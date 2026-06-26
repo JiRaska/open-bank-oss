@@ -66,7 +66,7 @@ class ClearingSimulatorService(private val clock: Clock) {
             messageId = "RET-${UUID.randomUUID()}".take(MAX_35),
             creationDateTime = now.atUtc(),
             settlementMethod = SettlementMethod.CLRG,
-            returnId = "RTRN-${UUID.randomUUID().toString().take(8)}",
+            returnId = "RTRN-${UUID.randomUUID().toString().take(RETURN_ID_SUFFIX_LEN)}",
             originalEndToEndId = request.originalEndToEndId,
             originalTransactionId = request.originalTransactionId,
             returnedAmount = request.amount,
@@ -158,5 +158,6 @@ class ClearingSimulatorService(private val clock: Clock) {
 
     private companion object {
         const val MAX_35 = 35
+        const val RETURN_ID_SUFFIX_LEN = 8
     }
 }

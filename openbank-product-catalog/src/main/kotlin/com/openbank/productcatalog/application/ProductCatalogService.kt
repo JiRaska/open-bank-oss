@@ -18,69 +18,124 @@ class ProductCatalogService @Inject constructor(private val clock: Clock) {
 
     private val store = ConcurrentHashMap<String, Product>()
 
-    init { seed() }
+    init {
+        seed()
+    }
 
     private fun seed() {
         listOf(
             Product(
-                id = "prod-001", code = "SAVINGS_STANDARD", name = "Standard Savings Account",
+                id = "prod-001",
+                code = "SAVINGS_STANDARD",
+                name = "Standard Savings Account",
                 shortDescription = "Spořicí účet 2,5 % p.a., bez poplatků",
-                type = "SAVINGS", currency = "EUR", status = ProductStatus.ACTIVE,
-                isPublic = true, version = "2.1.0",
+                type = "SAVINGS",
+                currency = "EUR",
+                status = ProductStatus.ACTIVE,
+                isPublic = true,
+                version = "2.1.0",
                 validFrom = LocalDate.of(2024, 1, 15),
-                baseRate = 0.025, fee = 0.0,
-                minBalance = 0.0, maxBalance = 500_000.0,
+                baseRate = 0.025,
+                fee = 0.0,
+                minBalance = 0.0,
+                maxBalance = 500_000.0,
                 tags = listOf("savings", "retail", "no-fee"),
                 eligibilitySegments = listOf(EligibilitySegment.ALL),
                 savingsConfig = SavingsConfig(
                     interestTiers = listOf(
                         InterestTier(0.0, 10_000.0, 0.020),
                         InterestTier(10_000.0, 100_000.0, 0.025),
-                        InterestTier(100_000.0, null, 0.028)
+                        InterestTier(100_000.0, null, 0.028),
                     ),
                     withdrawalNotice = WithdrawalNotice.NONE,
                     freeWithdrawalsPerMonth = 3,
-                    excessWithdrawalFee = 0.50
+                    excessWithdrawalFee = 0.50,
                 ),
                 cardConfig = CardConfig(
-                    enabled = false
+                    enabled = false,
                 ),
                 multiCurrencyConfig = MultiCurrencyConfig(enabled = false, defaultCurrency = "EUR"),
                 fees = listOf(
-                    Fee(name = "Account Maintenance", type = "MONTHLY", amount = 0.0, currency = "EUR", frequency = "MONTHLY", waivable = false),
-                    Fee(name = "Withdrawal Fee (excess)", type = "TRANSACTION", amount = 0.50, currency = "EUR", frequency = "PER_TRANSACTION", description = "After 3 free withdrawals/month", waivable = false)
+                    Fee(
+                        name = "Account Maintenance",
+                        type = "MONTHLY",
+                        amount = 0.0,
+                        currency = "EUR",
+                        frequency = "MONTHLY",
+                        waivable = false,
+                    ),
+                    Fee(
+                        name = "Withdrawal Fee (excess)",
+                        type = "TRANSACTION",
+                        amount = 0.50,
+                        currency = "EUR",
+                        frequency = "PER_TRANSACTION",
+                        description = "After 3 free withdrawals/month",
+                        waivable = false,
+                    ),
                 ),
                 termsAndConditions = listOf(
-                    TermsAndConditions(version = "2.1", url = "https://openbank.example/tac/savings-standard/v2.1", effectiveFrom = LocalDate.of(2024, 6, 1), language = "cs", summary = "Spořicí účet — obchodní podmínky"),
-                    TermsAndConditions(version = "2.0", url = "https://openbank.example/tac/savings-standard/v2.0", effectiveFrom = LocalDate.of(2024, 1, 15), effectiveTo = LocalDate.of(2024, 5, 31), language = "cs")
+                    TermsAndConditions(
+                        version = "2.1",
+                        url = "https://openbank.example/tac/savings-standard/v2.1",
+                        effectiveFrom = LocalDate.of(2024, 6, 1),
+                        language = "cs",
+                        summary = "Spořicí účet — obchodní podmínky",
+                    ),
+                    TermsAndConditions(
+                        version = "2.0",
+                        url = "https://openbank.example/tac/savings-standard/v2.0",
+                        effectiveFrom = LocalDate.of(2024, 1, 15),
+                        effectiveTo = LocalDate.of(2024, 5, 31),
+                        language = "cs",
+                    ),
                 ),
                 versionHistory = listOf(
-                    ProductVersion("2.1.0", LocalDate.of(2024, 6, 1), isPublic = true, changeNote = "Zvýšení sazby na 2,5 % p.a."),
-                    ProductVersion("2.0.0", LocalDate.of(2024, 1, 15), LocalDate.of(2024, 5, 31), isPublic = true, changeNote = "Úvodní verze")
+                    ProductVersion(
+                        "2.1.0",
+                        LocalDate.of(2024, 6, 1),
+                        isPublic = true,
+                        changeNote = "Zvýšení sazby na 2,5 % p.a.",
+                    ),
+                    ProductVersion(
+                        "2.0.0",
+                        LocalDate.of(2024, 1, 15),
+                        LocalDate.of(2024, 5, 31),
+                        isPublic = true,
+                        changeNote = "Úvodní verze",
+                    ),
                 ),
                 description = "Standard savings account with tiered 2.0–2.8% p.a. interest",
-                createdAt = Instant.parse("2024-01-15T10:00:00Z"), updatedAt = Instant.parse("2024-06-01T08:00:00Z")
+                createdAt = Instant.parse("2024-01-15T10:00:00Z"),
+                updatedAt = Instant.parse("2024-06-01T08:00:00Z"),
             ),
             Product(
-                id = "prod-002", code = "SAVINGS_PREMIUM", name = "Premium Savings Account",
+                id = "prod-002",
+                code = "SAVINGS_PREMIUM",
+                name = "Premium Savings Account",
                 shortDescription = "Prémiový spořicí účet 3,8 % p.a., min. 10 000 EUR",
-                type = "SAVINGS", currency = "EUR", status = ProductStatus.ACTIVE,
-                isPublic = true, version = "1.3.0",
+                type = "SAVINGS",
+                currency = "EUR",
+                status = ProductStatus.ACTIVE,
+                isPublic = true,
+                version = "1.3.0",
                 validFrom = LocalDate.of(2024, 1, 15),
-                baseRate = 0.038, fee = 5.0,
-                minBalance = 10_000.0, maxBalance = 2_000_000.0,
+                baseRate = 0.038,
+                fee = 5.0,
+                minBalance = 10_000.0,
+                maxBalance = 2_000_000.0,
                 tags = listOf("savings", "premium", "high-balance"),
                 eligibilitySegments = listOf(EligibilitySegment.PREMIUM, EligibilitySegment.RETAIL),
                 savingsConfig = SavingsConfig(
                     interestTiers = listOf(
                         InterestTier(10_000.0, 250_000.0, 0.038),
-                        InterestTier(250_000.0, null, 0.042)
+                        InterestTier(250_000.0, null, 0.042),
                     ),
                     withdrawalNotice = WithdrawalNotice.DAYS_30,
                     freeWithdrawalsPerMonth = 1,
                     excessWithdrawalFee = 25.0,
                     bonusRateCondition = "No withdrawals in calendar month",
-                    bonusRateAnnual = 0.005
+                    bonusRateAnnual = 0.005,
                 ),
                 cardConfig = CardConfig(enabled = false),
                 multiCurrencyConfig = MultiCurrencyConfig(
@@ -88,46 +143,85 @@ class ProductCatalogService @Inject constructor(private val clock: Clock) {
                     supportedCurrencies = listOf("EUR", "USD", "GBP", "CHF"),
                     defaultCurrency = "EUR",
                     fxMarginBuyPct = 1.0,
-                    fxMarginSellPct = 1.2
+                    fxMarginSellPct = 1.2,
                 ),
                 fees = listOf(
-                    Fee(name = "Account Maintenance", type = "MONTHLY", amount = 5.0, currency = "EUR", frequency = "MONTHLY", waivable = true, waiveCondition = "Balance > 50 000 EUR"),
-                    Fee(name = "Excess Withdrawal", type = "PENALTY", amount = 25.0, currency = "EUR", frequency = "PER_OCCURRENCE")
+                    Fee(
+                        name = "Account Maintenance",
+                        type = "MONTHLY",
+                        amount = 5.0,
+                        currency = "EUR",
+                        frequency = "MONTHLY",
+                        waivable = true,
+                        waiveCondition = "Balance > 50 000 EUR",
+                    ),
+                    Fee(
+                        name = "Excess Withdrawal",
+                        type = "PENALTY",
+                        amount = 25.0,
+                        currency = "EUR",
+                        frequency = "PER_OCCURRENCE",
+                    ),
                 ),
                 termsAndConditions = listOf(
-                    TermsAndConditions(version = "1.3", url = "https://openbank.example/tac/savings-premium/v1.3", effectiveFrom = LocalDate.of(2024, 9, 1), language = "cs")
+                    TermsAndConditions(
+                        version = "1.3",
+                        url = "https://openbank.example/tac/savings-premium/v1.3",
+                        effectiveFrom = LocalDate.of(2024, 9, 1),
+                        language = "cs",
+                    ),
                 ),
                 versionHistory = listOf(
-                    ProductVersion("1.3.0", LocalDate.of(2024, 9, 1), isPublic = true, changeNote = "Přidána multi-měnová podpora"),
-                    ProductVersion("1.2.0", LocalDate.of(2024, 1, 15), LocalDate.of(2024, 8, 31), isPublic = true)
+                    ProductVersion(
+                        "1.3.0",
+                        LocalDate.of(2024, 9, 1),
+                        isPublic = true,
+                        changeNote = "Přidána multi-měnová podpora",
+                    ),
+                    ProductVersion(
+                        "1.2.0",
+                        LocalDate.of(2024, 1, 15),
+                        LocalDate.of(2024, 8, 31),
+                        isPublic = true,
+                    ),
                 ),
                 description = "Premium savings with 3.8–4.2% p.a. tiered interest, multi-currency",
-                createdAt = Instant.parse("2024-01-15T10:00:00Z"), updatedAt = Instant.parse("2024-09-10T12:00:00Z")
+                createdAt = Instant.parse("2024-01-15T10:00:00Z"),
+                updatedAt = Instant.parse("2024-09-10T12:00:00Z"),
             ),
             Product(
-                id = "prod-003", code = "CURRENT_PERSONAL", name = "Personal Current Account",
+                id = "prod-003",
+                code = "CURRENT_PERSONAL",
+                name = "Personal Current Account",
                 shortDescription = "Osobní běžný účet, SEPA, 1–3 karty",
-                type = "CURRENT", currency = "EUR", status = ProductStatus.ACTIVE,
-                isPublic = true, version = "3.0.0",
+                type = "CURRENT",
+                currency = "EUR",
+                status = ProductStatus.ACTIVE,
+                isPublic = true,
+                version = "3.0.0",
                 validFrom = LocalDate.of(2024, 1, 15),
-                baseRate = 0.0, fee = 3.99,
+                baseRate = 0.0,
+                fee = 3.99,
                 tags = listOf("current", "retail", "cards"),
                 eligibilitySegments = listOf(EligibilitySegment.RETAIL, EligibilitySegment.SENIOR),
                 cardConfig = CardConfig(
-                    enabled = true, minCards = 1, maxCards = 3,
+                    enabled = true,
+                    minCards = 1,
+                    maxCards = 3,
                     networks = listOf(CardNetwork.VISA, CardNetwork.MASTERCARD),
                     tiers = listOf(CardTier.STANDARD, CardTier.GOLD),
-                    virtualCardAllowed = true, contactlessEnabled = true,
+                    virtualCardAllowed = true,
+                    contactlessEnabled = true,
                     eligibilityMinAge = 18,
                     eligibilitySegments = listOf(EligibilitySegment.RETAIL, EligibilitySegment.SENIOR),
-                    monthlyFeePerCard = 0.0
+                    monthlyFeePerCard = 0.0,
                 ),
                 multiCurrencyConfig = MultiCurrencyConfig(
                     enabled = true,
                     supportedCurrencies = listOf("EUR", "USD", "GBP", "CZK", "PLN"),
                     defaultCurrency = "EUR",
                     fxMarginBuyPct = 1.5,
-                    fxMarginSellPct = 1.5
+                    fxMarginSellPct = 1.5,
                 ),
                 overdraftConfig = OverdraftConfig(
                     type = OverdraftType.BOTH,
@@ -136,40 +230,93 @@ class ProductCatalogService @Inject constructor(private val clock: Clock) {
                     gracePeriodDays = 3,
                     unarrangedDailyFee = 8.0,
                     unarrangedRateAnnual = 0.3999,
-                    autoApprovalEnabled = true
+                    autoApprovalEnabled = true,
                 ),
                 fees = listOf(
-                    Fee(name = "Monthly Fee", type = "MONTHLY", amount = 3.99, currency = "EUR", frequency = "MONTHLY", waivable = true, waiveCondition = "Monthly turnover > 1 500 EUR"),
-                    Fee(name = "International Transfer", type = "TRANSACTION", amount = 2.50, currency = "EUR", frequency = "PER_TRANSACTION"),
-                    Fee(name = "ATM Withdrawal (abroad)", type = "TRANSACTION", amount = 3.0, currency = "EUR", frequency = "PER_TRANSACTION"),
-                    Fee(name = "FX Conversion", type = "TRANSACTION", amount = 1.5, currency = "EUR", frequency = "PERCENTAGE", description = "1.5% of converted amount")
+                    Fee(
+                        name = "Monthly Fee",
+                        type = "MONTHLY",
+                        amount = 3.99,
+                        currency = "EUR",
+                        frequency = "MONTHLY",
+                        waivable = true,
+                        waiveCondition = "Monthly turnover > 1 500 EUR",
+                    ),
+                    Fee(
+                        name = "International Transfer",
+                        type = "TRANSACTION",
+                        amount = 2.50,
+                        currency = "EUR",
+                        frequency = "PER_TRANSACTION",
+                    ),
+                    Fee(
+                        name = "ATM Withdrawal (abroad)",
+                        type = "TRANSACTION",
+                        amount = 3.0,
+                        currency = "EUR",
+                        frequency = "PER_TRANSACTION",
+                    ),
+                    Fee(
+                        name = "FX Conversion",
+                        type = "TRANSACTION",
+                        amount = 1.5,
+                        currency = "EUR",
+                        frequency = "PERCENTAGE",
+                        description = "1.5% of converted amount",
+                    ),
                 ),
                 termsAndConditions = listOf(
-                    TermsAndConditions(version = "3.0", url = "https://openbank.example/tac/current-personal/v3.0", effectiveFrom = LocalDate.of(2024, 11, 1), language = "cs", summary = "Osobní účet — obchodní podmínky v3.0")
+                    TermsAndConditions(
+                        version = "3.0",
+                        url = "https://openbank.example/tac/current-personal/v3.0",
+                        effectiveFrom = LocalDate.of(2024, 11, 1),
+                        language = "cs",
+                        summary = "Osobní účet — obchodní podmínky v3.0",
+                    ),
                 ),
                 versionHistory = listOf(
-                    ProductVersion("3.0.0", LocalDate.of(2024, 11, 1), isPublic = true, changeNote = "Multi-měna, povolený debet"),
-                    ProductVersion("2.5.0", LocalDate.of(2024, 1, 15), LocalDate.of(2024, 10, 31), isPublic = true)
+                    ProductVersion(
+                        "3.0.0",
+                        LocalDate.of(2024, 11, 1),
+                        isPublic = true,
+                        changeNote = "Multi-měna, povolený debet",
+                    ),
+                    ProductVersion(
+                        "2.5.0",
+                        LocalDate.of(2024, 1, 15),
+                        LocalDate.of(2024, 10, 31),
+                        isPublic = true,
+                    ),
                 ),
                 description = "Everyday personal current account with SEPA, multi-currency, overdraft",
-                createdAt = Instant.parse("2024-01-15T10:00:00Z"), updatedAt = Instant.parse("2024-11-01T09:00:00Z")
+                createdAt = Instant.parse("2024-01-15T10:00:00Z"),
+                updatedAt = Instant.parse("2024-11-01T09:00:00Z"),
             ),
             Product(
-                id = "prod-004", code = "CURRENT_BUSINESS", name = "Business Current Account",
+                id = "prod-004",
+                code = "CURRENT_BUSINESS",
+                name = "Business Current Account",
                 shortDescription = "Firemní běžný účet, multi-user, SWIFT, až 10 karet",
-                type = "CURRENT", currency = "EUR", status = ProductStatus.ACTIVE,
-                isPublic = true, version = "2.2.0",
+                type = "CURRENT",
+                currency = "EUR",
+                status = ProductStatus.ACTIVE,
+                isPublic = true,
+                version = "2.2.0",
                 validFrom = LocalDate.of(2024, 2, 1),
-                baseRate = 0.0, fee = 19.99,
+                baseRate = 0.0,
+                fee = 19.99,
                 tags = listOf("current", "business", "multi-user"),
                 eligibilitySegments = listOf(EligibilitySegment.BUSINESS),
                 cardConfig = CardConfig(
-                    enabled = true, minCards = 1, maxCards = 10,
+                    enabled = true,
+                    minCards = 1,
+                    maxCards = 10,
                     networks = listOf(CardNetwork.VISA, CardNetwork.MASTERCARD),
                     tiers = listOf(CardTier.STANDARD, CardTier.GOLD, CardTier.PLATINUM),
-                    virtualCardAllowed = true, contactlessEnabled = true,
+                    virtualCardAllowed = true,
+                    contactlessEnabled = true,
                     eligibilitySegments = listOf(EligibilitySegment.BUSINESS),
-                    monthlyFeePerCard = 2.50
+                    monthlyFeePerCard = 2.50,
                 ),
                 multiCurrencyConfig = MultiCurrencyConfig(
                     enabled = true,
@@ -177,131 +324,309 @@ class ProductCatalogService @Inject constructor(private val clock: Clock) {
                     defaultCurrency = "EUR",
                     fxMarginBuyPct = 0.8,
                     fxMarginSellPct = 0.8,
-                    crossCurrencyTransferAllowed = true
+                    crossCurrencyTransferAllowed = true,
                 ),
                 overdraftConfig = OverdraftConfig(
                     type = OverdraftType.ARRANGED,
                     maxLimitAmount = 50_000.0,
                     interestRateAnnual = 0.0899,
                     gracePeriodDays = 5,
-                    autoApprovalEnabled = false
+                    autoApprovalEnabled = false,
                 ),
                 fees = listOf(
                     Fee(name = "Monthly Fee", type = "MONTHLY", amount = 19.99, currency = "EUR", frequency = "MONTHLY"),
-                    Fee(name = "SEPA Transfer", type = "TRANSACTION", amount = 0.25, currency = "EUR", frequency = "PER_TRANSACTION"),
-                    Fee(name = "SWIFT Transfer", type = "TRANSACTION", amount = 15.0, currency = "EUR", frequency = "PER_TRANSACTION"),
-                    Fee(name = "Cash Deposit", type = "TRANSACTION", amount = 0.5, currency = "EUR", frequency = "PERCENTAGE", description = "0.5% of deposit amount"),
-                    Fee(name = "Card Fee (per card/month)", type = "MONTHLY", amount = 2.50, currency = "EUR", frequency = "MONTHLY")
+                    Fee(
+                        name = "SEPA Transfer",
+                        type = "TRANSACTION",
+                        amount = 0.25,
+                        currency = "EUR",
+                        frequency = "PER_TRANSACTION",
+                    ),
+                    Fee(
+                        name = "SWIFT Transfer",
+                        type = "TRANSACTION",
+                        amount = 15.0,
+                        currency = "EUR",
+                        frequency = "PER_TRANSACTION",
+                    ),
+                    Fee(
+                        name = "Cash Deposit",
+                        type = "TRANSACTION",
+                        amount = 0.5,
+                        currency = "EUR",
+                        frequency = "PERCENTAGE",
+                        description = "0.5% of deposit amount",
+                    ),
+                    Fee(
+                        name = "Card Fee (per card/month)",
+                        type = "MONTHLY",
+                        amount = 2.50,
+                        currency = "EUR",
+                        frequency = "MONTHLY",
+                    ),
                 ),
                 termsAndConditions = listOf(
-                    TermsAndConditions(version = "2.2", url = "https://openbank.example/tac/current-business/v2.2", effectiveFrom = LocalDate.of(2024, 11, 15), language = "cs")
+                    TermsAndConditions(
+                        version = "2.2",
+                        url = "https://openbank.example/tac/current-business/v2.2",
+                        effectiveFrom = LocalDate.of(2024, 11, 15),
+                        language = "cs",
+                    ),
                 ),
                 versionHistory = listOf(
-                    ProductVersion("2.2.0", LocalDate.of(2024, 11, 15), isPublic = true, changeNote = "Rozšíření multi-měny, 9 měn"),
-                    ProductVersion("2.1.0", LocalDate.of(2024, 2, 1), LocalDate.of(2024, 11, 14), isPublic = true)
+                    ProductVersion(
+                        "2.2.0",
+                        LocalDate.of(2024, 11, 15),
+                        isPublic = true,
+                        changeNote = "Rozšíření multi-měny, 9 měn",
+                    ),
+                    ProductVersion(
+                        "2.1.0",
+                        LocalDate.of(2024, 2, 1),
+                        LocalDate.of(2024, 11, 14),
+                        isPublic = true,
+                    ),
                 ),
                 description = "Full-featured business account with multi-user access, SWIFT, multi-currency",
-                createdAt = Instant.parse("2024-02-01T10:00:00Z"), updatedAt = Instant.parse("2024-11-15T14:00:00Z")
+                createdAt = Instant.parse("2024-02-01T10:00:00Z"),
+                updatedAt = Instant.parse("2024-11-15T14:00:00Z"),
             ),
             Product(
-                id = "prod-005", code = "LOAN_PERSONAL_5Y", name = "Personal Loan 5Y",
+                id = "prod-005",
+                code = "LOAN_PERSONAL_5Y",
+                name = "Personal Loan 5Y",
                 shortDescription = "Spotřebitelský úvěr až 50 000 EUR, 6,99 % p.a.",
-                type = "LOAN", currency = "EUR", status = ProductStatus.ACTIVE,
-                isPublic = true, version = "1.1.0",
+                type = "LOAN",
+                currency = "EUR",
+                status = ProductStatus.ACTIVE,
+                isPublic = true,
+                version = "1.1.0",
                 validFrom = LocalDate.of(2024, 3, 1),
-                baseRate = 0.0699, fee = 150.0,
-                minBalance = 1_000.0, maxBalance = 50_000.0,
+                baseRate = 0.0699,
+                fee = 150.0,
+                minBalance = 1_000.0,
+                maxBalance = 50_000.0,
                 tags = listOf("loan", "retail", "consumer"),
                 eligibilitySegments = listOf(EligibilitySegment.RETAIL, EligibilitySegment.PREMIUM),
                 fees = listOf(
-                    Fee(name = "Origination Fee", type = "ONE_TIME", amount = 150.0, currency = "EUR", frequency = "ONE_TIME"),
-                    Fee(name = "Early Repayment", type = "PENALTY", amount = 1.0, currency = "EUR", frequency = "PERCENTAGE", description = "1% of outstanding balance"),
-                    Fee(name = "Late Payment", type = "PENALTY", amount = 30.0, currency = "EUR", frequency = "PER_OCCURRENCE")
+                    Fee(
+                        name = "Origination Fee",
+                        type = "ONE_TIME",
+                        amount = 150.0,
+                        currency = "EUR",
+                        frequency = "ONE_TIME",
+                    ),
+                    Fee(
+                        name = "Early Repayment",
+                        type = "PENALTY",
+                        amount = 1.0,
+                        currency = "EUR",
+                        frequency = "PERCENTAGE",
+                        description = "1% of outstanding balance",
+                    ),
+                    Fee(
+                        name = "Late Payment",
+                        type = "PENALTY",
+                        amount = 30.0,
+                        currency = "EUR",
+                        frequency = "PER_OCCURRENCE",
+                    ),
                 ),
                 termsAndConditions = listOf(
-                    TermsAndConditions(version = "1.1", url = "https://openbank.example/tac/loan-personal/v1.1", effectiveFrom = LocalDate.of(2024, 10, 1), language = "cs")
+                    TermsAndConditions(
+                        version = "1.1",
+                        url = "https://openbank.example/tac/loan-personal/v1.1",
+                        effectiveFrom = LocalDate.of(2024, 10, 1),
+                        language = "cs",
+                    ),
                 ),
                 versionHistory = listOf(
-                    ProductVersion("1.1.0", LocalDate.of(2024, 10, 1), isPublic = true, changeNote = "Snížení sazby z 7,49 % na 6,99 %"),
-                    ProductVersion("1.0.0", LocalDate.of(2024, 3, 1), LocalDate.of(2024, 9, 30), isPublic = true)
+                    ProductVersion(
+                        "1.1.0",
+                        LocalDate.of(2024, 10, 1),
+                        isPublic = true,
+                        changeNote = "Snížení sazby z 7,49 % na 6,99 %",
+                    ),
+                    ProductVersion(
+                        "1.0.0",
+                        LocalDate.of(2024, 3, 1),
+                        LocalDate.of(2024, 9, 30),
+                        isPublic = true,
+                    ),
                 ),
                 description = "Personal loan up to 50,000 EUR over 5 years at 6.99% p.a.",
-                createdAt = Instant.parse("2024-03-01T10:00:00Z"), updatedAt = Instant.parse("2024-10-01T10:00:00Z")
+                createdAt = Instant.parse("2024-03-01T10:00:00Z"),
+                updatedAt = Instant.parse("2024-10-01T10:00:00Z"),
             ),
             Product(
-                id = "prod-006", code = "MORTGAGE_FIXED_20Y", name = "Fixed Rate Mortgage 20Y",
+                id = "prod-006",
+                code = "MORTGAGE_FIXED_20Y",
+                name = "Fixed Rate Mortgage 20Y",
                 shortDescription = "Hypotéka 20 let, fixní 3,89 % p.a.",
-                type = "MORTGAGE", currency = "EUR", status = ProductStatus.ACTIVE,
-                isPublic = true, version = "1.0.0",
+                type = "MORTGAGE",
+                currency = "EUR",
+                status = ProductStatus.ACTIVE,
+                isPublic = true,
+                version = "1.0.0",
                 validFrom = LocalDate.of(2024, 1, 15),
-                baseRate = 0.0389, fee = 500.0,
-                minBalance = 50_000.0, maxBalance = 2_000_000.0,
+                baseRate = 0.0389,
+                fee = 500.0,
+                minBalance = 50_000.0,
+                maxBalance = 2_000_000.0,
                 tags = listOf("mortgage", "retail", "fixed-rate"),
                 eligibilitySegments = listOf(EligibilitySegment.RETAIL, EligibilitySegment.PREMIUM),
                 fees = listOf(
-                    Fee(name = "Arrangement Fee", type = "ONE_TIME", amount = 500.0, currency = "EUR", frequency = "ONE_TIME"),
-                    Fee(name = "Valuation Fee", type = "ONE_TIME", amount = 350.0, currency = "EUR", frequency = "ONE_TIME"),
-                    Fee(name = "Early Repayment Charge", type = "PENALTY", amount = 3.0, currency = "EUR", frequency = "PERCENTAGE", description = "3% of outstanding balance in first 5 years")
+                    Fee(
+                        name = "Arrangement Fee",
+                        type = "ONE_TIME",
+                        amount = 500.0,
+                        currency = "EUR",
+                        frequency = "ONE_TIME",
+                    ),
+                    Fee(
+                        name = "Valuation Fee",
+                        type = "ONE_TIME",
+                        amount = 350.0,
+                        currency = "EUR",
+                        frequency = "ONE_TIME",
+                    ),
+                    Fee(
+                        name = "Early Repayment Charge",
+                        type = "PENALTY",
+                        amount = 3.0,
+                        currency = "EUR",
+                        frequency = "PERCENTAGE",
+                        description = "3% of outstanding balance in first 5 years",
+                    ),
                 ),
                 termsAndConditions = listOf(
-                    TermsAndConditions(version = "1.0", url = "https://openbank.example/tac/mortgage-fixed/v1.0", effectiveFrom = LocalDate.of(2024, 1, 15), language = "cs")
+                    TermsAndConditions(
+                        version = "1.0",
+                        url = "https://openbank.example/tac/mortgage-fixed/v1.0",
+                        effectiveFrom = LocalDate.of(2024, 1, 15),
+                        language = "cs",
+                    ),
                 ),
                 versionHistory = listOf(
-                    ProductVersion("1.0.0", LocalDate.of(2024, 1, 15), isPublic = true, changeNote = "Úvodní verze")
+                    ProductVersion(
+                        "1.0.0",
+                        LocalDate.of(2024, 1, 15),
+                        isPublic = true,
+                        changeNote = "Úvodní verze",
+                    ),
                 ),
                 description = "Fixed rate mortgage for 20 years at 3.89% p.a.",
-                createdAt = Instant.parse("2024-01-15T10:00:00Z"), updatedAt = Instant.parse("2024-12-01T10:00:00Z")
+                createdAt = Instant.parse("2024-01-15T10:00:00Z"),
+                updatedAt = Instant.parse("2024-12-01T10:00:00Z"),
             ),
             Product(
-                id = "prod-007", code = "CREDIT_CARD_CLASSIC", name = "Classic Credit Card",
+                id = "prod-007",
+                code = "CREDIT_CARD_CLASSIC",
+                name = "Classic Credit Card",
                 shortDescription = "Kreditní karta bez ročního poplatku, 19,99 % APR",
-                type = "CREDIT_CARD", currency = "EUR", status = ProductStatus.ACTIVE,
-                isPublic = true, version = "2.0.0",
+                type = "CREDIT_CARD",
+                currency = "EUR",
+                status = ProductStatus.ACTIVE,
+                isPublic = true,
+                version = "2.0.0",
                 validFrom = LocalDate.of(2024, 4, 1),
-                baseRate = 0.1999, fee = 0.0,
+                baseRate = 0.1999,
+                fee = 0.0,
                 maxBalance = 10_000.0,
                 tags = listOf("credit-card", "retail", "no-annual-fee"),
                 eligibilitySegments = listOf(EligibilitySegment.RETAIL, EligibilitySegment.PREMIUM),
                 cardConfig = CardConfig(
-                    enabled = true, minCards = 1, maxCards = 2,
+                    enabled = true,
+                    minCards = 1,
+                    maxCards = 2,
                     networks = listOf(CardNetwork.VISA, CardNetwork.MASTERCARD),
                     tiers = listOf(CardTier.STANDARD, CardTier.GOLD),
-                    virtualCardAllowed = true, contactlessEnabled = true,
+                    virtualCardAllowed = true,
+                    contactlessEnabled = true,
                     eligibilityMinAge = 18,
                     eligibilitySegments = listOf(EligibilitySegment.RETAIL, EligibilitySegment.PREMIUM),
-                    monthlyFeePerCard = 0.0
+                    monthlyFeePerCard = 0.0,
                 ),
                 multiCurrencyConfig = MultiCurrencyConfig(
                     enabled = true,
                     supportedCurrencies = listOf("EUR", "USD", "GBP"),
                     defaultCurrency = "EUR",
                     fxMarginBuyPct = 1.5,
-                    fxMarginSellPct = 1.5
+                    fxMarginSellPct = 1.5,
                 ),
                 fees = listOf(
-                    Fee(name = "Annual Fee", type = "ANNUAL", amount = 0.0, currency = "EUR", frequency = "ANNUAL", description = "No annual fee"),
-                    Fee(name = "Cash Advance Fee", type = "TRANSACTION", amount = 3.0, currency = "EUR", frequency = "PERCENTAGE", description = "3% min €3"),
-                    Fee(name = "Foreign Transaction", type = "TRANSACTION", amount = 1.5, currency = "EUR", frequency = "PERCENTAGE"),
-                    Fee(name = "Late Payment", type = "PENALTY", amount = 25.0, currency = "EUR", frequency = "PER_OCCURRENCE")
+                    Fee(
+                        name = "Annual Fee",
+                        type = "ANNUAL",
+                        amount = 0.0,
+                        currency = "EUR",
+                        frequency = "ANNUAL",
+                        description = "No annual fee",
+                    ),
+                    Fee(
+                        name = "Cash Advance Fee",
+                        type = "TRANSACTION",
+                        amount = 3.0,
+                        currency = "EUR",
+                        frequency = "PERCENTAGE",
+                        description = "3% min €3",
+                    ),
+                    Fee(
+                        name = "Foreign Transaction",
+                        type = "TRANSACTION",
+                        amount = 1.5,
+                        currency = "EUR",
+                        frequency = "PERCENTAGE",
+                    ),
+                    Fee(
+                        name = "Late Payment",
+                        type = "PENALTY",
+                        amount = 25.0,
+                        currency = "EUR",
+                        frequency = "PER_OCCURRENCE",
+                    ),
                 ),
                 termsAndConditions = listOf(
-                    TermsAndConditions(version = "2.0", url = "https://openbank.example/tac/credit-card-classic/v2.0", effectiveFrom = LocalDate.of(2024, 11, 20), language = "cs")
+                    TermsAndConditions(
+                        version = "2.0",
+                        url = "https://openbank.example/tac/credit-card-classic/v2.0",
+                        effectiveFrom = LocalDate.of(2024, 11, 20),
+                        language = "cs",
+                    ),
                 ),
                 versionHistory = listOf(
-                    ProductVersion("2.0.0", LocalDate.of(2024, 11, 20), isPublic = true, changeNote = "Přidána multi-měna a virtuální karta"),
-                    ProductVersion("1.0.0", LocalDate.of(2024, 4, 1), LocalDate.of(2024, 11, 19), isPublic = true)
+                    ProductVersion(
+                        "2.0.0",
+                        LocalDate.of(2024, 11, 20),
+                        isPublic = true,
+                        changeNote = "Přidána multi-měna a virtuální karta",
+                    ),
+                    ProductVersion(
+                        "1.0.0",
+                        LocalDate.of(2024, 4, 1),
+                        LocalDate.of(2024, 11, 19),
+                        isPublic = true,
+                    ),
                 ),
                 description = "Classic credit card with 19.99% APR, no annual fee, multi-currency",
-                createdAt = Instant.parse("2024-04-01T10:00:00Z"), updatedAt = Instant.parse("2024-11-20T10:00:00Z")
+                createdAt = Instant.parse("2024-04-01T10:00:00Z"),
+                updatedAt = Instant.parse("2024-11-20T10:00:00Z"),
             ),
             Product(
-                id = "prod-008", code = "TERM_DEPOSIT_12M", name = "12-Month Term Deposit",
+                id = "prod-008",
+                code = "TERM_DEPOSIT_12M",
+                name = "12-Month Term Deposit",
                 shortDescription = "Termínovaný vklad 12 měsíců, 4,2 % p.a.",
-                type = "TERM_DEPOSIT", currency = "EUR", status = ProductStatus.ACTIVE,
-                isPublic = true, version = "1.2.0",
+                type = "TERM_DEPOSIT",
+                currency = "EUR",
+                status = ProductStatus.ACTIVE,
+                isPublic = true,
+                version = "1.2.0",
                 validFrom = LocalDate.of(2024, 5, 1),
-                baseRate = 0.042, fee = 0.0,
-                minBalance = 1_000.0, maxBalance = 1_000_000.0,
+                baseRate = 0.042,
+                fee = 0.0,
+                minBalance = 1_000.0,
+                maxBalance = 1_000_000.0,
                 tags = listOf("term-deposit", "retail", "fixed-rate"),
                 eligibilitySegments = listOf(EligibilitySegment.ALL),
                 termDepositConfig = TermDepositConfig(
@@ -312,35 +637,64 @@ class ProductCatalogService @Inject constructor(private val clock: Clock) {
                     payoutFrequency = InterestPayoutFrequency.AT_MATURITY,
                     autoRenewEnabled = true,
                     earlyWithdrawalPenaltyPct = 50.0,
-                    earlyWithdrawalNoticeDays = 30
+                    earlyWithdrawalNoticeDays = 30,
                 ),
                 multiCurrencyConfig = MultiCurrencyConfig(
                     enabled = true,
                     supportedCurrencies = listOf("EUR", "USD", "GBP", "CZK"),
                     defaultCurrency = "EUR",
                     fxMarginBuyPct = 1.0,
-                    fxMarginSellPct = 1.0
+                    fxMarginSellPct = 1.0,
                 ),
                 fees = listOf(
-                    Fee(name = "Early Withdrawal Penalty", type = "PENALTY", amount = 50.0, currency = "EUR", frequency = "PERCENTAGE", description = "Loss of 50% accrued interest")
+                    Fee(
+                        name = "Early Withdrawal Penalty",
+                        type = "PENALTY",
+                        amount = 50.0,
+                        currency = "EUR",
+                        frequency = "PERCENTAGE",
+                        description = "Loss of 50% accrued interest",
+                    ),
                 ),
                 termsAndConditions = listOf(
-                    TermsAndConditions(version = "1.2", url = "https://openbank.example/tac/term-deposit-12m/v1.2", effectiveFrom = LocalDate.of(2024, 10, 15), language = "cs")
+                    TermsAndConditions(
+                        version = "1.2",
+                        url = "https://openbank.example/tac/term-deposit-12m/v1.2",
+                        effectiveFrom = LocalDate.of(2024, 10, 15),
+                        language = "cs",
+                    ),
                 ),
                 versionHistory = listOf(
-                    ProductVersion("1.2.0", LocalDate.of(2024, 10, 15), isPublic = true, changeNote = "Zvýšení sazby na 4,2 %, přidána multi-měna"),
-                    ProductVersion("1.1.0", LocalDate.of(2024, 5, 1), LocalDate.of(2024, 10, 14), isPublic = true)
+                    ProductVersion(
+                        "1.2.0",
+                        LocalDate.of(2024, 10, 15),
+                        isPublic = true,
+                        changeNote = "Zvýšení sazby na 4,2 %, přidána multi-měna",
+                    ),
+                    ProductVersion(
+                        "1.1.0",
+                        LocalDate.of(2024, 5, 1),
+                        LocalDate.of(2024, 10, 14),
+                        isPublic = true,
+                    ),
                 ),
                 description = "12-month fixed term deposit at 4.2% p.a., multi-currency, auto-renew",
-                createdAt = Instant.parse("2024-05-01T10:00:00Z"), updatedAt = Instant.parse("2024-10-15T10:00:00Z")
+                createdAt = Instant.parse("2024-05-01T10:00:00Z"),
+                updatedAt = Instant.parse("2024-10-15T10:00:00Z"),
             ),
             Product(
-                id = "prod-009", code = "OVERDRAFT_PERSONAL", name = "Personal Overdraft",
+                id = "prod-009",
+                code = "OVERDRAFT_PERSONAL",
+                name = "Personal Overdraft",
                 shortDescription = "Povolený debet až 5 000 EUR, 14,99 % EAR",
-                type = "OVERDRAFT", currency = "EUR", status = ProductStatus.ACTIVE,
-                isPublic = true, version = "1.0.0",
+                type = "OVERDRAFT",
+                currency = "EUR",
+                status = ProductStatus.ACTIVE,
+                isPublic = true,
+                version = "1.0.0",
                 validFrom = LocalDate.of(2024, 6, 1),
-                baseRate = 0.1499, fee = 0.0,
+                baseRate = 0.1499,
+                fee = 0.0,
                 maxBalance = 5_000.0,
                 tags = listOf("overdraft", "retail"),
                 eligibilitySegments = listOf(EligibilitySegment.RETAIL, EligibilitySegment.PREMIUM),
@@ -351,128 +705,252 @@ class ProductCatalogService @Inject constructor(private val clock: Clock) {
                     gracePeriodDays = 1,
                     unarrangedDailyFee = 8.0,
                     unarrangedRateAnnual = 0.3999,
-                    autoApprovalEnabled = true
+                    autoApprovalEnabled = true,
                 ),
                 fees = listOf(
-                    Fee(name = "Arrangement Fee", type = "ONE_TIME", amount = 0.0, currency = "EUR", frequency = "ONE_TIME"),
-                    Fee(name = "Unarranged Overdraft Daily Fee", type = "DAILY", amount = 8.0, currency = "EUR", frequency = "DAILY", description = "€8/day for unarranged overdraft")
+                    Fee(
+                        name = "Arrangement Fee",
+                        type = "ONE_TIME",
+                        amount = 0.0,
+                        currency = "EUR",
+                        frequency = "ONE_TIME",
+                    ),
+                    Fee(
+                        name = "Unarranged Overdraft Daily Fee",
+                        type = "DAILY",
+                        amount = 8.0,
+                        currency = "EUR",
+                        frequency = "DAILY",
+                        description = "€8/day for unarranged overdraft",
+                    ),
                 ),
                 termsAndConditions = listOf(
-                    TermsAndConditions(version = "1.0", url = "https://openbank.example/tac/overdraft-personal/v1.0", effectiveFrom = LocalDate.of(2024, 6, 1), language = "cs")
+                    TermsAndConditions(
+                        version = "1.0",
+                        url = "https://openbank.example/tac/overdraft-personal/v1.0",
+                        effectiveFrom = LocalDate.of(2024, 6, 1),
+                        language = "cs",
+                    ),
                 ),
                 versionHistory = listOf(
-                    ProductVersion("1.0.0", LocalDate.of(2024, 6, 1), isPublic = true, changeNote = "Úvodní verze")
+                    ProductVersion(
+                        "1.0.0",
+                        LocalDate.of(2024, 6, 1),
+                        isPublic = true,
+                        changeNote = "Úvodní verze",
+                    ),
                 ),
                 description = "Flexible overdraft facility at 14.99% EAR, unarranged €8/day",
-                createdAt = Instant.parse("2024-06-01T10:00:00Z"), updatedAt = Instant.parse("2024-11-01T10:00:00Z")
+                createdAt = Instant.parse("2024-06-01T10:00:00Z"),
+                updatedAt = Instant.parse("2024-11-01T10:00:00Z"),
             ),
             Product(
-                id = "prod-010", code = "SAVINGS_CZK", name = "CZK Savings Account",
+                id = "prod-010",
+                code = "SAVINGS_CZK",
+                name = "CZK Savings Account",
                 shortDescription = "Korunový spořicí účet 5,5 % p.a.",
-                type = "SAVINGS", currency = "CZK", status = ProductStatus.ACTIVE,
-                isPublic = true, version = "1.1.0",
+                type = "SAVINGS",
+                currency = "CZK",
+                status = ProductStatus.ACTIVE,
+                isPublic = true,
+                version = "1.1.0",
                 validFrom = LocalDate.of(2024, 7, 1),
-                baseRate = 0.055, fee = 0.0,
-                minBalance = 0.0, maxBalance = 10_000_000.0,
+                baseRate = 0.055,
+                fee = 0.0,
+                minBalance = 0.0,
+                maxBalance = 10_000_000.0,
                 tags = listOf("savings", "czk", "retail"),
                 eligibilitySegments = listOf(EligibilitySegment.ALL),
                 savingsConfig = SavingsConfig(
                     interestTiers = listOf(
                         InterestTier(0.0, 500_000.0, 0.055),
-                        InterestTier(500_000.0, null, 0.048)
+                        InterestTier(500_000.0, null, 0.048),
                     ),
                     withdrawalNotice = WithdrawalNotice.NONE,
                     freeWithdrawalsPerMonth = 5,
-                    excessWithdrawalFee = 0.0
+                    excessWithdrawalFee = 0.0,
                 ),
                 cardConfig = CardConfig(enabled = false),
                 multiCurrencyConfig = MultiCurrencyConfig(enabled = false, defaultCurrency = "CZK"),
                 fees = listOf(
-                    Fee(name = "Account Maintenance", type = "MONTHLY", amount = 0.0, currency = "CZK", frequency = "MONTHLY")
+                    Fee(name = "Account Maintenance", type = "MONTHLY", amount = 0.0, currency = "CZK", frequency = "MONTHLY"),
                 ),
                 termsAndConditions = listOf(
-                    TermsAndConditions(version = "1.1", url = "https://openbank.example/tac/savings-czk/v1.1", effectiveFrom = LocalDate.of(2024, 12, 1), language = "cs")
+                    TermsAndConditions(
+                        version = "1.1",
+                        url = "https://openbank.example/tac/savings-czk/v1.1",
+                        effectiveFrom = LocalDate.of(2024, 12, 1),
+                        language = "cs",
+                    ),
                 ),
                 versionHistory = listOf(
-                    ProductVersion("1.1.0", LocalDate.of(2024, 12, 1), isPublic = true, changeNote = "Úprava úrokových pásem"),
-                    ProductVersion("1.0.0", LocalDate.of(2024, 7, 1), LocalDate.of(2024, 11, 30), isPublic = true)
+                    ProductVersion(
+                        "1.1.0",
+                        LocalDate.of(2024, 12, 1),
+                        isPublic = true,
+                        changeNote = "Úprava úrokových pásem",
+                    ),
+                    ProductVersion(
+                        "1.0.0",
+                        LocalDate.of(2024, 7, 1),
+                        LocalDate.of(2024, 11, 30),
+                        isPublic = true,
+                    ),
                 ),
                 description = "CZK savings account with 5.5% p.a. interest (tiered)",
-                createdAt = Instant.parse("2024-07-01T10:00:00Z"), updatedAt = Instant.parse("2024-12-01T10:00:00Z")
+                createdAt = Instant.parse("2024-07-01T10:00:00Z"),
+                updatedAt = Instant.parse("2024-12-01T10:00:00Z"),
             ),
             Product(
-                id = "prod-011", code = "INVESTMENT_BASIC", name = "Basic Investment Account",
+                id = "prod-011",
+                code = "INVESTMENT_BASIC",
+                name = "Basic Investment Account",
                 shortDescription = "Investiční účet — připravujeme",
-                type = "INVESTMENT", currency = "EUR", status = ProductStatus.DRAFT,
-                isPublic = false, version = "0.9.0",
+                type = "INVESTMENT",
+                currency = "EUR",
+                status = ProductStatus.DRAFT,
+                isPublic = false,
+                version = "0.9.0",
                 validFrom = LocalDate.of(2025, 3, 1),
-                baseRate = 0.0, fee = 9.99,
+                baseRate = 0.0,
+                fee = 9.99,
                 tags = listOf("investment", "draft", "internal"),
                 eligibilitySegments = listOf(EligibilitySegment.PREMIUM),
                 fees = listOf(
-                    Fee(name = "Management Fee", type = "ANNUAL", amount = 0.75, currency = "EUR", frequency = "PERCENTAGE", description = "0.75% p.a. of AUM"),
-                    Fee(name = "Transaction Fee", type = "TRANSACTION", amount = 9.99, currency = "EUR", frequency = "PER_TRANSACTION")
+                    Fee(
+                        name = "Management Fee",
+                        type = "ANNUAL",
+                        amount = 0.75,
+                        currency = "EUR",
+                        frequency = "PERCENTAGE",
+                        description = "0.75% p.a. of AUM",
+                    ),
+                    Fee(
+                        name = "Transaction Fee",
+                        type = "TRANSACTION",
+                        amount = 9.99,
+                        currency = "EUR",
+                        frequency = "PER_TRANSACTION",
+                    ),
                 ),
                 termsAndConditions = listOf(
-                    TermsAndConditions(version = "0.9-draft", url = "https://openbank.example/tac/investment-basic/v0.9-draft", effectiveFrom = LocalDate.of(2025, 3, 1), language = "cs", summary = "Draft — nepublikováno")
+                    TermsAndConditions(
+                        version = "0.9-draft",
+                        url = "https://openbank.example/tac/investment-basic/v0.9-draft",
+                        effectiveFrom = LocalDate.of(2025, 3, 1),
+                        language = "cs",
+                        summary = "Draft — nepublikováno",
+                    ),
                 ),
                 versionHistory = listOf(
-                    ProductVersion("0.9.0", LocalDate.of(2025, 3, 1), isPublic = false, changeNote = "Interní draft")
+                    ProductVersion(
+                        "0.9.0",
+                        LocalDate.of(2025, 3, 1),
+                        isPublic = false,
+                        changeNote = "Interní draft",
+                    ),
                 ),
                 description = "Basic investment account — coming Q1 2025",
-                createdAt = Instant.parse("2024-11-01T10:00:00Z"), updatedAt = Instant.parse("2024-12-01T10:00:00Z")
+                createdAt = Instant.parse("2024-11-01T10:00:00Z"),
+                updatedAt = Instant.parse("2024-12-01T10:00:00Z"),
             ),
             Product(
-                id = "prod-012", code = "CURRENT_STUDENT", name = "Student Current Account",
+                id = "prod-012",
+                code = "CURRENT_STUDENT",
+                name = "Student Current Account",
                 shortDescription = "Studentský účet zdarma, bezúročný debet 500 EUR",
-                type = "CURRENT", currency = "EUR", status = ProductStatus.ACTIVE,
-                isPublic = true, version = "2.0.0",
+                type = "CURRENT",
+                currency = "EUR",
+                status = ProductStatus.ACTIVE,
+                isPublic = true,
+                version = "2.0.0",
                 validFrom = LocalDate.of(2024, 8, 1),
-                baseRate = 0.0, fee = 0.0,
+                baseRate = 0.0,
+                fee = 0.0,
                 tags = listOf("current", "student", "no-fee"),
                 eligibilitySegments = listOf(EligibilitySegment.STUDENT),
                 cardConfig = CardConfig(
-                    enabled = true, minCards = 1, maxCards = 1,
+                    enabled = true,
+                    minCards = 1,
+                    maxCards = 1,
                     networks = listOf(CardNetwork.VISA),
                     tiers = listOf(CardTier.STANDARD),
-                    virtualCardAllowed = true, contactlessEnabled = true,
+                    virtualCardAllowed = true,
+                    contactlessEnabled = true,
                     eligibilityMinAge = 15,
                     eligibilitySegments = listOf(EligibilitySegment.STUDENT),
-                    monthlyFeePerCard = 0.0
+                    monthlyFeePerCard = 0.0,
                 ),
                 multiCurrencyConfig = MultiCurrencyConfig(
                     enabled = false,
-                    defaultCurrency = "EUR"
+                    defaultCurrency = "EUR",
                 ),
                 overdraftConfig = OverdraftConfig(
                     type = OverdraftType.ARRANGED,
                     maxLimitAmount = 500.0,
                     interestRateAnnual = 0.0,
                     gracePeriodDays = 30,
-                    autoApprovalEnabled = true
+                    autoApprovalEnabled = true,
                 ),
                 fees = listOf(
-                    Fee(name = "Monthly Fee", type = "MONTHLY", amount = 0.0, currency = "EUR", frequency = "MONTHLY", description = "Free for students"),
-                    Fee(name = "Overdraft Interest", type = "DAILY", amount = 0.0, currency = "EUR", frequency = "DAILY", description = "Interest-free overdraft up to €500")
+                    Fee(
+                        name = "Monthly Fee",
+                        type = "MONTHLY",
+                        amount = 0.0,
+                        currency = "EUR",
+                        frequency = "MONTHLY",
+                        description = "Free for students",
+                    ),
+                    Fee(
+                        name = "Overdraft Interest",
+                        type = "DAILY",
+                        amount = 0.0,
+                        currency = "EUR",
+                        frequency = "DAILY",
+                        description = "Interest-free overdraft up to €500",
+                    ),
                 ),
                 termsAndConditions = listOf(
-                    TermsAndConditions(version = "2.0", url = "https://openbank.example/tac/current-student/v2.0", effectiveFrom = LocalDate.of(2024, 8, 1), language = "cs")
+                    TermsAndConditions(
+                        version = "2.0",
+                        url = "https://openbank.example/tac/current-student/v2.0",
+                        effectiveFrom = LocalDate.of(2024, 8, 1),
+                        language = "cs",
+                    ),
                 ),
                 versionHistory = listOf(
-                    ProductVersion("2.0.0", LocalDate.of(2024, 8, 1), isPublic = true, changeNote = "Přidána karta a bezúročný debet"),
-                    ProductVersion("1.0.0", LocalDate.of(2024, 1, 15), LocalDate.of(2024, 7, 31), isPublic = true)
+                    ProductVersion(
+                        "2.0.0",
+                        LocalDate.of(2024, 8, 1),
+                        isPublic = true,
+                        changeNote = "Přidána karta a bezúročný debet",
+                    ),
+                    ProductVersion(
+                        "1.0.0",
+                        LocalDate.of(2024, 1, 15),
+                        LocalDate.of(2024, 7, 31),
+                        isPublic = true,
+                    ),
                 ),
                 description = "Free current account for students with interest-free overdraft up to €500",
-                createdAt = Instant.parse("2024-08-01T10:00:00Z"), updatedAt = Instant.parse("2024-12-01T10:00:00Z")
+                createdAt = Instant.parse("2024-08-01T10:00:00Z"),
+                updatedAt = Instant.parse("2024-12-01T10:00:00Z"),
             ),
             Product(
-                id = "prod-013", code = "TERM_DEPOSIT_6M_CZK", name = "CZK Term Deposit 6M",
+                id = "prod-013",
+                code = "TERM_DEPOSIT_6M_CZK",
+                name = "CZK Term Deposit 6M",
                 shortDescription = "Korunový termínovaný vklad 6 měsíců, 5,8 % p.a.",
-                type = "TERM_DEPOSIT", currency = "CZK", status = ProductStatus.ACTIVE,
-                isPublic = true, version = "1.0.0",
+                type = "TERM_DEPOSIT",
+                currency = "CZK",
+                status = ProductStatus.ACTIVE,
+                isPublic = true,
+                version = "1.0.0",
                 validFrom = LocalDate.of(2024, 9, 1),
-                baseRate = 0.058, fee = 0.0,
-                minBalance = 10_000.0, maxBalance = 5_000_000.0,
+                baseRate = 0.058,
+                fee = 0.0,
+                minBalance = 10_000.0,
+                maxBalance = 5_000_000.0,
                 tags = listOf("term-deposit", "czk", "retail"),
                 eligibilitySegments = listOf(EligibilitySegment.ALL),
                 termDepositConfig = TermDepositConfig(
@@ -483,39 +961,70 @@ class ProductCatalogService @Inject constructor(private val clock: Clock) {
                     payoutFrequency = InterestPayoutFrequency.AT_MATURITY,
                     autoRenewEnabled = false,
                     earlyWithdrawalPenaltyPct = 100.0,
-                    earlyWithdrawalNoticeDays = 0
+                    earlyWithdrawalNoticeDays = 0,
                 ),
                 multiCurrencyConfig = MultiCurrencyConfig(enabled = false, defaultCurrency = "CZK"),
                 fees = listOf(
-                    Fee(name = "Early Withdrawal", type = "PENALTY", amount = 100.0, currency = "CZK", frequency = "PERCENTAGE", description = "Ztráta veškerého úroku")
+                    Fee(
+                        name = "Early Withdrawal",
+                        type = "PENALTY",
+                        amount = 100.0,
+                        currency = "CZK",
+                        frequency = "PERCENTAGE",
+                        description = "Ztráta veškerého úroku",
+                    ),
                 ),
                 termsAndConditions = listOf(
-                    TermsAndConditions(version = "1.0", url = "https://openbank.example/tac/term-deposit-6m-czk/v1.0", effectiveFrom = LocalDate.of(2024, 9, 1), language = "cs")
+                    TermsAndConditions(
+                        version = "1.0",
+                        url = "https://openbank.example/tac/term-deposit-6m-czk/v1.0",
+                        effectiveFrom = LocalDate.of(2024, 9, 1),
+                        language = "cs",
+                    ),
                 ),
                 versionHistory = listOf(
-                    ProductVersion("1.0.0", LocalDate.of(2024, 9, 1), isPublic = true, changeNote = "Úvodní verze")
+                    ProductVersion(
+                        "1.0.0",
+                        LocalDate.of(2024, 9, 1),
+                        isPublic = true,
+                        changeNote = "Úvodní verze",
+                    ),
                 ),
                 description = "CZK 6-month term deposit at 5.8% p.a.",
-                createdAt = Instant.parse("2024-09-01T10:00:00Z"), updatedAt = Instant.parse("2024-09-01T10:00:00Z")
+                createdAt = Instant.parse("2024-09-01T10:00:00Z"),
+                updatedAt = Instant.parse("2024-09-01T10:00:00Z"),
             ),
             Product(
-                id = "prod-014", code = "CURRENT_CZK", name = "CZK Current Account",
+                id = "prod-014",
+                code = "CURRENT_CZK",
+                name = "CZK Current Account",
                 shortDescription = "Korunový běžný účet — jedno IBAN, měnové kapsy, SEPA i CERTIS",
-                type = "CURRENT", currency = "CZK", status = ProductStatus.ACTIVE,
-                isPublic = true, version = "1.0.0",
+                type = "CURRENT",
+                currency = "CZK",
+                status = ProductStatus.ACTIVE,
+                isPublic = true,
+                version = "1.0.0",
                 validFrom = LocalDate.of(2025, 1, 1),
-                baseRate = 0.0, fee = 99.0,
+                baseRate = 0.0,
+                fee = 99.0,
                 tags = listOf("current", "czk", "retail", "multi-currency"),
                 eligibilitySegments = listOf(EligibilitySegment.RETAIL, EligibilitySegment.SENIOR, EligibilitySegment.STUDENT),
                 cardConfig = CardConfig(
-                    enabled = true, minCards = 1, maxCards = 3,
+                    enabled = true,
+                    minCards = 1,
+                    maxCards = 3,
                     networks = listOf(CardNetwork.VISA, CardNetwork.MASTERCARD),
                     tiers = listOf(CardTier.STANDARD, CardTier.GOLD),
-                    virtualCardAllowed = true, contactlessEnabled = true,
+                    virtualCardAllowed = true,
+                    contactlessEnabled = true,
                     eligibilityMinAge = 15,
-                    eligibilitySegments = listOf(EligibilitySegment.RETAIL, EligibilitySegment.SENIOR, EligibilitySegment.STUDENT),
+                    eligibilitySegments = listOf(
+                        EligibilitySegment.RETAIL,
+                        EligibilitySegment.SENIOR,
+                        EligibilitySegment.STUDENT,
+                    ),
                     monthlyFeePerCard = 0.0,
-                    cardCurrency = "CZK"
+                    cardCurrency = "CZK",
                 ),
                 multiCurrencyConfig = MultiCurrencyConfig(
                     enabled = true,
@@ -523,7 +1032,7 @@ class ProductCatalogService @Inject constructor(private val clock: Clock) {
                     defaultCurrency = "CZK",
                     fxMarginBuyPct = 1.5,
                     fxMarginSellPct = 1.5,
-                    crossCurrencyTransferAllowed = true
+                    crossCurrencyTransferAllowed = true,
                 ),
                 overdraftConfig = OverdraftConfig(
                     type = OverdraftType.BOTH,
@@ -532,71 +1041,167 @@ class ProductCatalogService @Inject constructor(private val clock: Clock) {
                     gracePeriodDays = 3,
                     unarrangedDailyFee = 200.0,
                     unarrangedRateAnnual = 0.3900,
-                    autoApprovalEnabled = true
+                    autoApprovalEnabled = true,
                 ),
                 fees = listOf(
-                    Fee(name = "Monthly Fee", type = "MONTHLY", amount = 99.0, currency = "CZK", frequency = "MONTHLY", waivable = true, waiveCondition = "Měsíční obrat > 25 000 CZK"),
-                    Fee(name = "SEPA Transfer", type = "TRANSACTION", amount = 0.0, currency = "CZK", frequency = "PER_TRANSACTION", description = "SEPA převody zdarma"),
-                    Fee(name = "Domestic CERTIS Transfer", type = "TRANSACTION", amount = 0.0, currency = "CZK", frequency = "PER_TRANSACTION", description = "Tuzemský převod zdarma"),
-                    Fee(name = "FX Conversion", type = "TRANSACTION", amount = 1.5, currency = "CZK", frequency = "PERCENTAGE", description = "1,5 % z konvertované částky")
+                    Fee(
+                        name = "Monthly Fee",
+                        type = "MONTHLY",
+                        amount = 99.0,
+                        currency = "CZK",
+                        frequency = "MONTHLY",
+                        waivable = true,
+                        waiveCondition = "Měsíční obrat > 25 000 CZK",
+                    ),
+                    Fee(
+                        name = "SEPA Transfer",
+                        type = "TRANSACTION",
+                        amount = 0.0,
+                        currency = "CZK",
+                        frequency = "PER_TRANSACTION",
+                        description = "SEPA převody zdarma",
+                    ),
+                    Fee(
+                        name = "Domestic CERTIS Transfer",
+                        type = "TRANSACTION",
+                        amount = 0.0,
+                        currency = "CZK",
+                        frequency = "PER_TRANSACTION",
+                        description = "Tuzemský převod zdarma",
+                    ),
+                    Fee(
+                        name = "FX Conversion",
+                        type = "TRANSACTION",
+                        amount = 1.5,
+                        currency = "CZK",
+                        frequency = "PERCENTAGE",
+                        description = "1,5 % z konvertované částky",
+                    ),
                 ),
                 termsAndConditions = listOf(
-                    TermsAndConditions(version = "1.0", url = "https://openbank.example/tac/current-czk/v1.0", effectiveFrom = LocalDate.of(2025, 1, 1), language = "cs", summary = "Korunový běžný účet — obchodní podmínky v1.0")
+                    TermsAndConditions(
+                        version = "1.0",
+                        url = "https://openbank.example/tac/current-czk/v1.0",
+                        effectiveFrom = LocalDate.of(2025, 1, 1),
+                        language = "cs",
+                        summary = "Korunový běžný účet — obchodní podmínky v1.0",
+                    ),
                 ),
                 versionHistory = listOf(
-                    ProductVersion("1.0.0", LocalDate.of(2025, 1, 1), isPublic = true, changeNote = "Úvodní verze — korunový běžný účet s měnovými kapsami")
+                    ProductVersion(
+                        "1.0.0",
+                        LocalDate.of(2025, 1, 1),
+                        isPublic = true,
+                        changeNote = "Úvodní verze — korunový běžný účet s měnovými kapsami",
+                    ),
                 ),
                 description = "CZK-base everyday current account: single IBAN, currency pockets, SEPA + domestic CERTIS, overdraft",
-                createdAt = Instant.parse("2025-01-01T10:00:00Z"), updatedAt = Instant.parse("2025-01-01T10:00:00Z")
+                createdAt = Instant.parse("2025-01-01T10:00:00Z"),
+                updatedAt = Instant.parse("2025-01-01T10:00:00Z"),
             ),
             Product(
-                id = "prod-015", code = "CURRENT_MULTICURRENCY_UMBRELLA", name = "Multi-Currency Umbrella Account",
+                id = "prod-015",
+                code = "CURRENT_MULTICURRENCY_UMBRELLA",
+                name = "Multi-Currency Umbrella Account",
                 shortDescription = "Multi-měnový zastřešující účet — jedno IBAN, kapsy v 12 měnách",
-                type = "CURRENT", currency = "EUR", status = ProductStatus.ACTIVE,
-                isPublic = true, version = "1.0.0",
+                type = "CURRENT",
+                currency = "EUR",
+                status = ProductStatus.ACTIVE,
+                isPublic = true,
+                version = "1.0.0",
                 validFrom = LocalDate.of(2025, 1, 1),
-                baseRate = 0.0, fee = 9.99,
+                baseRate = 0.0,
+                fee = 9.99,
                 tags = listOf("current", "multi-currency", "umbrella", "premium", "fx"),
                 eligibilitySegments = listOf(EligibilitySegment.PREMIUM, EligibilitySegment.RETAIL, EligibilitySegment.BUSINESS),
                 cardConfig = CardConfig(
-                    enabled = true, minCards = 1, maxCards = 5,
+                    enabled = true,
+                    minCards = 1,
+                    maxCards = 5,
                     networks = listOf(CardNetwork.VISA, CardNetwork.MASTERCARD),
                     tiers = listOf(CardTier.STANDARD, CardTier.GOLD, CardTier.PLATINUM),
-                    virtualCardAllowed = true, contactlessEnabled = true,
+                    virtualCardAllowed = true,
+                    contactlessEnabled = true,
                     eligibilityMinAge = 18,
-                    eligibilitySegments = listOf(EligibilitySegment.PREMIUM, EligibilitySegment.RETAIL, EligibilitySegment.BUSINESS),
-                    monthlyFeePerCard = 0.0
+                    eligibilitySegments = listOf(
+                        EligibilitySegment.PREMIUM,
+                        EligibilitySegment.RETAIL,
+                        EligibilitySegment.BUSINESS,
+                    ),
+                    monthlyFeePerCard = 0.0,
                 ),
                 multiCurrencyConfig = MultiCurrencyConfig(
                     enabled = true,
-                    supportedCurrencies = listOf("EUR", "USD", "GBP", "CHF", "CZK", "PLN", "HUF", "SEK", "NOK", "DKK", "RON", "BGN"),
+                    supportedCurrencies = listOf(
+                        "EUR", "USD", "GBP", "CHF", "CZK", "PLN", "HUF", "SEK", "NOK", "DKK", "RON", "BGN",
+                    ),
                     defaultCurrency = "EUR",
                     fxMarginBuyPct = 0.5,
                     fxMarginSellPct = 0.5,
-                    crossCurrencyTransferAllowed = true
+                    crossCurrencyTransferAllowed = true,
                 ),
                 overdraftConfig = OverdraftConfig(
                     type = OverdraftType.ARRANGED,
                     maxLimitAmount = 10_000.0,
                     interestRateAnnual = 0.1299,
                     gracePeriodDays = 5,
-                    autoApprovalEnabled = false
+                    autoApprovalEnabled = false,
                 ),
                 fees = listOf(
-                    Fee(name = "Monthly Fee", type = "MONTHLY", amount = 9.99, currency = "EUR", frequency = "MONTHLY", waivable = true, waiveCondition = "Souhrnný zůstatek kapes > 20 000 EUR"),
-                    Fee(name = "Currency Pocket Open", type = "ONE_TIME", amount = 0.0, currency = "EUR", frequency = "ONE_TIME", description = "Otevření měnové kapsy zdarma"),
-                    Fee(name = "FX Conversion", type = "TRANSACTION", amount = 0.5, currency = "EUR", frequency = "PERCENTAGE", description = "0,5 % mezikapesní směna"),
-                    Fee(name = "SWIFT Transfer", type = "TRANSACTION", amount = 10.0, currency = "EUR", frequency = "PER_TRANSACTION")
+                    Fee(
+                        name = "Monthly Fee",
+                        type = "MONTHLY",
+                        amount = 9.99,
+                        currency = "EUR",
+                        frequency = "MONTHLY",
+                        waivable = true,
+                        waiveCondition = "Souhrnný zůstatek kapes > 20 000 EUR",
+                    ),
+                    Fee(
+                        name = "Currency Pocket Open",
+                        type = "ONE_TIME",
+                        amount = 0.0,
+                        currency = "EUR",
+                        frequency = "ONE_TIME",
+                        description = "Otevření měnové kapsy zdarma",
+                    ),
+                    Fee(
+                        name = "FX Conversion",
+                        type = "TRANSACTION",
+                        amount = 0.5,
+                        currency = "EUR",
+                        frequency = "PERCENTAGE",
+                        description = "0,5 % mezikapesní směna",
+                    ),
+                    Fee(
+                        name = "SWIFT Transfer",
+                        type = "TRANSACTION",
+                        amount = 10.0,
+                        currency = "EUR",
+                        frequency = "PER_TRANSACTION",
+                    ),
                 ),
                 termsAndConditions = listOf(
-                    TermsAndConditions(version = "1.0", url = "https://openbank.example/tac/current-umbrella/v1.0", effectiveFrom = LocalDate.of(2025, 1, 1), language = "cs", summary = "Multi-měnový zastřešující účet — obchodní podmínky v1.0")
+                    TermsAndConditions(
+                        version = "1.0",
+                        url = "https://openbank.example/tac/current-umbrella/v1.0",
+                        effectiveFrom = LocalDate.of(2025, 1, 1),
+                        language = "cs",
+                        summary = "Multi-měnový zastřešující účet — obchodní podmínky v1.0",
+                    ),
                 ),
                 versionHistory = listOf(
-                    ProductVersion("1.0.0", LocalDate.of(2025, 1, 1), isPublic = true, changeNote = "Úvodní verze — zastřešující multi-měnový účet (1 IBAN, 12 kapes)")
+                    ProductVersion(
+                        "1.0.0",
+                        LocalDate.of(2025, 1, 1),
+                        isPublic = true,
+                        changeNote = "Úvodní verze — zastřešující multi-měnový účet (1 IBAN, 12 kapes)",
+                    ),
                 ),
                 description = "Flagship multi-currency umbrella: one IBAN, currency pockets across 12 currencies, 0.5% FX margin, cross-pocket transfers",
-                createdAt = Instant.parse("2025-01-01T10:00:00Z"), updatedAt = Instant.parse("2025-01-01T10:00:00Z")
-            )
+                createdAt = Instant.parse("2025-01-01T10:00:00Z"),
+                updatedAt = Instant.parse("2025-01-01T10:00:00Z"),
+            ),
         ).forEach { store[it.id] = it }
     }
 
@@ -686,7 +1291,7 @@ data class FeeScheduleItem(
     val productCode: String,
     val productName: String,
     val status: String,
-    val updatedAt: Instant
+    val updatedAt: Instant,
 ) {
     companion object {
         fun of(product: Product, fee: Fee): FeeScheduleItem = FeeScheduleItem(
@@ -706,7 +1311,7 @@ data class FeeScheduleItem(
             productName = product.name,
             // Fee availability tracks its owning product's lifecycle.
             status = product.status.name,
-            updatedAt = product.updatedAt
+            updatedAt = product.updatedAt,
         )
 
         /** Derives a stable, human-readable fee code, e.g. CURRENT_PERSONAL · "FX Conversion" → CURRENT_PERSONAL_FX_CONVERSION. */
@@ -743,11 +1348,14 @@ data class ProductRequest(
     val savingsConfig: SavingsConfig? = null,
     val termsAndConditions: List<TermsAndConditions>? = null,
     val tags: List<String>? = null,
-    val eligibilitySegments: List<EligibilitySegment>? = null
+    val eligibilitySegments: List<EligibilitySegment>? = null,
 ) {
     fun toDomain(clock: Clock) = Product(
         id = UUID.randomUUID().toString(),
-        code = code, name = name, type = type, currency = currency,
+        code = code,
+        name = name,
+        type = type,
+        currency = currency,
         status = status?.let { ProductStatus.valueOf(it) } ?: ProductStatus.DRAFT,
         isPublic = isPublic ?: true,
         version = version ?: "1.0.0",
@@ -768,11 +1376,15 @@ data class ProductRequest(
         termsAndConditions = termsAndConditions ?: emptyList(),
         tags = tags ?: emptyList(),
         eligibilitySegments = eligibilitySegments ?: listOf(EligibilitySegment.ALL),
-        createdAt = Instant.now(clock), updatedAt = Instant.now(clock)
+        createdAt = Instant.now(clock),
+        updatedAt = Instant.now(clock),
     )
 
+    @Suppress("CyclomaticComplexMethod")
     fun applyTo(existing: Product, clock: Clock) = existing.copy(
-        name = name, type = type, currency = currency,
+        name = name,
+        type = type,
+        currency = currency,
         status = status?.let { ProductStatus.valueOf(it) } ?: existing.status,
         isPublic = isPublic ?: existing.isPublic,
         version = version ?: existing.version,
@@ -793,6 +1405,6 @@ data class ProductRequest(
         termsAndConditions = termsAndConditions ?: existing.termsAndConditions,
         tags = tags ?: existing.tags,
         eligibilitySegments = eligibilitySegments ?: existing.eligibilitySegments,
-        updatedAt = Instant.now(clock)
+        updatedAt = Instant.now(clock),
     )
 }

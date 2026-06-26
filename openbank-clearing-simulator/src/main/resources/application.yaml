@@ -81,6 +81,8 @@ quarkus:
       enabled: false
     oidc:
       enabled: false
+    oidc-client:
+      enabled: false
 
 openbank:
   api:
