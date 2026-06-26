@@ -25,5 +25,6 @@ import java.time.Clock
 class IdempotencyConfig {
     @Produces
     @ApplicationScoped
-    fun idempotencyStore(redis: ReactiveRedisDataSource, clock: Clock): IdempotencyStore = RedisIdempotencyStore(redis, clock)
+    fun idempotencyStore(redis: ReactiveRedisDataSource, clock: Clock): IdempotencyStore =
+        RedisIdempotencyStore(redis, clock)
 }

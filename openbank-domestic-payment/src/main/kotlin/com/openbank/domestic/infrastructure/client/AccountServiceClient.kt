@@ -9,16 +9,15 @@ import io.quarkus.oidc.client.OidcClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Instance
-import org.eclipse.microprofile.config.inject.ConfigProperty
-import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
-import org.jboss.logging.Logger
-import java.util.UUID
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
+import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.jboss.logging.Logger
+import java.util.UUID
 
 @Path("/api/v1/accounts")
 @Produces(MediaType.APPLICATION_JSON)
@@ -31,18 +30,17 @@ interface AccountServiceRestClient {
     ): io.smallrye.mutiny.Uni<AccountDto>
 }
 
-data class AccountDto(
-    val id: String,
-    val partyId: String,
-)
+data class AccountDto(val id: String, val partyId: String)
 
 private const val HTTP_NOT_FOUND = 404
 
 @ApplicationScoped
 class AccountServiceClient(
     private val oidcClient: Instance<OidcClient>,
-    @ConfigProperty(name = "quarkus.rest-client.account-service.url",
-        defaultValue = "http://account-service.accounts.svc:8100")
+    @ConfigProperty(
+        name = "quarkus.rest-client.account-service.url",
+        defaultValue = "http://account-service.accounts.svc:8100",
+    )
     private val baseUrl: String,
 ) : AccountLookupPort {
 
@@ -60,8 +58,15 @@ class AccountServiceClient(
         val dto = httpClient.getByIban("Bearer $token", iban).awaitSuspending()
         UUID.fromString(dto.partyId)
     } catch (ex: jakarta.ws.rs.WebApplicationException) {
-        if (ex.response.status == HTTP_NOT_FOUND) null else {
-            log.warnf(ex, "Account lookup for IBAN %s failed with HTTP %d — treating as external", iban, ex.response.status)
+        if (ex.response.status == HTTP_NOT_FOUND) {
+            null
+        } else {
+            log.warnf(
+                ex,
+                "Account lookup for IBAN %s failed with HTTP %d — treating as external",
+                iban,
+                ex.response.status,
+            )
             null
         }
     } catch (ex: Exception) {
