@@ -1,0 +1,40 @@
+%% title: AML Screening Flow
+sequenceDiagram
+  participant PS as party-service
+  participant PAY as payment-service
+  participant K as Kafka
+  participant AML as aml-service
+  participant DB as PostgreSQL
+  participant REDIS as Valkey (idempotency)
+  participant ANA as Compliance Analyst
+  participant MLRO as MLRO
+
+  note over PS,K: Onboarding path
+  PS->>K: PARTY_CREATED → openbank.party.events
+  K-->>AML: PartyEventConsumer (filter: INDIVIDUAL + PARTY_CREATED)
+  AML->>REDIS: check idempotency key "<partyId>:CUSTOMER_ONBOARDING"
+  AML->>DB: INSERT INTO aml_cases (screening_type=CUSTOMER_ONBOARDING, status=OPEN/UNDER_REVIEW)
+  AML->>DB: INSERT INTO aml_outbox (aml.case.created.v1)
+  AML->>K: aml.case.created.v1 → openbank.aml.events
+
+  note over PAY,K: Payment screening gate path
+  PAY->>AML: POST /api/v1/aml/cases (Idempotency-Key, screening_type=TRANSACTION_MONITORING)
+  AML->>REDIS: check idempotency
+  AML->>DB: INSERT INTO aml_cases (risk_level drives initial status)
+  AML-->>PAY: 201 Created {caseId}
+
+  note over ANA: Analyst review
+  ANA->>AML: GET /api/v1/aml/cases?status=OPEN
+  ANA->>AML: PUT /api/v1/aml/cases/{id}/decision (status=CLEARED, decidedBy)
+  AML->>DB: UPDATE aml_cases SET status=CLEARED, decided_by, decided_at
+  AML->>DB: INSERT INTO aml_outbox (aml.case.status_changed.v1)
+  AML->>K: aml.case.status_changed.v1 → openbank.aml.events
+  K-->>PS: consumed → amlStatus=CLEARED → two-key gate evaluation
+
+  alt High-risk / suspicious — escalate to MLRO
+    ANA->>AML: PUT .../decision (status=ESCALATED, escalated_to_mlro=true)
+    AML->>DB: UPDATE aml_cases SET status=ESCALATED, escalated_to_mlro=true
+    MLRO->>AML: PUT .../decision (status=BLOCKED, sar_filed=true, sar_reference)
+    AML->>K: aml.case.status_changed.v1 (BLOCKED) → openbank.aml.events
+    K-->>PS: consumed → amlStatus=BLOCKED → party SUSPENDED
+  end

@@ -1,0 +1,109 @@
+%% title: ClickHouse Warehouse ER Schema — openbank_analytics (V1__analytics_bronze_silver.sql)
+erDiagram
+    BRONZE_EVENTS {
+        UUID event_id PK "bloom-filter index; dedupe key"
+        LowCardinality_String aggregate_type "account | transaction | balance | party | kyc | consent"
+        String aggregate_id
+        Int64 aggregate_version "ReplacingMergeTree version key"
+        LowCardinality_String event_type
+        DateTime64_UTC occurred_at "partition key (toYYYYMM); TTL 10 years"
+        LowCardinality_String source_service
+        UInt16 schema_version
+        Nullable_String actor_id
+        Nullable_String actor_type
+        Nullable_String trace_id
+        LowCardinality_String ingest_source "STREAM | INITIAL_LOAD | BACKFILL | CORRECTION"
+        Nullable_String batch_id "FK → BACKFILL_AUDIT.batch_id"
+        DateTime64_UTC ingested_at
+        String record_hash "SHA-256; leaf of Merkle tree"
+        String payload "PII-masked JSON"
+    }
+
+    DEAD_LETTER_EVENTS {
+        String content_hash PK "idempotent on content; ReplacingMergeTree key"
+        String raw_payload "original unmasked message"
+        String error "mapping / schema failure reason"
+        DateTime64_UTC failed_at "TTL 1 year; partition key"
+    }
+
+    BACKFILL_AUDIT {
+        String batch_id PK
+        LowCardinality_String ingest_source "BACKFILL | INITIAL_LOAD | CORRECTION"
+        DateTime64_UTC range_from
+        DateTime64_UTC range_to
+        Nullable_String aggregate_type
+        Nullable_String aggregate_id
+        UInt32 windows
+        UInt64 ingested
+        UInt64 deduped
+        String requested_by
+        String reason
+        DateTime64_UTC started_at "partition key (toYYYYMM); TTL 10 years"
+        DateTime64_UTC finished_at
+        LowCardinality_String status
+    }
+
+    INTEGRITY_ANCHORS {
+        String anchor_id PK
+        String merkle_root "Merkle root over batch record_hash leaves"
+        Nullable_String previous_anchor_hash "chain link to prior anchor"
+        UInt32 record_count
+        LowCardinality_String source "STREAM | RECONCILIATION:*"
+        DateTime64_UTC sealed_at "partition key; NO TTL — chain must outlive every record"
+    }
+
+    RELOAD_PROPOSALS {
+        String proposal_id PK
+        LowCardinality_String state "PROPOSED | APPROVED | REJECTED | WITHDRAWN | EXECUTED"
+        LowCardinality_String ingest_source
+        DateTime64_UTC range_from
+        DateTime64_UTC range_to
+        Nullable_String aggregate_type
+        Nullable_String aggregate_id
+        String requested_by
+        String proposed_by
+        DateTime64_UTC proposed_at "partition key; TTL 10 years"
+        Nullable_String decided_by "must differ from proposed_by (four-eyes)"
+        Nullable_DateTime64_UTC decided_at
+        Nullable_String decision_reason
+        Nullable_DateTime64_UTC executed_at
+        String reason
+        DateTime64_UTC updated_at "ReplacingMergeTree version key"
+    }
+
+    SILVER_CURRENT_STATE {
+        String aggregate_type
+        String aggregate_id
+        UUID event_id "argMax by (version, occurred_at, ingested_at)"
+        Int64 aggregate_version
+        String event_type
+        DateTime64_UTC occurred_at
+        String source_service
+        UInt16 schema_version
+        String payload "latest masked state"
+    }
+
+    SILVER_HISTORY {
+        String aggregate_type
+        String aggregate_id
+        Int64 aggregate_version
+        String event_type
+        DateTime64_UTC valid_from "= occurred_at"
+        DateTime64_UTC valid_to "= next version occurred_at; NULL = current"
+        String payload
+    }
+
+    GOLD_DAILY_EVENT_VOLUME {
+        Date day
+        String source_service
+        String aggregate_type
+        String event_type
+        UInt64 events
+    }
+
+    BRONZE_EVENTS ||--o{ INTEGRITY_ANCHORS : "record_hash sealed into merkle_root"
+    BRONZE_EVENTS ||--o{ BACKFILL_AUDIT : "batch_id links reload rows"
+    BRONZE_EVENTS ||--|| SILVER_CURRENT_STATE : "VIEW argMax over bronze"
+    BRONZE_EVENTS ||--o{ SILVER_HISTORY : "VIEW SCD2 intervals over bronze"
+    BRONZE_EVENTS ||--o{ GOLD_DAILY_EVENT_VOLUME : "VIEW rollup over bronze"
+    RELOAD_PROPOSALS ||--o{ BACKFILL_AUDIT : "EXECUTED proposal produces batch"

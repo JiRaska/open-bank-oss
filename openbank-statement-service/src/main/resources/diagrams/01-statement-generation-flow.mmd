@@ -1,0 +1,39 @@
+%% title: Statement Period Close and Render-on-Demand Flow
+sequenceDiagram
+    participant CRON as Scheduler (cron 0 30 2 1 * ?)
+    participant SVC as StatementService
+    participant REG as AccountRegistry
+    participant TXN as transaction-service
+    participant BAL as balance-service
+    participant DB as PostgreSQL
+    participant K as Kafka (outbox)
+    participant CLIENT as Client (admin-ui / customer app)
+
+    note over CRON: Monthly period close
+    CRON->>SVC: trigger close run (SCHEDULED)
+    SVC->>DB: INSERT statement_close_run (status=RUNNING)
+    SVC->>REG: enumerate all registered accounts
+    loop per account × currency pocket
+        SVC->>BAL: GET closing balance (pocket)
+        SVC->>TXN: GET booked entries for period
+        SVC->>SVC: reconcile closing balance (fail-closed if mismatch)
+        alt reconciliation OK
+            SVC->>DB: INSERT statement_period (CLOSED, legal_sequence++)
+            SVC->>DB: INSERT statement_outbox (account.statement.period.closed.v1)
+            SVC->>DB: UPDATE close_run pockets_closed++
+        else reconciliation FAILED
+            SVC->>DB: INSERT statement_close_failure (reason, detail)
+            SVC->>DB: UPDATE close_run pockets_failed++
+        end
+    end
+    SVC->>DB: UPDATE statement_close_run (status=COMPLETED | COMPLETED_WITH_FAILURES)
+    SVC->>K: publish account.statement.period.closed.v1 (per pocket)
+
+    note over CLIENT: Render on demand (no stored files)
+    CLIENT->>SVC: GET /api/v1/statements/{accountId}/{currency}/{legalSequence}
+    SVC->>DB: load statement_period record
+    SVC->>TXN: GET booked entries for period (replay)
+    SVC->>BAL: GET opening/closing balances
+    SVC->>SVC: build StatementModel (immutable aggregate)
+    SVC->>SVC: render → camt.053 / MT940 / PDF (pure projection)
+    SVC-->>CLIENT: rendered statement (deterministic, byte-identical)

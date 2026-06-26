@@ -1,0 +1,64 @@
+%% title: analytics-sink Process Lifecycle — startup, steady-state, operator flows
+stateDiagram-v2
+    [*] --> Booting
+
+    state Booting {
+        [*] --> DataResidencyCheck
+        DataResidencyCheck --> AdapterInit : region on allow-list
+        DataResidencyCheck --> [*] : region not allowed — boot aborted
+        AdapterInit --> HealthProbeReady : ClickHouse / Kafka / schema catalogue bound\n(or offline no-ops if unconfigured)
+    }
+
+    Booting --> Consuming : readiness probe GREEN\n(IngestFreshness lag within threshold)
+
+    state Consuming {
+        [*] --> AwaitingEvent
+        AwaitingEvent --> Mapping : Kafka message received
+        Mapping --> PiiMasking : AnalyticsEnvelope built
+        PiiMasking --> SchemaCheck : PII leaves masked
+        SchemaCheck --> Writing : eventType:version accepted
+        SchemaCheck --> Quarantined : unknown schema (strict mode)\nor mapping failure
+        Writing --> AnchorSealing : bronze INSERT OK\nrecord_hash computed
+        AnchorSealing --> AwaitingEvent : Merkle root sealed\n(ClickHouse + optional S3 WORM)
+        Quarantined --> AwaitingEvent : raw payload → dead_letter_events\nDLQ counter bumped
+    }
+
+    state OperatorFlows {
+        state ReconciliationFlow {
+            [*] --> RunReconciliation : POST /reconciliation/run\nor scheduled cron
+            RunReconciliation --> ReconciliationDone : diff bronze vs source-of-record\nevidence row anchored
+        }
+
+        state BackfillFlow {
+            [*] --> Proposed : POST /backfill/proposals\n(maker)
+            Proposed --> Approved : POST …/approve\n(different operator — four-eyes)
+            Proposed --> Rejected : POST …/approve with rejection reason
+            Proposed --> Withdrawn : proposer withdraws
+            Approved --> Executed : POST …/execute\nBackfillService chunks reload window\nbackfill_audit row written
+            Rejected --> [*]
+            Withdrawn --> [*]
+            Executed --> [*]
+        }
+
+        state ErasureFlow {
+            [*] --> ErasureRequested : POST /erasure\n(GDPR Art. 17)
+            ErasureRequested --> Erased : category erasable\ncrypto-shred via VaultCryptoErasure
+            ErasureRequested --> Refused : statutory hold applies\nlegal basis documented
+            Erased --> [*]
+            Refused --> [*]
+        }
+    }
+
+    Consuming --> OperatorFlows : operator REST call (8134)\nauthenticated via Keycloak
+
+    state DegradedMode {
+        [*] --> HighDlqRate : DLQ counter above threshold
+        [*] --> IngestLag : consumer lag exceeds SLO
+        HighDlqRate --> Unhealthy : IngestHealthCheck readiness FAIL
+        IngestLag --> Unhealthy : IngestHealthCheck readiness FAIL
+    }
+
+    Consuming --> DegradedMode : freshness check detects lag or DLQ spike
+    DegradedMode --> Consuming : lag clears / DLQ drained by operator replay
+
+    Consuming --> [*] : graceful shutdown (pod eviction / scale-to-zero)

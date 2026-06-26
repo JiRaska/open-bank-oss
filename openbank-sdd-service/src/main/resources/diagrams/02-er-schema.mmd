@@ -1,0 +1,36 @@
+%% title: SDD Service ER Schema
+erDiagram
+    SDD_MANDATE {
+        UUID id PK
+        UUID account_id
+        VARCHAR debtor_iban
+        VARCHAR creditor_identifier
+        VARCHAR umr
+        VARCHAR scheme
+        VARCHAR sequence_type
+        VARCHAR creditor_name
+        VARCHAR debtor_name
+        DATE signature_date
+        VARCHAR status
+        BOOLEAN b2b_confirmed
+        DATE last_collection_date
+        DATE last_pre_notification_date
+        TIMESTAMPTZ created_at
+        TEXT amendments
+    }
+
+    SDD_OUTBOX {
+        UUID id PK
+        UUID event_id UK
+        UUID aggregate_id
+        VARCHAR event_type
+        TEXT payload
+        VARCHAR status
+        INTEGER attempt_count
+        TIMESTAMPTZ sent_at
+        TEXT last_error
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    SDD_MANDATE ||--o{ SDD_OUTBOX : "aggregate_id"

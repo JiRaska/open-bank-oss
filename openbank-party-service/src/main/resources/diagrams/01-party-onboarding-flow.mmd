@@ -1,0 +1,38 @@
+%% title: Party Onboarding Flow
+sequenceDiagram
+  participant UI as admin-ui / mobile
+  participant PS as party-service
+  participant DB as PostgreSQL
+  participant K as Kafka
+  participant KYC as kyc-service
+  participant AML as aml-service
+
+  UI->>PS: POST /api/v1/parties (legal_name, email, partyType, …)
+  PS->>DB: BEGIN TX
+  PS->>DB: INSERT INTO parties (status=PENDING_KYC, kyc_status=NOT_STARTED, aml_status=NOT_SCREENED)
+  PS->>DB: INSERT INTO party_outbox (PARTY_CREATED, status=PENDING)
+  PS->>DB: COMMIT
+  PS-->>UI: 201 Created {partyId}
+
+  note over PS: OutboxDispatcher @Scheduled 5s
+  PS->>K: publish PARTY_CREATED → openbank.party.events
+
+  K-->>KYC: PARTY_CREATED (auto-open KYC case)
+  K-->>AML: PARTY_CREATED (open CUSTOMER_ONBOARDING case)
+
+  note over KYC: Checks: IDENTITY, ADDRESS, PEP_SCREENING, SANCTIONS_SCREENING, ADVERSE_MEDIA
+  KYC->>K: KYC_CASE_APPROVED → openbank.kyc.events
+
+  note over AML: Analyst four-eyes decision
+  AML->>K: aml.case.status_changed.v1 (CLEARED) → openbank.aml.events
+
+  K-->>PS: KYC_CASE_APPROVED consumed
+  PS->>DB: UPDATE parties SET kyc_status=APPROVED
+
+  K-->>PS: AML CLEARED consumed
+  PS->>DB: UPDATE parties SET aml_status=CLEARED
+
+  note over PS: deriveStatus(): kyc=APPROVED AND aml=CLEARED → ACTIVE
+  PS->>DB: UPDATE parties SET status=ACTIVE
+  PS->>DB: INSERT INTO party_outbox (PARTY_UPDATED)
+  PS->>K: publish PARTY_UPDATED → openbank.party.events

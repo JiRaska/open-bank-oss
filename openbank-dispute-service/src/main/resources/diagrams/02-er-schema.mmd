@@ -1,0 +1,86 @@
+%% title: ER Schema — openbank-dispute-service (DB: openbank_dispute)
+erDiagram
+    disputes {
+        UUID id PK
+        VARCHAR_32 reference UK
+        UUID transaction_id
+        UUID account_id
+        UUID party_id
+        dispute_type dispute_type
+        dispute_status status
+        dispute_resolution resolution
+        NUMERIC_20_4 amount
+        CHAR_3 currency
+        TEXT description
+        VARCHAR_256 merchant_name
+        VARCHAR_64 merchant_id
+        DATE transaction_date
+        DATE filing_date
+        DATE resolution_deadline
+        TIMESTAMPTZ resolved_at
+        VARCHAR_64 resolved_by
+        NUMERIC_20_4 chargeback_amount
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    dispute_evidence {
+        UUID id PK
+        UUID dispute_id FK
+        VARCHAR_64 submitted_by
+        VARCHAR_64 evidence_type
+        TEXT description
+        VARCHAR_256 file_reference
+        TIMESTAMPTZ submitted_at
+    }
+
+    dispute_timeline {
+        UUID id PK
+        UUID dispute_id FK
+        VARCHAR_64 event_type
+        TEXT description
+        VARCHAR_64 actor
+        TIMESTAMPTZ created_at
+    }
+
+    dispute_outbox {
+        BIGSERIAL id PK
+        UUID event_id UK
+        UUID aggregate_id
+        VARCHAR_128 event_type
+        TEXT payload
+        VARCHAR_16 status
+        INTEGER attempt_count
+        TIMESTAMPTZ sent_at
+        TEXT last_error
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    complaints {
+        UUID id PK
+        VARCHAR_32 reference UK
+        complaint_category category
+        complaint_channel channel
+        TEXT description
+        complaint_status status
+        UUID account_id
+        UUID transaction_id
+        UUID dispute_id FK
+        DATE received_date
+        DATE due_date
+        TIMESTAMPTZ interim_reply_at
+        TEXT interim_reply_reason
+        TIMESTAMPTZ resolved_at
+        TEXT outcome
+        BOOLEAN redress_granted
+        VARCHAR_64 root_cause_code
+        TIMESTAMPTZ closed_at
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    disputes ||--o{ dispute_evidence : "has evidence"
+    disputes ||--o{ dispute_timeline : "has timeline events"
+    disputes ||--o{ dispute_outbox : "publishes via outbox (aggregate_id)"
+    disputes ||--o{ complaints : "optionally linked to complaint"

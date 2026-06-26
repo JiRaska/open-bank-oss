@@ -1,0 +1,33 @@
+%% title: KYC Case Status Lifecycle
+stateDiagram-v2
+  [*] --> OPEN: case created (PARTY_CREATED event or POST /kyc/cases)
+
+  OPEN --> DOCUMENTS_REQUIRED: operator marks docs missing
+  OPEN --> UNDER_REVIEW: all mandatory checks recorded
+  OPEN --> EXPIRED: expires_at passed without decision
+
+  DOCUMENTS_REQUIRED --> OPEN: documents submitted
+  DOCUMENTS_REQUIRED --> EXPIRED: expires_at passed
+
+  UNDER_REVIEW --> APPROVED: POST /approve (four-eyes, authorised reviewer)
+  UNDER_REVIEW --> REJECTED: POST /reject (four-eyes, authorised reviewer)
+  UNDER_REVIEW --> ESCALATED: escalation required (EDD / PEP)
+
+  ESCALATED --> UNDER_REVIEW: escalation resolved
+  ESCALATED --> APPROVED: escalation cleared, four-eyes approve
+  ESCALATED --> REJECTED: escalation rejected
+
+  APPROVED --> [*]: terminal — emits KYC_CASE_APPROVED → party activation
+  REJECTED --> [*]: terminal — emits KYC_CASE_REJECTED → party SUSPENDED
+  EXPIRED --> [*]: terminal — party stays PENDING_KYC
+
+  note right of OPEN
+    KycChecks: IDENTITY, ADDRESS,
+    PEP_SCREENING, SANCTIONS_SCREENING,
+    ADVERSE_MEDIA (each PENDING→PASSED/FAILED/MANUAL_REVIEW)
+  end note
+
+  note right of UNDER_REVIEW
+    due_diligence_level: SDD / CDD / EDD
+    risk_level: LOW / MEDIUM / HIGH / VERY_HIGH
+  end note

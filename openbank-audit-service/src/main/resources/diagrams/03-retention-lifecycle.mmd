@@ -1,0 +1,29 @@
+%% title: Audit Entry Retention Lifecycle
+stateDiagram-v2
+  [*] --> ACTIVE : INSERT audit_entries\n(DB trigger sets retention_until = occurredAt + 10y\nrecord_hash computed, hash chain linked)
+
+  ACTIVE --> ACTIVE : read queries only\n(UPDATE/DELETE rejected by DB rules:\nno_update_audit / no_delete_audit)
+
+  ACTIVE --> ARCHIVED : retention_until approaching\nor compliance archival job\n(copy to cold storage / S3 Glacier)
+
+  ARCHIVED --> SEALED : retention_until reached\n(regulatory lock — EBA ICT / CNB / AMLD\n10-year mandatory retention elapsed)
+
+  SEALED --> [*] : legal hold released\n(purge authorized by compliance officer)
+
+  note right of ACTIVE
+    Hash chain integrity verifiable via
+    GET /api/v1/audit/integrity.
+    Any tampered row breaks the chain.
+  end note
+
+  note right of ARCHIVED
+    Rows stay queryable in DB.
+    Cold copy held for disaster recovery
+    and regulatory inspection.
+  end note
+
+  note right of SEALED
+    No application-layer path to delete.
+    Only explicit DBA + compliance
+    dual-authorization can purge.
+  end note

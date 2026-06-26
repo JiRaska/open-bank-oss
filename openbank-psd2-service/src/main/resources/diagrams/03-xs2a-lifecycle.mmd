@@ -1,0 +1,16 @@
+%% title: XS2A Request Lifecycle
+flowchart TD
+    A([TPP API Request]) --> B{mTLS QWAC\ncertificate valid?}
+    B -- No --> ERR1[401 Unauthorized\nCertificate invalid]
+    B -- Yes --> C{TPP in registry\nwith required role?}
+    C -- No --> ERR2[403 Forbidden\nTPP not authorised]
+    C -- Yes --> D{Active consent\nfor requested scope?}
+    D -- No --> ERR3[403 Forbidden\nNo valid consent]
+    D -- Yes --> E{Request type}
+    E -- AIS --> F[Proxy to Account Service\nread-only data]
+    E -- PIS --> G{SCA completed\nfor this payment?}
+    G -- No --> H[Redirect to SCA flow]
+    G -- Yes --> I[Proxy to Payment Service\ninitiate payment]
+    F --> J[200 OK with data]
+    I --> K[201 Created payment]
+    H --> L[202 Accepted\nSCA pending]

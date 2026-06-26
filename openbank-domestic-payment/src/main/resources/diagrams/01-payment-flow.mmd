@@ -1,0 +1,48 @@
+%% title: Domestic Payment Flow — SCA → Sanctions → Clearing → Settlement
+sequenceDiagram
+    autonumber
+    participant CH as Channel / Operator
+    participant DP as domestic-payment-service
+    participant SCA as sca-service<br/>(upstream, PSD2)
+    participant SAP as sanctions-service
+    participant AML as aml-service
+    participant DB as PostgreSQL
+    participant KB as Kafka
+    participant CL as clearing-service
+    participant LS as ledger-service
+
+    CH->>DP: POST /api/v1/domestic-payments<br/>(Idempotency-Key, Bearer token)
+    note over CH,DP: SCA already done upstream;<br/>sca_reference in request body
+
+    DP->>DB: INSERT domestic_payment (status=RECEIVED)<br/>+ outbox event
+    DP->>SAP: POST /api/v1/sanctions/screen<br/>(debtor name + creditor name)
+
+    alt CLEAR
+        SAP-->>DP: verdict=CLEAR
+        DP->>DB: status → VALIDATED
+        DP->>KB: domestic.payment.created + status-changed(VALIDATED)
+        DP-->>CH: 201 Created (paymentId, status=VALIDATED)
+    else SANCTIONS HIT
+        SAP-->>DP: verdict=HIT
+        DP->>AML: POST /api/v1/aml/cases (open case)
+        DP->>DB: status → REJECTED (SANCTIONS_HIT)
+        DP->>KB: domestic.payment.status-changed(REJECTED)
+        DP-->>CH: 201 Created (paymentId, status=REJECTED)
+    else POTENTIAL HIT or OUTAGE
+        SAP-->>DP: verdict=POTENTIAL_HIT or timeout
+        DP->>DB: status stays RECEIVED (hold for review)
+        DP->>KB: domestic.payment.created (RECEIVED)
+        DP-->>CH: 201 Created (paymentId, status=RECEIVED)
+        note over DP: Operator reviews and manually transitions
+    end
+
+    note over DP,CL: Clearing pipeline (async, event-driven)
+    KB-->>CL: domestic.payment.status-changed(VALIDATED)
+    CL->>DP: PATCH /status → SENT_TO_CLEARING
+    DP->>DB: status → SENT_TO_CLEARING
+    DP->>KB: status-changed(SENT_TO_CLEARING)
+
+    CL->>LS: POST /journals (inter-bank settlement posting)
+    CL->>DP: PATCH /status → SETTLED
+    DP->>DB: status → SETTLED, settled_at = now()
+    DP->>KB: domestic.payment.status-changed(SETTLED)

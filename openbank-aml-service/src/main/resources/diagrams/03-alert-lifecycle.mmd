@@ -1,0 +1,32 @@
+%% title: AML Alert (Case) Lifecycle
+stateDiagram-v2
+  [*] --> OPEN: LOW / MEDIUM risk case created
+  [*] --> UNDER_REVIEW: HIGH / CRITICAL risk case created
+
+  OPEN --> UNDER_REVIEW: analyst picks up case
+  OPEN --> ESCALATED: immediate escalation
+  OPEN --> CLEARED: analyst decision — no issue found
+  OPEN --> BLOCKED: analyst decision — confirmed match
+
+  UNDER_REVIEW --> ESCALATED: MLRO escalation required
+  UNDER_REVIEW --> CLEARED: analyst decision (decidedBy mandatory)
+  UNDER_REVIEW --> BLOCKED: analyst decision (decisionReason mandatory)
+
+  ESCALATED --> UNDER_REVIEW: escalation resolved, back to review
+  ESCALATED --> CLEARED: MLRO clears (false positive / resolved)
+  ESCALATED --> BLOCKED: MLRO confirms (SAR filed)
+
+  CLEARED --> [*]: terminal — emits aml.case.status_changed.v1 (CLEARED)\nparty-service: amlStatus=CLEARED
+  BLOCKED --> [*]: terminal — emits aml.case.status_changed.v1 (BLOCKED)\nparty-service: amlStatus=BLOCKED → party SUSPENDED
+
+  note right of OPEN
+    screening_type: CUSTOMER_ONBOARDING /
+    TRANSACTION_MONITORING /
+    PERIODIC_REVIEW / MANUAL_INVESTIGATION
+  end note
+
+  note right of BLOCKED
+    decisionReason required.
+    sar_filed + sar_reference recorded
+    if SAR submitted to FIU.
+  end note

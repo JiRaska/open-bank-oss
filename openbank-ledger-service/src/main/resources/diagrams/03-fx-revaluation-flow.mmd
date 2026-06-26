@@ -1,0 +1,37 @@
+%% title: Daily FX Revaluation Flow (ADR-0046)
+sequenceDiagram
+    autonumber
+    participant Scheduler as FxRevaluationScheduler\n(in-process cron)
+    participant LedgerSvc as ledger-service
+    participant FxSvc as fx-service\n(ČNB fixing)
+    participant DB as PostgreSQL
+    participant Outbox as outbox table
+    participant Kafka as Kafka\nopenbank.ledger.fx.revalued
+
+    Note over Scheduler: Daily at EOD (22:00 CET)\nor manual trigger via\nPOST /api/v1/ledger/fx-revaluation
+
+    Scheduler->>LedgerSvc: trigger revaluation(date)
+
+    loop for each foreign currency (EUR, USD, GBP)
+        LedgerSvc->>FxSvc: GET /api/v1/rates/{currency}/cnb?date={date}
+        FxSvc-->>LedgerSvc: cnbFixingRate
+
+        LedgerSvc->>DB: SELECT SUM(amount) FROM journal_lines\nWHERE gl_account_id = FX_POSITION_{CCY}\n(199x accounts)
+        DB-->>LedgerSvc: currentFxPosition (in foreign CCY)
+
+        LedgerSvc->>DB: SELECT current counter-value\nFROM journal_lines WHERE gl_account=199x-CV
+        DB-->>LedgerSvc: previousCounterValueCZK
+
+        LedgerSvc->>LedgerSvc: newCounterValue = position × cnbRate\ndelta = newCounterValue − previousCounterValue
+
+        alt delta != 0
+            LedgerSvc->>DB: BEGIN
+            LedgerSvc->>DB: INSERT journal_entry (status=POSTED)\nDEBIT/CREDIT 199x-CV vs 5900\n(exchange rate differences, CZK only)
+            LedgerSvc->>Outbox: INSERT FxRevalued event
+            LedgerSvc->>DB: COMMIT
+        end
+    end
+
+    Outbox->>Kafka: FxRevalued {date, currency, cnbRate,\npositionAmount, deltaAmountCZK}
+
+    Note over LedgerSvc: Per-currency balancing invariant\n(ADR-0025) preserved:\nonly CZK legs (199x-CV + 5900)

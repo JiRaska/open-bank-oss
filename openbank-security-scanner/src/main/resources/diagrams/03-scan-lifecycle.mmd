@@ -1,0 +1,74 @@
+%% title: Security Scanner — Životní cyklus scanu (ServiceScanResult + SecurityOutbox)
+stateDiagram-v2
+    [*] --> Triggered : POST /scan\nnebo Scheduler (každých 30 min)
+
+    Triggered --> Probing : scanService() spuštěno
+
+    state Probing {
+        [*] --> MgmtProbe : GET :8085/q/health
+        MgmtProbe --> Unreachable : timeout / connection refused
+        MgmtProbe --> HeaderCheck : 2xx–5xx odpověď
+        HeaderCheck --> HealthBodyCheck : GET :8085/q/health/ready
+        HealthBodyCheck --> OpenApiCheck : GET :8080/q/openapi
+        OpenApiCheck --> ActuatorCheck : GET /q/metrics /q/info /q/dev
+        ActuatorCheck --> CorsCheck : GET + Origin: evil.example.com
+        CorsCheck --> [*]
+    }
+
+    Probing --> Unreachable : service nedostupný
+    Probing --> Scored : všechny sondy dokončeny
+
+    state Unreachable {
+        [*] --> UnreachableFinding : SecurityFinding UNREACHABLE\nSeverity=CRITICAL, OWASP A05
+        UnreachableFinding --> [*]
+    }
+
+    Unreachable --> Scored : score=0, grade=F
+
+    state Scored {
+        [*] --> ScoreCalc : 100 − 30×CRIT − 15×HIGH − 5×MED
+        ScoreCalc --> GradeAssign : ≥95→A+, ≥90→A, ≥80→B,\n≥70→C, ≥60→D, else→F
+        GradeAssign --> [*]
+    }
+
+    Scored --> Cached : ServiceScanResult uložen do ConcurrentHashMap
+
+    Cached --> ReportBuilt : buildReport() po dokončení všech služeb
+
+    state ReportBuilt {
+        [*] --> PlatformScore : průměr reachable scores
+        PlatformScore --> ComplianceCheck : PSD2_SCA / EBA_ICT_RISK /\nGDPR / OWASP_TOP10 / CNB_SECURITY
+        ComplianceCheck --> [*]
+    }
+
+    ReportBuilt --> Stored : lastReport = PlatformSecurityReport
+
+    state Stored {
+        [*] --> OutboxPending : SecurityOutboxEntity status=PENDING
+        OutboxPending --> OutboxSending : SecurityOutboxDispatcher poll
+        OutboxSending --> OutboxSent : Kafka publish OK\nstatus=SENT, sent_at=now
+        OutboxSending --> OutboxFailed : publish error\nattempt_count++, last_error set
+        OutboxFailed --> OutboxPending : retry (attempt_count < max)
+        OutboxFailed --> OutboxDead : attempt_count ≥ max\nstatus=DEAD
+        OutboxSent --> [*]
+        OutboxDead --> [*]
+    }
+
+    Stored --> [*] : report dostupný přes GET /api/v1/security/report
+
+    note right of Scored
+        Severity mapping:
+        CRITICAL → −30 bodů
+        HIGH → −15 bodů
+        MEDIUM → −5 bodů
+        LOW / INFO → bez penalizace
+    end note
+
+    note right of ReportBuilt
+        Compliance gates:
+        PSD2_SCA: všechny služby reachable
+        EBA_ICT_RISK: ≥80 % služeb score≥70
+        GDPR: žádný CRITICAL v A02
+        OWASP_TOP10: žádný CRITICAL finding
+        CNB_SECURITY: platformScore≥70
+    end note

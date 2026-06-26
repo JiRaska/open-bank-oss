@@ -1,0 +1,39 @@
+%% title: Onboarding Funnel Projection Flow
+sequenceDiagram
+  participant PS as party-service
+  participant KS as kyc-service
+  participant SS as sca-service
+  participant K as Kafka
+  participant OS as onboarding-service<br/>(consumer)
+  participant DB as PostgreSQL<br/>onboarding_records
+  participant UI as admin-ui<br/>cockpit
+
+  PS->>K: PARTY_CREATED<br/>(openbank.party.events)
+  K->>OS: consume PARTY_CREATED
+  OS->>DB: INSERT onboarding_records<br/>(partyId, legalName, email,<br/>partyStatus=PENDING,<br/>funnelStage=PENDING_KYC)
+
+  PS->>K: PARTY_STATUS_CHANGED
+  K->>OS: consume PARTY_STATUS_CHANGED
+  OS->>DB: UPDATE partyStatus, funnelStage
+
+  KS->>K: KYC_CASE_OPENED<br/>(openbank.kyc.events)
+  K->>OS: consume KYC_CASE_OPENED
+  OS->>DB: UPDATE kycCaseId,<br/>funnelStage=KYC_IN_PROGRESS
+
+  KS->>K: KYC_CASE_STATUS_CHANGED /<br/>KYC_CASE_APPROVED / KYC_CASE_REJECTED
+  K->>OS: consume KYC event
+  OS->>DB: UPDATE kycStatus, funnelStage<br/>(PENDING_SCA or BLOCKED)
+
+  SS->>K: DEVICE_ENROLLED<br/>(openbank.sca.events)
+  K->>OS: consume DEVICE_ENROLLED
+  OS->>DB: UPDATE scaEnrolled=true,<br/>deviceCount++,<br/>funnelStage=ACTIVE
+
+  UI->>OS: GET /api/v1/onboarding/records?stage=…
+  OS->>DB: SELECT * WHERE funnel_stage=…
+  DB-->>OS: rows
+  OS-->>UI: 200 OK {records}
+
+  UI->>OS: GET /api/v1/onboarding/funnel
+  OS->>DB: COUNT(*) GROUP BY funnel_stage
+  DB-->>OS: stage counts
+  OS-->>UI: 200 OK {stageCounts}

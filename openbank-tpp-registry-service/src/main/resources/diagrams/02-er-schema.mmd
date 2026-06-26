@@ -1,0 +1,40 @@
+%% title: TPP Registry Service — ER Schema
+erDiagram
+    TPP_ENTRIES {
+        bigint id PK
+        varchar tpp_id
+        varchar name
+        char country_code
+        varchar nca
+        varchar roles
+        varchar status
+        text qwac_subject_dn
+        text qseal_subject_dn
+        date qwac_expires_at
+        date qseal_expires_at
+        timestamptz registered_at
+        timestamptz updated_at
+        timestamptz blacklisted_at
+        text blacklist_reason
+    }
+    EBA_SYNC_STATE {
+        bigint id PK
+        timestamptz last_sync_at
+        timestamptz last_success_at
+        int total_entries
+        text error_message
+    }
+    TPP_OUTBOX {
+        bigint id PK
+        uuid event_id
+        uuid aggregate_id
+        varchar event_type
+        text payload
+        varchar status
+        int attempt_count
+        timestamptz sent_at
+        text last_error
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    TPP_ENTRIES ||--o{ TPP_OUTBOX : "emits via"

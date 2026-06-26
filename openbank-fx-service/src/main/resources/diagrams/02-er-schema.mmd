@@ -1,0 +1,48 @@
+%% title: FX Service ER Schema
+erDiagram
+    fx_rates {
+        UUID id PK
+        CHAR_3 base_currency
+        CHAR_3 quote_currency
+        NUMERIC bid_rate
+        NUMERIC ask_rate
+        VARCHAR rate_type "SPOT|FORWARD|INDICATIVE|INTERBANK"
+        VARCHAR source "ECB|REUTERS|BLOOMBERG|INTERNAL|CNB"
+        TIMESTAMPTZ valid_from
+        TIMESTAMPTZ valid_to
+        TIMESTAMPTZ created_at
+    }
+
+    fx_conversions {
+        UUID id PK
+        VARCHAR idempotency_key UK
+        UUID party_id
+        UUID account_id
+        CHAR_3 from_currency
+        CHAR_3 to_currency
+        BIGINT from_amount_minor_units
+        BIGINT to_amount_minor_units
+        NUMERIC applied_rate
+        BIGINT fee_minor_units
+        UUID rate_id FK
+        VARCHAR status "PENDING|SETTLED|FAILED|REVERSED"
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ settled_at
+    }
+
+    fx_outbox {
+        BIGSERIAL id PK
+        UUID event_id UK
+        UUID aggregate_id
+        VARCHAR event_type
+        TEXT payload
+        VARCHAR status "PENDING|SENT|FAILED"
+        INTEGER attempt_count
+        TIMESTAMPTZ sent_at
+        TEXT last_error
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    fx_rates ||--o{ fx_conversions : "pinned via rate_id"
+    fx_conversions ||--o{ fx_outbox : "triggers outbox on SETTLED"

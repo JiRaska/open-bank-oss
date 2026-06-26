@@ -1,0 +1,26 @@
+%% title: Notification Delivery Lifecycle
+stateDiagram-v2
+  [*] --> PENDING : NotificationRequest consumed\nINSERT notifications
+
+  PENDING --> SENT : delivery succeeded\n(SMTP ACK / FCM success)
+
+  PENDING --> FAILED : delivery error\n(SMTP reject / FCM error / timeout)
+
+  FAILED --> PENDING : outbox retry\n(attempt_count++)
+
+  FAILED --> BOUNCED : max retries exceeded\nor hard bounce
+
+  SENT --> [*]
+  BOUNCED --> [*]
+
+  state "dispatch_control_log" as DCL {
+    [*] --> RUNNING : default state
+    RUNNING --> HALTED : POST /ops/dispatch/halt\n(single actor, deferred review)
+    HALTED --> RUNNING : four-eyes approve\n(dispatch_resume_proposal APPROVED)
+  }
+
+  note right of PENDING
+    While HALTED: outbox dispatcher
+    pauses; rows stay PENDING.
+    No messages are lost.
+  end note

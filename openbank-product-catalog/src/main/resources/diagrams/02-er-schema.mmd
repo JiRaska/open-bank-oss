@@ -1,0 +1,146 @@
+%% title: Product Catalog — Logický datový model (cílový: MongoDB products_schema)
+%% Zdroj: domain/Product.kt + application/ProductCatalogService.kt
+%% Persistence: dnes in-memory ConcurrentHashMap; MongoDB je plánovaný follow-up (governance.yaml)
+erDiagram
+    PRODUCT ||--o{ FEE : "fees[]"
+    PRODUCT ||--o{ TERMS_AND_CONDITIONS : "termsAndConditions[]"
+    PRODUCT ||--o{ PRODUCT_VERSION : "versionHistory[]"
+    PRODUCT ||--o| CARD_CONFIG : "cardConfig (optional)"
+    PRODUCT ||--o| MULTI_CURRENCY_CONFIG : "multiCurrencyConfig (optional)"
+    PRODUCT ||--o| OVERDRAFT_CONFIG : "overdraftConfig (optional)"
+    PRODUCT ||--o| TERM_DEPOSIT_CONFIG : "termDepositConfig (optional)"
+    PRODUCT ||--o| SAVINGS_CONFIG : "savingsConfig (optional)"
+    SAVINGS_CONFIG ||--o{ INTEREST_TIER : "interestTiers[]"
+
+    PRODUCT {
+        string id PK "prod-NNN or UUID (ADR-0105 canonical)"
+        string code UK "e.g. SAVINGS_STANDARD, CURRENT_PERSONAL"
+        string name
+        string shortDescription
+        string description
+        string type "SAVINGS|CURRENT|LOAN|MORTGAGE|CREDIT_CARD|TERM_DEPOSIT|OVERDRAFT|INVESTMENT"
+        string currency "ISO 4217 (EUR, CZK, ...)"
+        string status "DRAFT|ACTIVE|INACTIVE|DEPRECATED|ARCHIVED"
+        boolean isPublic "false = interní/draft, skrytý retail"
+        string version "semver, e.g. 2.1.0"
+        date validFrom
+        date validTo
+        double baseRate "roční sazba, e.g. 0.025 = 2.5 % p.a."
+        double fee "headline fee"
+        double minBalance
+        double maxBalance
+        list tags "retail, premium, no-fee, ..."
+        list eligibilitySegments "RETAIL|STUDENT|SENIOR|BUSINESS|PREMIUM|ALL"
+        timestamptz createdAt
+        timestamptz updatedAt
+    }
+
+    FEE {
+        string id PK "UUID"
+        string name "e.g. Monthly Fee, FX Conversion"
+        string type "MONTHLY|TRANSACTION|PENALTY|ANNUAL|ONE_TIME|DAILY"
+        double amount
+        string currency "ISO 4217"
+        string frequency "MONTHLY|PER_TRANSACTION|PERCENTAGE|ONE_TIME|DAILY|PER_OCCURRENCE"
+        string description
+        boolean waivable
+        string waiveCondition "e.g. Balance > 50 000 EUR"
+    }
+
+    TERMS_AND_CONDITIONS {
+        string id PK "UUID"
+        string version "e.g. 2.1"
+        string url "https://openbank.example/tac/..."
+        date effectiveFrom
+        date effectiveTo "null = stále platné"
+        string language "cs|en"
+        string summary
+    }
+
+    PRODUCT_VERSION {
+        string version "semver"
+        date validFrom
+        date validTo
+        boolean isPublic
+        string changeNote
+        timestamptz createdAt
+    }
+
+    CARD_CONFIG {
+        boolean enabled
+        int minCards
+        int maxCards
+        list networks "VISA|MASTERCARD|AMEX|UNIONPAY"
+        list tiers "STANDARD|GOLD|PLATINUM|INFINITE"
+        boolean virtualCardAllowed
+        boolean contactlessEnabled
+        int eligibilityMinAge
+        list eligibilitySegments
+        double monthlyFeePerCard
+        string cardCurrency
+    }
+
+    MULTI_CURRENCY_CONFIG {
+        boolean enabled
+        list supportedCurrencies "ISO 4217 codes"
+        string defaultCurrency
+        double fxMarginPct "symetrická marže (fallback)"
+        double fxMarginBuyPct
+        double fxMarginSellPct
+        boolean crossCurrencyTransferAllowed
+    }
+
+    OVERDRAFT_CONFIG {
+        string type "ARRANGED|UNARRANGED|BOTH"
+        double maxLimitAmount
+        double interestRateAnnual
+        int gracePeriodDays
+        double unarrangedDailyFee
+        double unarrangedRateAnnual
+        boolean autoApprovalEnabled
+    }
+
+    TERM_DEPOSIT_CONFIG {
+        int termMonths "nominální termín"
+        int minTermMonths
+        int maxTermMonths
+        double interestRateAnnual
+        string payoutFrequency "MONTHLY|QUARTERLY|SEMI_ANNUAL|ANNUAL|AT_MATURITY"
+        boolean autoRenewEnabled
+        double earlyWithdrawalPenaltyPct "% ze získaného úroku"
+        int earlyWithdrawalNoticeDays
+    }
+
+    SAVINGS_CONFIG {
+        string withdrawalNotice "NONE|DAYS_7|DAYS_14|DAYS_30|DAYS_60|DAYS_90"
+        int freeWithdrawalsPerMonth
+        double excessWithdrawalFee
+        string bonusRateCondition
+        double bonusRateAnnual
+    }
+
+    INTEREST_TIER {
+        double fromAmount
+        double toAmount "null = neomezeno"
+        double rateAnnual
+    }
+
+    FEE_SCHEDULE_ITEM {
+        string id "productId:feeId (stable composite)"
+        string code "PRODUCT_CODE_FEE_SLUG"
+        string name
+        string type
+        double amount
+        string currency
+        string frequency
+        string description
+        boolean waivable
+        string waiveCondition
+        string productId FK
+        string productCode
+        string productName
+        string status "odvozeno z Product.status"
+        timestamptz updatedAt
+    }
+
+    PRODUCT ||--o{ FEE_SCHEDULE_ITEM : "flattened by listFeeSchedule()"

@@ -1,0 +1,37 @@
+%% title: Card Issuance Flow
+sequenceDiagram
+    actor Client
+    participant CardResource
+    participant CardService
+    participant CardRepository
+    participant OutboxDispatcher
+    participant Kafka
+
+    Client->>CardResource: POST /api/v1/cards (IssueCardRequest)
+    CardResource->>CardService: issueCard(IssueCardCommand)
+    CardService->>CardRepository: findByIdempotencyKey(key)
+    alt idempotent replay
+        CardRepository-->>CardService: existing Card
+        CardService-->>CardResource: existing Card
+    else new issuance
+        CardService->>CardRepository: save(card, CardIssued outbox message)
+        Note over CardRepository: atomic: card + outbox row in one TX
+        CardRepository-->>CardService: saved Card (status=PENDING)
+        CardService-->>CardResource: Card
+    end
+    CardResource-->>Client: 201 Created (CardResponse)
+
+    loop Outbox dispatcher (periodic)
+        OutboxDispatcher->>CardRepository: load PENDING outbox rows
+        OutboxDispatcher->>Kafka: publish card.issued.v1
+        OutboxDispatcher->>CardRepository: mark outbox row SENT
+    end
+
+    Client->>CardResource: POST /api/v1/cards/{id}/activate
+    CardResource->>CardService: activateCard(CardStatusCommand)
+    CardService->>CardRepository: findById(id)
+    CardRepository-->>CardService: Card (status=PENDING)
+    CardService->>CardRepository: save(card.activate(), CardStatusChanged outbox)
+    CardRepository-->>CardService: Card (status=ACTIVE)
+    CardService-->>CardResource: Card
+    CardResource-->>Client: 200 OK

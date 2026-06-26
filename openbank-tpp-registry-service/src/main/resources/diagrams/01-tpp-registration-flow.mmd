@@ -1,0 +1,26 @@
+%% title: TPP Registration & Verification Flow
+sequenceDiagram
+    participant EBA as EBA Register
+    participant SyncJob as EBA Sync Job
+    participant TPPReg as TPP Registry Service
+    participant DB as PostgreSQL
+    participant Outbox as TPP Outbox
+    participant Kafka
+    participant PSD2 as PSD2 Service
+
+    SyncJob->>EBA: fetch national competent authority list
+    EBA-->>SyncJob: TPP entries (AISP/PISP/CBPII)
+    SyncJob->>DB: UPSERT tpp_entries (tpp_id, name, roles, qwac_expires_at)
+    SyncJob->>DB: UPDATE eba_sync_state (last_success_at, total_entries)
+    SyncJob->>Outbox: INSERT tpp_outbox (TPP_REGISTRY_SYNCED)
+    Outbox->>Kafka: publish TPP_REGISTRY_SYNCED
+
+    PSD2->>TPPReg: GET /api/v1/tpp/{tpp_id} (verify on API call)
+    TPPReg->>DB: SELECT tpp_entries WHERE tpp_id AND status=ACTIVE
+    DB-->>TPPReg: TPP record with roles & certificate DNs
+    TPPReg-->>PSD2: 200 OK (roles, qwac_subject_dn, valid)
+
+    note over TPPReg,DB: Blacklisting
+    TPPReg->>DB: UPDATE tpp_entries SET status=BLACKLISTED, blacklisted_at
+    TPPReg->>Outbox: INSERT tpp_outbox (TPP_BLACKLISTED)
+    Outbox->>Kafka: publish TPP_BLACKLISTED

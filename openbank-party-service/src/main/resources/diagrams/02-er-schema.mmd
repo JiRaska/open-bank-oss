@@ -1,0 +1,75 @@
+%% title: Party Service — ER Schema
+erDiagram
+  parties {
+    bigserial id PK
+    uuid party_id UK
+    varchar party_type
+    varchar status
+    varchar legal_name
+    varchar trading_name
+    varchar date_of_birth
+    varchar nationality
+    varchar tax_id
+    varchar registration_number
+    varchar email UK
+    varchar phone
+    varchar address_line1
+    varchar address_line2
+    varchar address_city
+    varchar address_postal_code
+    char address_country_code
+    varchar kyc_status
+    varchar aml_status
+    boolean pep_flag
+    varchar pep_category
+    timestamptz sanctions_checked_at
+    varchar risk_rating
+    timestamptz next_review_due
+    varchar fatca_status
+    varchar crs_status
+    timestamptz gdpr_consent_at
+    timestamptz data_retention_until
+    timestamptz deleted_at
+    timestamptz created_at
+    timestamptz updated_at
+  }
+
+  party_documents {
+    bigserial id PK
+    uuid document_id UK
+    uuid party_id FK
+    varchar document_type
+    varchar document_number
+    char issuing_country
+    varchar expiry_date
+    timestamptz verified_at
+    timestamptz deleted_at
+    timestamptz created_at
+  }
+
+  party_document_files {
+    uuid id PK
+    uuid party_id FK
+    varchar document_type
+    varchar file_name
+    varchar mime_type
+    bytea content
+    timestamptz uploaded_at
+  }
+
+  party_outbox {
+    bigserial id PK
+    uuid event_id UK
+    uuid aggregate_id
+    varchar event_type
+    text payload
+    varchar status
+    int attempt_count
+    text last_error
+    timestamptz created_at
+    timestamptz processed_at
+  }
+
+  parties ||--o{ party_documents : "has"
+  parties ||--o{ party_document_files : "has"
+  parties ||--o{ party_outbox : "emits"

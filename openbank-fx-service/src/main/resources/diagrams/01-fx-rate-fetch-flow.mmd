@@ -1,0 +1,49 @@
+%% title: FX Rate Fetch and Conversion Flow
+sequenceDiagram
+    participant C as Caller (payment/admin-ui)
+    participant FX as FxResource
+    participant SVC as FxService
+    participant DB as PostgreSQL
+    participant SAT as sanctions-service
+    participant AML as aml-service
+    participant OB as FxOutboxDispatcher
+    participant K as Kafka
+
+    C->>FX: GET /api/v1/fx/rates/{base}/{quote}
+    FX->>DB: findCurrentRate(base, quote)
+    DB-->>FX: FxRate
+    FX-->>C: 200 OK (rate)
+
+    C->>FX: POST /api/v1/fx/convert
+    FX->>SVC: convert(command)
+    SVC->>DB: findByIdempotencyKey → return if exists
+    SVC->>DB: findCurrentSpotRate(from, to)
+    SVC->>SVC: validate rate window, compute amounts + fee (0.5%)
+    SVC->>SAT: POST /sanctions/screen(partyName, DEBTOR)
+
+    alt sanctions-service unavailable
+        SAT-->>SVC: timeout / error
+        SVC->>DB: save FxConversion status=PENDING
+        SVC-->>AML: open AML case (MEDIUM, SCREENING_UNAVAILABLE)
+    else CLEAR
+        SAT-->>SVC: CLEAR
+        SVC->>DB: save FxConversion status=SETTLED
+        SVC->>DB: INSERT fx_outbox (PENDING)
+    else REVIEW (potential hit ≤ threshold)
+        SAT-->>SVC: REVIEW
+        SVC->>DB: save FxConversion status=PENDING
+        SVC-->>AML: open AML case (HIGH, AML_HOLD)
+    else BLOCK (HIT / ESCALATED / score > 0.85)
+        SAT-->>SVC: BLOCK
+        SVC->>DB: save FxConversion status=FAILED
+        SVC-->>AML: open AML case (CRITICAL, SANCTIONS_HIT)
+    end
+
+    SVC-->>FX: FxConversion
+    FX-->>C: 201 Created
+
+    loop every 5s
+        OB->>DB: listProcessable(BATCH_SIZE=25)
+        OB->>K: publish openbank.fx.conversion.completed
+        OB->>DB: markSent / markFailed
+    end

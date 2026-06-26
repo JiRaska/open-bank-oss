@@ -1,0 +1,15 @@
+%% title: PSD2 Service — ER Schema
+erDiagram
+    PSD2_OUTBOX {
+        bigint id PK
+        uuid event_id
+        uuid aggregate_id
+        varchar event_type
+        text payload
+        varchar status
+        int attempt_count
+        timestamptz sent_at
+        text last_error
+        timestamptz created_at
+        timestamptz updated_at
+    }

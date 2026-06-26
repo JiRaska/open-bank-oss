@@ -1,0 +1,41 @@
+%% title: Request Lifecycle — openbank-api-gateway (Kong OSS 3.7.1 passthrough)
+stateDiagram-v2
+    [*] --> Received : TCP connection accepted on :8000
+
+    Received --> RouteMatching : HTTP request parsed
+
+    RouteMatching --> BusinessRoute : path matches /api/v1/<resource>
+    RouteMatching --> HealthRoute : path matches /health/<service>/*
+    RouteMatching --> Rejected : no route matched
+
+    BusinessRoute --> HeaderForwarding : route found (strip_path=false)
+    HeaderForwarding --> Proxying : Authorization + X-Request-Id +\nX-Correlation-Id forwarded verbatim
+
+    HealthRoute --> PathStripping : strip_path=true\n/health/account → /q/health
+    PathStripping --> Proxying
+
+    Proxying --> RetryLogic : upstream connect/read/write
+    RetryLogic --> Proxying : retry attempt (max 2)
+    RetryLogic --> UpstreamError : retries exhausted
+
+    Proxying --> UpstreamResponse : upstream replies
+
+    UpstreamResponse --> ResponseRelay : stream response back to client
+    UpstreamError --> ResponseRelay : 502/503 gateway error
+
+    Rejected --> ResponseRelay : 404 Not Found
+
+    ResponseRelay --> AccessLogged : method, path, status, latency\nlogged to stdout (no body, no auth header)
+    AccessLogged --> [*]
+
+    note right of HeaderForwarding
+        Kong does NOT inspect or validate JWT.
+        Keycloak OIDC validation is done
+        by the downstream Quarkus service.
+    end note
+
+    note right of Proxying
+        connect_timeout: 5 000 ms
+        write_timeout:  30 000 ms
+        read_timeout:   30 000 ms
+    end note

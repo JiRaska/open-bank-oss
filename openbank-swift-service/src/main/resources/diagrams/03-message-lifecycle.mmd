@@ -1,0 +1,13 @@
+%% title: SWIFT Message Lifecycle
+stateDiagram-v2
+    [*] --> PENDING : send() — persisted before network call
+    PENDING --> VALIDATED : validate() passes
+    VALIDATED --> SENT : submitted to SWIFTNet gateway
+    SENT --> ACKNOWLEDGED : ACK received (ack_received_at set)
+    ACKNOWLEDGED --> COMPLETED : settlement booked
+    SENT --> REJECTED : NAK / timeout from scheme
+    VALIDATED --> FAILED : gateway unreachable
+    PENDING --> FAILED : validation error
+    COMPLETED --> [*]
+    REJECTED --> [*]
+    FAILED --> [*]

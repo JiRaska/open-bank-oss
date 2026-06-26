@@ -1,0 +1,34 @@
+%% title: EUDI PID Issuance Flow (ADR-0094)
+sequenceDiagram
+    participant Wallet as EUDI Wallet
+    participant PIDService as PID Service
+    participant DB as PostgreSQL
+    participant IVC as Identity Verification\n(four-eyes)
+    participant Outbox as PID Outbox
+    participant Kafka
+
+    Wallet->>PIDService: POST /api/v1/pid/credential-offer (party_id, wallet_attestation)
+    PIDService->>DB: SELECT parties WHERE id AND case_status=VERIFIED
+    alt party identity verified
+        PIDService->>DB: INSERT eudi_credential_offer (offer_uri, expires_at)
+        PIDService-->>Wallet: 201 Created (credential_offer_uri)
+    else identity not yet verified
+        PIDService-->>Wallet: 409 Conflict (identity verification required)
+    end
+
+    Wallet->>PIDService: POST /api/v1/pid/credentials (pre-auth code, proof_of_possession)
+    PIDService->>DB: SELECT eudi_credential_offer WHERE code AND NOT expired
+    PIDService->>DB: INSERT eudi_status_list_entry (index, status=VALID)
+    PIDService->>DB: UPDATE eudi_credential_offer SET redeemed_at
+    PIDService->>Outbox: INSERT pid_outbox (EUDI_CREDENTIAL_ISSUED)
+    PIDService-->>Wallet: 200 OK (credential JWT-VC, status_list_uri)
+    Outbox->>Kafka: publish EUDI_CREDENTIAL_ISSUED
+
+    Wallet->>PIDService: POST /api/v1/pid/presentations (vp_token, presentation_definition)
+    PIDService->>DB: INSERT eudi_presentation_exchange (nonce, state, verified_at)
+    PIDService-->>Wallet: 200 OK (presentation verified)
+
+    note over PIDService,IVC: Deduplication — four-eyes adjudication
+    PIDService->>IVC: trigger=NAMESAKE_CANDIDATE or RN_COLLISION
+    IVC->>DB: INSERT identity_verification_case
+    IVC-->>PIDService: case_id (review pending)

@@ -1,0 +1,43 @@
+%% title: Loan Origination and Servicing Flow
+sequenceDiagram
+    participant MAKER as Maker (lending officer)
+    participant CHECK as Checker (≠ maker)
+    participant DISB as Disburser (≠ checker)
+    participant SVC as LendingService
+    participant DB as PostgreSQL
+    participant LED as ledger-service
+    participant K as Kafka (outbox)
+
+    MAKER->>SVC: POST /api/v1/lending/applications
+    note over SVC: proposed_by = JWT subject
+    SVC->>DB: INSERT loan_application (status=PROPOSED)
+    SVC-->>MAKER: 201 Created (applicationId)
+
+    CHECK->>SVC: POST /api/v1/lending/applications/{id}/decision (APPROVED)
+    note over SVC: decided_by = JWT subject (must ≠ proposed_by)
+    SVC->>DB: UPDATE loan_application status=APPROVED, decided_by, decision_reason
+    SVC-->>CHECK: 200 OK
+
+    DISB->>SVC: POST /api/v1/lending/applications/{id}/disburse
+    note over SVC: disburser = JWT subject (must ≠ decided_by)
+    SVC->>DB: UPDATE loan_application status=DISBURSED
+    SVC->>DB: INSERT loan (status=ACTIVE)
+    SVC->>SVC: generate installment schedule (Amortization — libs.lending)
+    SVC->>DB: INSERT installments (1..term_periods)
+    SVC->>LED: POST /api/v1/journals (DISBURSEMENT posting)
+    SVC->>DB: INSERT lending_outbox (loan.disbursed)
+    SVC->>K: publish loan.disbursed
+    SVC-->>DISB: 201 Created (loanId)
+
+    note over SVC: Repayment (customer or payment service)
+    SVC->>SVC: POST /api/v1/lending/loans/{id}/installments/{n}/repay
+    SVC->>DB: UPDATE installment paid=TRUE, paid_at
+    SVC->>LED: POST /api/v1/journals (PRINCIPAL_REPAYMENT + INTEREST_SETTLEMENT)
+    SVC->>K: publish loan.repayment_received
+
+    note over SVC: Scheduled accrual pass (IAS 1)
+    loop each due installment (interest_accrued=FALSE)
+        SVC->>LED: POST /api/v1/journals (INTEREST_ACCRUAL)
+        SVC->>DB: UPDATE installment interest_accrued=TRUE, accrued_at
+        SVC->>K: publish loan.interest_accrued
+    end

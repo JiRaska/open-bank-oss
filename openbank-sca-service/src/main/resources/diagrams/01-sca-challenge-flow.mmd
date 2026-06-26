@@ -1,0 +1,25 @@
+%% title: SCA Challenge Flow
+sequenceDiagram
+    participant Client
+    participant SCAService
+    participant DB as PostgreSQL
+    participant Outbox as SCA Outbox
+    participant Kafka
+
+    Client->>SCAService: POST /api/v1/sca/challenges (party_id, purpose, method)
+    SCAService->>DB: INSERT sca_challenges (status=PENDING, expires_at)
+    SCAService-->>Client: 201 Created (challenge_id, method, expires_at)
+
+    Client->>SCAService: POST /api/v1/sca/challenges/{id}/verify (otp/assertion)
+    SCAService->>DB: SELECT sca_challenges WHERE id AND consumed_at IS NULL
+    alt attempt_count < max_attempts AND not expired
+        SCAService->>DB: UPDATE status=COMPLETED, completed_at, consumed_at
+        SCAService->>Outbox: INSERT sca_outbox (SCA_CHALLENGE_COMPLETED)
+        SCAService-->>Client: 200 OK
+        Outbox->>Kafka: publish SCA_CHALLENGE_COMPLETED
+    else max attempts exceeded
+        SCAService->>DB: UPDATE status=FAILED, failed_at, failure_reason
+        SCAService->>Outbox: INSERT sca_outbox (SCA_CHALLENGE_FAILED)
+        SCAService-->>Client: 422 Unprocessable (challenge failed)
+        Outbox->>Kafka: publish SCA_CHALLENGE_FAILED
+    end

@@ -62,7 +62,7 @@ class SettlementAdapter(
     @Timeout(SETTLE_TIMEOUT_MS)
     open suspend fun settleWithResilience(payment: DomesticPayment): SettlementOutcome {
         val token = oidcClient.get().tokens.awaitSuspending().accessToken
-        val valueDate = LocalDate.now(clock).format(DateTimeFormatter.BASIC_ISO_DATE)
+        val valueDate = LocalDate.now(clock).format(DateTimeFormatter.ISO_LOCAL_DATE)
         val description = buildDescription(payment)
 
         val response = client.initiateTransaction(

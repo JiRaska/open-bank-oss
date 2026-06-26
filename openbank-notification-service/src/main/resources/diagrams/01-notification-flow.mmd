@@ -1,0 +1,38 @@
+%% title: Notification Delivery Flow
+sequenceDiagram
+  participant SVC as Originating service<br/>(account/kyc/consent/transaction)
+  participant K as Kafka<br/>openbank.notification.requests
+  participant NS as notification-service
+  participant DB as PostgreSQL<br/>notifications + outbox
+  participant DT as device_tokens
+  participant SMTP as SMTP mailer<br/>(email)
+  participant FCM as FCM / APNs<br/>(push)
+  participant SL as Slack webhook<br/>(oversight, ADR-0059)
+
+  SVC->>K: NotificationRequest<br/>{partyId, channel, template, recipient, vars}
+  K->>NS: consume NotificationRequest
+  NS->>NS: render template → subject + body
+  NS->>DB: INSERT notifications<br/>(status=PENDING)
+
+  alt channel = EMAIL
+    NS->>SMTP: send rendered email
+    SMTP-->>NS: delivered / error
+    NS->>DB: UPDATE status=SENT / FAILED
+  else channel = PUSH
+    NS->>DT: SELECT active tokens WHERE party_id=…
+    DT-->>NS: [token1, token2, …]
+    loop per device token
+      NS->>FCM: send push notification
+      FCM-->>NS: success / invalid-token
+      alt invalid token
+        NS->>DT: UPDATE status=RETIRED
+      end
+    end
+    NS->>DB: UPDATE status=SENT / FAILED
+  end
+
+  alt template in risk allow-list
+    NS->>SL: anonymized oversight signal<br/>(no PII, event type only)
+  end
+
+  NS->>DB: INSERT notification_outbox\n(relay event downstream)

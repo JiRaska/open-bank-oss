@@ -1,0 +1,41 @@
+%% title: SWIFT Message Flow
+sequenceDiagram
+    actor Client
+    participant SwiftResource
+    participant SwiftService
+    participant SwiftRepository
+    participant SchemeGateway as SchemeGateway (SWIFTNet)
+    participant SettlementPort
+    participant OutboxDispatcher
+    participant Kafka
+
+    Client->>SwiftResource: POST /api/v1/swift/messages (SendSwiftRequest)
+    SwiftResource->>SwiftService: send(command)
+    SwiftService->>SwiftRepository: findByIdempotencyKey(key)
+    alt idempotent replay
+        SwiftRepository-->>SwiftService: existing message
+    else new message
+        SwiftService->>SwiftService: validate() BIC, amount, valueDate, chargeCode
+        alt validation errors
+            SwiftService-->>SwiftResource: 422 Unprocessable
+        else valid
+            SwiftService->>SwiftRepository: save(message, status=PENDING)
+            SwiftService->>SchemeGateway: submit(MT103/MT202)
+            SchemeGateway-->>SwiftService: ACK / NAK
+            alt ACK received
+                SwiftService->>SwiftRepository: update(status=ACKNOWLEDGED)
+                SwiftService->>SettlementPort: settle(message)
+                SwiftService->>SwiftRepository: update(status=COMPLETED)
+            else NAK / timeout
+                SwiftService->>SwiftRepository: update(status=REJECTED, rejection_reason)
+            end
+        end
+    end
+    SwiftService-->>SwiftResource: SwiftMessage
+    SwiftResource-->>Client: 200 OK
+
+    loop Outbox dispatcher (periodic)
+        OutboxDispatcher->>SwiftRepository: load PENDING outbox rows
+        OutboxDispatcher->>Kafka: publish swift.* event
+        OutboxDispatcher->>SwiftRepository: mark outbox row SENT
+    end

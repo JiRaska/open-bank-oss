@@ -1,0 +1,13 @@
+%% title: SCT Inst Payment Lifecycle
+stateDiagram-v2
+    [*] --> PENDING : submit() — sanctions REVIEW or screening unavailable
+    [*] --> PROCESSING : submit() — CLEAR, scheme accepted (ACSC)
+    [*] --> REJECTED : submit() — BLOCK (sanctions hit) or scheme RJCT
+    PENDING --> PROCESSING : manual release after AML review
+    PROCESSING --> SETTLED : settlement booked
+    PROCESSING --> TIMEOUT : execution_timeout_at exceeded
+    SETTLED --> RECALLED : recall(reason)
+    REJECTED --> [*]
+    TIMEOUT --> [*]
+    RECALLED --> [*]
+    SETTLED --> [*]

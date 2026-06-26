@@ -1,0 +1,45 @@
+%% title: SEPA Direct Debit Flow
+sequenceDiagram
+    actor Creditor
+    actor Debtor
+    participant SddResource
+    participant SddMandateService
+    participant MandateLifecycle
+    participant SddRepository
+    participant OutboxDispatcher
+    participant Kafka
+
+    Debtor->>SddResource: POST /api/v1/sdd/mandates (RegisterMandateCommand)
+    SddResource->>SddMandateService: registerMandate(command)
+    SddMandateService->>SddRepository: findByCreditorIdAndUmr(cid, umr)
+    alt mandate already exists
+        SddRepository-->>SddMandateService: existing mandate
+    else new mandate
+        SddMandateService->>MandateLifecycle: create(scheme, sequenceType)
+        Note over MandateLifecycle: CORE → born ACTIVE\nB2B → born PENDING_CONFIRMATION
+        SddMandateService->>SddRepository: save(mandate + MandateRegistered outbox)
+    end
+    SddMandateService-->>SddResource: SddMandate
+    SddResource-->>Debtor: 201 Created
+
+    opt B2B scheme
+        SddResource->>SddMandateService: confirmMandate(mandateId)
+        SddMandateService->>SddRepository: save(b2bConfirmed=true, status=ACTIVE)
+    end
+
+    Creditor->>SddResource: POST /api/v1/sdd/mandates/{id}/collections (CollectCommand)
+    SddResource->>SddMandateService: requestCollection(command)
+    SddMandateService->>SddRepository: findById(mandateId)
+    SddMandateService->>MandateLifecycle: authoriseCollection(mandate, amount, dueDate)
+    Note over MandateLifecycle: CollectionAuthorisationPolicy checks\nstatus=ACTIVE, not terminal, pre-notification gap
+    SddMandateService->>SddRepository: save(lastCollectionDate, CollectionRequested outbox)
+    SddMandateService-->>SddResource: collection reference
+    SddResource-->>Creditor: 202 Accepted
+
+    loop Outbox dispatcher
+        OutboxDispatcher->>SddRepository: load PENDING outbox rows
+        OutboxDispatcher->>Kafka: publish sdd.mandate.* / sdd.collection.* events
+        OutboxDispatcher->>SddRepository: mark SENT
+    end
+
+    Note over SddMandateService: MandateExpiryScheduler runs daily\n→ expires mandates past last_collection_date + 36 months

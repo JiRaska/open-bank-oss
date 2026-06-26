@@ -1,0 +1,34 @@
+%% title: Agent Task Lifecycle (Proposal + Kill-Switch)
+stateDiagram-v2
+    [*] --> RUNNING : operator sends chat request\n(ui-assistant identity, charter check)
+
+    RUNNING --> HALTED : kill_switch scope matches\n(agent id or '*' global halt)
+    HALTED --> RUNNING : kill switch row deleted\n(operator resumes)
+
+    RUNNING --> RATE_LIMITED : CharterRateLimiter\ntokens-per-run or runs-per-day exceeded
+    RATE_LIMITED --> RUNNING : counter resets\n(pod restart or next day window)
+
+    RUNNING --> TOOL_POLICY_CHECK : model requests tool call\n(AgentPolicyGate.gate())
+    TOOL_POLICY_CHECK --> TOOL_ALLOWED : OPA ALLOW\n(GateOutcome.ALLOW)
+    TOOL_POLICY_CHECK --> TOOL_DENIED : OPA DENY or absent X-Agent-Id\n(GateOutcome.DENY)
+    TOOL_POLICY_CHECK --> TOOL_ALLOWED : OPA transport error + EnforcementMode=ADVISORY\n(pdpError=true, degrade to advisory)
+    TOOL_DENIED --> RUNNING : DENY injected into context\nmodel continues without tool result
+    TOOL_ALLOWED --> RUNNING : tool result returned\n(capped to 3 000 chars)
+
+    RUNNING --> PROPOSAL_PENDING : ProposalDetector flags reply\n(isProposal=true, ADR-0031 D4)
+
+    state PROPOSAL_PENDING {
+        [*] --> PROPOSED
+        PROPOSED --> APPROVED : human approves\n(decided_by, decided_at set)
+        PROPOSED --> REJECTED : human rejects\n(decision_reason set)
+        APPROVED --> [*]
+        REJECTED --> [*]
+    }
+
+    PROPOSAL_PENDING --> RUNNING : next chat turn\n(proposal stored, agent continues)
+
+    RUNNING --> COMPLETED : stop_reason = end_turn\nChatOutcome returned to caller
+    COMPLETED --> [*]
+
+    RUNNING --> DEGRADED : model backend 429 / outage\nor all tool calls failed
+    DEGRADED --> COMPLETED : friendly error reply\nreturned (no 5xx)

@@ -1,0 +1,28 @@
+%% title: Domestic Payment Lifecycle — State Machine
+stateDiagram-v2
+    [*] --> RECEIVED : POST /domestic-payments created
+
+    RECEIVED --> VALIDATED : sanctions screen → CLEAR
+    RECEIVED --> REJECTED : sanctions screen → HIT\n(SANCTIONS_HIT + AML case opened)
+    RECEIVED --> RECEIVED : screen → POTENTIAL_HIT or outage\n(held for operator review)
+
+    VALIDATED --> SENT_TO_CLEARING : clearing-service picks up
+    VALIDATED --> CANCELLED : operator cancels before clearing
+
+    SENT_TO_CLEARING --> SETTLED : inter-bank settlement confirmed
+    SENT_TO_CLEARING --> RETURNED : payment returned by receiving bank
+
+    REJECTED --> [*]
+    CANCELLED --> [*]
+    SETTLED --> [*]
+    RETURNED --> [*]
+
+    note right of RECEIVED
+        fail-closed: outage keeps
+        payment in RECEIVED
+    end note
+
+    note right of VALIDATED
+        domain event emitted
+        on every transition
+    end note

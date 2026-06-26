@@ -1,0 +1,59 @@
+%% title: Product Catalog — Pricing Flow
+sequenceDiagram
+    autonumber
+    participant AdminUI as admin-ui
+    participant AccSvc as account-service
+    participant IntSvc as interest-service
+    participant FXSvc as fx-service
+    participant CardSvc as card-issuance-service
+    participant PC as ProductCatalogResource<br/>(:8104)
+    participant AppSvc as ProductCatalogService
+    participant Store as ConcurrentHashMap<br/>(in-memory store)
+
+    Note over Store: Seeded at startup — 15 products<br/>(SAVINGS, CURRENT, LOAN, MORTGAGE,<br/>CREDIT_CARD, TERM_DEPOSIT, OVERDRAFT, INVESTMENT)
+
+    AdminUI->>PC: GET /api/v1/fees
+    PC->>AppSvc: listFeeSchedule()
+    AppSvc->>Store: store.values (all products)
+    Store-->>AppSvc: List<Product>
+    AppSvc->>AppSvc: flatMap { product.fees.map { FeeScheduleItem.of(product, fee) } }<br/>derives code: PRODUCT_CODE_FEE_SLUG
+    AppSvc-->>PC: List<FeeScheduleItem>
+    PC-->>AdminUI: 200 OK — bank-wide fee schedule
+
+    AdminUI->>PC: GET /api/v1/products?type=SAVINGS&status=ACTIVE
+    PC->>AppSvc: findAll() → filter client-side
+    AppSvc->>Store: store.values.sortedBy { code }
+    Store-->>AppSvc: List<Product>
+    AppSvc-->>PC: List<Product>
+    PC-->>AdminUI: 200 OK — filtered product list
+
+    AdminUI->>PC: POST /api/v1/products (ProductRequest body)
+    PC->>AppSvc: create(req)
+    AppSvc->>AppSvc: guard: code uniqueness check
+    AppSvc->>AppSvc: req.toDomain(clock) → Product(status=DRAFT)
+    AppSvc->>Store: store[product.id] = product
+    AppSvc-->>PC: Product
+    PC-->>AdminUI: 201 Created
+
+    AdminUI->>PC: POST /api/v1/products/{id}/activate
+    PC->>AppSvc: activate(id)
+    AppSvc->>Store: store[id] → existing Product
+    AppSvc->>Store: store[id] = product.copy(status=ACTIVE, updatedAt=now)
+    AppSvc-->>PC: Product (status=ACTIVE)
+    PC-->>AdminUI: 200 OK
+
+    AccSvc->>PC: GET /api/v1/products/{id}
+    PC->>AppSvc: findById(id)
+    AppSvc->>Store: store[id] or find by code or canonicalId
+    Store-->>AppSvc: Product
+    AppSvc-->>PC: Product (type, currency, multiCurrencyConfig)
+    PC-->>AccSvc: 200 OK — product definition for account opening
+
+    IntSvc->>PC: GET /api/v1/products/{id}
+    PC-->>IntSvc: 200 OK — baseRate, savingsConfig.interestTiers
+
+    FXSvc->>PC: GET /api/v1/products/{id}
+    PC-->>FXSvc: 200 OK — multiCurrencyConfig (fxMarginBuyPct, fxMarginSellPct)
+
+    CardSvc->>PC: GET /api/v1/products/{id}
+    PC-->>CardSvc: 200 OK — cardConfig (networks, tiers, limits)

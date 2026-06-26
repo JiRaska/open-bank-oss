@@ -1,0 +1,48 @@
+%% title: KYC Service — ER Schema
+erDiagram
+  kyc_cases {
+    bigserial id PK
+    uuid case_id UK
+    uuid party_id
+    varchar status
+    varchar risk_level
+    varchar due_diligence_level
+    varchar assigned_to
+    text checks_json
+    text notes
+    varchar reviewed_by
+    timestamptz reviewed_at
+    timestamptz expires_at
+    varchar source_of_funds
+    varchar source_of_wealth
+    varchar business_purpose
+    numeric expected_turnover
+    char expected_turnover_currency
+    boolean pep_declaration
+    uuid beneficial_owner_id
+    varchar screening_provider
+    varchar screening_ref
+    timestamptz next_review_date
+    varchar escalated_to
+    timestamptz escalated_at
+    text escalation_reason
+    timestamptz created_at
+    timestamptz updated_at
+  }
+
+  kyc_outbox {
+    bigserial id PK
+    uuid event_id UK
+    uuid aggregate_id
+    varchar event_type
+    text payload
+    varchar status
+    int attempt_count
+    text last_error
+    timestamptz created_at
+    timestamptz processed_at
+  }
+
+  kyc_cases ||--o{ kyc_outbox : "emits"
+
+  note for kyc_cases "checks_json stores array of KycCheck: type + status + resultNote + providerRef"

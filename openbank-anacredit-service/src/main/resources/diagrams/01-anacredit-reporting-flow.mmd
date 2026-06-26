@@ -1,0 +1,52 @@
+%% title: AnaCredit Reporting Flow — exposure feed & return rendering
+sequenceDiagram
+    participant FX as fx-service<br/>(caller-side)
+    participant OP as Operator / upstream feed<br/>(ROLE_SERVICE or ROLE_COMPLIANCE)
+    participant KC as Keycloak<br/>(OIDC)
+    participant RES as AnaCreditResource<br/>(infrastructure/rest)
+    participant SVC as AnaCreditService<br/>(application)
+    participant REPO as InMemoryCreditExposureRepository<br/>(infrastructure/persistence)
+    participant POL as AnaCreditEligibilityPolicy<br/>(domain)
+    participant BLD as AnaCreditReturnBuilder<br/>(domain)
+
+    note over FX,OP: Step 1 — caller obtains EUR-equivalent commitment from fx-service
+    FX-->>OP: committedAmountEur (threshold currency)
+
+    note over OP,RES: Step 2 — register / replace credit exposure
+    OP->>RES: POST /api/v1/anacredit/exposures<br/>{ instrumentId, debtorId, debtorType,<br/>  instrumentType, committedAmount,<br/>  drawnAmount, committedAmountEur,<br/>  arrearsAmount, defaulted, originationDate }
+    RES->>KC: validate Bearer token
+    KC-->>RES: token claims (roles)
+    RES->>SVC: registerExposure(command)
+    SVC->>REPO: upsert(CreditExposure)
+    REPO-->>SVC: ok
+    SVC-->>RES: unit
+    RES-->>OP: 201 Created
+
+    note over OP,BLD: Step 3 — render AnaCredit return for reference date (monthly)
+    OP->>RES: GET /api/v1/anacredit/returns/{referenceDate}
+    RES->>KC: validate Bearer token
+    KC-->>RES: token claims (ROLE_COMPLIANCE or ROLE_AUDITOR)
+    RES->>SVC: buildReturn(referenceDate)
+    SVC->>REPO: listAll()
+    REPO-->>SVC: List<CreditExposure>
+
+    SVC->>BLD: build(exposures, referenceDate)
+    note over BLD: Aggregate total committedAmountEur per debtorId
+    loop for each instrument
+        BLD->>POL: assess(exposure, debtorTotalEur)
+        alt debtorType == NATURAL_PERSON
+            POL-->>BLD: HOUSEHOLD_OUT_OF_SCOPE
+        else debtorTotalEur < €25 000
+            POL-->>BLD: BELOW_THRESHOLD
+        else committedAmountEur == 0 AND drawnAmount == 0
+            POL-->>BLD: NO_EXPOSURE
+        else
+            POL-->>BLD: REPORTABLE
+            note over BLD: Map to CreditRecord:<br/>outstandingNominalAmount = drawn<br/>offBalanceSheetAmount = max(committed−drawn, 0)
+        end
+    end
+    BLD-->>SVC: AnaCreditReturn { creditRecords, exclusionNotes }
+    SVC-->>RES: AnaCreditReturn
+    RES-->>OP: 200 OK — AnaCreditReturnResponse<br/>(credit dataset rows + exclusion audit trail)
+
+    note over OP: ČNB / ECB submission is OUT OF SCOPE in v1 — operator exports manually

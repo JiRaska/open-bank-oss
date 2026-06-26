@@ -1,0 +1,54 @@
+%% title: Domestic Payment Service — ER Schema
+erDiagram
+    domestic_payments {
+        BIGSERIAL id PK
+        UUID payment_id UK
+        VARCHAR idempotency_key UK
+        VARCHAR status
+        UUID debtor_account_id
+        VARCHAR debtor_account_number
+        VARCHAR debtor_bank_code
+        VARCHAR debtor_name
+        VARCHAR creditor_account_number
+        VARCHAR creditor_bank_code
+        VARCHAR creditor_name
+        NUMERIC amount
+        VARCHAR currency
+        VARCHAR variable_symbol
+        VARCHAR specific_symbol
+        VARCHAR constant_symbol
+        VARCHAR message_for_payee
+        VARCHAR priority
+        VARCHAR statement_label
+        VARCHAR end_to_end_id
+        VARCHAR reject_reason
+        TEXT reject_detail
+        VARCHAR transfer_scope
+        VARCHAR technical_account_code
+        VARCHAR purpose_code
+        VARCHAR payment_category
+        VARCHAR actor_id
+        VARCHAR channel
+        VARCHAR sca_reference
+        BOOLEAN aml_screened
+        VARCHAR cnb_reporting_code
+        DATE value_date
+        TIMESTAMPTZ submitted_at
+        TIMESTAMPTZ settled_at
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    domestic_payment_outbox {
+        BIGSERIAL id PK
+        UUID event_id UK
+        UUID aggregate_id
+        VARCHAR event_type
+        TEXT payload
+        VARCHAR status
+        INTEGER attempt_count
+        TIMESTAMPTZ sent_at
+        TIMESTAMPTZ created_at
+    }
+
+    domestic_payments ||--o{ domestic_payment_outbox : "emits events"

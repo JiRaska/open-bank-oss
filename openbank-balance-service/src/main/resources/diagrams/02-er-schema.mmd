@@ -1,0 +1,49 @@
+%% title: Balance Service — ER Schema
+erDiagram
+    balances {
+        BIGSERIAL id PK
+        UUID account_id
+        CHAR currency
+        NUMERIC booked_amount
+        NUMERIC available_amount
+        NUMERIC reserved_amount
+        NUMERIC pending_amount
+        NUMERIC arranged_overdraft_limit
+        TIMESTAMPTZ updated_at
+        BIGINT version
+    }
+
+    balance_holds {
+        BIGSERIAL id PK
+        UUID hold_id UK
+        UUID account_id
+        NUMERIC amount
+        CHAR currency
+        VARCHAR reason
+        VARCHAR reference_id
+        TIMESTAMPTZ expires_at
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ released_at
+    }
+
+    balance_movement {
+        UUID account_id PK
+        VARCHAR currency PK
+        VARCHAR reference_id PK
+        VARCHAR operation PK
+        NUMERIC delta
+        TIMESTAMPTZ applied_at
+    }
+
+    balance_reconciliation {
+        BIGSERIAL id PK
+        DATE as_of
+        TIMESTAMPTZ generated_at
+        NUMERIC tolerance
+        BOOLEAN has_drift
+        VARCHAR drifted_currencies
+        TEXT currencies
+    }
+
+    balances ||--o{ balance_holds : "reserves funds"
+    balances ||--o{ balance_movement : "idempotency log"

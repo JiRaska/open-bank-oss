@@ -1,0 +1,67 @@
+%% title: Statement Service ER Schema
+erDiagram
+    statement_period {
+        UUID id PK
+        UUID account_id
+        VARCHAR pocket_currency
+        DATE period_from
+        DATE period_to
+        BIGINT legal_sequence_number
+        BIGINT electronic_sequence_number
+        NUMERIC opening_balance
+        NUMERIC closing_balance
+        INTEGER entry_count
+        VARCHAR status "CLOSED|SUPERSEDED"
+        BIGINT supersedes_sequence
+        TIMESTAMPTZ closed_at
+    }
+
+    statement_outbox {
+        UUID id PK
+        UUID event_id UK
+        UUID aggregate_id
+        VARCHAR event_type
+        TEXT payload
+        VARCHAR status "PENDING|SENT|FAILED"
+        INTEGER attempt_count
+        TIMESTAMPTZ sent_at
+        TEXT last_error
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    statement_close_run {
+        UUID id PK
+        VARCHAR trigger "SCHEDULED|MANUAL"
+        VARCHAR status "RUNNING|COMPLETED|COMPLETED_WITH_FAILURES"
+        DATE period_from
+        DATE period_to
+        INTEGER accounts_enumerated
+        INTEGER pockets_closed
+        INTEGER pockets_failed
+        INTEGER pockets_skipped
+        TIMESTAMPTZ started_at
+        TIMESTAMPTZ finished_at
+    }
+
+    statement_close_failure {
+        UUID id PK
+        UUID run_id FK
+        UUID account_id
+        VARCHAR pocket_currency
+        DATE period_from
+        DATE period_to
+        VARCHAR reason "RECONCILIATION|UPSTREAM|UNKNOWN"
+        TEXT detail
+        TIMESTAMPTZ failed_at
+    }
+
+    account_registry {
+        UUID account_id PK
+        VARCHAR status
+        TIMESTAMPTZ registered_at
+    }
+
+    statement_close_run ||--o{ statement_close_failure : "run_id"
+    statement_period ||--o{ statement_outbox : "aggregate_id"
+    statement_close_run }o--|| account_registry : "enumerates"

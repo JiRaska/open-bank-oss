@@ -1,0 +1,29 @@
+%% title: Loan Application and Loan Lifecycle
+stateDiagram-v2
+    state "LoanApplication" as App {
+        [*] --> PROPOSED : maker submits (POST /applications)
+        PROPOSED --> APPROVED : checker approves (≠ maker, EBA/GL/2020/06)
+        PROPOSED --> REJECTED : checker rejects
+        APPROVED --> DISBURSED : disburser disburses (≠ checker)
+        REJECTED --> [*]
+        DISBURSED --> [*] : loan created
+    }
+
+    state "Loan" as LoanState {
+        [*] --> ACTIVE : disbursed, installment schedule generated
+        ACTIVE --> CLOSED : all installments paid
+        ACTIVE --> WRITTEN_OFF : uncollectible — write-off event + posting
+        CLOSED --> [*]
+        WRITTEN_OFF --> [*]
+    }
+
+    state "Installment" as Inst {
+        [*] --> Unpaid : generated at disbursement
+        Unpaid --> AccruedNotPaid : due date passed, interest_accrued=TRUE (IAS 1)
+        Unpaid --> Paid : repayment received before due date
+        AccruedNotPaid --> Paid : repayment received
+        Paid --> [*]
+    }
+
+    App --> LoanState : DISBURSED triggers loan creation
+    LoanState --> Inst : one per schedule period

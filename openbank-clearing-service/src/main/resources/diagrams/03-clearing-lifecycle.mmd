@@ -1,0 +1,19 @@
+%% title: Clearing Batch & Item Lifecycle
+stateDiagram-v2
+    state "Batch" as Batch {
+        [*] --> PENDING : submit items
+        PENDING --> IN_CLEARING : triggerClearingCycle()
+        IN_CLEARING --> SETTLED : net positions computed & booked
+        IN_CLEARING --> FAILED : settlement error
+        SETTLED --> REVERSED : reversal initiated
+        REVERSED --> [*]
+        FAILED --> [*]
+    }
+
+    state "Item" as Item {
+        [*] --> PENDING : submit(payment)
+        PENDING --> IN_CLEARING : batch assigned
+        IN_CLEARING --> SETTLED : batch settled
+        IN_CLEARING --> FAILED : processing error
+        SETTLED --> REVERSED : batch reversed
+    }

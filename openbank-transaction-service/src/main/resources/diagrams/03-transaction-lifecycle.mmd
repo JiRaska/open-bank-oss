@@ -1,0 +1,32 @@
+%% title: Transaction Lifecycle — Status & Saga State Machine
+stateDiagram-v2
+    [*] --> PENDING : POST /transactions created
+
+    state "Transaction Status" as TX {
+        PENDING --> PROCESSING : saga LEDGER_POSTING
+        PROCESSING --> COMPLETED : saga FUNDS_CAPTURED + credit done
+        PROCESSING --> FAILED : compensation completed
+        COMPLETED --> REVERSED : reversal transaction posted
+        FAILED --> [*]
+        REVERSED --> [*]
+        COMPLETED --> [*]
+    }
+
+    state "PaymentSaga State" as SAGA {
+        [*] --> STARTED
+        STARTED --> PAYMENT_INITIATED : transaction inserted
+        PAYMENT_INITIATED --> FUNDS_RESERVED : balance hold placed
+        FUNDS_RESERVED --> LEDGER_POSTING : GL journal posted
+        LEDGER_POSTING --> FUNDS_CAPTURED : debit captured
+        FUNDS_CAPTURED --> COMPLETED : credit posted
+        COMPLETED --> [*]
+
+        PAYMENT_INITIATED --> COMPENSATING : ledger error
+        FUNDS_RESERVED --> COMPENSATING : GL post failed
+        LEDGER_POSTING --> COMPENSATING : capture failed
+        FUNDS_CAPTURED --> COMPENSATING : credit failed
+        COMPENSATING --> COMPENSATED : hold released + journal reversed
+        COMPENSATED --> [*]
+        COMPENSATING --> FAILED : compensation failed
+        FAILED --> [*]
+    }

@@ -1,0 +1,66 @@
+%% title: Account Service — ER Schema
+erDiagram
+    accounts {
+        UUID id PK
+        VARCHAR account_number UK
+        VARCHAR account_type
+        UUID party_id
+        UUID product_id
+        CHAR currency_code
+        VARCHAR status
+        VARCHAR iban UK
+        VARCHAR bic
+        VARCHAR signing_rule
+        VARCHAR risk_category
+        VARCHAR onboarding_channel
+        TIMESTAMPTZ opened_at
+        TIMESTAMPTZ closed_at
+        VARCHAR closed_reason
+        TIMESTAMPTZ dormancy_date
+        TIMESTAMPTZ data_retention_until
+        BIGINT version
+    }
+
+    account_authorizations {
+        UUID id PK
+        UUID account_id FK
+        UUID party_id
+        VARCHAR role
+        NUMERIC daily_limit_amount
+        CHAR daily_limit_currency
+        NUMERIC transaction_limit_amount
+        CHAR transaction_limit_currency
+        DATE valid_from
+        DATE valid_to
+        VARCHAR status
+        UUID granted_by
+        TIMESTAMPTZ granted_at
+        UUID revoked_by
+        TIMESTAMPTZ revoked_at
+    }
+
+    account_pockets {
+        UUID id PK
+        UUID account_id FK
+        CHAR currency_code
+        BOOLEAN is_primary
+        VARCHAR status
+        TIMESTAMPTZ opened_at
+        TIMESTAMPTZ closed_at
+        BIGINT version
+    }
+
+    account_balances {
+        UUID account_id PK_FK
+        NUMERIC available_balance
+        NUMERIC current_balance
+        NUMERIC reserved_balance
+        NUMERIC pending_balance
+        CHAR currency_code
+        TIMESTAMPTZ last_updated_at
+        BIGINT version
+    }
+
+    accounts ||--o{ account_authorizations : "authorizes"
+    accounts ||--o{ account_pockets : "has pockets"
+    accounts ||--|| account_balances : "denorm cache"

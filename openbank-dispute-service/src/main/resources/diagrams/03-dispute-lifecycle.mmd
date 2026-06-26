@@ -1,0 +1,54 @@
+%% title: Dispute Lifecycle (stateDiagram-v2) — openbank-dispute-service
+stateDiagram-v2
+    [*] --> OPEN : POST /disputes\n(OpenDisputeUseCase)\ntimeline: OPENED
+
+    OPEN --> UNDER_REVIEW : PUT status=UNDER_REVIEW\n(operator picks up case)\ntimeline: STATUS_CHANGED
+
+    UNDER_REVIEW --> PENDING_CUSTOMER : PUT status=PENDING_CUSTOMER\n(awaiting customer info)\ntimeline: STATUS_CHANGED
+
+    UNDER_REVIEW --> PENDING_MERCHANT : PUT status=PENDING_MERCHANT\n(awaiting merchant response)\ntimeline: STATUS_CHANGED
+
+    PENDING_CUSTOMER --> UNDER_REVIEW : PUT status=UNDER_REVIEW\n(customer responded)\ntimeline: STATUS_CHANGED
+
+    PENDING_MERCHANT --> UNDER_REVIEW : PUT status=UNDER_REVIEW\n(merchant responded)\ntimeline: STATUS_CHANGED
+
+    OPEN --> WITHDRAWN : POST /withdraw?actor=…\nresolution=WITHDRAWN\ntimeline: STATUS_CHANGED
+
+    UNDER_REVIEW --> WITHDRAWN : POST /withdraw?actor=…\nresolution=WITHDRAWN\ntimeline: STATUS_CHANGED
+
+    UNDER_REVIEW --> ESCALATED : POST /escalate?actor=…\ntimeline: STATUS_CHANGED
+
+    PENDING_CUSTOMER --> ESCALATED : POST /escalate?actor=…\ntimeline: STATUS_CHANGED
+
+    PENDING_MERCHANT --> ESCALATED : POST /escalate?actor=…\ntimeline: STATUS_CHANGED
+
+    UNDER_REVIEW --> RESOLVED_CUSTOMER : PUT status=RESOLVED_CUSTOMER\nresolution=CHARGEBACK | REPRESENTMENT\ntimeline: STATUS_CHANGED
+
+    UNDER_REVIEW --> RESOLVED_MERCHANT : PUT status=RESOLVED_MERCHANT\nresolution=REPRESENTMENT | ARBITRATION\ntimeline: STATUS_CHANGED
+
+    PENDING_CUSTOMER --> RESOLVED_CUSTOMER : PUT (evidence provided, decided)\ntimeline: STATUS_CHANGED
+
+    PENDING_MERCHANT --> RESOLVED_MERCHANT : PUT (merchant response decided)\ntimeline: STATUS_CHANGED
+
+    RESOLVED_CUSTOMER --> [*] : terminal — SLA met\nresolutionDeadline tracked
+    RESOLVED_MERCHANT --> [*] : terminal — SLA met
+    WITHDRAWN --> [*] : terminal
+    ESCALATED --> [*] : terminal (external arbitration)
+
+    note right of OPEN
+        SLA clock starts: filingDate + 45 days
+        chargeback window: 120 days from transaction
+    end note
+
+    note right of ESCALATED
+        Moves to external arbitration.
+        No further automated transitions.
+    end note
+
+    state "Resolution values" as ResolutionNote {
+        [*] --> PENDING : on open
+        PENDING --> CHARGEBACK : customer wins
+        PENDING --> REPRESENTMENT : merchant wins
+        PENDING --> ARBITRATION : escalated
+        PENDING --> WITHDRAWN : dispute withdrawn
+    }

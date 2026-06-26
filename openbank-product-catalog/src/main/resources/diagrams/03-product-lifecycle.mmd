@@ -1,0 +1,54 @@
+%% title: Product Catalog — Životní cyklus produktu (ProductStatus)
+%% Zdroj: domain/Product.kt (enum ProductStatus) + application/ProductCatalogService.kt
+stateDiagram-v2
+    [*] --> DRAFT : POST /api/v1/products\n(výchozí stav při vytvoření)
+
+    DRAFT --> ACTIVE : POST /api/v1/products/{id}/activate\n(operátor schválí a aktivuje)
+    DRAFT --> ARCHIVED : přímé archivování draftu\n(produkt nebyl nikdy spuštěn)
+
+    ACTIVE --> INACTIVE : POST /api/v1/products/{id}/deactivate\n(dočasné pozastavení nabídky)
+    ACTIVE --> DEPRECATED : PUT /api/v1/products/{id}\n(status=DEPRECATED — nový zákazník nemůže sjednat,\nexistující smlouvy běží dál)
+    ACTIVE --> ARCHIVED : PUT /api/v1/products/{id}\n(status=ARCHIVED — kompletní stažení)
+
+    INACTIVE --> ACTIVE : POST /api/v1/products/{id}/activate\n(reaktivace pozastaveného produktu)
+    INACTIVE --> ARCHIVED : PUT /api/v1/products/{id}\n(status=ARCHIVED)
+
+    DEPRECATED --> ARCHIVED : PUT /api/v1/products/{id}\n(status=ARCHIVED — po vypršení všech smluv)
+
+    ARCHIVED --> [*]
+
+    note right of DRAFT
+        isPublic=false nebo true
+        Viditelný pouze interně
+        Seed: INVESTMENT_BASIC (prod-011)
+        je jediný produkt ve stavu DRAFT
+    end note
+
+    note right of ACTIVE
+        isPublic=true → retail browsing
+        isPublic=false → interní (skrytý)
+        14 z 15 seedovaných produktů
+        je ve stavu ACTIVE
+        Fees jsou dostupné přes
+        GET /api/v1/fees
+    end note
+
+    note right of INACTIVE
+        Dočasné pozastavení
+        (sezónní produkt, regulatorní hold)
+        Existující smlouvy nejsou dotčeny
+    end note
+
+    note right of DEPRECATED
+        Žádné nové sjednání
+        Existující zákazníci zachováni
+        Sazby a poplatky stále platné
+        pro stávající smlouvy
+    end note
+
+    note right of ARCHIVED
+        Pouze archivní čtení
+        versionHistory[] zachovává
+        historii pro audit a transparentnost
+        retentionPolicy: indefinite
+    end note

@@ -1,0 +1,30 @@
+%% title: PSD2 XS2A API Flow
+sequenceDiagram
+    participant TPP as TPP (AISP/PISP)
+    participant PSD2 as PSD2Service
+    participant TPPReg as TPP Registry
+    participant ConsentSvc as Consent Service
+    participant AccountSvc as Account Service
+    participant PaymentSvc as Payment Service
+    participant Outbox as PSD2 Outbox
+    participant Kafka
+
+    TPP->>PSD2: GET /api/v1/accounts (QWAC mTLS, Bearer token)
+    PSD2->>TPPReg: verify TPP certificate & role (AISP)
+    TPPReg-->>PSD2: TPP valid, roles=[AISP]
+    PSD2->>ConsentSvc: GET /api/v1/consents?grantee_id={tpp_id}&scope=accounts
+    ConsentSvc-->>PSD2: active consent with account IBANs
+    PSD2->>AccountSvc: GET /api/v1/accounts?ibans={...}
+    AccountSvc-->>PSD2: account list
+    PSD2-->>TPP: 200 OK (account list, X-Request-Id)
+
+    TPP->>PSD2: POST /api/v1/payments/sepa-credit-transfers (PISP)
+    PSD2->>TPPReg: verify TPP role (PISP)
+    TPPReg-->>PSD2: TPP valid, roles=[PISP]
+    PSD2->>ConsentSvc: verify payment consent & SCA
+    ConsentSvc-->>PSD2: consent active
+    PSD2->>PaymentSvc: POST /api/v1/payments (amount, creditor_iban)
+    PaymentSvc-->>PSD2: payment_id, status=RECEIVED
+    PSD2->>Outbox: INSERT psd2_outbox (PAYMENT_INITIATED)
+    Outbox->>Kafka: publish PAYMENT_INITIATED
+    PSD2-->>TPP: 201 Created (payment_id, _links)

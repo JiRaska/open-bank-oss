@@ -1,0 +1,31 @@
+%% title: SEPA Payment Lifecycle — State Machine
+stateDiagram-v2
+    [*] --> RECEIVED : POST /sepa-payments created\n(SCT or SCT_INST)
+
+    RECEIVED --> VALIDATED : sanctions screen → CLEAR
+    RECEIVED --> REJECTED : sanctions screen → HIT\n(SANCTIONS_HIT + AML case)
+    RECEIVED --> RECEIVED : screen → POTENTIAL_HIT or outage\n(held for operator review — fail-closed)
+
+    VALIDATED --> PROCESSING : clearing-service starts settlement
+    VALIDATED --> CANCELLED : operator cancels before processing
+
+    PROCESSING --> COMPLETED : inter-bank clearing confirmed\n+ GL journal posted
+    PROCESSING --> RETURNED : payment returned by\nreceiving bank / CSM
+
+    REJECTED --> [*]
+    CANCELLED --> [*]
+    COMPLETED --> [*]
+    RETURNED --> [*]
+
+    note right of RECEIVED
+        Idempotency-Key enforced:
+        retried create returns
+        existing payment
+    end note
+
+    note right of VALIDATED
+        Domain event emitted on
+        every guarded transition;
+        invalid transitions rejected
+        by domain model
+    end note

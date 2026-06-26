@@ -1,0 +1,50 @@
+%% title: SEPA Instant (SCT Inst) Payment Flow
+sequenceDiagram
+    actor Client
+    participant SctInstResource
+    participant SctInstPaymentService
+    participant SanctionsScreening
+    participant FraudScoring
+    participant SchemeGateway
+    participant SettlementPort
+    participant AmlCasePort
+    participant Repo as SctInstPaymentRepository
+    participant Publisher
+
+    Client->>SctInstResource: POST /api/v1/sct-inst/payments
+    SctInstResource->>SctInstPaymentService: submit(SubmitSctInstCommand)
+    SctInstPaymentService->>Repo: findByIdempotencyKey(key)
+    alt idempotent replay
+        Repo-->>SctInstPaymentService: existing payment
+    else new payment
+        SctInstPaymentService->>SanctionsScreening: screen(debtorName, DEBTOR)
+        SctInstPaymentService->>SanctionsScreening: screen(creditorName, CREDITOR)
+        SanctionsScreening-->>SctInstPaymentService: ScreeningResult[]
+
+        alt CLEAR
+            SctInstPaymentService->>SchemeGateway: submit(pacs.008) [if flag ON]
+            SchemeGateway-->>SctInstPaymentService: pacs.002 verdict
+            alt ACSC (accepted)
+                SctInstPaymentService->>Repo: save(status=PROCESSING)
+                SctInstPaymentService->>Publisher: publish SctInstPaymentSubmitted
+                SctInstPaymentService->>SettlementPort: settle(payment)
+                SettlementPort-->>SctInstPaymentService: outcome
+                SctInstPaymentService->>Repo: save(status=SETTLED)
+                SctInstPaymentService->>Publisher: publish SctInstPaymentSettled
+            else RJCT
+                SctInstPaymentService->>Repo: save(status=REJECTED)
+                SctInstPaymentService->>Publisher: publish SctInstPaymentRejected
+            end
+        else REVIEW / screening unavailable
+            SctInstPaymentService->>Repo: save(status=PENDING, held)
+            SctInstPaymentService->>AmlCasePort: openCase(risk=HIGH/MEDIUM)
+        else BLOCK (sanctions hit)
+            SctInstPaymentService->>Repo: save(status=REJECTED)
+            SctInstPaymentService->>AmlCasePort: openCase(risk=CRITICAL)
+            SctInstPaymentService->>Publisher: publish SctInstPaymentRejected
+        end
+
+        SctInstPaymentService->>FraudScoring: score(shadow mode, fail-open)
+    end
+    SctInstPaymentService-->>SctInstResource: SctInstPayment
+    SctInstResource-->>Client: 200 OK

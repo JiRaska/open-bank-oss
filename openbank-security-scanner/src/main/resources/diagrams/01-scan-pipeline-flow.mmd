@@ -1,0 +1,53 @@
+%% title: Security Scanner — Scan Pipeline Flow
+sequenceDiagram
+    autonumber
+    participant Scheduler as Scheduler (every 30m)
+    participant REST as REST API<br/>/api/v1/security
+    participant ScanSvc as SecurityScannerService
+    participant Target as Target Service<br/>(API :8080 / Mgmt :8085)
+    participant Cache as In-Memory Cache<br/>(lastResults / lastReport)
+
+    alt Scheduled trigger
+        Scheduler->>REST: scheduledScan()
+    else Manual trigger
+        REST->>REST: POST /scan
+    end
+
+    REST->>ScanSvc: scanAll(services)
+
+    loop For each configured service
+        ScanSvc->>Target: GET :8085/q/health (mgmtUrl probe)
+        Target-->>ScanSvc: 200 OK (or fallback to API port)
+
+        ScanSvc->>Target: GET :8080/ (reachability + headers)
+        Target-->>ScanSvc: Response headers
+
+        Note over ScanSvc: Check 1 — Reachability (OWASP A05)
+        Note over ScanSvc: Check 2 — Security headers: HSTS, CSP,<br/>X-Frame-Options, X-Content-Type-Options… (A05)
+
+        ScanSvc->>Target: GET :8085/q/health/ready
+        Target-->>ScanSvc: body
+        Note over ScanSvc: Check 3 — Sensitive data in health body (A02)
+
+        ScanSvc->>Target: GET :8080/q/openapi
+        Target-->>ScanSvc: 200 / 404
+        Note over ScanSvc: Check 4 — OpenAPI exposure (A05 info-disclosure)
+
+        ScanSvc->>Target: GET :8080/q/metrics, /q/info, /q/dev
+        Target-->>ScanSvc: 200 / 401
+        Note over ScanSvc: Check 5 — Unauthenticated actuator on API port (A01)
+
+        ScanSvc->>Target: GET :8080/ Origin: https://evil.example.com
+        Target-->>ScanSvc: ACAO header
+        Note over ScanSvc: Check 6 — CORS wildcard (A05)
+
+        ScanSvc->>ScanSvc: Calculate score (100 − 30×CRIT − 15×HIGH − 5×MED)<br/>Assign grade A+/A/B/C/D/F
+        ScanSvc->>Cache: store ServiceScanResult
+    end
+
+    ScanSvc->>ScanSvc: buildReport()<br/>platformScore = avg(reachable scores)<br/>owaspCoverage, complianceStatus<br/>(PSD2_SCA, EBA_ICT_RISK, GDPR, OWASP, CNB)
+    ScanSvc->>Cache: store PlatformSecurityReport
+
+    REST-->>REST: return PlatformSecurityReport
+
+    Note over REST: GET /report → cached lastReport<br/>GET /services/{name} → cached ServiceScanResult<br/>GET /services → all cached results

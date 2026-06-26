@@ -1,0 +1,10 @@
+%% title: Consent Lifecycle
+stateDiagram-v2
+    [*] --> PENDING_SCA : consent created\n(TPP request received)
+    PENDING_SCA --> ACTIVE : SCA challenge completed\n(CONSENT_GRANTED)
+    PENDING_SCA --> REJECTED : SCA failed or\nTPP abandoned
+    ACTIVE --> REVOKED : party or TPP revokes\n(CONSENT_REVOKED)
+    ACTIVE --> EXPIRED : valid_to passed\n(max 90 days PSD2 RTS)
+    REVOKED --> [*]
+    REJECTED --> [*]
+    EXPIRED --> [*]

@@ -1,0 +1,48 @@
+%% title: AnaCredit Logical Data Model — v1 in-memory, planned anacredit_schema
+erDiagram
+    CREDIT_EXPOSURE {
+        string instrumentId PK "unique instrument identifier"
+        string debtorId FK "links to DEBTOR"
+        string debtorType "LEGAL_ENTITY | NATURAL_PERSON"
+        string instrumentType "OVERDRAFT | CREDIT_CARD_CREDIT | REVOLVING_CREDIT | LOAN"
+        decimal committedAmount "native currency committed"
+        decimal drawnAmount "native currency drawn (outstanding nominal)"
+        decimal committedAmountEur "EUR-equivalent committed (supplied by caller from fx-service)"
+        decimal arrearsAmount "arrears in native currency"
+        boolean defaulted "default flag"
+        date originationDate "instrument start date"
+    }
+
+    DEBTOR {
+        string debtorId PK "counterparty identifier"
+        string debtorType "LEGAL_ENTITY | NATURAL_PERSON"
+        decimal totalCommittedAmountEur "aggregated across instruments (computed at render time)"
+    }
+
+    ANACREDIT_RETURN {
+        date referenceDate PK "monthly reporting reference date (last day of month)"
+        int creditRecordCount "number of reportable instruments"
+        int exclusionNoteCount "number of dropped instruments"
+    }
+
+    CREDIT_RECORD {
+        string instrumentId PK "reportable instrument"
+        date referenceDate FK "links to ANACREDIT_RETURN"
+        decimal outstandingNominalAmount "= drawnAmount"
+        decimal offBalanceSheetAmount "= max(committedAmount − drawnAmount, 0)"
+        decimal arrearsAmount "passed through from exposure"
+        string defaultStatus "DEFAULT | NON_DEFAULT"
+    }
+
+    EXCLUSION_NOTE {
+        string instrumentId PK "dropped instrument"
+        date referenceDate FK "links to ANACREDIT_RETURN"
+        string reasonCode "HOUSEHOLD_OUT_OF_SCOPE | BELOW_THRESHOLD | NO_EXPOSURE"
+        string debtorId "counterparty that triggered exclusion"
+    }
+
+    CREDIT_EXPOSURE ||--o{ CREDIT_RECORD : "maps to (when REPORTABLE)"
+    CREDIT_EXPOSURE ||--o{ EXCLUSION_NOTE : "maps to (when excluded)"
+    ANACREDIT_RETURN ||--o{ CREDIT_RECORD : "contains"
+    ANACREDIT_RETURN ||--o{ EXCLUSION_NOTE : "contains"
+    DEBTOR ||--o{ CREDIT_EXPOSURE : "owes"

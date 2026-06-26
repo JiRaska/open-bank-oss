@@ -1,0 +1,40 @@
+%% title: Analytics Ingestion Flow — Kafka → analytics-sink → ClickHouse warehouse
+sequenceDiagram
+    autonumber
+    participant PS as Producing Service<br/>(account/transaction/balance/<br/>party/kyc/consent)
+    participant OB as Transactional Outbox<br/>(ADR-0003)
+    participant KF as Kafka<br/>analytics-events-in
+    participant AC as AnalyticsConsumer<br/>(@Incoming)
+    participant PM as PayloadMasker<br/>(PII boundary)
+    participant SG as SchemaGovernance<br/>(catalogue check)
+    participant AS as AnalyticsSink<br/>(port/out)
+    participant CH as ClickHouse<br/>openbank_analytics
+    participant DL as DeadLetterSink<br/>(quarantine)
+    participant WA as WormArchive<br/>(S3 Object Lock)
+
+    PS->>OB: write domain event (transactional)
+    OB->>KF: relay event (at-least-once)
+    KF->>AC: consume raw JSON (consumer group: analytics-sink)
+    AC->>AC: map to AnalyticsEnvelope<br/>(infer aggregateType/aggregateId/version)
+    AC->>PM: mask PII leaves<br/>(email, IBAN, PAN, phone, name, national-id)
+    PM-->>AC: masked AnalyticsEnvelope
+
+    alt schema accepted
+        AC->>SG: check eventType:schemaVersion
+        SG-->>AC: OK
+        AC->>AS: write envelope
+        AS->>CH: INSERT bronze_events<br/>(ReplacingMergeTree dedupes by event_id)
+        CH-->>AS: ack
+        AS->>AS: compute record_hash (SHA-256)
+        AS->>AS: accumulate Merkle batch
+        AS->>WA: seal integrity_anchor (merkle_root + chain)
+        WA->>CH: mirror to integrity_anchors table
+        WA-->>AS: anchor sealed
+        AS->>AC: freshness updated (IngestFreshness)
+    else schema unknown / strict mode / mapping failure
+        AC->>DL: quarantine raw message
+        DL->>CH: INSERT dead_letter_events<br/>(idempotent on content_hash)
+        DL-->>AC: dead-letter counter bumped
+    end
+
+    note over CH: silver_current_state VIEW<br/>= argMax(aggregate_version) over bronze<br/>silver_history VIEW = SCD2 intervals<br/>gold_daily_event_volume VIEW = BI rollups

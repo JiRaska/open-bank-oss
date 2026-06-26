@@ -1,0 +1,41 @@
+%% title: Audit Service — ER Schema
+erDiagram
+  AUDIT_ENTRIES {
+    bigserial id PK
+    uuid entry_id UK "NOT NULL"
+    varchar event_type "NOT NULL, indexed"
+    varchar aggregate_type "ACCOUNT | PARTY | TRANSACTION | CONSENT | KYC_CASE | UNKNOWN"
+    varchar aggregate_id "NOT NULL, indexed"
+    varchar actor_id "nullable, indexed WHERE NOT NULL"
+    varchar actor_type "USER | SERVICE | SYSTEM | …"
+    text payload "NOT NULL — verbatim JSON from originating event"
+    varchar source_service "NOT NULL"
+    varchar correlation_id
+    timestamptz occurred_at "NOT NULL — business time, indexed DESC"
+    timestamptz recorded_at "NOT NULL DEFAULT NOW() — ingest time"
+    varchar session_id "nullable — EBA ICT, indexed WHERE NOT NULL"
+    varchar user_agent "nullable — EBA ICT, max 500"
+    varchar ip_address "nullable — EBA ICT, max 45 (IPv6)"
+    varchar data_sensitivity "PUBLIC | INTERNAL | CONFIDENTIAL | RESTRICTED — DEFAULT INTERNAL"
+    timestamptz retention_until "NOT NULL — occurred_at + 10 years (trigger), indexed"
+    boolean is_security_event "NOT NULL DEFAULT false — SIEM flag, indexed WHERE true"
+    smallint risk_score "nullable"
+    char prev_hash "64 chars — SHA-256 of previous entry"
+    char record_hash "64 chars — SHA-256(prev_hash | evidential fields)"
+  }
+
+  AUDIT_OUTBOX {
+    bigserial id PK
+    uuid event_id UK "NOT NULL"
+    uuid aggregate_id "NOT NULL"
+    varchar event_type "NOT NULL"
+    text payload "NOT NULL"
+    varchar status "NOT NULL"
+    integer attempt_count "DEFAULT 0"
+    timestamptz sent_at
+    text last_error
+    timestamptz created_at "NOT NULL DEFAULT NOW()"
+    timestamptz updated_at "NOT NULL DEFAULT NOW()"
+  }
+
+  AUDIT_ENTRIES ||--o{ AUDIT_OUTBOX : "relayed via outbox"

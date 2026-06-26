@@ -1,0 +1,40 @@
+%% title: Audit Event Ingestion Flow
+sequenceDiagram
+  participant ACC as account-service
+  participant TXN as transaction-service
+  participant BAL as balance-service
+  participant PAR as party-service
+  participant KYC as kyc-service
+  participant CON as consent-service
+  participant K as Kafka<br/>(multiple topics)
+  participant AS as audit-service<br/>(consumer group: audit-service)
+  participant DB as PostgreSQL<br/>audit_entries (append-only)
+  participant OUT as audit_outbox
+  participant K2 as Kafka<br/>(relay topics)
+  participant UI as admin-ui / auditor
+
+  ACC->>K: account.created / account.frozen / …
+  TXN->>K: transaction.initiated / …
+  BAL->>K: balance.events
+  PAR->>K: party.events
+  KYC->>K: kyc.events
+  CON->>K: consent.events
+
+  K->>AS: consume (channel: audit-events-in)
+  AS->>AS: derive aggregateType from payload<br/>(accountId→ACCOUNT, partyId→PARTY,<br/>transactionId→TRANSACTION,<br/>consentId→CONSENT, kycCaseId→KYC_CASE)
+  AS->>AS: set retention_until = occurredAt + 10y
+  AS->>AS: compute record_hash (SHA-256 chain)
+  AS->>DB: INSERT audit_entries<br/>(append-only — UPDATE/DELETE rejected by DB rules)
+
+  AS->>OUT: INSERT audit_outbox (relay)
+  OUT->>K2: dispatch outbox → downstream consumers\n(SIEM, compliance, GlitchTip)
+
+  UI->>AS: GET /api/v1/audit/entries/{aggregateId}
+  AS->>DB: SELECT WHERE aggregate_id = ?<br/>ORDER BY occurred_at DESC
+  DB-->>AS: immutable rows
+  AS-->>UI: 200 OK {entries}
+
+  UI->>AS: GET /api/v1/audit/integrity
+  AS->>DB: verify hash chain continuity
+  DB-->>AS: chain status
+  AS-->>UI: 200 OK {integrity report}

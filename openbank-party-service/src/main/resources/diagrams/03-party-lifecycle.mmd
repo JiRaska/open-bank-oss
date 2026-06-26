@@ -1,0 +1,30 @@
+%% title: Party Lifecycle
+stateDiagram-v2
+  [*] --> PENDING_KYC: POST /parties (party created)
+
+  PENDING_KYC --> PENDING_KYC: KYC/AML outcome not yet terminal
+  PENDING_KYC --> ACTIVE: kyc=APPROVED AND aml=CLEARED (two-key gate)
+  PENDING_KYC --> SUSPENDED: kyc=REJECTED OR aml=BLOCKED
+
+  ACTIVE --> SUSPENDED: kyc=REJECTED OR aml=BLOCKED (re-screen event)
+  ACTIVE --> CLOSED: DELETE /parties/{id} (GDPR Art. 17 erasure)
+
+  SUSPENDED --> ACTIVE: kyc=APPROVED AND aml=CLEARED (re-clearance)
+  SUSPENDED --> CLOSED: manual closure / GDPR erasure
+
+  CLOSED --> [*]: terminal — never re-opened
+
+  note right of PENDING_KYC
+    kycStatus: NOT_STARTED → IN_PROGRESS → APPROVED/REJECTED/EXPIRED
+    amlStatus: NOT_SCREENED → CLEARED/BLOCKED
+  end note
+
+  note right of ACTIVE
+    Both keys cleared.
+    Account opening permitted.
+  end note
+
+  note right of SUSPENDED
+    Hard negative on either key.
+    Fail-closed — no account ops.
+  end note

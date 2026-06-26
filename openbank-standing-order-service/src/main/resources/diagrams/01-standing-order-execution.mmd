@@ -1,0 +1,43 @@
+%% title: Standing Order Creation and Execution Flow
+sequenceDiagram
+    participant CLIENT as Client (admin-ui / customer app)
+    participant SVC as StandingOrderService
+    participant DB as PostgreSQL
+    participant OB as OutboxDispatcher
+    participant K as Kafka
+    participant TXN as transaction-service (consumer)
+
+    note over CLIENT: Create standing order
+    CLIENT->>SVC: POST /api/v1/standing-orders
+    SVC->>DB: findByIdempotencyKey → return if exists
+    SVC->>DB: INSERT standing_orders (status=ACTIVE, next_execution_date=start_date)
+    SVC->>DB: INSERT standing_order_outbox (StandingOrderCreated)
+    SVC-->>CLIENT: 201 Created
+
+    note over OB: Outbox dispatch (every 5s)
+    OB->>DB: listProcessable
+    OB->>K: publish openbank.standing-orders.order.event (StandingOrderCreated)
+    OB->>DB: markSent
+
+    K-->>TXN: StandingOrderCreated event consumed
+
+    note over SVC: Execution scheduler (TBD — port defined, not yet wired)
+    SVC->>DB: listDueForExecution(today) — standing_orders WHERE next_execution_date <= today AND status=ACTIVE
+    loop per due order
+        SVC->>K: publish StandingOrderExecuted (triggers payment in transaction-service)
+        SVC->>DB: UPDATE standing_orders next_execution_date, last_execution_date, execution_count++
+    end
+
+    note over CLIENT: Lifecycle management
+    CLIENT->>SVC: POST /api/v1/standing-orders/{id}/pause
+    SVC->>DB: UPDATE standing_orders status=PAUSED
+    SVC->>DB: INSERT outbox (StandingOrderPaused)
+
+    CLIENT->>SVC: POST /api/v1/standing-orders/{id}/resume
+    SVC->>DB: UPDATE standing_orders status=ACTIVE
+    SVC->>DB: INSERT outbox (StandingOrderResumed)
+
+    CLIENT->>SVC: DELETE /api/v1/standing-orders/{id}
+    SVC->>DB: UPDATE standing_orders status=CANCELLED
+    SVC->>DB: INSERT outbox (StandingOrderCancelled)
+    SVC->>K: publish StandingOrderCancelled

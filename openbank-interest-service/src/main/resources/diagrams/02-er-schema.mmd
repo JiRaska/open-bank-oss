@@ -1,0 +1,68 @@
+%% title: Interest Service ER Schema
+erDiagram
+    interest_rate_configs {
+        UUID id PK
+        VARCHAR product_id
+        VARCHAR rate_type "FIXED|VARIABLE|TIERED"
+        NUMERIC annual_rate
+        NUMERIC min_balance
+        NUMERIC max_balance
+        VARCHAR day_count "ACT_365|ACT_360|ACT_ACT|30_360"
+        DATE effective_from
+        DATE effective_to
+        BOOLEAN active
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    interest_accruals {
+        UUID id PK
+        UUID account_id
+        VARCHAR product_id
+        UUID config_id FK
+        DATE accrual_date
+        NUMERIC balance
+        NUMERIC daily_rate
+        NUMERIC accrued_amount
+        CHAR_3 currency
+        VARCHAR status "ACCRUING|CAPITALIZED|REVERSED|SUSPENDED"
+        TIMESTAMPTZ capitalized_at
+        TIMESTAMPTZ created_at
+    }
+
+    interest_capitalizations {
+        UUID id PK
+        UUID account_id
+        VARCHAR product_id
+        DATE period_from
+        DATE period_to
+        NUMERIC total_accrued
+        NUMERIC capitalized_amount
+        NUMERIC gross_amount
+        NUMERIC tax_amount
+        NUMERIC net_amount
+        CHAR_3 currency
+        UUID ledger_entry_id
+        TIMESTAMPTZ created_at
+    }
+
+    withholding_tax {
+        UUID id PK
+        UUID capitalization_id FK
+        UUID account_id
+        VARCHAR party_ref
+        DATE period_from
+        DATE period_to
+        NUMERIC taxable_base
+        NUMERIC rate
+        NUMERIC tax_amount
+        CHAR_3 currency
+        VARCHAR treatment "WITHHELD|NOT_WITHHELD|EXEMPT|DEFERRED_FX"
+        VARCHAR exempt_code
+        VARCHAR status "RECORDED|REMITTED|RECONCILED|REVERSED"
+        TIMESTAMPTZ created_at
+    }
+
+    interest_rate_configs ||--o{ interest_accruals : "config_id"
+    interest_accruals }o--|| interest_capitalizations : "summarised into"
+    interest_capitalizations ||--o| withholding_tax : "capitalization_id"

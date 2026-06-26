@@ -1,0 +1,39 @@
+%% title: AnaCredit Report Lifecycle — from exposure registration to return rendering
+stateDiagram-v2
+    [*] --> ExposurePending : POST /api/v1/anacredit/exposures\n(operator / upstream feed)
+
+    ExposurePending --> ExposureRegistered : upsert accepted\n(instrumentId stored in InMemoryCreditExposureRepository)
+
+    ExposureRegistered --> ExposureRegistered : re-registered\n(idempotent upsert — same instrumentId replaces previous)
+
+    ExposureRegistered --> ReturnRequested : GET /api/v1/anacredit/returns/{referenceDate}\n(operator / auditor triggers render)
+
+    state ReturnRequested {
+        [*] --> AggregatingDebtorTotals : listAll() from repository
+        AggregatingDebtorTotals --> AssessingEligibility : per-debtor totalCommittedAmountEur computed
+
+        state AssessingEligibility {
+            [*] --> EvaluatingScope
+            EvaluatingScope --> ExcludedHousehold : debtorType == NATURAL_PERSON\nreason: HOUSEHOLD_OUT_OF_SCOPE
+            EvaluatingScope --> EvaluatingMateriality : debtorType == LEGAL_ENTITY
+
+            EvaluatingMateriality --> ExcludedBelowThreshold : totalCommittedAmountEur < €25 000\nreason: BELOW_THRESHOLD
+            EvaluatingMateriality --> EvaluatingExposure : totalCommittedAmountEur >= €25 000
+
+            EvaluatingExposure --> ExcludedNoExposure : committedAmountEur == 0\nAND drawnAmount == 0\nreason: NO_EXPOSURE
+            EvaluatingExposure --> Reportable : has commitment or drawing
+        }
+
+        Reportable --> MappedToCreditRecord : AnaCreditReturnBuilder maps\noutstandingNominalAmount = drawnAmount\noffBalanceSheetAmount = max(committed−drawn, 0)
+        ExcludedHousehold --> MappedToExclusionNote : ExclusionNote recorded\n(audit trail — nothing disappears silently)
+        ExcludedBelowThreshold --> MappedToExclusionNote
+        ExcludedNoExposure --> MappedToExclusionNote
+
+        MappedToCreditRecord --> ReturnBuilt
+        MappedToExclusionNote --> ReturnBuilt
+        ReturnBuilt --> [*]
+    }
+
+    ReturnRequested --> ReturnRendered : AnaCreditReturn { creditRecords, exclusionNotes }
+
+    ReturnRendered --> [*] : 200 OK — operator exports\nto ČNB/ECB manually (v1)\nSDMX transport is out of scope

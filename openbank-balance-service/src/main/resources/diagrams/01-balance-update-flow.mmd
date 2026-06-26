@@ -1,0 +1,42 @@
+%% title: Balance Update Flow (Event-Driven)
+sequenceDiagram
+    autonumber
+    participant TxSvc as transaction-service
+    participant Kafka as Kafka\nopenbank.transaction.events
+    participant BalanceSvc as balance-service\n(Kafka consumer)
+    participant DB as PostgreSQL\n(optimistic lock)
+    participant Outbox as outbox table
+    participant KafkaOut as Kafka\nopenbank.balance.events
+    participant AccountSvc as account-service\n(denorm cache)
+    participant NotifSvc as notification-service
+
+    TxSvc->>Kafka: TransactionCommitted\n{accountId, currency, amount, direction}
+
+    Kafka->>BalanceSvc: consume event (at-least-once)
+
+    BalanceSvc->>DB: SELECT FROM balance_movement\nWHERE (account, currency, referenceId, op)\n(idempotency check V8)
+
+    alt already applied
+        BalanceSvc-->>Kafka: ACK (skip duplicate)
+    else first delivery
+        BalanceSvc->>DB: BEGIN
+        BalanceSvc->>DB: SELECT balances FOR UPDATE\n(version check — optimistic lock)
+
+        alt CREDIT
+            BalanceSvc->>DB: UPDATE balances\nSET booked_amount += amount\navailable_amount += amount\npending_amount -= amount (if pending)
+        else DEBIT
+            BalanceSvc->>DB: UPDATE balances\nSET booked_amount -= amount\npending_amount -= amount
+        end
+
+        BalanceSvc->>DB: INSERT balance_movement\n(idempotency marker, same tx)
+        BalanceSvc->>Outbox: INSERT BalanceUpdated event
+        BalanceSvc->>DB: COMMIT
+
+        BalanceSvc-->>Kafka: ACK
+
+        Note over Outbox,KafkaOut: Transactional outbox relay
+        Outbox->>KafkaOut: BalanceUpdated\n{accountId, currency, bookedAmount,\navailableAmount, updatedAt}
+
+        KafkaOut-->>AccountSvc: update denorm balance cache
+        KafkaOut-->>NotifSvc: check low-balance threshold\n→ push notification if triggered
+    end

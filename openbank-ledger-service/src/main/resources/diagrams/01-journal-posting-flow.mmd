@@ -1,0 +1,39 @@
+%% title: Journal Posting Flow
+sequenceDiagram
+    autonumber
+    participant TxSvc as transaction-service
+    participant LedgerAPI as ledger-service\n(REST API)
+    participant Domain as JournalDomain
+    participant DB as PostgreSQL\n(partitioned journal)
+    participant Outbox as outbox table
+    participant Kafka as Kafka\nopenbank.ledger.journal.posted
+    participant BalanceSvc as balance-service
+    participant AuditSvc as audit-service
+
+    TxSvc->>LedgerAPI: POST /api/v1/journals\n{transactionId, entryDate, valueDate, lines[]}
+    LedgerAPI->>Domain: PostJournalCommand
+
+    Domain->>Domain: validate per-currency balance\n(sum debits = sum credits per CCY)
+    Domain->>Domain: check idempotency key\n(transactionId already posted?)
+
+    Domain->>DB: BEGIN
+    Domain->>DB: INSERT journal_entries\n(status=PENDING)
+    Domain->>DB: INSERT journal_lines\n(D/C legs, amounts, fx_rate)
+    Domain->>DB: UPDATE journal_entries\nSET status='POSTED'
+    Domain->>Outbox: INSERT JournalPosted event
+    Domain->>DB: COMMIT
+
+    LedgerAPI-->>TxSvc: 201 Created {journalId, entryNumber}
+
+    Note over Outbox,Kafka: Transactional outbox relay (async)
+    Outbox->>Kafka: JournalPosted {journalId, transactionId,\nentryDate, lines[]}
+
+    Kafka-->>BalanceSvc: update booked/available balance\n(ledger projection)
+    Kafka-->>AuditSvc: append tamper-evident audit record
+
+    Note over TxSvc,LedgerAPI: Reversal path
+    TxSvc->>LedgerAPI: POST /api/v1/journals/{journalId}/reverse
+    LedgerAPI->>DB: INSERT mirror journal_entry\n(status=POSTED, negated lines)
+    LedgerAPI->>DB: UPDATE original SET status='REVERSED'
+    LedgerAPI->>Outbox: INSERT JournalReversed event
+    Outbox->>Kafka: JournalReversed {originalId, reversalId}

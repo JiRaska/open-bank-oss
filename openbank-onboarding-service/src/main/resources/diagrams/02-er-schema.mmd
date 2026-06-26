@@ -1,0 +1,23 @@
+%% title: Onboarding Service — ER Schema
+erDiagram
+  ONBOARDING_RECORDS {
+    bigserial id PK
+    uuid party_id UK "NOT NULL"
+    text legal_name
+    text email
+    text party_status "NOT NULL"
+    uuid kyc_case_id
+    text kyc_status
+    boolean sca_enrolled "DEFAULT false"
+    integer device_count "DEFAULT 0"
+    text funnel_stage "NOT NULL — PENDING_KYC | KYC_IN_PROGRESS | PENDING_SCA | ACTIVE | BLOCKED"
+    text blocked_reason
+    timestamptz created_at "NOT NULL"
+    timestamptz updated_at "NOT NULL"
+  }
+
+  ONBOARDING_RECORDS_SEQ {
+    bigint last_value "allocationSize=50 (Hibernate ORM 6)"
+  }
+
+  ONBOARDING_RECORDS ||--|| ONBOARDING_RECORDS_SEQ : "id sequence"

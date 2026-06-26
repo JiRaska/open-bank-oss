@@ -1,0 +1,22 @@
+%% title: Standing Order Lifecycle
+stateDiagram-v2
+    [*] --> ACTIVE : POST /standing-orders (start_date set, next_execution_date = start_date)
+
+    ACTIVE --> PAUSED : POST /{id}/pause (operator / customer request)
+    PAUSED --> ACTIVE : POST /{id}/resume
+
+    ACTIVE --> CANCELLED : DELETE /{id}
+    PAUSED --> CANCELLED : DELETE /{id}
+
+    ACTIVE --> COMPLETED : end_date reached or last execution processed
+    ACTIVE --> FAILED : execution_count max failures exceeded
+
+    CANCELLED --> [*]
+    COMPLETED --> [*]
+    FAILED --> [*]
+
+    note on join ACTIVE
+        Each execution: next_execution_date advances by frequency,
+        execution_count++, last_execution_date updated.
+        Actual payment triggered downstream (transaction-service).
+    end note

@@ -1,0 +1,46 @@
+%% title: SCA Service — ER Schema
+erDiagram
+    SCA_CHALLENGES {
+        uuid id PK
+        uuid party_id
+        varchar purpose
+        varchar method
+        varchar status
+        timestamptz expires_at
+        timestamptz completed_at
+        timestamptz failed_at
+        text failure_reason
+        int attempt_count
+        int max_attempts
+        varchar dynamic_amount
+        varchar dynamic_currency
+        varchar dynamic_creditor_iban
+        varchar dynamic_creditor_name
+        varchar dynamic_reference
+        text redirect_url
+        timestamptz consumed_at
+        timestamptz created_at
+    }
+    SCA_ENROLLED_DEVICES {
+        uuid id PK
+        uuid party_id
+        text credential_id
+        text public_key_spki
+        varchar algorithm
+        timestamptz created_at
+    }
+    SCA_OUTBOX {
+        bigint id PK
+        uuid event_id
+        uuid aggregate_id
+        varchar event_type
+        text payload
+        varchar status
+        int attempt_count
+        timestamptz sent_at
+        text last_error
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    SCA_CHALLENGES ||--o{ SCA_OUTBOX : "emits via"
+    SCA_ENROLLED_DEVICES }o--|| SCA_CHALLENGES : "party_id"

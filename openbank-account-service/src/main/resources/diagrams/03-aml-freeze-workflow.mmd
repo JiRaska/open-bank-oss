@@ -1,0 +1,38 @@
+%% title: AML / Court-Order Freeze Workflow
+sequenceDiagram
+    autonumber
+    actor Compliance as Compliance Officer
+    participant AdminUI as admin-ui
+    participant AccountSvc as account-service
+    participant DB as PostgreSQL
+    participant Outbox as outbox table
+    participant Kafka as Kafka\nopenbank.account.events.v1
+    participant AuditSvc as audit-service
+    participant NotifSvc as notification-service
+
+    Compliance->>AdminUI: Initiate freeze\n(court order / AML hit)
+    AdminUI->>AccountSvc: POST /api/v1/accounts/{id}/freeze\n{reason, reference}
+
+    AccountSvc->>DB: BEGIN
+    AccountSvc->>DB: SELECT account WHERE id=? FOR UPDATE
+    DB-->>AccountSvc: account (status=ACTIVE)
+
+    AccountSvc->>DB: UPDATE accounts SET status='FROZEN'
+    AccountSvc->>Outbox: INSERT AccountFrozen event
+    AccountSvc->>DB: COMMIT
+
+    AccountSvc-->>AdminUI: 200 OK (account snapshot)
+
+    Note over Outbox,Kafka: Transactional outbox relay (async)
+    Outbox->>Kafka: AccountFrozen {accountId, reason, frozenBy, frozenAt}
+
+    Kafka-->>AuditSvc: persist immutable audit record\n(10-year retention)
+    Kafka-->>NotifSvc: send freeze notification\nto account owner
+
+    Note over Compliance,NotifSvc: Unfreeze path (mirror)
+    Compliance->>AdminUI: Initiate unfreeze
+    AdminUI->>AccountSvc: POST /api/v1/accounts/{id}/unfreeze
+    AccountSvc->>DB: UPDATE accounts SET status='ACTIVE'
+    AccountSvc->>Outbox: INSERT AccountUnfrozen event
+    Outbox->>Kafka: AccountUnfrozen {accountId, clearedBy, clearedAt}
+    Kafka-->>AuditSvc: persist audit record

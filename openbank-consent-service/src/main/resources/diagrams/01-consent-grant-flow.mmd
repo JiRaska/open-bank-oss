@@ -1,0 +1,26 @@
+%% title: Consent Grant Flow
+sequenceDiagram
+    participant TPP
+    participant ConsentService
+    participant SCAService
+    participant DB as PostgreSQL
+    participant Outbox as Consent Outbox
+    participant Kafka
+
+    TPP->>ConsentService: POST /api/v1/consents (party_id, grantee_id, scopes, accounts, valid_to)
+    ConsentService->>DB: INSERT consents (status=PENDING_SCA)
+    ConsentService->>DB: INSERT consent_scopes, consent_accounts
+    ConsentService->>SCAService: initiate SCA challenge (purpose=CONSENT_GRANT)
+    ConsentService-->>TPP: 201 Created (consent_id, redirect_uri for SCA)
+
+    TPP->>SCAService: complete SCA challenge
+    SCAService-->>ConsentService: SCA_CHALLENGE_COMPLETED event (via Kafka)
+
+    ConsentService->>DB: UPDATE consents SET status=ACTIVE, sca_reference
+    ConsentService->>Outbox: INSERT consent_outbox (CONSENT_GRANTED)
+    Outbox->>Kafka: publish CONSENT_GRANTED
+
+    TPP->>ConsentService: DELETE /api/v1/consents/{id}
+    ConsentService->>DB: UPDATE consents SET status=REVOKED, revoked_at, revoked_reason
+    ConsentService->>Outbox: INSERT consent_outbox (CONSENT_REVOKED)
+    Outbox->>Kafka: publish CONSENT_REVOKED

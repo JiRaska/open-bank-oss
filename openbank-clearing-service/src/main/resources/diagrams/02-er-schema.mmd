@@ -1,0 +1,70 @@
+%% title: Clearing Service ER Schema
+erDiagram
+    CLEARING_BATCHES {
+        UUID id PK
+        VARCHAR batch_reference UK
+        payment_rail rail
+        settlement_type settlement_type
+        clearing_status status
+        NUMERIC total_debit
+        NUMERIC total_credit
+        NUMERIC net_position
+        CHAR currency
+        INT item_count
+        VARCHAR cycle_id
+        DATE settlement_date
+        TIMESTAMPTZ settled_at
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    CLEARING_ITEMS {
+        UUID id PK
+        UUID batch_id FK
+        UUID payment_id
+        VARCHAR payment_reference
+        VARCHAR debtor_iban
+        VARCHAR creditor_iban
+        VARCHAR debtor_bic
+        VARCHAR creditor_bic
+        NUMERIC amount
+        CHAR currency
+        clearing_status status
+        DATE value_date
+        VARCHAR end_to_end_id
+        VARCHAR remittance_info
+        VARCHAR error_code
+        VARCHAR error_message
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    SETTLEMENT_POSITIONS {
+        UUID id PK
+        VARCHAR participant_bic
+        CHAR currency
+        VARCHAR cycle_id
+        NUMERIC gross_debit
+        NUMERIC gross_credit
+        NUMERIC net_position
+        BOOLEAN settled
+        TIMESTAMPTZ settled_at
+        TIMESTAMPTZ created_at
+    }
+
+    CLEARING_OUTBOX {
+        UUID id PK
+        UUID event_id UK
+        UUID aggregate_id
+        VARCHAR event_type
+        TEXT payload
+        VARCHAR status
+        INTEGER attempt_count
+        TIMESTAMPTZ sent_at
+        TEXT last_error
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    CLEARING_BATCHES ||--o{ CLEARING_ITEMS : "batch_id"
+    CLEARING_BATCHES ||--o{ CLEARING_OUTBOX : "aggregate_id"

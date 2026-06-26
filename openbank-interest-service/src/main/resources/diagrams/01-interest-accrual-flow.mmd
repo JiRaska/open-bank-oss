@@ -1,0 +1,39 @@
+%% title: Interest Accrual and Capitalization Flow
+sequenceDiagram
+    participant CRON as Scheduler (cron)
+    participant SVC as InterestService
+    participant DB as PostgreSQL
+    participant K as Kafka (outbox)
+    participant LED as ledger-service
+
+    note over CRON: Daily accrual — cron 0 0 1 * * ?
+    CRON->>SVC: POST /api/v1/interest/accrue/all
+    SVC->>DB: load active interest_rate_configs per product
+    loop per account
+        SVC->>SVC: resolve config (product, balance tier, effectiveFrom/To)
+        SVC->>SVC: compute daily_rate = annual_rate / day_count_basis
+        SVC->>SVC: accrued_amount = balance * daily_rate
+        SVC->>DB: UPSERT interest_accruals (account, accrualDate, product) status=ACCRUING
+    end
+    SVC-->>CRON: accrual complete
+
+    note over CRON: Monthly capitalization — cron 0 0 2 1 * ?
+    CRON->>SVC: POST /api/v1/interest/capitalize/{accountId}
+    SVC->>DB: sum ACCRUING accruals for period
+    SVC->>SVC: apply withholding tax (§36/§38d ZDP) → gross/tax/net split
+    SVC->>DB: INSERT interest_capitalizations (gross, tax, net)
+    SVC->>DB: INSERT withholding_tax (RECORDED)
+    SVC->>DB: UPDATE interest_accruals status=CAPITALIZED
+    SVC->>DB: INSERT interest_outbox (interest.withholding.recorded.v1)
+    SVC-->>CRON: capitalization complete
+
+    note over SVC: Outbox dispatcher (every 5s)
+    SVC->>K: publish interest.withholding.recorded.v1
+    K-->>LED: credit net amount to customer GL account
+
+    note over CRON: Monthly withholding remittance
+    CRON->>SVC: POST /api/v1/interest/withholding/remittances?year&month
+    SVC->>DB: aggregate RECORDED withholding_tax rows for tax month
+    SVC->>DB: INSERT withholding_remittances
+    SVC->>DB: UPDATE withholding_tax status=REMITTED
+    SVC->>K: publish interest.withholding.remitted.v1

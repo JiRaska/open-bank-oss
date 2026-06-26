@@ -1,0 +1,27 @@
+%% title: Statement Period and Close Run Lifecycle
+stateDiagram-v2
+    state "StatementCloseRun" as Run {
+        [*] --> RUNNING : cron fires or operator triggers manually
+        RUNNING --> COMPLETED : all pockets closed without errors
+        RUNNING --> COMPLETED_WITH_FAILURES : one or more pockets failed
+        COMPLETED --> [*]
+        COMPLETED_WITH_FAILURES --> [*] : failures logged in statement_close_failure
+    }
+
+    state "StatementPeriod (per pocket)" as Period {
+        [*] --> CLOSED : reconciliation passed, sequence assigned
+        CLOSED --> SUPERSEDED : corrected statement issued (supersedes_sequence set)
+        SUPERSEDED --> [*]
+        CLOSED --> [*]
+    }
+
+    state "Pocket close decision" as Decision {
+        [*] --> Reconciling : load balance + replay transactions
+        Reconciling --> OK : closing balance matches balance-service
+        Reconciling --> FAILED : mismatch — fail-closed (ADR-0035 §E)
+        OK --> [*] : statement_period inserted
+        FAILED --> [*] : statement_close_failure inserted, retry next cadence
+    }
+
+    Run --> Decision : per account × currency pocket
+    Decision --> Period : OK path

@@ -1,0 +1,54 @@
+%% title: Consent Service — ER Schema
+erDiagram
+    CONSENTS {
+        uuid id PK
+        uuid party_id
+        varchar grantee_id
+        varchar grantee_type
+        varchar grantee_name
+        varchar status
+        timestamptz valid_from
+        timestamptz valid_to
+        uuid sca_session_id
+        text redirect_uri
+        varchar tpp_transaction_id
+        varchar tpp_name
+        varchar tpp_roles
+        varchar sca_method
+        varchar sca_reference
+        int frequency_per_day
+        boolean combined_service_flag
+        timestamptz last_action_date
+        varchar revoked_by
+        varchar revocation_reason
+        varchar ip_address
+        varchar user_agent
+        timestamptz created_at
+        timestamptz updated_at
+        timestamptz revoked_at
+        text revoked_reason
+    }
+    CONSENT_SCOPES {
+        uuid consent_id FK
+        varchar scope
+    }
+    CONSENT_ACCOUNTS {
+        uuid consent_id FK
+        varchar iban
+    }
+    CONSENT_OUTBOX {
+        bigint id PK
+        uuid event_id
+        uuid aggregate_id
+        varchar event_type
+        text payload
+        varchar status
+        int attempt_count
+        timestamptz sent_at
+        text last_error
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    CONSENTS ||--o{ CONSENT_SCOPES : "has"
+    CONSENTS ||--o{ CONSENT_ACCOUNTS : "covers"
+    CONSENTS ||--o{ CONSENT_OUTBOX : "emits via"

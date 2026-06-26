@@ -1,0 +1,34 @@
+%% title: Clearing & Settlement Flow
+sequenceDiagram
+    participant PaymentRail as Payment Rail Service
+    participant ClearingResource
+    participant ClearingService
+    participant ItemRepo as ClearingItemRepository
+    participant BatchRepo as ClearingBatchRepository
+    participant PositionRepo as SettlementPositionRepository
+    participant EventPublisher
+
+    PaymentRail->>ClearingResource: POST /api/v1/clearing/items (SubmitPaymentRequest)
+    ClearingResource->>ClearingService: submit(request)
+    ClearingService->>ItemRepo: save(ClearingItem, status=PENDING)
+    ItemRepo-->>ClearingService: saved item
+    ClearingService-->>ClearingResource: ClearingItem
+    ClearingResource-->>PaymentRail: 202 Accepted
+
+    Note over ClearingService: Clearing cycle triggered (scheduled or manual)
+
+    ClearingResource->>ClearingService: triggerClearingCycle(rail)
+    ClearingService->>ItemRepo: findPendingByRail(rail, limit=1000)
+    ItemRepo-->>ClearingService: pending items[]
+
+    alt no pending items
+        ClearingService->>BatchRepo: save(emptyBatch, status=SETTLED)
+    else items present
+        ClearingService->>BatchRepo: save(batch, status=IN_CLEARING)
+        ClearingService->>ItemRepo: assignBatch + status=IN_CLEARING
+        ClearingService->>PositionRepo: upsert settlement positions per BIC
+        ClearingService->>BatchRepo: update status=SETTLED, settled_at=now
+        ClearingService->>ItemRepo: update status=SETTLED
+        ClearingService->>EventPublisher: publish BatchSettled event
+    end
+    ClearingService-->>ClearingResource: ClearingBatch

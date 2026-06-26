@@ -1,0 +1,75 @@
+%% title: Agent Orchestration Flow
+sequenceDiagram
+    participant UI as admin-ui
+    participant MCP as MCP Client (IDE)
+    participant CE as ChatEndpoint /agent/chat
+    participant ME as McpEndpoint /mcp
+    participant ACS as AgentChatService
+    participant MTR as McpToolRegistry
+    participant MG as ModelGateway
+    participant PG as AgentPolicyGate
+    participant OPA as OPA sidecar :8181
+    participant MP as ModelProvider (mock / openai-compat)
+    participant DS as Downstream Services (account · ledger · tx · balance · …)
+    participant AU as audit-service (Kafka)
+
+    alt admin-ui assistant flow
+        UI->>CE: POST /agent/chat {messages, agentId: ui-assistant}
+        CE->>ACS: chat(request)
+        ACS->>ACS: build system prompt (read-only, untrusted tool data)
+        ACS->>MTR: listTools()
+        MTR-->>ACS: tool catalogue (JSON-Schema per tool)
+        loop bounded reasoning loop (MAX_ITERATIONS=5)
+            ACS->>MG: complete(ModelRequest)
+            MG->>MP: dispatch(modelDescriptor, request)
+            MP-->>MG: ModelResponse (content / tool_calls / stop_reason)
+            MG->>AU: AuditEvent [AI_AGENT, model_call, prompt_hash, tokens]
+            MG-->>ACS: ModelResponse
+            alt stop_reason = tool_use
+                loop for each requested tool call
+                    ACS->>PG: gate(agent=ui-assistant, tool=capability, resource)
+                    PG->>OPA: POST /v1/data/agents/allow {query}
+                    OPA-->>PG: {allow: true/false}
+                    PG->>AU: AuditEvent [AI_AGENT, agent.mcp.tool_call, ALLOW/DENY]
+                    alt ALLOW
+                        PG-->>ACS: GateOutcome.ALLOW
+                        ACS->>MTR: callTool(name, args)
+                        MTR->>DS: REST GET (Bearer: openbank-services client-credentials)
+                        DS-->>MTR: domain data
+                        MTR-->>ACS: ToolCallResult (capped to MAX_TOOL_RESULT_CHARS=3000)
+                    else DENY
+                        PG-->>ACS: GateOutcome.DENY
+                        ACS->>ACS: inject DENY message into context
+                    end
+                end
+            else stop_reason = end_turn / max_tokens
+                ACS->>ACS: ProposalDetector.detect(reply)
+                ACS-->>CE: ChatOutcome {reply, toolCallRecords, isProposal}
+                CE-->>UI: ChatResponse
+            end
+        end
+    else MCP client flow
+        MCP->>ME: POST /mcp {method: initialize | ping | tools/list | tools/call}
+        ME->>ME: assert X-Agent-Id header (deny-by-default if absent)
+        alt tools/list
+            ME->>MTR: listTools()
+            MTR-->>ME: ToolDefinition[]
+            ME-->>MCP: McpResponse {tools}
+        else tools/call
+            ME->>MTR: capabilityOf(toolName)
+            MTR-->>ME: capability string
+            ME->>PG: gate(agentId, capability, resource)
+            PG->>OPA: POST /v1/data/agents/allow
+            OPA-->>PG: decision
+            PG->>AU: AuditEvent [AI_AGENT, agent.mcp.tool_call, ALLOW/DENY]
+            alt ALLOW
+                ME->>MTR: callTool(name, args)
+                MTR->>DS: REST GET (Bearer: openbank-services)
+                DS-->>MTR: domain data
+                MTR-->>ME: ToolCallResult
+                ME-->>MCP: McpResponse {content}
+            else DENY
+                ME-->>MCP: McpError {code: -32603, message: policy denied}
+            end
+        end
+    end

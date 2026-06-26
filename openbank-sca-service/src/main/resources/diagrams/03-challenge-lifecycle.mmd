@@ -1,0 +1,10 @@
+%% title: SCA Challenge Lifecycle
+stateDiagram-v2
+    [*] --> PENDING : challenge created
+    PENDING --> PENDING : verify attempt (attempt_count++)
+    PENDING --> COMPLETED : verification success\n(consumed_at set — RTS Art.5 replay guard)
+    PENDING --> FAILED : max_attempts exceeded\nor expired
+    PENDING --> EXPIRED : expires_at passed\nbefore completion
+    COMPLETED --> [*]
+    FAILED --> [*]
+    EXPIRED --> [*]

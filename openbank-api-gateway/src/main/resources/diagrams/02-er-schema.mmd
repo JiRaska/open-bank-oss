@@ -1,0 +1,48 @@
+%% title: Logical Config Model — openbank-api-gateway (DB-less Kong, no SQL schema)
+erDiagram
+    KONG_CONFIG {
+        string format_version "3.0"
+        bool transform "true"
+        string database "off (DB-less)"
+    }
+
+    KONG_SERVICE {
+        string name PK "e.g. account-service"
+        string host "host.docker.internal"
+        int port "8100–8117"
+        string path "/ or /q/health"
+        int retries "2"
+        int connect_timeout_ms "5000"
+        int write_timeout_ms "30000"
+        int read_timeout_ms "30000"
+        string protocol "http"
+    }
+
+    KONG_ROUTE {
+        string name PK "e.g. account-route"
+        string[] paths "e.g. [/api/v1/accounts]"
+        bool strip_path "false (business) | true (health)"
+        string[] protocols "[http, https]"
+    }
+
+    ENV_CONFIG {
+        string KONG_DATABASE "off"
+        string KONG_DECLARATIVE_CONFIG "/etc/kong/kong.yml"
+        string KONG_PROXY_LISTEN "0.0.0.0:8000"
+        string KONG_ADMIN_LISTEN "0.0.0.0:8001"
+        string KONG_LOG_LEVEL "info"
+        string OPENBANK_AUTH_MODE "passthrough"
+        string OPENBANK_JWT_ISSUER "optional, not enabled"
+    }
+
+    UPSTREAM_SERVICE {
+        string domain "openbank-*-service"
+        int port "8100–8117"
+        string auth "Keycloak OIDC (owns validation)"
+        string health "/q/health"
+    }
+
+    KONG_CONFIG ||--o{ KONG_SERVICE : "declares"
+    KONG_SERVICE ||--|{ KONG_ROUTE : "has one or two routes"
+    KONG_SERVICE }o--|| UPSTREAM_SERVICE : "proxies to"
+    KONG_CONFIG ||--|| ENV_CONFIG : "parameterised by"

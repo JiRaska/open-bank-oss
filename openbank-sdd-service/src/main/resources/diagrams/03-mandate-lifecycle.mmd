@@ -1,0 +1,19 @@
+%% title: SDD Mandate Lifecycle
+stateDiagram-v2
+    [*] --> ACTIVE : registerMandate() — CORE scheme
+    [*] --> PENDING_CONFIRMATION : registerMandate() — B2B scheme
+    PENDING_CONFIRMATION --> ACTIVE : confirmMandate() — debtor bank confirms
+    ACTIVE --> SUSPENDED : suspend()
+    SUSPENDED --> ACTIVE : reactivate()
+    ACTIVE --> CANCELLED : cancel() — by debtor or creditor
+    SUSPENDED --> CANCELLED : cancel()
+    PENDING_CONFIRMATION --> CANCELLED : cancel()
+    ACTIVE --> EXPIRED : MandateExpiryScheduler\n(no collection > 36 months)
+    CANCELLED --> [*]
+    EXPIRED --> [*]
+
+    note right of ACTIVE
+        lastCollectionDate updated on each collection.
+        sequenceType advances FRST → RCUR → FNAL.
+        Amendments recorded in JSON array.
+    end note

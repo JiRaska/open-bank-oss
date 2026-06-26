@@ -1,0 +1,33 @@
+%% title: Account Lifecycle
+stateDiagram-v2
+    [*] --> PENDING_ACTIVATION : POST /api/v1/accounts\n(AccountOpened event)
+
+    PENDING_ACTIVATION --> ACTIVE : KYC approved\n(kyc-service callback)
+    PENDING_ACTIVATION --> CLOSED : KYC rejected\n(AccountClosed event)
+
+    ACTIVE --> DORMANT : No activity\nfor configured period
+    ACTIVE --> FROZEN : freeze()\ncourt order / AML hit\n(AccountFrozen event)
+
+    DORMANT --> ACTIVE : Transaction occurs
+    DORMANT --> FROZEN : freeze()
+    DORMANT --> CLOSED : close()\n(AccountClosed event)
+
+    FROZEN --> ACTIVE : unfreeze()\ncompliance clears hold\n(AccountUnfrozen event)
+    FROZEN --> CLOSED : close() after\nregulatory resolution
+
+    ACTIVE --> CLOSED : close()\n(AccountClosed event)
+
+    CLOSED --> [*]
+
+    note right of FROZEN
+        All debit and credit
+        operations rejected.
+        Read-only access
+        still permitted.
+    end note
+
+    note right of CLOSED
+        data_retention_until
+        set to +10 years
+        (GDPR Art.17 / CNB)
+    end note

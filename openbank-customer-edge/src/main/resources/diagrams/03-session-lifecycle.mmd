@@ -1,0 +1,36 @@
+%% title: Session Lifecycle — Customer Request & Onboarding State
+stateDiagram-v2
+    [*] --> UNAUTHENTICATED : app opens / token absent
+
+    UNAUTHENTICATED --> ONBOARDING_ANONYMOUS : POST /onboarding/start\n(OnboardingResource, @PermitAll)
+    ONBOARDING_ANONYMOUS --> PENDING_ACTIVATION : party created in party-service\n(kycStatus=PENDING_ACTIVATION)
+    PENDING_ACTIVATION --> KYC_ACTIVE : operator completes KYC\n(out-of-band, admin-UI)
+    KYC_ACTIVE --> AUTHENTICATED : customer obtains JWT\nfrom Keycloak customers realm
+
+    UNAUTHENTICATED --> JWT_PRESENTED : app sends Bearer token
+    JWT_PRESENTED --> JWT_INVALID : OIDC validation fails\n(wrong issuer / expired / bad sig)
+    JWT_INVALID --> [*] : 401 Unauthorized
+
+    JWT_PRESENTED --> AUTHENTICATED : JWT valid, CustomerIdentity resolved\n(party_id / sub extracted)
+
+    AUTHENTICATED --> OWNERSHIP_CHECK : request targets\naccount / balance / tx / statement / payment
+    OWNERSHIP_CHECK --> FORBIDDEN : account.partyId ≠ JWT partyId
+    FORBIDDEN --> [*] : 403 Forbidden
+
+    OWNERSHIP_CHECK --> M2M_TOKEN_RESOLVED : ownership confirmed
+    AUTHENTICATED --> M2M_TOKEN_RESOLVED : party-scoped route\n(profile / notifications / devices / SCA)
+
+    M2M_TOKEN_RESOLVED --> TOKEN_CACHE_HIT : cached token valid\n(>60 s remaining)
+    M2M_TOKEN_RESOLVED --> TOKEN_REFRESH : token absent\nor <60 s to expiry
+    TOKEN_REFRESH --> TOKEN_CACHE_HIT : Keycloak client_credentials\n(operator realm) → new token cached
+
+    TOKEN_CACHE_HIT --> PROXYING : outbound request dispatched\nAuthorization: Bearer M2M token\nX-Customer-Party-Id: partyId
+
+    PROXYING --> RESPONSE_OK : upstream 2xx / 4xx
+    PROXYING --> TRANSPORT_ERROR : connect timeout / network failure
+
+    RESPONSE_OK --> [*] : proxied response to app
+    TRANSPORT_ERROR --> [*] : 502 {"error":"upstream unavailable"}
+
+    PENDING_ACTIVATION --> KYC_GATE_BLOCKED : POST /onboarding/account\nbefore kycStatus=ACTIVE
+    KYC_GATE_BLOCKED --> [*] : 403 Forbidden (ADR-0069)

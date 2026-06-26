@@ -1,0 +1,40 @@
+%% title: Transaction Orchestration — Debit + Credit + Ledger Post
+sequenceDiagram
+    autonumber
+    participant PS as Payment Service<br/>(sepa/domestic/swift)
+    participant TS as transaction-service<br/>(saga orchestrator)
+    participant BS as balance-service
+    participant LS as ledger-service
+    participant FX as fx-service
+    participant DB as PostgreSQL
+    participant KB as Kafka
+
+    PS->>TS: POST /api/v1/transactions
+    TS->>DB: INSERT transaction (PENDING)<br/>+ payment_saga (STARTED)
+    alt Cross-currency
+        TS->>FX: GET /api/v1/rates/{pair}
+        FX-->>TS: FX rate + base amount
+    end
+    TS->>DB: saga → PAYMENT_INITIATED
+    TS->>BS: POST /holds (place hold on source pocket)
+    BS-->>TS: holdId
+    TS->>DB: saga → FUNDS_RESERVED
+    TS->>LS: POST /journals (double-entry GL posting)
+    LS-->>TS: journalId
+    TS->>DB: saga → LEDGER_POSTING
+    TS->>BS: POST /debits (capture debit on source pocket)
+    BS-->>TS: debitId
+    TS->>DB: saga → FUNDS_CAPTURED
+    TS->>BS: POST /credits (credit beneficiary pocket)
+    BS-->>TS: creditId
+    TS->>DB: transaction → COMPLETED<br/>saga → COMPLETED
+    TS->>KB: openbank.transactions.transaction.completed
+    TS-->>PS: 201 Created (transactionId, status=COMPLETED)
+
+    note over TS,DB: On any failure → COMPENSATING path
+    rect rgb(255, 235, 235)
+        TS->>LS: DELETE /journals/{journalId} (reverse GL)
+        TS->>BS: DELETE /holds/{holdId} (release hold)
+        TS->>DB: transaction → FAILED / REVERSED<br/>saga → COMPENSATED
+        TS->>KB: openbank.transactions.transaction.failed
+    end

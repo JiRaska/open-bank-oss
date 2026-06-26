@@ -1,0 +1,50 @@
+%% title: SEPA Payment Service — ER Schema
+erDiagram
+    sepa_payments {
+        BIGSERIAL id PK
+        UUID payment_id UK
+        VARCHAR idempotency_key UK
+        VARCHAR payment_type
+        VARCHAR status
+        UUID debtor_account_id
+        VARCHAR debtor_iban
+        VARCHAR debtor_name
+        VARCHAR creditor_iban
+        VARCHAR creditor_name
+        VARCHAR creditor_bic
+        NUMERIC amount
+        VARCHAR currency
+        VARCHAR remittance_info
+        VARCHAR end_to_end_id
+        VARCHAR reject_reason
+        TEXT reject_detail
+        VARCHAR purpose_code
+        VARCHAR charge_bearer
+        VARCHAR category_purpose
+        TEXT regulatory_reporting
+        VARCHAR actor_id
+        VARCHAR channel
+        VARCHAR sca_reference
+        UUID consent_id
+        BOOLEAN aml_screened
+        DATE value_date
+        UUID transaction_id
+        TIMESTAMPTZ submitted_at
+        TIMESTAMPTZ completed_at
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    sepa_payment_outbox {
+        BIGSERIAL id PK
+        UUID event_id UK
+        UUID aggregate_id
+        VARCHAR event_type
+        TEXT payload
+        VARCHAR status
+        INTEGER attempt_count
+        TIMESTAMPTZ sent_at
+        TIMESTAMPTZ created_at
+    }
+
+    sepa_payments ||--o{ sepa_payment_outbox : "emits events"

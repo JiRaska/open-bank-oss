@@ -1,0 +1,56 @@
+%% title: AML Service — ER Schema
+erDiagram
+  aml_cases {
+    bigserial id PK
+    uuid case_id UK
+    varchar idempotency_key UK
+    uuid party_id
+    uuid account_id
+    uuid transaction_id
+    varchar customer_reference
+    varchar screening_type
+    varchar risk_level
+    varchar status
+    varchar alert_code
+    text alert_detail
+    varchar matched_entity
+    varchar matched_list
+    varchar matched_entity_name
+    numeric match_score
+    text decision_reason
+    varchar assigned_analyst
+    varchar decided_by
+    timestamptz screened_at
+    timestamptz decided_at
+    boolean false_positive
+    text false_positive_reason
+    varchar false_positive_by
+    timestamptz false_positive_at
+    boolean sar_filed
+    varchar sar_reference
+    timestamptz sar_filed_at
+    varchar reviewed_by
+    timestamptz reviewed_at
+    boolean escalated_to_mlro
+    timestamptz escalated_at
+    numeric amount
+    char currency
+    text notes
+    timestamptz created_at
+    timestamptz updated_at
+  }
+
+  aml_outbox {
+    bigserial id PK
+    uuid event_id UK
+    uuid aggregate_id
+    varchar event_type
+    text payload
+    varchar status
+    int attempt_count
+    text last_error
+    timestamptz created_at
+    timestamptz processed_at
+  }
+
+  aml_cases ||--o{ aml_outbox : "emits"

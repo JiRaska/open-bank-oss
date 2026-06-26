@@ -1,0 +1,29 @@
+%% title: Balance Hold Lifecycle (Card Authorisation / Pending Transfer)
+stateDiagram-v2
+    [*] --> ACTIVE : POST /api/v1/balances/{accountId}/holds\n{amount, currency, reason, referenceId, expiresAt}\nreserved_amount += amount\navailable_amount -= amount
+
+    ACTIVE --> RELEASED : DELETE /api/v1/balances/holds/{holdId}\n(authorisation expired / cancelled)\nreserved_amount -= amount\navailable_amount += amount
+
+    ACTIVE --> CAPTURED : POST /api/v1/balances/holds/{holdId}/capture\n(card transaction settled)\nreserved_amount -= amount\npending_amount += amount
+
+    ACTIVE --> AUTO_EXPIRED : expires_at reached\n(scheduled cleanup job)\nreserved_amount -= amount\navailable_amount += amount
+
+    CAPTURED --> [*] : TransactionCommitted event consumed\npending_amount -= amount\nbooked_amount -= amount
+
+    RELEASED --> [*]
+    AUTO_EXPIRED --> [*]
+
+    note right of ACTIVE
+        Hold ID is the stable
+        card-authorisation reference.
+        Optimistic lock (version)
+        prevents concurrent
+        double-release.
+    end note
+
+    note right of CAPTURED
+        pending_amount bridges
+        the gap between
+        authorisation and
+        ledger settlement.
+    end note

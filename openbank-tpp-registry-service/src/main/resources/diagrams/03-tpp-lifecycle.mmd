@@ -1,0 +1,9 @@
+%% title: TPP Lifecycle
+stateDiagram-v2
+    [*] --> ACTIVE : EBA sync — new TPP\nor manual registration
+    ACTIVE --> ACTIVE : EBA sync update\n(roles/certs refreshed)
+    ACTIVE --> SUSPENDED : NCA suspension\nor cert expired
+    ACTIVE --> BLACKLISTED : fraud / regulatory action\n(blacklisted_at set)
+    SUSPENDED --> ACTIVE : NCA reinstatement
+    SUSPENDED --> BLACKLISTED : escalation
+    BLACKLISTED --> [*] : permanent — cannot be reactivated

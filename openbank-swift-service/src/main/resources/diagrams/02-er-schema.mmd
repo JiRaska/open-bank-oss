@@ -1,0 +1,44 @@
+%% title: SWIFT Service ER Schema
+erDiagram
+    SWIFT_MESSAGES {
+        UUID id PK
+        VARCHAR idempotency_key UK
+        VARCHAR message_type
+        VARCHAR sender_bic
+        VARCHAR receiver_bic
+        VARCHAR transaction_reference
+        VARCHAR related_reference
+        CHAR value_date
+        CHAR currency
+        BIGINT amount_minor_units
+        VARCHAR ordering_customer_account
+        VARCHAR ordering_customer_name
+        VARCHAR beneficiary_account
+        VARCHAR beneficiary_name
+        VARCHAR remittance_info
+        CHAR charge_code
+        VARCHAR priority
+        VARCHAR status
+        TEXT raw_mt
+        TIMESTAMPTZ ack_received_at
+        TEXT rejection_reason
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+        BIGINT version
+    }
+
+    SWIFT_OUTBOX {
+        UUID id PK
+        UUID event_id UK
+        UUID aggregate_id
+        VARCHAR event_type
+        TEXT payload
+        VARCHAR status
+        INTEGER attempt_count
+        TIMESTAMPTZ sent_at
+        TEXT last_error
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    SWIFT_MESSAGES ||--o{ SWIFT_OUTBOX : "aggregate_id"

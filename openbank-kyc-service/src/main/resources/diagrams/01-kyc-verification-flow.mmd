@@ -1,0 +1,40 @@
+%% title: KYC Verification Flow
+sequenceDiagram
+  participant PS as party-service
+  participant K as Kafka
+  participant KYC as kyc-service
+  participant DB as PostgreSQL
+  participant OPS as Compliance Officer
+  participant REV as Reviewer (four-eyes)
+
+  PS->>K: PARTY_CREATED → openbank.party.events
+  K-->>KYC: PartyEventConsumer receives PARTY_CREATED
+
+  KYC->>DB: openCaseForParty (idempotent, uq index guard)
+  KYC->>DB: INSERT INTO kyc_cases (status=OPEN, risk_level=MEDIUM, due_diligence_level=CDD)
+  KYC->>DB: INSERT INTO kyc_outbox (KYC_CASE_OPENED)
+  KYC->>K: KYC_CASE_OPENED → openbank.kyc.events
+
+  note over KYC: Checks accumulate via REST
+  OPS->>KYC: PUT /api/v1/kyc/cases/{id}/checks/IDENTITY (status=PASSED)
+  OPS->>KYC: PUT /api/v1/kyc/cases/{id}/checks/ADDRESS (status=PASSED)
+  OPS->>KYC: PUT /api/v1/kyc/cases/{id}/checks/PEP_SCREENING (status=PASSED)
+  OPS->>KYC: PUT /api/v1/kyc/cases/{id}/checks/SANCTIONS_SCREENING (status=PASSED)
+  OPS->>KYC: PUT /api/v1/kyc/cases/{id}/checks/ADVERSE_MEDIA (status=PASSED)
+
+  KYC->>DB: UPDATE kyc_cases SET status=UNDER_REVIEW
+
+  note over REV: Four-eyes control — different user than assignee
+  REV->>KYC: POST /api/v1/kyc/cases/{id}/approve
+  KYC->>DB: UPDATE kyc_cases SET status=APPROVED, reviewed_by, reviewed_at
+  KYC->>DB: INSERT INTO kyc_outbox (KYC_CASE_APPROVED)
+  KYC->>K: KYC_CASE_APPROVED → openbank.kyc.events
+
+  K-->>PS: KYC_CASE_APPROVED consumed → kycStatus=APPROVED
+
+  alt Case rejected
+    REV->>KYC: POST /api/v1/kyc/cases/{id}/reject
+    KYC->>DB: UPDATE kyc_cases SET status=REJECTED
+    KYC->>K: KYC_CASE_REJECTED → openbank.kyc.events
+    K-->>PS: KYC_CASE_REJECTED → kycStatus=REJECTED, party SUSPENDED
+  end

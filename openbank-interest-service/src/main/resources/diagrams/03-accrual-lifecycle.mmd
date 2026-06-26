@@ -1,0 +1,30 @@
+%% title: Interest Accrual and Withholding Tax Lifecycle
+stateDiagram-v2
+    state "InterestAccrual" as Accrual {
+        [*] --> ACCRUING : daily cron — balance × daily_rate
+        ACCRUING --> CAPITALIZED : monthly capitalization run
+        ACCRUING --> SUSPENDED : account suspended / rate config deactivated
+        ACCRUING --> REVERSED : correction / reversal
+        CAPITALIZED --> [*]
+        SUSPENDED --> ACCRUING : account reactivated
+        REVERSED --> [*]
+    }
+
+    state "WithholdingTax" as WHT {
+        [*] --> RECORDED : capitalization applies §36 ZDP
+        RECORDED --> REMITTED : monthly remittance batch assembled
+        REMITTED --> RECONCILED : finanční úřad confirms receipt
+        RECORDED --> REVERSED : capitalization reversed
+        REMITTED --> REVERSED : late reversal (pre-reconciliation)
+        RECONCILED --> [*]
+        REVERSED --> [*]
+    }
+
+    state "InterestCapitalization" as Cap {
+        [*] --> Created : sum ACCRUING accruals, split gross/tax/net
+        Created --> LinkedToLedger : ledger-service credits net amount
+        LinkedToLedger --> [*]
+    }
+
+    Accrual --> Cap : ACCRUING rows aggregated
+    Cap --> WHT : withholding_tax row inserted

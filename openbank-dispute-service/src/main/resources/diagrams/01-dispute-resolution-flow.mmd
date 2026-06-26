@@ -1,0 +1,59 @@
+%% title: Dispute Resolution Flow — openbank-dispute-service
+sequenceDiagram
+    actor Customer as Customer / admin-UI
+    participant DR as DisputeResource<br/>(REST :8135)
+    participant DS as DisputeService<br/>(use cases)
+    participant Repo as DisputeRepository<br/>(Panache / PG)
+    participant Outbox as DisputeOutboxDispatcher<br/>(@Scheduled 5s)
+    participant Kafka as Kafka<br/>openbank.disputes.dispute.event
+    participant Consumers as audit-service<br/>/ notification
+
+    Note over Customer,Consumers: Open a dispute
+    Customer->>DR: POST /api/v1/disputes
+    DR->>DS: openDispute(request)
+    DS->>DS: generate reference DSP-<epochMillis>
+    DS->>DS: compute resolutionDeadline = filingDate + 45d
+    DS->>Repo: persist Dispute (status=OPEN, resolution=PENDING)
+    DS->>Repo: append DisputeTimeline (OPENED, actor)
+    Repo-->>DS: saved Dispute
+    DS-->>DR: Dispute
+    DR-->>Customer: 201 Created {id, reference, status=OPEN}
+
+    Note over Customer,Consumers: Add evidence
+    Customer->>DR: POST /api/v1/disputes/{id}/evidence
+    DR->>DS: addEvidence(id, evidenceRequest)
+    DS->>Repo: persist DisputeEvidence (fileReference, submittedBy)
+    DS->>Repo: append DisputeTimeline (EVIDENCE_ADDED, actor)
+    DR-->>Customer: 201 Created
+
+    Note over Customer,Consumers: Status update (operator)
+    Customer->>DR: PUT /api/v1/disputes/{id}
+    DR->>DS: updateDispute(id, updateRequest)
+    DS->>Repo: update Dispute (status, resolution, resolvedBy, resolvedAt)
+    DS->>Repo: append DisputeTimeline (STATUS_CHANGED, actor)
+    DR-->>Customer: 200 OK {updated Dispute}
+
+    Note over Customer,Consumers: Withdraw
+    Customer->>DR: POST /api/v1/disputes/{id}/withdraw?actor=…
+    DR->>DS: withdraw(id, actor)
+    DS->>DS: updateDispute → status=WITHDRAWN, resolution=WITHDRAWN
+    DR-->>Customer: 200 OK
+
+    Note over Customer,Consumers: Escalate
+    Customer->>DR: POST /api/v1/disputes/{id}/escalate?actor=…
+    DR->>DS: escalate(id, actor)
+    DS->>DS: updateDispute → status=ESCALATED
+    DR-->>Customer: 200 OK
+
+    Note over Outbox,Consumers: Outbox → Kafka publish (async, every 5s)
+    loop Every 5 seconds
+        Outbox->>Repo: listProcessable(batch=25)
+        Repo-->>Outbox: pending outbox rows
+        Outbox->>Kafka: publishWithResilience(payload)<br/>[@Bulkhead(1) @CircuitBreaker @Retry(2) @Timeout(3s)]
+        alt success
+            Outbox->>Repo: markSent(eventId)
+        else failure
+            Outbox->>Repo: markFailed(eventId, error)
+        end
+    end
+    Kafka-->>Consumers: DisputeEvent (audit / notification / card-issuance block)

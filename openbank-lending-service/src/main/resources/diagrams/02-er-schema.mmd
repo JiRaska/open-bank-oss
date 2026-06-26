@@ -1,0 +1,84 @@
+%% title: Lending Service ER Schema
+erDiagram
+    loan_application {
+        UUID id PK
+        UUID party_id
+        NUMERIC requested_amount
+        CHAR_3 currency
+        NUMERIC nominal_annual_rate
+        INTEGER term_periods
+        INTEGER periods_per_year
+        VARCHAR method "ANNUITY|EQUAL_PRINCIPAL|BULLET"
+        DATE first_due_date
+        VARCHAR status "PROPOSED|APPROVED|REJECTED|DISBURSED"
+        VARCHAR proposed_by
+        VARCHAR decided_by
+        TEXT decision_reason
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ decided_at
+    }
+
+    loan {
+        UUID id PK
+        UUID application_id FK
+        UUID party_id
+        NUMERIC principal
+        CHAR_3 currency
+        NUMERIC nominal_annual_rate
+        INTEGER term_periods
+        INTEGER periods_per_year
+        VARCHAR method "ANNUITY|EQUAL_PRINCIPAL|BULLET"
+        DATE first_due_date
+        VARCHAR status "ACTIVE|CLOSED|WRITTEN_OFF"
+        TIMESTAMPTZ disbursed_at
+        BIGINT version
+        TIMESTAMPTZ created_at
+    }
+
+    installment {
+        UUID id PK
+        UUID loan_id FK
+        INTEGER number
+        DATE due_date
+        CHAR_3 currency
+        NUMERIC opening_balance
+        NUMERIC principal
+        NUMERIC interest
+        NUMERIC payment
+        NUMERIC closing_balance
+        BOOLEAN paid
+        TIMESTAMPTZ paid_at
+        BOOLEAN interest_accrued
+        TIMESTAMPTZ accrued_at
+    }
+
+    collateral {
+        UUID id PK
+        UUID loan_id FK
+        VARCHAR type "REAL_ESTATE|VEHICLE|SECURITIES|CASH_DEPOSIT|GUARANTEE|OTHER"
+        TEXT description
+        NUMERIC market_value
+        CHAR_3 currency
+        NUMERIC haircut
+        TIMESTAMPTZ valued_at
+        TIMESTAMPTZ created_at
+    }
+
+    lending_outbox {
+        BIGSERIAL id PK
+        UUID event_id UK
+        UUID aggregate_id
+        VARCHAR event_type
+        TEXT payload
+        VARCHAR status
+        INTEGER attempt_count
+        TIMESTAMPTZ sent_at
+        TEXT last_error
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    loan_application ||--|| loan : "application_id"
+    loan ||--o{ installment : "loan_id"
+    loan ||--o{ collateral : "loan_id"
+    loan ||--o{ lending_outbox : "aggregate_id"

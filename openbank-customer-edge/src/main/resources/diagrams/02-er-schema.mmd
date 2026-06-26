@@ -1,0 +1,98 @@
+%% title: Logical Data Model — customer-edge in-flight data (no persistent store)
+%% Note: openbank-customer-edge is fully stateless — no PostgreSQL schema, no Flyway migrations.
+%% This diagram shows the logical data structures that transit the edge at runtime
+%% and the upstream owners where the data is actually persisted.
+
+erDiagram
+    CUSTOMER_IDENTITY {
+        string partyId PK "from JWT party_id / sub claim"
+        string realm "openbank-customers"
+        string roles "e.g. ROLE_CUSTOMER"
+    }
+
+    M2M_TOKEN_CACHE {
+        string accessToken "service-account JWT (operator realm)"
+        instant expiresAt "refreshed when <60 s remaining"
+    }
+
+    ACCOUNT {
+        uuid accountId PK
+        string partyId FK "ownership check: must == CUSTOMER_IDENTITY.partyId"
+        string iban
+        string currency
+        string status
+    }
+
+    BALANCE {
+        uuid accountId FK
+        decimal amount
+        string currency
+        string type "available / booked"
+    }
+
+    TRANSACTION {
+        uuid transactionId PK
+        uuid accountId FK
+        decimal amount
+        string currency
+        string direction "CREDIT / DEBIT"
+        string referenceId
+        instant valueDate
+    }
+
+    STATEMENT {
+        uuid accountId FK
+        string currency
+        integer legalSequence
+        string format "camt.053 / MT940 / PDF"
+    }
+
+    PAYMENT_INSTRUCTION {
+        string debtorIban "enriched by edge from BBAN if needed"
+        string debtorLegalName "resolved from party-service"
+        string creditorIban
+        decimal amount
+        string currency
+        string reference
+    }
+
+    SCA_CHALLENGE {
+        uuid challengeId PK
+        string partyId FK
+        string method "PUSH / TOTP"
+        string status "PENDING / APPROVED / REJECTED / EXPIRED"
+        instant expiresAt
+    }
+
+    SCA_DEVICE {
+        uuid deviceId PK
+        string partyId FK
+        string credentialId
+        string publicKey
+    }
+
+    PUSH_DEVICE {
+        uuid deviceId PK
+        string partyId FK
+        string platform "FCM / APNs"
+    }
+
+    PARTY_PROFILE {
+        string partyId PK
+        string legalName
+        string email
+        string phone
+        string kycStatus "PENDING_ACTIVATION / ACTIVE / SUSPENDED"
+        string address
+    }
+
+    CUSTOMER_IDENTITY ||--o{ ACCOUNT : "ownership enforced at edge"
+    ACCOUNT ||--o{ BALANCE : "one per currency"
+    ACCOUNT ||--o{ TRANSACTION : "ledger entries"
+    ACCOUNT ||--o{ STATEMENT : "periodic"
+    CUSTOMER_IDENTITY ||--o{ SCA_CHALLENGE : "initiated"
+    CUSTOMER_IDENTITY ||--o{ SCA_DEVICE : "enrolled"
+    CUSTOMER_IDENTITY ||--o{ PUSH_DEVICE : "registered"
+    CUSTOMER_IDENTITY ||--|| PARTY_PROFILE : "proxied from party-service"
+    PAYMENT_INSTRUCTION }o--|| ACCOUNT : "debtor account"
+    M2M_TOKEN_CACHE ||--o{ ACCOUNT : "used for outbound requests"

@@ -1,0 +1,57 @@
+%% title: Ledger Service — ER Schema
+erDiagram
+    gl_accounts {
+        UUID id PK
+        VARCHAR code UK
+        VARCHAR name
+        VARCHAR type
+        CHAR currency_code
+        UUID parent_id FK
+        BOOLEAN is_leaf
+        BOOLEAN is_enabled
+        TIMESTAMPTZ created_at
+    }
+
+    journal_entries {
+        UUID id PK
+        DATE entry_date PK
+        BIGINT entry_number UK
+        UUID transaction_id
+        DATE value_date
+        VARCHAR description
+        VARCHAR status
+        TIMESTAMPTZ created_at
+        UUID created_by
+        BIGINT version
+    }
+
+    journal_lines {
+        UUID id PK
+        UUID journal_id FK
+        UUID gl_account_id FK
+        CHAR side
+        NUMERIC amount
+        CHAR currency_code
+        NUMERIC fx_rate
+        NUMERIC base_amount
+        CHAR base_currency
+        INT sequence
+        UUID sub_account_id
+    }
+
+    ledger_year_close {
+        UUID id PK
+        INT fiscal_year UK
+        VARCHAR status
+        TIMESTAMPTZ computed_at
+        NUMERIC total_debits
+        NUMERIC total_credits
+        INT account_count
+        VARCHAR content_hash
+        VARCHAR attested_by
+        TIMESTAMPTZ attested_at
+    }
+
+    gl_accounts ||--o{ gl_accounts : "parent / child"
+    gl_accounts ||--o{ journal_lines : "posted to"
+    journal_entries ||--o{ journal_lines : "contains"

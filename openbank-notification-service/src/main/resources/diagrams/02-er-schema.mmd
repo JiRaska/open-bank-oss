@@ -1,0 +1,75 @@
+%% title: Notification Service — ER Schema
+erDiagram
+  NOTIFICATIONS {
+    bigserial id PK
+    uuid notification_id UK "NOT NULL"
+    uuid party_id "NOT NULL, indexed"
+    varchar channel "EMAIL | PUSH | SMS | IN_APP"
+    varchar template "ACCOUNT_OPENED | OTP_CODE | KYC_APPROVED | …"
+    varchar recipient "NOT NULL"
+    varchar subject
+    text body "NOT NULL"
+    varchar status "PENDING | SENT | FAILED | BOUNCED — indexed"
+    jsonb metadata "DEFAULT {}"
+    timestamptz sent_at
+    timestamptz created_at "NOT NULL DEFAULT NOW()"
+  }
+
+  NOTIFICATION_OUTBOX {
+    bigserial id PK
+    uuid event_id UK "NOT NULL"
+    uuid aggregate_id "NOT NULL, indexed"
+    varchar event_type "NOT NULL"
+    text payload "NOT NULL"
+    varchar status "NOT NULL — indexed (status, created_at)"
+    integer attempt_count "DEFAULT 0"
+    timestamptz sent_at
+    text last_error
+    timestamptz created_at "NOT NULL DEFAULT NOW()"
+    timestamptz updated_at "NOT NULL DEFAULT NOW()"
+  }
+
+  DISPATCH_CONTROL_LOG {
+    bigserial id PK
+    varchar control_key "NOT NULL, indexed (key, version_no DESC)"
+    varchar state "RUNNING | HALTED"
+    bigint version_no "NOT NULL — append-only desired-state log"
+    text reason
+    varchar actor
+    timestamptz effective_from "NOT NULL"
+    boolean deferred_review_required "DEFAULT false"
+    timestamptz created_at "NOT NULL DEFAULT NOW()"
+  }
+
+  DISPATCH_RESUME_PROPOSAL {
+    bigserial id PK
+    varchar proposal_id UK "NOT NULL"
+    varchar control_key "NOT NULL, indexed (key, state)"
+    text reason
+    varchar proposed_by "NOT NULL"
+    timestamptz proposed_at "NOT NULL"
+    varchar state "PENDING | APPROVED | REJECTED | EXECUTED"
+    varchar decided_by
+    timestamptz decided_at
+    text decision_reason
+    timestamptz executed_at
+  }
+
+  DEVICE_TOKENS {
+    bigserial id PK
+    uuid device_id UK "NOT NULL"
+    uuid party_id "NOT NULL, indexed (party_id, status)"
+    varchar app_instance "NOT NULL"
+    varchar platform "ANDROID | IOS — unique (platform, token)"
+    text token "NOT NULL — provider-issued, write-only"
+    varchar app_version
+    varchar os_version
+    varchar status "ACTIVE | RETIRED — DEFAULT ACTIVE"
+    timestamptz last_used_at
+    timestamptz created_at "NOT NULL DEFAULT NOW()"
+    timestamptz updated_at "NOT NULL DEFAULT NOW()"
+  }
+
+  NOTIFICATIONS ||--o{ NOTIFICATION_OUTBOX : "relayed via outbox"
+  DEVICE_TOKENS }o--|| NOTIFICATIONS : "push fan-out target"
+  DISPATCH_CONTROL_LOG ||--o{ DISPATCH_RESUME_PROPOSAL : "controls via four-eyes"

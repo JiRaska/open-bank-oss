@@ -1,0 +1,26 @@
+%% title: ER Schema — openbank-agent-service
+erDiagram
+    AGENT_PROPOSAL {
+        UUID id PK
+        TEXT title
+        TEXT rationale
+        TEXT suggested_action
+        VARCHAR_128 proposed_by
+        TIMESTAMPTZ proposed_at
+        VARCHAR_16 state "PROPOSED | APPROVED | REJECTED"
+        VARCHAR_128 decided_by "NULL when pending"
+        TIMESTAMPTZ decided_at "NULL when pending"
+        TEXT decision_reason "NULL when pending"
+        VARCHAR_128 model_id "model that generated proposal"
+        VARCHAR_128 correlation_id "links to chat session / audit trace"
+    }
+
+    AGENT_KILL_SWITCH {
+        VARCHAR_128 scope PK "agent id or '*' for global halt"
+        BOOLEAN halted
+        TEXT reason
+        VARCHAR_128 set_by "OIDC subject of operator"
+        TIMESTAMPTZ set_at
+    }
+
+    AGENT_PROPOSAL ||--o| AGENT_KILL_SWITCH : "scope '*' suspends all proposals"

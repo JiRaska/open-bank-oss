@@ -1,0 +1,66 @@
+%% title: Transaction Service — ER Schema
+erDiagram
+    transactions {
+        UUID id PK
+        VARCHAR reference_number UK
+        VARCHAR type
+        UUID source_account_id
+        UUID target_account_id
+        NUMERIC amount
+        CHAR currency_code
+        NUMERIC fx_rate
+        NUMERIC base_amount
+        CHAR base_currency_code
+        VARCHAR status
+        DATE value_date
+        DATE booking_date
+        TIMESTAMPTZ initiated_at
+        TIMESTAMPTZ completed_at
+        VARCHAR actor_id
+        VARCHAR channel
+        VARCHAR correlation_id
+        VARCHAR purpose_code
+        BOOLEAN aml_screened
+        VARCHAR source_iban
+        VARCHAR source_bban
+        VARCHAR target_iban
+        VARCHAR target_bban
+        VARCHAR counterparty_name
+        VARCHAR end_to_end_id
+        VARCHAR bank_transaction_code
+        DATE settlement_date
+        UUID sca_challenge_id
+        VARCHAR sca_exemption
+        UUID reversal_of
+        VARCHAR idempotency_key UK
+        BIGINT version
+    }
+
+    payment_sagas {
+        UUID id PK
+        UUID transaction_id UK
+        VARCHAR state
+        VARCHAR idempotency_key UK
+        TEXT failure_reason
+        TEXT compensation_reason
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+        BIGINT version
+    }
+
+    transaction_outbox {
+        BIGSERIAL id PK
+        UUID event_id UK
+        UUID aggregate_id
+        VARCHAR event_type
+        VARCHAR event_key
+        TEXT payload
+        VARCHAR status
+        INTEGER attempt_count
+        TIMESTAMPTZ sent_at
+        TIMESTAMPTZ created_at
+    }
+
+    transactions ||--o| payment_sagas : "drives saga"
+    transactions ||--o{ transaction_outbox : "emits events"
+    transactions ||--o| transactions : "reversal_of"

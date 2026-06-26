@@ -1,0 +1,81 @@
+%% title: PID Service — ER Schema
+erDiagram
+    PARTIES {
+        uuid id PK
+        varchar case_id
+        varchar case_type
+        varchar case_status
+        varchar case_last_actor
+        varchar case_last_reason_code
+        timestamptz case_last_transition_at
+        text case_metadata
+    }
+    PARTY_EXTERNAL_IDS {
+        uuid id PK
+        uuid party_id FK
+        varchar id_type
+        text id_value_blind
+    }
+    PARTY_ID_DOCUMENTS {
+        uuid id PK
+        uuid party_id FK
+        varchar doc_type
+        varchar doc_number
+        date expires_at
+    }
+    PARTY_RELATIONSHIPS {
+        uuid id PK
+        uuid party_id FK
+        uuid related_party_id FK
+        varchar relationship_type
+    }
+    IDENTITY_VERIFICATION_CASE {
+        uuid id PK
+        uuid party_id FK
+        varchar trigger_type
+        varchar status
+        uuid reviewer_id
+        timestamptz created_at
+        timestamptz resolved_at
+    }
+    EUDI_CREDENTIAL_OFFER {
+        uuid id PK
+        uuid party_id FK
+        text offer_uri
+        timestamptz expires_at
+        timestamptz redeemed_at
+    }
+    EUDI_STATUS_LIST_ENTRY {
+        bigint idx PK
+        uuid credential_id
+        varchar status
+        timestamptz updated_at
+    }
+    EUDI_PRESENTATION_EXCHANGE {
+        uuid id PK
+        uuid party_id FK
+        text nonce
+        varchar state
+        timestamptz verified_at
+    }
+    PID_OUTBOX {
+        bigint id PK
+        uuid event_id
+        uuid aggregate_id
+        varchar event_type
+        text payload
+        varchar status
+        int attempt_count
+        timestamptz sent_at
+        text last_error
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    PARTIES ||--o{ PARTY_EXTERNAL_IDS : "has"
+    PARTIES ||--o{ PARTY_ID_DOCUMENTS : "has"
+    PARTIES ||--o{ PARTY_RELATIONSHIPS : "has"
+    PARTIES ||--o{ IDENTITY_VERIFICATION_CASE : "triggers"
+    PARTIES ||--o{ EUDI_CREDENTIAL_OFFER : "receives"
+    PARTIES ||--o{ EUDI_PRESENTATION_EXCHANGE : "performs"
+    EUDI_CREDENTIAL_OFFER ||--|| EUDI_STATUS_LIST_ENTRY : "tracked by"
+    PARTIES ||--o{ PID_OUTBOX : "emits via"

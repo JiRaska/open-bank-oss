@@ -1,0 +1,15 @@
+%% title: Card Lifecycle
+stateDiagram-v2
+    [*] --> PENDING : issueCard()
+    PENDING --> ACTIVE : activate()
+    ACTIVE --> SUSPENDED : suspend()
+    SUSPENDED --> ACTIVE : resume()
+    ACTIVE --> BLOCKED : block(reason)
+    SUSPENDED --> BLOCKED : block(reason)
+    ACTIVE --> EXPIRED : expiry date reached
+    PENDING --> CANCELLED : cancel()
+    ACTIVE --> CANCELLED : cancel()
+    SUSPENDED --> CANCELLED : cancel()
+    BLOCKED --> [*]
+    EXPIRED --> [*]
+    CANCELLED --> [*]

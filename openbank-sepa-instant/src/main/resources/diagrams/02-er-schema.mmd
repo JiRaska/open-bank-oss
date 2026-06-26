@@ -1,0 +1,43 @@
+%% title: SEPA Instant (SCT Inst) ER Schema
+erDiagram
+    SCT_INST_PAYMENTS {
+        BIGSERIAL id PK
+        UUID payment_id UK
+        VARCHAR idempotency_key UK
+        VARCHAR status
+        UUID debtor_account_id
+        VARCHAR debtor_iban
+        VARCHAR debtor_name
+        VARCHAR creditor_iban
+        VARCHAR creditor_name
+        VARCHAR creditor_bic
+        NUMERIC amount
+        VARCHAR currency
+        VARCHAR remittance_info
+        VARCHAR end_to_end_id
+        TIMESTAMPTZ execution_timeout_at
+        TIMESTAMPTZ settled_at
+        TIMESTAMPTZ recalled_at
+        VARCHAR recall_reason
+        VARCHAR reject_reason
+        TEXT reject_detail
+        TIMESTAMPTZ submitted_at
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    SCT_INST_OUTBOX {
+        UUID id PK
+        UUID event_id UK
+        UUID aggregate_id
+        VARCHAR event_type
+        TEXT payload
+        VARCHAR status
+        INTEGER attempt_count
+        TIMESTAMPTZ sent_at
+        TEXT last_error
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    SCT_INST_PAYMENTS ||--o{ SCT_INST_OUTBOX : "aggregate_id = payment_id"

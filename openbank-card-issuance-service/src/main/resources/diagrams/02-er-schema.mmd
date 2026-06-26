@@ -1,0 +1,41 @@
+%% title: Card Issuance ER Schema
+erDiagram
+    CARDS {
+        UUID id PK
+        VARCHAR idempotency_key UK
+        UUID party_id
+        UUID account_id
+        VARCHAR product_code
+        VARCHAR card_type
+        VARCHAR network
+        VARCHAR masked_pan
+        VARCHAR cardholder_name
+        VARCHAR embossed_name
+        DATE expiry_date
+        VARCHAR status
+        BIGINT daily_limit_minor_units
+        BIGINT monthly_limit_minor_units
+        CHAR currency
+        TEXT delivery_address
+        TIMESTAMPTZ activated_at
+        TIMESTAMPTZ blocked_at
+        TEXT blocked_reason
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    CARD_OUTBOX {
+        UUID id PK
+        UUID event_id UK
+        UUID aggregate_id
+        VARCHAR event_type
+        TEXT payload
+        VARCHAR status
+        INTEGER attempt_count
+        TIMESTAMPTZ sent_at
+        TEXT last_error
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    CARDS ||--o{ CARD_OUTBOX : "aggregate_id"

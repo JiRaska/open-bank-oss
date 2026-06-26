@@ -1,0 +1,51 @@
+%% title: SEPA Payment Flow — Initiation → Screening → Clearing → Completion
+sequenceDiagram
+    autonumber
+    participant CH as Admin UI / Channel
+    participant SP as sepa-payment-service
+    participant SAP as sanctions-service
+    participant AML as aml-service
+    participant DB as PostgreSQL
+    participant KB as Kafka
+    participant CL as clearing-service
+    participant LS as ledger-service
+    participant TS as transaction-service
+
+    CH->>SP: POST /api/v1/sepa-payments<br/>(Idempotency-Key, Bearer token)<br/>type: SCT or SCT_INST
+    SP->>DB: INSERT sepa_payment (status=RECEIVED)<br/>+ outbox event (idempotent)
+
+    SP->>SAP: POST /api/v1/sanctions/screen<br/>(debtor name + creditor name)
+
+    alt CLEAR
+        SAP-->>SP: verdict=CLEAR
+        SP->>DB: status → VALIDATED
+        SP->>KB: sepa.payment.created + status-changed(VALIDATED)
+        SP-->>CH: 201 Created (paymentId, status=VALIDATED)
+    else HIT
+        SAP-->>SP: verdict=HIT
+        SP->>AML: POST /api/v1/aml/cases (best-effort)
+        SP->>DB: status → REJECTED (SANCTIONS_HIT)
+        SP->>KB: sepa.payment.status-changed(REJECTED)
+        SP-->>CH: 201 Created (paymentId, status=REJECTED)
+    else POTENTIAL_HIT or outage
+        SAP-->>SP: verdict=POTENTIAL_HIT or timeout
+        SP->>DB: status stays RECEIVED
+        SP->>KB: sepa.payment.created (RECEIVED)
+        SP-->>CH: 201 Created (paymentId, status=RECEIVED)
+        note over SP: Operator reviews and drives manually
+    end
+
+    note over SP,TS: Processing pipeline (async, event-driven)
+    KB-->>CL: sepa.payment.status-changed(VALIDATED)
+    CL->>SP: PATCH /status → PROCESSING
+    SP->>DB: status → PROCESSING
+    SP->>KB: status-changed(PROCESSING)
+
+    CL->>TS: POST /transactions (debit booking)
+    TS-->>CL: transactionId
+    SP->>DB: transaction_id recorded
+
+    CL->>LS: POST /journals (SEPA GL posting)
+    CL->>SP: PATCH /status → COMPLETED
+    SP->>DB: status → COMPLETED, completed_at = now()
+    SP->>KB: sepa.payment.status-changed(COMPLETED)

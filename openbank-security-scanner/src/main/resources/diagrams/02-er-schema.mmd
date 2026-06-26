@@ -1,0 +1,60 @@
+%% title: Security Scanner — ER Schema (odvozeno z Flyway migrací V2–V3 + doménového modelu)
+erDiagram
+
+    security_outbox {
+        BIGINT id PK "BIGSERIAL; alokace přes security_outbox_seq (INCREMENT 50)"
+        UUID event_id UK "NOT NULL UNIQUE"
+        UUID aggregate_id "NOT NULL, idx: idx_security_outbox_aggregate_id"
+        VARCHAR_128 event_type "NOT NULL"
+        TEXT payload "NOT NULL — JSON tělo události"
+        VARCHAR_16 status "NOT NULL — PENDING | SENT | FAILED | DEAD"
+        INTEGER attempt_count "NOT NULL DEFAULT 0"
+        TIMESTAMPTZ sent_at "nullable"
+        TEXT last_error "nullable"
+        TIMESTAMPTZ created_at "NOT NULL DEFAULT NOW()"
+        TIMESTAMPTZ updated_at "NOT NULL DEFAULT NOW()"
+    }
+
+    SecurityScanResult {
+        UUID id PK "in-memory / report context"
+        STRING serviceName
+        STRING serviceUrl
+        INSTANT scannedAt
+        LONG durationMs
+        BOOLEAN reachable
+        INT score "0–100"
+        STRING grade "A+ A B C D F"
+        STRING tlsVersion "nullable"
+        BOOLEAN openApiAvailable
+        BOOLEAN healthEndpointSecured
+    }
+
+    SecurityFinding {
+        STRING id PK "napr. MISSING_HEADER_CSP"
+        ENUM category "OwaspCategory A01–A10"
+        ENUM severity "CRITICAL HIGH MEDIUM LOW INFO"
+        STRING title
+        STRING description
+        STRING remediation
+        STRING cweId "nullable"
+        DOUBLE cvssScore "nullable"
+        STRING endpoint "nullable"
+        STRING evidence "nullable"
+    }
+
+    PlatformSecurityReport {
+        STRING reportId PK "UUID string"
+        INSTANT generatedAt
+        INT totalServices
+        INT reachableServices
+        INT platformScore "0–100"
+        STRING platformGrade "A+ … F"
+        INT criticalFindings
+        INT highFindings
+        MAP owaspCoverage "OwaspCategory → count"
+        MAP complianceStatus "PSD2_SCA EBA_ICT_RISK GDPR OWASP_TOP10 CNB_SECURITY"
+    }
+
+    PlatformSecurityReport ||--o{ SecurityScanResult : "serviceResults"
+    SecurityScanResult ||--o{ SecurityFinding : "findings"
+    SecurityScanResult ||--o| security_outbox : "events published via outbox (aggregate_id = scan UUID)"

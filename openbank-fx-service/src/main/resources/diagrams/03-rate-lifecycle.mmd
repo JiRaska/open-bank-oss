@@ -1,0 +1,29 @@
+%% title: FX Conversion and Rate Lifecycle
+stateDiagram-v2
+    [*] --> RateValid : POST /convert — SPOT rate resolved
+
+    state "FxRate (validity window)" as RateValid {
+        [*] --> Active : valid_from ≤ now ≤ valid_to
+        Active --> Expired : valid_to passed
+    }
+
+    state "FxConversion lifecycle" as ConvFlow {
+        [*] --> PENDING : screening unavailable or REVIEW hit
+        [*] --> SETTLED : sanctions CLEAR
+        [*] --> FAILED : sanctions BLOCK / HIT
+
+        PENDING --> SETTLED : operator clears AML hold
+        PENDING --> FAILED : operator rejects / escalated BLOCK
+        SETTLED --> REVERSED : compliance reversal
+        FAILED --> [*]
+        REVERSED --> [*]
+    }
+
+    state "ČNB rate ingestion (daily)" as CnbFlow {
+        [*] --> Fetched : cron 14:40 Europe/Prague
+        Fetched --> Upserted : parse denni_kurz.txt, source=CNB
+        Upserted --> [*] : idempotent on (source, pair, validFrom)
+    }
+
+    RateValid --> ConvFlow : rate pinned (rateId + appliedRate)
+    CnbFlow --> RateValid : upsert as INDICATIVE / CNB
