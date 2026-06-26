@@ -14,6 +14,7 @@ import com.openbank.libs.analytics.BackfillRequest
 import com.openbank.libs.analytics.IngestSource
 import com.openbank.libs.analytics.Proposal
 import com.openbank.libs.analytics.ProposalState
+import java.time.Clock
 import java.time.Instant
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -158,7 +159,7 @@ class ClickHouseAdaptersTest {
             aggregateType = "ACCOUNT",
             aggregateId = "acc-1",
             reason = "fix restated balance",
-            requestedBy = "alice"
+            requestedBy = "alice",
         )
         return Proposal(
             id = "prop-1",
@@ -168,7 +169,7 @@ class ClickHouseAdaptersTest {
             state = ProposalState.APPROVED,
             decidedBy = "bob",
             decidedAt = Instant.parse("2026-05-01T11:00:00Z"),
-            decisionReason = "looks right"
+            decisionReason = "looks right",
         )
     }
 
@@ -201,9 +202,14 @@ class ClickHouseAdaptersTest {
             from = Instant.parse("2025-01-01T00:00:00Z"),
             to = Instant.parse("2025-02-01T00:00:00Z"),
             reason = "gap fill",
-            requestedBy = "carol"
+            requestedBy = "carol",
         )
-        val proposal = Proposal(id = "p2", action = request, proposedBy = "carol", proposedAt = Instant.parse("2026-05-01T10:00:00Z"))
+        val proposal = Proposal(
+            id = "p2",
+            action = request,
+            proposedBy = "carol",
+            proposedAt = Instant.parse("2026-05-01T10:00:00Z"),
+        )
 
         val parsed = store.parseRow(mapper.readTree(store.rowJson(proposal, Instant.now())))
 
@@ -219,6 +225,7 @@ class ClickHouseAdaptersTest {
         val store = ClickHouseProposalStore().apply {
             clickhouse = client
             mapper = this@ClickHouseAdaptersTest.mapper
+            clock = Clock.systemUTC()
         }
         store.save(sampleProposal())
         assertThat(client.lastInsertTable).isEqualTo("reload_proposals")

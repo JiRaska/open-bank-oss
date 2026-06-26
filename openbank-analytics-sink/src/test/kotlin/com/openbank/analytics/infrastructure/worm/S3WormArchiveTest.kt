@@ -9,6 +9,7 @@ import com.openbank.analytics.application.port.out.IntegrityAnchor
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Clock
 import java.time.Instant
 
 /**
@@ -25,13 +26,14 @@ class S3WormArchiveTest {
     /** Captures every request and replays scripted responses chosen by URL. */
     private class ScriptedS3(
         mapper: ObjectMapper,
-        private val responder: (method: String, url: String) -> Pair<Int, String>
+        private val responder: (method: String, url: String) -> Pair<Int, String>,
     ) : S3WormArchive() {
         data class Call(val method: String, val url: String, val headers: Map<String, String>, val body: ByteArray?)
         val calls = mutableListOf<Call>()
 
         init {
             this.mapper = mapper
+            clock = Clock.systemUTC()
             endpoint = "https://s3.eu-central-1.amazonaws.com"
             region = "eu-central-1"
             bucket = "test-bucket"
@@ -40,7 +42,12 @@ class S3WormArchiveTest {
             retentionYears = 10
         }
 
-        override fun send(method: String, url: String, headers: Map<String, String>, body: ByteArray?): Pair<Int, String> {
+        override fun send(
+            method: String,
+            url: String,
+            headers: Map<String, String>,
+            body: ByteArray?,
+        ): Pair<Int, String> {
             calls += Call(method, url, headers, body)
             return responder(method, url)
         }
@@ -64,7 +71,7 @@ class S3WormArchiveTest {
             headers = mapOf("host" to "example.amazonaws.com", "x-amz-date" to "20150830T123600Z"),
             payloadHash = emptyHash,
             amzDate = "20150830T123600Z",
-            service = "service"
+            service = "service",
         )
 
         // Authoritative value computed independently from the AWS SigV4 get-vanilla inputs; the
@@ -72,7 +79,7 @@ class S3WormArchiveTest {
         assertThat(auth).isEqualTo(
             "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, " +
                 "SignedHeaders=host;x-amz-date, " +
-                "Signature=ea21d6f05e96a897f6000a1a293f0a5bf0f92a00343409e820dce329ca6365ea"
+                "Signature=ea21d6f05e96a897f6000a1a293f0a5bf0f92a00343409e820dce329ca6365ea",
         )
     }
 
@@ -117,9 +124,11 @@ class S3WormArchiveTest {
         s3.seal(anchor(sealedAt = Instant.parse("2026-05-30T12:00:00Z")))
 
         val put = s3.calls.single()
+        val invertedTs = "%019d".format(Long.MAX_VALUE - Instant.parse("2026-05-30T12:00:00Z").toEpochMilli())
         assertThat(put.method).isEqualTo("PUT")
-        assertThat(put.url).isEqualTo("https://s3.eu-central-1.amazonaws.com/test-bucket/anchors/" +
-            "%019d".format(Long.MAX_VALUE - Instant.parse("2026-05-30T12:00:00Z").toEpochMilli()) + "-anchor-1.json")
+        assertThat(put.url).isEqualTo(
+            "https://s3.eu-central-1.amazonaws.com/test-bucket/anchors/$invertedTs-anchor-1.json",
+        )
         assertThat(put.headers["x-amz-object-lock-mode"]).isEqualTo("COMPLIANCE")
         // retention-years=10 -> sealed 2026 + 10 = 2036.
         assertThat(put.headers["x-amz-object-lock-retain-until-date"]).isEqualTo("2036-05-30T12:00:00Z")
@@ -166,13 +175,13 @@ class S3WormArchiveTest {
     private fun anchor(
         anchorId: String = "anchor-1",
         previousAnchorHash: String? = "prev-hash",
-        sealedAt: Instant = Instant.parse("2026-05-30T12:00:00Z")
+        sealedAt: Instant = Instant.parse("2026-05-30T12:00:00Z"),
     ) = IntegrityAnchor(
         anchorId = anchorId,
         merkleRoot = "merkle-root-abc",
         previousAnchorHash = previousAnchorHash,
         recordCount = 7,
         source = "STREAM",
-        sealedAt = sealedAt
+        sealedAt = sealedAt,
     )
 }

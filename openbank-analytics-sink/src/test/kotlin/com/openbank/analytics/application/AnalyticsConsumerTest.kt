@@ -19,7 +19,10 @@ import org.junit.jupiter.api.Test
 class AnalyticsConsumerTest {
 
     private val mapper = ObjectMapper()
-    private val consumer = AnalyticsConsumer().apply { objectMapper = mapper; clock = Clock.systemUTC() }
+    private val consumer = AnalyticsConsumer().apply {
+        objectMapper = mapper
+        clock = Clock.systemUTC()
+    }
 
     @Test
     fun `maps canonical fields from an outbox event`() {
@@ -39,7 +42,7 @@ class AnalyticsConsumerTest {
               "actorType": "ROLE_OPERATOR",
               "traceId": "trace-9"
             }
-            """.trimIndent()
+            """.trimIndent(),
         )
 
         val env = consumer.toEnvelope(node)
@@ -89,7 +92,7 @@ class AnalyticsConsumerTest {
                 "active": true
               }
             }
-            """.trimIndent()
+            """.trimIndent(),
         )
 
         val payload = consumer.toEnvelope(node).payload
@@ -111,7 +114,7 @@ class AnalyticsConsumerTest {
               "eventType": "party.updated",
               "payload": { "contact": { "phone": "+420123456789" }, "tags": ["vip", "new"] }
             }
-            """.trimIndent()
+            """.trimIndent(),
         )
 
         @Suppress("UNCHECKED_CAST")

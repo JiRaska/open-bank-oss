@@ -34,12 +34,16 @@ class RecoveryFlowsTest {
 
     private class CapturingSink : AnalyticsSink {
         val written = mutableListOf<AnalyticsEnvelope>()
-        override suspend fun write(envelope: AnalyticsEnvelope) { written += envelope }
+        override suspend fun write(envelope: AnalyticsEnvelope) {
+            written += envelope
+        }
     }
 
     private class CapturingDlq : DeadLetterSink {
         val records = mutableListOf<DeadLetterRecord>()
-        override suspend fun quarantine(record: DeadLetterRecord) { records += record }
+        override suspend fun quarantine(record: DeadLetterRecord) {
+            records += record
+        }
     }
 
     private class FakeBackfillSource(private val payloads: List<String>) : BackfillSource {
@@ -48,7 +52,9 @@ class RecoveryFlowsTest {
 
     private class CapturingWorm : WormArchive {
         val anchors = mutableListOf<IntegrityAnchor>()
-        override suspend fun seal(anchor: IntegrityAnchor) { anchors += anchor }
+        override suspend fun seal(anchor: IntegrityAnchor) {
+            anchors += anchor
+        }
         override suspend fun latest(): IntegrityAnchor? = anchors.lastOrNull()
     }
 
@@ -56,7 +62,12 @@ class RecoveryFlowsTest {
     fun `malformed message is quarantined to the DLQ, not silently dropped`() = runBlocking<Unit> {
         val sink = CapturingSink()
         val dlq = CapturingDlq()
-        val consumer = AnalyticsConsumer().apply { this.sink = sink; this.deadLetters = dlq; objectMapper = mapper; clock = Clock.systemUTC() }
+        val consumer = AnalyticsConsumer().apply {
+            this.sink = sink
+            this.deadLetters = dlq
+            objectMapper = mapper
+            clock = Clock.systemUTC()
+        }
 
         consumer.consume("{ this is not valid json")
 
@@ -69,7 +80,12 @@ class RecoveryFlowsTest {
     @Test
     fun `DLQ content hash is stable so re-delivery is idempotent`() = runBlocking<Unit> {
         val dlq = CapturingDlq()
-        val consumer = AnalyticsConsumer().apply { sink = CapturingSink(); deadLetters = dlq; objectMapper = mapper; clock = Clock.systemUTC() }
+        val consumer = AnalyticsConsumer().apply {
+            sink = CapturingSink()
+            deadLetters = dlq
+            objectMapper = mapper
+            clock = Clock.systemUTC()
+        }
 
         consumer.consume("broken")
         consumer.consume("broken")
@@ -81,9 +97,9 @@ class RecoveryFlowsTest {
     fun `backfill dedupes by eventId and tags every row with source and batchId`() = runBlocking<Unit> {
         val idX = UUID.randomUUID()
         val idY = UUID.randomUUID()
-        fun event(id: UUID, aggId: String) =
-            """{ "eventId":"$id", "aggregateType":"ACCOUNT", "aggregateId":"$aggId",
-                 "aggregateVersion":1, "eventType":"account.changed", "sourceService":"svc" }"""
+        fun event(id: UUID, aggId: String) = """{ "eventId":"$id", "aggregateType":"ACCOUNT",
+            "aggregateId":"$aggId", "aggregateVersion":1,
+            "eventType":"account.changed", "sourceService":"svc" }"""
 
         val sink = CapturingSink()
         val worm = CapturingWorm()
@@ -91,9 +107,13 @@ class RecoveryFlowsTest {
             source = FakeBackfillSource(listOf(event(idX, "a"), event(idX, "a"), event(idY, "b")))
             this.sink = sink
             this.worm = worm
-            consumer = AnalyticsConsumer().apply { objectMapper = mapper; clock = Clock.systemUTC() }
+            consumer = AnalyticsConsumer().apply {
+                objectMapper = mapper
+                clock = Clock.systemUTC()
+            }
             objectMapper = mapper
             chunk = Duration.ofDays(1)
+            clock = Clock.systemUTC()
         }
 
         val report = service.run(
@@ -101,8 +121,9 @@ class RecoveryFlowsTest {
                 source = IngestSource.BACKFILL,
                 from = Instant.parse("2026-01-01T00:00:00Z"),
                 to = Instant.parse("2026-01-01T06:00:00Z"),
-                reason = "outage gap 2026-01-01", requestedBy = "ops-1"
-            )
+                reason = "outage gap 2026-01-01",
+                requestedBy = "ops-1",
+            ),
         )
 
         // Duplicate eventId collapsed; both surviving rows carry the batch lineage.
@@ -128,12 +149,17 @@ class RecoveryFlowsTest {
             source = FakeBackfillSource(emptyList())
             this.sink = sink
             this.worm = worm
-            consumer = AnalyticsConsumer().apply { objectMapper = mapper; clock = Clock.systemUTC() }
+            consumer = AnalyticsConsumer().apply {
+                objectMapper = mapper
+                clock = Clock.systemUTC()
+            }
             objectMapper = mapper
             chunk = Duration.ofDays(1)
+            clock = Clock.systemUTC()
         }
         val service = SensitiveReloadService().apply {
             store = com.openbank.analytics.infrastructure.proposal.InMemoryProposalStore()
+            clock = Clock.systemUTC()
             this.backfill = backfill
         }
 
@@ -142,8 +168,9 @@ class RecoveryFlowsTest {
                 source = IngestSource.CORRECTION,
                 from = Instant.parse("2026-01-01T00:00:00Z"),
                 to = Instant.parse("2026-01-02T00:00:00Z"),
-                reason = "restate fees", requestedBy = "alice"
-            )
+                reason = "restate fees",
+                requestedBy = "alice",
+            ),
         )
 
         // Cannot execute before approval.

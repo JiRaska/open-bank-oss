@@ -9,6 +9,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.openbank.libs.analytics.AggregateKey
 import java.net.URI
+import java.time.Clock
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -23,16 +24,14 @@ class HttpReconciliationSourceTest {
     private val mapper = ObjectMapper().registerKotlinModule().registerModule(JavaTimeModule())
 
     /** Captures requested URIs and returns canned bodies keyed by URI. Token acquisition is disabled. */
-    private inner class FakeSource(
-        spec: String,
-        private val bodies: Map<String, String>
-    ) : HttpReconciliationSource() {
+    private inner class FakeSource(spec: String, private val bodies: Map<String, String>) : HttpReconciliationSource() {
         val requested = mutableListOf<URI>()
         var fetchCalls = 0
 
         init {
             endpointsSpec = spec
             mapper = this@HttpReconciliationSourceTest.mapper
+            clock = Clock.systemUTC()
         }
 
         override fun bearerToken(): String? = null
@@ -48,7 +47,7 @@ class HttpReconciliationSourceTest {
     fun `parses endpoint spec skipping blanks and malformed entries`() {
         val source = FakeSource("account=http://acct:8081, , balance=http://bal:8082,broken,trailing=", emptyMap())
         assertThat(source.endpoints()).containsExactlyInAnyOrderEntriesOf(
-            mapOf("account" to "http://acct:8081", "balance" to "http://bal:8082")
+            mapOf("account" to "http://acct:8081", "balance" to "http://bal:8082"),
         )
     }
 
@@ -70,19 +69,19 @@ class HttpReconciliationSourceTest {
             "account=http://acct:8081,balance=http://bal:8082/",
             mapOf(
                 "http://acct:8081/api/v1/analytics/reconciliation-summary" to accountBody,
-                "http://bal:8082/api/v1/analytics/reconciliation-summary" to balanceBody
-            )
+                "http://bal:8082/api/v1/analytics/reconciliation-summary" to balanceBody,
+            ),
         )
 
         assertThat(source.currentVersions()).containsExactlyInAnyOrderEntriesOf(
             mapOf(
                 AggregateKey("account", "a1") to 7L,
                 AggregateKey("account", "a2") to 2L,
-                AggregateKey("balance", "b1") to 5L
-            )
+                AggregateKey("balance", "b1") to 5L,
+            ),
         )
         assertThat(source.rowCountsByType()).containsExactlyInAnyOrderEntriesOf(
-            mapOf("account" to 2L, "account_pocket" to 3L, "balance" to 1L)
+            mapOf("account" to 2L, "account_pocket" to 3L, "balance" to 1L),
         )
     }
 
@@ -94,7 +93,11 @@ class HttpReconciliationSourceTest {
              "aggregates":[{"aggregateType":"account","aggregateId":"a1","maxVersion":1}]}
         """.trimIndent()
         val source = object : HttpReconciliationSource() {
-            init { endpointsSpec = "account=http://acct:8081,down=http://down:9999"; mapper = this@HttpReconciliationSourceTest.mapper }
+            init {
+                endpointsSpec = "account=http://acct:8081,down=http://down:9999"
+                mapper = this@HttpReconciliationSourceTest.mapper
+                clock = Clock.systemUTC()
+            }
             override fun bearerToken(): String? = null
             override suspend fun fetch(uri: URI, authHeader: String?): String {
                 if (uri.host == "down") throw IllegalStateException("connection refused")
@@ -113,7 +116,7 @@ class HttpReconciliationSourceTest {
         """.trimIndent()
         val source = FakeSource(
             "account=http://acct:8081",
-            mapOf("http://acct:8081/api/v1/analytics/reconciliation-summary" to body)
+            mapOf("http://acct:8081/api/v1/analytics/reconciliation-summary" to body),
         )
         source.currentVersions()
         source.rowCountsByType()
