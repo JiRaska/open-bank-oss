@@ -20,7 +20,7 @@ import java.time.ZoneOffset
 
 class ClearingSimulatorServiceTest {
     private val fixedClock: Clock = Clock.fixed(Instant.parse("2026-06-22T10:18:00Z"), ZoneOffset.UTC)
-    private val service = ClearingSimulatorService(fixedClock)
+    private val service = ClearingSimulatorService().apply { clock = fixedClock }
     private val pacs008 = Pacs008Builder()
     private val now = Instant.parse("2026-06-22T10:18:00Z")
 

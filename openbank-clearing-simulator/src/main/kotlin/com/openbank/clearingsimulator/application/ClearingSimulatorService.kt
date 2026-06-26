@@ -24,6 +24,7 @@ import com.openbank.libs.iso20022.PaymentStatusReport
 import com.openbank.libs.iso20022.ReceivedCreditTransfer
 import com.openbank.libs.iso20022.SettlementMethod
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
@@ -45,7 +46,10 @@ data class ClearingResult(val statusReportXml: String, val settled: Boolean, val
  * returned: a non-conforming output is a simulator bug ([IllegalStateException]), never a reject.
  */
 @ApplicationScoped
-class ClearingSimulatorService(private val clock: Clock) {
+class ClearingSimulatorService {
+
+    @Inject
+    lateinit var clock: Clock
     private val pacs008Validator = Iso20022Validator.forSchema(Pacs008Builder.SCHEMA_RESOURCE)
     private val pacs002Validator = Iso20022Validator.forSchema(Pacs002Builder.SCHEMA_RESOURCE)
     private val camt054Validator = Iso20022Validator.forSchema(Camt054Builder.SCHEMA_RESOURCE)
