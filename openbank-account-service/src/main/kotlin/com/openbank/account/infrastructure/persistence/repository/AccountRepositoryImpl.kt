@@ -31,9 +31,15 @@ class AccountRepositoryImpl :
 
     override suspend fun findByPartyId(partyId: UUID, limit: Int, afterId: UUID?): List<Account> = Panache.withSession {
         val query = if (afterId != null) {
-            find("partyId = ?1 AND id > ?2 ORDER BY id", partyId, afterId)
+            find(
+                "partyId = ?1 AND id > ?2 ORDER BY CASE accountType WHEN 'CURRENT' THEN 0 WHEN 'SAVINGS' THEN 1 ELSE 2 END, id",
+                partyId, afterId,
+            )
         } else {
-            find("partyId = ?1 ORDER BY id", partyId)
+            find(
+                "partyId = ?1 ORDER BY CASE accountType WHEN 'CURRENT' THEN 0 WHEN 'SAVINGS' THEN 1 ELSE 2 END, id",
+                partyId,
+            )
         }
         query.page(0, limit).list()
     }.awaitSuspending().map { it.toDomain() }
