@@ -334,7 +334,13 @@ class ProductCatalogService @Inject constructor(private val clock: Clock) {
                     autoApprovalEnabled = false,
                 ),
                 fees = listOf(
-                    Fee(name = "Monthly Fee", type = "MONTHLY", amount = 19.99, currency = "EUR", frequency = "MONTHLY"),
+                    Fee(
+                        name = "Monthly Fee",
+                        type = "MONTHLY",
+                        amount = 19.99,
+                        currency = "EUR",
+                        frequency = "MONTHLY",
+                    ),
                     Fee(
                         name = "SEPA Transfer",
                         type = "TRANSACTION",
@@ -773,7 +779,13 @@ class ProductCatalogService @Inject constructor(private val clock: Clock) {
                 cardConfig = CardConfig(enabled = false),
                 multiCurrencyConfig = MultiCurrencyConfig(enabled = false, defaultCurrency = "CZK"),
                 fees = listOf(
-                    Fee(name = "Account Maintenance", type = "MONTHLY", amount = 0.0, currency = "CZK", frequency = "MONTHLY"),
+                    Fee(
+                        name = "Account Maintenance",
+                        type = "MONTHLY",
+                        amount = 0.0,
+                        currency = "CZK",
+                        frequency = "MONTHLY",
+                    ),
                 ),
                 termsAndConditions = listOf(
                     TermsAndConditions(
@@ -1008,7 +1020,11 @@ class ProductCatalogService @Inject constructor(private val clock: Clock) {
                 baseRate = 0.0,
                 fee = 99.0,
                 tags = listOf("current", "czk", "retail", "multi-currency"),
-                eligibilitySegments = listOf(EligibilitySegment.RETAIL, EligibilitySegment.SENIOR, EligibilitySegment.STUDENT),
+                eligibilitySegments = listOf(
+                    EligibilitySegment.RETAIL,
+                    EligibilitySegment.SENIOR,
+                    EligibilitySegment.STUDENT,
+                ),
                 cardConfig = CardConfig(
                     enabled = true,
                     minCards = 1,
@@ -1095,7 +1111,8 @@ class ProductCatalogService @Inject constructor(private val clock: Clock) {
                         changeNote = "Úvodní verze — korunový běžný účet s měnovými kapsami",
                     ),
                 ),
-                description = "CZK-base everyday current account: single IBAN, currency pockets, SEPA + domestic CERTIS, overdraft",
+                description = "CZK-base everyday current account: single IBAN, currency pockets, " +
+                    "SEPA + domestic CERTIS, overdraft",
                 createdAt = Instant.parse("2025-01-01T10:00:00Z"),
                 updatedAt = Instant.parse("2025-01-01T10:00:00Z"),
             ),
@@ -1113,7 +1130,11 @@ class ProductCatalogService @Inject constructor(private val clock: Clock) {
                 baseRate = 0.0,
                 fee = 9.99,
                 tags = listOf("current", "multi-currency", "umbrella", "premium", "fx"),
-                eligibilitySegments = listOf(EligibilitySegment.PREMIUM, EligibilitySegment.RETAIL, EligibilitySegment.BUSINESS),
+                eligibilitySegments = listOf(
+                    EligibilitySegment.PREMIUM,
+                    EligibilitySegment.RETAIL,
+                    EligibilitySegment.BUSINESS,
+                ),
                 cardConfig = CardConfig(
                     enabled = true,
                     minCards = 1,
@@ -1198,7 +1219,8 @@ class ProductCatalogService @Inject constructor(private val clock: Clock) {
                         changeNote = "Úvodní verze — zastřešující multi-měnový účet (1 IBAN, 12 kapes)",
                     ),
                 ),
-                description = "Flagship multi-currency umbrella: one IBAN, currency pockets across 12 currencies, 0.5% FX margin, cross-pocket transfers",
+                description = "Flagship multi-currency umbrella: one IBAN, currency pockets across 12 currencies, " +
+                    "0.5% FX margin, cross-pocket transfers",
                 createdAt = Instant.parse("2025-01-01T10:00:00Z"),
                 updatedAt = Instant.parse("2025-01-01T10:00:00Z"),
             ),
@@ -1263,12 +1285,11 @@ class ProductCatalogService @Inject constructor(private val clock: Clock) {
      * the catalog is a tracked follow-up; today the catalog is the in-memory seed,
      * but the fee schedule is now served *by the service*, not duplicated in the web.)
      */
-    fun listFeeSchedule(): List<FeeScheduleItem> =
-        store.values
-            .sortedBy { it.code }
-            .flatMap { product ->
-                product.fees.map { fee -> FeeScheduleItem.of(product, fee) }
-            }
+    fun listFeeSchedule(): List<FeeScheduleItem> = store.values
+        .sortedBy { it.code }
+        .flatMap { product ->
+            product.fees.map { fee -> FeeScheduleItem.of(product, fee) }
+        }
 }
 
 /**
