@@ -75,6 +75,9 @@ quarkus:
     transaction-service:
       url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
       scope: jakarta.inject.Singleton
+    account-service:
+      url: ${ACCOUNT_SERVICE_URL:http://account-service.accounts.svc:8100}
+      scope: jakarta.inject.Singleton
   redis:
     hosts: redis://localhost:6379
   smallrye-reactive-messaging:

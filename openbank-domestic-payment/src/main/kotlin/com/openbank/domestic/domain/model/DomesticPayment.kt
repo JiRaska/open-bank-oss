@@ -21,7 +21,7 @@ enum class DomesticPaymentStatus {
 
 enum class DomesticPaymentPriority { STANDARD, URGENT, INSTANT }
 
-enum class DomesticTransferScope { OWN_ACCOUNTS, INTERNAL_CLIENT, TECHNICAL_ACCOUNT }
+enum class DomesticTransferScope { OWN_ACCOUNTS, INTERNAL_CLIENT, TECHNICAL_ACCOUNT, EXTERNAL }
 
 enum class DomesticRejectReason {
     INVALID_ACCOUNT_NUMBER,

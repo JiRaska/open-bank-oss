@@ -13,7 +13,9 @@ import com.openbank.domestic.infrastructure.rest.dto.TransitionDomesticPaymentSt
 import com.openbank.domestic.infrastructure.rest.dto.toResponse
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
+import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
+import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
@@ -26,6 +28,7 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.net.URI
@@ -40,6 +43,17 @@ class DomesticPaymentResource(
     private val idempotencyStore: IdempotencyStore,
     private val objectMapper: ObjectMapper,
 ) {
+
+    // OIDC identity is taken from the CDI request-scoped SecurityIdentity, NOT the
+    // JAX-RS @Context SecurityContext — consistent with how account-service resolves identity
+    // in suspend resource methods (smallrye-context-propagation carries it across dispatches).
+    @Inject
+    lateinit var identity: SecurityIdentity
+
+    private val actorId: UUID?
+        get() = (identity.principal as? JsonWebToken)?.subject?.let {
+            runCatching { UUID.fromString(it) }.getOrNull()
+        }
 
     @POST
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
@@ -58,7 +72,7 @@ class DomesticPaymentResource(
                 .build()
         }
 
-        val payment = paymentUseCase.createPayment(request.toCommand(idempotencyKey))
+        val payment = paymentUseCase.createPayment(request.toCommand(idempotencyKey, actorId))
         val responseBody = payment.toResponse()
         idempotencyStore.save(idempotencyKey, 201, objectMapper.writeValueAsString(responseBody))
 

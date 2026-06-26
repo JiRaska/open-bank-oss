@@ -481,7 +481,7 @@ class DomesticPaymentActivitiesImplTest {
         constantSymbol = "0308",
         messageForPayee = "Utility bill",
         priority = DomesticPaymentPriority.URGENT,
-        transferScope = DomesticTransferScope.INTERNAL_CLIENT,
+        transferScope = DomesticTransferScope.EXTERNAL,
         technicalAccountCode = null,
         statementLabel = "Monthly settlement",
         endToEndId = "DOMU123",

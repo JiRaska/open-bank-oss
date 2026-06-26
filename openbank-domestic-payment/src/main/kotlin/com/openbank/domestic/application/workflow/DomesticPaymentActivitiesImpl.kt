@@ -21,9 +21,11 @@ import com.openbank.domestic.application.port.out.SettlementUnavailableException
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticRejectReason
+import com.openbank.domestic.domain.model.DomesticTransferScope
 import com.openbank.domestic.domain.screening.ScreeningDecision
 import com.openbank.domestic.domain.screening.ScreeningMatchStatus
 import com.openbank.domestic.domain.screening.ScreeningPolicy
+import com.openbank.domestic.domain.screening.ScreeningResult
 import com.openbank.domestic.domain.screening.ScreeningRole
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.vertx.VertxContextSupport
@@ -65,6 +67,14 @@ open class DomesticPaymentActivitiesImpl(
         val payment = paymentRepository.findById(paymentId)
             ?: error("Payment $paymentId not found during screening activity")
 
+        when (payment.transferScope) {
+            DomesticTransferScope.OWN_ACCOUNTS, DomesticTransferScope.TECHNICAL_ACCOUNT -> {
+                log.infof("%s transfer %s — sanctions screening skipped (SDD)", payment.transferScope, paymentId)
+                return@vtx ScreeningDecision.CLEAR
+            }
+            else -> Unit
+        }
+
         val results = try {
             listOf(
                 screeningPort.screen(payment.debtorName, ScreeningRole.DEBTOR, "$paymentId:debtor"),
@@ -72,40 +82,48 @@ open class DomesticPaymentActivitiesImpl(
             )
         } catch (ex: ScreeningUnavailableException) {
             log.warnf(ex, "Sanctions screening unavailable for payment %s; returning REVIEW", paymentId)
-            openCaseQuietly(
-                payment = payment,
-                riskLevel = AmlCaseRiskLevel.MEDIUM,
-                alertCode = ALERT_SCREENING_UNAVAILABLE,
-                detail = ex.message,
-                matchedEntity = null,
-            )
+            openCaseQuietly(payment, AmlCaseRiskLevel.MEDIUM, ALERT_SCREENING_UNAVAILABLE, ex.message, null)
             return@vtx ScreeningDecision.REVIEW
         }
 
-        val decision = ScreeningPolicy.decide(results)
-
+        val decision = applySddPolicy(payment, ScreeningPolicy.decide(results), paymentId)
         if (decision == ScreeningDecision.BLOCK || decision == ScreeningDecision.REVIEW) {
-            val nonClear = results.filter {
-                it.status != ScreeningMatchStatus.CLEAR && it.status != ScreeningMatchStatus.WHITELISTED
-            }
-            val detail = nonClear
-                .joinToString("; ") { "${it.role} '${it.subject}' ${it.status} score=${it.score}" }
-                .ifBlank { "no actionable matches" }
-            val riskLevel = if (decision == ScreeningDecision.BLOCK) {
-                AmlCaseRiskLevel.CRITICAL
-            } else {
-                AmlCaseRiskLevel.HIGH
-            }
-            openCaseQuietly(
-                payment = payment,
-                riskLevel = riskLevel,
-                alertCode = ALERT_SANCTIONS_HIT,
-                detail = detail,
-                matchedEntity = nonClear.firstNotNullOfOrNull { it.matchedEntity },
-            )
+            openSanctionsCase(payment, results, decision)
+        }
+        decision
+    }
+
+    /** SDD for INTERNAL_CLIENT: bank holds full KYC on both parties — POTENTIAL_HIT is not
+     *  actionable and must not escalate to REVIEW hold (AMLD4 Art. 15–17). */
+    private fun applySddPolicy(payment: DomesticPayment, raw: ScreeningDecision, paymentId: UUID): ScreeningDecision =
+        if (payment.transferScope == DomesticTransferScope.INTERNAL_CLIENT && raw == ScreeningDecision.REVIEW) {
+            log.infof("INTERNAL_CLIENT payment %s: downgrading REVIEW → CLEAR under SDD", paymentId)
+            ScreeningDecision.CLEAR
+        } else {
+            raw
         }
 
-        decision
+    private suspend fun openSanctionsCase(
+        payment: DomesticPayment,
+        results: List<ScreeningResult>,
+        decision: ScreeningDecision,
+    ) {
+        val nonClear = results.filter {
+            it.status != ScreeningMatchStatus.CLEAR && it.status != ScreeningMatchStatus.WHITELISTED
+        }
+        val detail = nonClear
+            .joinToString("; ") { "${it.role} '${it.subject}' ${it.status} score=${it.score}" }
+            .ifBlank { "no actionable matches" }
+        val riskLevel = if (decision == ScreeningDecision.BLOCK) AmlCaseRiskLevel.CRITICAL else AmlCaseRiskLevel.HIGH
+        openCaseQuietly(
+            payment,
+            riskLevel,
+            ALERT_SANCTIONS_HIT,
+            detail,
+            nonClear.firstNotNullOfOrNull {
+                it.matchedEntity
+            },
+        )
     }
 
     override fun validatePayment(paymentId: UUID): Unit = vtx {

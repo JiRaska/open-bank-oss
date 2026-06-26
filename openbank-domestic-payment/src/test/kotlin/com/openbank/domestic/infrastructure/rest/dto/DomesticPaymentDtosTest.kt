@@ -65,21 +65,22 @@ class DomesticPaymentDtosTest {
     }
 
     @Test
-    fun `toCommand defaults transferScope to INTERNAL_CLIENT when absent`() {
+    fun `toCommand does not map transferScope — scope is derived server-side`() {
         val command = createRequest(transferScope = null).toCommand("idem-2")
 
-        assertThat(command.transferScope).isEqualTo(DomesticTransferScope.INTERNAL_CLIENT)
+        // transferScope is derived server-side from creditorBankCode + account lookup;
+        // the DTO field is accepted for API compatibility but never forwarded to the command.
+        assertThat(command.transferScope).isNull()
         assertThat(command.technicalAccountCode).isNull()
     }
 
     @Test
-    fun `toCommand parses an explicit transferScope and technical account code`() {
+    fun `toCommand passes technicalAccountCode when present`() {
         val command = createRequest(
             transferScope = "TECHNICAL_ACCOUNT",
             technicalAccountCode = "TECH-9",
         ).toCommand("idem-3")
 
-        assertThat(command.transferScope).isEqualTo(DomesticTransferScope.TECHNICAL_ACCOUNT)
         assertThat(command.technicalAccountCode).isEqualTo("TECH-9")
     }
 

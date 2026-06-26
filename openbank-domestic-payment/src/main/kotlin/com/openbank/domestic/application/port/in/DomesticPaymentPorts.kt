@@ -32,6 +32,7 @@ data class CreateDomesticPaymentCommand(
     val technicalAccountCode: String? = null,
     val statementLabel: String?,
     val endToEndId: String?,
+    val actorId: UUID? = null,
 )
 
 data class ListDomesticPaymentsQuery(

@@ -3,6 +3,7 @@ package com.openbank.domestic.application.usecase
 
 import com.openbank.domestic.application.port.`in`.CreateDomesticPaymentCommand
 import com.openbank.domestic.application.port.`in`.TransitionDomesticPaymentStatusCommand
+import com.openbank.domestic.application.port.out.AccountLookupPort
 import com.openbank.domestic.application.port.out.AmlCasePort
 import com.openbank.domestic.application.port.out.AmlCaseRiskLevel
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
@@ -50,6 +51,7 @@ class DomesticPaymentServiceTest {
     private lateinit var fraudScoringPort: FraudScoringPort
     private lateinit var schemeGatewayPort: SchemeGatewayPort
     private lateinit var settlementPort: SettlementPort
+    private lateinit var accountLookupPort: AccountLookupPort
     private lateinit var metrics: DomainMetrics
     private lateinit var workflowClient: WorkflowClient
 
@@ -64,6 +66,7 @@ class DomesticPaymentServiceTest {
         fraudScoringPort = mockk()
         schemeGatewayPort = mockk()
         settlementPort = mockk()
+        accountLookupPort = mockk()
         metrics = mockk(relaxed = true)
         workflowClient = mockk()
         // temporalEnabled = false: these tests cover the synchronous screening/fraud path
@@ -76,12 +79,16 @@ class DomesticPaymentServiceTest {
             fraudScoringPort,
             schemeGatewayPort,
             settlementPort,
+            accountLookupPort,
             metrics,
             temporalEnabled = false,
             temporalTaskQueue = "openbank-domestic-payments",
             schemeSubmissionEnabled = false,
             workflowClient = workflowClient,
         )
+
+        // Account lookup for server-side transferScope derivation: default to null (INTERNAL_CLIENT).
+        coEvery { accountLookupPort.findPartyByIban(any()) } returns null
 
         // Fraud scoring is SHADOW (ADR-0084): default to ALLOW; never affects the payment outcome.
         coEvery { fraudScoringPort.score(any()) } returns FraudScoreOutcome(FraudVerdict.ALLOW, 0, "v0", emptyList())
@@ -109,7 +116,7 @@ class DomesticPaymentServiceTest {
         assertThat(result.status).isEqualTo(DomesticPaymentStatus.VALIDATED)
         assertThat(result.currency).isEqualTo("CZK")
         assertThat(result.priority).isEqualTo(DomesticPaymentPriority.URGENT)
-        assertThat(result.transferScope).isEqualTo(DomesticTransferScope.INTERNAL_CLIENT)
+        assertThat(result.transferScope).isEqualTo(DomesticTransferScope.EXTERNAL) // creditorBankCode="0100" → EXTERNAL
         assertThat(result.variableSymbol).isEqualTo("2026001")
         assertThat(result.messageForPayee).isEqualTo("Utility bill")
         assertThat(result.endToEndId).startsWith("DOMU")
@@ -159,8 +166,21 @@ class DomesticPaymentServiceTest {
     }
 
     @Test
-    fun `create payment defaults transfer scope to internal client when missing`() = runBlocking<Unit> {
-        val command = createCommand(transferScope = null)
+    fun `create payment derives EXTERNAL scope for non-own-bank creditor`() = runBlocking<Unit> {
+        val command = createCommand() // creditorBankCode = "0100" → EXTERNAL
+
+        coEvery { paymentRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        coEvery { screeningPort.screen(any(), ScreeningRole.DEBTOR, any()) } returns clear(ScreeningRole.DEBTOR)
+        coEvery { screeningPort.screen(any(), ScreeningRole.CREDITOR, any()) } returns clear(ScreeningRole.CREDITOR)
+
+        val result = service.createPayment(command)
+
+        assertThat(result.transferScope).isEqualTo(DomesticTransferScope.EXTERNAL)
+    }
+
+    @Test
+    fun `create payment derives INTERNAL_CLIENT scope for own-bank creditor unknown party`() = runBlocking<Unit> {
+        val command = createCommand(creditorBankCode = "0000")
 
         coEvery { paymentRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
         coEvery { screeningPort.screen(any(), ScreeningRole.DEBTOR, any()) } returns clear(ScreeningRole.DEBTOR)
@@ -172,31 +192,18 @@ class DomesticPaymentServiceTest {
     }
 
     @Test
-    fun `technical account requires technical account code`() {
-        val command = createCommand(
-            transferScope = DomesticTransferScope.TECHNICAL_ACCOUNT,
-            technicalAccountCode = "   ",
-        )
-
-        coEvery { paymentRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
-
-        assertThatThrownBy {
-            runBlocking { service.createPayment(command) }
-        }
-            .isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessage("technicalAccountCode is required for TECHNICAL_ACCOUNT")
-    }
-
-    @Test
     fun `own accounts path persists correctly`(): Unit = runBlocking {
+        val actorId = UUID.randomUUID()
+        // own-bank creditor whose partyId matches the actor → OWN_ACCOUNTS
+        coEvery { accountLookupPort.findPartyByIban(any()) } returns actorId
         val command = createCommand(
-            transferScope = DomesticTransferScope.OWN_ACCOUNTS,
+            creditorBankCode = "0000",
+            actorId = actorId,
             technicalAccountCode = null,
         )
 
         coEvery { paymentRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
-        coEvery { screeningPort.screen(any(), ScreeningRole.DEBTOR, any()) } returns clear(ScreeningRole.DEBTOR)
-        coEvery { screeningPort.screen(any(), ScreeningRole.CREDITOR, any()) } returns clear(ScreeningRole.CREDITOR)
+        coEvery { settlementPort.settle(any()) } returns SettlementOutcome(settled = true, transactionId = null)
 
         val result = service.createPayment(command)
 
@@ -322,6 +329,7 @@ class DomesticPaymentServiceTest {
             fraudScoringPort,
             schemeGatewayPort,
             settlementPort,
+            accountLookupPort,
             metrics,
             temporalEnabled = false,
             temporalTaskQueue = "openbank-domestic-payments",
@@ -351,6 +359,7 @@ class DomesticPaymentServiceTest {
             fraudScoringPort,
             schemeGatewayPort,
             settlementPort,
+            accountLookupPort,
             metrics,
             temporalEnabled = false,
             temporalTaskQueue = "openbank-domestic-payments",
@@ -395,8 +404,9 @@ class DomesticPaymentServiceTest {
 
     private fun createCommand(
         idempotencyKey: String = "dom-idem-1",
-        transferScope: DomesticTransferScope? = null,
         technicalAccountCode: String? = null,
+        creditorBankCode: String = " 0100 ",
+        actorId: UUID? = null,
     ) = CreateDomesticPaymentCommand(
         idempotencyKey = idempotencyKey,
         debtorAccountId = UUID.randomUUID(),
@@ -404,7 +414,7 @@ class DomesticPaymentServiceTest {
         debtorBankCode = " 0800 ",
         debtorName = "  Alice Example ",
         creditorAccountNumber = " 9876543210 ",
-        creditorBankCode = " 0100 ",
+        creditorBankCode = creditorBankCode,
         creditorName = "  Brno Utility ",
         amount = BigDecimal("1500.00"),
         currency = " czk ",
@@ -413,10 +423,10 @@ class DomesticPaymentServiceTest {
         constantSymbol = " 0308 ",
         messageForPayee = "  Utility bill ",
         priority = DomesticPaymentPriority.URGENT,
-        transferScope = transferScope,
         technicalAccountCode = technicalAccountCode,
         statementLabel = "  Monthly settlement  ",
         endToEndId = "   ",
+        actorId = actorId,
     )
 
     private fun payment(status: DomesticPaymentStatus = DomesticPaymentStatus.RECEIVED) = DomesticPayment(

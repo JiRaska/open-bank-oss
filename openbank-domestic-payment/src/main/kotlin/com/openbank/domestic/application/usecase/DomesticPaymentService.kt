@@ -8,6 +8,7 @@ import com.openbank.domestic.application.port.`in`.CreateDomesticPaymentCommand
 import com.openbank.domestic.application.port.`in`.DomesticPaymentUseCase
 import com.openbank.domestic.application.port.`in`.ListDomesticPaymentsQuery
 import com.openbank.domestic.application.port.`in`.TransitionDomesticPaymentStatusCommand
+import com.openbank.domestic.application.port.out.AccountLookupPort
 import com.openbank.domestic.application.port.out.AmlCasePort
 import com.openbank.domestic.application.port.out.AmlCaseRiskLevel
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
@@ -60,6 +61,7 @@ class DomesticPaymentService(
     private val fraudScoringPort: FraudScoringPort,
     private val schemeGatewayPort: SchemeGatewayPort,
     private val settlementPort: SettlementPort,
+    private val accountLookupPort: AccountLookupPort,
     private val metrics: DomainMetrics,
     @ConfigProperty(name = "openbank.temporal.enabled", defaultValue = "false")
     private val temporalEnabled: Boolean,
@@ -80,6 +82,7 @@ class DomesticPaymentService(
         fraudScoringPort: FraudScoringPort,
         schemeGatewayPort: SchemeGatewayPort,
         settlementPort: SettlementPort,
+        accountLookupPort: AccountLookupPort,
         metrics: DomainMetrics,
         @ConfigProperty(name = "openbank.temporal.enabled", defaultValue = "false")
         temporalEnabled: Boolean,
@@ -90,7 +93,7 @@ class DomesticPaymentService(
         workflowClient: WorkflowClient,
     ) : this(
         paymentRepository, eventPublisher, screeningPort, amlCasePort, fraudScoringPort,
-        schemeGatewayPort, settlementPort, metrics, temporalEnabled, temporalTaskQueue,
+        schemeGatewayPort, settlementPort, accountLookupPort, metrics, temporalEnabled, temporalTaskQueue,
         schemeSubmissionEnabled, workflowClient, Clock.systemUTC(),
     )
 
@@ -103,12 +106,33 @@ class DomesticPaymentService(
         private const val ALERT_SANCTIONS_HIT = "SANCTIONS_HIT"
         private const val ALERT_AML_HOLD = "AML_HOLD"
         private const val ALERT_SCREENING_UNAVAILABLE = "SCREENING_UNAVAILABLE"
+
+        private const val OWN_BANK_CODE = "0000"
+    }
+
+    /** Derive transferScope server-side — never trust the value from the client. */
+    private suspend fun deriveTransferScope(
+        creditorBankCode: String,
+        creditorIban: String,
+        actorId: UUID?,
+    ): DomesticTransferScope {
+        if (creditorBankCode.trim() != OWN_BANK_CODE) return DomesticTransferScope.EXTERNAL
+        val creditorPartyId = accountLookupPort.findPartyByIban(creditorIban)
+        return when {
+            creditorPartyId == null -> DomesticTransferScope.INTERNAL_CLIENT
+            creditorPartyId == actorId -> DomesticTransferScope.OWN_ACCOUNTS
+            else -> DomesticTransferScope.INTERNAL_CLIENT
+        }
     }
 
     override suspend fun createPayment(command: CreateDomesticPaymentCommand): DomesticPayment {
         paymentRepository.findByIdempotencyKey(command.idempotencyKey)?.let { return it }
 
-        val transferScope = command.transferScope ?: DomesticTransferScope.INTERNAL_CLIENT
+        val transferScope = deriveTransferScope(
+            creditorBankCode = command.creditorBankCode.trim(),
+            creditorIban = command.creditorAccountNumber.trim(),
+            actorId = command.actorId,
+        )
         val technicalAccountCode = command.technicalAccountCode?.trim()?.ifBlank { null }
         require(transferScope != DomesticTransferScope.TECHNICAL_ACCOUNT || !technicalAccountCode.isNullOrBlank()) {
             "technicalAccountCode is required for TECHNICAL_ACCOUNT"
@@ -287,6 +311,13 @@ class DomesticPaymentService(
      * (§C): if the sanctions service is unreachable the payment is held in RECEIVED, never released.
      */
     private suspend fun applyScreening(payment: DomesticPayment): DomesticPayment {
+        if (payment.transferScope == DomesticTransferScope.OWN_ACCOUNTS ||
+            payment.transferScope == DomesticTransferScope.TECHNICAL_ACCOUNT
+        ) {
+            log.infof("%s payment %s — screening skipped (SDD)", payment.transferScope, payment.id)
+            return persistTransition(payment, DomesticPaymentStatus.VALIDATED, null, null)
+        }
+
         val results = try {
             listOf(
                 screeningPort.screen(payment.debtorName, ScreeningRole.DEBTOR, "${payment.id}:debtor"),

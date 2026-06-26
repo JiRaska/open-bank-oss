@@ -37,7 +37,7 @@ data class CreateDomesticPaymentRequest(
     val statementLabel: String?,
     val endToEndId: String?,
 ) {
-    fun toCommand(idempotencyKey: String) = CreateDomesticPaymentCommand(
+    fun toCommand(idempotencyKey: String, actorId: UUID? = null) = CreateDomesticPaymentCommand(
         idempotencyKey = idempotencyKey,
         debtorAccountId = debtorAccountId,
         debtorAccountNumber = debtorAccountNumber,
@@ -53,10 +53,10 @@ data class CreateDomesticPaymentRequest(
         constantSymbol = constantSymbol,
         messageForPayee = messageForPayee,
         priority = DomesticPaymentPriority.valueOf(priority),
-        transferScope = transferScope?.let(DomesticTransferScope::valueOf) ?: DomesticTransferScope.INTERNAL_CLIENT,
         technicalAccountCode = technicalAccountCode,
         statementLabel = statementLabel,
         endToEndId = endToEndId,
+        actorId = actorId,
     )
 }
 
