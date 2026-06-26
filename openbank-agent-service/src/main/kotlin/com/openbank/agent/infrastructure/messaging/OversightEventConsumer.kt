@@ -30,6 +30,7 @@ class OversightEventConsumer {
 
     @Incoming("oversight-events")
     @Blocking
+    @Suppress("UnusedParameter") // Smallrye @Incoming requires the payload param; content is not needed here
     fun onOversightEvent(payload: String) {
         if (!enabled) return
         runBlocking { oversightService.sweep("kafka-event") }
