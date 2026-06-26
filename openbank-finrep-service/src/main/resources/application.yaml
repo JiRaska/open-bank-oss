@@ -1,0 +1,65 @@
+quarkus:
+  application:
+    name: openbank-finrep-service
+    version: 0.1.0
+  http:
+    port: 8140
+    cors:
+      ~: true
+      origins: "http://localhost:3000,http://openbank-admin-ui:3000"
+      methods: GET,POST,PUT,DELETE,OPTIONS
+      headers: Content-Type,Authorization
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  oidc:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: ${QUARKUS_OIDC_CLIENT_ID:openbank-services}
+    credentials:
+      secret: ${QUARKUS_OIDC_CREDENTIALS_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+
+  rest-client:
+    ledger-service:
+      url: ${LEDGER_SERVICE_URL:http://ledger-service.ledger.svc:8101}
+
+  log:
+    level: INFO
+  smallrye-openapi:
+    path: /q/openapi
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+
+openbank:
+  service:
+    name: finrep-service
+    port: 8140
+
+"%test":
+  quarkus:
+    oidc:
+      enabled: false
+    management:
+      enabled: false
+    devservices:
+      enabled: false

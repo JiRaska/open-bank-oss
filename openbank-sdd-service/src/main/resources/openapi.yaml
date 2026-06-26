@@ -1,0 +1,214 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+openapi: 3.0.3
+info:
+  title: OpenBank SEPA Direct Debit Service
+  description: >-
+    Debtor-side SEPA Direct Debit (ADR-0036): mandate vault keyed by (creditorIdentifier, UMR),
+    lifecycle, fail-closed collection authorisation and refund-window assessment. v1 never moves
+    money — an authorised collection is emitted for the ledger/payment path.
+  version: 1.0.0
+tags:
+  - name: SEPA Direct Debit
+paths:
+  /api/v1/sdd/mandates:
+    post:
+      tags: [SEPA Direct Debit]
+      summary: Register a debtor mandate (idempotent on creditorIdentifier+UMR)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterMandateRequest' }
+      responses:
+        '201':
+          description: Mandate registered (or the existing one returned)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mandate' }
+    get:
+      tags: [SEPA Direct Debit]
+      summary: List an account's mandates
+      parameters:
+        - { name: accountId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Mandates
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Mandate' } }
+  /api/v1/sdd/mandates/{id}:
+    get:
+      tags: [SEPA Direct Debit]
+      summary: Fetch a mandate
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Mandate
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mandate' }
+        '404': { description: No such mandate }
+    patch:
+      tags: [SEPA Direct Debit]
+      summary: Amend a mandate field (records an AMDT marker)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AmendMandateRequest' }
+      responses:
+        '200': { description: Amended, content: { application/json: { schema: { $ref: '#/components/schemas/Mandate' } } } }
+        '409': { description: Illegal transition }
+  /api/v1/sdd/mandates/{id}/confirm:
+    post:
+      tags: [SEPA Direct Debit]
+      summary: Confirm a B2B mandate (PENDING_CONFIRMATION -> ACTIVE)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Confirmed, content: { application/json: { schema: { $ref: '#/components/schemas/Mandate' } } } }
+        '409': { description: Illegal transition }
+  /api/v1/sdd/mandates/{id}/suspend:
+    post:
+      tags: [SEPA Direct Debit]
+      summary: Suspend an ACTIVE mandate
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Suspended, content: { application/json: { schema: { $ref: '#/components/schemas/Mandate' } } } }
+        '409': { description: Illegal transition }
+  /api/v1/sdd/mandates/{id}/resume:
+    post:
+      tags: [SEPA Direct Debit]
+      summary: Resume a SUSPENDED mandate
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Resumed, content: { application/json: { schema: { $ref: '#/components/schemas/Mandate' } } } }
+        '409': { description: Illegal transition }
+  /api/v1/sdd/mandates/{id}/cancel:
+    post:
+      tags: [SEPA Direct Debit]
+      summary: Cancel a mandate (terminal)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Cancelled, content: { application/json: { schema: { $ref: '#/components/schemas/Mandate' } } } }
+        '409': { description: Illegal transition }
+  /api/v1/sdd/mandates/{id}/refund-assessment:
+    get:
+      tags: [SEPA Direct Debit]
+      summary: Assess a post-settlement refund claim
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: debitDate, in: query, required: true, schema: { type: string, format: date } }
+        - { name: asOf, in: query, required: false, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Refund decision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RefundAssessment' }
+        '404': { description: No such mandate }
+  /api/v1/sdd/collections/authorise:
+    post:
+      tags: [SEPA Direct Debit]
+      summary: Fail-closed authorisation of an inbound collection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AuthoriseCollectionRequest' }
+      responses:
+        '200':
+          description: Authorisation decision (ACCEPT / REJECT / REFUSE)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthorisationDecision' }
+components:
+  schemas:
+    SddScheme: { type: string, enum: [CORE, B2B] }
+    SequenceType: { type: string, enum: [OOFF, FRST, RCUR, FNAL] }
+    MandateStatus: { type: string, enum: [PENDING_CONFIRMATION, ACTIVE, SUSPENDED, CANCELLED, EXPIRED] }
+    RegisterMandateRequest:
+      type: object
+      required: [accountId, debtorIban, creditorIdentifier, umr, scheme, sequenceType, creditorName, debtorName, signatureDate]
+      properties:
+        accountId: { type: string, format: uuid }
+        debtorIban: { type: string }
+        creditorIdentifier: { type: string }
+        umr: { type: string }
+        scheme: { $ref: '#/components/schemas/SddScheme' }
+        sequenceType: { $ref: '#/components/schemas/SequenceType' }
+        creditorName: { type: string }
+        debtorName: { type: string }
+        signatureDate: { type: string, format: date }
+    AmendMandateRequest:
+      type: object
+      required: [field, newValue]
+      properties:
+        field: { type: string, enum: [CREDITOR_NAME, CREDITOR_IDENTIFIER, UMR, DEBTOR_IBAN, SEQUENCE_TYPE] }
+        newValue: { type: string }
+    Mandate:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        debtorIban: { type: string }
+        creditorIdentifier: { type: string }
+        umr: { type: string }
+        scheme: { $ref: '#/components/schemas/SddScheme' }
+        sequenceType: { $ref: '#/components/schemas/SequenceType' }
+        creditorName: { type: string }
+        debtorName: { type: string }
+        signatureDate: { type: string, format: date }
+        status: { $ref: '#/components/schemas/MandateStatus' }
+        b2bConfirmed: { type: boolean }
+        lastCollectionDate: { type: string, format: date, nullable: true }
+        lastPreNotificationDate: { type: string, format: date, nullable: true }
+        createdAt: { type: string, format: date-time }
+        amendments:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              oldValue: { type: string }
+              newValue: { type: string }
+              at: { type: string, format: date-time }
+    DebtorControls:
+      type: object
+      properties:
+        blockAll: { type: boolean }
+        blockedCreditors: { type: array, items: { type: string } }
+        maxAmountPerCollection: { type: number, nullable: true }
+    AuthoriseCollectionRequest:
+      type: object
+      required: [creditorIdentifier, umr, scheme, sequenceType, amount, currency, dueDate]
+      properties:
+        creditorIdentifier: { type: string }
+        umr: { type: string }
+        scheme: { $ref: '#/components/schemas/SddScheme' }
+        sequenceType: { $ref: '#/components/schemas/SequenceType' }
+        amount: { type: number }
+        currency: { type: string }
+        dueDate: { type: string, format: date }
+        controls: { $ref: '#/components/schemas/DebtorControls' }
+    AuthorisationDecision:
+      type: object
+      properties:
+        decision: { type: string, enum: [ACCEPT, REJECT, REFUSE] }
+        reasonCode: { type: string, nullable: true }
+        reason: { type: string, nullable: true }
+    RefundAssessment:
+      type: object
+      properties:
+        eligible: { type: boolean }
+        kind: { type: string, enum: [UNCONDITIONAL, UNAUTHORISED], nullable: true }
+        reasonCode: { type: string, nullable: true }
+        reason: { type: string, nullable: true }

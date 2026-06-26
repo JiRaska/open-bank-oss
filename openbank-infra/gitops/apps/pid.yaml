@@ -1,0 +1,30 @@
+# pid-service: identity golden record (ADR-0072) / EUDI-native identity hub (ADR-0094).
+# Identity-critical; non-money-path. Automated sync (selfHeal+prune), like party.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pid
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/pid
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: pid
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false

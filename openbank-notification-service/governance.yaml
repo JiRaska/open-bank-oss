@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: MPL-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: platform
+primaryDatastore: PostgreSQL
+schemaName: notifications_schema
+dataLineageRole: consumer
+dataClassification: confidential
+retentionPolicy: 2 years
+evidenceExported: false
+lineage:
+  upstream:
+    - serviceName: transaction-service
+      relationType: topic
+      description: events
+    - serviceName: kyc-service
+      relationType: topic
+      description: events
+schemaLineage:
+  ownedSchemas:
+    - notifications_schema

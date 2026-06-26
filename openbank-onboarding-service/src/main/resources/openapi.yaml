@@ -1,0 +1,193 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: Onboarding Service API
+  version: 1.0.1
+  description: >-
+    Read-model projection of the onboarding funnel (ADR-0068). Aggregates events from
+    party-service, kyc-service and sca-service into a denormalised view for operator
+    dashboards and the four-eyes approval queue.
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8130
+    description: Local development
+tags:
+  - name: Onboarding
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/v1/onboarding/records:
+    get:
+      tags: [Onboarding]
+      summary: List onboarding records (paginated). Optional ?stage= filter for funnel columns.
+      operationId: listOnboardingRecords
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: stage
+          in: query
+          description: Filter by funnel stage. When omitted all records are returned.
+          schema:
+            type: string
+            enum:
+              - REGISTERED
+              - KYC_OPEN
+              - KYC_DOCUMENTS_REQUIRED
+              - KYC_UNDER_REVIEW
+              - SCA_PENDING
+              - ACTIVE
+              - BLOCKED
+      responses:
+        '200':
+          description: Paginated list of onboarding records
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OnboardingRecordPage'
+
+  /api/v1/onboarding/records/{partyId}:
+    get:
+      tags: [Onboarding]
+      summary: Get onboarding record for a single party
+      operationId: getOnboardingRecord
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: partyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Onboarding record detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OnboardingRecordDto'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/onboarding/funnel:
+    get:
+      tags: [Onboarding]
+      summary: KPI tile counts — number of records per funnel stage
+      operationId: getFunnelCounts
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Map of FunnelStage → count
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: integer
+                  format: int64
+                example:
+                  REGISTERED: 12
+                  KYC_OPEN: 45
+                  KYC_DOCUMENTS_REQUIRED: 8
+                  KYC_UNDER_REVIEW: 23
+                  SCA_PENDING: 6
+                  ACTIVE: 301
+                  BLOCKED: 4
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    OnboardingRecordDto:
+      type: object
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        legalName:
+          type: string
+        email:
+          type: string
+        partyStatus:
+          type: string
+          enum: [PENDING_KYC, ACTIVE, SUSPENDED, CLOSED]
+        kycCaseId:
+          type: string
+          format: uuid
+          nullable: true
+        kycStatus:
+          type: string
+          nullable: true
+          enum: [OPEN, DOCUMENTS_REQUIRED, UNDER_REVIEW, APPROVED, REJECTED, EXPIRED]
+        scaEnrolled:
+          type: boolean
+        deviceCount:
+          type: integer
+        funnelStage:
+          type: string
+          enum: [REGISTERED, KYC_OPEN, KYC_DOCUMENTS_REQUIRED, KYC_UNDER_REVIEW, SCA_PENDING, ACTIVE, BLOCKED]
+        blockedReason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    OnboardingRecordPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OnboardingRecordDto'
+        total:
+          type: integer
+          format: int64
+        page:
+          type: integer
+        size:
+          type: integer
+        stageFilter:
+          type: string
+          nullable: true
+
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string

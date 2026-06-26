@@ -1,0 +1,433 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="src/main/kotlin/com/openbank/sanctions/application/port/in/SanctionsPorts.kt">
+        <error line="5" column="9" source="standard:package-name" />
+        <error line="7" column="1" source="standard:no-wildcard-imports" />
+        <error line="22" column="26" source="standard:parameter-list-wrapping" />
+        <error line="22" column="26" source="standard:wrapping" />
+        <error line="22" column="26" source="standard:class-signature" />
+        <error line="22" column="45" source="standard:parameter-list-wrapping" />
+        <error line="22" column="45" source="standard:class-signature" />
+        <error line="22" column="69" source="standard:parameter-list-wrapping" />
+        <error line="22" column="69" source="standard:class-signature" />
+        <error line="23" column="39" source="standard:wrapping" />
+        <error line="23" column="40" source="standard:parameter-list-wrapping" />
+        <error line="23" column="40" source="standard:class-signature" />
+        <error line="23" column="40" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sanctions/application/port/out/SanctionsOutboxPort.kt">
+        <error line="1" column="1" source="standard:filename" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sanctions/application/port/out/SanctionsPorts.kt">
+        <error line="1" column="1" source="standard:filename" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sanctions/application/usecase/SanctionsImportService.kt">
+        <error line="8" column="1" source="standard:no-wildcard-imports" />
+        <error line="41" column="5" source="standard:class-signature" />
+        <error line="41" column="53" source="standard:class-signature" />
+        <error line="57" column="44" source="standard:no-multi-spaces" />
+        <error line="59" column="46" source="standard:no-multi-spaces" />
+        <error line="62" column="47" source="standard:no-multi-spaces" />
+        <error line="62" column="77" source="standard:argument-list-wrapping" />
+        <error line="62" column="88" source="standard:argument-list-wrapping" />
+        <error line="62" column="98" source="standard:argument-list-wrapping" />
+        <error line="62" column="105" source="standard:argument-list-wrapping" />
+        <error line="62" column="120" source="standard:argument-list-wrapping" />
+        <error line="62" column="121" source="standard:argument-list-wrapping" />
+        <error line="62" column="121" source="standard:max-line-length" />
+        <error line="63" column="50" source="standard:no-multi-spaces" />
+        <error line="63" column="56" source="standard:statement-wrapping" />
+        <error line="63" column="107" source="standard:statement-wrapping" />
+        <error line="63" column="110" source="standard:statement-wrapping" />
+        <error line="64" column="48" source="standard:no-multi-spaces" />
+        <error line="64" column="56" source="standard:statement-wrapping" />
+        <error line="64" column="65" source="standard:argument-list-wrapping" />
+        <error line="64" column="121" source="standard:max-line-length" />
+        <error line="64" column="130" source="standard:argument-list-wrapping" />
+        <error line="64" column="132" source="standard:statement-wrapping" />
+        <error line="64" column="135" source="standard:statement-wrapping" />
+        <error line="67" column="23" source="standard:wrapping" />
+        <error line="67" column="23" source="standard:argument-list-wrapping" />
+        <error line="68" column="1" source="standard:indent" />
+        <error line="68" column="33" source="standard:argument-list-wrapping" />
+        <error line="68" column="58" source="standard:argument-list-wrapping" />
+        <error line="68" column="67" source="standard:wrapping" />
+        <error line="68" column="68" source="standard:argument-list-wrapping" />
+        <error line="68" column="68" source="standard:trailing-comma-on-call-site" />
+        <error line="82" column="41" source="standard:wrapping" />
+        <error line="82" column="53" source="standard:wrapping" />
+        <error line="83" column="33" source="standard:no-multi-spaces" />
+        <error line="84" column="31" source="standard:no-multi-spaces" />
+        <error line="85" column="35" source="standard:no-multi-spaces" />
+        <error line="86" column="30" source="standard:no-multi-spaces" />
+        <error line="88" column="38" source="standard:no-multi-spaces" />
+        <error line="90" column="43" source="standard:no-multi-spaces" />
+        <error line="91" column="42" source="standard:no-multi-spaces" />
+        <error line="93" column="33" source="standard:no-multi-spaces" />
+        <error line="94" column="38" source="standard:no-multi-spaces" />
+        <error line="97" column="42" source="standard:no-multi-spaces" />
+        <error line="104" column="36" source="standard:statement-wrapping" />
+        <error line="104" column="54" source="standard:statement-wrapping" />
+        <error line="104" column="71" source="standard:statement-wrapping" />
+        <error line="104" column="87" source="standard:statement-wrapping" />
+        <error line="105" column="42" source="standard:statement-wrapping" />
+        <error line="107" column="27" source="standard:no-multi-spaces" />
+        <error line="107" column="44" source="standard:statement-wrapping" />
+        <error line="107" column="57" source="standard:statement-wrapping" />
+        <error line="107" column="74" source="standard:statement-wrapping" />
+        <error line="107" column="90" source="standard:statement-wrapping" />
+        <error line="123" column="50" source="standard:no-multi-spaces" />
+        <error line="123" column="62" source="standard:no-multi-spaces" />
+        <error line="125" column="49" source="standard:statement-wrapping" />
+        <error line="130" column="52" source="standard:no-multi-spaces" />
+        <error line="130" column="75" source="standard:binary-expression-wrapping" />
+        <error line="130" column="93" source="standard:binary-expression-wrapping" />
+        <error line="130" column="103" source="standard:function-literal" />
+        <error line="130" column="121" source="standard:function-literal" />
+        <error line="130" column="121" source="standard:max-line-length" />
+        <error line="131" column="51" source="standard:no-multi-spaces" />
+        <error line="131" column="72" source="standard:no-multi-spaces" />
+        <error line="131" column="75" source="standard:binary-expression-wrapping" />
+        <error line="131" column="91" source="standard:no-multi-spaces" />
+        <error line="131" column="93" source="standard:binary-expression-wrapping" />
+        <error line="131" column="103" source="standard:function-literal" />
+        <error line="131" column="121" source="standard:function-literal" />
+        <error line="131" column="121" source="standard:max-line-length" />
+        <error line="132" column="36" source="standard:no-multi-spaces" />
+        <error line="132" column="55" source="standard:no-multi-spaces" />
+        <error line="132" column="63" source="standard:no-multi-spaces" />
+        <error line="133" column="40" source="standard:no-multi-spaces" />
+        <error line="134" column="40" source="standard:no-multi-spaces" />
+        <error line="136" column="48" source="standard:no-multi-spaces" />
+        <error line="139" column="31" source="standard:no-multi-spaces" />
+        <error line="140" column="50" source="standard:statement-wrapping" />
+        <error line="144" column="29" source="standard:multiline-if-else" />
+        <error line="144" column="58" source="standard:multiline-if-else" />
+        <error line="146" column="38" source="standard:no-multi-spaces" />
+        <error line="147" column="40" source="standard:no-multi-spaces" />
+        <error line="148" column="40" source="standard:no-multi-spaces" />
+        <error line="150" column="37" source="standard:no-multi-spaces" />
+        <error line="152" column="38" source="standard:no-multi-spaces" />
+        <error line="157" column="9" source="standard:wrapping" />
+        <error line="191" column="19" source="standard:no-multi-spaces" />
+        <error line="192" column="23" source="standard:no-multi-spaces" />
+        <error line="193" column="21" source="standard:no-multi-spaces" />
+        <error line="194" column="24" source="standard:no-multi-spaces" />
+        <error line="195" column="26" source="standard:no-multi-spaces" />
+        <error line="196" column="26" source="standard:no-multi-spaces" />
+        <error line="219" column="24" source="standard:no-multi-spaces" />
+        <error line="220" column="28" source="standard:no-multi-spaces" />
+        <error line="221" column="26" source="standard:no-multi-spaces" />
+        <error line="222" column="32" source="standard:no-multi-spaces" />
+        <error line="223" column="31" source="standard:no-multi-spaces" />
+        <error line="225" column="32" source="standard:no-multi-spaces" />
+        <error line="239" column="21" source="standard:multiline-if-else" />
+        <error line="241" column="21" source="standard:multiline-if-else" />
+        <error line="245" column="40" source="standard:no-multi-spaces" />
+        <error line="247" column="26" source="standard:no-multi-spaces" />
+        <error line="251" column="30" source="standard:no-multi-spaces" />
+        <error line="252" column="32" source="standard:no-multi-spaces" />
+        <error line="253" column="32" source="standard:no-multi-spaces" />
+        <error line="254" column="33" source="standard:no-multi-spaces" />
+        <error line="255" column="29" source="standard:no-multi-spaces" />
+        <error line="256" column="33" source="standard:no-multi-spaces" />
+        <error line="258" column="30" source="standard:no-multi-spaces" />
+        <error line="313" column="52" source="standard:function-signature" />
+        <error line="329" column="88" source="standard:statement-wrapping" />
+        <error line="329" column="108" source="standard:statement-wrapping" />
+        <error line="329" column="113" source="standard:statement-wrapping" />
+        <error line="330" column="38" source="standard:no-multi-spaces" />
+        <error line="331" column="44" source="standard:statement-wrapping" />
+        <error line="331" column="73" source="standard:statement-wrapping" />
+        <error line="331" column="90" source="standard:statement-wrapping" />
+        <error line="332" column="22" source="standard:no-multi-spaces" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sanctions/application/usecase/SanctionsListService.kt">
+        <error line="35" column="41" source="standard:argument-list-wrapping" />
+        <error line="35" column="45" source="standard:argument-list-wrapping" />
+        <error line="35" column="58" source="standard:argument-list-wrapping" />
+        <error line="35" column="79" source="standard:argument-list-wrapping" />
+        <error line="35" column="93" source="standard:argument-list-wrapping" />
+        <error line="35" column="109" source="standard:argument-list-wrapping" />
+        <error line="35" column="121" source="standard:max-line-length" />
+        <error line="35" column="123" source="standard:argument-list-wrapping" />
+        <error line="46" column="16" source="standard:multiline-if-else" />
+        <error line="74" column="21" source="standard:multiline-if-else" />
+        <error line="76" column="21" source="standard:multiline-if-else" />
+        <error line="80" column="53" source="standard:argument-list-wrapping" />
+        <error line="80" column="75" source="standard:argument-list-wrapping" />
+        <error line="80" column="121" source="standard:max-line-length" />
+        <error line="80" column="123" source="standard:argument-list-wrapping" />
+        <error line="80" column="124" source="standard:argument-list-wrapping" />
+        <error line="117" column="117" source="standard:binary-expression-wrapping" />
+        <error line="117" column="121" source="standard:max-line-length" />
+        <error line="117" column="137" source="standard:binary-expression-wrapping" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sanctions/application/usecase/SanctionsService.kt">
+        <error line="7" column="1" source="standard:no-wildcard-imports" />
+        <error line="8" column="1" source="standard:no-wildcard-imports" />
+        <error line="9" column="1" source="standard:no-wildcard-imports" />
+        <error line="23" column="88" source="standard:function-signature" />
+        <error line="38" column="68" source="standard:no-multi-spaces" />
+        <error line="57" column="26" source="standard:no-multi-spaces" />
+        <error line="58" column="27" source="standard:no-multi-spaces" />
+        <error line="61" column="26" source="standard:no-multi-spaces" />
+        <error line="63" column="28" source="standard:no-multi-spaces" />
+        <error line="65" column="27" source="standard:no-multi-spaces" />
+        <error line="67" column="26" source="standard:no-multi-spaces" />
+        <error line="72" column="57" source="standard:no-multi-spaces" />
+        <error line="74" column="18" source="standard:no-multi-spaces" />
+        <error line="91" column="57" source="standard:trailing-comma-on-call-site" />
+        <error line="97" column="41" source="standard:no-multi-spaces" />
+        <error line="103" column="34" source="standard:wrapping" />
+        <error line="103" column="34" source="standard:argument-list-wrapping" />
+        <error line="103" column="58" source="standard:argument-list-wrapping" />
+        <error line="104" column="36" source="standard:argument-list-wrapping" />
+        <error line="104" column="61" source="standard:wrapping" />
+        <error line="104" column="62" source="standard:argument-list-wrapping" />
+        <error line="104" column="62" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sanctions/domain/model/SanctionsCheck.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="7" column="26" source="standard:statement-wrapping" />
+        <error line="9" column="120" source="standard:max-line-length" />
+        <error line="15" column="38" source="standard:parameter-list-wrapping" />
+        <error line="15" column="38" source="standard:class-signature" />
+        <error line="16" column="28" source="standard:parameter-list-spacing" />
+        <error line="16" column="29" source="standard:no-multi-spaces" />
+        <error line="17" column="30" source="standard:parameter-list-wrapping" />
+        <error line="17" column="30" source="standard:class-signature" />
+        <error line="18" column="33" source="standard:parameter-list-wrapping" />
+        <error line="18" column="33" source="standard:class-signature" />
+        <error line="18" column="59" source="standard:trailing-comma-on-declaration-site" />
+        <error line="22" column="19" source="standard:parameter-list-wrapping" />
+        <error line="22" column="19" source="standard:class-signature" />
+        <error line="24" column="23" source="standard:parameter-list-wrapping" />
+        <error line="24" column="23" source="standard:class-signature" />
+        <error line="25" column="31" source="standard:parameter-list-wrapping" />
+        <error line="25" column="31" source="standard:class-signature" />
+        <error line="26" column="42" source="standard:parameter-list-spacing" />
+        <error line="26" column="43" source="standard:no-multi-spaces" />
+        <error line="33" column="29" source="standard:parameter-list-wrapping" />
+        <error line="33" column="29" source="standard:class-signature" />
+        <error line="33" column="53" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sanctions/domain/model/SanctionsEntry.kt">
+        <error line="34" column="5" source="standard:class-signature" />
+        <error line="35" column="5" source="standard:class-signature" />
+        <error line="36" column="5" source="standard:class-signature" />
+        <error line="36" column="23" source="standard:class-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sanctions/domain/model/SanctionsList.kt">
+        <error line="22" column="27" source="standard:trailing-comma-on-declaration-site" />
+        <error line="30" column="26" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sanctions/infrastructure/kafka/KafkaSanctionsOutboxEventPublisher.kt">
+        <error line="19" column="5" source="standard:class-signature" />
+        <error line="19" column="80" source="standard:class-signature" />
+        <error line="19" column="80" source="standard:trailing-comma-on-declaration-site" />
+        <error line="20" column="5" source="standard:class-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sanctions/infrastructure/outbox/SanctionsOutboxDispatcher.kt">
+        <error line="24" column="41" source="standard:trailing-comma-on-declaration-site" />
+        <error line="34" column="49" source="standard:trailing-comma-on-call-site" />
+        <error line="40" column="29" source="standard:no-unit-return" />
+        <error line="48" column="75" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sanctions/infrastructure/persistence/entity/SanctionsCheckEntity.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="7" column="1" source="standard:no-wildcard-imports" />
+        <error line="9" column="1" source="standard:no-wildcard-imports" />
+        <error line="10" column="26" source="standard:statement-wrapping" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sanctions/infrastructure/persistence/entity/SanctionsListEntity.kt">
+        <error line="8" column="1" source="standard:no-wildcard-imports" />
+        <error line="55" column="53" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sanctions/infrastructure/persistence/mapper/SanctionsMapper.kt">
+        <error line="9" column="1" source="standard:no-wildcard-imports" />
+        <error line="23" column="50" source="standard:trailing-comma-on-call-site" />
+        <error line="27" column="16" source="standard:statement-wrapping" />
+        <error line="27" column="52" source="standard:statement-wrapping" />
+        <error line="28" column="20" source="standard:statement-wrapping" />
+        <error line="29" column="34" source="standard:statement-wrapping" />
+        <error line="31" column="24" source="standard:statement-wrapping" />
+        <error line="34" column="32" source="standard:statement-wrapping" />
+        <error line="35" column="30" source="standard:statement-wrapping" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sanctions/infrastructure/persistence/repository/SanctionsEntryRepositoryImpl.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="10" column="1" source="standard:no-wildcard-imports" />
+        <error line="27" column="5" source="standard:class-signature" />
+        <error line="27" column="30" source="standard:class-signature" />
+        <error line="86" column="31" source="standard:wrapping" />
+        <error line="86" column="46" source="standard:wrapping" />
+        <error line="96" column="13" source="standard:wrapping" />
+        <error line="96" column="14" source="standard:wrapping" />
+        <error line="110" column="28" source="standard:argument-list-wrapping" />
+        <error line="110" column="121" source="standard:max-line-length" />
+        <error line="110" column="132" source="standard:argument-list-wrapping" />
+        <error line="148" column="30" source="standard:no-multi-spaces" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sanctions/infrastructure/persistence/repository/SanctionsListRepositoryImpl.kt">
+        <error line="38" column="60" source="standard:function-signature" />
+        <error line="44" column="67" source="standard:function-signature" />
+        <error line="47" column="32" source="standard:function-signature" />
+        <error line="47" column="42" source="standard:function-signature" />
+        <error line="47" column="61" source="standard:function-signature" />
+        <error line="47" column="81" source="standard:function-signature" />
+        <error line="47" column="97" source="standard:function-signature" />
+        <error line="47" column="115" source="standard:function-signature" />
+        <error line="47" column="120" source="standard:max-line-length" />
+        <error line="47" column="132" source="standard:function-signature" />
+        <error line="47" column="156" source="standard:function-signature" />
+        <error line="61" column="37" source="standard:function-signature" />
+        <error line="61" column="47" source="standard:function-signature" />
+        <error line="61" column="66" source="standard:function-signature" />
+        <error line="61" column="86" source="standard:function-signature" />
+        <error line="61" column="102" source="standard:function-signature" />
+        <error line="61" column="120" source="standard:function-signature" />
+        <error line="61" column="120" source="standard:max-line-length" />
+        <error line="61" column="137" source="standard:function-signature" />
+        <error line="61" column="156" source="standard:function-signature" />
+        <error line="64" column="80" source="standard:function-expression-body" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sanctions/infrastructure/persistence/repository/SanctionsOutboxRepositoryImpl.kt">
+        <error line="21" column="39" source="standard:class-signature" />
+        <error line="21" column="66" source="standard:class-signature" />
+        <error line="23" column="75" source="standard:function-signature" />
+        <error line="26" column="74" source="standard:function-signature" />
+        <error line="31" column="41" source="standard:trailing-comma-on-call-site" />
+        <error line="35" column="52" source="standard:function-signature" />
+        <error line="40" column="41" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sanctions/infrastructure/persistence/repository/SanctionsRepositoryImpl.kt">
+        <error line="11" column="1" source="standard:no-wildcard-imports" />
+        <error line="13" column="1" source="standard:no-wildcard-imports" />
+        <error line="22" column="5" source="standard:class-signature" />
+        <error line="22" column="54" source="standard:class-signature" />
+        <error line="22" column="54" source="standard:trailing-comma-on-declaration-site" />
+        <error line="23" column="26" source="standard:class-signature" />
+        <error line="35" column="35" source="standard:wrapping" />
+        <error line="35" column="35" source="standard:argument-list-wrapping" />
+        <error line="35" column="59" source="standard:argument-list-wrapping" />
+        <error line="36" column="54" source="standard:wrapping" />
+        <error line="36" column="55" source="standard:argument-list-wrapping" />
+        <error line="36" column="55" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sanctions/infrastructure/rest/SanctionsListResource.kt">
+        <error line="9" column="1" source="standard:no-wildcard-imports" />
+        <error line="22" column="9" source="standard:annotation" />
+        <error line="26" column="9" source="standard:annotation" />
+        <error line="30" column="10" source="standard:annotation" />
+        <error line="34" column="10" source="standard:annotation" />
+        <error line="35" column="41" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sanctions/infrastructure/rest/SanctionsResource.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="7" column="1" source="standard:no-wildcard-imports" />
+        <error line="8" column="1" source="standard:no-wildcard-imports" />
+        <error line="9" column="1" source="standard:no-wildcard-imports" />
+        <error line="9" column="24" source="standard:statement-wrapping" />
+        <error line="9" column="61" source="standard:statement-wrapping" />
+        <error line="13" column="38" source="standard:annotation" />
+        <error line="13" column="39" source="standard:annotation" />
+        <error line="16" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="16" column="10" source="standard:annotation" />
+        <error line="16" column="27" source="standard:annotation" />
+        <error line="16" column="74" source="standard:function-signature" />
+        <error line="18" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="18" column="10" source="standard:annotation" />
+        <error line="18" column="27" source="standard:annotation" />
+        <error line="19" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="19" column="9" source="standard:annotation" />
+        <error line="19" column="24" source="standard:annotation" />
+        <error line="20" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="20" column="9" source="standard:annotation" />
+        <error line="20" column="24" source="standard:annotation" />
+        <error line="21" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="21" column="9" source="standard:annotation" />
+        <error line="21" column="27" source="standard:annotation" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/governance/HibernateSequenceGuardTest.kt">
+        <error line="54" column="33" source="standard:trailing-comma-on-call-site" />
+        <error line="68" column="36" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/sanctions/application/usecase/SanctionsServiceTest.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="11" column="1" source="standard:no-wildcard-imports" />
+        <error line="25" column="22" source="standard:no-multi-spaces" />
+        <error line="27" column="26" source="standard:no-multi-spaces" />
+        <error line="28" column="25" source="standard:no-multi-spaces" />
+        <error line="53" column="33" source="standard:wrapping" />
+        <error line="53" column="33" source="standard:argument-list-wrapping" />
+        <error line="53" column="72" source="standard:argument-list-wrapping" />
+        <error line="54" column="1" source="standard:indent" />
+        <error line="54" column="70" source="standard:argument-list-wrapping" />
+        <error line="54" column="94" source="standard:wrapping" />
+        <error line="54" column="95" source="standard:argument-list-wrapping" />
+        <error line="54" column="95" source="standard:trailing-comma-on-call-site" />
+        <error line="56" column="93" source="standard:trailing-comma-on-call-site" />
+        <error line="83" column="18" source="standard:function-literal" />
+        <error line="83" column="19" source="standard:wrapping" />
+        <error line="83" column="39" source="standard:argument-list-wrapping" />
+        <error line="83" column="45" source="standard:function-literal" />
+        <error line="83" column="46" source="standard:wrapping" />
+        <error line="83" column="111" source="standard:function-literal" />
+        <error line="83" column="114" source="standard:argument-list-wrapping" />
+        <error line="83" column="117" source="standard:argument-list-wrapping" />
+        <error line="83" column="121" source="standard:max-line-length" />
+        <error line="83" column="134" source="standard:argument-list-wrapping" />
+        <error line="83" column="135" source="standard:argument-list-wrapping" />
+        <error line="83" column="137" source="standard:function-literal" />
+        <error line="93" column="91" source="standard:trailing-comma-on-call-site" />
+        <error line="111" column="93" source="standard:trailing-comma-on-call-site" />
+        <error line="115" column="96" source="standard:trailing-comma-on-call-site" />
+        <error line="128" column="33" source="standard:wrapping" />
+        <error line="128" column="33" source="standard:argument-list-wrapping" />
+        <error line="128" column="72" source="standard:argument-list-wrapping" />
+        <error line="129" column="1" source="standard:indent" />
+        <error line="129" column="57" source="standard:wrapping" />
+        <error line="129" column="58" source="standard:argument-list-wrapping" />
+        <error line="129" column="58" source="standard:trailing-comma-on-call-site" />
+        <error line="132" column="93" source="standard:trailing-comma-on-call-site" />
+        <error line="135" column="93" source="standard:trailing-comma-on-call-site" />
+        <error line="140" column="47" source="standard:no-multi-spaces" />
+        <error line="141" column="71" source="standard:no-multi-spaces" />
+        <error line="152" column="27" source="standard:wrapping" />
+        <error line="152" column="27" source="standard:argument-list-wrapping" />
+        <error line="152" column="41" source="standard:argument-list-wrapping" />
+        <error line="153" column="1" source="standard:indent" />
+        <error line="153" column="65" source="standard:argument-list-wrapping" />
+        <error line="153" column="102" source="standard:wrapping" />
+        <error line="153" column="103" source="standard:argument-list-wrapping" />
+        <error line="153" column="103" source="standard:trailing-comma-on-call-site" />
+        <error line="153" column="104" source="standard:trailing-comma-on-call-site" />
+        <error line="160" column="18" source="standard:function-literal" />
+        <error line="160" column="19" source="standard:wrapping" />
+        <error line="160" column="39" source="standard:argument-list-wrapping" />
+        <error line="160" column="45" source="standard:function-literal" />
+        <error line="160" column="46" source="standard:wrapping" />
+        <error line="160" column="119" source="standard:function-literal" />
+        <error line="160" column="121" source="standard:max-line-length" />
+        <error line="160" column="122" source="standard:argument-list-wrapping" />
+        <error line="160" column="125" source="standard:argument-list-wrapping" />
+        <error line="160" column="142" source="standard:argument-list-wrapping" />
+        <error line="160" column="143" source="standard:argument-list-wrapping" />
+        <error line="160" column="145" source="standard:function-literal" />
+        <error line="170" column="32" source="standard:wrapping" />
+        <error line="170" column="46" source="standard:wrapping" />
+        <error line="170" column="46" source="standard:argument-list-wrapping" />
+        <error line="170" column="60" source="standard:argument-list-wrapping" />
+        <error line="171" column="1" source="standard:indent" />
+        <error line="171" column="64" source="standard:argument-list-wrapping" />
+        <error line="171" column="101" source="standard:wrapping" />
+        <error line="171" column="102" source="standard:wrapping" />
+        <error line="171" column="102" source="standard:argument-list-wrapping" />
+        <error line="171" column="102" source="standard:trailing-comma-on-call-site" />
+        <error line="215" column="33" source="standard:argument-list-wrapping" />
+        <error line="215" column="54" source="standard:argument-list-wrapping" />
+        <error line="216" column="45" source="standard:argument-list-wrapping" />
+        <error line="217" column="30" source="standard:argument-list-wrapping" />
+    </file>
+</baseline>

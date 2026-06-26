@@ -1,0 +1,90 @@
+# Changelog
+
+## [1.7.0](https://github.com/JiRaska/open-bank/compare/balance-service-v1.6.0...balance-service-v1.7.0) (2026-06-25)
+
+
+### Features
+
+* **balance:** inject Clock into application and infrastructure layers (ADR-0100) ([#2065](https://github.com/JiRaska/open-bank/issues/2065)) ([4adefcd](https://github.com/JiRaska/open-bank/commit/4adefcdf3ba93d294f260eafb1ac26d2d5f0e98b)), closes [#1612](https://github.com/JiRaska/open-bank/issues/1612)
+* **balance:** inject Clock into ReconciliationResource (ADR-0100) ([#2066](https://github.com/JiRaska/open-bank/issues/2066)) ([0d78f0a](https://github.com/JiRaska/open-bank/commit/0d78f0aaaa073a905fbe83a5073c6f6f0b524e28)), closes [#1612](https://github.com/JiRaska/open-bank/issues/1612)
+
+
+### Bug Fixes
+
+* **balance,sepa-payment,fraud:** @Dependent scope on ClockProducer + inject Clock into fraud persistence (ADR-0100) ([#2081](https://github.com/JiRaska/open-bank/issues/2081)) ([fc1a129](https://github.com/JiRaska/open-bank/commit/fc1a129cbfee4b5db41dbf4334f3dbe9d5e621c8))
+
+## [1.6.0](https://github.com/JiRaska/open-bank/compare/balance-service-v1.5.2...balance-service-v1.6.0) (2026-06-25)
+
+
+### Features
+
+* **balance:** inject Clock for DST determinism (ADR-0100 Layer 1) ([#2029](https://github.com/JiRaska/open-bank/issues/2029)) ([a6ab925](https://github.com/JiRaska/open-bank/commit/a6ab925e56edee29adb4f265a70fc0a31e934de4))
+
+
+### Bug Fixes
+
+* **balance:** inject Clock into domain/application layers (ADR-0100, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2006](https://github.com/JiRaska/open-bank/issues/2006)) ([9591d00](https://github.com/JiRaska/open-bank/commit/9591d00c4f21b1188e52d599a3634c902bb865d0))
+
+## [1.5.2](https://github.com/JiRaska/open-bank/compare/balance-service-v1.5.1...balance-service-v1.5.2) (2026-06-25)
+
+
+### Bug Fixes
+
+* **ci:** can-i-deploy --latest main — avoid 'No pacts' on path-scoped SHA ([4ea2731](https://github.com/JiRaska/open-bank/commit/4ea273195d038704acc6341f684c0f1cb039ce82))
+* **libs:** wire @Authorize attributes to AuthzQuery + BearerTokenClientHeadersFactory warn log ([de3bfc1](https://github.com/JiRaska/open-bank/commit/de3bfc1937681ff13205a2ddedc07334ee23b42e))
+* **lint:** resolve fleet-wide ktlint/compile violations (Refs [#1968](https://github.com/JiRaska/open-bank/issues/1968)) ([#1971](https://github.com/JiRaska/open-bank/issues/1971)) ([92dc2d6](https://github.com/JiRaska/open-bank/commit/92dc2d636d857b526c8276e2647de440c540577b))
+
+
+### Security
+
+* **balance:** per-account ownership check via X-Customer-Party-Id (A1, issue [#628](https://github.com/JiRaska/open-bank/issues/628)) ([f69af56](https://github.com/JiRaska/open-bank/commit/f69af56979ea4b3df64d86bee1a5cd17c21caf7d))
+
+## [1.5.1](https://github.com/JiRaska/open-bank/compare/balance-service-v1.5.0...balance-service-v1.5.1) (2026-06-15)
+
+
+### Bug Fixes
+
+* **agent,balance,product-catalog:** unblock main CI — capability rename sync + /q/metrics registries ([#751](https://github.com/JiRaska/open-bank/issues/751)) ([a561b91](https://github.com/JiRaska/open-bank/commit/a561b91ee2f06ed71b23086a3a62d7db00a8c7ff))
+
+## [1.5.0](https://github.com/JiRaska/open-bank/compare/balance-service-v1.4.0...balance-service-v1.5.0) (2026-06-12)
+
+
+### Features
+
+* **balance:** outbox backlog gauge + countProcessable (ADR-0077/0079) ([#811](https://github.com/JiRaska/open-bank/issues/811)) ([10b78f2](https://github.com/JiRaska/open-bank/commit/10b78f240bae7cab91e52a1a24e7c63ebb716dbc))
+* **domestic-payment:** wire DomainMetrics counters (ADR-0077 Phase 2 sweep) ([#684](https://github.com/JiRaska/open-bank/issues/684)) ([7bc6633](https://github.com/JiRaska/open-bank/commit/7bc663347fd81e5fe0f49076e7eb64055b4baa5e))
+
+## [1.4.0](https://github.com/JiRaska/open-bank/compare/balance-service-v1.3.0...balance-service-v1.4.0) (2026-06-10)
+
+
+### Features
+
+* **admin-ui:** derive governance manifest from governance.yaml (ADR-0071 phase 2) ([#498](https://github.com/JiRaska/open-bank/issues/498)) ([46c85e9](https://github.com/JiRaska/open-bank/commit/46c85e98fe1e887eb82e2110efb5286fe0220d12))
+* **balance:** event-driven zero-balance init on AccountCreated (ADR-0073) ([#549](https://github.com/JiRaska/open-bank/issues/549)) ([18c23aa](https://github.com/JiRaska/open-bank/commit/18c23aa073ba2ea1ba9732782b74416a6a028902))
+* **balance:** make direct credit/debit idempotent on referenceId ([#590](https://github.com/JiRaska/open-bank/issues/590)) ([32bfa57](https://github.com/JiRaska/open-bank/commit/32bfa57cbcb5276e8537628efedd3f1b4fe02eea))
+* **balance:** point-in-time asOf query on GET balance ([#579](https://github.com/JiRaska/open-bank/issues/579)) ([8256ee6](https://github.com/JiRaska/open-bank/commit/8256ee6072a9a0d8017ee67bfef8e4cea11a1928))
+
+
+### Bug Fixes
+
+* **gitops:** single-owner ArgoCD apps for product-catalog and audit-oidc ([#609](https://github.com/JiRaska/open-bank/issues/609)) ([48959b1](https://github.com/JiRaska/open-bank/commit/48959b1459fe696b05f0ec983a4daec3fce24207))
+
+## [1.3.0](https://github.com/JiRaska/open-bank/compare/balance-service-v1.2.3...balance-service-v1.3.0) (2026-06-06)
+
+
+### Features
+
+* **admin-ui:** quality dashboard — Pact contract tests, pitest mutation, composite score (ADR-0063) ([#360](https://github.com/JiRaska/open-bank/issues/360)) ([00b25bc](https://github.com/JiRaska/open-bank/commit/00b25bcc934fea8728bb4b404166cd21c273495b))
+* **build-logic:** convention plugin openbank.quarkus-service (ADR-0049 D1) ([#344](https://github.com/JiRaska/open-bank/issues/344)) ([da71b7e](https://github.com/JiRaska/open-bank/commit/da71b7e1705649c453b252c32fa06dc098210d63))
+* **coverage:** enforce kover 40% floor on all 13 money-path services ([#338](https://github.com/JiRaska/open-bank/issues/338)) ([6e5f132](https://github.com/JiRaska/open-bank/commit/6e5f132ab1f0c3723104276d373307f76076d483))
+
+
+### Bug Fixes
+
+* **gitops:** add Kafka value.deserializer env vars for payment services ([#366](https://github.com/JiRaska/open-bank/issues/366)) ([b578775](https://github.com/JiRaska/open-bank/commit/b57877557a04f6d4b7fe19bba90db3494eb6d6de))
+* **infra:** restore Keycloak login theme to dark blue/cyan ([#358](https://github.com/JiRaska/open-bank/issues/358)) ([2e56cbc](https://github.com/JiRaska/open-bank/commit/2e56cbc39dab44a2a7c6ed66edea533aebdca317))
+
+
+### Security
+
+* **libs:** harden shared config + DB constraints + logging (beta pentest) ([#342](https://github.com/JiRaska/open-bank/issues/342)) ([e368296](https://github.com/JiRaska/open-bank/commit/e3682965a4f7df3b7328e8a741e4809604706390))

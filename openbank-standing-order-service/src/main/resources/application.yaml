@@ -1,0 +1,118 @@
+quarkus:
+  application:
+    name: openbank-standing-order-service
+    version: 0.1.0
+  http:
+    port: 8121
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+      headers: Content-Type,Authorization,Idempotency-Key
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: postgresql://localhost:5432/openbank_standing_orders
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_standing_orders
+  flyway:
+    migrate-at-start: true
+    validate-on-migrate: false
+    connect-retries: 10
+    connect-retries-interval: 2S
+  hibernate-orm:
+    database:
+      generation: none
+    physical-naming-strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  redis:
+    hosts: redis://localhost:6379
+  smallrye-reactive-messaging:
+    kafka:
+      bootstrap-servers: localhost:29092
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+    console:
+      json: true
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-standing-order-service
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+    oidc:
+      enabled: false
+"%test":
+  quarkus:
+    oidc:
+      enabled: false
+openbank:
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 200
+  outbox:
+    dispatch-enabled: true
+    poll-interval: 5s
+    initial-delay: 5s
+
+mp:
+  messaging:
+    outgoing:
+      standing-order-events-out:
+        connector: smallrye-kafka
+        client.id: standing-order-service-${quarkus.uuid}
+        topic: openbank.standing-orders.order.event
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+
+# OPA sidecar (ADR-0034). Advisory mode by default.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:true}"

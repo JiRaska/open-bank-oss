@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MPL-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: compliance
+primaryDatastore: none
+schemaName: n/a
+dataLineageRole: consumer
+dataClassification: confidential
+retentionPolicy: 10 years
+evidenceExported: true
+lineage:
+  upstream:
+    - serviceName: ledger-service
+      relationType: api
+      description: reads transaction and balance data for FINREP templates
+    - serviceName: statement-service
+      relationType: api
+      description: reads statement data for regulatory reporting

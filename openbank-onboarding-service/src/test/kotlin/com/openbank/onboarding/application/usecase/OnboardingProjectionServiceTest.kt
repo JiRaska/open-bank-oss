@@ -1,0 +1,205 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.onboarding.application.usecase
+
+import com.openbank.onboarding.application.port.out.OnboardingRepository
+import com.openbank.onboarding.domain.model.*
+import io.mockk.*
+import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import java.time.Instant
+import java.util.UUID
+
+class OnboardingProjectionServiceTest {
+
+    private val repo = mockk<OnboardingRepository>()
+    private lateinit var service: OnboardingProjectionService
+
+    @BeforeEach
+    fun setUp() {
+        service = OnboardingProjectionService().also { it.repo = repo }
+    }
+
+    // ── FunnelStage.derive ────────────────────────────────────────────────────
+
+    @Test
+    fun `derive returns REGISTERED for PENDING_KYC with no kyc`(): Unit = runBlocking {
+        assertThat(FunnelStage.derive(PartyStage.PENDING_KYC, null, false))
+            .isEqualTo(FunnelStage.KYC_OPEN)
+    }
+
+    @Test
+    fun `derive returns KYC_UNDER_REVIEW when kyc is UNDER_REVIEW`(): Unit = runBlocking {
+        assertThat(FunnelStage.derive(PartyStage.PENDING_KYC, KycStage.UNDER_REVIEW, false))
+            .isEqualTo(FunnelStage.KYC_UNDER_REVIEW)
+    }
+
+    @Test
+    fun `derive returns SCA_PENDING for ACTIVE party without device`(): Unit = runBlocking {
+        assertThat(FunnelStage.derive(PartyStage.ACTIVE, KycStage.APPROVED, false))
+            .isEqualTo(FunnelStage.SCA_PENDING)
+    }
+
+    @Test
+    fun `derive returns ACTIVE for ACTIVE party with device enrolled`(): Unit = runBlocking {
+        assertThat(FunnelStage.derive(PartyStage.ACTIVE, KycStage.APPROVED, true))
+            .isEqualTo(FunnelStage.ACTIVE)
+    }
+
+    @Test
+    fun `derive returns BLOCKED for SUSPENDED party`(): Unit = runBlocking {
+        assertThat(FunnelStage.derive(PartyStage.SUSPENDED, KycStage.APPROVED, true))
+            .isEqualTo(FunnelStage.BLOCKED)
+    }
+
+    // ── applyEvent: PartyCreated ──────────────────────────────────────────────
+
+    @Test
+    fun `applyEvent PartyCreated inserts record with REGISTERED stage`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        val slot = slot<OnboardingRecord>()
+        coEvery { repo.upsert(capture(slot)) } just runs
+
+        service.applyEvent(
+            OnboardingEvent.PartyCreated(
+                partyId = partyId,
+                legalName = "Alice Example",
+                email = "alice@example.com",
+                occurredAt = Instant.parse("2026-06-01T10:00:00Z"),
+            )
+        )
+
+        with(slot.captured) {
+            assertThat(this.partyId).isEqualTo(partyId)
+            assertThat(legalName).isEqualTo("Alice Example")
+            assertThat(partyStatus).isEqualTo(PartyStage.PENDING_KYC)
+            assertThat(funnelStage).isEqualTo(FunnelStage.REGISTERED)
+            assertThat(scaEnrolled).isFalse()
+            assertThat(deviceCount).isEqualTo(0)
+        }
+        coVerify(exactly = 1) { repo.upsert(any()) }
+    }
+
+    // ── applyEvent: KycCaseOpened ─────────────────────────────────────────────
+
+    @Test
+    fun `applyEvent KycCaseOpened updates record with KYC_OPEN stage`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        val caseId = UUID.randomUUID()
+        val existing = sampleRecord(partyId, partyStatus = PartyStage.PENDING_KYC, funnelStage = FunnelStage.REGISTERED)
+        val slot = slot<OnboardingRecord>()
+        coEvery { repo.findByPartyId(partyId) } returns existing
+        coEvery { repo.upsert(capture(slot)) } just runs
+
+        service.applyEvent(
+            OnboardingEvent.KycCaseOpened(partyId, caseId, Instant.parse("2026-06-01T11:00:00Z"))
+        )
+
+        with(slot.captured) {
+            assertThat(kycCaseId).isEqualTo(caseId)
+            assertThat(kycStatus).isEqualTo(KycStage.OPEN)
+            assertThat(funnelStage).isEqualTo(FunnelStage.KYC_OPEN)
+        }
+    }
+
+    // ── applyEvent: KycStatusChanged → APPROVED ───────────────────────────────
+
+    @Test
+    fun `applyEvent KycStatusChanged APPROVED moves to SCA_PENDING`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        val caseId = UUID.randomUUID()
+        val existing = sampleRecord(partyId, kycStatus = KycStage.UNDER_REVIEW,
+            funnelStage = FunnelStage.KYC_UNDER_REVIEW)
+        val slot = slot<OnboardingRecord>()
+        coEvery { repo.findByPartyId(partyId) } returns existing
+        coEvery { repo.upsert(capture(slot)) } just runs
+
+        service.applyEvent(
+            OnboardingEvent.KycStatusChanged(partyId, caseId, KycStage.APPROVED,
+                Instant.parse("2026-06-02T09:00:00Z"))
+        )
+
+        // ACTIVE party + KYC approved + no SCA = SCA_PENDING
+        // Note: partyStatus in sampleRecord is ACTIVE
+        with(slot.captured) {
+            assertThat(kycStatus).isEqualTo(KycStage.APPROVED)
+            assertThat(funnelStage).isEqualTo(FunnelStage.SCA_PENDING)
+            assertThat(blockedReason).isNull()
+        }
+    }
+
+    // ── applyEvent: DeviceEnrolled ────────────────────────────────────────────
+
+    @Test
+    fun `applyEvent DeviceEnrolled marks scaEnrolled and advances to ACTIVE`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        val existing = sampleRecord(partyId, funnelStage = FunnelStage.SCA_PENDING,
+            kycStatus = KycStage.APPROVED)
+        val slot = slot<OnboardingRecord>()
+        coEvery { repo.findByPartyId(partyId) } returns existing
+        coEvery { repo.upsert(capture(slot)) } just runs
+
+        service.applyEvent(
+            OnboardingEvent.DeviceEnrolled(partyId, "cred-abc", Instant.parse("2026-06-03T08:00:00Z"))
+        )
+
+        with(slot.captured) {
+            assertThat(scaEnrolled).isTrue()
+            assertThat(deviceCount).isEqualTo(1)
+            assertThat(funnelStage).isEqualTo(FunnelStage.ACTIVE)
+        }
+    }
+
+    // ── getRecord not found ───────────────────────────────────────────────────
+
+    @Test
+    fun `getRecord throws when party not found`() {
+        val partyId = UUID.randomUUID()
+        coEvery { repo.findByPartyId(partyId) } returns null
+
+        assertThatThrownBy {
+            runBlocking { service.getRecord(partyId) }
+        }.isInstanceOf(OnboardingRecordNotFoundException::class.java)
+    }
+
+    // ── funnelCounts ─────────────────────────────────────────────────────────
+
+    @Test
+    fun `funnelCounts returns entry for every FunnelStage`(): Unit = runBlocking {
+        FunnelStage.entries.forEach { stage ->
+            coEvery { repo.countByStage(stage) } returns stage.ordinal.toLong()
+        }
+
+        val result = service.funnelCounts()
+
+        assertThat(result.keys).containsExactlyInAnyOrderElementsOf(FunnelStage.entries.map { it.name })
+        assertThat(result["ACTIVE"]).isEqualTo(FunnelStage.ACTIVE.ordinal.toLong())
+    }
+
+    // ── helpers ───────────────────────────────────────────────────────────────
+
+    private fun sampleRecord(
+        partyId: UUID = UUID.randomUUID(),
+        partyStatus: PartyStage = PartyStage.ACTIVE,
+        kycStatus: KycStage? = null,
+        funnelStage: FunnelStage = FunnelStage.REGISTERED,
+    ) = OnboardingRecord(
+        partyId = partyId,
+        legalName = "Alice Example",
+        email = "alice@example.com",
+        partyStatus = partyStatus,
+        kycCaseId = null,
+        kycStatus = kycStatus,
+        scaEnrolled = false,
+        deviceCount = 0,
+        funnelStage = funnelStage,
+        blockedReason = null,
+        createdAt = Instant.parse("2026-06-01T10:00:00Z"),
+        updatedAt = Instant.parse("2026-06-01T10:00:00Z"),
+    )
+}

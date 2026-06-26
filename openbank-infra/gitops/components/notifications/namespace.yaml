@@ -1,0 +1,14 @@
+# Notifications banking-domain namespace (ADR-0037: domain = namespace). App
+# plane. Holds notification-service plus its single-owner CNPG Postgres. This is
+# the first FinOps T2 pilot (ADR-0057): the service is an async Kafka consumer
+# scaled from/to zero on consumer-group lag by KEDA, so it normally has ZERO
+# resident pods — the namespace mostly contains just the (idle) DB.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: notifications
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

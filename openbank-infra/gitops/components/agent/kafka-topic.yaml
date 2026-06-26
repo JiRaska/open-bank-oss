@@ -1,0 +1,22 @@
+# Strimzi-managed KafkaTopic for compliance-officer oversight sweep triggers (ADR-0031 D9 P2,
+# Refs #703). Events on this topic wake the agent-service oversight consumer immediately,
+# supplementing the 30-minute scheduler cadence. Lives in the `messaging` namespace (the Strimzi
+# topic operator only watches its own namespace). Single partition + RF 1 for the sandbox;
+# raise partitions and RF to 3 for production.
+#
+# Producers: aml-service, sanctions-service (pending — they will emit an event here when a
+# high-priority finding arrives that warrants an immediate compliance sweep rather than waiting
+# for the next scheduled run).
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.oversight-triggers
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

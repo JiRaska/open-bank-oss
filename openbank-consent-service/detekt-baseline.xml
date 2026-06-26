@@ -1,0 +1,30 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>LongParameterList:ConsentResource.kt$ConsentResource$( private val createConsent: CreateConsentUseCase, private val revokeConsent: RevokeConsentUseCase, private val getConsent: GetConsentUseCase, private val validateConsent: ValidateConsentUseCase, private val activateConsent: ActivateConsentUseCase, private val idempotencyStore: IdempotencyStore, private val objectMapper: ObjectMapper )</ID>
+    <ID>MagicNumber:AuthzProducer.kt$AuthzProducer$500</ID>
+    <ID>MagicNumber:Consent.kt$Consent$365L</ID>
+    <ID>MagicNumber:Consent.kt$Consent$90L</ID>
+    <ID>MagicNumber:ConsentOutboxDispatcher.kt$ConsentOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:ConsentOutboxDispatcher.kt$ConsentOutboxDispatcher$30000</ID>
+    <ID>MatchingDeclarationName:ConsentOutboxPort.kt$ConsentOutboxRepository : OutboxRepository</ID>
+    <ID>MagicNumber:ConsentOutboxRepositoryImpl.kt$ConsentOutboxRepositoryImpl$4000</ID>
+    <ID>MagicNumber:ConsentResource.kt$ConsentResource$201</ID>
+    <ID>MagicNumber:ConsentService.kt$ConsentService$365L</ID>
+    <ID>MagicNumber:ConsentService.kt$ConsentService$90L</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$ConsentAlreadyActiveMapper$409</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$ConsentNotFoundMapper$404</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$ConsentNotOwnedMapper$403</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$ConsentScaChallengeMismatchMapper$422</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$ConsentScaChallengeNotFoundMapper$422</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$ConsentScaNotCompletedMapper$422</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$ConsentScaVerificationUnavailableMapper$503</ID>
+    <ID>MagicNumber:ScaChallengeClient.kt$ResilientScaChallengeClient$2000</ID>
+    <ID>SwallowedException:ConsentOutboxDispatcher.kt$ConsentOutboxDispatcher$ex: Exception</ID>
+    <ID>SwallowedException:ConsentService.kt$ConsentService$e: Exception</ID>
+    <ID>SwallowedException:ConsentService.kt$ConsentService$e: NotFoundException</ID>
+    <ID>TooGenericExceptionCaught:ConsentOutboxDispatcher.kt$ConsentOutboxDispatcher$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:ConsentService.kt$ConsentService$e: Exception</ID>
+  </CurrentIssues>
+</SmellBaseline>

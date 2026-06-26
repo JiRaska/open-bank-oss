@@ -1,0 +1,26 @@
+# external-dns — reconciles Route53 records for open-bank.tech from Ingress
+# hosts (platform plane). AWS access is via EKS Pod Identity wired in
+# modules/dns; this Application only ships the namespace, RBAC and Deployment.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: external-dns
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/external-dns
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: external-dns
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

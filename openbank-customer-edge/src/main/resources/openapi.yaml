@@ -1,0 +1,674 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: Customer Edge API
+  version: 1.9.0
+  description: >-
+    Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
+    retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
+    enforces ownership, and proxies an explicit allow-list of routes to backend services.
+    Deny-by-default: any path not listed here returns 404.
+
+    Onboarding (ADR-0069): /onboarding/start is unauthenticated (party creation before
+    Keycloak user exists). /onboarding/account requires a valid customer session and
+    enforces the KYC gate (party must be ACTIVE) before opening a bank account.
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+
+servers:
+  - url: https://customer.open-bank.tech/customer/v1
+    description: Sandbox
+
+tags:
+  - name: Reference
+  - name: Accounts
+  - name: Balances
+  - name: SCA
+  - name: Devices
+  - name: Onboarding
+
+paths:
+  /banks:
+    get:
+      tags: [Reference]
+      summary: List Czech bank codes (CNB registry)
+      description: >-
+        Returns the current list of Czech bank codes from the CNB JERR registry.
+        The response is served from an in-process cache that is seeded from an embedded
+        fallback on startup and refreshed from CNB every 24 hours. No authentication
+        required — bank codes are public reference data.
+      operationId: listBanks
+      security: []
+      responses:
+        '200':
+          description: Array of Czech bank entries sorted by code
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BankDto'
+
+  /accounts:
+    get:
+      tags: [Accounts]
+      summary: List the authenticated customer's accounts
+      operationId: listAccounts
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: Account list
+
+  /accounts/{accountId}:
+    get:
+      tags: [Accounts]
+      summary: Get a single account
+      operationId: getAccount
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Account detail
+        '403':
+          description: Not the owner
+
+  /balances/{accountId}:
+    get:
+      tags: [Balances]
+      summary: Get balance for an account
+      operationId: getBalance
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Balance detail
+
+  /transactions:
+    get:
+      tags: [Transactions]
+      summary: List transactions for one of the caller's own accounts (ownership-enforced)
+      operationId: listTransactions
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: accountId, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, required: false, schema: {type: integer, default: 20}}
+        - {name: cursor, in: query, required: false, schema: {type: string}}
+      responses:
+        '200':
+          description: Transaction page
+        '403':
+          description: Account does not belong to caller
+
+  /statements/{accountId}:
+    get:
+      tags: [Statements]
+      summary: List closed-period statement records for one of the caller's own accounts (ownership-enforced)
+      operationId: listStatements
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Statement-period list
+        '403':
+          description: Account does not belong to caller
+
+  /statements/{accountId}/{currency}/{legalSequence}:
+    get:
+      tags: [Statements]
+      summary: Render a closed statement on demand (camt.053 / MT940 / PDF) for one of the caller's own accounts
+      description: >-
+        statement-service renders the document deterministically on demand (ADR-0035) — nothing is
+        stored. Ownership is enforced (same IDOR guard as the list); currency and format are
+        allow-listed before proxying. The body streams back with the upstream Content-Type
+        (application/xml for camt.053, text/plain for MT940/PDF).
+      operationId: renderStatement
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: currency, in: path, required: true, schema: {type: string, example: CZK}}
+        - {name: legalSequence, in: path, required: true, schema: {type: integer, format: int64}}
+        - name: format
+          in: query
+          required: false
+          schema: {type: string, enum: [CAMT_053, MT940, PDF], default: PDF}
+      responses:
+        '200':
+          description: Rendered statement document
+          content:
+            application/xml: {schema: {type: string}}
+            text/plain: {schema: {type: string}}
+        '400':
+          description: Invalid currency or unsupported format
+        '403':
+          description: Account does not belong to caller
+        '404':
+          description: No statement for that sequence
+
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: List the authenticated customer's notification feed (party-scoped)
+      operationId: listNotifications
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: limit, in: query, required: false, schema: {type: integer, default: 20}}
+      responses:
+        '200':
+          description: Notification list
+
+  /profile:
+    get:
+      tags: [Profile]
+      summary: Get the authenticated customer's own profile (party-scoped)
+      operationId: getProfile
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: Customer profile
+
+  /fx/rates:
+    get:
+      tags: [FX]
+      summary: Published FX rate sheet (kurzovní lístek) — authenticated, not party-scoped
+      description: >-
+        The bank's current FX rate sheet. The edge projects fx-service's rich rate records down to
+        a lightweight array of {base, quote, rate, bid, ask, timestamp}; `rate` is the mid-price
+        (bid+ask)/2. Same data for every customer.
+      operationId: listFxRates
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: FX rate sheet
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/FxRate'}
+        '502':
+          description: Malformed upstream rate sheet
+
+  /fx/rates/{base}/{quote}:
+    post:
+      tags: [FX]
+      summary: Live FX rate for one currency pair (mid-price), for in-form conversion
+      description: >-
+        Single-pair rate. POST mirrors the app's other write-shaped calls but this is a read; the
+        edge GETs fx-service and projects to {base, quote, rate, timestamp} (mid-price).
+      operationId: getFxRate
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: base, in: path, required: true, schema: {type: string, minLength: 3, maxLength: 3}}
+        - {name: quote, in: path, required: true, schema: {type: string, minLength: 3, maxLength: 3}}
+      responses:
+        '200':
+          description: FX rate for the pair
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FxRate'}
+        '400':
+          description: Invalid currency code
+        '502':
+          description: Malformed upstream rate
+
+  /fx/rates/{base}/{quote}/history:
+    get:
+      tags: [FX]
+      summary: Historical bank commercial rates for a currency pair (newest-first)
+      description: >-
+        Returns the bank's own published rates (source=INTERNAL) for the pair over time, ordered
+        newest-first. Use `from`/`to` (ISO-8601 Instant) to bound the window; `limit` is capped
+        at 365 (one year of daily rates). Designed for the app's rate-history chart.
+      operationId: getFxRateHistory
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: base, in: path, required: true, schema: {type: string, minLength: 3, maxLength: 3}}
+        - {name: quote, in: path, required: true, schema: {type: string, minLength: 3, maxLength: 3}}
+        - {name: from, in: query, required: false, schema: {type: string, format: date-time}, description: Start of window (inclusive), ISO-8601 Instant}
+        - {name: to, in: query, required: false, schema: {type: string, format: date-time}, description: End of window (inclusive), ISO-8601 Instant}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 365, default: 90}}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0, default: 0}}
+      responses:
+        '200':
+          description: Historical bank FX rates, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/FxRate'}
+        '400':
+          description: Invalid currency code or instant format
+        '502':
+          description: Malformed upstream history
+
+  /domestic-payments:
+    post:
+      tags: [Payments]
+      summary: Initiate a domestic payment from one of the caller's own accounts (ownership-enforced; instruction only, no settlement)
+      description: >-
+        The client sends a lightweight body; the edge enriches it into the full instruction the
+        payment service needs — resolving the debtor's own account number + bank code from its Czech
+        IBAN and the debtor's legal name from party-service, splitting the creditor "number/bankcode",
+        defaulting priority to STANDARD and mapping reference→messageForPayee. Ownership is enforced
+        (debtorAccountId must belong to the JWT party); malformed currency / IBAN / creditor format
+        are rejected with 400. Initiation creates + screens only; money movement stays SCA-gated.
+      operationId: createDomesticPayment
+      security:
+        - customerOidc: [payments:initiate]
+      parameters:
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [debtorAccountId, amount, creditorAccountNumber, creditorName]
+              properties:
+                debtorAccountId: {type: string, format: uuid}
+                amount: {type: string, example: '250.00'}
+                currency: {type: string, default: CZK}
+                creditorAccountNumber: {type: string, description: 'Czech "number/bankcode"', example: '2000145399/0800'}
+                creditorName: {type: string}
+                variableSymbol: {type: string, nullable: true}
+                specificSymbol: {type: string, nullable: true}
+                constantSymbol: {type: string, nullable: true}
+                reference: {type: string, nullable: true}
+      responses:
+        '201':
+          description: Payment instruction created
+        '400':
+          description: Malformed currency, debtor IBAN, creditor account, or incomplete body
+        '403':
+          description: Debtor account does not belong to caller
+
+  /sepa-payments:
+    post:
+      tags: [Payments]
+      summary: Initiate a SEPA credit transfer from one of the caller's own accounts (ownership-enforced; instruction only, no settlement)
+      description: >-
+        The client sends a lightweight body; the edge enriches it into the full SEPA instruction —
+        the debtor IBAN is the account's own IBAN (SEPA is IBAN-native, no BBAN), the debtor legal
+        name comes from party-service, and `type` defaults to SCT. The creditor IBAN passes through.
+        Ownership is enforced (debtorAccountId must belong to the JWT party); an incomplete body
+        (missing creditorIban / creditorName / amount) is rejected with 400. Initiation creates +
+        screens only; money movement stays SCA-gated.
+      operationId: createSepaPayment
+      security:
+        - customerOidc: [payments:initiate]
+      parameters:
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [debtorAccountId, amount, creditorIban, creditorName]
+              properties:
+                debtorAccountId: {type: string, format: uuid}
+                amount: {type: string, example: '120.00'}
+                currency: {type: string, default: EUR}
+                creditorIban: {type: string, example: 'DE89370400440532013000'}
+                creditorName: {type: string}
+                creditorBic: {type: string, nullable: true}
+                reference: {type: string, nullable: true}
+      responses:
+        '201':
+          description: SEPA payment instruction created
+        '400':
+          description: Incomplete body (need creditorIban, creditorName, amount) or unresolvable debtor
+        '403':
+          description: Debtor account does not belong to caller
+
+  /sca/parties/{partyId}/devices:
+    post:
+      tags: [SCA]
+      summary: Enrol a device for SCA (ADR-0021)
+      operationId: enrollDevice
+      security:
+        - customerOidc: [sca:enroll-device]
+      parameters:
+        - {name: partyId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnrollDeviceRequest'
+      responses:
+        '201':
+          description: Device enrolled
+        '403':
+          description: partyId does not match authenticated party
+
+  /sca/challenges:
+    post:
+      tags: [SCA]
+      summary: Initiate an SCA challenge (partyId injected from the JWT)
+      operationId: initiateChallenge
+      security:
+        - customerOidc: [sca:decide]
+      parameters:
+        - {name: Idempotency-Key, in: header, required: false, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json: {schema: {type: object}}
+      responses:
+        '201':
+          description: Challenge created
+
+  /sca/challenges/{id}:
+    get:
+      tags: [SCA]
+      summary: Get SCA challenge status
+      operationId: getChallenge
+      security:
+        - customerOidc: [sca:decide]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Challenge detail
+
+  /sca/challenges/{id}/decision:
+    post:
+      tags: [SCA]
+      summary: Record an out-of-band device decision (ADR-0021)
+      operationId: recordDecision
+      security:
+        - customerOidc: [sca:decide]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordDecisionRequest'
+      responses:
+        '200':
+          description: Decision recorded
+
+  /devices:
+    post:
+      tags: [Devices]
+      summary: Register this app instance's push token (FCM/APNs)
+      description: >-
+        Registers (upserts) the device's push token so the party can receive push
+        notifications. partyId is taken from the JWT — not the body — to prevent IDOR.
+      operationId: registerDevice
+      security:
+        - customerOidc: [accounts:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterDeviceRequest'
+      responses:
+        '201':
+          description: Device registered
+        '400':
+          description: Missing or invalid fields
+    get:
+      tags: [Devices]
+      summary: List the authenticated customer's registered push devices
+      description: Returns device metadata only — provider tokens are never returned.
+      operationId: listDevices
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: Device list
+
+  /onboarding/register:
+    post:
+      tags: [Onboarding]
+      summary: Register a new party with identity resolution (ADR-0072 §6)
+      description: >-
+        Unauthenticated. Creates a PENDING_KYC party in party-service via the edge's
+        M2M operator token, optionally running PID-based deduplication first (flag-gated).
+        When the resolver returns MATCH_EXISTING the caller is linked to the existing
+        golden-record party instead of creating a duplicate; the mobile client must
+        refresh its token so the next JWT carries the correct party_id claim.
+      operationId: registerParty
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterPartyRequest'
+      responses:
+        '201':
+          description: New party created (NO_MATCH or flag off)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterPartyCreatedResponse'
+        '200':
+          description: Existing party matched — caller linked to golden-record party
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterPartyMatchedResponse'
+        '202':
+          description: Manual verification required (NEEDS_MANUAL_VERIFICATION)
+        '502':
+          description: party-service or pid-service unavailable
+
+  /onboarding/start:
+    post:
+      tags: [Onboarding]
+      summary: Start customer onboarding — create a party record (ADR-0069)
+      description: >-
+        Unauthenticated. Creates a PENDING_KYC party in party-service via the edge's
+        M2M operator token. Returns the partyId; the Keycloak user is created in a
+        separate step (Phase 1: operator via seed script; Phase 2: auto via this API).
+        The party goes through KYC before an account can be opened (/onboarding/account).
+      operationId: startOnboarding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartOnboardingRequest'
+      responses:
+        '201':
+          description: Party created, pending activation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StartOnboardingResponse'
+        '400':
+          description: Missing required fields
+        '502':
+          description: party-service unavailable
+
+  /onboarding/account:
+    post:
+      tags: [Onboarding]
+      summary: Open the customer's first account after KYC approval (ADR-0069)
+      description: >-
+        Requires an authenticated ROLE_CUSTOMER JWT (passkey login after activation).
+        Enforces the KYC gate: party must be ACTIVE (KYC approved) before an account
+        is opened. partyId is taken from the JWT party_id claim — not from the request
+        body — to prevent IDOR.
+      operationId: openAccount
+      security:
+        - customerOidc: [accounts:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenAccountRequest'
+      responses:
+        '201':
+          description: Account opened
+        '422':
+          description: KYC not approved — party status is not ACTIVE
+        '404':
+          description: Party not found
+
+components:
+  securitySchemes:
+    customerOidc:
+      type: openIdConnect
+      openIdConnectUrl: https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
+
+  schemas:
+    BankDto:
+      type: object
+      required: [code, name]
+      properties:
+        code:
+          type: string
+          pattern: '^\d{4}$'
+          description: 4-digit Czech bank routing code (e.g. "0100" for Komerční banka)
+        name:
+          type: string
+          description: Official bank name as published by CNB
+        bic:
+          type: string
+          nullable: true
+          description: BIC/SWIFT code (null when not assigned or not yet in CNB data)
+
+    FxRate:
+      type: object
+      required: [base, quote, rate]
+      properties:
+        base: {type: string, description: ISO-4217 base currency, e.g. EUR}
+        quote: {type: string, description: ISO-4217 quote currency, e.g. CZK}
+        rate: {type: string, description: Mid-price (bid+ask)/2 as a decimal string}
+        bid: {type: string, description: Bid (bank buys base) — rate-sheet only}
+        ask: {type: string, description: Ask (bank sells base) — rate-sheet only}
+        timestamp: {type: string, format: date-time, description: validFrom of the upstream rate}
+        refMid: {type: string, description: ČNB central-bank fixing mid for this pair (absent when no CNB rate ingested yet)}
+        spreadPct: {type: string, description: "(ask − refMid) / refMid × 100, 2 d.p. — how much the bank's sell price exceeds the CNB reference"}
+
+    EnrollDeviceRequest:
+      type: object
+      required: [credentialId, publicKey, algorithm]
+      properties:
+        credentialId: {type: string}
+        publicKey: {type: string, description: Base64 X.509 SPKI}
+        algorithm: {type: string, enum: [ES256, ED25519]}
+
+    RegisterDeviceRequest:
+      type: object
+      required: [platform, token, appInstance]
+      properties:
+        platform: {type: string, enum: [FCM, APNS]}
+        token: {type: string, description: Provider-issued push token (FCM registration / APNs device token)}
+        appInstance: {type: string, description: Stable per-install identifier}
+        appVersion: {type: string}
+        osVersion: {type: string}
+
+    RecordDecisionRequest:
+      type: object
+      required: [credentialId, decision, signature]
+      properties:
+        credentialId: {type: string}
+        decision: {type: string, enum: [APPROVED, DENIED]}
+        signature: {type: string, description: Base64 signature over dynamic-linking payload}
+
+    StartOnboardingRequest:
+      type: object
+      required: [partyType, legalName]
+      properties:
+        partyType:
+          type: string
+          enum: [INDIVIDUAL, LEGAL_ENTITY, SOLE_TRADER]
+        legalName:
+          type: string
+          example: Jana Nováková
+        email:
+          type: string
+          format: email
+
+    StartOnboardingResponse:
+      type: object
+      required: [partyId, status]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [PENDING_ACTIVATION]
+
+    RegisterPartyRequest:
+      type: object
+      required: [legalName]
+      properties:
+        legalName:
+          type: string
+          example: Jana Nováková
+        email:
+          type: string
+          format: email
+        dateOfBirth:
+          type: string
+          format: date
+          description: Required for PID-based deduplication (ADR-0072)
+
+    RegisterPartyCreatedResponse:
+      type: object
+      required: [id, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [PENDING_KYC]
+
+    RegisterPartyMatchedResponse:
+      type: object
+      required: [partyId, status, requireTokenRefresh]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+          description: UUID of the existing golden-record party the caller was linked to
+        status:
+          type: string
+          enum: [MATCHED_EXISTING]
+        requireTokenRefresh:
+          type: boolean
+          description: >-
+            Always true on MATCHED_EXISTING — the mobile client must re-authenticate
+            so the next JWT carries the correct party_id claim (set via Keycloak
+            user-attribute mapper by the edge's admin client, PR3 / issue #1270).
+
+    OpenAccountRequest:
+      type: object
+      required: [productId, accountType, currencyCode]
+      properties:
+        productId:
+          type: string
+          format: uuid
+          description: Product catalogue ID for the account product
+        accountType:
+          type: string
+          enum: [CURRENT, SAVINGS]
+        currencyCode:
+          type: string
+          example: EUR

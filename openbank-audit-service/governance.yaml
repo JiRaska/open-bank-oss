@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: MPL-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: compliance
+primaryDatastore: Cassandra
+schemaName: audit_schema
+dataLineageRole: consumer
+dataClassification: restricted
+retentionPolicy: 10 years
+evidenceExported: true
+lineage:
+  upstream:
+    - serviceName: account-service
+      relationType: topic
+      description: events
+    - serviceName: transaction-service
+      relationType: topic
+      description: events
+    - serviceName: party-service
+      relationType: topic
+      description: events
+    - serviceName: sepa-payment
+      relationType: topic
+      description: events
+schemaLineage:
+  ownedSchemas:
+    - audit_schema
+  dependentSchemas:
+    - accounts_schema
+    - transactions_schema
+    - parties_schema

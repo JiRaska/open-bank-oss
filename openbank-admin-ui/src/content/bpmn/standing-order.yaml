@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# BPMN process diagram (ADR-0019/0029). Authored as data; validated by
+# src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
+
+name: Standing Order Execution
+desc: Automatické zpracování trvalého příkazu
+regulation: PSD2
+services:
+  - standing-order-service
+  - account-service
+  - ledger-service
+  - audit-service
+  - sepa-payment
+steps:
+  - id: start
+    type: start
+    x: 60
+    y: 100
+    label: Trigger
+  - id: load
+    type: task
+    x: 180
+    y: 100
+    label: Načtení příkazu
+    lane: payment
+    apis:
+      - GET /api/v1/standing-orders/{id}
+    relatedServices:
+      - standing-order-service
+  - id: balance
+    type: task
+    x: 320
+    y: 100
+    label: Kontrola zůstatku
+    lane: core
+    apis:
+      - GET /api/v1/accounts/{id}/balance
+    relatedServices:
+      - account-service
+  - id: gw1
+    type: gateway
+    x: 440
+    y: 100
+    label: Dostatek?
+  - id: reject
+    type: end-err
+    x: 440
+    y: 220
+    label: Nedostatek
+  - id: debit
+    type: task
+    x: 560
+    y: 100
+    label: Debit
+    lane: core
+    apis:
+      - POST /api/v1/ledger/post
+    relatedServices:
+      - ledger-service
+  - id: transfer
+    type: task
+    x: 700
+    y: 100
+    label: Credit Transfer
+    lane: payment
+    apis:
+      - POST /api/v1/sepa/outward
+    relatedServices:
+      - sepa-payment
+  - id: update
+    type: task
+    x: 840
+    y: 100
+    label: Další spuštění
+    lane: payment
+    apis:
+      - PUT /api/v1/standing-orders/{id}
+    relatedServices:
+      - standing-order-service
+  - id: audit
+    type: task
+    x: 960
+    y: 100
+    label: Audit Log
+    lane: compliance
+    apis:
+      - POST /api/v1/audit/log
+    relatedServices:
+      - audit-service
+    consumes:
+      - openbank.transactions.transaction.initiated
+  - id: end
+    type: end
+    x: 1060
+    y: 100
+    label: Hotovo
+flows:
+  - from: start
+    to: load
+  - from: load
+    to: balance
+  - from: balance
+    to: gw1
+  - from: gw1
+    to: reject
+    label: Ne
+  - from: gw1
+    to: debit
+    label: Ano
+  - from: debit
+    to: transfer
+  - from: transfer
+    to: update
+  - from: update
+    to: audit
+    kind: async
+    topic: openbank.transactions.transaction.initiated
+  - from: audit
+    to: end

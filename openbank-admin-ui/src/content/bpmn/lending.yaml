@@ -1,0 +1,135 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# BPMN process diagram (ADR-0019/0029). Authored as data; validated by
+# src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
+
+name: Lending (úvěrový lifecycle)
+desc: Životní cyklus úvěru od žádosti přes čerpání a servicing po splacení/odpis
+regulation: EBA GL/2020/06 (four-eyes) + IFRS 9 + CRR
+services:
+  - lending-service
+  - ledger-service
+steps:
+  - id: start
+    type: start
+    x: 60
+    y: 100
+    label: Žádost o úvěr
+  - id: score
+    type: task
+    x: 190
+    y: 100
+    label: Scoring (4 oči)
+    lane: compliance
+    apis:
+      - POST /api/v1/lending/applications/{id}/decision
+    relatedServices:
+      - lending-service
+  - id: gw1
+    type: gateway
+    x: 320
+    y: 100
+    label: Schváleno?
+  - id: reject
+    type: end-err
+    x: 320
+    y: 220
+    label: Zamítnuto
+  - id: disburse
+    type: task
+    x: 450
+    y: 100
+    label: Disbursement
+    lane: core
+    apis:
+      - POST /api/v1/lending/applications/{id}/disburse
+    relatedServices:
+      - lending-service
+      - ledger-service
+    emits:
+      - openbank.lending.events
+  - id: schedule
+    type: task
+    x: 580
+    y: 100
+    label: Splátkový kalendář
+    lane: core
+    relatedServices:
+      - lending-service
+  - id: accrual
+    type: task
+    x: 710
+    y: 100
+    label: Úročení (denní)
+    lane: core
+    relatedServices:
+      - lending-service
+      - ledger-service
+    emits:
+      - openbank.lending.events
+  - id: repay
+    type: task
+    x: 840
+    y: 100
+    label: Splátka
+    lane: core
+    apis:
+      - POST /api/v1/loans/{id}/installments/{iid}/repay
+    relatedServices:
+      - lending-service
+      - ledger-service
+  - id: gw2
+    type: gateway
+    x: 960
+    y: 100
+    label: Splaceno?
+  - id: writeoff
+    type: task
+    x: 960
+    y: 220
+    label: Odpis (write-off)
+    lane: compliance
+    apis:
+      - POST /api/v1/loans/{id}/writeoff
+    relatedServices:
+      - lending-service
+      - ledger-service
+    emits:
+      - openbank.lending.events
+  - id: end
+    type: end
+    x: 1080
+    y: 100
+    label: Splaceno
+  - id: end-wo
+    type: end-err
+    x: 1080
+    y: 220
+    label: Odepsáno
+flows:
+  - from: start
+    to: score
+  - from: score
+    to: gw1
+  - from: gw1
+    to: reject
+    label: Ne
+  - from: gw1
+    to: disburse
+    label: Ano
+  - from: disburse
+    to: schedule
+  - from: schedule
+    to: accrual
+  - from: accrual
+    to: repay
+  - from: repay
+    to: gw2
+  - from: gw2
+    to: end
+    label: Ano
+  - from: gw2
+    to: writeoff
+    label: Delikvence
+  - from: writeoff
+    to: end-wo

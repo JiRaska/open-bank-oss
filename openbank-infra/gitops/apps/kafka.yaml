@@ -1,0 +1,41 @@
+# The Kafka cluster CR (single-broker KRaft) reconciled by the Strimzi operator.
+# Separate Application from the operator so the CRD install and the CR can sync
+# independently — ArgoCD retries the CR until the operator's CRDs exist.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kafka
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/kafka
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: messaging
+  syncPolicy:
+    automated:
+      # prune is OFF on purpose. Strimzi copies the Kafka CR's labels —
+      # including ArgoCD's `argocd.argoproj.io/instance: kafka` tracking label —
+      # onto the broker PVCs it provisions. With prune enabled ArgoCD then sees
+      # those operator-owned PVCs as tracked-but-absent-from-git and deletes
+      # them, destroying the broker's data volume and wedging the cluster
+      # (pod Pending on a missing PVC ↔ reconcile stuck on the roller). The
+      # CR set here is tiny and fixed (Kafka/KafkaNodePool/KafkaTopic), so the
+      # lost convenience of auto-prune is cheap. Durable fix is switching
+      # ArgoCD to annotation-based resource tracking cluster-wide.
+      prune: false
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

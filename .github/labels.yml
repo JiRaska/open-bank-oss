@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+#
+# OpenBank issue/PR labels — the single source of truth (governance-as-code, ADR-0029).
+# Edited here, applied by .github/workflows/labels.yml. Do NOT create labels in the GitHub
+# UI: a hand-made label rots the same way a hand-edited catalog does (CLAUDE.md rule #7).
+#
+# Sync is ADDITIVE and idempotent: the workflow creates-or-updates every label below and
+# NEVER deletes. Removing a label from an issue's history is destructive, so pruning is a
+# deliberate manual act, not an automated side effect. Labels applied by dependabot
+# (java, javascript, docker, github-actions) are intentionally NOT listed here — they are
+# owned by .github/dependabot.yml and left untouched by this sync.
+#
+# Runner labels (self-hosted / openbank-build / openbank-deploy) live in a different
+# namespace (`runs-on`, rules.yaml: ci_runners) and are NOT issue labels — keep them out.
+
+labels:
+  # --- Type: what kind of work this is -------------------------------------------------
+  - name: bug
+    color: "d73a4a"
+    description: "A defect in shipped behavior."
+  - name: enhancement
+    color: "a2eeef"
+    description: "New capability or improvement to an existing one."
+  - name: governance
+    color: "5319e7"
+    description: "Process / policy / rules.yaml / ADR follow-up. Often the actionable tail of an ADR."
+  - name: sweep
+    color: "0e8a16"
+    description: "Cross-service fleet sweep tracker — one issue, one PR per service (see fleet_sweep template)."
+  - name: tech-debt
+    color: "fbca04"
+    description: "Refactor / cleanup with no user-facing behavior change."
+  - name: docs
+    color: "0075ca"
+    description: "Documentation, ADRs, runbooks, process specs."
+  - name: fleet-health
+    color: "b60205"
+    description: "Auto-opened by the nightly full-fleet build when a service on main is red."
+
+  # --- Triage / workflow state ---------------------------------------------------------
+  - name: triage
+    color: "ededed"
+    description: "Not yet assessed. Default on every new issue until a maintainer sizes it."
+  - name: blocked
+    color: "b60205"
+    description: "Cannot proceed — waiting on a dependency, a decision, or another issue."
+  - name: good-first-issue
+    color: "7057ff"
+    description: "Small, well-scoped, good entry point for a new contributor."
+  - name: help-wanted
+    color: "008672"
+    description: "Maintainers welcome outside contribution here."
+  - name: duplicate
+    color: "cfd3d7"
+    description: "Already tracked by another issue."
+  - name: wontfix
+    color: "ffffff"
+    description: "Acknowledged but will not be actioned. State why before closing."
+  - name: skip-hygiene
+    color: "fef2c0"
+    description: "Bypass the issue-hygiene link-in-PR gate (ADR-0052) — PR has no sensible issue to link."
+
+  # --- Risk tier: drives review rigor (rules.yaml) -------------------------------------
+  - name: money-path
+    color: "b60205"
+    description: "Touches a money_path service — needs 2 approvals + a threat model (rules.yaml)."
+
+  # --- Compliance touchpoints: mirror the PR template & feature_request template --------
+  - name: "compliance:pci"
+    color: "1d76db"
+    description: "PCI DSS surface affected."
+  - name: "compliance:dora"
+    color: "1d76db"
+    description: "DORA (operational resilience) surface affected."
+  - name: "compliance:gdpr"
+    color: "1d76db"
+    description: "GDPR / personal-data surface affected."
+  - name: "compliance:psd2-sca"
+    color: "1d76db"
+    description: "PSD2 / SCA / RTS surface affected."
+  - name: "compliance:aml"
+    color: "1d76db"
+    description: "AML / 5AMLD / sanctions surface affected."
+  - name: "compliance:cnb"
+    color: "1d76db"
+    description: "CNB regulatory-reporting surface affected."
+
+  # --- Review gates: applied to PRs by the PR template's security checklist -------------
+  - name: security-review-required
+    color: "d93f0b"
+    description: "Auth / crypto / payment code changed — security review must sign off (PR template)."
+  - name: gdpr-review-required
+    color: "d93f0b"
+    description: "PII path changed — GDPR review must sign off (PR template)."
+  - name: pci-review-required
+    color: "d93f0b"
+    description: "Cardholder-data path changed — PCI review must sign off (PR template)."
+
+  # --- Dependencies: owned by dependabot, declared here only to fix its color/description
+  - name: dependencies
+    color: "0366d6"
+    description: "Dependency update. Applied automatically by dependabot."

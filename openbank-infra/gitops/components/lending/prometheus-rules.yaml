@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: MPL-2.0
+# Per-service PrometheusRule for openbank-lending-service (money-path, ADR-0077/0079).
+# Complements the fleet-wide tier-1 rules with lending-specific credit-risk alerts.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-lending-alerts
+  namespace: lending
+  labels:
+    app.kubernetes.io/part-of: openbank
+    app.kubernetes.io/name: lending-service
+spec:
+  groups:
+    - name: openbank.lending.health
+      rules:
+        - alert: LendingServiceDown
+          expr: up{job="observability/openbank-services", namespace="lending"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            service: lending
+          annotations:
+            summary: "lending-service is unreachable"
+            description: "lending-service has been unreachable for >2m — credit disbursements and repayment processing are blocked."
+        - alert: LendingOutboxBacklogStuck
+          expr: openbank_outbox_backlog{service="lending"} > 50
+          for: 15m
+          labels:
+            severity: critical
+            service: lending
+          annotations:
+            summary: "lending outbox backlog stuck"
+            description: "lending-service outbox has >50 unrelayed rows for >15m — credit events (disbursement/repayment) may be delayed."
+        - alert: LendingHighErrorRate
+          expr: |
+            (
+              sum by (service) (rate(traces_spanmetrics_calls_total{status_code="STATUS_CODE_ERROR", service="lending"}[5m]))
+                / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service="lending"}[5m])), 0.001) > 0.10
+            )
+            and
+            (
+              sum by (service) (rate(traces_spanmetrics_calls_total{status_code="STATUS_CODE_ERROR", service="lending"}[5m])) > 0.5
+            )
+          for: 5m
+          labels:
+            severity: critical
+            service: lending
+          annotations:
+            summary: "High error rate on lending-service"
+            description: ">10% of spans on lending-service are erroring at >0.5 err/s."
+        - alert: LendingRepaymentProcessingStalled
+          # Repayment events must be processed promptly; a stall means accounts
+          # may be incorrectly reported as overdue to the credit bureau.
+          expr: |
+            increase(openbank_lending_repayments_processed_total[30m]) == 0
+            and on() hour() >= 6 and on() hour() <= 22
+          for: 30m
+          labels:
+            severity: warning
+            service: lending
+          annotations:
+            summary: "No repayments processed in 30m (business hours)"
+            description: "lending-service has not processed any repayment events in 30m during business hours — check Kafka consumer lag."

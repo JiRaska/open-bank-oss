@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: MPL-2.0
+# Production Readiness — manuální atestace (M-dimenze).
+#
+# Tohle je JEDINÉ místo, kde se zralost zadává ručně. Derived signály (kód, testy,
+# openapi, flyway, backup-config, netpol, scrape) bere collector přímo z repu a sem
+# NEPATŘÍ. Sem patří jen fakta, která z repu odvodit nejdou a někdo je musí dosvědčit:
+#   restore_drill  — proběhl ověřený obnov ze zálohy?
+#   dr_drill       — proběhl cvičený failover (RPO/RTO změřeno)?
+#   pentest        — externí/automatizovaný pentest
+#   oncall         — on-call rotace + auditovaný break-glass
+#   coverage_floor — money-path coverage práh atestován
+#   slo_defined    — definované SLO + burn-rate alerty
+#   contract_verified / code_complete — viz collector
+#
+# ANTI-ROT: každá atestace MÁ date + ttl_days. Po expiraci collector NEzapočítá
+# bank-grade bonus a dimenze spadne zpět na derived skóre. Zelená není navždy.
+#
+# Formát (jeden řádek na atestaci):
+#   <service>:
+#     <key>: { date: YYYY-MM-DD, ttl_days: N, by: <kdo>, ref: <PR/runbook> }
+#
+# Příklad (zakomentovaný — odkomentuj AŽ to fakt proběhne, ne dřív):
+#
+# ledger:
+#   restore_drill: { date: 2026-06-20, ttl_days: 180, by: jiri, ref: runbook-0006 }
+#   dr_drill:      { date: 2026-06-20, ttl_days: 180, by: jiri, ref: runbook-0006 }
+#   pentest:       { date: 2026-05-01, ttl_days: 365, by: ext,  ref: schemathesis-fleet }
+
+# --- zatím prázdné: žádná M-dimenze není dosvědčena (a to je pravda) ---

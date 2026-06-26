@@ -1,0 +1,435 @@
+web:
+  port: 8080
+  read-buffer-size: 8192
+
+storage:
+  type: postgres
+  path: "host=postgres user=openbank password=${POSTGRES_PASSWORD} dbname=openbank_gatus sslmode=disable"
+  caching: true
+
+ui:
+  title: "OpenBank Status"
+  header: "OpenBank Platform Status"
+  description: "Real-time availability of OpenBank services. Published in compliance with PSD2 RTS Art. 32."
+  logo: ""
+  link: "https://openbank.example.com"
+  buttons:
+    - name: "API Documentation"
+      link: "https://openbank.example.com/docs"
+
+alerting:
+  slack:
+    webhook-url: "${SLACK_WEBHOOK_URL}"
+    default-alert:
+      enabled: false
+      failure-threshold: 3
+      success-threshold: 2
+      send-on-resolved: true
+
+connectivity:
+  checker:
+    target: 1.1.1.1:53
+    interval: 60s
+
+endpoints:
+  # ── Core Banking ──────────────────────────────────────────────────────────
+
+  - name: "Account Service"
+    group: "Core Banking"
+    url: "http://account-service:8100/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"
+    alerts:
+      - type: slack
+        failure-threshold: 3
+        success-threshold: 2
+        send-on-resolved: true
+
+  - name: "Account Service — Liveness"
+    group: "Core Banking"
+    url: "http://account-service:8100/q/health/live"
+    interval: 15s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+    ui:
+      hide-conditions: true
+
+  - name: "Ledger Service"
+    group: "Core Banking"
+    url: "http://ledger-service:8101/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"
+    alerts:
+      - type: slack
+        failure-threshold: 3
+        success-threshold: 2
+        send-on-resolved: true
+
+  - name: "Transaction Service"
+    group: "Core Banking"
+    url: "http://transaction-service:8102/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"
+    alerts:
+      - type: slack
+        failure-threshold: 3
+        success-threshold: 2
+        send-on-resolved: true
+
+  - name: "Balance Service"
+    group: "Core Banking"
+    url: "http://balance-service:8103/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"
+    alerts:
+      - type: slack
+        failure-threshold: 3
+        success-threshold: 2
+        send-on-resolved: true
+
+  - name: "Product Catalog"
+    group: "Core Banking"
+    url: "http://openbank-product-catalog:8104/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"
+    alerts:
+      - type: slack
+        failure-threshold: 3
+        success-threshold: 2
+        send-on-resolved: true
+
+  - name: "PID Service"
+    group: "Core Banking"
+    url: "http://pid-service:8105/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"
+
+  # ── PSD2 / Open Banking ───────────────────────────────────────────────────
+
+  - name: "PSD2 API (ČOBS)"
+    group: "PSD2 Open Banking"
+    url: "http://psd2-service:8107/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 3000"
+    alerts:
+      - type: slack
+        failure-threshold: 2
+        success-threshold: 1
+        send-on-resolved: true
+
+  - name: "PSD2 Sandbox"
+    group: "PSD2 Open Banking"
+    url: "http://psd2-service:8107/open-banking/sandbox/v2/health"
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].sandbox == true"
+      - "[RESPONSE_TIME] < 2000"
+
+  - name: "Consent Service"
+    group: "PSD2 Open Banking"
+    url: "http://consent-service:8106/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"
+    alerts:
+      - type: slack
+        failure-threshold: 2
+        success-threshold: 1
+        send-on-resolved: true
+
+  - name: "SCA Service"
+    group: "PSD2 Open Banking"
+    url: "http://sca-service:8110/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"
+    alerts:
+      - type: slack
+        failure-threshold: 2
+        success-threshold: 1
+        send-on-resolved: true
+
+  - name: "TPP Registry"
+    group: "PSD2 Open Banking"
+    url: "http://tpp-registry-service:8108/q/health/ready"
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"
+
+  - name: "Agent Service (MCP)"
+    group: "AI & Automation"
+    url: "http://agent-service:8109/q/health/ready"
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"
+
+  - name: "Party Service"
+    group: "Core Banking"
+    url: "http://party-service:8111/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 1000"
+
+  - name: "Notification Service"
+    group: "Core Banking"
+    url: "http://notification-service:8112/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 1000"
+
+  - name: "Audit Service"
+    group: "Compliance"
+    url: "http://audit-service:8113/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 1000"
+
+  - name: "KYC Service"
+    group: "Compliance"
+    url: "http://kyc-service:8114/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 1000"
+
+  - name: "SEPA Payment"
+    group: "PSD2 Open Banking"
+    url: "http://sepa-payment:8115/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"
+
+  - name: "Domestic Payment"
+    group: "PSD2 Open Banking"
+    url: "http://domestic-payment:8116/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"
+
+  - name: "AML Service"
+    group: "Compliance"
+    url: "http://aml-service:8117/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"
+
+  - name: "API Gateway"
+    group: "PSD2 Open Banking"
+    url: "http://api-gateway:8001/status"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 2000"
+
+  # ── Infrastructure ────────────────────────────────────────────────────────
+
+  - name: "PostgreSQL"
+    group: "Infrastructure"
+    url: "tcp://postgres:5432"
+    interval: 30s
+    conditions:
+      - "[CONNECTED] == true"
+
+  - name: "Kafka"
+    group: "Infrastructure"
+    url: "tcp://kafka:9092"
+    interval: 30s
+    conditions:
+      - "[CONNECTED] == true"
+
+  - name: "Keycloak (IAM)"
+    group: "Infrastructure"
+    url: "http://keycloak:8080/realms/openbank"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 3000"
+
+  - name: "Valkey (Cache)"
+    group: "Infrastructure"
+    url: "tcp://valkey:6379"
+    interval: 30s
+    conditions:
+      - "[CONNECTED] == true"
+
+  - name: "Vault (Secrets)"
+    group: "Infrastructure"
+    url: "http://vault:8200/v1/sys/health"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 2000"
+
+  - name: "Schema Registry"
+    group: "Infrastructure"
+    url: "http://schema-registry:8081"
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 2000"
+
+  - name: "Grafana"
+    group: "Observability"
+    url: "http://grafana:3000/api/health"
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 2000"
+
+  - name: "Prometheus"
+    group: "Observability"
+    url: "http://prometheus:9090/-/healthy"
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 2000"
+
+  - name: "Loki"
+    group: "Observability"
+    url: "http://loki:3100/ready"
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 2000"
+
+  - name: "Tempo"
+    group: "Observability"
+    url: "http://tempo:3200/ready"
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 2000"
+
+  - name: "Sanctions Service"
+    group: "Compliance"
+    url: "http://sanctions-service:8123/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 1000"
+
+  - name: "Security Scanner"
+    group: "Compliance"
+    url: "http://security-scanner:8120/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 1000"
+
+  - name: "Card Issuance Service"
+    group: "Payments"
+    url: "http://card-issuance-service:8118/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"
+
+  - name: "FX Service"
+    group: "Payments"
+    url: "http://fx-service:8119/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"
+
+  - name: "Standing Order Service"
+    group: "Payments"
+    url: "http://standing-order-service:8121/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"
+
+  - name: "SWIFT Service"
+    group: "Payments"
+    url: "http://swift-service:8122/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"
+
+  - name: "Clearing Service"
+    group: "Payments"
+    url: "http://clearing-service:8124/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"
+
+  - name: "Interest Service"
+    group: "Payments"
+    url: "http://interest-service:8125/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"
+
+  - name: "Dispute Service"
+    group: "Payments"
+    url: "http://dispute-service:8135/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"
+
+  - name: "SEPA Instant Service"
+    group: "Payments"
+    url: "http://sepa-instant-service:8127/q/health/ready"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 2000"

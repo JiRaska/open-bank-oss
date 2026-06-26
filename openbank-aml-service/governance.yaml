@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: MPL-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: compliance
+primaryDatastore: PostgreSQL
+schemaName: aml_schema
+dataLineageRole: both
+dataClassification: restricted
+retentionPolicy: 10 years
+evidenceExported: true
+lineage:
+  upstream:
+    - serviceName: sepa-payment
+      relationType: api
+      description: screens
+    - serviceName: sepa-instant
+      relationType: api
+      description: screens
+    - serviceName: domestic-payment
+      relationType: api
+      description: screens
+    - serviceName: swift-service
+      relationType: api
+      description: screens
+    - serviceName: kyc-service
+      relationType: topic
+      description: triggers
+    - serviceName: sanctions-service
+      relationType: topic
+      description: updates
+schemaLineage:
+  ownedSchemas:
+    - aml_schema
+  dependentSchemas:
+    - sepa_schema
+    - domestic_schema
+    - swift_schema
+    - sepa_instant_schema

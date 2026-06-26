@@ -1,0 +1,51 @@
+# Single-owner Postgres for psd2-service (cluster-wide CNPG operator). Generates
+# the psd2-db-app secret (username/password) + psd2-db-rw Service the Deployment uses.
+# Backs the PSD2 transactional outbox (V1__create_psd2_outbox).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: psd2-db
+  namespace: psd2
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_psd2
+      owner: openbank
+
+  # WAL archiving + daily base backups to S3 (ADR-0035, #863 pattern). Credentials via EKS Pod
+  # Identity on the psd2-db ServiceAccount (aws/.../db-backups.tf) — barman reads the SDK chain,
+  # no secret. Sandbox S3 lifecycle expires after 35d; prod needs compliance retention.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/psd2-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: psd2-db-daily
+  namespace: psd2
+spec:
+  schedule: "0 19 2 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: psd2-db

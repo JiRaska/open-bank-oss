@@ -1,0 +1,240 @@
+# 34. Unified OPA authorization — single sidecar serves both MCP tool-calls and REST endpoints
+
+Date: 2026-05-30
+Status: Accepted
+Author(s): Claude (session: Phase 5b consolidation)
+Amends: ADR-0018 (OPA for fine-grained authz, Proposed)
+Extends: ADR-0031 (AI agent governance, Accepted)
+
+## Context
+
+Two OPA work-streams converge on the same infrastructure but were drafted
+independently:
+
+1. **ADR-0018** (Op-ex 4, Proposed) — OPA sidecar per Quarkus service for
+   fine-grained REST authorization (`@Authorize("party.update", resource =
+   "#partyId")` Quarkus interceptor → local OPA → allow/deny).
+2. **ADR-0031** (Accepted, in implementation) — OPA in front of the MCP
+   `/tools/call` endpoint for AI agent tool authorization. Already ships:
+   - `openbank-infra/opa/policies/agents.rego` — agent allow rules
+   - `openbank-libs/governance/agents.yaml` — agent charters as data
+   - `openbank-libs/governance/rules.yaml` — governance rules as data
+
+The same engine (OPA), the same policy language (Rego), the same data bundle
+shape (`data.openbank.*`), and the same deployment model (sidecar in the
+`openbank` namespace) appear on both sides — but they were drafted as
+parallel stacks, not as one. Without an explicit decision they will diverge:
+
+- Two OPA sidecars per pod doubles memory and management surface.
+- Two policy bundles ship divergent Rego conventions, complicating audit.
+- Two query shapes (`data.openbank.agents.allow` vs `data.openbank.allow`)
+  break the "single decision point" mental model that makes OPA reviewable.
+- Charters in `agents.yaml` reference money-path rules in `rules.yaml`; the
+  same `rules.yaml` will need to drive REST authorization too (least-
+  privilege, four-eyes, value-band thresholds — none of these are
+  AI-agent-specific).
+
+K7 of the 2026-05-28 audit (36 `@PermitAll` on business endpoints) is the
+forcing function for REST authz. ADR-0031 has shown the rails. The question
+is whether to lay a second set or extend the first.
+
+## Decision
+
+**One OPA sidecar per service serves both planes — MCP tool-calls AND REST
+endpoint authorization — from a single bundle published by openbank-libs.**
+
+### D1 — Single OPA query namespace
+
+Policy package layout:
+
+```
+data.openbank.
+  agents.allow              # ADR-0031 D2 — MCP /tools/call gate (exists)
+  rest.allow                # NEW — Quarkus @Authorize interceptor (this ADR)
+  shared.{predicates,...}   # common helpers (charter lookup, money_path, four-eyes)
+```
+
+Both endpoints (`/v1/data/openbank/agents/allow`,
+`/v1/data/openbank/rest/allow`) consult the same loaded bundle.
+`data.shared.*` predicates are reused so the rule "this user has
+COMPLIANCE role AND this resource is in their business unit" is written
+once and applied identically whether the actor is an AI agent or a human
+operator through a JAX-RS endpoint.
+
+### D2 — Bundle source = openbank-libs/governance/
+
+The bundle ships under `openbank-libs/src/main/resources/policies/` and is
+built into the libs JAR. A Gradle task (`policyBundle`) packages it as an
+OCI artefact for distribution to OPA sidecars (mirroring how SBOMs were
+attached in Op-ex 2). This means:
+
+- A service that depends on `openbank-libs` gets the policy bundle by
+  construction — no separate pull step.
+- Versioning follows libs SemVer (ADR-0029) — bundle version = libs version.
+- The same `agents.yaml` + `rules.yaml` files already in
+  `openbank-libs/governance/` are loaded as OPA `data` (no duplication).
+
+> **Amendment 2026-06-19 — D3 fleet sweep complete.** All 30 REST services now carry
+> `@Authorize` on every business endpoint — advisory mode (`authz.enforce: false` default).
+> Zero `@PermitAll` remain on business endpoints. Merged as 14 PRs covering the full fleet:
+> anacredit, audit, card-issuance, clearing, consent, customer-edge, dispute, fx, interest,
+> ledger, lending, notification, psd2, sanctions, sca, sdd, sepa-payment, sepa-instant,
+> standing-order, statement, swift, transaction, account (clean split PR #1343 replacing
+> ktlint-entangled #1280). Phase 5 (enforced flip) and D4 (k8s sidecar) are next.
+
+### D3 — `com.openbank.libs.authz` Kotlin API
+
+New libs package mirroring the docs / outbox / idempotency patterns:
+
+```kotlin
+package com.openbank.libs.authz
+
+/**
+ * Quarkus method interceptor. Builds the OPA query from method args and
+ * blocks the call when `data.openbank.rest.allow` is false.
+ */
+@InterceptorBinding
+@Target(AnnotationTarget.FUNCTION)
+annotation class Authorize(
+    /** Logical action — `<aggregate>.<verb>`, e.g. `party.update`. Conventional, machine-checkable. */
+    val action: String,
+    /** SpEL-like reference to a method arg that identifies the resource, e.g. `#partyId`. */
+    val resource: String = "",
+    /** Extra attributes pulled from request context (headers, JWT claims, time-of-day). */
+    val attributes: Array<String> = [],
+)
+
+/** Port — implementations: OpaSidecarPolicyDecisionPoint (prod), AllowAllPolicyDecisionPoint (test). */
+interface PolicyDecisionPoint {
+    suspend fun allow(query: AuthzQuery): AuthzDecision
+}
+
+data class AuthzQuery(
+    val principal: Principal,        // from SecurityContext + JWT claims
+    val action: String,              // `party.update`
+    val resource: ResourceRef?,      // type + id, e.g. ("party", "p-123")
+    val attributes: Map<String, Any> = emptyMap(),
+)
+
+data class AuthzDecision(val allow: Boolean, val reason: String? = null, val policyVersion: String? = null)
+
+/** Thin Quarkus REST client to the local sidecar (`http://localhost:8181/v1/data/openbank/rest/allow`). */
+@ApplicationScoped
+class OpaSidecarPolicyDecisionPoint @Inject constructor(
+    @ConfigProperty(name = "openbank.authz.opa.url", defaultValue = "http://localhost:8181")
+    private val opaUrl: String,
+    private val client: WebClient,
+) : PolicyDecisionPoint { /* … */ }
+```
+
+Same idiom as `IdempotencyStore` (port + impl) and `DocsCatalog` (libs
+provides, services inject). Tests get `AllowAllPolicyDecisionPoint` so the
+in-process suite never depends on a running OPA.
+
+### D4 — Sidecar deployment model
+
+Services don't deploy OPA themselves. The k8s pod spec gains a sidecar via
+`openbank-infra/k8s/base/opa-sidecar.yaml` (cluster default), wired with
+the libs-published policy bundle URL. Local dev: one OPA process in
+`docker-compose.yml` (port 8181 on the `openbank-net` network); services
+reach it as `http://opa:8181`.
+
+This is one sidecar configuration that serves BOTH the agent-service's MCP
+gate (`data.openbank.agents.allow`) and every Quarkus service's REST
+interceptor (`data.openbank.rest.allow`). Memory cost: ~50 MB per pod
+versus ~100 MB if we ran two.
+
+### D5 — Migration sequence
+
+1. **Now (this ADR)** — Decision recorded. No code yet.
+2. **Phase 1** — `com.openbank.libs.authz` API + `AllowAllPolicyDecisionPoint`
+   for tests + `OpaSidecarPolicyDecisionPoint` for prod. Unit-test the
+   interceptor against a fake sidecar.
+3. **Phase 2** — `data.openbank.rest.allow` skeleton policy in
+   `openbank-libs/src/main/resources/policies/rest.rego`. Initially: allow
+   when role match (mirrors current `@RolesAllowed`). Audit-only — emits
+   `policy_decision` to AuditEvent but never blocks. This is the deny-by-
+   default-with-charter-allow pattern from ADR-0031, but applied to REST.
+4. **Phase 3** — Per-service pilot: party-service `updateParty` becomes the
+   first endpoint annotated `@Authorize("party.update", resource = "#partyId")`.
+   The Rego policy adds an ownership predicate that consults
+   `data.shared.party_ownership` (loaded from a new bundle file). Same
+   approach as ADR-0031 phase 1 (deny-by-default, audit-only first).
+5. **Phase 4** — Fleet rollout: replace each `@PermitAll` on a business
+   endpoint with a matching `@Authorize`. K7 closes when zero
+   business-endpoint `@PermitAll` remain.
+6. **Phase 5** — Enforced flip. Per-action, per the existing `enforced:
+   advisory|block` flag pattern from `rules.yaml`.
+
+> **Amendment 2026-06-19 — D5 Phase 5 partially complete (non-money-path).** Three PRs shipped
+> Phase 5:
+>
+> - **#1363** — `AuthorizeInterceptor` now reads `SecurityIdentity.roles` (was always empty,
+>   making operator-level allow rules vacuously deny). Adds 6-test coverage suite.
+> - **#1364** — `rest.rego` adds `operator-write` (ROLE_OPERATOR/ADMIN write access, minus
+>   `featureflag.flip`) and `customer-self-action` (`customer.*` prefix) allow reasons.
+>   Without these the enforced flip would have blocked all write operations on every service.
+> - **#1365** — `authz.enforce: "${AUTHZ_ENFORCE:true}"` (was `false`) on the 13 non-money-path
+>   services: aml, copilot, customer-edge, dispute, kyc, party, pid, psd2, sanctions, sdd,
+>   statement, standing-order, tpp-registry. OPA sidecar deny → 403; unavailable → 503 (fail-closed).
+>
+> **Remaining (money-path, 14 services):** account, balance, clearing, consent, domestic-payment,
+> fraud, fx, ledger, lending, sca, sepa-instant, sepa-payment, swift, transaction — each requires
+> 2 approvals + threat model update (ADR-0030). D5 is **fully complete** once all 14 are flipped.
+> Break-glass: set `AUTHZ_ENFORCE=false` in the service GitOps env ConfigMap.
+
+### D6 — Out of scope
+
+- **Cedar** (mentioned alongside OPA in task #32 description) is rejected
+  for now: OPA is already deployed and AI agents use it. Adopting a second
+  policy language for REST would re-fragment the audit surface this ADR
+  exists to prevent. Cedar may make sense later for graph-shaped
+  authorization (e.g. document sharing); revisit when that requirement
+  materialises.
+- **Network-layer authz** (mTLS service identity) is owned by ADR-0033
+  (Op-ex 5 Istio) — orthogonal.
+
+## Consequences
+
+**Positive.**
+
+- Single decision engine, single audit trail. An auditor asks "who can
+  update party 123?" once and gets a complete answer (both human and AI
+  actors).
+- Libs becomes the policy distribution point — same versioning rails as
+  the existing libs SemVer + SBOM machinery.
+- `rules.yaml` (value-band thresholds, four-eyes triggers, money_path
+  scope) is finally consumed by REST too, not just by CI gates and AI
+  agents.
+- Test ergonomics: `AllowAllPolicyDecisionPoint` keeps unit suites OPA-free.
+
+**Negative / accepted trade-offs.**
+
+- Coupling: a libs major bump now also moves the policy schema. Mitigated
+  by the same backwards-compat rules already used for `openbank.docs.v*`
+  schema versions: additive-only fields, deprecation overlap.
+- Bundle distribution: the policy OCI registry becomes part of the supply
+  chain. Mitigated by Cosign-signing the bundle in CI (ADR-0030).
+- Rego is a smaller talent pool than RBAC config. Mitigated by keeping
+  rules in YAML data (`rules.yaml`) and the Rego limited to combinators —
+  ops edit YAML, not Rego.
+
+## Compliance impact
+
+| Regulation | Article | What this closes |
+|---|---|---|
+| K7 (audit 2026-05-28) | — | 36 `@PermitAll` → fine-grained, attribute-aware |
+| NIS2 | čl. 21 | Authn (Istio mTLS, ADR-0033) + Authz (this) per access |
+| GDPR | Art. 32 | "Appropriate technical measures" gains a per-resource scope check |
+| PSD2 RTS | čl. 22 | Consent-scope check on every TPP-initiated payment endpoint |
+| DORA | Art. 9 | Both human and AI actor authorization in one audit trail |
+
+## References
+
+- ADR-0018 (Proposed) — OPA per-service sidecar for REST authz (this ADR amends and supersedes its sidecar-deployment section)
+- ADR-0031 (Accepted) — AI agent governance; OPA in front of MCP
+- `openbank-libs/governance/agents.yaml` — agent charters (data)
+- `openbank-libs/governance/rules.yaml` — governance rules (data)
+- `openbank-infra/opa/policies/agents.rego` — current MCP allow policy (to be co-located with `rest.rego` under the same bundle)
+- ADR-0029 — versioning as code (libs SemVer drives bundle version)
+- ADR-0030 — supply chain (Cosign signs the bundle)

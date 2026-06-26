@@ -1,0 +1,407 @@
+// SPDX-License-Identifier: MPL-2.0\n// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.\n// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.\n
+package com.openbank.transaction.application.usecase
+
+import com.openbank.libs.api.pagination.CursorEncoder
+import com.openbank.libs.domain.money.Money
+import com.openbank.libs.domain.payment.InstructionType
+import com.openbank.libs.domain.payment.PaymentRail
+import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.transaction.application.port.`in`.InitiateTransactionCommand
+import com.openbank.transaction.application.port.`in`.ListTransactionsQuery
+import com.openbank.transaction.application.port.`in`.ReverseTransactionCommand
+import com.openbank.transaction.application.port.out.FxRatePort
+import com.openbank.transaction.application.port.out.FxRateView
+import com.openbank.transaction.application.port.out.TransactionEventPublisher
+import com.openbank.transaction.application.port.out.TransactionRepository
+import com.openbank.transaction.domain.model.Transaction
+import com.openbank.transaction.domain.model.TransactionStatus
+import com.openbank.transaction.domain.model.TransactionType
+import com.openbank.transaction.domain.saga.PaymentSaga
+import com.openbank.transaction.domain.saga.SagaState
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.every
+import io.mockk.mockk
+import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import java.math.BigDecimal
+import java.time.Clock
+import java.time.Instant
+import java.time.LocalDate
+import java.util.UUID
+
+class TransactionServiceTest {
+    private lateinit var transactionRepository: TransactionRepository
+    private lateinit var eventPublisher: TransactionEventPublisher
+    private lateinit var sagaOrchestrator: PaymentSagaOrchestrator
+    private lateinit var fxRatePort: FxRatePort
+
+    private lateinit var service: TransactionService
+
+    @BeforeEach
+    fun setUp() {
+        transactionRepository = mockk()
+        eventPublisher = mockk()
+        sagaOrchestrator = mockk()
+        fxRatePort = mockk()
+        service = TransactionService(transactionRepository, eventPublisher, sagaOrchestrator, fxRatePort)
+    }
+
+    @Test
+    fun `initiate transaction replays existing record for idempotency key`(): Unit = runBlocking {
+        val command = initiateCommand()
+        val existing = transaction(idempotencyKey = command.idempotencyKey)
+
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns existing
+
+        val result = service.initiateTransaction(command)
+
+        assertThat(result).isEqualTo(existing)
+        coVerify(exactly = 0) {
+            transactionRepository.save(any(), any())
+            sagaOrchestrator.startSaga(any())
+        }
+    }
+
+    @Test
+    fun `initiate transaction completes when saga succeeds and emits completed event`(): Unit = runBlocking {
+        val command = initiateCommand()
+
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        every { eventPublisher.initiatedPayload(any()) } returns "{\"event\":\"initiated\"}"
+        every { eventPublisher.completedPayload(any()) } returns "{\"event\":\"completed\"}"
+        coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
+        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
+        coEvery { sagaOrchestrator.startSaga(any()) } answers {
+            val transaction = firstArg<Transaction>()
+            PaymentSaga.start(
+                transaction.id,
+                transaction.idempotencyKey,
+                Clock.systemUTC(),
+            ).copy(state = SagaState.COMPLETED)
+        }
+
+        val result = service.initiateTransaction(command)
+
+        assertThat(result.status).isEqualTo(TransactionStatus.COMPLETED)
+        assertThat(result.completedAt).isNotNull()
+        assertThat(result.referenceNumber).startsWith("TXN")
+        assertThat(result.amount).isEqualTo(Money.of(command.amount, command.currencyCode))
+
+        coVerify {
+            transactionRepository.save(
+                match {
+                    it.idempotencyKey == command.idempotencyKey &&
+                        it.type == command.type &&
+                        it.status == TransactionStatus.PENDING
+                },
+                match<OutboxMessage> {
+                    it.eventType == "openbank.transactions.transaction.initiated" &&
+                        it.aggregateId == result.id &&
+                        it.payload.contains("initiated")
+                },
+            )
+            sagaOrchestrator.startSaga(match { it.id == result.id && it.idempotencyKey == command.idempotencyKey })
+            transactionRepository.update(
+                match { it.id == result.id && it.status == TransactionStatus.COMPLETED },
+                match<OutboxMessage> {
+                    it.eventType == "openbank.transactions.transaction.completed" &&
+                        it.aggregateId == result.id &&
+                        it.payload.contains("completed")
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `initiate cross-currency transaction via fx-service carries the applied rate`(): Unit = runBlocking {
+        val command = initiateCommand().copy(
+            amount = BigDecimal("40.00"),
+            currencyCode = "EUR",
+            settlementCurrencyCode = "CZK",
+        )
+
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        coEvery {
+            fxRatePort.getRate("EUR", "CZK")
+        } returns FxRateView("EUR", "CZK", BigDecimal("24.50"), BigDecimal("25.00"))
+        every { eventPublisher.initiatedPayload(any()) } returns "{\"event\":\"initiated\"}"
+        every { eventPublisher.completedPayload(any()) } returns "{\"event\":\"completed\"}"
+        coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
+        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
+        coEvery { sagaOrchestrator.startSaga(any()) } answers {
+            val transaction = firstArg<Transaction>()
+            PaymentSaga.start(
+                transaction.id,
+                transaction.idempotencyKey,
+                Clock.systemUTC(),
+            ).copy(state = SagaState.COMPLETED)
+        }
+
+        val result = service.initiateTransaction(command)
+
+        assertThat(result.amount).isEqualTo(Money.of(BigDecimal("40.00"), "EUR"))
+        assertThat(result.fxRate).isEqualByComparingTo("25.00")
+        assertThat(result.baseAmount).isEqualTo(Money.of(BigDecimal("1000.00"), "CZK"))
+        coVerify { fxRatePort.getRate("EUR", "CZK") }
+    }
+
+    @Test
+    fun `sell-specified cross-currency uses settlement amount verbatim (ADR-0107)`(): Unit = runBlocking {
+        // Pocket sweep: sell exactly 40.00 EUR into CZK. The caller fixes the sell amount so the
+        // source pocket debits to zero; the rate is implied (settlement / payment), no fx lookup.
+        val command = initiateCommand().copy(
+            amount = BigDecimal("1000.00"),
+            currencyCode = "CZK",
+            settlementCurrencyCode = "EUR",
+            settlementAmount = BigDecimal("40.00"),
+        )
+
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        every { eventPublisher.completedPayload(any()) } returns "{}"
+        coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
+        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
+        coEvery { sagaOrchestrator.startSaga(any()) } answers {
+            val transaction = firstArg<Transaction>()
+            PaymentSaga.start(
+                transaction.id,
+                transaction.idempotencyKey,
+                Clock.systemUTC(),
+            ).copy(state = SagaState.COMPLETED)
+        }
+
+        val result = service.initiateTransaction(command)
+
+        // baseAmount (the sell leg) is exactly what the caller asked — not amount x rate.
+        assertThat(result.baseAmount).isEqualTo(Money.of(BigDecimal("40.00"), "EUR"))
+        assertThat(result.fxRate).isEqualByComparingTo("0.04") // 40.00 / 1000.00, implied
+        coVerify(exactly = 0) { fxRatePort.getRate(any(), any()) }
+    }
+
+    @Test
+    fun `initiate same-currency transaction does not call fx-service`(): Unit = runBlocking {
+        val command = initiateCommand()
+
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        every { eventPublisher.completedPayload(any()) } returns "{}"
+        coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
+        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
+        coEvery { sagaOrchestrator.startSaga(any()) } answers {
+            val transaction = firstArg<Transaction>()
+            PaymentSaga.start(
+                transaction.id,
+                transaction.idempotencyKey,
+                Clock.systemUTC(),
+            ).copy(state = SagaState.COMPLETED)
+        }
+
+        val result = service.initiateTransaction(command)
+
+        assertThat(result.fxRate).isNull()
+        assertThat(result.baseAmount).isEqualTo(result.amount)
+        coVerify(exactly = 0) { fxRatePort.getRate(any(), any()) }
+    }
+
+    @Test
+    fun `initiate transaction fails when saga does not complete and emits failed event`(): Unit = runBlocking {
+        val command = initiateCommand()
+
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        every { eventPublisher.initiatedPayload(any()) } returns "{\"event\":\"initiated\"}"
+        every { eventPublisher.failedPayload(any(), any()) } returns "{\"event\":\"failed\"}"
+        coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
+        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
+        coEvery { sagaOrchestrator.startSaga(any()) } answers {
+            val transaction = firstArg<Transaction>()
+            PaymentSaga.start(transaction.id, transaction.idempotencyKey, Clock.systemUTC())
+                .copy(state = SagaState.FAILED, failureReason = "Ledger posting failed: boom")
+        }
+
+        val result = service.initiateTransaction(command)
+
+        assertThat(result.status).isEqualTo(TransactionStatus.FAILED)
+        assertThat(result.failedAt).isNotNull()
+        assertThat(result.failureReason).contains("boom")
+
+        coVerify {
+            transactionRepository.update(
+                match { it.id == result.id && it.status == TransactionStatus.FAILED },
+                match<OutboxMessage> {
+                    it.eventType == "openbank.transactions.transaction.failed" &&
+                        it.payload.contains("failed")
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `list transactions decodes cursor and emits next cursor from final returned record`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+        val afterId = UUID.randomUUID()
+        val transactions = listOf(
+            transaction(sourceAccountId = accountId),
+            transaction(sourceAccountId = accountId),
+            transaction(sourceAccountId = accountId),
+        )
+
+        coEvery { transactionRepository.findByAccountId(accountId, 3, afterId) } returns transactions
+
+        val page = service.listTransactions(
+            ListTransactionsQuery(
+                accountId = accountId,
+                limit = 2,
+                afterCursor = CursorEncoder.encode(afterId.toString()),
+            ),
+        )
+
+        assertThat(page.data).containsExactly(transactions[0], transactions[1])
+        assertThat(page.pagination.hasNextPage).isTrue()
+        assertThat(CursorEncoder.decode(page.pagination.nextCursor!!)).isEqualTo(transactions[1].id.toString())
+    }
+
+    @Test
+    fun `reverseTransaction creates REVERSAL transaction and marks original as REVERSED`(): Unit = runBlocking {
+        val originalSourceId = UUID.randomUUID()
+        val original = transaction(idempotencyKey = "orig-idem", sourceAccountId = originalSourceId)
+            .copy(status = TransactionStatus.COMPLETED, completedAt = Instant.now())
+        val command = ReverseTransactionCommand(
+            originalTransactionId = original.id,
+            idempotencyKey = "rev-idem-1",
+            reason = "Customer requested return",
+        )
+
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        coEvery { transactionRepository.findById(original.id) } returns original
+        coEvery {
+            transactionRepository.update(match { it.status == TransactionStatus.REVERSED })
+        } answers { firstArg() }
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returnsMany listOf(null, null)
+        every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        every { eventPublisher.completedPayload(any()) } returns "{}"
+        coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
+        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
+        coEvery { sagaOrchestrator.startSaga(any()) } answers {
+            val tx = firstArg<Transaction>()
+            PaymentSaga.start(tx.id, tx.idempotencyKey, Clock.systemUTC()).copy(state = SagaState.COMPLETED)
+        }
+
+        val result = service.reverseTransaction(command)
+
+        assertThat(result.type).isEqualTo(TransactionType.REVERSAL)
+        assertThat(result.targetAccountId).isEqualTo(originalSourceId)
+        assertThat(result.sourceAccountId).isNull()
+        coVerify { transactionRepository.update(match { it.status == TransactionStatus.REVERSED }) }
+    }
+
+    @Test
+    fun `reverseTransaction is idempotent for same idempotency key`(): Unit = runBlocking {
+        val existing = transaction(idempotencyKey = "rev-idem-2").copy(
+            type = TransactionType.REVERSAL,
+            status = TransactionStatus.COMPLETED,
+            completedAt = Instant.now(),
+        )
+        val command = ReverseTransactionCommand(
+            originalTransactionId = UUID.randomUUID(),
+            idempotencyKey = "rev-idem-2",
+            reason = "duplicate",
+        )
+
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns existing
+
+        val result = service.reverseTransaction(command)
+
+        assertThat(result).isEqualTo(existing)
+        coVerify(exactly = 0) { transactionRepository.findById(any()) }
+    }
+
+    @Test
+    fun `reverseTransaction fails when original transaction is not COMPLETED`(): Unit = runBlocking {
+        val original = transaction(idempotencyKey = "orig-pending").copy(status = TransactionStatus.PENDING)
+        val command = ReverseTransactionCommand(
+            originalTransactionId = original.id,
+            idempotencyKey = "rev-idem-3",
+            reason = "bad state",
+        )
+
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        coEvery { transactionRepository.findById(original.id) } returns original
+
+        val exception = runCatching { service.reverseTransaction(command) }.exceptionOrNull()
+
+        assertThat(exception).isInstanceOf(IllegalStateException::class.java)
+        assertThat(exception!!.message).contains("PENDING")
+    }
+
+    @Test
+    fun `rail and instructionType from command are stamped on the saved transaction`(): Unit = runBlocking {
+        val command = initiateCommand().copy(
+            rail = PaymentRail.SEPA_CT,
+            instructionType = InstructionType.ONE_OFF,
+        )
+
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        every { eventPublisher.completedPayload(any()) } returns "{}"
+        coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
+        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
+        coEvery { sagaOrchestrator.startSaga(any()) } answers {
+            val tx = firstArg<Transaction>()
+            PaymentSaga.start(tx.id, tx.idempotencyKey, Clock.systemUTC()).copy(state = SagaState.COMPLETED)
+        }
+
+        val result = service.initiateTransaction(command)
+
+        assertThat(result.rail).isEqualTo(PaymentRail.SEPA_CT)
+        assertThat(result.instructionType).isEqualTo(InstructionType.ONE_OFF)
+
+        coVerify {
+            transactionRepository.save(
+                match {
+                    it.rail == PaymentRail.SEPA_CT &&
+                        it.instructionType == InstructionType.ONE_OFF
+                },
+                any(),
+            )
+        }
+    }
+
+    private fun initiateCommand() = InitiateTransactionCommand(
+        idempotencyKey = "txn-idem-1",
+        type = TransactionType.TRANSFER,
+        sourceAccountId = UUID.randomUUID(),
+        targetAccountId = UUID.randomUUID(),
+        amount = BigDecimal("1250.50"),
+        currencyCode = "CZK",
+        description = "Invoice settlement",
+        valueDate = LocalDate.of(2026, 6, 1),
+        initiatedBy = UUID.randomUUID(),
+    )
+
+    private fun transaction(
+        idempotencyKey: String = "existing-idem",
+        sourceAccountId: UUID? = UUID.randomUUID(),
+    ): Transaction = Transaction(
+        id = UUID.randomUUID(),
+        referenceNumber = "TXN202606010001",
+        type = TransactionType.TRANSFER,
+        sourceAccountId = sourceAccountId,
+        targetAccountId = UUID.randomUUID(),
+        amount = Money.of(BigDecimal("1250.50"), "CZK"),
+        fxRate = null,
+        baseAmount = Money.of(BigDecimal("1250.50"), "CZK"),
+        status = TransactionStatus.PENDING,
+        description = "Invoice settlement",
+        valueDate = LocalDate.of(2026, 6, 1),
+        bookingDate = LocalDate.of(2026, 6, 1),
+        initiatedAt = Instant.now(),
+        completedAt = null,
+        failedAt = null,
+        failureReason = null,
+        idempotencyKey = idempotencyKey,
+        version = 0L,
+    )
+}

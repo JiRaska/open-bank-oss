@@ -1,0 +1,157 @@
+# Log-aggregation backend: Grafana Loki 3.x (ADR-0008 logs pillar, ADR-0082
+# correlation layer).
+#
+# WHY THIS REPLACES loki-stack: the old `loki-stack` chart (2.10.2) bundled
+# Loki 2.6.1 — long Past-EoL (the red card in the admin-UI Control Tower) and
+# without TSDB, structured-metadata or native OTLP ingest. ADR-0082 needs all
+# three: `trace_id` as queryable structured metadata (NOT a high-cardinality
+# label) is what makes the logs<->traces jump bidirectional. So we move to the
+# canonical `loki` chart pinning Loki 3.x.
+#
+# DEPLOYMENT SHAPE: SingleBinary (monolithic) on a gp3 PVC with filesystem
+# storage — same lightweight FinOps profile as Tempo for the sandbox (ADR-0027
+# flips object_store to S3 for prod). The scalable read/write/backend targets
+# and the memcached caches are zeroed out — a single-tenant sandbox does not
+# need them.
+#
+# LOG SHIPPER: the modern `loki` chart does NOT bundle Promtail (Promtail is EoL,
+# superseded by Grafana Alloy). The shipper now lives in its own app — see
+# gitops/apps/alloy.yaml — which tails every pod's stdout/stderr and pushes to
+# this Loki with `trace_id`/`span_id`/`correlationId` lifted into structured
+# metadata.
+#
+# Codified into GitOps (ADR-0027). No root app-of-apps syncs gitops/apps yet, so
+# applied with `kubectl apply` until that is wired (separate follow-up).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loki
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: loki
+    targetRevision: 6.55.0   # Loki app v3.6.7 (latest 3.x; TSDB v13 unchanged)
+    helm:
+      releaseName: loki
+      valuesObject:
+        fullnameOverride: loki
+        # SingleBinary monolithic mode — sandbox FinOps profile.
+        deploymentMode: SingleBinary
+        # IRSA (ADR-0088 D3): the `loki` SA assumes the openbank-observability-s3 role
+        # for durable S3 object storage — no static keys. Trust policy binds this SA's
+        # OIDC sub; the role grants s3:{Get,Put,Delete,List} on openbank-loki-<acct>.
+        serviceAccount:
+          annotations:
+            eks.amazonaws.com/role-arn: arn:aws:iam::265175468565:role/openbank-observability-s3
+        loki:
+          # Pin the image tag explicitly (chart default = appVersion) so the admin-UI
+          # infra card reads a clean '3.3.2' from gitops instead of the binary's ugly
+          # branch-build self-report ('release-3.3.x-...' from /status/buildinfo).
+          image:
+            tag: "3.6.7"
+          auth_enabled: false
+          # Cheap single-node ring.
+          commonConfig:
+            replication_factor: 1
+          # TSDB v13 schema on filesystem — unlocks structured metadata
+          # (trace_id) and is the only schema Loki 3.x will start with.
+          schemaConfig:
+            configs:
+              - from: "2024-04-01"
+                store: tsdb
+                object_store: s3
+                schema: v13
+                index:
+                  prefix: index_
+                  period: 24h
+          # Durable S3 object storage (ADR-0088 D3) — replaces the ephemeral gp3
+          # filesystem. IRSA on the `loki` SA supplies credentials (no static keys);
+          # region only, AWS-default endpoint. One bucket serves chunks/ruler/admin.
+          storage:
+            type: s3
+            bucketNames:
+              chunks: openbank-loki-265175468565
+              ruler: openbank-loki-265175468565
+              admin: openbank-loki-265175468565
+            s3:
+              region: eu-north-1
+          # Accept structured metadata pushed by Alloy (trace_id/span_id/...).
+          limits_config:
+            allow_structured_metadata: true
+            volume_enabled: true
+            # FinOps (ADR-0054): sandbox 7d retention (ADR-0088 D3). S3 lifecycle on the
+            # bucket also expires objects at 7d (belt-and-suspenders).
+            retention_period: 168h
+          compactor:
+            retention_enabled: true
+            delete_request_store: s3
+          ruler:
+            enable_api: true
+          # Single-binary needs the embedded query scheduler off.
+          querier:
+            max_concurrent: 2
+        singleBinary:
+          replicas: 1
+          # On-demand observability node pool (ADR-0082) — survive spot reclamation.
+          nodeSelector:
+            workload: observability
+          tolerations:
+            - key: workload
+              operator: Equal
+              value: observability
+              effect: NoSchedule
+          persistence:
+            enabled: true
+            size: 10Gi
+            storageClass: gp3
+          # 768Mi OOMKilled the SingleBinary loki (exit 137, crashloop) — TSDB +
+          # ingester + querier + distributor in one process need real headroom, and
+          # the OOM kills it before the ingester registers ("empty ring" 503 loop).
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+        # Zero out everything the monolith doesn't use.
+        backend:
+          replicas: 0
+        read:
+          replicas: 0
+        write:
+          replicas: 0
+        chunksCache:
+          enabled: false
+        resultsCache:
+          enabled: false
+        lokiCanary:
+          enabled: false
+        test:
+          enabled: false
+        gateway:
+          enabled: false
+        # The canonical Loki Grafana datasource (uid: loki) is provisioned
+        # separately — see gitops/components/observability/loki-grafana-datasource.yaml.
+        monitoring:
+          selfMonitoring:
+            enabled: false
+            grafanaAgent:
+              installOperator: false
+        sidecar:
+          image:
+            repository: kiwigrid/k8s-sidecar
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

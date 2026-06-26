@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ISO 20022 camt.056.001.08 — FIToFIPaymentCancellationRequest (recall)
+
+  PROVENANCE / STATUS (ADR-0104)
+  ==============================
+  Structurally-faithful WORKING SUBSET of the official ISO 20022 camt.056.001.08 schema, vendored
+  so the rail's / simulator's recall message can be built and XSD-validated with zero external
+  dependencies (JDK JAXP only). Not the full official schema — models the message tree, namespace
+  and constrained types for the recall fields actually populated (assignment, original references,
+  cancellation reason). See pacs.008.001.08.xsd for the swap-in TODO that applies here.
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns="urn:iso:std:iso:20022:tech:xsd:camt.056.001.08"
+           targetNamespace="urn:iso:std:iso:20022:tech:xsd:camt.056.001.08"
+           elementFormDefault="qualified">
+
+  <xs:element name="Document" type="Document"/>
+
+  <xs:complexType name="Document">
+    <xs:sequence>
+      <xs:element name="FIToFIPmtCxlReq" type="FIToFIPaymentCancellationRequestV08"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="FIToFIPaymentCancellationRequestV08">
+    <xs:sequence>
+      <xs:element name="Assgnmt" type="CaseAssignment5"/>
+      <xs:element name="Undrlyg" type="UnderlyingTransaction23"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="CaseAssignment5">
+    <xs:sequence>
+      <xs:element name="Id" type="Max35Text"/>
+      <xs:element name="CreDtTm" type="ISODateTime"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="UnderlyingTransaction23">
+    <xs:sequence>
+      <xs:element name="TxInf" type="PaymentTransaction106" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="PaymentTransaction106">
+    <xs:sequence>
+      <xs:element name="CxlId" type="Max35Text" minOccurs="0"/>
+      <xs:element name="OrgnlEndToEndId" type="Max35Text" minOccurs="0"/>
+      <xs:element name="OrgnlTxId" type="Max35Text" minOccurs="0"/>
+      <xs:element name="CxlRsnInf" type="PaymentCancellationReason5" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="PaymentCancellationReason5">
+    <xs:sequence>
+      <xs:element name="Rsn" type="CancellationReason33Choice"/>
+      <xs:element name="AddtlInf" type="Max105Text" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="CancellationReason33Choice">
+    <xs:sequence>
+      <xs:element name="Cd" type="ExternalCancellationReason1Code"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:simpleType name="Max35Text">
+    <xs:restriction base="xs:string">
+      <xs:minLength value="1"/>
+      <xs:maxLength value="35"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="Max105Text">
+    <xs:restriction base="xs:string">
+      <xs:minLength value="1"/>
+      <xs:maxLength value="105"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="ISODateTime">
+    <xs:restriction base="xs:dateTime"/>
+  </xs:simpleType>
+
+  <xs:simpleType name="ExternalCancellationReason1Code">
+    <xs:restriction base="xs:string">
+      <xs:minLength value="1"/>
+      <xs:maxLength value="4"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+</xs:schema>

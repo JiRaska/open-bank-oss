@@ -1,0 +1,130 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# BPMN process diagram (ADR-0019/0029). Authored as data; validated by
+# src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
+
+name: SEPA Direct Debit
+desc: Mandát (CORE/B2B) a inkaso od autorizace přes settlement po refund window
+regulation: SEPA SDD Core/B2B Rulebook + PSD2
+services:
+  - sdd-service
+  - ledger-service
+steps:
+  - id: start
+    type: start
+    x: 60
+    y: 100
+    label: Nový mandát
+  - id: register
+    type: task
+    x: 180
+    y: 100
+    label: Registrace mandátu
+    lane: payment
+    apis:
+      - POST /api/v1/sdd/mandates
+    relatedServices:
+      - sdd-service
+    emits:
+      - openbank.sdd.event
+  - id: gw-scheme
+    type: gateway
+    x: 310
+    y: 100
+    label: Schéma?
+  - id: confirm
+    type: task
+    x: 310
+    y: 220
+    label: Potvrzení B2B
+    lane: payment
+    apis:
+      - POST /api/v1/sdd/mandates/{id}/confirm
+    relatedServices:
+      - sdd-service
+    emits:
+      - openbank.sdd.event
+  - id: authorise
+    type: task
+    x: 440
+    y: 100
+    label: Autorizace inkasa
+    lane: payment
+    apis:
+      - POST /api/v1/sdd/collections/authorise
+    relatedServices:
+      - sdd-service
+  - id: gw-auth
+    type: gateway
+    x: 570
+    y: 100
+    label: Povoleno? (fail-closed)
+  - id: refuse
+    type: end-err
+    x: 570
+    y: 220
+    label: Odmítnuto
+  - id: debit
+    type: task
+    x: 690
+    y: 100
+    label: Debit (inkaso)
+    lane: payment
+    relatedServices:
+      - sdd-service
+    emits:
+      - openbank.sdd.event
+  - id: settle
+    type: event
+    x: 810
+    y: 100
+    label: Ledger settlement
+    consumes:
+      - openbank.sdd.event
+  - id: refund
+    type: task
+    x: 810
+    y: 220
+    label: Refund window
+    lane: compliance
+    apis:
+      - GET /api/v1/sdd/mandates/{id}/refund-assessment
+    relatedServices:
+      - sdd-service
+  - id: end
+    type: end
+    x: 930
+    y: 100
+    label: Settled
+flows:
+  - from: start
+    to: register
+  - from: register
+    to: gw-scheme
+  - from: gw-scheme
+    to: authorise
+    label: CORE
+  - from: gw-scheme
+    to: confirm
+    label: B2B
+  - from: confirm
+    to: authorise
+  - from: authorise
+    to: gw-auth
+  - from: gw-auth
+    to: refuse
+    label: Ne
+  - from: gw-auth
+    to: debit
+    label: Ano
+  - from: debit
+    to: settle
+    kind: async
+    topic: openbank.sdd.event
+  - from: settle
+    to: end
+  - from: settle
+    to: refund
+    label: refund window
+  - from: refund
+    to: end

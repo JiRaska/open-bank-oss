@@ -1,0 +1,142 @@
+quarkus:
+  application:
+    name: openbank-ledger-service
+    version: 0.1.0
+
+  http:
+    port: 8101
+
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: vertx-reactive:postgresql://localhost:5432/openbank_ledger
+
+  flyway:
+    # Flyway (blocking/JDBC) migrates the DEFAULT datasource. Its JDBC URL comes from the
+    # default datasource — QUARKUS_DATASOURCE_JDBC_URL in the cluster (see ledger-service.yaml)
+    # and the %test override below — so no `quarkus.flyway.datasource.*` block is needed. Those
+    # keys were unrecognized and ignored anyway (they logged a startup WARN); removing them is a
+    # no-op for behaviour and silences the noise.
+    migrate-at-start: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+    locations: db/migration
+
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+
+  rest-client:
+    fx-service:
+      url: ${FX_SERVICE_URL:http://localhost:8119}
+      scope: jakarta.inject.Singleton
+
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-ledger-service
+
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+mp:
+  messaging:
+    outgoing:
+      ledger-events-out:
+        connector: smallrye-kafka
+        client.id: ledger-service-${quarkus.uuid}
+        topic: openbank.ledger.journal.posted
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+    oidc:
+      enabled: false
+
+# OPA sidecar (ADR-0034). Advisory mode by default.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:false}"
+
+openbank:
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 100
+  outbox:
+    dispatch-enabled: true
+  ledger:
+    # journal_entries partition lifecycle (JournalPartitionMaintainer). Roll-forward is always
+    # active; retention is DETACH-only and dry-run by default. Flip drop-enabled + dry-run only
+    # as a deliberate, archived operator action — DROP is physically destructive.
+    partition:
+      future-years: 2       # pre-create this many years ahead of the current year
+      retention-years: 10   # keep at least this many calendar years attached (CZ účetnictví / AML)
+      drop-enabled: false   # when true, expired partitions are DROPped instead of DETACHed
+      dry-run: true         # when true, DETACH/DROP are audited but not executed
+  api:
+    version: "1"
+  build:
+    time: "${BUILD_TIME:unknown}"
+  git:
+    commit: "${GIT_COMMIT:unknown}"
+
+"%test":
+  quarkus:
+    datasource:
+      username: openbank
+      password: openbank_secret
+      reactive:
+        url: vertx-reactive:postgresql://localhost:5432/openbank_ledger_it
+      jdbc:
+        url: jdbc:postgresql://localhost:5432/openbank_ledger_it
+    management:
+      enabled: false
+    oidc:
+      enabled: false
+    devservices:
+      enabled: false
+    # The outbox dispatcher is driven explicitly in LedgerOutboxDispatchIT (await the Uni),
+    # so the 5s tick must not race the assertions or double-publish. Other ITs call their
+    # collaborators directly, so a disabled scheduler is safe fleet-wide in test.
+    scheduler:
+      enabled: false

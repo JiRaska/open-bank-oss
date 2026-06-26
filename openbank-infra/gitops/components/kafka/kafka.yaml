@@ -1,0 +1,107 @@
+# Single-broker KRaft Kafka for the sandbox. Strimzi 0.46+ is KRaft-only and
+# requires KafkaNodePools (both annotations below). One dual-role node
+# (controller+broker) for FinOps; prod should split roles and raise replicas to
+# 3 with matching replication factors. Kafka version is intentionally omitted so
+# the operator pins its own supported default. Bootstrap Service for clients:
+# `openbank-cluster-kafka-bootstrap.messaging.svc:9092` (internal plaintext).
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: dual
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  replicas: 1
+  roles:
+    - controller
+    - broker
+  # Strimzi copies this pool's labels — including ArgoCD's
+  # `argocd.argoproj.io/instance` tracking label — onto every PVC it
+  # provisions, which makes ArgoCD treat the broker's data volume as a
+  # tracked-but-unmanaged resource and (with prune on) delete it. Stamp the
+  # per-resource opt-out onto the PVCs so they survive a prune regardless of
+  # the app's prune setting. Belt to the kafka Application's prune=false suspenders.
+  template:
+    persistentVolumeClaim:
+      metadata:
+        annotations:
+          argocd.argoproj.io/sync-options: Prune=false
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 5Gi
+        class: gp3
+        deleteClaim: false
+  resources:
+    requests:
+      cpu: 250m
+      memory: 768Mi
+    limits:
+      cpu: "1"
+      memory: 1536Mi
+---
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: openbank-cluster
+  namespace: messaging
+  annotations:
+    strimzi.io/node-pools: enabled
+    strimzi.io/kraft: enabled
+spec:
+  kafka:
+    # Broker-layer observability (Dynatrace-parity #0). Strimzi's bundled JMX
+    # Prometheus exporter publishes broker metrics on :9404 (container port
+    # `tcp-prometheus`); rules are in the kafka-metrics ConfigMap below. Lights
+    # up under-replicated/offline partitions, request rates and throughput —
+    # none of which were scraped before.
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef:
+          name: kafka-metrics
+          key: kafka-metrics-config.yml
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+    config:
+      # Single broker ⇒ every replication factor must be 1 or topic creation
+      # blocks. Raise all of these in prod alongside the 3-node pool.
+      offsets.topic.replication.factor: 1
+      transaction.state.log.replication.factor: 1
+      transaction.state.log.min.isr: 1
+      default.replication.factor: 1
+      min.insync.replicas: 1
+  # Consumer-lag visibility (Dynatrace-parity #0). The Kafka Exporter is a
+  # separate pod (also on `tcp-prometheus`:9404) that turns consumer group
+  # offsets into `kafka_consumergroup_lag` — the single most useful event-bus
+  # health signal for the service fleet's outbox→topic consumers.
+  kafkaExporter:
+    topicRegex: ".*"
+    groupRegex: ".*"
+  entityOperator:
+    topicOperator: {}
+    userOperator: {}
+---
+# Domain event topic for account-service. Declared explicitly (the broker does
+# not auto-create topics) so the topic operator manages it and the producer's
+# readiness probe goes green. Single partition + RF 1 to match the single-broker
+# sandbox; prod should raise partitions for parallelism and RF to 3.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.accounts.account.created
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

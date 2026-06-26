@@ -1,0 +1,332 @@
+# ============================================================================
+# OpenBank .gitignore — Audit-grade
+# Protects against: secrets, PII, build artifacts, IDE noise, large binaries
+# ============================================================================
+
+# --- BUILD / GENERATED ---
+.gradle/
+.kotlin/
+build/
+**/build/
+!**/src/**/build/
+# Anchored to repo root only — the unanchored `out/` rule silently matched
+# every hexagonal `application/port/out/` source dir and dropped the entire
+# outbound-port layer for 25 services from git. Do NOT remove the leading /.
+/out/
+target/
+bin/
+.classpath
+.project
+.factorypath
+.apt_generated/
+.apt_generated_tests/
+classes/
+generated/
+**/generated/
+**/generated-src/
+
+# Quarkus
+.quarkus/
+quarkus.log
+quarkus-app/
+
+# JVM crash
+hs_err_pid*
+replay_pid*
+*.hprof
+
+# Compiled
+*.class
+*.jar
+# The Gradle wrapper jar MUST be version-controlled: it bootstraps the pinned
+# Gradle version (reproducible builds) and gradle/actions/wrapper-validation
+# verifies its checksum against known-good releases (supply-chain integrity).
+# The blanket *.jar rule above would otherwise exclude it.
+!gradle/wrapper/gradle-wrapper.jar
+!**/gradle/wrapper/gradle-wrapper.jar
+*.war
+*.nar
+*.ear
+*.so
+*.dll
+*.dylib
+
+# Archives (only when explicitly added)
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# --- NODE / NEXT.JS / ADMIN UI ---
+node_modules/
+**/node_modules/
+.next/
+**/.next/
+.turbo/
+.npm/
+.yarn/
+.pnp.*
+dist/
+.cache/
+.parcel-cache/
+*.tsbuildinfo
+next-env.d.ts
+.swc/
+
+# --- IDE / EDITOR ---
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json.example
+*.swp
+*.swo
+*~
+.history/
+.vs/
+
+# --- OS ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# --- LOGS ---
+*.log
+logs/
+**/logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ============================================================================
+# SECRETS — NEVER COMMIT (CRITICAL for banking compliance)
+# ============================================================================
+
+# Env files
+.env
+.env.*
+!.env.example
+!.env.*.example
+!.env.template
+
+# Keys / certificates
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+*.csr
+*.p12
+*.pfx
+*.p8
+*.jks
+*.keystore
+*.truststore
+*.kdbx
+id_rsa
+id_rsa.*
+id_ecdsa
+id_ecdsa.*
+id_ed25519
+id_ed25519.*
+*.gpg
+*.asc
+!*.pub
+
+# Service account / credentials files
+credentials.json
+credentials/
+**/credentials/
+secrets/
+**/secrets/
+service-account*.json
+gcp-key*.json
+firebase-adminsdk*.json
+.netrc
+.npmrc
+
+# Cloud config
+.aws/
+.gcp/
+.azure/
+kubeconfig
+*.kubeconfig
+.kube/config
+
+# --- TERRAFORM (CRITICAL — state contains plaintext secrets) ---
+.terraform/
+**/.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+# Plan files contain the full plaintext resource diff, including secret attribute values.
+*.tfplan
+tfplan
+*.tfvars
+!*.tfvars.example
+!terraform.tfvars.example
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Helm
+charts/*.tgz
+values-secret.yaml
+values-*.secret.yaml
+
+# Ansible vault
+*.vault
+vault.yml
+
+# --- COVERAGE / TEST OUTPUTS ---
+coverage/
+**/coverage/
+.nyc_output/
+*.lcov
+htmlcov/
+.coverage
+.coverage.*
+test-results/
+# but DO track the admin-ui source route of the same name (not a build artifact)
+!openbank-admin-ui/src/app/api/test-results/
+!openbank-admin-ui/src/app/api/test-results/**
+# Generated CI test-coverage summary baked into the admin-ui image at build time
+# by build-push-admin-ui.sh (scripts/collect-test-results.mjs). Derived data —
+# never hand-edited, never committed (governance rule #7); regenerated per build.
+openbank-admin-ui/test-results.json
+# Generated quality report (contract pairs + pitest mutation scores) baked into the
+# admin-ui image at build time (scripts/collect-quality-report.mjs, ADR-0063).
+# Derived data — never committed; regenerated per build.
+openbank-admin-ui/quality-report.json
+# Generated AWS Cost Explorer snapshot baked into the admin-ui image at build
+# time (scripts/collect-aws-costs.mjs). Derived billing data — never committed.
+openbank-admin-ui/cost-report.json
+# Generated repo-derived production-readiness scorecard baked at build time
+# (scripts/prod-readiness-collector.py). Derived — never committed (rule #7).
+openbank-admin-ui/prod-readiness.json
+# Generated code-derived service catalog baked into the admin-ui image at build
+# time (scripts/generate-catalog.mjs, ADR-0029 D3). Derived — never committed
+# (CLAUDE.md rule #7: catalog/coverage are derived, never hand-edited).
+openbank-admin-ui/catalog.json
+# Generated code-derived governance manifest baked at build time
+# (scripts/generate-governance.mjs, ADR-0071). Derived — never committed.
+openbank-admin-ui/governance.json
+# Generated git-derived DORA snapshot baked at build time
+# (scripts/collect-dora.mjs, ADR-0061). Derived — never committed.
+openbank-admin-ui/dora.json
+# Generated code-derived dependency graph baked at build time
+# (scripts/generate-service-graph.mjs, ADR-0029 D1). Derived — never committed.
+openbank-admin-ui/service-graph.json
+# Generated zero-trust security posture baked at build time
+# (scripts/generate-security-graph.mjs — derived from istio/network/kyverno
+# manifests, ADR-0029 governance-as-code). Derived — never committed.
+openbank-admin-ui/security-graph.json
+# Generated per-service resource footprints baked at build time
+# (scripts/collect-cost-footprints.mjs, ADR-0062). Derived — never committed.
+openbank-admin-ui/cost-footprints.json
+# Bundled copy of the AI-agent charters (source: openbank-libs/governance/agents.yaml);
+# baked into the admin-ui image by the Dockerfile, never committed in the UI dir.
+openbank-admin-ui/agents.yaml
+playwright-report/
+allure-results/
+allure-report/
+
+# --- DOCKER ---
+.docker/
+docker-compose.override.yml
+docker-compose.*.local.yml
+
+# --- TEMP / BACKUPS ---
+*.tmp
+*.temp
+*.bak
+*.backup
+*.orig
+*.rej
+*.old
+
+# --- DATA / DUMPS (audit: never commit production data) ---
+*.dump
+*.sql.gz
+*.dump.gz
+dumps/
+backups/
+pgdata/
+postgres-data/
+kafka-data/
+valkey-data/
+
+# --- LARGE BINARIES (use Git LFS if needed) ---
+UI.png
+*.mov
+*.mp4
+*.mkv
+*.iso
+*.dmg
+
+# --- AI / TOOLING METADATA ---
+.sisyphus/
+.cursor/
+.aider*
+.claude/
+.continue/
+
+# --- PYTHON (if any utility scripts) ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Allow markers ---
+!.gitkeep
+!.gitignore
+
+# --- ADMIN-UI debug / browser-test noise (not committed) ---
+# Scoped to openbank-admin-ui/ so the patterns don't shadow legitimate
+# files elsewhere (e.g. attic/scripts/fix-*.js kept for history). One-off
+# fix-*/patch-* scripts at the package root paper over a single issue and
+# then sit in the worktree forever — if a fix is durable it belongs in src/.
+openbank-admin-ui/fix.js
+openbank-admin-ui/fix[0-9].js
+openbank-admin-ui/fix-*.js
+openbank-admin-ui/patch-*.js
+
+# Screenshots and saved HTML from manual browser testing — useful while
+# debugging, never useful in git history. (Git glob does NOT expand
+# `{html,png}` brace syntax, so each suffix is listed explicitly.)
+**/login_page.html
+**/login_page.png
+**/after_sso_click.html
+**/after_sso_click.png
+**/error_page.html
+**/error_page.png
+**/sso_page.html
+**/sso_page.png
+**/payments_*.html
+**/payments_*.png
+**/*_smoke.png
+**/*_validation.png
+**/console_logs.txt
+**/qa_findings.txt
+
+# Pact consumer contract files — published to the Pact Broker by CI, not committed
+pacts/

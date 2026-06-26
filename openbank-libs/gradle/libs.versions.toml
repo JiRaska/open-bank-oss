@@ -1,0 +1,107 @@
+[versions]
+kotlin = "2.3.20"
+quarkus = "3.33.2"
+quarkus-plugin = "3.33.2"
+coroutines = "1.8.1"
+jackson = "2.17.2"
+# JUG — UUIDv7 (RFC 9562) generation for time-ordered identifiers (ADR-0106). FasterXML,
+# Apache-2.0, same org as Jackson (already a core dep). Vetted generator instead of a
+# hand-rolled one: intra-millisecond monotonicity (RFC 9562 §6.2) is subtle to get right.
+java-uuid-generator = "5.1.0"
+junit = "5.11.0"
+assertj = "3.26.3"
+mockk = "1.13.12"
+kover = "0.9.1"
+wiremock = "3.9.2"
+avro = "1.11.3"
+apicurio-registry = "2.6.2.Final"
+testcontainers = "1.20.4"
+pact = "4.6.17"
+# Static analysis (SAST gate — detekt for correctness rules, ktlint for formatting).
+# detekt 1.23.8 bundles its own kotlin-compiler-embeddable, so it parses sources
+# independently of the project Kotlin version (2.3.x here).
+detekt = "1.23.8"
+ktlint-plugin = "13.1.0"
+# pitest-plugin = "1.15.0"       # deferred: crashes on Gradle 9.5 (ADR-0063 Phase 2)
+# pitest-junit5-plugin = "1.2.1" # deferred: see above
+
+[libraries]
+kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
+kotlin-reflect = { module = "org.jetbrains.kotlin:kotlin-reflect", version.ref = "kotlin" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+kotlinx-coroutines-reactive = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-reactive", version.ref = "coroutines" }
+
+quarkus-bom = { module = "io.quarkus.platform:quarkus-bom", version.ref = "quarkus" }
+quarkus-kotlin = { module = "io.quarkus:quarkus-kotlin" }
+# Quarkus 3.9+ renamed quarkus-resteasy-reactive → quarkus-rest; the old
+# coordinates were dropped from the BOM in 3.20. Aliases preserved so
+# build.gradle.kts callers don't need to change.
+quarkus-resteasy-reactive = { module = "io.quarkus:quarkus-rest" }
+quarkus-resteasy-reactive-jackson = { module = "io.quarkus:quarkus-rest-jackson" }
+# Both kotlin and java variants — Kotlin extension auto-pulls the Java one as transitive
+# in 3.20, but in 3.33 it does not. Some entities import the Java types directly, so we
+# declare both explicitly.
+quarkus-hibernate-reactive-panache = { module = "io.quarkus:quarkus-hibernate-reactive-panache-kotlin" }
+quarkus-hibernate-orm-panache = { module = "io.quarkus:quarkus-hibernate-orm-panache-kotlin" }
+quarkus-hibernate-reactive-panache-base = { module = "io.quarkus:quarkus-hibernate-reactive-panache" }
+quarkus-agroal = { module = "io.quarkus:quarkus-agroal" }
+quarkus-reactive-pg-client = { module = "io.quarkus:quarkus-reactive-pg-client" }
+quarkus-flyway = { module = "io.quarkus:quarkus-flyway" }
+quarkus-jdbc-postgresql = { module = "io.quarkus:quarkus-jdbc-postgresql" }
+quarkus-smallrye-kafka = { module = "io.quarkus:quarkus-messaging-kafka" }
+quarkus-smallrye-health = { module = "io.quarkus:quarkus-smallrye-health" }
+quarkus-micrometer-registry-prometheus = { module = "io.quarkus:quarkus-micrometer-registry-prometheus" }
+quarkus-opentelemetry = { module = "io.quarkus:quarkus-opentelemetry" }
+quarkus-oidc = { module = "io.quarkus:quarkus-oidc" }
+quarkus-oidc-client-reactive-filter = { module = "io.quarkus:quarkus-rest-client-oidc-filter" }
+quarkus-redis-client = { module = "io.quarkus:quarkus-redis-client" }
+quarkus-grpc = { module = "io.quarkus:quarkus-grpc" }
+quarkus-config-yaml = { module = "io.quarkus:quarkus-config-yaml" }
+quarkus-smallrye-openapi = { module = "io.quarkus:quarkus-smallrye-openapi" }
+quarkus-vault = { module = "io.quarkiverse.vault:quarkus-vault" }
+quarkus-mailer = { module = "io.quarkus:quarkus-mailer" }
+quarkus-rest-client-reactive = { module = "io.quarkus:quarkus-rest-client" }
+quarkus-rest-client-reactive-jackson = { module = "io.quarkus:quarkus-rest-client-jackson" }
+quarkus-smallrye-fault-tolerance = { module = "io.quarkus:quarkus-smallrye-fault-tolerance" }
+quarkus-cache = { module = "io.quarkus:quarkus-cache" }
+quarkus-scheduler = { module = "io.quarkus:quarkus-scheduler" }
+
+jackson-module-kotlin = { module = "com.fasterxml.jackson.module:jackson-module-kotlin", version.ref = "jackson" }
+jackson-datatype-jsr310 = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jsr310", version.ref = "jackson" }
+java-uuid-generator = { module = "com.fasterxml.uuid:java-uuid-generator", version.ref = "java-uuid-generator" }
+
+avro = { module = "org.apache.avro:avro", version.ref = "avro" }
+apicurio-registry-avro = { module = "io.apicurio:apicurio-registry-serdes-avro-serde", version.ref = "apicurio-registry" }
+
+junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
+assertj = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
+wiremock-standalone = { module = "org.wiremock:wiremock-standalone", version.ref = "wiremock" }
+quarkus-junit5 = { module = "io.quarkus:quarkus-junit5" }
+quarkus-test-security = { module = "io.quarkus:quarkus-test-security" }
+rest-assured-kotlin = { module = "io.rest-assured:kotlin-extensions" }
+# In-memory reactive-messaging connector for outbox dispatch ITs (ADR-0050): swaps the Kafka
+# leg so the test asserts exactly what was produced (key/headers) without a live broker.
+smallrye-reactive-messaging-inmemory = { module = "io.smallrye.reactive:smallrye-reactive-messaging-in-memory" }
+testcontainers = { module = "org.testcontainers:testcontainers", version.ref = "testcontainers" }
+testcontainers-junit = { module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers" }
+# Per-job isolated test infra (fleet sweep, issue #578): @QuarkusTest ITs spin their
+# own PostgreSQL + Redpanda (Kafka API) per JVM instead of sharing one compose stack.
+testcontainers-postgresql = { module = "org.testcontainers:postgresql", version.ref = "testcontainers" }
+testcontainers-redpanda = { module = "org.testcontainers:redpanda", version.ref = "testcontainers" }
+
+# Consumer-driven contract testing — Pact JVM (ADR-0063)
+pact-consumer = { module = "au.com.dius.pact.consumer:junit5", version.ref = "pact" }
+pact-provider = { module = "au.com.dius.pact.provider:junit5", version.ref = "pact" }
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-allopen = { id = "org.jetbrains.kotlin.plugin.allopen", version.ref = "kotlin" }
+quarkus = { id = "io.quarkus", version.ref = "quarkus-plugin" }
+jandex = { id = "org.kordamp.gradle.jandex", version = "2.0.0" }
+kover = { id = "org.jetbrains.kotlinx.kover", version.ref = "kover" }
+cyclonedx = { id = "org.cyclonedx.bom", version = "2.3.0" }
+detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
+ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint-plugin" }
+# pitest = { id = "info.solidsoft.pitest", version.ref = "pitest-plugin" }  # deferred Gradle 9

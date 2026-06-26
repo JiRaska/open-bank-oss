@@ -1,0 +1,13 @@
+# Statements banking domain (ADR-0037: domain = namespace). App plane. Holds
+# statement-service plus its single-owner CNPG Postgres. statement-service owns the
+# monthly per-pocket period-close record (ADR-0035) and a local account_registry
+# projection (account-service AccountCreated stream) that drives scheduled close.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: statements
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

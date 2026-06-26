@@ -1,0 +1,118 @@
+# Traces backend: Grafana Tempo in single-binary (monolithic) mode. Sandbox
+# uses local filesystem storage on a gp3 PVC — prod should flip the backend to
+# S3 chunks per ADR-0027 (Loki/Tempo → S3). OTLP gRPC (4317) + HTTP (4318)
+# receivers are enabled so the OTel collector (and any direct OTLP client) can
+# push spans; query/UI served on 3100.
+#
+# METRICS GENERATOR (ADR-0082): Tempo derives RED metrics + a service graph
+# straight from span data and remote-writes them to Prometheus — zero service
+# instrumentation. This gives `traces_spanmetrics_*` (rate/error/duration per
+# service+route) and `traces_service_graph_*` (who-calls-whom edges) for the
+# whole fleet, powering the auto service map in Grafana. Prometheus must accept
+# the remote write — see kube-prometheus-stack.yaml enableRemoteWriteReceiver.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tempo
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: tempo
+    targetRevision: 1.24.4
+    helm:
+      valuesObject:
+        fullnameOverride: tempo
+        # IRSA (ADR-0088 D3): the `tempo` SA assumes openbank-observability-s3 for
+        # durable S3 trace storage — no static keys.
+        serviceAccount:
+          annotations:
+            eks.amazonaws.com/role-arn: arn:aws:iam::265175468565:role/openbank-observability-s3
+        tempo:
+          # 7d retention (ADR-0088 D3); the S3 bucket lifecycle also expires at 7d.
+          retention: 168h
+          storage:
+            trace:
+              # Durable S3 object storage (ADR-0088 D3) — replaces the ephemeral gp3
+              # local path. Credentials via IRSA on the `tempo` SA (no static keys).
+              backend: s3
+              s3:
+                bucket: openbank-tempo-265175468565
+                endpoint: s3.eu-north-1.amazonaws.com
+                region: eu-north-1
+              # WAL stays on the local PVC (fast path before flush to S3).
+              wal:
+                path: /var/tempo/wal
+          receivers:
+            otlp:
+              protocols:
+                grpc:
+                  endpoint: 0.0.0.0:4317
+                http:
+                  endpoint: 0.0.0.0:4318
+          # Derive span-metrics + service-graph metrics from traces and
+          # remote-write them to Prometheus (ADR-0082). Processors run per the
+          # global override below.
+          metricsGenerator:
+            enabled: true
+            remoteWriteUrl: "http://kube-prometheus-stack-prometheus.observability.svc:9090/api/v1/write"
+            # local-blocks processor (ADR-0082) — powers TraceQL metrics, i.e. the
+            # Grafana Drilldown → Traces app (`{} | rate()` / `quantile_over_time`).
+            # WITHOUT this the Drilldown "Span rate" query 500s ("An error occurred in
+            # the query"); the span-metrics→Prometheus dashboards work regardless since
+            # they don't use TraceQL metrics. flush_to_storage lets the querier read
+            # flushed blocks from the S3 backend beyond the generator's in-memory
+            # window; filter_server_spans=false keeps client/internal spans too so the
+            # Drilldown "All spans" breakdowns aren't empty (trace volume is tiny —
+            # ~580 active series — so the extra cardinality is cheap).
+            processor:
+              local_blocks:
+                flush_to_storage: true
+                filter_server_spans: false
+          # Enable the processors for ALL tenants (span-metrics = RED,
+          # service-graphs = dependency edges). The chart templates the main
+          # config's `overrides:` block from `.Values.tempo.overrides`
+          # (config: `{{ toYaml .Values.tempo.overrides }}`) — NOT global_overrides
+          # and NOT a top-level key. Wrong key => overrides.defaults:{} => zero metrics.
+          overrides:
+            defaults:
+              metrics_generator:
+                processors:
+                  - service-graphs
+                  - span-metrics
+                  - local-blocks
+          resources:
+            requests:
+              cpu: 100m
+              memory: 320Mi
+            limits:
+              cpu: 500m
+              # bumped 640Mi → 1Gi → 2Gi: local-blocks in-memory span buffer kept
+              # OOMKilling at 1Gi (41 restarts); 2Gi matches observed ~1.6Gi peak.
+              memory: 2Gi
+        persistence:
+          enabled: true
+          storageClassName: gp3
+          accessModes: ["ReadWriteOnce"]
+          size: 5Gi
+        # On-demand observability node pool (ADR-0082) — survive spot reclamation.
+        nodeSelector:
+          workload: observability
+        tolerations:
+          - key: workload
+            operator: Equal
+            value: observability
+            effect: NoSchedule
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

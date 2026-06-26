@@ -1,0 +1,355 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: Transaction Service API
+  # Kept in lockstep with version.txt / quarkus.application.version
+  # (ADR-0029 D2 single-source invariant).
+  version: 1.7.0
+  description: BIAN-aligned transaction history, search and retrieval.
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8101
+    description: Local development
+tags:
+  - name: Transactions
+
+paths:
+  /api/v1/transactions:
+    get:
+      tags: [Transactions]
+      summary: List transactions for an account (cursor-paginated)
+      operationId: listTransactions
+      parameters:
+        - name: accountId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated transaction list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionPage'
+
+  /api/v1/transactions/search:
+    get:
+      tags: [Transactions]
+      summary: Search transactions (IBAN/BBAN/reference/amount/date/counterparty)
+      operationId: searchTransactions
+      parameters:
+        - name: accountId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: iban
+          in: query
+          schema:
+            type: string
+        - name: bban
+          in: query
+          schema:
+            type: string
+        - name: referenceNumber
+          in: query
+          schema:
+            type: string
+        - name: endToEndId
+          in: query
+          schema:
+            type: string
+        - name: counterparty
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, COMPLETED, REVERSED, FAILED]
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [CREDIT, DEBIT, REVERSAL, FEE]
+        - name: dateFrom
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: dateTo
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: amountMin
+          in: query
+          schema:
+            type: number
+        - name: amountMax
+          in: query
+          schema:
+            type: number
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionSearchResult'
+
+  /api/v1/transactions/{transactionId}:
+    get:
+      tags: [Transactions]
+      summary: Get transaction by ID
+      operationId: getTransaction
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Transaction detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/transactions/{transactionId}/reverse:
+    post:
+      tags: [Transactions]
+      summary: Reverse a completed transaction — R-transaction return path (ADR-0109)
+      operationId: reverseTransaction
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReverseTransactionRequest'
+      responses:
+        '200':
+          description: Reversal transaction created (or existing reversal returned — idempotent)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Transaction is not in COMPLETED status and cannot be reversed
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    ReverseTransactionRequest:
+      type: object
+      required: [idempotencyKey, reason]
+      properties:
+        idempotencyKey:
+          type: string
+          description: Idempotency key — re-submitting the same key returns the existing reversal
+        reason:
+          type: string
+          description: Human-readable reason for the reversal (e.g. pacs.004 return code)
+
+    TransactionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        referenceNumber:
+          type: string
+        type:
+          type: string
+        sourceAccountId:
+          type: string
+          format: uuid
+          nullable: true
+        targetAccountId:
+          type: string
+          format: uuid
+          nullable: true
+        amount:
+          type: number
+        currencyCode:
+          type: string
+        status:
+          type: string
+        description:
+          type: string
+          nullable: true
+        valueDate:
+          type: string
+          format: date
+        bookingDate:
+          type: string
+          format: date
+        initiatedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        rail:
+          type: string
+          nullable: true
+          description: >
+            Which scheme carried the money (ADR-0103). One of the PaymentRail enum values
+            (SEPA_CT, SEPA_INST, SWIFT, DOMESTIC, CARD, INTERNAL, CASH, FEE, INTEREST, UNKNOWN).
+            Null on legacy rows not yet stamped.
+        instructionType:
+          type: string
+          nullable: true
+          description: >
+            How the movement was instructed (ADR-0103) — orthogonal to rail. One of the
+            InstructionType enum values (ONE_OFF, STANDING_ORDER, DIRECT_DEBIT,
+            FUTURE_DATED, SYSTEM, UNKNOWN). Null on legacy rows not yet stamped.
+        merchantCategory:
+          type: string
+          nullable: true
+          description: MCC-derived merchant category for card spend (ADR-0103).
+
+    InitiateTransactionRequest:
+      type: object
+      required: [idempotencyKey, type, amount, currencyCode, valueDate]
+      properties:
+        idempotencyKey:
+          type: string
+        type:
+          type: string
+        sourceAccountId:
+          type: string
+          format: uuid
+          nullable: true
+        targetAccountId:
+          type: string
+          format: uuid
+          nullable: true
+        amount:
+          type: number
+        currencyCode:
+          type: string
+        baseCurrencyCode:
+          type: string
+          nullable: true
+        baseAmount:
+          type: number
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        valueDate:
+          type: string
+          format: date
+        initiatedByPartyId:
+          type: string
+          format: uuid
+          nullable: true
+        scaChallengeId:
+          type: string
+          format: uuid
+          nullable: true
+        scaExemption:
+          type: string
+          nullable: true
+        rail:
+          type: string
+          nullable: true
+          description: PaymentRail name (ADR-0103 D2) — which scheme is carrying this payment.
+        instructionType:
+          type: string
+          nullable: true
+          description: InstructionType name (ADR-0103 D2) — how the movement was instructed.
+
+    TransactionPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionResponse'
+        pagination:
+          type: object
+          properties:
+            nextCursor:
+              type: string
+              nullable: true
+            hasMore:
+              type: boolean
+
+    TransactionSearchResult:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionResponse'
+        count:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string

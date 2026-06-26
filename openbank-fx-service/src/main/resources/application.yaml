@@ -1,0 +1,162 @@
+quarkus:
+  application:
+    name: openbank-fx-service
+    version: 0.1.0
+  http:
+    port: 8119
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+      headers: Content-Type,Authorization,Idempotency-Key
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: postgresql://localhost:5432/openbank_fx
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_fx
+  flyway:
+    migrate-at-start: true
+    validate-on-migrate: false
+    connect-retries: 10
+    connect-retries-interval: 2S
+  hibernate-orm:
+    database:
+      generation: none
+    # Flyway schema is snake_case (base_currency, valid_to, …) but the JPA entities use
+    # camelCase fields with no @Column(name). Without this strategy Hibernate's default
+    # physical naming lowercases the field as-is → `basecurrency`, so every query threw
+    # "column basecurrency does not exist (42703)" → GET /api/v1/fx/rates was 500.
+    physical-naming-strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  # Outbound service-to-service token (ADR-0104 D3 / Bug #3): the inter-service rest-clients
+  # (sanctions, aml, fraud — the ADR-0032 screening gate) mint an openbank-services M2M token via
+  # this oidc-client. Without it the default client is "not initialized" → DisabledOidcClientException
+  # → no Authorization header → screening 401s. Reuses the resource-server's keycloak URL,
+  # client id and secret. Disabled under %test; the IT enables + stubs it, units use a producer.
+  # (cnb-feed is an external public feed — it carries no openbank token.)
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+  redis:
+    hosts: redis://localhost:6379
+  rest-client:
+    cnb-feed:
+      url: ${CNB_FEED_URL:https://www.cnb.cz/cs/financni-trhy/devizovy-trh/kurzy-devizoveho-trhu/kurzy/denni_kurz.txt}
+      scope: jakarta.inject.Singleton
+    sanctions-service:
+      url: ${SANCTIONS_SERVICE_URL:http://localhost:8123}
+      scope: jakarta.inject.Singleton
+    aml-service:
+      url: ${AML_SERVICE_URL:http://localhost:8117}
+      scope: jakarta.inject.Singleton
+    fraud-service:
+      url: ${FRAUD_SERVICE_URL:http://localhost:8133}
+      scope: jakarta.inject.Singleton
+  smallrye-reactive-messaging:
+    kafka:
+      bootstrap-servers: localhost:29092
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+    console:
+      json: true
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-fx-service
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+    oidc:
+      enabled: false
+"%test":
+  quarkus:
+    management:
+      enabled: false
+    oidc:
+      enabled: false
+    oidc-client:
+      enabled: false
+    devservices:
+      enabled: false
+mp:
+  messaging:
+    outgoing:
+      fx-events-out:
+        connector: smallrye-kafka
+        client.id: fx-service-${quarkus.uuid}
+        topic: openbank.fx.conversion.completed
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+
+openbank:
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 200
+  outbox:
+    dispatch-enabled: true
+    poll-interval: 5s
+    initial-delay: 5s
+  cnb:
+    # Currencies (against CZK) ingested from the ČNB central-bank fixing — ADR-0046 scope.
+    currencies: ${CNB_CURRENCIES:EUR,USD,GBP}
+  temporal:
+    enabled: false
+    server-url: ${TEMPORAL_SERVER_URL:localhost:7233}
+    namespace: ${TEMPORAL_NAMESPACE:openbank-fx}
+    task-queue: ${TEMPORAL_TASK_QUEUE:openbank-fx-conversions}
+
+# OPA sidecar (ADR-0034). Advisory mode by default.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:false}"

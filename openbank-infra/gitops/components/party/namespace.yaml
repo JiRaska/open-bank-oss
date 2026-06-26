@@ -1,0 +1,67 @@
+# party-service domain namespace (ADR-0002: domain = namespace).
+# Holds party-service and its single-owner CNPG Postgres.
+# KYC/party-management data plane; non-money-path.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: party
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+# Single-owner Postgres for party-service, reconciled by the CNPG operator.
+# CNPG generates the `party-db-app` secret and `party-db-rw` Service.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: party-db
+  namespace: party
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  bootstrap:
+    initdb:
+      database: openbank_parties
+      owner: openbank
+  # Continuous WAL + base-backup to S3 (CNPG Barman). party holds the canonical
+  # client identity (1 person = 1 party, ADR-0072) — restorability is the #1
+  # production-readiness gap (prod-readiness C5). Mirrors components/statements/
+  # postgres.yaml. Sandbox S3 lifecycle expires after 35d; prod needs compliance
+  # retention. In-tree barmanObjectStore is deprecated in favour of the CNPG-I
+  # barman plugin — migrate when the operator drops in-tree support.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/party-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+# Daily base backup — WAL archiving alone is not restorable (the C5 gap the comment above
+# flags). Staggered off-peak (the fleet batches at 02:19). CNPG cron is 6-field.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: party-db-daily
+  namespace: party
+spec:
+  schedule: "0 5 3 * * *"
+  backupOwnerReference: self
+  method: barmanObjectStore
+  cluster:
+    name: party-db

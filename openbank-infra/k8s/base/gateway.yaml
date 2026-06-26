@@ -1,0 +1,441 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openbank-api-gateway-config
+data:
+  kong.yml: |
+    _format_version: "3.0"
+    _transform: true
+    services:
+      - name: account-service
+        protocol: http
+        host: account-service
+        port: 8100
+        path: /
+        routes:
+          - name: account-route
+            paths:
+              - /api/v1/accounts
+            strip_path: false
+      - name: account-health-service
+        protocol: http
+        host: account-service
+        port: 8100
+        path: /q/health
+        routes:
+          - name: account-health-route
+            paths:
+              - /health/account
+            strip_path: true
+      - name: ledger-service
+        protocol: http
+        host: ledger-service
+        port: 8101
+        path: /
+        routes:
+          - name: ledger-route
+            paths:
+              - /api/v1/ledger
+            strip_path: false
+      - name: ledger-health-service
+        protocol: http
+        host: ledger-service
+        port: 8101
+        path: /q/health
+        routes:
+          - name: ledger-health-route
+            paths:
+              - /health/ledger
+            strip_path: true
+      - name: transaction-service
+        protocol: http
+        host: transaction-service
+        port: 8102
+        path: /
+        routes:
+          - name: transaction-route
+            paths:
+              - /api/v1/transactions
+            strip_path: false
+      - name: transaction-health-service
+        protocol: http
+        host: transaction-service
+        port: 8102
+        path: /q/health
+        routes:
+          - name: transaction-health-route
+            paths:
+              - /health/transaction
+            strip_path: true
+      - name: balance-service
+        protocol: http
+        host: balance-service
+        port: 8103
+        path: /
+        routes:
+          - name: balance-route
+            paths:
+              - /api/v1/balances
+            strip_path: false
+      - name: balance-health-service
+        protocol: http
+        host: balance-service
+        port: 8103
+        path: /q/health
+        routes:
+          - name: balance-health-route
+            paths:
+              - /health/balance
+            strip_path: true
+      - name: consent-service
+        protocol: http
+        host: consent-service
+        port: 8106
+        path: /
+        routes:
+          - name: consent-route
+            paths:
+              - /api/v1/consents
+            strip_path: false
+      - name: consent-health-service
+        protocol: http
+        host: consent-service
+        port: 8106
+        path: /q/health
+        routes:
+          - name: consent-health-route
+            paths:
+              - /health/consent
+            strip_path: true
+      - name: psd2-service
+        protocol: http
+        host: psd2-service
+        port: 8107
+        path: /
+        routes:
+          - name: psd2-route
+            paths:
+              - /api/v1/psd2
+            strip_path: false
+      - name: psd2-health-service
+        protocol: http
+        host: psd2-service
+        port: 8107
+        path: /q/health
+        routes:
+          - name: psd2-health-route
+            paths:
+              - /health/psd2
+            strip_path: true
+      - name: tpp-registry-service
+        protocol: http
+        host: tpp-registry-service
+        port: 8108
+        path: /
+        routes:
+          - name: tpp-registry-route
+            paths:
+              - /api/v1/tpp-registry
+            strip_path: false
+      - name: tpp-registry-health-service
+        protocol: http
+        host: tpp-registry-service
+        port: 8108
+        path: /q/health
+        routes:
+          - name: tpp-registry-health-route
+            paths:
+              - /health/tpp-registry
+            strip_path: true
+      - name: agent-service
+        protocol: http
+        host: agent-service
+        port: 8109
+        path: /
+        routes:
+          - name: agent-route
+            paths:
+              - /api/v1/agent
+              - /api/v1/agents
+            strip_path: false
+      - name: agent-health-service
+        protocol: http
+        host: agent-service
+        port: 8109
+        path: /q/health
+        routes:
+          - name: agent-health-route
+            paths:
+              - /health/agent
+            strip_path: true
+      - name: sca-service
+        protocol: http
+        host: sca-service
+        port: 8110
+        path: /
+        routes:
+          - name: sca-route
+            paths:
+              - /api/v1/sca
+            strip_path: false
+      - name: sca-health-service
+        protocol: http
+        host: sca-service
+        port: 8110
+        path: /q/health
+        routes:
+          - name: sca-health-route
+            paths:
+              - /health/sca
+            strip_path: true
+      - name: party-service
+        protocol: http
+        host: party-service
+        port: 8111
+        path: /
+        routes:
+          - name: party-route
+            paths:
+              - /api/v1/parties
+            strip_path: false
+      - name: party-health-service
+        protocol: http
+        host: party-service
+        port: 8111
+        path: /q/health
+        routes:
+          - name: party-health-route
+            paths:
+              - /health/party
+            strip_path: true
+      - name: notification-service
+        protocol: http
+        host: notification-service
+        port: 8112
+        path: /
+        routes:
+          - name: notification-route
+            paths:
+              - /api/v1/notifications
+            strip_path: false
+      - name: notification-health-service
+        protocol: http
+        host: notification-service
+        port: 8112
+        path: /q/health
+        routes:
+          - name: notification-health-route
+            paths:
+              - /health/notification
+            strip_path: true
+      - name: audit-service
+        protocol: http
+        host: audit-service
+        port: 8113
+        path: /
+        routes:
+          - name: audit-route
+            paths:
+              - /api/v1/audit
+            strip_path: false
+      - name: audit-health-service
+        protocol: http
+        host: audit-service
+        port: 8113
+        path: /q/health
+        routes:
+          - name: audit-health-route
+            paths:
+              - /health/audit
+            strip_path: true
+      - name: kyc-service
+        protocol: http
+        host: kyc-service
+        port: 8114
+        path: /
+        routes:
+          - name: kyc-route
+            paths:
+              - /api/v1/kyc
+            strip_path: false
+      - name: kyc-health-service
+        protocol: http
+        host: kyc-service
+        port: 8114
+        path: /q/health
+        routes:
+          - name: kyc-health-route
+            paths:
+              - /health/kyc
+            strip_path: true
+      - name: sepa-service
+        protocol: http
+        host: sepa-service
+        port: 8115
+        path: /
+        routes:
+          - name: sepa-route
+            paths:
+              - /api/v1/sepa
+            strip_path: false
+      - name: sepa-health-service
+        protocol: http
+        host: sepa-service
+        port: 8115
+        path: /q/health
+        routes:
+          - name: sepa-health-route
+            paths:
+              - /health/sepa
+            strip_path: true
+      - name: domestic-service
+        protocol: http
+        host: domestic-service
+        port: 8116
+        path: /
+        routes:
+          - name: domestic-route
+            paths:
+              - /api/v1/domestic
+            strip_path: false
+      - name: domestic-health-service
+        protocol: http
+        host: domestic-service
+        port: 8116
+        path: /q/health
+        routes:
+          - name: domestic-health-route
+            paths:
+              - /health/domestic
+            strip_path: true
+      - name: aml-service
+        protocol: http
+        host: aml-service
+        port: 8117
+        path: /
+        routes:
+          - name: aml-route
+            paths:
+              - /api/v1/aml
+            strip_path: false
+      - name: aml-health-service
+        protocol: http
+        host: aml-service
+        port: 8117
+        path: /q/health
+        routes:
+          - name: aml-health-route
+            paths:
+              - /health/aml
+            strip_path: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openbank-api-gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: openbank-api-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: openbank-api-gateway
+        app.kubernetes.io/component: gateway
+    spec:
+      containers:
+        - name: kong
+          image: kong:3.7.1
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: KONG_DATABASE
+              value: "off"
+            - name: KONG_DECLARATIVE_CONFIG
+              value: /etc/kong/kong.yml
+            - name: KONG_PROXY_ACCESS_LOG
+              value: /dev/stdout
+            - name: KONG_ADMIN_ACCESS_LOG
+              value: /dev/stdout
+            - name: KONG_PROXY_ERROR_LOG
+              value: /dev/stderr
+            - name: KONG_ADMIN_ERROR_LOG
+              value: /dev/stderr
+            - name: KONG_LOG_LEVEL
+              value: info
+            - name: KONG_PROXY_LISTEN
+              value: 0.0.0.0:8000 reuseport backlog=16384
+            - name: KONG_ADMIN_LISTEN
+              value: 0.0.0.0:8001 reuseport backlog=16384
+          ports:
+            - name: proxy
+              containerPort: 8000
+            - name: admin
+              containerPort: 8001
+          volumeMounts:
+            - name: kong-config
+              mountPath: /etc/kong/kong.yml
+              subPath: kong.yml
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: admin
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /status
+              port: admin
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          startupProbe:
+            httpGet:
+              path: /status
+              port: admin
+            failureThreshold: 30
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: kong-config
+          configMap:
+            name: openbank-api-gateway-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openbank-api-gateway
+spec:
+  selector:
+    app.kubernetes.io/name: openbank-api-gateway
+  ports:
+    - name: http
+      port: 8000
+      targetPort: proxy
+    - name: admin
+      port: 8001
+      targetPort: admin
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: openbank-api-gateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: openbank-api-gateway
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

@@ -1,0 +1,154 @@
+quarkus:
+  application:
+    name: openbank-psd2-service
+    version: 0.1.0
+
+  http:
+    port: 8107
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,PUT,DELETE,OPTIONS
+      headers: Content-Type,Authorization,Consent-ID,X-Request-ID,TPP-Redirect-URI,TPP-Name,Idempotency-Key,X-TPP-ID,SSL-CLIENT-S-DN
+
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+    limits:
+      max-body-size: 10M
+    idle-timeout: 60S
+    read-timeout: 30S
+
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+
+  smallrye-reactive-messaging:
+    kafka:
+      bootstrap-servers: localhost:29092
+
+  shutdown:
+    timeout: 30S
+
+  smallrye-health:
+    root-path: /q/health
+
+  log:
+    level: INFO
+    console:
+      format: '{"timestamp":"%d{yyyy-MM-dd HH:mm:ss.SSS}","level":"%p","logger":"%c{3.}","message":"%s","traceId":"%X{traceId}","spanId":"%X{spanId}"}%n'
+      json: true
+
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-psd2-service
+        service.version: 0.1.0
+
+  swagger-ui:
+    always-include: true
+    path: /open-banking/docs
+
+  redis:
+    hosts: redis://localhost:6379
+
+  rest-client:
+    tpp-registry:
+      url: ${TPP_REGISTRY_SERVICE_URL:http://localhost:8108}
+      connect-timeout: 2000
+      read-timeout: 2000
+
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+        format: "%d{HH:mm:ss} %-5p [%c{2.}] %s%e%n"
+    oidc:
+      enabled: false
+
+"%test":
+  quarkus:
+    oidc:
+      enabled: false
+    # health/metrics on the main port in tests — RestAssured targets a single port
+    management:
+      enabled: false
+
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:true}"
+
+openbank:
+  psd2:
+    sandbox-mode: true
+    idempotency-ttl-seconds: 86400
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 100
+  resilience:
+    circuit-breaker:
+      enabled: true
+      request-volume-threshold: 10
+      failure-ratio: 0.5
+      success-threshold: 5
+      delay-ms: 5000
+    retry:
+      enabled: true
+      max-retries: 3
+      delay-ms: 200
+      jitter-ms: 100
+    timeout:
+      enabled: true
+      value-ms: 10000
+  api:
+    version: "1"
+  build:
+    time: "${BUILD_TIME:unknown}"
+  git:
+    commit: "${GIT_COMMIT:unknown}"
+  outbox:
+    poll-interval: 5s
+    initial-delay: 5s
+    dispatch-enabled: true
+
+mp:
+  messaging:
+    outgoing:
+      psd2-events-out:
+        connector: smallrye-kafka
+        client.id: psd2-service-${quarkus.uuid}
+        topic: openbank.psd2.events
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer

@@ -1,0 +1,471 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # JVM / Kotlin / Gradle builds moved to services-ci.yml, which builds every
+  # Gradle module as its own path-scoped matrix job (per-service status checks +
+  # fewer billed minutes). This workflow keeps the non-JVM checks below.
+  # ---------------------------------------------------------------------------
+
+  # ---------------------------------------------------------------------------
+  # Admin UI — path-scoped: only runs when openbank-admin-ui/** changes.
+  # On push to main (post-merge) always rebuilds to keep the sandbox image current.
+  # A separate gate job ("Admin UI") always runs and fails only when the build
+  # itself failed — so branch-protection never blocks a backend-only PR.
+  # ---------------------------------------------------------------------------
+  changes-ui:
+    name: Detect UI changes
+    runs-on: openbank-build
+    timeout-minutes: 5
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - id: check
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Post-merge main build always includes admin-ui.
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            BASE="origin/${{ github.base_ref }}"
+            # Force the remote-tracking ref to the true tip (persistent self-hosted
+            # runners reuse the workdir, so the cached ref can be stale).
+            git fetch origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" --no-tags
+            N=$(git diff --name-only "${BASE}...HEAD" -- openbank-admin-ui/ | wc -l | tr -d ' ')
+            echo "changed=$( [ "$N" -gt 0 ] && echo 'true' || echo 'false' )" >> "$GITHUB_OUTPUT"
+            echo "Admin UI files changed: $N"
+          fi
+
+  ui-build:
+    name: Admin UI build
+    needs: changes-ui
+    if: needs.changes-ui.outputs.changed == 'true'
+    runs-on: openbank-build
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: openbank-admin-ui
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: openbank-admin-ui/package-lock.json
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run type-check
+
+      # ADR-0071 Phase 4: manifest.ts must stay types-only — no hand-edited versions
+      # or inline data. Enforced (hard failure). Runs from repo root so the script
+      # can resolve the relative path to manifest.ts.
+      - name: manifest.ts types-only gate (ADR-0071 Phase 4, enforced)
+        working-directory: ${{ github.workspace }}
+        run: bash .github/scripts/check-manifest-types-only.sh
+
+      # ADR-0071: the governance manifest is code-derived from per-service
+      # governance.yaml. Regenerate and fail on any module missing/with an invalid
+      # governance.yaml. Phase 4: flipped from advisory (::warning::) to enforce
+      # (exit 1) — the fleet completed the governance.yaml sweep in phases 1-3.
+      - name: Governance manifest gate (ADR-0071, enforced)
+        working-directory: openbank-admin-ui
+        run: |
+          node scripts/generate-governance.mjs
+          GAPS=$(node -e "console.log(require('./governance.json').totals.withGaps)")
+          if [ "$GAPS" -gt 0 ]; then
+            echo "::error::Governance drift — $GAPS module(s) missing or with an invalid governance.yaml (ADR-0071 Phase 4). Add a governance.yaml to each flagged service."
+            node -e "const g=require('./governance.json'); g.modules.filter(m=>m.hasGap).forEach(m=>console.log('  gap: '+m.name))"
+            exit 1
+          else
+            echo "Governance manifest clean: $(node -e "console.log(require('./governance.json').totals.modules)") modules, 0 gaps."
+          fi
+
+      - name: Test (unit + integration)
+        run: npm run test
+        # ADR-0076 Phase 0+1: guard tests, BFF route integration tests, docs-route,
+        # health-route integration tests all run here via Vitest.
+
+      - name: Install Playwright browsers
+        # Download the Chromium binary (always works, no root required).
+        run: npx playwright install chromium
+
+      - name: Install Playwright system dependencies
+        # On Linux, Chromium needs OS-level libs (libnspr4, libnss3, etc.).
+        # This requires sudo / root; self-hosted runners may not have it yet.
+        # Linux-only: install-deps is a no-op on macOS, and on a self-hosted Mac
+        # runner `sudo` without NOPASSWD hangs on the password prompt until the
+        # JOB timeout kills the run (continue-on-error can't catch a job timeout).
+        # The step timeout is the belt-and-braces for an unprepared Linux runner —
+        # the E2E step still skips gracefully if deps are absent (see below).
+        # When the runner is eventually set up with NOPASSWD sudo, remove the flag.
+        if: runner.os == 'Linux'
+        run: sudo npx playwright install-deps chromium
+        timeout-minutes: 5
+        continue-on-error: true
+
+      - name: E2E tests (Playwright)
+        run: npm run test:e2e
+        # ADR-0076 Phase 2: Playwright E2E for /services docs-coverage page.
+        # Mocks all BFF endpoints via page.route() — no live services required.
+        # continue-on-error: true until every pool member has browser system deps.
+        # Layer 1 (Vitest) and Layer 3 (Kotlin) are the regression gate; E2E is
+        # an advisory signal until runner infrastructure is fully provisioned.
+        continue-on-error: true
+        env:
+          CI: "true"
+          NEXTAUTH_URL: "http://localhost:3001"
+          NEXTAUTH_SECRET: "ci-e2e-secret"
+          OPENBANK_REPO_ROOT: "${{ github.workspace }}"
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: openbank-admin-ui/playwright-report/
+          retention-days: 7
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
+  # Gate job — always runs, maps to the "Admin UI" required check name.
+  # Passes when ui-build succeeded or was skipped (no UI changes); fails only
+  # when ui-build itself failed. Backend-only PRs therefore never get blocked.
+  ui:
+    name: Admin UI
+    needs: [changes-ui, ui-build]
+    if: always()
+    runs-on: openbank-build
+    timeout-minutes: 2
+    steps:
+      - name: Check build result
+        run: |
+          result="${{ needs.ui-build.result }}"
+          if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+            echo "Admin UI build failed (result: $result)." && exit 1
+          fi
+          echo "Admin UI: $result (skipped = no UI changes in this PR)."
+
+  # ---------------------------------------------------------------------------
+  # Static config validation
+  # ---------------------------------------------------------------------------
+  validate:
+    name: Validate manifests
+    runs-on: openbank-build
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # yamllint/shellcheck run as the host binaries (brew) rather than Docker
+      # container actions — container actions don't execute on the macOS pool
+      # member, so a direct CLI invocation keeps this job OS-portable across the
+      # mixed [self-hosted, openbank-sandbox] pool (ADR-0040).
+      - name: yamllint
+        run: |
+          # Lint the infra/CI manifests this job is named for. Quarkus service
+          # application.yaml files are validated by Quarkus itself during the
+          # per-service build (services-ci.yml), so we don't double-lint them.
+          cat > "${RUNNER_TEMP:-/tmp}/yamllint-ci.yml" <<'YML'
+          extends: default
+          rules:
+            line-length: disable
+            document-start: disable
+            # The fleet manifests use single-spaced flow style — `{ a: b }`,
+            # `[ x, y ]` — pervasively (ArgoCD Applications, component resources).
+            # Allow one inner space rather than fight it file-by-file (it kept
+            # re-reddening main as new services landed).
+            braces:
+              max-spaces-inside: 1
+            brackets:
+              max-spaces-inside: 1
+            # SHA-pinned actions use the `@<sha> # vX` convention (1 space) that
+            # Dependabot/GitHub generate and rewrite; don't fight it with 2.
+            comments:
+              min-spaces-from-content: 1
+            truthy:
+              check-keys: false
+            # Allow ONE space inside flow collections (`{ a: b }`, `[ x, y ]`) as
+            # well as zero. The gitops single-owner service manifests are authored
+            # in compact flow style with inner spaces; both styles are equivalent
+            # YAML and harmless. Defaulting to 0-only kept re-breaking the required
+            # check every time a new service was onboarded (#648, #657, ...).
+            braces:
+              max-spaces-inside: 1
+            brackets:
+              max-spaces-inside: 1
+            # Allow either sequence-indentation style (block sequences indented
+            # under their key, or flush with it). The Kyverno mutation policies
+            # (ecr-pull-through-rewrite.yaml) and several ArgoCD/gitops manifests
+            # author `- item` flush with the parent key, which the `default`
+            # (indent-sequences: true) flags as wrong-indentation — the same
+            # file-by-file fight as braces/brackets above. `whatever` accepts both
+            # equivalent styles instead of re-reddening the required check (#926).
+            indentation:
+              indent-sequences: whatever
+          YML
+          # strict:false equivalent — yamllint exits non-zero only on errors,
+          # warnings don't fail the job (no --strict).
+          yamllint -f github -c "${RUNNER_TEMP:-/tmp}/yamllint-ci.yml" openbank-infra .github
+
+      - name: shellcheck
+        run: |
+          files=$(find openbank-infra/scripts -type f -name '*.sh' 2>/dev/null || true)
+          if [ -n "$files" ]; then
+            shellcheck -S warning $files
+          else
+            echo "No shell scripts under openbank-infra/scripts — skipping."
+          fi
+
+      # ADR-0081 / issue #854 step 4: NetworkPolicies are DERIVED data (DO NOT
+      # EDIT — generated by gen-network-policies.py from the declared GitOps
+      # edges). Re-run the generator and fail on any uncommitted diff so that a
+      # new cross-namespace call or a new service added to gitops/components/
+      # automatically surfaces a required regeneration.
+      # PyYAML is not stdlib: try multiple install paths for portability across
+      # macOS (system python3 without pip, Homebrew pip3) and Linux ARC runners
+      # (pip/pip3 not in PATH). Fall back to checking if pyyaml is already present.
+      - name: gen-network-policies drift gate (ADR-0081, issue #854)
+        run: |
+          python3 -m pip install --quiet pyyaml --break-system-packages 2>/dev/null \
+            || python3 -m pip install --quiet pyyaml 2>/dev/null \
+            || pip3 install --quiet pyyaml --break-system-packages 2>/dev/null \
+            || pip3 install --quiet pyyaml 2>/dev/null \
+            || python3 -c "import yaml" 2>/dev/null \
+            || { echo "::error::pyyaml unavailable — add it to the runner base image"; exit 1; }
+          python3 openbank-infra/scripts/gen-network-policies.py
+          if ! git diff --exit-code openbank-infra/gitops/components/; then
+            echo "::error::NetworkPolicy drift detected — run openbank-infra/scripts/gen-network-policies.py and commit the result."
+            exit 1
+          fi
+
+      # ADR-0030 D2: every money-path service must ship a structured STRIDE/DFD
+      # threat model. stdlib-only gate, ratchets coverage (a new money-path
+      # service or a deleted/stubbed model fails here). Part of the always-run,
+      # pool-reliable Validate check so it gates every PR (ADR-0042 Phase 1).
+      - name: threat-model coverage (ADR-0030 D2)
+        run: python3 openbank-infra/scripts/check-threat-models.py
+
+      # CLAUDE.md rule 3 / ADR-0029: a module is a released component iff it has
+      # a version.txt, and must be registered in release-please-config.json AND
+      # .release-please-manifest.json. stdlib-only gate; catches a new service
+      # that ships a version.txt but is never wired into release-please (so it
+      # silently never gets a Release PR / changelog / tag).
+      - name: release-registration consistency (rule 3, ADR-0029)
+        run: python3 openbank-infra/scripts/check-release-registration.py
+
+      # ADR-0067 §3/§5/§7 / issue #419: every *.flagd.json file with an `openbank`
+      # metadata block must satisfy FlagDefinition.validate() — non-blank owner,
+      # MONEY_PATH → fourEyes=true, expiresAt in the future, no prohibited keys.
+      # stdlib-only Python script mirrors the Kotlin FlagDefinition.validate() rules.
+      - name: feature-flag governance (ADR-0067, issue #419)
+        run: python3 .github/scripts/validate-flags.py .
+
+      # Guard the silent Kotlin+JUnit5 footgun: `fun x() = runBlocking { assert }`
+      # without `: Unit` infers a non-Unit return → JUnit5 silently skips the test.
+      # Bans the bare expression-body form in src/test (the whole fleet is clean as
+      # of this gate's introduction). stdlib-only shell script.
+      - name: "test runBlocking ': Unit' guard"
+        run: bash .github/scripts/check-test-runblocking-unit.sh .
+
+      # Guard the silent SmallRye Config / SnakeYAML footgun: a duplicate mapping
+      # key is NOT merged — the last occurrence wins and earlier ones are silently
+      # dropped to library defaults, so a boot smoke-test never catches it. Flags
+      # duplicate keys at ANY level in every service application.yaml. Prevents
+      # regression of #1170 (dup quarkus.http dropped the port) and #1193 (dup
+      # top-level openbank: blocks dropped rate-limit/resilience fleet-wide). Uses
+      # the yamllint host binary already required by the yamllint step above.
+      #
+      # ENFORCED. The #1193 sweep is complete: the top-level `openbank:` blocks were
+      # merged fleet-wide, and the second layer of duplicate `quarkus.http:` keys
+      # (sca/tpp-registry, earlier consent/pid) was merged too. The guard now reports
+      # 0 fleet-wide (37 application.yaml files), so this is a hard gate — any new
+      # duplicate mapping key at ANY level fails the build (no silent config drop).
+      - name: "duplicate YAML key guard (application.yaml, #1170/#1193, enforced)"
+        run: bash .github/scripts/check-duplicate-yaml-keys.sh . --enforce
+
+      # ADR-0106 identifier intent split (#1699): new code mints identifiers via
+      # com.openbank.libs.domain.identifiers.Ids — Ids.newId() (UUIDv7, time-ordered,
+      # for durable/indexed keys) or Ids.randomId() (UUIDv4, for idempotency keys,
+      # correlation/trace ids, nonces/tokens that must not leak a creation timestamp).
+      # DIFF-SCOPED: fails only if THIS PR adds a bare UUID.randomUUID() in src/main, so
+      # it never trips on the ~100 pre-existing sites (those migrate to Ids as-touched)
+      # nor on unrelated fleet churn. No-ops on non-PR runs. stdlib-only shell.
+      - name: "identifier intent guard (ADR-0106, #1699)"
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          if [ -n "$base" ]; then git fetch --depth=1 origin "$base" 2>/dev/null || true; fi
+          bash .github/scripts/check-new-random-uuid.sh "$base"
+
+      # ADR-0100 DST harness — Layer 1 clock-injection gate (#1612).
+      # Domain and application layers of money-path services must never call
+      # Instant.now() / LocalDateTime.now() / LocalDate.now() /
+      # System.currentTimeMillis() directly; all time reads must go through an
+      # injected Clock / ClockProvider so the DST/leap-second test harness can
+      # control time deterministically.
+      #
+      # ENFORCED for the seven money-path services; other services are advisory
+      # until their domain layer has been ported (follow-up Issue #1612).
+      - name: "clock-injection gate — domain/application layers (ADR-0100, #1612)"
+        run: bash .github/scripts/check-clock-injection.sh
+
+  # ---------------------------------------------------------------------------
+  # Customer-app dossier content check (ADR-0074 invariant 5).
+  #
+  # Regenerate app-status.json from the SEPARATE customer-app repo (JiRaska/
+  # openbank-app) and diff its `derived` block against the committed copy. This is
+  # the content check that would have caught the README-vs-code drift the ADR was
+  # written about (committed useFakeData=true while AppConfig.kt says false).
+  #
+  # ENFORCED (ADR-0074 invariant 5, issue #587): drift fails the check.
+  # The job degrades to a clean skip when OPENBANK_APP_RO_TOKEN is absent
+  # (fork PRs, missing secret) — a check that can't see the source has no verdict.
+  #
+  # Cross-repo by design (invariant 3): the app source is a read-only checkout, not
+  # a baked sibling path. If the read token is absent (e.g. a fork PR), the job
+  # degrades to a skip — a check that can't see the source has no verdict to give,
+  # and it must never block the platform PR.
+  # ---------------------------------------------------------------------------
+  app-status:
+    name: Customer-app dossier
+    if: github.event_name == 'pull_request'
+    runs-on: openbank-build
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      APP_RO_TOKEN: ${{ secrets.OPENBANK_APP_RO_TOKEN }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Read-only checkout of the customer-app source so the generator can derive
+      # facts (AppConfig.kt + version.txt + app-status.yaml). openbank-app pins no
+      # ref → its default branch, the published state the committed copy should match.
+      - name: Checkout customer-app source
+        if: env.APP_RO_TOKEN != ''
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: JiRaska/openbank-app
+          token: ${{ env.APP_RO_TOKEN }}
+          path: .app-src
+          persist-credentials: false
+
+      - name: Skip notice (no app-source token)
+        if: env.APP_RO_TOKEN == ''
+        run: echo "::notice title=app-status::OPENBANK_APP_RO_TOKEN not set — skipping customer-app dossier content check (ADR-0074)."
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        if: env.APP_RO_TOKEN != ''
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: openbank-admin-ui/package-lock.json
+
+      - name: Install (admin-ui, for the yaml parser)
+        if: env.APP_RO_TOKEN != ''
+        working-directory: openbank-admin-ui
+        run: npm ci --no-audit --no-fund
+
+      # Diff the derived block in enforce mode: --enforce makes node exit 1 on drift,
+      # which propagates via pipefail and turns the step red. Do NOT add `|| true`.
+      - name: Regenerate & diff derived block
+        if: env.APP_RO_TOKEN != ''
+        working-directory: openbank-admin-ui
+        run: |
+          node scripts/generate-app-status.mjs \
+            --app-repo "${GITHUB_WORKSPACE}/.app-src" \
+            --against app-status.json \
+            --enforce \
+            --check | tee "${RUNNER_TEMP:-/tmp}/app-status-check.txt"
+
+      # Sticky PR comment ONLY when drift is detected, so a clean PR stays quiet.
+      - name: Comment on drift
+        if: env.APP_RO_TOKEN != ''
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs')
+            const f = `${process.env.RUNNER_TEMP || '/tmp'}/app-status-check.txt`
+            let out = ''
+            try { out = fs.readFileSync(f, 'utf8') } catch { return }
+            if (!out.includes('derived drift')) return
+            const body = [
+              '### ❌ Customer-app dossier drift (ADR-0074)',
+              '',
+              'The committed `openbank-admin-ui/app-status.json` no longer matches the',
+              '`derived` facts in `JiRaska/openbank-app` source. Regenerate & publish',
+              '(openbank-app CI opens the publish PR), or run locally:',
+              '',
+              '```',
+              'node openbank-admin-ui/scripts/generate-app-status.mjs --app-repo ../openbank-app',
+              '```',
+              '',
+              '<details><summary>drift</summary>',
+              '',
+              '```',
+              out.trim(),
+              '```',
+              '',
+              '</details>',
+            ].join('\n')
+            const marker = '<!-- app-status-drift -->'
+            const { owner, repo } = context.repo
+            const issue_number = context.issue.number
+            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number, per_page: 100 })
+            const existing = comments.find((c) => c.body && c.body.includes(marker))
+            const payload = `${marker}\n${body}`
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body: payload })
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body: payload })
+            }
+
+  # ---------------------------------------------------------------------------
+  # Issue hygiene (ADR-0052) moved to issue-hygiene.yml so it also runs on the
+  # `edited` pull_request event (PR-body fixes re-evaluate the check) without
+  # re-running this whole workflow on every description edit.
+  # ---------------------------------------------------------------------------
+
+  # ---------------------------------------------------------------------------
+  # Dependency review — fails a PR that introduces a known-vulnerable dependency.
+  # Requires the Dependency Graph + GitHub Advanced Security, which on a PRIVATE
+  # repo is a paid GHAS add-on (not bundled with Free or Pro). The job therefore
+  # auto-skips while the repo is private and activates the moment it goes public
+  # (where GHAS is free). Until then, Trivy fs scan + Dependabot cover vulnerable
+  # dependency detection.
+  # ---------------------------------------------------------------------------
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request' && github.event.repository.private == false
+    runs-on: openbank-build
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Dependency review
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5
+        with:
+          fail-on-severity: high

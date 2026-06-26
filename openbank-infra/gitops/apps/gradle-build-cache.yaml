@@ -1,0 +1,24 @@
+# ADR-0043: in-cluster Gradle HTTP Build Cache.
+# See gitops/components/gradle-build-cache/ for sizing and cost rationale.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gradle-build-cache
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/gradle-build-cache
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gradle-build-cache
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

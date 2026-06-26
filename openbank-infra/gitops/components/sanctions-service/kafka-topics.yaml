@@ -1,0 +1,14 @@
+# Kafka topic for sanctions screening events (published by the outbox dispatcher).
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.sanctions.screening.event
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: "604800000"
+    cleanup.policy: "delete"

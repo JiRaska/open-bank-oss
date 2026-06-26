@@ -1,0 +1,82 @@
+# Kafka / event-bus dashboard. Visualises the Strimzi JMX exporter + Kafka
+# Exporter metrics enabled in the DB-layer sweep (#0) — previously collected but
+# not surfaced on any board. Consumer lag is the headline event-bus health signal
+# (outbox→topic consumers falling behind); broker/controller/under-replicated
+# panels watch the single-broker sandbox. Metric names verified live.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-kafka
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  openbank-kafka.json: |
+    {
+      "id": null,
+      "uid": "openbank-kafka",
+      "title": "OpenBank — Kafka / Event Bus",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": { "from": "now-6h", "to": "now" },
+      "templating": { "list": [ { "name": "datasource", "type": "datasource", "pluginId": "prometheus", "label": "Metrics", "current": {} } ] },
+      "panels": [
+        {
+          "title": "Brokers up",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+          "targets": [ { "refId": "A", "expr": "kafka_brokers" } ]
+        },
+        {
+          "title": "Active controllers (must be 1)",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 }, { "color": "red", "value": 2 } ] } } },
+          "targets": [ { "refId": "A", "expr": "sum(kafka_controller_kafkacontroller_activecontrollercount)" } ]
+        },
+        {
+          "title": "Under-replicated partitions",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } } },
+          "targets": [ { "refId": "A", "expr": "sum(kafka_server_replicamanager_underreplicatedpartitions)" } ]
+        },
+        {
+          "title": "Max consumer lag",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1000 }, { "color": "red", "value": 10000 } ] } } },
+          "targets": [ { "refId": "A", "expr": "max(kafka_consumergroup_lag)" } ]
+        },
+        {
+          "title": "Consumer lag (by group / topic)",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 9, "w": 24, "x": 0, "y": 4 },
+          "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "legendFormat": "{{consumergroup}} / {{topic}}", "expr": "sum by (consumergroup, topic) (kafka_consumergroup_lag) > 0" } ]
+        },
+        {
+          "title": "Messages in (rate, by topic)",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+          "fieldConfig": { "defaults": { "unit": "mps", "custom": { "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "legendFormat": "{{topic}}", "expr": "sum by (topic) (rate(kafka_server_brokertopicmetrics_messagesin_total[5m]))" } ]
+        },
+        {
+          "title": "Partition count",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+          "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "legendFormat": "partitions", "expr": "sum(kafka_server_replicamanager_partitioncount)" } ]
+        }
+      ]
+    }

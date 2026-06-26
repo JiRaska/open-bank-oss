@@ -1,0 +1,31 @@
+# customer-edge WebAuthn secrets from OpenBao → customer-edge-webauthn Secret.
+# kc-client-secret (Keycloak confidential client) + enrollment-ticket-secret
+# (device-enrollment ticket signing key), from the openbank/customer-edge-webauthn
+# KV path.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: customer-edge-webauthn
+  namespace: customer-edge
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: customer-edge-webauthn
+    creationPolicy: Owner
+    template:
+      mergePolicy: Merge
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+  data:
+    - secretKey: kc-client-secret
+      remoteRef:
+        key: customer-edge-webauthn
+        property: kc-client-secret
+    - secretKey: enrollment-ticket-secret
+      remoteRef:
+        key: customer-edge-webauthn
+        property: enrollment-ticket-secret

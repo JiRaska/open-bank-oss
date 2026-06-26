@@ -1,0 +1,22 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+    <CurrentIssues>
+    <ID>MagicNumber:AmlCaseResource.kt$AmlCaseResource$201</ID>
+    <ID>MagicNumber:AmlCaseService.kt$AmlCaseService$200</ID>
+    <ID>MagicNumber:AmlOutboxDispatcher.kt$AmlOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:AmlOutboxDispatcher.kt$AmlOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:AuthzProducer.kt$AuthzProducer$500</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$AmlCaseNotFoundMapper$404</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$InvalidAmlCaseStateTransitionMapper$409</ID>
+    <ID>MagicNumber:KafkaAmlOutboxEventPublisher.kt$KafkaAmlOutboxEventPublisher$3000</ID>
+    <ID>MatchingDeclarationName:AmlCasePorts.kt$AmlCaseRepository</ID>
+    <ID>MatchingDeclarationName:AmlOutboxPort.kt$AmlOutboxRepository : OutboxRepository</ID>
+    <ID>NewLineAtEndOfFile:AmlCaseTest.kt$com.openbank.aml.domain.model.AmlCaseTest.kt</ID>
+    <ID>SpreadOperator:AmlCaseRepositoryImpl.kt$AmlCaseRepositoryImpl$("$clause order by createdAt desc", *params.toTypedArray())</ID>
+    <ID>SwallowedException:AmlCaseService.kt$AmlCaseService$ex: IllegalArgumentException</ID>
+    <ID>TooGenericExceptionCaught:AmlCaseService.kt$AmlCaseService$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:PartyEventConsumer.kt$PartyEventConsumer$e: Exception</ID>
+    <ID>TooManyFunctions:AmlOutboxRepositoryImpl.kt$AmlOutboxRepositoryImpl : AmlOutboxRepositoryPanacheRepository</ID>
+  </CurrentIssues>
+</SmellBaseline>

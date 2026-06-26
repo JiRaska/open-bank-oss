@@ -1,0 +1,22 @@
+# Kafka topics consumed by onboarding-service (ADR-0068 read-model projection).
+# openbank.party.events and openbank.kyc.events are already declared in the
+# audit component — not re-declared here.
+# openbank.sca.events is owned here (onboarding is the only consumer of the
+# SCA enrollment lifecycle topic).
+---
+# SCA enrollment lifecycle events — published by sca-service on factor
+# enroll/verify/revoke. Distinct from openbank.sca.challenge.event (OTP
+# challenge lifecycle); this is the long-lived enrollment state change bus.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.sca.events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

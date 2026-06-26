@@ -1,0 +1,33 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>LongParameterList:BalanceMovementPortImpl.kt$BalanceMovementPortImpl$( accountId: UUID, currency: String, referenceId: String, operation: String, delta: BigDecimal, mutate: (Balance) -&gt; Balance )</ID>
+    <ID>LongParameterList:BalancePorts.kt$LedgerProjectionPort$( journalEntryId: UUID, accountId: UUID, currency: String, delta: BigDecimal, transactionId: UUID, entryDate: java.time.LocalDate )</ID>
+    <ID>MagicNumber:AuthzProducer.kt$AuthzProducer$500</ID>
+    <ID>MagicNumber:BalanceInitConsumer.kt$BalanceInitConsumer$200</ID>
+    <ID>MagicNumber:BalanceOutboxDispatcher.kt$BalanceOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:BalanceOutboxDispatcher.kt$BalanceOutboxDispatcher$3000</ID>
+    <ID>MatchingDeclarationName:BalanceOutboxPort.kt$BalanceOutboxRepository</ID>
+    <ID>MagicNumber:BalanceOutboxRepositoryImpl.kt$BalanceOutboxRepositoryImpl$4000</ID>
+    <ID>MagicNumber:BalanceResource.kt$BalanceResource$201</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$BalanceNotFoundMapper$404</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$HoldNotFoundMapper$404</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$InsufficientFundsMapper$422</ID>
+    <ID>MagicNumber:LedgerProjectionConsumer.kt$LedgerProjectionConsumer$200</ID>
+    <ID>NewLineAtEndOfFile:BalanceServiceTest.kt$com.openbank.balance.application.usecase.BalanceServiceTest.kt</ID>
+    <ID>NewLineAtEndOfFile:BalanceTest.kt$com.openbank.balance.domain.model.BalanceTest.kt</ID>
+    <ID>SerialVersionUIDInSerializableClass:BalanceMovementEntity.kt$BalanceMovementId : Serializable</ID>
+    <ID>SerialVersionUIDInSerializableClass:LedgerProjectionEventEntity.kt$LedgerProjectionEventId : Serializable</ID>
+    <ID>SwallowedException:BalanceOutboxDispatcher.kt$BalanceOutboxDispatcher$ex: Exception</ID>
+    <ID>SwallowedException:BalanceService.kt$BalanceService$e: IllegalArgumentException</ID>
+    <ID>TooGenericExceptionCaught:BalanceInitConsumer.kt$BalanceInitConsumer$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:BalanceOutboxDispatcher.kt$BalanceOutboxDispatcher$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:BalanceReconciliationScheduler.kt$BalanceReconciliationScheduler$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:LedgerProjectionConsumer.kt$LedgerProjectionConsumer$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:LedgerProjectionService.kt$LedgerProjectionService$ex: Exception</ID>
+    <ID>TooManyFunctions:Balance.kt$Balance</ID>
+    <ID>UseCheckOrError:BalanceRepositoryImpl.kt$BalanceRepositoryImpl$throw IllegalStateException("Balance not found for update")</ID>
+    <ID>UseCheckOrError:BalanceRepositoryImpl.kt$HoldRepositoryImpl$throw IllegalStateException("Hold not found for update")</ID>
+  </CurrentIssues>
+</SmellBaseline>

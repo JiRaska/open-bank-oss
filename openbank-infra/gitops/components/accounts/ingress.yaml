@@ -1,0 +1,37 @@
+# Public API Ingress for account-service (accounts namespace).
+# Routes /api/v1/accounts to the account ClusterIP service.
+# Previously the accounts API was only reachable in-cluster (from admin-ui
+# server-side calls). This exposes it at api.open-bank.tech for direct REST
+# access by developers and the eventual customer-facing application.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: accounts-api
+  namespace: accounts
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.open-bank.tech
+      secretName: accounts-api-tls
+  rules:
+    - host: api.open-bank.tech
+      http:
+        paths:
+          - path: /api/v1/accounts
+            pathType: Prefix
+            backend:
+              service:
+                name: account-service
+                port:
+                  number: 8100
+          - path: /api/v1/balances
+            pathType: Prefix
+            backend:
+              service:
+                name: balance-service
+                port:
+                  number: 8103

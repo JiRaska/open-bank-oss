@@ -1,0 +1,224 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.balance.application.usecase
+
+import com.openbank.balance.application.port.`in`.*
+import com.openbank.balance.application.port.out.*
+import com.openbank.balance.domain.model.*
+import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
+import java.time.Clock
+import java.time.OffsetDateTime
+import java.util.UUID
+
+class BalanceNotFoundException(msg: String) : RuntimeException(msg)
+class InsufficientFundsException(msg: String) : RuntimeException(msg)
+class HoldNotFoundException(msg: String) : RuntimeException(msg)
+
+@ApplicationScoped
+class BalanceService(
+    private val balanceRepo: BalanceRepository,
+    private val holdRepo: HoldRepository,
+    private val eventPublisher: BalanceEventPublisher,
+    private val movementPort: BalanceMovementPort,
+    private val clock: Clock,
+) : BalanceUseCase {
+
+    // CDI entry point: injects the production UTC clock. Tests use the primary constructor with a
+    // fixed Clock for deterministic timestamps (ADR-0100 Layer 1).
+    @Inject
+    constructor(
+        balanceRepo: BalanceRepository,
+        holdRepo: HoldRepository,
+        eventPublisher: BalanceEventPublisher,
+        movementPort: BalanceMovementPort,
+    ) : this(
+        balanceRepo,
+        holdRepo,
+        eventPublisher,
+        movementPort,
+        Clock.systemUTC(),
+    )
+
+    override suspend fun getBalance(query: GetBalanceQuery): Balance {
+        val currency = query.currency ?: "CZK"
+        val current = balanceRepo.findByAccountIdAndCurrency(query.accountId, currency)
+            ?: throw BalanceNotFoundException("Balance not found for account=${query.accountId} currency=$currency")
+
+        val asOf = query.asOf ?: return current
+
+        // Point-in-time (ADR-0039): rewind the current booked balance by the deltas booked strictly
+        // after `asOf`, read from the dated ledger-projection audit. Holds are current-state and have
+        // no historical meaning, so a point-in-time snapshot carries no reservation/pending and reports
+        // available == booked. With the projection ledger empty (projection disabled, or no movement
+        // after asOf) the future sum is ZERO and this returns the current booked figure unchanged.
+        val futureDelta = balanceRepo.sumBookedDeltaAfter(query.accountId, currency, asOf)
+        val bookedAsOf = current.bookedAmount - futureDelta
+        return current.copy(
+            bookedAmount = bookedAsOf,
+            availableAmount = bookedAsOf,
+            reservedAmount = java.math.BigDecimal.ZERO,
+            pendingAmount = java.math.BigDecimal.ZERO,
+        )
+    }
+
+    override suspend fun getBalances(accountId: UUID): List<Balance> = balanceRepo.findAllByAccountId(accountId)
+
+    override suspend fun placeHold(cmd: PlaceHoldCommand): BalanceHold {
+        val balance = balanceRepo.findByAccountIdAndCurrency(cmd.accountId, cmd.currency)
+            ?: throw BalanceNotFoundException("Balance not found for account=${cmd.accountId}")
+
+        val updated = try {
+            balance.withReservation(cmd.amount).copy(updatedAt = OffsetDateTime.now(clock))
+        } catch (e: IllegalArgumentException) {
+            throw InsufficientFundsException(e.message ?: "Insufficient funds")
+        }
+
+        balanceRepo.update(updated)
+
+        val hold = BalanceHold(
+            id = UUID.randomUUID(),
+            accountId = cmd.accountId,
+            amount = cmd.amount,
+            currency = cmd.currency,
+            reason = cmd.reason,
+            referenceId = cmd.referenceId,
+            expiresAt = cmd.ttlSeconds?.let { OffsetDateTime.now(clock).plusSeconds(it) },
+            createdAt = OffsetDateTime.now(clock),
+            releasedAt = null,
+        )
+        val saved = holdRepo.save(hold)
+
+        eventPublisher.publish(
+            BalanceEvent(
+                eventId = UUID.randomUUID(),
+                eventType = BalanceEventType.HOLD_PLACED,
+                accountId = cmd.accountId,
+                currency = cmd.currency,
+                amount = cmd.amount,
+                bookedAmount = updated.bookedAmount,
+                availableAmount = updated.availableAmount,
+                reservedAmount = updated.reservedAmount,
+                occurredAt = OffsetDateTime.now(clock),
+            ),
+        )
+
+        return saved
+    }
+
+    override suspend fun releaseHold(cmd: ReleaseHoldCommand): BalanceHold {
+        val hold = holdRepo.findById(cmd.holdId)
+            ?: throw HoldNotFoundException("Hold ${cmd.holdId} not found")
+
+        val balance = balanceRepo.findByAccountIdAndCurrency(hold.accountId, hold.currency)
+            ?: throw BalanceNotFoundException("Balance not found")
+
+        val updated = balance.releaseReservation(hold.amount).copy(updatedAt = OffsetDateTime.now(clock))
+        balanceRepo.update(updated)
+
+        val released = hold.copy(releasedAt = OffsetDateTime.now(clock))
+        holdRepo.update(released)
+
+        eventPublisher.publish(
+            BalanceEvent(
+                eventId = UUID.randomUUID(),
+                eventType = BalanceEventType.HOLD_RELEASED,
+                accountId = hold.accountId,
+                currency = hold.currency,
+                amount = hold.amount,
+                bookedAmount = updated.bookedAmount,
+                availableAmount = updated.availableAmount,
+                reservedAmount = updated.reservedAmount,
+                occurredAt = OffsetDateTime.now(clock),
+            ),
+        )
+
+        return released
+    }
+
+    override suspend fun credit(cmd: CreditAccountCommand): Balance {
+        // Idempotent: a retried credit with the same referenceId returns the same balance and is NOT
+        // re-applied. The BALANCE_UPDATED event is emitted only on the first application, so a replay
+        // never double-counts in downstream projections either.
+        val outcome = movementPort.applyCredit(cmd.accountId, cmd.currency, cmd.referenceId, cmd.amount)
+
+        if (outcome.applied) {
+            eventPublisher.publish(
+                BalanceEvent(
+                    eventId = UUID.randomUUID(),
+                    eventType = BalanceEventType.BALANCE_UPDATED,
+                    accountId = cmd.accountId,
+                    currency = cmd.currency,
+                    amount = cmd.amount,
+                    bookedAmount = outcome.balance.bookedAmount,
+                    availableAmount = outcome.balance.availableAmount,
+                    reservedAmount = outcome.balance.reservedAmount,
+                    occurredAt = OffsetDateTime.now(clock),
+                ),
+            )
+        }
+
+        return outcome.balance
+    }
+
+    override suspend fun debit(cmd: DebitAccountCommand): Balance {
+        // Idempotent (see credit). The overdraft guard runs only on the first application; a duplicate
+        // returns the already-debited balance without re-checking funds or re-emitting an event.
+        val outcome = try {
+            movementPort.applyDebit(cmd.accountId, cmd.currency, cmd.referenceId, cmd.amount)
+        } catch (e: IllegalArgumentException) {
+            throw InsufficientFundsException(e.message ?: "Insufficient funds")
+        }
+
+        if (outcome.applied) {
+            eventPublisher.publish(
+                BalanceEvent(
+                    eventId = UUID.randomUUID(),
+                    eventType = BalanceEventType.BALANCE_UPDATED,
+                    accountId = cmd.accountId,
+                    currency = cmd.currency,
+                    amount = cmd.amount.negate(),
+                    bookedAmount = outcome.balance.bookedAmount,
+                    availableAmount = outcome.balance.availableAmount,
+                    reservedAmount = outcome.balance.reservedAmount,
+                    occurredAt = OffsetDateTime.now(clock),
+                ),
+            )
+        }
+
+        return outcome.balance
+    }
+
+    override suspend fun initializeBalance(cmd: InitializeBalanceCommand): Balance {
+        val existing = balanceRepo.findByAccountIdAndCurrency(cmd.accountId, cmd.currency)
+        if (existing != null) return existing
+
+        val balance = Balance(
+            id = UUID.randomUUID(),
+            accountId = cmd.accountId,
+            currency = cmd.currency,
+            bookedAmount = cmd.initialAmount,
+            availableAmount = cmd.initialAmount,
+            reservedAmount = java.math.BigDecimal.ZERO,
+            pendingAmount = java.math.BigDecimal.ZERO,
+            updatedAt = OffsetDateTime.now(clock),
+            version = 0,
+            arrangedOverdraftLimit = cmd.arrangedOverdraftLimit,
+        )
+        return balanceRepo.save(balance)
+    }
+
+    override suspend fun setOverdraftLimit(cmd: SetOverdraftLimitCommand): Balance {
+        val balance = balanceRepo.findByAccountIdAndCurrency(cmd.accountId, cmd.currency)
+            ?: throw BalanceNotFoundException("Balance not found for account=${cmd.accountId} currency=${cmd.currency}")
+
+        val updated = balance.copy(
+            arrangedOverdraftLimit = cmd.arrangedOverdraftLimit,
+            updatedAt = OffsetDateTime.now(clock),
+            version = balance.version + 1,
+        )
+        return balanceRepo.update(updated)
+    }
+}

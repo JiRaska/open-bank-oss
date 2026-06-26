@@ -1,0 +1,77 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.lending.application.port.out
+
+import com.openbank.lending.domain.model.Loan
+import com.openbank.libs.domain.money.Money
+import com.openbank.libs.lending.EclInputs
+import io.smallrye.mutiny.Uni
+import java.math.BigDecimal
+import java.util.UUID
+
+/**
+ * Outbound integration ports for the lending bounded context (ADR-0028 D3/D4).
+ *
+ * Each has an offline-buildable `@Default` no-op binding (`NoOpLendingAdapters`) so the service builds
+ * and boots with zero external dependency; real integrations land later as build-time-gated
+ * `@Alternative @Priority` adapters, following the platform realization pattern (ADR-0045).
+ */
+
+/** A single ledger posting the loan book emits — it never mutates balances itself (ADR-0028 D3). */
+data class LedgerPosting(val reference: String, val partyId: UUID, val amount: Money, val kind: PostingKind)
+
+/**
+ * The economic events the loan book posts to the ledger.
+ *
+ * Interest is recognized on an accrual basis: [INTEREST_ACCRUAL] books income against a receivable the
+ * moment an installment falls due (the scheduled servicing pass), and [INTEREST_SETTLEMENT] clears that
+ * receivable when cash arrives. [INTEREST] is the direct cash-basis recognition used only when an
+ * installment is repaid *before* it has been accrued (early/on-time payment) — so interest income is
+ * always recognized exactly once.
+ */
+enum class PostingKind {
+    DISBURSEMENT,
+    PRINCIPAL_REPAYMENT,
+    INTEREST,
+    INTEREST_ACCRUAL,
+    INTEREST_SETTLEMENT,
+    WRITE_OFF,
+}
+
+/** Posts loan cash events to the ledger (via the outbox in the real adapter). */
+interface LedgerPostingPort {
+    fun post(posting: LedgerPosting): Uni<Unit>
+}
+
+/** Creditworthiness signal from an external bureau / scoring source (EBA/GL/2020/06). */
+data class CreditAssessment(
+    val score: Int?, // null when no bureau data is available
+    val hasAdverseData: Boolean,
+    val source: String,
+)
+
+interface CreditBureauPort {
+    fun assess(partyId: UUID, requestedAmount: Money): Uni<CreditAssessment>
+}
+
+/** Re-values collateral; the no-op returns the supplied market value unchanged. */
+interface CollateralValuationPort {
+    fun revalue(type: String, declaredValue: Money): Uni<Money>
+}
+
+/**
+ * Supplies the IFRS 9 risk parameters (PD/LGD) for a loan. The pure ECL math (`libs.Ifrs9`) consumes
+ * whatever this returns; swapping the conservative no-op for a real PD model is a wiring change only.
+ */
+interface RiskParameterSource {
+    fun parametersFor(loan: Loan, exposureAtDefault: Money): Uni<EclInputs>
+
+    companion object {
+        /** Deliberately conservative defaults used by the no-op binding. */
+        val DEFAULT_PD_12M: BigDecimal = BigDecimal("0.03")
+        val DEFAULT_PD_LIFETIME: BigDecimal = BigDecimal("0.20")
+        val DEFAULT_LGD: BigDecimal = BigDecimal("0.45")
+    }
+}

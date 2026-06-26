@@ -1,0 +1,425 @@
+# ---------------------------------------------------------------------------
+# Infra vulnerability scanner — daily Grype scan of the infrastructure image
+# fleet, published as ConfigMap `infra-vulns` in the admin-ui namespace
+# (ADR-0077 §Architecture evolution, issue #671).
+#
+# The BFF at /api/infra/lifecycle mounts this ConfigMap as
+# OPENBANK_INFRA_VULNS=/config/infra-vulns/infra-vulns.json and prefers it
+# over the stale baked snapshot.  optional=true so the admin-ui pod starts
+# fine before the first scan completes — the BFF degrades to "not yet scanned"
+# per the graceful-state rule.
+#
+# RBAC design:
+#   - infra-vuln-scanner-configmap Role (admin-ui ns): write the single
+#     infra-vulns ConfigMap.
+#   - infra-vuln-scanner-pod-reader ClusterRole + per-namespace RoleBindings:
+#     list pods in each infra namespace to discover the live image+tag.
+#     Never granted as a ClusterRoleBinding; confers no cross-namespace view.
+#   - admin-ui-discovery ClusterRole + RoleBinding (admin-ui ns): the existing
+#     admin-ui SA gets a one-time read on the ConfigMap so the Next.js BFF can
+#     read the live scan result (no API change; the BFF already reads via fs).
+#
+# Image discovery strategy: for each component the script greps the image from
+# running pods in the target namespace.  Hardcoded fallback image is used only
+# when no pod is found (e.g. component not yet deployed in sandbox).
+# ---------------------------------------------------------------------------
+
+# ─── ServiceAccount ─────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: infra-vuln-scanner
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: infra-vuln-scanner
+    app.kubernetes.io/part-of: admin-ui
+
+---
+# ─── RBAC: write the single ConfigMap ───────────────────────────────────────
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: infra-vuln-scanner-configmap
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: infra-vuln-scanner
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["infra-vulns"]
+    verbs: ["get", "patch", "update"]
+  # create: resourceNames cannot gate create — belt-and-braces for first-run
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: infra-vuln-scanner-configmap
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: infra-vuln-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: infra-vuln-scanner-configmap
+subjects:
+  - kind: ServiceAccount
+    name: infra-vuln-scanner
+    namespace: admin-ui
+
+---
+# ─── RBAC: read pods in infra namespaces (never ClusterRoleBinding) ─────────
+# Defined as ClusterRole so it can be reused across per-namespace RoleBindings
+# without duplicating the rules.  Each namespace binding is explicit below.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: infra-vuln-scanner-pod-reader
+  labels:
+    app.kubernetes.io/name: infra-vuln-scanner
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+
+---
+# messaging: kafka (Strimzi broker), schema-registry (Apicurio), kafka-ui
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: infra-vuln-scanner-pod-reader
+  namespace: messaging
+  labels:
+    app.kubernetes.io/name: infra-vuln-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: infra-vuln-scanner-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: infra-vuln-scanner
+    namespace: admin-ui
+
+---
+# iam: Keycloak
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: infra-vuln-scanner-pod-reader
+  namespace: iam
+  labels:
+    app.kubernetes.io/name: infra-vuln-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: infra-vuln-scanner-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: infra-vuln-scanner
+    namespace: admin-ui
+
+---
+# vault: OpenBao
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: infra-vuln-scanner-pod-reader
+  namespace: vault
+  labels:
+    app.kubernetes.io/name: infra-vuln-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: infra-vuln-scanner-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: infra-vuln-scanner
+    namespace: admin-ui
+
+---
+# observability: Grafana, Prometheus, Loki, Tempo, Alloy, Pyroscope, GlitchTip
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: infra-vuln-scanner-pod-reader
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: infra-vuln-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: infra-vuln-scanner-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: infra-vuln-scanner
+    namespace: admin-ui
+
+---
+# accounts: find a running CNPG postgres pod to resolve the exact image tag
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: infra-vuln-scanner-pod-reader
+  namespace: accounts
+  labels:
+    app.kubernetes.io/name: infra-vuln-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: infra-vuln-scanner-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: infra-vuln-scanner
+    namespace: admin-ui
+
+---
+# ─── RBAC: admin-ui SA reads the live ConfigMap (for the BFF route) ─────────
+# The admin-ui Deployment mounts the ConfigMap as a volume (optional:true), so
+# this binding is a belt-and-suspenders for any future direct-API read path.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: infra-vulns-configmap-reader
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: infra-vuln-scanner
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["infra-vulns"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-infra-vulns-reader
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: infra-vuln-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: infra-vulns-configmap-reader
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+
+---
+# ─── CronJob ────────────────────────────────────────────────────────────────
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: infra-vuln-scanner
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: infra-vuln-scanner
+    app.kubernetes.io/part-of: admin-ui
+spec:
+  # 02:15 UTC daily — after cost-collector (23:50 Prague = 21:50 UTC) and
+  # before peak traffic. spec.timeZone GA in Kubernetes 1.27+.
+  schedule: "15 2 * * *"
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      # Grype scans can take several minutes per image if the vuln DB needs
+      # refreshing. Allow up to 30 min total; fail cleanly rather than hang.
+      activeDeadlineSeconds: 1800
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: infra-vuln-scanner
+        spec:
+          serviceAccountName: infra-vuln-scanner
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          # Two-phase design:
+          #   init/scan  — anchore/grype image: discovers + scans each infra
+          #                image, writes /results/infra-vulns.json.
+          #   main/publish — alpine/k8s: publishes the JSON to the ConfigMap
+          #                  via kubectl apply (no Grype dependency needed in
+          #                  the publish container — least capability).
+          initContainers:
+            - name: scan
+              image: anchore/grype:v0.94.0
+              # Override entrypoint; the image defaults to running grype directly.
+              command: ["/bin/sh", "-ec"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: false
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: HOME
+                  value: /tmp
+                # Grype DB cache; must be writable (read-only root fs off for this
+                # container because grype writes its vuln DB to $HOME/.cache).
+                - name: GRYPE_DB_CACHE_DIR
+                  value: /tmp/grype-db
+                # Postgres image tag: resolved from CNPG GitOps; updated here when
+                # the cluster is upgraded (ADR-0106 / runbook 0003).
+                - name: POSTGRES_IMAGE
+                  value: "ghcr.io/cloudnative-pg/postgresql:18.1"
+                # Valkey fallback (accounts-service namespace valkey statefulset)
+                - name: VALKEY_IMAGE
+                  value: "valkey/valkey:8-alpine"
+              args:
+                - |
+                  set -eu
+                  NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+                  # Write the Python aggregator script (avoids quoting nightmares
+                  # with inline Python in a YAML block scalar).
+                  cat > /tmp/agg.py << 'PYEOF'
+                  import json, subprocess, sys, os
+
+                  # Component: (id, namespace, image-grep-substring, fallback-image-env)
+                  # namespace="" means skip kubectl discovery, use fallback env var only.
+                  COMPONENTS = [
+                      ("postgres",       "accounts",      "cloudnative-pg/postgresql", "POSTGRES_IMAGE"),
+                      ("valkey",         "",              "",                           "VALKEY_IMAGE"),
+                      ("kafka",          "messaging",     "strimzi/kafka:",             ""),
+                      ("schema-registry","messaging",     "apicurio-registry-sql",      ""),
+                      ("kafka-ui",       "messaging",     "kafka-ui",                   ""),
+                      ("keycloak",       "iam",           "keycloak/keycloak",          ""),
+                      ("openbao",        "vault",         "openbao/openbao",            ""),
+                      ("grafana",        "observability", "grafana/grafana",            ""),
+                      ("prometheus",     "observability", "prometheus/prometheus",       ""),
+                      ("loki",           "observability", "grafana/loki",               ""),
+                      ("tempo",          "observability", "grafana/tempo",              ""),
+                      ("alloy",          "observability", "grafana/alloy",              ""),
+                  ]
+
+                  def discover_image(ns, grep):
+                      """kubectl get pods and grep the first matching image."""
+                      if not ns or not grep:
+                          return None
+                      try:
+                          out = subprocess.run(
+                              ["kubectl", "get", "pods", "-n", ns,
+                               "-o", "jsonpath={range .items[*]}{range .spec.containers[*]}{.image}{'\\n'}{end}{end}"],
+                              capture_output=True, text=True, timeout=15
+                          )
+                          for line in out.stdout.splitlines():
+                              if grep in line:
+                                  return line.strip()
+                      except Exception as e:
+                          print(f"  WARN: kubectl discover failed for {ns}/{grep}: {e}", file=sys.stderr)
+                      return None
+
+                  def scan_image(image):
+                      """Run grype -o json and return parsed summary or None."""
+                      try:
+                          out = subprocess.run(
+                              ["grype", image, "-o", "json", "-q"],
+                              capture_output=True, text=True, timeout=600
+                          )
+                          if out.returncode != 0:
+                              print(f"  WARN: grype exit {out.returncode}: {out.stderr[:200]}", file=sys.stderr)
+                              return None
+                          d = json.loads(out.stdout)
+                      except Exception as e:
+                          print(f"  WARN: scan failed: {e}", file=sys.stderr)
+                          return None
+                      matches = d.get("matches", [])
+                      counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "total": len(matches)}
+                      top = []
+                      for m in matches:
+                          sev = m.get("vulnerability", {}).get("severity", "Unknown").lower()
+                          if sev in counts:
+                              counts[sev] += 1
+                          if len(top) < 5 and sev in ("critical", "high"):
+                              v = m.get("vulnerability", {})
+                              fix_versions = v.get("fix", {}).get("versions", [])
+                              top.append({
+                                  "id": v.get("id", "?"),
+                                  "severity": sev,
+                                  "fixedIn": fix_versions[0] if fix_versions else None,
+                              })
+                      counts["top"] = top
+                      return counts
+
+                  results = {}
+                  for comp_id, ns, grep, fallback_env in COMPONENTS:
+                      print(f"[{comp_id}] discovering image...", flush=True)
+                      image = discover_image(ns, grep)
+                      if not image and fallback_env:
+                          image = os.environ.get(fallback_env, "")
+                      if not image:
+                          print(f"  SKIP {comp_id}: no image found", flush=True)
+                          continue
+                      print(f"  scanning {image}", flush=True)
+                      summary = scan_image(image)
+                      if summary is None:
+                          print(f"  SKIP {comp_id}: scan failed", flush=True)
+                          continue
+                      results[comp_id] = summary
+                      crit = summary["critical"]; high = summary["high"]; total = summary["total"]
+                      print(f"  ok: total={total} critical={crit} high={high}", flush=True)
+
+                  now = os.environ.get("NOW", "")
+                  snapshot = {"scannedAt": now, "images": results}
+                  out_path = "/results/infra-vulns.json"
+                  with open(out_path, "w") as f:
+                      json.dump(snapshot, f)
+                  print(f"Written {out_path}: {len(results)} components scanned", flush=True)
+                  PYEOF
+
+                  python3 /tmp/agg.py
+              volumeMounts:
+                - name: results
+                  mountPath: /results
+                - name: tmp
+                  mountPath: /tmp
+
+          containers:
+            - name: publish
+              image: alpine/k8s:1.34.1
+              command: ["/bin/sh", "-ec"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: HOME
+                  value: /tmp
+              args:
+                - |
+                  echo "Publishing infra-vulns ConfigMap..."
+                  cat /results/infra-vulns.json
+                  kubectl create configmap infra-vulns \
+                    --namespace admin-ui \
+                    --from-file=infra-vulns.json=/results/infra-vulns.json \
+                    --dry-run=client -o yaml | kubectl apply -f -
+                  echo "Done."
+              volumeMounts:
+                - name: results
+                  mountPath: /results
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+
+          volumes:
+            - name: results
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}

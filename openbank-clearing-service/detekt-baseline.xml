@@ -1,0 +1,17 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>MagicNumber:AuthzProducer.kt$AuthzProducer$500</ID>
+    <ID>MagicNumber:ClearingOutboxDispatcher.kt$ClearingOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:ClearingOutboxDispatcher.kt$ClearingOutboxDispatcher$30000</ID>
+    <ID>MatchingDeclarationName:ClearingOutboxPort.kt$ClearingOutboxRepository : OutboxRepository</ID>
+    <ID>MagicNumber:ClearingOutboxRepositoryImpl.kt$ClearingOutboxRepositoryImpl$4000</ID>
+    <ID>MagicNumber:ClearingResource.kt$ClearingResource$404</ID>
+    <ID>MagicNumber:ClearingService.kt$ClearingService$1000</ID>
+    <ID>MagicNumber:ClearingService.kt$ClearingService$10000</ID>
+    <ID>SwallowedException:ClearingOutboxDispatcher.kt$ClearingOutboxDispatcher$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:ClearingOutboxDispatcher.kt$ClearingOutboxDispatcher$ex: Exception</ID>
+    <ID>UnusedPrivateProperty:ClearingEventPublisherImpl.kt$ClearingEventPublisherImpl$private val objectMapper: ObjectMapper</ID>
+  </CurrentIssues>
+</SmellBaseline>

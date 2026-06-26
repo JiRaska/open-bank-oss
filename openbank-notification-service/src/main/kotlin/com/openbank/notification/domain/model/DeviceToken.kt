@@ -1,0 +1,71 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.notification.domain.model
+
+import java.time.Instant
+import java.util.UUID
+
+/** Push transport. Selects which adapter delivers a registered device token. */
+enum class PushPlatform { FCM, APNS }
+
+/**
+ * Lifecycle of a registered device token.
+ * - ACTIVE   — eligible for fan-out delivery.
+ * - INACTIVE — explicitly retired by the customer (logout / un-register).
+ * - INVALID  — the provider rejected the token (UNREGISTERED / INVALID_TOKEN); never retried.
+ */
+enum class DeviceTokenStatus { ACTIVE, INACTIVE, INVALID }
+
+/**
+ * A push-capable device belonging to a party. The token is provider-issued (FCM
+ * registration token / APNs device token); it is PII-adjacent and is masked before
+ * it ever reaches a log line (see PiiMask in openbank-libs).
+ */
+data class DeviceToken(
+    val id: UUID,
+    val partyId: UUID,
+    val appInstance: String,
+    val platform: PushPlatform,
+    val token: String,
+    val appVersion: String?,
+    val osVersion: String?,
+    val status: DeviceTokenStatus,
+    val lastUsedAt: Instant?,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+)
+
+/** Inbound registration command (REST → registry). partyId is authoritative from the edge JWT, never the body. */
+data class DeviceRegistration(
+    val partyId: UUID,
+    val appInstance: String,
+    val platform: PushPlatform,
+    val token: String,
+    val appVersion: String? = null,
+    val osVersion: String? = null,
+)
+
+/**
+ * Outcome of a single push send. `skipped` means the adapter is disabled (off-by-default
+ * sandbox mode) — that is a successful no-op, not a failure. `invalidToken` flags a
+ * provider rejection that should retire the device token from future fan-out.
+ */
+data class PushResult(
+    val success: Boolean,
+    val skipped: Boolean = false,
+    val invalidToken: Boolean = false,
+    val messageId: String? = null,
+    val errorCode: String? = null,
+    val errorMessage: String? = null,
+) {
+    companion object {
+        fun ok(messageId: String?): PushResult = PushResult(success = true, messageId = messageId)
+
+        fun skipped(reason: String): PushResult = PushResult(success = true, skipped = true, errorMessage = reason)
+
+        fun failed(code: String?, message: String?, invalidToken: Boolean = false): PushResult =
+            PushResult(success = false, invalidToken = invalidToken, errorCode = code, errorMessage = message)
+    }
+}

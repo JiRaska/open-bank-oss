@@ -1,0 +1,148 @@
+quarkus:
+  application:
+    name: openbank-sca-service
+    version: 0.1.0
+
+  http:
+    port: 8110
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,OPTIONS
+      headers: Content-Type,Authorization,Idempotency-Key,X-Request-ID
+
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+    limits:
+      max-body-size: 10M
+    idle-timeout: 60S
+    read-timeout: 30S
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: vertx-reactive:postgresql://localhost:5432/openbank_sca
+
+  flyway:
+    migrate-at-start: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+    locations: db/migration
+    datasource:
+      db-kind: postgresql
+      username: openbank
+      password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+      jdbc:
+        url: jdbc:postgresql://localhost:5432/openbank_sca
+
+  hibernate-orm:
+    database:
+      generation: none
+
+  redis:
+    hosts: redis://localhost:6379
+
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+
+  shutdown:
+    timeout: 30S
+
+  smallrye-health:
+    root-path: /q/health
+
+  log:
+    level: INFO
+    console:
+      format: '{"timestamp":"%d{yyyy-MM-dd HH:mm:ss.SSS}","level":"%p","logger":"%c{3.}","message":"%s","traceId":"%X{traceId}","spanId":"%X{spanId}"}%n'
+      json: true
+
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-sca-service
+        service.version: 0.1.0
+
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+        format: "%d{HH:mm:ss} %-5p [%c{2.}] %s%e%n"
+    oidc:
+      enabled: false
+
+"%test":
+  quarkus:
+    datasource:
+      reactive:
+        url: vertx-reactive:postgresql://localhost:5433/openbank_sca_test
+    oidc:
+      enabled: false
+
+openbank:
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 100
+  sca:
+    idempotency-ttl-seconds: 300
+  api:
+    version: "1"
+  build:
+    time: "${BUILD_TIME:unknown}"
+  git:
+    commit: "${GIT_COMMIT:unknown}"
+  outbox:
+    poll-interval: 5s
+    initial-delay: 5s
+    dispatch-enabled: true
+
+mp:
+  messaging:
+    outgoing:
+      sca-events-out:
+        connector: smallrye-kafka
+        client.id: sca-service-${quarkus.uuid}
+        topic: openbank.sca.challenge.event
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+
+# OPA sidecar (ADR-0034). Advisory mode by default.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:false}"

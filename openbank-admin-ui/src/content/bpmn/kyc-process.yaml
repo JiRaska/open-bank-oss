@@ -1,0 +1,132 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# BPMN process diagram (ADR-0019/0029). Authored as data; validated by
+# src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
+
+name: KYC / CDD Process
+desc: Know Your Customer - Customer Due Diligence proces dle EBA AML Guidelines
+regulation: EBA AML Guidelines + 5AMLD Art. 13 + FATF R.10
+services:
+  - kyc-service
+  - aml-service
+  - party-service
+steps:
+  - id: start
+    type: start
+    x: 60
+    y: 100
+    label: Nový zákazník
+  - id: collect
+    type: task
+    x: 180
+    y: 100
+    label: Sběr dokumentů
+    lane: kyc
+    apis:
+      - POST /api/v1/kyc/documents
+    relatedServices:
+      - kyc-service
+  - id: pep
+    type: task
+    x: 320
+    y: 100
+    label: PEP Screening
+    lane: compliance
+    apis:
+      - POST /api/v1/aml/pep-check
+    relatedServices:
+      - aml-service
+  - id: gw-pep
+    type: gateway
+    x: 440
+    y: 100
+    label: PEP?
+  - id: edd
+    type: task
+    x: 440
+    y: 220
+    label: EDD (Enhanced)
+    lane: compliance
+    apis:
+      - POST /api/v1/kyc/edd
+    relatedServices:
+      - kyc-service
+    emits:
+      - openbank.kyc.events
+  - id: cdd
+    type: task
+    x: 560
+    y: 100
+    label: CDD Standard
+    lane: compliance
+    apis:
+      - POST /api/v1/kyc/cdd
+    relatedServices:
+      - kyc-service
+    emits:
+      - openbank.kyc.events
+  - id: risk
+    type: task
+    x: 680
+    y: 100
+    label: Risk Rating
+    lane: compliance
+    apis:
+      - POST /api/v1/aml/risk-rating
+    relatedServices:
+      - aml-service
+  - id: gw2
+    type: gateway
+    x: 800
+    y: 100
+    label: Schváleno?
+  - id: reject
+    type: end-err
+    x: 800
+    y: 220
+    label: Odmítnuto
+  - id: active
+    type: task
+    x: 920
+    y: 100
+    label: Aktivace Party
+    lane: identity
+    apis:
+      - PUT /api/v1/party/{id}/activate
+    relatedServices:
+      - party-service
+    consumes:
+      - openbank.kyc.events
+      - openbank.aml.events
+  - id: end
+    type: end
+    x: 1020
+    y: 100
+    label: Aktivní
+flows:
+  - from: start
+    to: collect
+  - from: collect
+    to: pep
+  - from: pep
+    to: gw-pep
+  - from: gw-pep
+    to: edd
+    label: Ano
+  - from: gw-pep
+    to: cdd
+    label: Ne
+  - from: edd
+    to: risk
+  - from: cdd
+    to: risk
+  - from: risk
+    to: gw2
+  - from: gw2
+    to: reject
+    label: Ne
+  - from: gw2
+    to: active
+    label: Ano
+  - from: active
+    to: end

@@ -1,0 +1,65 @@
+name: Governance / ADR follow-up
+description: Track the actionable tail of an ADR — a pending rollout, a regulatory condition, a gate to flip
+labels: ["governance", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ADRs record *what and why*; they often leave an actionable tail that lives nowhere
+        sortable — "rollout pending", "5 regulatory conditions before go-live", "flip this
+        gate from advisory to enforced". This issue makes that tail a tracked, closeable unit
+        of work linked back to its decision.
+
+  - type: input
+    id: adr
+    attributes:
+      label: Source ADR
+      description: The decision this task realizes.
+      placeholder: "ADR-0027"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of follow-up
+      options:
+        - "Pending rollout / implementation of an accepted decision"
+        - "Regulatory / go-live condition"
+        - "Flip an enforcement gate (advisory -> enforced)"
+        - "Policy or rules.yaml change"
+        - "Cleanup / retire a superseded mechanism"
+    validations:
+      required: true
+
+  - type: textarea
+    id: task
+    attributes:
+      label: What concretely must happen
+      description: The specific, verifiable change — not the rationale (that is in the ADR).
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: How we know this is done. Reference the gate, the rule, or the artifact that proves it.
+      placeholder: |
+        - rules.yaml: <gate>.enforced flips from `advisory` to `block`
+        - CI rejects a PR that violates <rule>
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: compliance
+    attributes:
+      label: Compliance touchpoints
+      description: Add the matching `compliance:*` label for each marked item.
+      options:
+        - label: PCI DSS
+        - label: DORA
+        - label: GDPR
+        - label: PSD2 / SCA
+        - label: AML
+        - label: CNB

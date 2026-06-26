@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.statement.application.workflow
+
+import io.temporal.activity.ActivityInterface
+import java.util.UUID
+
+@ActivityInterface
+interface StatementActivities {
+    fun initCloseRun(closeRunId: UUID)
+    fun collectPeriodData(closeRunId: UUID)
+    fun generateStatements(closeRunId: UUID)
+    fun finalizeCloseRun(closeRunId: UUID): String
+}

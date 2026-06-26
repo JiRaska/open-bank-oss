@@ -1,0 +1,63 @@
+# Single-owner Postgres for Apicurio, reconciled by the cluster-wide CNPG
+# operator (installed via tofu in the platform root). Sandbox runs a single
+# instance for FinOps; prod should raise instances to 3 for HA. CNPG generates
+# the `apicurio-db-app` secret (keys: username, password) for the `apicurio`
+# owner and a read-write Service `apicurio-db-rw` — both consumed by the
+# registry Deployment.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: apicurio-db
+  namespace: messaging
+spec:
+  # DB-layer observability (Dynatrace-parity #0): CNPG runs its built-in
+  # Prometheus exporter on :9187 and creates a PodMonitor the operator owns.
+  # kube-prometheus-stack selects PodMonitors cluster-wide (NilUsesHelmValues
+  # =false), so this lights up cnpg_* metrics (connections, replication lag,
+  # deadlocks, xid age, WAL archiving) with zero app changes.
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: registrydb
+      owner: apicurio
+
+  # WAL archiving + daily base backups to S3 (ADR-0035, #863 pattern). Credentials via EKS Pod
+  # Identity on the apicurio-db ServiceAccount (aws/.../db-backups.tf) — barman reads the SDK chain,
+  # no secret. Sandbox S3 lifecycle expires after 35d; prod needs compliance retention.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/apicurio-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: apicurio-db-daily
+  namespace: messaging
+spec:
+  schedule: "0 19 2 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: apicurio-db

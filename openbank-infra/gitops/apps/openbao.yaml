@@ -1,0 +1,149 @@
+# OpenBao — the secrets source of truth, migrated off HashiCorp Vault (runbook
+# 0005, supersedes the 0002 Vault upgrade). OpenBao is the Linux-Foundation,
+# MPL-2.0 fork of Vault 1.15 — storage- and API-compatible — so it restores a
+# Vault raft snapshot directly and reuses the SAME AWS KMS auto-unseal key
+# (alias/openbank-vault-unseal). Same reasoning as Redis -> Valkey: leave the
+# BUSL re-licence for the LF-governed OSS fork (ADR-0027 cloud-agnostic OSS).
+#
+# Deployed INTO the `vault` namespace and reusing the existing `vault`
+# ServiceAccount on purpose: the KMS unseal IAM role is bound via EKS Pod
+# Identity to (vault/vault), so an openbao-0 pod running as SA `vault` inherits
+# Encrypt/Decrypt/DescribeKey on the unseal key with ZERO tofu/IAM change. It
+# coexists beside vault-0 (blue/green) until ESO is cut over and Vault pruned.
+# Agent Injector OFF — secrets reach workloads via External Secrets Operator.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: openbao
+  namespace: argocd
+  # ServerSideDiff: same StatefulSet-defaulting reason as vault.yaml — diff via a
+  # server-side-apply dry-run so ArgoCD doesn't show a permanent OutOfSync of pure
+  # API-server defaults (volumeClaimTemplates, pod/container defaults, ports[].protocol).
+  annotations:
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://openbao.github.io/openbao-helm
+    chart: openbao
+    targetRevision: 0.28.3
+    helm:
+      releaseName: openbao
+      valuesObject:
+        global:
+          # OpenBao talks plaintext on the in-cluster leg; TLS terminates at the
+          # mesh/edge. No ingress — ClusterIP only. Keeps the readiness/liveness
+          # probes on http (BAO_ADDR scheme follows tlsDisable).
+          tlsDisable: true
+        injector:
+          enabled: false
+        server:
+          # Pin the OpenBao binary. NB: quay publishes `2.5.4` (no `v`); the chart
+          # default tag is the appVersion `v2.5.4`, which does NOT exist on quay ->
+          # would ImagePullBackOff. Pin the real tag explicitly.
+          image:
+            registry: quay.io
+            repository: openbao/openbao
+            tag: "2.5.4"
+          # OWN the `vault` ServiceAccount so it survives the Vault app being pruned
+          # (runbook 0005 step 7). The (vault/vault) EKS Pod Identity association keys
+          # on namespace+SA NAME, so keeping the name `vault` preserves OpenBao's KMS
+          # auto-unseal with zero IAM change — only the ArgoCD owner moves from the
+          # vault app to this one (vault.yaml drops to serviceAccount.create:false in
+          # the same change, so exactly one Helm release renders the SA — no conflict).
+          serviceAccount:
+            create: true
+            name: vault
+          # Single-node HA Raft, mirroring the Vault deployment. The seal/listener/
+          # storage stanzas are HCL — OpenBao is config-compatible with Vault 1.17.
+          ha:
+            enabled: true
+            replicas: 1
+            raft:
+              enabled: true
+              setNodeId: true
+              config: |
+                ui = true
+
+                # NB: no `disable_mlock` — OpenBao 2.x removed that field (it warns
+                # "unknown or unsupported field disable_mlock" and ignores it). OpenBao
+                # does not mlock, so no IPC_LOCK capability is needed and the pod stays
+                # inside PSS `restricted` (the `vault` ns is enforce=restricted).
+
+                listener "tcp" {
+                  tls_disable     = 1
+                  address         = "[::]:8200"
+                  cluster_address = "[::]:8201"
+                }
+
+                storage "raft" {
+                  path = "/openbao/data"
+                }
+
+                # Auto-unseal via AWS KMS — the SAME key Vault uses. A restored
+                # Vault snapshot stays unsealed because the seal config (key) is
+                # identical. Credentials come from EKS Pod Identity on SA `vault`.
+                seal "awskms" {
+                  region     = "eu-north-1"
+                  kms_key_id = "alias/openbank-vault-unseal"
+                }
+
+                service_registration "kubernetes" {}
+          dataStorage:
+            enabled: true
+            size: 5Gi
+            mountPath: /openbao/data
+            storageClass: gp3
+          # PSS restricted compliance (the `vault` ns is enforce=restricted).
+          statefulSet:
+            securityContext:
+              pod:
+                runAsNonRoot: true
+                runAsUser: 100
+                runAsGroup: 1000
+                fsGroup: 1000
+                seccompProfile:
+                  type: RuntimeDefault
+              container:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                capabilities:
+                  drop:
+                    - ALL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+        ui:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vault
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    # Self-contained PSS-restricted labels on the `vault` ns. Mirrors vault.yaml so
+    # this app is correct regardless of sync order — `openbao` sorts before `vault`
+    # alphabetically, so on a fresh app-of-apps reconcile it may create the ns first;
+    # without this it would come up missing enforce=restricted.
+    managedNamespaceMetadata:
+      labels:
+        openbank.io/plane: platform
+        pod-security.kubernetes.io/enforce: restricted
+        pod-security.kubernetes.io/audit: restricted
+        pod-security.kubernetes.io/warn: restricted
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m

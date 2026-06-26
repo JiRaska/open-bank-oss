@@ -1,0 +1,64 @@
+# Public API Ingress for the payment pipeline (payments namespace).
+# Routes /api/v1/sepa-payments, /api/v1/domestic-payments, /api/v1/payments/instant
+# and /api/v1/transactions to the respective ClusterIP services. All paths require
+# a bearer token (Keycloak openbank realm); the services validate it via OIDC.
+#
+# Separate from the admin-ui Ingress (admin.open-bank.tech) — this is the developer
+# REST API surface, not the operator UI.
+#
+# TLS: letsencrypt-prod via cert-manager DNS-01; external-dns publishes the A record.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: payments-api
+  namespace: payments
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Payment APIs require auth — enforce at ingress level too (belt+suspenders).
+    nginx.ingress.kubernetes.io/auth-response-headers: Authorization
+    # Preserve the original Host header so OIDC issuer validation works correctly
+    # (Keycloak discovery returns the public issuer, not the cluster-internal one).
+    nginx.ingress.kubernetes.io/proxy-set-headers: "payments/payments-api-headers"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.open-bank.tech
+      secretName: payments-api-tls
+  rules:
+    - host: api.open-bank.tech
+      http:
+        paths:
+          # SEPA Credit Transfer (SCT) payments — POST /api/v1/sepa-payments
+          - path: /api/v1/sepa-payments
+            pathType: Prefix
+            backend:
+              service:
+                name: sepa-payment
+                port:
+                  number: 8115
+          # Czech domestic payments (CERTIS) — POST /api/v1/domestic-payments
+          - path: /api/v1/domestic-payments
+            pathType: Prefix
+            backend:
+              service:
+                name: domestic-payment
+                port:
+                  number: 8116
+          # SEPA Instant Credit Transfer (SCT Inst, 10s) — POST /api/v1/sepa-instant-payments
+          - path: /api/v1/sepa-instant-payments
+            pathType: Prefix
+            backend:
+              service:
+                name: sepa-instant
+                port:
+                  number: 8127
+          # Transaction saga read — GET /api/v1/transactions/{id}
+          - path: /api/v1/transactions
+            pathType: Prefix
+            backend:
+              service:
+                name: transaction-service
+                port:
+                  number: 8102

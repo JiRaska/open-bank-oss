@@ -1,0 +1,29 @@
+# App-of-apps seed. Applied once to bootstrap ArgoCD's ownership of the
+# sandbox cluster (ADR-0027: tofu seeds ArgoCD, ArgoCD owns everything after).
+# It syncs every Application under gitops/apps/, which in turn own the
+# component manifests under gitops/components/. After this is applied, all
+# further changes flow through git — no direct kubectl.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/apps
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

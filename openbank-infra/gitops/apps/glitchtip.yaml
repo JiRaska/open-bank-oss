@@ -1,0 +1,148 @@
+# Mobile crash & error sink: GlitchTip (ADR-0075). Self-hosted, Sentry-wire-
+# compatible error tracker for the KMP customer app (ADR-0064) — the production
+# complement to the debug-only in-app diagnostics surface (ADR-0070). Captures
+# the class of client failures the backend LGTM stack (ADR-0008) cannot see:
+# native crashes, ANRs, pre-API errors (TLS/pinning/offline), per-release
+# regressions. Events are tagged with X-Correlation-ID + party_id so a mobile
+# crash links back to its Tempo trace.
+#
+# WHY GLITCHTIP, NOT SENTRY: GlitchTip is a lightweight, true-OSS, Sentry-protocol
+# re-implementation — vs self-hosted Sentry's Kafka + ClickHouse + Snuba + Relay
+# (~20 containers, BSL non-OSS). It is AGPL-3.0, the SAME license as Loki/Tempo/
+# Grafana already in this cluster: the rules.yaml GPL/AGPL denylist governs
+# shipped code dependencies (SBOM), not a deployed service. The client SDK in the
+# app binary is sentry-kotlin-multiplatform (MIT) — no copyleft in the artifact.
+#
+# DATA RESIDENCY vs REACHABILITY: storage stays in-cluster (EU residency, ADR-0027)
+# — but the INGEST endpoint must be reachable by devices in the field, so the
+# ingress is public (glitchtip.open-bank.tech, letsencrypt-prod) like the customer
+# edge. PII is stripped on-device before send (ADR-0075 inv. 3 beforeSend gate),
+# so the public surface only ever receives pseudonymous, redaction-clean events.
+#
+# SECRETS: SECRET_KEY + DATABASE_URL come from Vault via ESO
+# (components/external-secrets/es-glitchtip.yaml -> Secret `glitchtip-secrets`).
+# Git holds only the reference. Postgres is external/managed (chart default); the
+# bundled Valkey is a transient cache (no persistence needed). No app-of-apps yet
+# syncs gitops/apps, so this is applied with `kubectl apply` (same as tempo/loki).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: glitchtip
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://gitlab.com/api/v4/projects/16325141/packages/helm/stable
+    chart: glitchtip
+    targetRevision: 8.2.0   # appVersion GlitchTip v6.1.4
+    helm:
+      releaseName: glitchtip
+      valuesObject:
+        glitchtip:
+          # Public origin used to build absolute URLs + CSRF trust. Matches the
+          # ingress host below.
+          domain: https://glitchtip.open-bank.tech
+          # Django SECRET_KEY — from Vault via ESO, never inline (existingSecretKey
+          # defaults to SECRET_KEY). DATABASE_URL is NOT needed here: with
+          # postgresql.enabled below, the chart wires it from the CNPG-generated
+          # `glitchtip-pg-app` secret automatically.
+          existingSecret: glitchtip-secrets
+        # GlitchTip ships its DB migration as a Helm `post-install,pre-upgrade` hook,
+        # which ArgoCD maps to PreSync (runs before the Sync phase on every sync).
+        # ENABLED now that the bundled CNPG DB (`glitchtip-pg-app`) + Valkey + the
+        # ESO-projected `glitchtip-secrets` already exist and persist across syncs —
+        # so the PreSync hook finds its secrets and auto-migrates on every upgrade
+        # (no more out-of-band `./manage.py migrate`).
+        # ⚠️ DR/fresh-install caveat: on a clean reinstall (DB+secrets absent) this
+        # hook deadlocks (CreateContainerConfigError) and blocks the whole sync, so
+        # the DB never gets created. For a from-scratch rebuild, set this to `false`
+        # for the first sync (lets CNPG+ESO come up), run the migration once, then
+        # flip back to `true`. Steady-state upgrades need no intervention (ADR-0075/0082).
+        migrationJob:
+          enabled: true
+        # All-in-one: the web pod embeds the background worker, so no separate
+        # worker Deployment is needed for a small instance.
+        web:
+          embedWorker: true
+          replicaCount: 1
+          budget:
+            minAvailable: 0   # single-replica sandbox — allow voluntary eviction
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          ingress:
+            enabled: true
+            className: nginx
+            annotations:
+              cert-manager.io/cluster-issuer: letsencrypt-prod
+              # ATTACK-SURFACE REDUCTION (ADR-0056): only the event INGEST must be
+              # public (devices in the field + the admin-ui operator browser POST
+              # crashes here). The web UI, Django /admin/ (a superuser password login)
+              # and the management REST API have no business on the internet — they're
+              # reached in-cluster via port-forward (like Grafana, ArgoCD, et al.).
+              # So the public ingress allow-lists ONLY the per-project ingest verbs;
+              # everything else 404s at the edge. Mirrors the keycloak-admin-block pattern.
+              nginx.ingress.kubernetes.io/use-regex: "true"
+            hosts:
+              - host: glitchtip.open-bank.tech
+                paths:
+                  # Sentry/GlitchTip project ingest endpoints only (store/envelope/
+                  # security/minidump). project_id is numeric; /api/0/* (management) and
+                  # every UI/admin path are intentionally NOT matched → edge 404.
+                  - path: /api/[0-9]+/(store|envelope|security|minidump|unreal)/
+                    pathType: ImplementationSpecific
+            tls:
+              - secretName: glitchtip-tls
+                hosts:
+                  - glitchtip.open-bank.tech
+        worker:
+          enabled: false   # embedded in web (embedWorker)
+        # Transient cache/broker; data loss only logs users out — no persistence.
+        valkey:
+          enabled: true
+        # In-cluster Postgres via the CloudNativePG operator (installed in the
+        # sandbox). The chart creates a CNPG `Cluster` (glitchtip-pg) + the
+        # `glitchtip-pg-app` secret and wires DATABASE_URL from it automatically —
+        # so no external DB and no DATABASE_URL in Vault. Storage on gp3 like
+        # tempo/loki; EU residency (ADR-0027). Scale instances/size for prod.
+        postgresql:
+          enabled: true
+          cluster:
+            instances: 1
+            storage:
+              size: 5Gi
+              storageClass: gp3
+        extraEnvVars:
+          # Closed instance: operators are provisioned, no public sign-up.
+          - name: ENABLE_OPEN_USER_REGISTRATION
+            value: "false"
+          - name: ENABLE_ORGANIZATION_CREATION
+            value: "false"
+          # PII (ADR-0075 inv. 3): don't trust/store the client IP from the proxy
+          # header. The device already nulls user.ipAddress on-device; this keeps
+          # the server from re-inferring it.
+          - name: SENTRY_USE_X_FORWARDED_FOR
+            value: "false"
+          # Sender for alert emails (avoid the unresolved Django default).
+          - name: DEFAULT_FROM_EMAIL
+            value: glitchtip@open-bank.tech
+          # Bound event retention to cap storage/cost (FinOps, ADR-0027); tune
+          # with real traffic.
+          - name: GLITCHTIP_MAX_EVENT_LIFE_DAYS
+            value: "30"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+#
+# OpenBao post-install configuration (ADR-0099):
+#   - Tier 1: database secrets engine setup + weekly DB rotation CronJob
+#   - Tier 2: weekly OIDC client secret + JWT signing key rotation CronJob
+#
+# Deployed via openbao-config ArgoCD Application (apps/openbao-config.yaml).
+# The openbao Helm release (apps/openbao.yaml) must be synced first so the
+# `vault` namespace exists.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - dynamic-db-credentials.yaml
+  - db-rotation-job.yaml
+  - secret-rotator-cronjob.yaml

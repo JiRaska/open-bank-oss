@@ -1,0 +1,181 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Reposilite — in-cluster Maven / Gradle dependency proxy (issue #849)
+# ─────────────────────────────────────────────────────────────────────────────
+# Three repos proxied (store=true = local cache on gp3 PVC):
+#   maven-central  → https://repo1.maven.org/maven2/
+#   google         → https://dl.google.com/dl/android/maven2/
+#   gradle-plugins → https://plugins.gradle.org/m2/
+#
+# Wiring (settings.gradle.kts):
+#   Build start → probe http://reposilite.reposilite.svc.cluster.local:8080/api/status
+#   If 200 → set REPOSILITE_MIRROR_URL → settings.gradle.kts prepends 3 repos
+#   If unreachable → fall back to GCS mirror (existing behaviour)
+#
+# Storage: 10 Gi gp3 in eu-north-1a (co-located with ARC runner pool so
+# dep downloads never cross an AZ). LRU eviction keeps the PVC from filling.
+# ─────────────────────────────────────────────────────────────────────────────
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: reposilite-data
+  namespace: reposilite
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: reposilite-config
+  namespace: reposilite
+data:
+  configuration.cdn: |
+    port: 8080
+    workingDirectory: /data/reposilite
+
+    repositories {
+      maven-central {
+        visibility: PUBLIC
+        redeployment: false
+        proxies {
+          maven-central-upstream {
+            reference: https://repo1.maven.org/maven2/
+            store: true
+          }
+        }
+      }
+      google {
+        visibility: PUBLIC
+        redeployment: false
+        proxies {
+          google-upstream {
+            reference: https://dl.google.com/dl/android/maven2/
+            store: true
+          }
+        }
+      }
+      gradle-plugins {
+        visibility: PUBLIC
+        redeployment: false
+        proxies {
+          gradle-plugins-upstream {
+            reference: https://plugins.gradle.org/m2/
+            store: true
+          }
+        }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reposilite
+  namespace: reposilite
+  labels:
+    app.kubernetes.io/name: reposilite
+    app.kubernetes.io/component: maven-mirror
+spec:
+  replicas: 1
+  # Recreate: gp3 PVC is RWO; a rolling second pod would deadlock the mount.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: reposilite
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: reposilite
+    spec:
+      # Co-locate with ARC runner pool AZ so cache↔runner traffic never
+      # crosses an AZ ($0.01/GB) and the gp3 PVC binds to the same AZ.
+      nodeSelector:
+        topology.kubernetes.io/zone: eu-north-1a
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: reposilite
+          image: dzikoysk/reposilite:3.5.14
+          args:
+            - "--working-directory=/data/reposilite"
+            - "--port=8080"
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /data/reposilite
+            # reposilite 3.5.x stores its SQLite DB at /app/data/reposilite.db
+            # (relative to the JAR dir) regardless of --working-directory; mount
+            # a subPath of the PVC there so it is both persistent and writable
+            # by uid 1000 (fsGroup: 1000 sets ownership via the pod securityContext).
+            - name: data
+              mountPath: /app/data
+              subPath: app-data
+            - name: config
+              mountPath: /data/reposilite/configuration.cdn
+              subPath: configuration.cdn
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+          # Reposilite 3.5.14 serves the dashboard SPA at "/" (200) but has no
+          # "/api/status" route — it 404s (verified in-cluster). The old path made
+          # every readiness check 404 and the liveness check kill the pod at
+          # ~120s (delay 30 + 3×period 30), so it CrashLoopBackOff'd. "/" is the
+          # path-independent "is Javalin serving" signal.
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: reposilite-data
+        - name: config
+          configMap:
+            name: reposilite-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: reposilite
+  namespace: reposilite
+  labels:
+    app.kubernetes.io/name: reposilite
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: reposilite
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

@@ -1,0 +1,241 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+'use client'
+
+import { useState, useMemo, useEffect, useCallback } from 'react'
+import { Receipt, Search, RefreshCw } from 'lucide-react'
+import { AuthGuard } from '@/components/auth/AuthGuard'
+import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { classifyBffFailure } from '@/lib/services/bff'
+import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+
+// Shape served by openbank-product-catalog GET /api/v1/fees — the bank-wide fee
+// schedule, flattened from the per-product Fee model. The UI no longer hardcodes
+// any of this; pricing is owned by the catalog service.
+interface FeeScheduleItem {
+  id: string
+  code: string
+  name: string
+  type: string
+  amount: number
+  currency: string
+  frequency: string
+  description: string | null
+  waivable: boolean
+  waiveCondition: string | null
+  productId: string
+  productCode: string
+  productName: string
+  status: string
+  updatedAt: string
+}
+
+const STATUS_COLOR: Record<string, string> = {
+  ACTIVE: 'var(--green)',
+  INACTIVE: 'var(--text-muted)',
+  DRAFT: 'var(--yellow)',
+  DEPRECATED: 'var(--text-muted)',
+  ARCHIVED: 'var(--text-muted)',
+}
+
+export default function FeesPage() {
+  const { t, language } = useLanguage()
+  const [fees, setFees] = useState<FeeScheduleItem[]>([])
+  const [loading, setLoading] = useState(true)
+  // Typed unavailable reason → renders the calm <DataUnavailable> panel instead
+  // of leaking a raw "HTTP 500" string (admin-ui graceful-state rule).
+  const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
+  const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState<string>('ALL')
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setUnavailable(null)
+    try {
+      const res = await fetch('/api/product-catalog/fees', { cache: 'no-store' })
+      if (!res.ok) {
+        setFees([])
+        setUnavailable({ kind: await classifyBffFailure(res) })
+        return
+      }
+      const data = await res.json()
+      if (!Array.isArray(data)) {
+        setFees([])
+        setUnavailable({ kind: 'error' })
+        return
+      }
+      setFees(data as FeeScheduleItem[])
+    } catch {
+      // Timeout / abort / network — product-catalog didn't answer.
+      setFees([])
+      setUnavailable({ kind: 'unreachable' })
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void load() }, [load])
+
+  const filtered = useMemo(() => {
+    return fees.filter(f => {
+      if (typeFilter !== 'ALL' && f.type !== typeFilter) return false
+      if (search) {
+        const query = search.toLowerCase()
+        if (
+          !f.code.toLowerCase().includes(query) &&
+          !f.name.toLowerCase().includes(query) &&
+          !f.productCode.toLowerCase().includes(query)
+        ) {
+          return false
+        }
+      }
+      return true
+    })
+  }, [fees, typeFilter, search])
+
+  const uniqueTypes = useMemo(() => Array.from(new Set(fees.map(f => f.type))).sort(), [fees])
+  const activeCount = fees.filter(f => f.status === 'ACTIVE').length
+
+  return (
+    <AuthGuard permission="payments:view">
+      <div>
+        <div className="page-header">
+          <div>
+            <div className="breadcrumb">
+              <span>OpenBank</span><span className="breadcrumb-sep">/</span>
+              <span className="breadcrumb-current">{t('Poplatky', 'Fees')}</span>
+            </div>
+            <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Receipt size={18} style={{ color: 'var(--accent)' }} />
+              {t('Ceník poplatků', 'Fee Schedule')}
+            </h1>
+            <p className="page-subtitle">
+              {t('Ceník poplatků ze service product-catalog', 'Fee schedule served by the product-catalog service')}
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="btn btn-secondary" onClick={() => void load()} disabled={loading}>
+              <RefreshCw size={14} style={loading ? { animation: 'spin 1s linear infinite' } : undefined} />
+              {t('Obnovit', 'Refresh')}
+            </button>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
+          <div className="stat-card">
+            <div className="stat-value">{fees.length}</div>
+            <div className="stat-label">{t('Celkem poplatků', 'Total Fees')}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-value" style={{ color: 'var(--green)' }}>{activeCount}</div>
+            <div className="stat-label">{t('Aktivní (na aktivním produktu)', 'Active (on active product)')}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-value" style={{ color: 'var(--accent)' }}>{uniqueTypes.length}</div>
+            <div className="stat-label">{t('Kategorie poplatků', 'Fee Categories')}</div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative', flex: 1, minWidth: '250px', maxWidth: '320px' }}>
+            <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            <input
+              className="input"
+              style={{ paddingLeft: '32px', width: '100%' }}
+              placeholder={t('Hledat kód, název, produkt…', 'Search code, name, product…')}
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+          <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginRight: '4px' }}>{t('Typ', 'Type')}:</span>
+            <select className="input" style={{ width: 'auto', padding: '6px 12px' }} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+              <option value="ALL">{t('Všechny', 'All')}</option>
+              {uniqueTypes.map(typ => <option key={typ} value={typ}>{typ}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {unavailable && (
+          <div className="card" style={{ padding: 0, marginBottom: '16px' }}>
+            <DataUnavailable
+              kind={unavailable.kind}
+              service={t('Product-catalog', 'Product-catalog')}
+              feature={t('Poplatky', 'Fees')}
+              lang={language}
+              dense
+            />
+          </div>
+        )}
+
+        <div className="card" style={{ overflow: 'hidden' }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t('Kód', 'Code')}</th>
+                <th>{t('Název', 'Name')}</th>
+                <th>{t('Produkt', 'Product')}</th>
+                <th>{t('Typ', 'Type')}</th>
+                <th>{t('Částka', 'Amount')}</th>
+                <th>{t('Měna', 'Currency')}</th>
+                <th>{t('Frekvence', 'Frequency')}</th>
+                <th>{t('Status', 'Status')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && (
+                <tr>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                    {t('Načítám…', 'Loading…')}
+                  </td>
+                </tr>
+              )}
+              {!loading && !unavailable && filtered.length === 0 && (
+                <tr>
+                  <td colSpan={8} style={{ padding: 0 }}>
+                    <DataUnavailable
+                      kind="no_data"
+                      feature={t('Poplatky', 'Fees')}
+                      lang={language}
+                      detail={t('Žádné poplatky nenalezeny.', 'No fees found.')}
+                      dense
+                    />
+                  </td>
+                </tr>
+              )}
+              {!loading && filtered.map(fee => (
+                <tr key={fee.id}>
+                  <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: '12px' }}>{fee.code}</td>
+                  <td style={{ fontSize: '13px' }}>
+                    {fee.name}
+                    {fee.waivable && (
+                      <span className="tag" style={{ marginLeft: '6px', color: 'var(--green)', fontSize: '10px' }} title={fee.waiveCondition ?? ''}>
+                        {t('lze prominout', 'waivable')}
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }} title={fee.productName}>
+                    <span style={{ fontFamily: 'var(--font-mono)' }}>{fee.productCode}</span>
+                  </td>
+                  <td><span className="tag" style={{ color: 'var(--accent)' }}>{fee.type}</span></td>
+                  <td style={{ fontFamily: 'var(--font-mono)' }}>
+                    {fee.amount.toLocaleString('cs-CZ', { minimumFractionDigits: 2 })}
+                  </td>
+                  <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{fee.currency}</td>
+                  <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{fee.frequency}</td>
+                  <td>
+                    <span className="pill" style={{ background: `${STATUS_COLOR[fee.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[fee.status] ?? 'var(--text-muted)' }}>
+                      {fee.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </AuthGuard>
+  )
+}

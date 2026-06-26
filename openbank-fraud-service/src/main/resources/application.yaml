@@ -1,0 +1,126 @@
+quarkus:
+  application:
+    name: openbank-fraud-service
+    version: 0.1.0
+  http:
+    port: 8133
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+      headers: Content-Type,Authorization,Idempotency-Key
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: postgresql://localhost:5432/openbank_fraud
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_fraud
+  flyway:
+    migrate-at-start: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+  hibernate-orm:
+    database:
+      generation: none
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+    console:
+      json: true
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-fraud-service
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+mp:
+  messaging:
+    incoming:
+      transaction-signal:
+        connector: smallrye-kafka
+        topic: openbank.transactions.transaction.initiated
+        group.id: openbank-fraud-service-velocity
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto.offset.reset: latest
+        # DLQ: stale signals degrade counters gracefully; processing failures go to DLQ
+        failure-strategy: dead-letter-queue
+        dead-letter-queue.topic: openbank.transactions.transaction.initiated.fraud.dlq
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+    oidc:
+      enabled: false
+"%test":
+  quarkus:
+    management:
+      enabled: false
+    oidc:
+      enabled: false
+    devservices:
+      enabled: false
+  mp:
+    messaging:
+      incoming:
+        transaction-signal:
+          connector: smallrye-kafka
+          enabled: false
+openbank:
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 100
+  api:
+    version: "1"
+  build:
+    time: "${BUILD_TIME:unknown}"
+  git:
+    commit: "${GIT_COMMIT:unknown}"
+
+# OPA sidecar (ADR-0034). Advisory mode by default.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:false}"

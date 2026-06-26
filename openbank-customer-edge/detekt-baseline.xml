@@ -1,0 +1,41 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:CustomerEdgeResource.kt$CustomerEdgeResource.Companion$private fun mapFxRateRow( mapper: ObjectMapper, obj: ObjectNode, cnbRef: Map&lt;String, java.math.BigDecimal&gt; = emptyMap(), ): ObjectNode?</ID>
+    <ID>LongParameterList:CustomerEdgeResource.kt$CustomerEdgeResource$( @PathParam("base") base: String, @PathParam("quote") quote: String, @QueryParam("from") from: String?, @QueryParam("to") to: String?, @QueryParam("limit") limit: Int?, @QueryParam("offset") offset: Int?, )</ID>
+    <ID>MagicNumber:CustomerEdgeResource.kt$CustomerEdgeResource$100</ID>
+    <ID>MagicNumber:CustomerEdgeResource.kt$CustomerEdgeResource$200</ID>
+    <ID>MagicNumber:CustomerEdgeResource.kt$CustomerEdgeResource$365</ID>
+    <ID>MagicNumber:CustomerEdgeResource.kt$CustomerEdgeResource$400</ID>
+    <ID>MagicNumber:CustomerEdgeResource.kt$CustomerEdgeResource$403</ID>
+    <ID>MagicNumber:CustomerEdgeResource.kt$CustomerEdgeResource$404</ID>
+    <ID>MagicNumber:CustomerEdgeResource.kt$CustomerEdgeResource$422</ID>
+    <ID>MagicNumber:CustomerEdgeResource.kt$CustomerEdgeResource$90</ID>
+    <ID>MagicNumber:CustomerEdgeResource.kt$CustomerEdgeResource.Companion$10</ID>
+    <ID>MagicNumber:CustomerEdgeResource.kt$CustomerEdgeResource.Companion$20</ID>
+    <ID>MagicNumber:CustomerEdgeResource.kt$CustomerEdgeResource.Companion$24</ID>
+    <ID>MagicNumber:CustomerEdgeResource.kt$CustomerEdgeResource.Companion$3</ID>
+    <ID>MagicNumber:CustomerEdgeResource.kt$CustomerEdgeResource.Companion$4</ID>
+    <ID>MagicNumber:CustomerEdgeResource.kt$CustomerEdgeResource.Companion$6</ID>
+    <ID>MagicNumber:OnboardingResource.kt$OnboardingResource$201</ID>
+    <ID>MagicNumber:OnboardingResource.kt$OnboardingResource$400</ID>
+    <ID>MagicNumber:OnboardingResource.kt$OnboardingResource$502</ID>
+    <ID>MagicNumber:KeycloakAdminClient.kt$KeycloakAdminClient$1000L</ID>
+    <ID>MagicNumber:KeycloakAdminClient.kt$KeycloakAdminClient$200</ID>
+    <ID>MagicNumber:KeycloakAdminClient.kt$KeycloakAdminClient$299</ID>
+    <ID>MagicNumber:KeycloakAdminClient.kt$KeycloakAdminClient$300L</ID>
+    <ID>MagicNumber:KeycloakAdminClient.kt$KeycloakAdminClient$5</ID>
+    <ID>MagicNumber:KeycloakAdminClient.kt$KeycloakAdminClient$60L</ID>
+    <ID>MagicNumber:UpstreamClient.kt$UpstreamClient$10000</ID>
+    <ID>MagicNumber:UpstreamClient.kt$UpstreamClient$1000L</ID>
+    <ID>MagicNumber:UpstreamClient.kt$UpstreamClient$200</ID>
+    <ID>MagicNumber:UpstreamClient.kt$UpstreamClient$300L</ID>
+    <ID>MagicNumber:UpstreamClient.kt$UpstreamClient$5000</ID>
+    <ID>MagicNumber:UpstreamClient.kt$UpstreamClient$502</ID>
+    <ID>SwallowedException:CustomerEdgeResource.kt$CustomerEdgeResource$e: IllegalArgumentException</ID>
+    <ID>TooGenericExceptionCaught:UpstreamClient.kt$UpstreamClient$e: Exception</ID>
+    <ID>TooManyFunctions:CustomerEdgeResource.kt$CustomerEdgeResource</ID>
+    <ID>TooManyFunctions:CustomerEdgeResource.kt$CustomerEdgeResource$Companion</ID>
+  </CurrentIssues>
+</SmellBaseline>

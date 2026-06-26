@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.cardissuance.infrastructure.persistence.mapper
+
+import com.openbank.cardissuance.domain.model.*
+import com.openbank.cardissuance.infrastructure.persistence.entity.CardEntity
+
+fun CardEntity.toDomain() = Card(
+    id = id, idempotencyKey = idempotencyKey, partyId = partyId, accountId = accountId,
+    productCode = productCode, cardType = CardType.valueOf(cardType), network = CardNetwork.valueOf(network),
+    maskedPan = maskedPan, cardholderName = cardholderName, embossedName = embossedName,
+    expiryDate = expiryDate, status = CardStatus.valueOf(status),
+    dailyLimitMinorUnits = dailyLimitMinorUnits, monthlyLimitMinorUnits = monthlyLimitMinorUnits,
+    currency = currency, deliveryAddress = deliveryAddress,
+    activatedAt = activatedAt, blockedAt = blockedAt, blockedReason = blockedReason,
+    createdAt = createdAt, updatedAt = updatedAt
+)
+
+fun Card.toEntity() = CardEntity().also { e ->
+    e.id = id; e.idempotencyKey = idempotencyKey; e.partyId = partyId; e.accountId = accountId
+    e.productCode = productCode; e.cardType = cardType.name; e.network = network.name
+    e.maskedPan = maskedPan; e.cardholderName = cardholderName; e.embossedName = embossedName
+    e.expiryDate = expiryDate; e.status = status.name
+    e.dailyLimitMinorUnits = dailyLimitMinorUnits; e.monthlyLimitMinorUnits = monthlyLimitMinorUnits
+    e.currency = currency; e.deliveryAddress = deliveryAddress
+    e.activatedAt = activatedAt; e.blockedAt = blockedAt; e.blockedReason = blockedReason
+    e.createdAt = createdAt; e.updatedAt = updatedAt
+}

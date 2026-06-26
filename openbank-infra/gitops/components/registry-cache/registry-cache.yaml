@@ -1,0 +1,358 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CI image pull-through cache (Docker Hub mirror)
+# ─────────────────────────────────────────────────────────────────────────────
+# FinOps: the self-hosted CI runners live in private subnets, so every container
+# image the build pool's dind pulls for the docker-compose test infra
+# (postgres / kafka / valkey) exits via the NAT Gateway at $0.045/GB. With
+# ephemeral runners (per-job dind, empty image cache) the SAME base images are
+# re-pulled on every build — the dominant slice of the NatGateway-Bytes spend.
+#
+# Fix (creds-free — the build pool deliberately has ZERO cloud creds because it
+# runs untrusted PR code, so an ECR pull-through cache that needs auth is out):
+# run an in-cluster registry:2 in pull-through (proxy) mode against Docker Hub.
+# dind points `--registry-mirror` at this Service, so docker.io pulls are served
+# from the in-cluster cache (PVC) over the pod network — OFF the NAT. Only the
+# first pull of each image/tag fetches from Docker Hub (once, through NAT), which
+# also sidesteps the anonymous 429 rate limit that drove #246.
+#
+# Cost of the cache itself: one ~256Mi pod on the existing default pool ($0 new
+# compute) + a 20Gi gp3 PVC (~$1.7/mo) + a ClusterIP Service (no ELB). Pinned to
+# eu-north-1a (the NAT/runner AZ) so neither the PVC nor the cache traffic crosses
+# an AZ. Net: ~$2/mo to save the bulk of the image-pull NAT bytes.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: registry-cache
+  labels:
+    app.kubernetes.io/part-of: platform
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: registry-cache-data
+  namespace: registry-cache
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry-cache
+  namespace: registry-cache
+  labels:
+    app.kubernetes.io/name: registry-cache
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: the PVC is RWO (single-attach), so a rolling
+  # second pod would deadlock trying to mount the same volume.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: registry-cache
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: registry-cache
+    spec:
+      # Co-locate with the NAT Gateway / runner AZ so the gp3 PVC (AZ-bound) binds
+      # in 1a and cache↔runner traffic never crosses an AZ. The default pool (not
+      # the tainted runners pool) hosts it — no runner toleration, so it lands on
+      # a stable platform node.
+      nodeSelector:
+        topology.kubernetes.io/zone: eu-north-1a
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: registry
+          # Pinned tag (Docker Hub official). One-time kubelet pull at rollout.
+          image: registry:2.8.3
+          ports:
+            - containerPort: 5000
+          env:
+            # Pull-through cache against Docker Hub. Anonymous — no token needed;
+            # the 429 risk is gone because only first-pull-per-image hits upstream.
+            - name: REGISTRY_PROXY_REMOTEURL
+              value: "https://registry-1.docker.io"
+            - name: REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY
+              value: "/var/lib/registry"
+            - name: REGISTRY_HTTP_ADDR
+              value: ":5000"
+            # In-memory blob descriptor cache: manifest lookups resolve from RAM
+            # instead of re-reading the gp3 blob index on every HEAD/GET.
+            # Without this, parallel dind pulls (max-parallel=8) can each issue a
+            # HEAD before the first write completes, all miss, and all proxy to
+            # Docker Hub over NAT — the root cause of the 21.6 NAT spike.
+            - name: REGISTRY_STORAGE_CACHE_BLOBDESCRIPTOR
+              value: "inmemory"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/registry
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 640Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          readinessProbe:
+            httpGet:
+              path: /v2/
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /v2/
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: registry-cache-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry-cache
+  namespace: registry-cache
+  labels:
+    app.kubernetes.io/name: registry-cache
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: registry-cache
+  ports:
+    - name: registry
+      port: 5000
+      targetPort: 5000
+# ─────────────────────────────────────────────────────────────────────────────
+# quay-cache — pull-through proxy for quay.io (port 5001)
+# ghcr-cache — pull-through proxy for ghcr.io (port 5002)
+#
+# FinOps: dind pulls quay.io (ArgoCD, cert-manager, Strimzi) and ghcr.io
+# (Kyverno, CNPG, etc.) over NAT for every Testcontainers/compose build.
+# These caches are hit via containerd certs.d mirrors (--containerd-snapshotter
+# in dind) so dockerd routes those pulls in-cluster — zero NAT egress after
+# the first pull of each image/tag. Anonymous upstream access; no credentials
+# needed for the public images CI pulls.
+# ─────────────────────────────────────────────────────────────────────────────
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: quay-cache-data
+  namespace: registry-cache
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quay-cache
+  namespace: registry-cache
+  labels:
+    app.kubernetes.io/name: quay-cache
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: quay-cache
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: quay-cache
+    spec:
+      nodeSelector:
+        topology.kubernetes.io/zone: eu-north-1a
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: registry
+          image: registry:2.8.3
+          ports:
+            - containerPort: 5001
+          env:
+            - name: REGISTRY_PROXY_REMOTEURL
+              value: "https://quay.io"
+            - name: REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY
+              value: "/var/lib/registry"
+            - name: REGISTRY_HTTP_ADDR
+              value: ":5001"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/registry
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 384Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          readinessProbe:
+            httpGet:
+              path: /v2/
+              port: 5001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /v2/
+              port: 5001
+            initialDelaySeconds: 15
+            periodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: quay-cache-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: quay-cache
+  namespace: registry-cache
+  labels:
+    app.kubernetes.io/name: quay-cache
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: quay-cache
+  ports:
+    - name: registry
+      port: 5001
+      targetPort: 5001
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ghcr-cache-data
+  namespace: registry-cache
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ghcr-cache
+  namespace: registry-cache
+  labels:
+    app.kubernetes.io/name: ghcr-cache
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ghcr-cache
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ghcr-cache
+    spec:
+      nodeSelector:
+        topology.kubernetes.io/zone: eu-north-1a
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: registry
+          image: registry:2.8.3
+          ports:
+            - containerPort: 5002
+          env:
+            - name: REGISTRY_PROXY_REMOTEURL
+              value: "https://ghcr.io"
+            - name: REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY
+              value: "/var/lib/registry"
+            - name: REGISTRY_HTTP_ADDR
+              value: ":5002"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/registry
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 384Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          readinessProbe:
+            httpGet:
+              path: /v2/
+              port: 5002
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /v2/
+              port: 5002
+            initialDelaySeconds: 15
+            periodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: ghcr-cache-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ghcr-cache
+  namespace: registry-cache
+  labels:
+    app.kubernetes.io/name: ghcr-cache
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ghcr-cache
+  ports:
+    - name: registry
+      port: 5002
+      targetPort: 5002

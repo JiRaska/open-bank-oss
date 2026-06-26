@@ -1,0 +1,220 @@
+name: Security scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 5 * * 1"  # weekly Monday 05:00 UTC
+  workflow_dispatch:      # manual SBOM/scan refresh (e.g. before a deploy)
+
+permissions:
+  contents: read
+  security-events: write
+
+# Cancel superseded runs on the same ref so Dependabot/PR pushes don't stack up
+# expensive CodeQL/Trivy/SBOM runs and drain the Free-tier minute budget.
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Decide whether the (heavy) SBOM jobs need to run this push.
+  # ---------------------------------------------------------------------------
+  # An SBOM only changes when the dependency graph changes. Regenerating it on
+  # EVERY main-line commit meant a 30-min `sbomAll` build fired on every gitops
+  # auto-deploy commit (dozens/day, deps unchanged) — pure waste of runner
+  # minutes and artifact storage. So on push we run the SBOM jobs only when a
+  # dependency-affecting file changed; schedule/manual always run (audit posture).
+  detect-deps:
+    name: Detect dependency changes
+    runs-on: openbank-batch
+    outputs:
+      run_sbom: ${{ steps.f.outputs.run_sbom }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0  # need history to diff event.before..sha on push
+      - id: f
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          # schedule / manual: always run the full audit.
+          if [ "$EVENT" = "schedule" ] || [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "run_sbom=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # PRs never run the SBOM jobs (too heavy for the PR gate).
+          if [ "$EVENT" = "pull_request" ]; then
+            echo "run_sbom=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # First push of a branch has an all-zero "before" → cannot diff, run to be safe.
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            echo "run_sbom=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # Dependency-affecting paths: Gradle build/version files, lockfiles, Dockerfiles.
+          if git diff --name-only "$BEFORE" "$SHA" \
+               | grep -qE '(\.gradle\.kts$|gradle/libs\.versions\.toml$|gradle\.lockfile$|gradle/wrapper/|Dockerfile|package-lock\.json$|pnpm-lock\.yaml$|yarn\.lock$)'; then
+            echo "run_sbom=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_sbom=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # CodeQL (semantic analysis)
+  # ---------------------------------------------------------------------------
+  codeql:
+    name: CodeQL
+    # CodeQL uploads results to GitHub code scanning, which on a PRIVATE repo is a
+    # paid GHAS add-on (not bundled with Free/Pro) — the init step errors with
+    # "Code scanning is not enabled for this repository". So this job auto-skips
+    # while the repo is private and activates the moment it goes public (free GHAS),
+    # mirroring the dependency-review job in ci.yml. Until then Trivy fs + Dependabot
+    # cover vulnerable-dependency detection. (Aside: the CodeQL CLI also does not
+    # support linux/arm64, so it could not run on the arm64 sandbox runner anyway.)
+    if: github.event.repository.private == false
+    runs-on: openbank-batch
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [java-kotlin, javascript-typescript]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+        if: matrix.language == 'java-kotlin'
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended,security-and-quality
+
+      - uses: github/codeql-action/autobuild@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+
+      - uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        with:
+          category: "/language:${{ matrix.language }}"
+
+  # ---------------------------------------------------------------------------
+  # Trivy filesystem + IaC scan
+  # ---------------------------------------------------------------------------
+  trivy:
+    name: Trivy
+    runs-on: openbank-batch
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Trivy runs as the host binary (brew) rather than the Docker container
+      # action — container actions don't execute on the macOS pool member, so a
+      # direct CLI invocation keeps this OS-portable across the mixed
+      # [self-hosted, openbank-sandbox] pool (ADR-0040).
+      - name: Trivy fs scan
+        run: |
+          trivy fs --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
+            --skip-dirs node_modules,.next,build,.gradle \
+            --format sarif --output trivy-fs.sarif --exit-code 1 .
+
+      - name: Trivy config (IaC) scan
+        if: always()
+        run: |
+          # Print findings to log for visibility (includes baseline-suppressed ones via || true).
+          trivy config --severity CRITICAL,HIGH --ignorefile .trivyignore --format table openbank-infra || true
+          # Gate: fail on new HIGH/CRITICAL findings not in .trivyignore baseline.
+          trivy config --severity CRITICAL,HIGH --ignorefile .trivyignore \
+            --format sarif --output trivy-config.sarif --exit-code 1 openbank-infra
+
+      # SARIF upload targets GitHub code scanning (paid GHAS on a private repo), so
+      # it can only run once the repo is public — same gate as the CodeQL job. The
+      # fs/config scans above already gate the job; this step is purely for the
+      # code-scanning UI, so skipping it while private loses no enforcement.
+      - name: Upload Trivy SARIF
+        if: always() && github.event.repository.private == false
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        with:
+          sarif_file: .
+          category: trivy
+
+  # ---------------------------------------------------------------------------
+  # SBOM (CycloneDX) — repo-wide via Syft (filesystem scan)
+  # ---------------------------------------------------------------------------
+  sbom:
+    name: SBOM (repo-wide)
+    runs-on: openbank-batch
+    timeout-minutes: 15
+    # Runs on schedule/manual, and on main pushes only when dependencies changed
+    # (see detect-deps). Never on PRs. The authoritative, signed, release-attached
+    # SBOM is produced separately at release time (release-please.yml).
+    needs: detect-deps
+    if: needs.detect-deps.outputs.run_sbom == 'true'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Generate SBOM with Syft
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: .
+          format: cyclonedx-json
+          artifact-name: openbank-sbom.cdx.json
+          output-file: openbank-sbom.cdx.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom
+          path: openbank-sbom.cdx.json
+          # CI debugging artifact only; long-term SBOMs live on release assets, not here.
+          # 90d on every main-line run blew past the Actions artifact-storage quota (broke
+          # the build job fleet-wide on the upload step). 14d keeps it bounded.
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # SBOM (CycloneDX) — per-service via the cyclonedx Gradle plugin (SBOM-1)
+  # ---------------------------------------------------------------------------
+  # The Gradle plugin sees the *actual* runtime classpath each service pulls
+  # from quarkus-bom, which Syft cannot reconstruct from a filesystem scan.
+  # This complements (does not replace) the repo-wide job above.
+  sbom-per-service:
+    name: SBOM (per service)
+    runs-on: openbank-batch
+    timeout-minutes: 30
+    # Builds the full runtime classpath of all modules — far too heavy to run on
+    # every PR or on dependency-neutral commits (e.g. gitops auto-deploy). Runs on
+    # schedule/manual and on main pushes only when dependencies changed (detect-deps).
+    needs: detect-deps
+    if: needs.detect-deps.outputs.run_sbom == 'true'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+        with:
+          distribution: temurin
+          java-version: "25"
+      - name: Cache Gradle
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-sbom-${{ hashFiles('**/*.gradle.kts', '**/libs.versions.toml') }}
+          restore-keys: gradle-sbom-
+      - name: Generate per-service SBOMs
+        run: ./gradlew sbomAll --console=plain --no-daemon
+      - name: Collect per-service SBOMs
+        run: |
+          mkdir -p sboms
+          # bom.json is emitted at openbank-<name>/build/reports/bom.json by
+          # the cyclonedx Gradle plugin (per-service config in build.gradle.kts).
+          for d in openbank-*/; do
+            svc="${d%/}"
+            [ -f "$d/build/reports/bom.json" ] && cp "$d/build/reports/bom.json" "sboms/${svc}-sbom.cdx.json"
+          done
+          ls -la sboms/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: per-service-sboms
+          path: sboms/*.cdx.json
+          # See note on the repo-wide SBOM above: 14d, not 90d. This artifact was the
+          # dominant storage consumer (~6 GB across ~660 main-line runs).
+          retention-days: 14

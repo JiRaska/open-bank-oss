@@ -1,0 +1,94 @@
+# -----------------------------------------------------------------------------
+# Issue hygiene — the link-in-PR lint (ADR-0052, rules.yaml: issues).
+#
+# Every PR's "Linked issues" section must be consciously addressed: either a
+# real reference (Closes/Fixes/Resolves/Refs #<n>) or an explicit N/A. Leaving
+# the template placeholder untouched is the failure this gate prevents — it is
+# the producer that lets rules.yaml flip `issues.enforced` advisory -> block.
+#
+# Lives in its own workflow (not ci.yml) so it can subscribe to the `edited`
+# event: fixing the PR body must re-evaluate THIS check without re-running the
+# whole CI on every description edit. The job name `issue-hygiene` is a
+# required status check in the main-protection ruleset — do not rename it.
+#
+# Exempt (a check that can't sensibly apply has no verdict): release-please and
+# other bot PRs, and any PR carrying the `skip-hygiene` escape-hatch label.
+# -----------------------------------------------------------------------------
+name: Issue hygiene
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue-hygiene-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  issue-hygiene:
+    name: issue-hygiene
+    runs-on: openbank-build
+    steps:
+      - name: Lint PR "Linked issues"
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const pr = context.payload.pull_request
+            const author = pr.user?.login ?? ''
+            const labels = (pr.labels ?? []).map(l => l.name)
+            const headRef = pr.head?.ref ?? ''
+
+            // --- Exemptions -------------------------------------------------
+            const botAuthor = author.endsWith('[bot]')
+            const isRelease = /^chore(\(.+\))?:\s*release\b/i.test(pr.title ?? '')
+              || /^release-please/.test(headRef)
+            if (botAuthor || isRelease || labels.includes('skip-hygiene')) {
+              core.notice(`issue-hygiene: exempt (author=${author}, release=${isRelease}, `
+                + `skip-hygiene=${labels.includes('skip-hygiene')}) — no verdict`)
+              return
+            }
+
+            const body = pr.body ?? ''
+            // Strip HTML comments so the template placeholder doesn't count as content.
+            const stripped = body.replace(/<!--[\s\S]*?-->/g, '')
+
+            // Isolate the "Linked issues" section when the template is used; else
+            // fall back to scanning the whole (comment-stripped) body. Line-walk
+            // rather than one big regex — JS has no \Z, and headings are the clean
+            // section boundary.
+            const sectionText = (md, title) => {
+              const headRe = /^#{1,6}\s+(.*\S)\s*$/
+              let inSec = false
+              const buf = []
+              for (const line of md.split(/\r?\n/)) {
+                const h = line.match(headRe)
+                if (h) {
+                  if (inSec) break
+                  if (h[1].trim().toLowerCase() === title.toLowerCase()) inSec = true
+                } else if (inSec) {
+                  buf.push(line)
+                }
+              }
+              return inSec ? buf.join('\n').trim() : null
+            }
+            const section = sectionText(stripped, 'Linked issues') ?? stripped.trim()
+
+            // A real reference: "Closes #12", "Fixes #3", "Refs #9", or a bare "#12".
+            const refRe = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?)?\s*#\d+/i
+            // A conscious "no issue" declaration.
+            const naRe = /\b(n\/?a|none|no\s+(?:linked\s+)?issue)\b/i
+
+            const hasRef = refRe.test(section)
+            const hasNa = section.length > 0 && naRe.test(section)
+
+            if (hasRef || hasNa) {
+              core.notice(`issue-hygiene: OK (${hasRef ? 'issue reference' : 'explicit N/A'})`)
+              return
+            }
+            core.setFailed(
+              'issue-hygiene: the PR "Linked issues" section is empty or still the template '
+              + 'placeholder. Add `Closes #<n>` / `Refs #<n>`, or an explicit `N/A — <reason>`. '
+              + '(ADR-0052; bypass with the `skip-hygiene` label.)')

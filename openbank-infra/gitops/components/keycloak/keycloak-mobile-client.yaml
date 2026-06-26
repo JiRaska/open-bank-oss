@@ -1,0 +1,114 @@
+# Keycloak mobile client for OpenBank customer app (ADR-0064 / Sprint 1 mobile onboarding).
+#
+# Public client (no client secret) with PKCE S256 — mobile apps cannot keep a secret.
+# offline_access scope grants long-lived refresh tokens (60 days) stored in the device
+# Keystore / Secure Enclave; token rotation (refreshTokenMaxReuse: 0) makes stolen
+# tokens single-use.
+#
+# Apply: kubectl apply -f keycloak-mobile-client.yaml -n iam
+# Then import via Keycloak admin API or include in realm-import JSON.
+#
+# realm-import JSON snippet (add to clients[] array in the openbank realm export):
+---
+# ConfigMap carrying the mobile client realm-patch for Keycloak import.
+# Usage: mount into the init container that calls kcadm.sh create clients -f /mobile-client.json -r openbank
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-mobile-client
+  namespace: iam
+  labels:
+    app.kubernetes.io/part-of: iam
+    openbank.dev/managed-by: gitops
+data:
+  mobile-client.json: |
+    {
+      "clientId": "openbank-mobile",
+      "name": "OpenBank Mobile App",
+      "description": "Customer-facing KMP mobile application (ADR-0064)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "openbank://callback",
+        "https://open-bank.tech/mobile/callback"
+      ],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "openbank://logout",
+        "refresh.token.max.reuse": "0",
+        "client.offline.session.max.lifespan": "5184000",
+        "client.offline.session.idle.timeout": "1209600"
+      },
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "offline_access"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "email-verified-claim",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "emailVerified",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "email_verified",
+            "jsonType.label": "boolean"
+          }
+        }
+      ]
+    }
+---
+# Keycloak realm session settings patch for mobile (offline tokens + token rotation).
+# Apply after realm is created: kcadm.sh update realms/openbank -s attributes.offlineSessionMaxLifespan=5184000
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm-mobile-settings
+  namespace: iam
+  labels:
+    app.kubernetes.io/part-of: iam
+    openbank.dev/managed-by: gitops
+data:
+  realm-mobile-settings.sh: |
+    #!/bin/sh
+    # Run once after Keycloak realm creation to configure mobile token lifetimes.
+    # Idempotent — safe to re-run.
+    set -e
+    KCADM="/opt/keycloak/bin/kcadm.sh"
+
+    $KCADM config credentials \
+      --server http://localhost:8080 \
+      --realm master \
+      --user "$KEYCLOAK_ADMIN" \
+      --password "$KEYCLOAK_ADMIN_PASSWORD"
+
+    # Offline token: 60 days max, 14 days idle
+    $KCADM update realms/openbank \
+      -s offlineSessionMaxLifespanEnabled=true \
+      -s offlineSessionMaxLifespan=5184000 \
+      -s offlineSessionIdleTimeout=1209600
+
+    # SSO session: 30 days max, 14 days idle
+    $KCADM update realms/openbank \
+      -s ssoSessionMaxLifespan=2592000 \
+      -s ssoSessionIdleTimeout=1209600
+
+    # Token rotation: each refresh token is single-use
+    $KCADM update clients/$(
+      $KCADM get clients -r openbank --fields id,clientId | \
+      python3 -c "import json,sys; cs=json.load(sys.stdin); print(next(c['id'] for c in cs if c['clientId']=='openbank-mobile'))"
+    ) -r openbank \
+      -s attributes.refreshTokenMaxReuse=0
+
+    echo "Mobile client session settings applied."

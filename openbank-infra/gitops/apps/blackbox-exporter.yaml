@@ -1,0 +1,82 @@
+# Synthetic monitoring (Dynatrace-parity #2). prometheus-blackbox-exporter probes
+# the public ingress hosts from inside the cluster: HTTP availability (the app
+# actually answers) and TLS certificate expiry — neither of which the existing
+# RED/span-metrics stack can see, because those only exist once a *real* request
+# arrives. This is the proactive "is the front door open?" signal an APM like
+# Dynatrace gives via its synthetic monitors. Probe CRs + alerts live in
+# components/observability (probes-synthetic.yaml). The exporter's own /metrics
+# is scraped by the chart's ServiceMonitor.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: blackbox-exporter
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: prometheus-blackbox-exporter
+    targetRevision: 11.12.0
+    helm:
+      valuesObject:
+        fullnameOverride: blackbox-exporter
+        serviceMonitor:
+          enabled: true
+          defaults:
+            labels:
+              app.kubernetes.io/part-of: observability
+        # Probe modules. `http_app` is lenient on status (a 401 on a protected
+        # endpoint still proves the host is up + TLS valid); `http_2xx` is strict
+        # for public pages. follow_redirects handles login redirects.
+        config:
+          modules:
+            http_2xx:
+              prober: http
+              timeout: 10s
+              http:
+                method: GET
+                valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+                valid_status_codes: [200, 301, 302]
+                follow_redirects: true
+                preferred_ip_protocol: ip4
+            # Edge reachability + TLS: the public apex of kc/customer/glitchtip/
+            # the API gateway returns 401/403/404 at "/" by design (no welcome
+            # page, auth-gated, or app served under a sub-path). Any of these
+            # still proves the ingress is up and the cert valid — what this probe
+            # asserts. A 5xx or a connection/TLS failure flips probe_success to 0.
+            # Deeper per-endpoint health (correct 200 paths) is a follow-up;
+            # in-cluster ServiceMonitors already cover service-level health.
+            http_app:
+              prober: http
+              timeout: 10s
+              http:
+                method: GET
+                valid_status_codes: [200, 301, 302, 401, 403, 404]
+                follow_redirects: true
+                preferred_ip_protocol: ip4
+        resources:
+          requests:
+            cpu: 25m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 96Mi
+        nodeSelector:
+          workload: observability
+        tolerations:
+          - key: workload
+            operator: Equal
+            value: observability
+            effect: NoSchedule
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

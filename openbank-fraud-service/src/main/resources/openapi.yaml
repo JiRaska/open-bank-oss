@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: Fraud Service API
+  version: 1.0.0
+  description: >-
+    Real-time transaction fraud scoring (ADR-0084). Returns a verdict
+    (ALLOW/CHALLENGE/REVIEW/DECLINE) for a payment intent. Phase 1 is a deterministic, versioned
+    rule set with a single always-ALLOW baseline rule; the service is not yet wired into any
+    payment surface.
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8133
+    description: Local development
+tags:
+  - name: Fraud
+
+paths:
+  /api/v1/fraud/score:
+    post:
+      tags: [Fraud]
+      summary: Score a payment intent and return a fraud verdict
+      operationId: scoreFraud
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScoreFraudRequest'
+      responses:
+        '200':
+          description: Fraud verdict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoreFraudResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Forbidden:
+      description: Caller lacks a required role
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    ScoreFraudRequest:
+      type: object
+      required: [amount, currency, rail]
+      properties:
+        amount:
+          type: string
+          description: Payment amount as a decimal string (e.g. "1250.00")
+          example: "1250.00"
+        currency:
+          type: string
+          description: ISO-4217 currency code
+          example: "CZK"
+        rail:
+          type: string
+          description: Payment rail / type (e.g. SEPA, SEPA_INSTANT, DOMESTIC, FX)
+          example: "SEPA_INSTANT"
+        accountId:
+          type: string
+          format: uuid
+          nullable: true
+        counterpartyId:
+          type: string
+          format: uuid
+          nullable: true
+
+    ScoreFraudResponse:
+      type: object
+      required: [verdict, score, reasons, ruleVersion]
+      properties:
+        verdict:
+          type: string
+          enum: [ALLOW, CHALLENGE, REVIEW, DECLINE]
+        score:
+          type: integer
+          description: Deterministic numeric risk score (0 = no risk)
+        reasons:
+          type: array
+          items:
+            type: string
+          description: Human-readable reasons for rules that fired
+        ruleVersion:
+          type: string
+          description: Version of the rule set that produced the verdict
+          example: "v0"
+
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string

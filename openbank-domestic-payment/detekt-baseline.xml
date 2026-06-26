@@ -1,0 +1,25 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+    <CurrentIssues>
+    <ID>MagicNumber:AmlCaseAdapter.kt$AmlCaseAdapter$5_000</ID>
+    <ID>MagicNumber:AuthzProducer.kt$AuthzProducer$500</ID>
+    <ID>MagicNumber:DomesticOutboxDispatcher.kt$DomesticOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:DomesticOutboxDispatcher.kt$DomesticOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:DomesticPaymentOutboxDispatcher.kt$DomesticPaymentOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:DomesticPaymentOutboxDispatcher.kt$DomesticPaymentOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:DomesticPaymentOutboxRepositoryImpl.kt$DomesticPaymentOutboxRepositoryImpl$4000</ID>
+    <ID>MagicNumber:DomesticPaymentResource.kt$DomesticPaymentResource$201</ID>
+    <ID>MagicNumber:DomesticPaymentService.kt$DomesticPaymentService$1000</ID>
+    <ID>MagicNumber:DomesticPaymentService.kt$DomesticPaymentService$200</ID>
+    <ID>MagicNumber:DomesticPaymentService.kt$DomesticPaymentService$9999</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$DomesticPaymentNotFoundMapper$404</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$InvalidDomesticPaymentStateTransitionMapper$409</ID>
+    <ID>MagicNumber:SanctionsScreeningAdapter.kt$SanctionsScreeningAdapter$5_000</ID>
+    <ID>SwallowedException:DomesticPaymentOutboxDispatcher.kt$DomesticPaymentOutboxDispatcher$ex: Exception</ID>
+    <ID>SwallowedException:DomesticPaymentService.kt$DomesticPaymentService$ex: IllegalArgumentException</ID>
+    <ID>TooGenericExceptionCaught:DomesticPaymentOutboxDispatcher.kt$DomesticPaymentOutboxDispatcher$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:DomesticPaymentService.kt$DomesticPaymentService$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:SanctionsScreeningAdapter.kt$SanctionsScreeningAdapter$ex: Exception</ID>
+  </CurrentIssues>
+</SmellBaseline>

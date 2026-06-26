@@ -1,0 +1,170 @@
+quarkus:
+  application:
+    name: openbank-party-service
+    version: 0.2.0
+  http:
+    port: 8111
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+      headers: Content-Type,Authorization,Idempotency-Key
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: postgresql://localhost:5432/openbank_parties
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_parties
+  flyway:
+    migrate-at-start: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+  hibernate-orm:
+    database:
+      generation: none
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  smallrye-reactive-messaging:
+    kafka:
+      bootstrap-servers: localhost:29092
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+    console:
+      json: true
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-party-service
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+mp:
+  messaging:
+    outgoing:
+      party-events-out:
+        connector: smallrye-kafka
+        client.id: party-service-${quarkus.uuid}
+        topic: openbank.party.events
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+      party-outbox-out:
+        connector: smallrye-kafka
+        client.id: party-outbox-service-${quarkus.uuid}
+        topic: openbank.party.events
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+    incoming:
+      # KYC + AML activation gate (ADR-0073): consume the KYC and AML case-lifecycle
+      # topics and flip the party to ACTIVE only when both clear (two-key gate).
+      kyc-events-in:
+        connector: smallrye-kafka
+        topic: openbank.kyc.events
+        group.id: openbank-party-service
+        auto.offset.reset: earliest
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      aml-events-in:
+        connector: smallrye-kafka
+        topic: openbank.aml.events
+        group.id: openbank-party-service
+        auto.offset.reset: earliest
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+    oidc:
+      enabled: false
+"%test":
+  quarkus:
+    datasource:
+      username: openbank
+      password: openbank_secret
+      reactive:
+        url: vertx-reactive:postgresql://localhost:5432/openbank_party_it
+      jdbc:
+        url: jdbc:postgresql://localhost:5432/openbank_party_it
+    management:
+      enabled: false
+    oidc:
+      enabled: false
+    devservices:
+      enabled: false
+  authz:
+    enforce: false
+openbank:
+  outbox:
+    dispatch-enabled: true
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 150
+  api:
+    version: "1"
+  build:
+    time: "${BUILD_TIME:unknown}"
+  git:
+    commit: "${GIT_COMMIT:unknown}"
+  gdpr:
+    retention-days: 2555
+  # Feature flags (ADR-0067) — first pilot adopter. flagd serves OFREP HTTP on :8016
+  # (8013 is gRPC, 8014 is management). Fail-static: no sidecar reachable → every flag
+  # resolves to its caller default, so the same image runs locally without flagd.
+  flags:
+    url: "${OPENBANK_FLAGS_URL:http://localhost:8016}"
+    timeout-ms: "${OPENBANK_FLAGS_TIMEOUT_MS:100}"
+  # ADR-0072: pepper for RČ blind index dedup. Sourced from Vault/OpenBao (gitops secret).
+  # When absent the dedup gate is silently off — POST /parties/resolve returns 503.
+  identity:
+    rc-pepper: "${OPENBANK_IDENTITY_RC_PEPPER:}"
+
+# OPA sidecar (ADR-0034). Defaults match the per-service deployment manifest
+# (sidecar bound to 8181, bundle exposing data.openbank.rest.allow). Override
+# in CI / cluster envs as needed.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+
+# Phase 3 pilot ships in ADVISORY mode (ADR-0034 D5): @Authorize-annotated
+# methods are evaluated and denies are logged at WARN, but the request still
+# proceeds. The flip to enforce is Phase 5 — after CI audit confirms the
+# policy is rejecting the right calls.
+authz:
+  enforce: "${AUTHZ_ENFORCE:true}"

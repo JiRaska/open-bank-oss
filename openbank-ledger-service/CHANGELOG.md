@@ -1,0 +1,68 @@
+# Changelog
+
+## [1.6.0](https://github.com/JiRaska/open-bank/compare/ledger-service-v1.5.0...ledger-service-v1.6.0) (2026-06-25)
+
+
+### Features
+
+* **ledger:** sub-ledger tie-out for deposit-control accounts (ADR-0039 Phase B) ([#1560](https://github.com/JiRaska/open-bank/issues/1560)) ([02c6f66](https://github.com/JiRaska/open-bank/commit/02c6f66d0c094365049ba2f72968a051479faade))
+
+
+### Bug Fixes
+
+* **ci:** can-i-deploy --latest main — avoid 'No pacts' on path-scoped SHA ([4ea2731](https://github.com/JiRaska/open-bank/commit/4ea273195d038704acc6341f684c0f1cb039ce82))
+* **ledger:** inject Clock into LedgerService; make JournalEntry.reverse time-free (ADR-0100) ([#1817](https://github.com/JiRaska/open-bank/issues/1817)) ([4a97b57](https://github.com/JiRaska/open-bank/commit/4a97b57135be1cd55bfc3ac2381b27d7dcd9bd80))
+* **sdd:** add sdd_outbox_seq to V2 migration + fix outbox IT Vert.x context ([fceadf4](https://github.com/JiRaska/open-bank/commit/fceadf4a679eddc7cbde749839846cc83bf8d5d5)), closes [#1360](https://github.com/JiRaska/open-bank/issues/1360)
+* **settlement:** fix management host binding and datasource username default ([89f7276](https://github.com/JiRaska/open-bank/commit/89f72763c4f6ea558e49626421e9adf6715905d3))
+
+## [1.5.0](https://github.com/JiRaska/open-bank/compare/ledger-service-v1.4.0...ledger-service-v1.5.0) (2026-06-15)
+
+
+### Features
+
+* **ledger:** EoY increment 1 — fiscal-year trial balance + attestable YearClose record (ADR-0078 D5) ([#868](https://github.com/JiRaska/open-bank/issues/868)) ([49ad0cf](https://github.com/JiRaska/open-bank/commit/49ad0cfb6a32fa3b338a88a6e5de95a4997aa487))
+* **ledger:** four-eyes (maker != checker) year-close attestation ([#1014](https://github.com/JiRaska/open-bank/issues/1014)) ([14036f3](https://github.com/JiRaska/open-bank/commit/14036f30184d6a97c68524c5c65453884b83c70b)), closes [#869](https://github.com/JiRaska/open-bank/issues/869)
+* **ledger:** period lock + re-verify endpoint for attested fiscal years ([#985](https://github.com/JiRaska/open-bank/issues/985)) ([3584aa2](https://github.com/JiRaska/open-bank/commit/3584aa2c61338284ca16c3d44e0a4a04072b663a)), closes [#869](https://github.com/JiRaska/open-bank/issues/869)
+
+
+### Bug Fixes
+
+* **infra:** revert EC2NodeClass userData — breaks AL2023 node bootstrap ([#940](https://github.com/JiRaska/open-bank/issues/940)) ([f7d128a](https://github.com/JiRaska/open-bank/commit/f7d128ae7773d4d3237af13d45d2f4cf177aa89a))
+
+## [1.4.0](https://github.com/JiRaska/open-bank/compare/ledger-service-v1.3.0...ledger-service-v1.4.0) (2026-06-12)
+
+
+### Features
+
+* **domestic-payment:** wire DomainMetrics counters (ADR-0077 Phase 2 sweep) ([#684](https://github.com/JiRaska/open-bank/issues/684)) ([7bc6633](https://github.com/JiRaska/open-bank/commit/7bc663347fd81e5fe0f49076e7eb64055b4baa5e))
+* **ledger:** domain posting metrics + outbox backlog gauge (ADR-0077/0079) ([#789](https://github.com/JiRaska/open-bank/issues/789)) ([17507ac](https://github.com/JiRaska/open-bank/commit/17507ac7f51f13645baaa316df617644143423e5))
+* **ledger:** emit AccountBookedChanged per customer account (ADR-0039 Phase D) ([#765](https://github.com/JiRaska/open-bank/issues/765)) ([b6d7905](https://github.com/JiRaska/open-bank/commit/b6d7905dc2a694828e1ac91ebcd1c19a94b9d667))
+
+## [1.3.0](https://github.com/JiRaska/open-bank/compare/ledger-service-v1.2.0...ledger-service-v1.3.0) (2026-06-10)
+
+
+### Features
+
+* **admin-ui:** derive governance manifest from governance.yaml (ADR-0071 phase 2) ([#498](https://github.com/JiRaska/open-bank/issues/498)) ([46c85e9](https://github.com/JiRaska/open-bank/commit/46c85e98fe1e887eb82e2110efb5286fe0220d12))
+
+
+### Bug Fixes
+
+* **gitops:** single-owner ArgoCD apps for product-catalog and audit-oidc ([#609](https://github.com/JiRaska/open-bank/issues/609)) ([48959b1](https://github.com/JiRaska/open-bank/commit/48959b1459fe696b05f0ec983a4daec3fce24207))
+
+## [1.2.0](https://github.com/JiRaska/open-bank/compare/ledger-service-v1.1.1...ledger-service-v1.2.0) (2026-06-06)
+
+
+### Features
+
+* **admin-ui:** quality dashboard — Pact contract tests, pitest mutation, composite score (ADR-0063) ([#360](https://github.com/JiRaska/open-bank/issues/360)) ([00b25bc](https://github.com/JiRaska/open-bank/commit/00b25bcc934fea8728bb4b404166cd21c273495b))
+* **build-logic:** convention plugin openbank.quarkus-service (ADR-0049 D1) ([#344](https://github.com/JiRaska/open-bank/issues/344)) ([da71b7e](https://github.com/JiRaska/open-bank/commit/da71b7e1705649c453b252c32fa06dc098210d63))
+* **coverage:** enforce kover 40% floor on all 13 money-path services ([#338](https://github.com/JiRaska/open-bank/issues/338)) ([6e5f132](https://github.com/JiRaska/open-bank/commit/6e5f132ab1f0c3723104276d373307f76076d483))
+* **ledger:** deploy money-path ledger-service + regulatory-grade outbox dispatch (ADR-0050) ([#169](https://github.com/JiRaska/open-bank/issues/169)) ([7cf5e97](https://github.com/JiRaska/open-bank/commit/7cf5e9754257b1e1c0e8c6a536290d0ab3270402))
+
+
+### Bug Fixes
+
+* **gitops:** add Kafka value.deserializer env vars for payment services ([#366](https://github.com/JiRaska/open-bank/issues/366)) ([b578775](https://github.com/JiRaska/open-bank/commit/b57877557a04f6d4b7fe19bba90db3494eb6d6de))
+* **infra:** restore Keycloak login theme to dark blue/cyan ([#358](https://github.com/JiRaska/open-bank/issues/358)) ([2e56cbc](https://github.com/JiRaska/open-bank/commit/2e56cbc39dab44a2a7c6ed66edea533aebdca317))
+* **ledger:** drop generic Exception mapper, defer to libs (ADR-0049 D4) ([#335](https://github.com/JiRaska/open-bank/issues/335)) ([3fdb95a](https://github.com/JiRaska/open-bank/commit/3fdb95adecbac238b70b39238471321fb02ce016))

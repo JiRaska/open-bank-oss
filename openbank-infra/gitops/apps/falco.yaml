@@ -1,0 +1,107 @@
+# Falco — runtime threat detection (syscall layer), ADR-0081 baseline.
+#
+# Closes the runtime half of the security posture: admission is covered
+# (kyverno verify-images Enforce, PSS restricted on app namespaces), but until
+# now nothing watched a container AFTER it was admitted — a reverse shell, a
+# package manager run in a production pod, /etc/shadow reads or a crypto-miner
+# would have been invisible. Falco's stock ruleset detects exactly that class.
+#
+# Integration is deliberately zero-new-plumbing: json output to stdout → the
+# Alloy DaemonSet already tails every pod and ships to Loki (structured
+# metadata) → Grafana. Alerting on CRITICAL/EMERGENCY rules rides the existing
+# Loki datasource; no falcosidekick, no new webhook surface.
+#
+# Driver: modern_ebpf (CO-RE) — no kernel-module build, works on the AL2023
+# arm64 nodes. DaemonSet covers app + observability nodes; the CI runner pool
+# keeps its own taint untolerated on purpose (dind syscall noise would drown
+# the signal — revisit with a runner-scoped ruleset).
+#
+# The falco namespace is PSS-privileged: the eBPF probe needs CAP_BPF/
+# CAP_PERFMON and /proc access (chart sets the minimal set). That privilege is
+# the cost of watching everyone else — same trade Prometheus node-exporter
+# class tooling makes.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: falco
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://falcosecurity.github.io/charts
+    chart: falco
+    targetRevision: 9.1.0   # Falco 0.44.1
+    helm:
+      releaseName: falco
+      valuesObject:
+        fullnameOverride: falco
+
+        driver:
+          kind: modern_ebpf
+
+        # Logs are the delivery channel (Alloy → Loki) — keep them machine-y.
+        tty: false
+        falco:
+          json_output: true
+          json_include_output_property: true
+          log_syslog: false
+          # Stock rules only (falco_rules.yaml from the falcoctl artifact
+          # follow); tuning exceptions land here as values once the first
+          # week of sandbox noise is triaged.
+          priority: notice
+
+        falcosidekick:
+          enabled: false
+
+        # Node-agent priority (same class as CNI/kube-proxy): sandbox nodes
+        # run at the max-pods (ENI IP) limit, where a default-priority DS pod
+        # finds "Too many pods" and no preemption victim — the security agent
+        # must win that slot; the evicted workload pod reschedules elsewhere
+        # (Karpenter provisions for it, unlike for node-bound DS pods).
+        podPriorityClassName: system-node-critical
+
+        # Lean sandbox profile (FinOps): Falco idles ~150Mi / single-digit
+        # mCPU; bursts on event storms are capped instead of evicting
+        # neighbours. cpu request is deliberately tiny — at 50m the DaemonSet
+        # pod did not FIT on 4 bin-packed sandbox nodes (Insufficient cpu,
+        # Karpenter does not provision for node-bound DS pods).
+        resources:
+          requests:
+            cpu: 25m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+        tolerations:
+          # Cover the stateful observability pool too — Prometheus/Loki nodes
+          # are exactly where tampering would hurt most.
+          - key: workload
+            operator: Equal
+            value: observability
+            effect: NoSchedule
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: falco
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    managedNamespaceMetadata:
+      labels:
+        openbank.io/plane: platform
+        # The eBPF probe is privileged by design — restricted would block it.
+        pod-security.kubernetes.io/enforce: privileged
+        pod-security.kubernetes.io/audit: privileged
+        pod-security.kubernetes.io/warn: privileged
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m

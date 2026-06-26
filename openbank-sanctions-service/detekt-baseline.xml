@@ -1,0 +1,28 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:SanctionsImportService.kt$SanctionsImportService$private suspend fun importOpenSanctionsCsv( url: String, listType: SanctionsListType, defaultPrograms: List&lt;String&gt; = listOf("PEP"), ): Int</ID>
+    <ID>LongMethod:SanctionsImportService.kt$SanctionsImportService$private suspend fun importOpenSanctionsCsv( url: String, listType: SanctionsListType, defaultPrograms: List&lt;String&gt; = listOf("PEP"), ): Int</ID>
+    <ID>LongParameterList:SanctionsListRepositoryImpl.kt$SanctionsListRepositoryImpl$(id: UUID, enabled: Boolean?, sourceUrl: String?, cronHour: Int?, cronMinute: Int?, cronDays: String?)</ID>
+    <ID>LoopWithTooManyJumpStatements:SanctionsImportService.kt$SanctionsImportService$while</ID>
+    <ID>MagicNumber:SanctionsCheck.kt$SanctionsCheck$0.85</ID>
+    <ID>MagicNumber:SanctionsEntryRepositoryImpl.kt$SanctionsEntryRepositoryImpl$500</ID>
+    <ID>MagicNumber:SanctionsImportService.kt$SanctionsImportService$10_000</ID>
+    <ID>MagicNumber:SanctionsImportService.kt$SanctionsImportService$30</ID>
+    <ID>MagicNumber:SanctionsImportService.kt$SanctionsImportService$300</ID>
+    <ID>MagicNumber:SanctionsListEntity.kt$SanctionsListEntity$6</ID>
+    <ID>MagicNumber:SanctionsListResource.kt$SanctionsListResource$404</ID>
+    <ID>MagicNumber:SanctionsListService.kt$SanctionsListService$23</ID>
+    <ID>MagicNumber:SanctionsListService.kt$SanctionsListService$3</ID>
+    <ID>MagicNumber:SanctionsListService.kt$SanctionsListService$59</ID>
+    <ID>MagicNumber:SanctionsOutboxDispatcher.kt$SanctionsOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:SanctionsOutboxDispatcher.kt$SanctionsOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:SanctionsResource.kt$SanctionsResource$201</ID>
+    <ID>MatchingDeclarationName:SanctionsOutboxPort.kt$SanctionsOutboxRepository : OutboxRepository</ID>
+    <ID>MatchingDeclarationName:SanctionsPorts.kt$SanctionsRepository</ID>
+    <ID>NestedBlockDepth:SanctionsImportService.kt$SanctionsImportService$private suspend fun importOpenSanctionsCsv( url: String, listType: SanctionsListType, defaultPrograms: List&lt;String&gt; = listOf("PEP"), ): Int</ID>
+    <ID>TooGenericExceptionCaught:SanctionsImportService.kt$SanctionsImportService$ex: Exception</ID>
+    <ID>UseCheckOrError:SanctionsListService.kt$SanctionsListService$throw IllegalStateException("Failed to persist sanctions list refresh for $listType")</ID>
+  </CurrentIssues>
+</SmellBaseline>

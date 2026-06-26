@@ -1,0 +1,88 @@
+# ===========================================================================
+# OpenBank CI runner image (ADR-0053). FROM the stock ARC ephemeral runner,
+# plus the toolchain the workflows assume — the same set the retired EC2 AMI
+# baked in (commit d75d05e), so the ephemeral runner is a drop-in replacement:
+#
+#   * docker compose v2 CLI plugin  — _service-ci.yml boots the test-infra
+#                                      stack (postgres/kafka/valkey) via
+#                                      `docker compose -f …`.
+#   * yamllint + shellcheck         — Validate manifests (ci.yml).
+#   * trivy                         — Trivy fs/config scan.
+#   * gitleaks                      — secret-scan.
+#   * yq (+ jq)                      — manifest / label workflows.
+#   * aws CLI v2                    — _service-ci.yml "Configure CodeArtifact
+#                                      Maven mirror" fetches the repo token via
+#                                      IRSA; without the CLI the step soft-skips
+#                                      and dep resolution falls back to public
+#                                      Maven Central (NAT cost + 429 risk).
+#
+# arm64 only (the runners NodePool is Graviton).
+#
+# Supply chain (ADR-0030 applied to the runner image): the base image is
+# pinned by digest and every downloaded tool is pinned to an explicit version
+# with a sha256 check (yq excepted — it ships a non-standard multi-hash file;
+# version-pinned URL only). Bump a tool by editing its ARG + SHA below. The
+# image is rebuilt + pushed by .github/workflows/runner-image.yml; the produced
+# digest is what local.runner_image references in arc-runners.tf.
+# ===========================================================================
+
+# ghcr.io/actions/actions-runner:latest @ 2026-06-01 (multi-arch index digest).
+FROM ghcr.io/actions/actions-runner@sha256:b6614fce332517f74d0a76e7c762fb08e4f2ff13dcf333183397c8a5725b6e8e
+
+USER root
+
+# --- pinned tool versions + arm64 sha256 ----------------------------------
+ARG COMPOSE_VERSION=v5.1.4
+ARG COMPOSE_SHA256=d4fb48b72857810314d3ee77123c89954101844efa4788031221f4c370495946
+ARG TRIVY_VERSION=0.70.0
+ARG TRIVY_SHA256=2f6bb988b553a1bbac6bdd1ce890f5e412439564e17522b88a4541b4f364fc8d
+ARG GITLEAKS_VERSION=8.30.1
+ARG GITLEAKS_SHA256=e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080
+ARG YQ_VERSION=v4.53.2
+ARG AWSCLI_VERSION=2.33.14
+ARG AWSCLI_SHA256=d4914cdbcfccfe151d1f4672bf7aeb81bd7cdfc5edc41425a9e54c900cddab24
+
+# yamllint + shellcheck + tooling deps (jq used by the workflows + curl/tar here).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends yamllint shellcheck curl ca-certificates jq tar unzip \
+ && rm -rf /var/lib/apt/lists/*
+
+# docker compose — pinned CLI plugin (scanned from /usr/local/lib/docker/cli-plugins).
+RUN mkdir -p /usr/local/lib/docker/cli-plugins \
+ && curl -fsSL "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-aarch64" \
+      -o /usr/local/lib/docker/cli-plugins/docker-compose \
+ && echo "${COMPOSE_SHA256}  /usr/local/lib/docker/cli-plugins/docker-compose" | sha256sum -c - \
+ && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose \
+ && /usr/local/lib/docker/cli-plugins/docker-compose version
+
+# trivy — pinned release tarball (not the mutable curl|sh installer).
+RUN curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-ARM64.tar.gz" -o /tmp/trivy.tgz \
+ && echo "${TRIVY_SHA256}  /tmp/trivy.tgz" | sha256sum -c - \
+ && tar -xz -C /usr/local/bin -f /tmp/trivy.tgz trivy \
+ && rm /tmp/trivy.tgz \
+ && trivy --version
+
+# gitleaks — pinned release tarball.
+RUN curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_arm64.tar.gz" -o /tmp/gitleaks.tgz \
+ && echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tgz" | sha256sum -c - \
+ && tar -xz -C /usr/local/bin -f /tmp/gitleaks.tgz gitleaks \
+ && rm /tmp/gitleaks.tgz \
+ && gitleaks version
+
+# aws CLI v2 — pinned installer zip (sha256 computed from the versioned, immutable
+# release URL; AWS publishes only PGP sigs, no checksum file). Used by the
+# CodeArtifact Maven mirror step in _service-ci.yml (token via the pod's IRSA role).
+RUN curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-aarch64-${AWSCLI_VERSION}.zip" -o /tmp/awscliv2.zip \
+ && echo "${AWSCLI_SHA256}  /tmp/awscliv2.zip" | sha256sum -c - \
+ && unzip -q /tmp/awscliv2.zip -d /tmp \
+ && /tmp/aws/install \
+ && rm -rf /tmp/aws /tmp/awscliv2.zip \
+ && aws --version
+
+# yq (mikefarah) — version-pinned (ships a non-standard multi-hash checksums file).
+RUN curl -fsSL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_arm64" \
+      -o /usr/local/bin/yq \
+ && chmod +x /usr/local/bin/yq \
+ && yq --version
+
+USER runner

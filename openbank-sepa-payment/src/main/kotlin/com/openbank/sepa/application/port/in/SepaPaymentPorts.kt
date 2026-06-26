@@ -1,0 +1,51 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.sepa.application.port.`in`
+
+import com.openbank.sepa.domain.model.SepaPayment
+import com.openbank.sepa.domain.model.SepaPaymentStatus
+import com.openbank.sepa.domain.model.SepaPaymentType
+import com.openbank.sepa.domain.model.SepaRejectReason
+import java.math.BigDecimal
+import java.util.UUID
+
+data class CreateSepaPaymentCommand(
+    val idempotencyKey: String,
+    val type: SepaPaymentType,
+    val debtorAccountId: UUID,
+    val debtorIban: String,
+    val debtorName: String,
+    val creditorIban: String,
+    val creditorName: String,
+    val creditorBic: String?,
+    val amount: BigDecimal,
+    val currency: String,
+    val remittanceInfo: String?,
+    val endToEndId: String?,
+)
+
+data class ListSepaPaymentsQuery(
+    val status: SepaPaymentStatus? = null,
+    val debtorAccountId: UUID? = null,
+    val limit: Int = 50,
+    val offset: Int = 0,
+)
+
+data class TransitionSepaPaymentStatusCommand(
+    val paymentId: UUID,
+    val targetStatus: SepaPaymentStatus,
+    val rejectReason: SepaRejectReason? = null,
+    val rejectDetail: String? = null,
+)
+
+data class HandlePaymentReturnCommand(val pacs004Xml: String)
+
+interface SepaPaymentUseCase {
+    suspend fun createPayment(command: CreateSepaPaymentCommand): SepaPayment
+    suspend fun getPayment(paymentId: UUID): SepaPayment
+    suspend fun listPayments(query: ListSepaPaymentsQuery): List<SepaPayment>
+    suspend fun transitionStatus(command: TransitionSepaPaymentStatusCommand): SepaPayment
+    suspend fun handlePaymentReturn(command: HandlePaymentReturnCommand): SepaPayment
+}

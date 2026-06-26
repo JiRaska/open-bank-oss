@@ -1,0 +1,28 @@
+# Cluster-wide platform glue that isn't a single operator install: the TLS
+# trust root (self-signed CA ClusterIssuer) consumed by every Ingress. Synced
+# into the cert-manager namespace; cluster-scoped ClusterIssuers have no
+# namespace. ServerSideApply so cert-manager CRDs (installed via tofu) are
+# treated as pre-existing.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/platform
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

@@ -1,0 +1,67 @@
+# Trivy IaC ignore baseline — sandbox + accepted deviations
+# Format: AVD-<provider>-<id>  # reason
+#
+# ──────────────────────────────────────────────────────────────────────────────
+# Terraform / AWS — sandbox architectural decisions
+# These findings are intentional for the sandbox environment and documented in
+# ADR-0027 (cloud-agnostic substrate) go-live conditions.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# S3 SSE-KMS with customer-managed key: sandbox uses SSE-S3 for cost optimisation.
+# CMK rotation is a prod go-live condition (ADR-0027 C5).
+AVD-AWS-0132
+
+# EKS API server public endpoint: required for sandbox runner and developer access.
+# Prod will use private endpoint + VPN (ADR-0027 go-live).
+AVD-AWS-0040
+AVD-AWS-0041
+
+# IMDSv2 not enforced on runner EC2 instances: sandbox runner pool (aws/modules/runner)
+# uses launch templates without http_tokens=required. Enforcing IMDSv2 is a prod
+# go-live condition (ADR-0027 hardening). Scope: runner node pool only (not app nodes).
+AVD-AWS-0028
+
+# Root EBS volume unencrypted: runner EC2 instances (aws/modules/runner) use
+# unencrypted root volumes. Encrypted volumes are a prod go-live condition (ADR-0027 C5).
+AVD-AWS-0131
+
+# Branch protection signed commits not required: GitHub branch protection in
+# aws/envs/sandbox-platform/github-governance.tf. The main branch ruleset enforces
+# GPG signature verification via the GitHub main-protection ruleset (not Terraform-managed);
+# the Terraform resource manages secondary branches. Prod go-live condition.
+AVD-GIT-0004
+
+# Security group unrestricted egress: runner SGs need internet egress for
+# CI builds (npm, gradle, docker pulls). Scope = runner pool only.
+AVD-AWS-0104
+
+# Subnet auto-assign public IP: required for NAT gateway, ALB, and runner nodes
+# in the sandbox VPC public subnets.
+AVD-AWS-0164
+
+# CloudFront distribution without WAF: applies to the developer portal static
+# distribution (static HTML/JS, no user-generated content). The ingress-nginx
+# WAF (ModSecurity/OWASP CRS, ADR-0093) protects the API plane.
+AVD-AWS-0011
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Kubernetes — hardening follow-ups (tracked in issue #854 and related issues)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# readOnlyRootFilesystem: several containers (Keycloak theme cache, registry
+# cache, GoAlert, Kafka-UI, nginx build-cache) need writable tmp/work dirs.
+# Progressive hardening is tracked in the network-policy / security tier-2
+# sweep (issue #854). Each container will be addressed individually.
+AVD-KSV-0014
+
+# ConfigMap storing secrets: Keycloak realm-mobile-settings ConfigMap contains
+# a YAML key `# Offline token` (a comment explaining offline token config).
+# Trivy DS/KSV-0109 false-positive: the key name starts with "#" — it is a YAML
+# comment in the file, not a secret value.
+AVD-KSV-0109
+
+# Default security context (allows root privileges): applies to pyrra-api,
+# pyrra-kubernetes, pact-broker, and registry-cache (ghcr-cache, quay-cache,
+# registry-cache) third-party deployments. Security context tightening is a
+# follow-up in the security tier-2 hardening sweep (#850-#854).
+AVD-KSV-0118

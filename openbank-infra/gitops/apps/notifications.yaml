@@ -1,0 +1,34 @@
+# Notifications banking domain: notification-service (FinOps T2 scale-to-zero,
+# ADR-0057) + its single-owner CNPG Postgres, plus the inbound Kafka topic and the
+# KEDA ScaledObject that owns the replica count. The DB secret is CNPG-generated;
+# no out-of-band secret is needed (OIDC is disabled for the pilot). ArgoCD
+# converges as the CNPG operator and KEDA come up; the Deployment is scaled to
+# zero by KEDA whenever the topic has no lag.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: notifications
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/notifications
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: notifications
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false

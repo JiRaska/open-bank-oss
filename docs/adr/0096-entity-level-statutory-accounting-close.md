@@ -1,0 +1,83 @@
+# 96. Entity-level statutory accounting close (GL period freeze, attested trial balance, financial statements, EoY)
+
+Date: 2026-06-16
+Status: Accepted
+Author(s): @JiRaska
+
+Relates to: ADR-0039 (ledger golden source, balance projection), ADR-0078 (per-customer
+statement close), ADR-0035 (statement periods), ADR-0026 (EoD reconciliation),
+ADR-0037 (AnaCredit render-only reporting). Closes the gap tracked in issue #471.
+Prerequisite for: ADR-0097 (supervisory / prudential returns — FINREP/COREP).
+
+## Context
+
+The platform has a per-**customer** statement close (ADR-0078/0035) and a daily reconciliation
+(ADR-0026/0039), but **no entity-level statutory accounting close**. Issue #471 records the gap and
+the obligations each missing piece maps to:
+
+- **Účetní závěrka** — financial statements (rozvaha, výkaz zisku a ztráty, příloha) at the
+  balance-sheet date — *zákon č. 563/1991 Sb. §18–19; bank form per vyhláška ČNB 501/2002 Sb.*
+- **GL period freeze + trial-balance attestation** — signed, immutable per period. Today the ledger
+  trial balance is a **read API only** (`/api/v1/journals/trial-balance` — point-in-time query, not a
+  frozen artefact) — *zákon 563/1991 průkaznost/úplnost; auditor attestation.*
+- **Fiscal-year (EoY) close** — year-end cut-off, result allocation, opening-balance roll.
+
+The per-customer statement close MUST NOT be presented as a statutory close: it closes *customer
+sub-ledgers*, not the *entity's general ledger*, and emits no attested, immutable, entity-wide
+artefact. All existing reporting (AnaCredit render-only ADR-0037, withholding tax, reconciliation,
+analytics) is **point-in-time / event-fed**, not derived from an attested period close — it
+complements but does not substitute one.
+
+**Why now:** a statutory close is **license-gated** — it becomes mandatory when pursuing a banking
+licence, and prudential returns (ADR-0097) cannot be produced without it as their attested source.
+Recording the architecture now (even at Proposed) unblocks the dependent FINREP/COREP work and keeps
+the ledger's golden-source invariant intact as the foundation.
+
+## Decision
+
+Build an entity-level statutory close as a **net-new bounded context**
+(`openbank-statutory-close-service`), with the **ledger as the sole golden source** (ADR-0039). We
+**build** the close orchestration in-house (the ledger already owns double-entry truth; outsourcing
+the GL-close engine would fork the source of truth) and **render** statements from the frozen artefact.
+
+1. **GL period freeze (the attested artefact).** At a period boundary (month / quarter / year) the
+   close service requests an immutable trial-balance snapshot from the ledger for `[from, to]`: the
+   ledger marks those journals **closed** (no further postings dated into a frozen period; late entries
+   post to the next open period with an audit link), computes the per-account debit/credit/balance
+   trial balance, and persists it as a **signed, immutable `ClosedPeriod` artefact** (cosign/KMS or the
+   audit-chain ADR-0086 hash-chain). This replaces "trial balance is a read API" with a frozen,
+   reproducible, attestable record. The attestation is filed in `attestations.yaml`-style governance
+   with the period id, hash, and signer.
+
+2. **Financial statements (rozvaha / výkaz zisku a ztráty / příloha).** A mapping layer projects the
+   frozen trial balance onto the ČNB bank statement forms (vyhláška 501/2002 Sb.) via a declarative
+   **chart-of-accounts → statement-line** mapping (versioned config, not code), rendered to a
+   structured artefact + human-readable PDF. Pure projection over the frozen TB — no recomputation.
+
+3. **Fiscal-year (EoY) close.** Year-end cut-off freezes Q4/December, allocates the result
+   (P&L → retained earnings via closing journals posted *by* the ledger, audit-linked), and rolls
+   opening balances into the new fiscal year. Builds on the existing EoY trial-balance attestation
+   increment (#868) rather than replacing it.
+
+4. **Boundaries.** The close service is **read-mostly on the ledger** (requests freezes + reads frozen
+   TBs); it never posts business journals itself (only the ledger does, including the EoY result-
+   allocation journals it is asked to post). Statements + attestations surface in the admin-ui
+   `regulatory` page. Scope of *this* ADR: statements + attested close. Prudential returns are ADR-0097.
+
+## Consequences
+
+**Positive:** a real, attestable statutory close satisfying zákon 563/1991 + vyhláška 501/2002;
+an immutable per-period artefact (průkaznost) that auditors and ADR-0097 can build on; the ledger's
+golden-source invariant is preserved (close reads, ledger posts).
+
+**Negative / open:** net-new service (money-path-adjacent, needs a threat model per ADR-0030); the
+ledger gains a "frozen period" concept (posting-date guard + late-entry routing) — a non-trivial
+ledger change; the CoA→statement-line mapping is regulatory config that must track vyhláška changes;
+license-gated, so this is **Proposed** until a licence track is prioritised.
+
+**Build vs outsource:** build the orchestration + freeze (ledger-native); the statement *forms* mapping
+could later adopt a vendor template, but the attested TB and close stay in-house.
+
+## References
+- Issue #471 (gap placeholder); ADR-0039, ADR-0078, ADR-0035, ADR-0026, ADR-0037, ADR-0086.
+- zákon č. 563/1991 Sb. (o účetnictví) §18–19; vyhláška ČNB č. 501/2002 Sb. (bank financial statements).

@@ -1,0 +1,38 @@
+# Grafana datasource for Loki (ADR-0008). The kube-prometheus-stack Grafana runs
+# a `grafana-sc-datasources` sidecar that loads every ConfigMap labelled
+# `grafana_datasource: "1"` in its namespace as a provisioned datasource. This
+# registers Loki with uid `loki` — which is exactly the UID the Tempo datasource
+# already references in `tracesToLogsV2`, so the trace→logs jump in Grafana
+# (Explore → a span → "Logs for this trace") starts working the moment Loki is up.
+#
+# Plain ConfigMap (not a Helm chart), applied with the loki app until the
+# app-of-apps is wired.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-grafana-datasource
+  namespace: observability
+  labels:
+    grafana_datasource: "1"
+    app.kubernetes.io/part-of: observability
+data:
+  loki-datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Loki
+        type: loki
+        uid: loki
+        access: proxy
+        url: http://loki.observability.svc:3100
+        isDefault: false
+        jsonData:
+          maxLines: 1000
+          # logs -> trace (ADR-0082): the trace_id Alloy lifted into structured
+          # metadata becomes a one-click link to the Tempo trace.
+          derivedFields:
+            - name: trace_id
+              matcherType: label
+              matcherRegex: trace_id
+              datasourceUid: tempo
+              url: "${__value.raw}"
+              urlDisplayLabel: "View trace"

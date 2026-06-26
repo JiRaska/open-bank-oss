@@ -1,0 +1,250 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: SEPA Payment Service API
+  version: 1.2.0
+  description: >-
+    SEPA credit transfer lifecycle — create, query, status transitions. On create, debtor and
+    creditor names are synchronously screened against the sanctions lists (ADR-0032): a clean payment
+    is returned VALIDATED, a sanctions hit is returned REJECTED (SANCTIONS_HIT) with an AML case
+    opened, and a sub-threshold potential hit or a screening-service outage holds the payment in
+    RECEIVED for review (fail-closed).
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8102
+    description: Local development
+tags:
+  - name: SEPA Payments
+
+paths:
+  /api/v1/sepa-payments:
+    post:
+      tags: [SEPA Payments]
+      summary: Create a SEPA payment
+      operationId: createSepaPayment
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN, ROLE_PAYMENTS]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSepaPaymentRequest'
+      responses:
+        '201':
+          description: Payment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SepaPaymentResponse'
+        '409':
+          description: Idempotent replay
+    get:
+      tags: [SEPA Payments]
+      summary: List SEPA payments
+      operationId: listSepaPayments
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, PROCESSING, COMPLETED, REJECTED, RECALLED]
+        - name: debtorAccountId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of payments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SepaPaymentResponse'
+
+  /api/v1/sepa-payments/returns:
+    post:
+      tags: [SEPA Payments]
+      summary: Handle inbound pacs.004 payment return from clearing
+      operationId: handleSepaPaymentReturn
+      security:
+        - bearerAuth: [ROLE_SERVICE, ROLE_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/xml:
+            schema:
+              type: string
+              description: ISO 20022 pacs.004.001.09 XML document
+      responses:
+        '200':
+          description: Payment transitioned to RETURNED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SepaPaymentResponse'
+        '400':
+          description: Invalid pacs.004 or unknown endToEndId
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/sepa-payments/{paymentId}:
+    get:
+      tags: [SEPA Payments]
+      summary: Get SEPA payment by ID
+      operationId: getSepaPayment
+      security:
+        - bearerAuth: [ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN, ROLE_PAYMENTS]
+      parameters:
+        - $ref: '#/components/parameters/paymentId'
+      responses:
+        '200':
+          description: Payment detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SepaPaymentResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/sepa-payments/{paymentId}/status:
+    patch:
+      tags: [SEPA Payments]
+      summary: Transition SEPA payment status
+      operationId: transitionSepaPaymentStatus
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN, ROLE_PAYMENTS]
+      parameters:
+        - $ref: '#/components/parameters/paymentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransitionStatusRequest'
+      responses:
+        '200':
+          description: Updated payment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SepaPaymentResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    paymentId:
+      name: paymentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    CreateSepaPaymentRequest:
+      type: object
+      required: [debtorAccountId, creditorIban, creditorName, amount, currencyCode, endToEndId]
+      properties:
+        debtorAccountId:
+          type: string
+          format: uuid
+        creditorIban:
+          type: string
+        creditorName:
+          type: string
+        creditorBic:
+          type: string
+        amount:
+          type: number
+        currencyCode:
+          type: string
+          example: EUR
+        endToEndId:
+          type: string
+        remittanceInfo:
+          type: string
+        requestedExecutionDate:
+          type: string
+          format: date
+
+    TransitionStatusRequest:
+      type: object
+      required: [targetStatus]
+      properties:
+        targetStatus:
+          type: string
+          enum: [PROCESSING, COMPLETED, REJECTED, RECALLED]
+        reason:
+          type: string
+
+    SepaPaymentResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        endToEndId:
+          type: string
+        debtorAccountId:
+          type: string
+          format: uuid
+        creditorIban:
+          type: string
+        creditorName:
+          type: string
+        amount:
+          type: number
+        currencyCode:
+          type: string
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string

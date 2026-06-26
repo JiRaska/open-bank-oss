@@ -1,0 +1,286 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-ci-finops
+  namespace: observability
+  labels:
+    grafana_dashboard: '1'
+    app.kubernetes.io/part-of: observability
+data:
+  openbank-ci-finops.json: |
+    {
+      "id": null,
+      "uid": "openbank-cif",
+      "title": "OpenBank — CI/CD FinOps",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "browser",
+      "templating": {
+        "list": [
+          {
+            "current": {
+              "selected": false,
+              "text": "Prometheus",
+              "value": "prometheus"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "name": "datasource",
+            "options": [],
+            "query": "prometheus",
+            "refresh": 1,
+            "type": "datasource",
+            "label": "Datasource"
+          }
+        ]
+      },
+      "annotations": {
+        "list": []
+      },
+      "links": [],
+      "panels": [
+        {
+          "id": 1,
+          "type": "timeseries",
+          "title": "ARC Runner Pods (build lane)",
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 7
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "count(kube_pod_info{namespace=\"arc-runners\"})",
+              "legendFormat": "Total Pods",
+              "refId": "A"
+            },
+            {
+              "datasource": "${datasource}",
+              "expr": "count(kube_pod_status_phase{namespace=\"arc-runners\",phase=\"Running\"})",
+              "legendFormat": "Running",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "Cluster Node Count (Karpenter)",
+          "gridPos": {
+            "x": 12,
+            "y": 0,
+            "w": 12,
+            "h": 7
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "count(kube_node_info)",
+              "legendFormat": "Total Nodes",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 3,
+          "type": "timeseries",
+          "title": "CPU Utilization %",
+          "gridPos": {
+            "x": 0,
+            "y": 7,
+            "w": 12,
+            "h": 7
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "avg(rate(node_cpu_seconds_total{mode!=\"idle\"}[5m])) * 100",
+              "legendFormat": "Avg CPU %",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 4,
+          "type": "timeseries",
+          "title": "Memory Available %",
+          "gridPos": {
+            "x": 12,
+            "y": 7,
+            "w": 12,
+            "h": 7
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "avg(node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100",
+              "legendFormat": "Avg Available %",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 5,
+          "type": "piechart",
+          "title": "Pods by Namespace (top 10)",
+          "gridPos": {
+            "x": 0,
+            "y": 14,
+            "w": 8,
+            "h": 7
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "topk(10, count by (namespace) (kube_pod_info))",
+              "legendFormat": "{{namespace}}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "pieType": "pie",
+            "displayLabels": [
+              "name",
+              "percent"
+            ],
+            "legend": {
+              "displayMode": "list",
+              "placement": "right"
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 6,
+          "type": "text",
+          "title": "💡 NAT Cost Tip",
+          "gridPos": {
+            "x": 8,
+            "y": 14,
+            "w": 16,
+            "h": 7
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "**NAT Gateway cost** (`EC2 - Other` in Cost Explorer):\n\nCheck CloudWatch metric `NatGatewayBytesOut` in `eu-north-1`.\n\nAfter CodeArtifact mirror (PR #690) merges, Maven deps no longer exit the VPC.\n\n→ Target: < 1 GB/day NAT egress."
+          },
+          "targets": []
+        }
+      ],
+      "tags": [
+        "openbank"
+      ]
+    }

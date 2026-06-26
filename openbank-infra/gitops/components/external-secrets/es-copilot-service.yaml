@@ -1,0 +1,27 @@
+# copilot-service secret from OpenBao → copilot-service-secrets Secret.
+# COPILOT_MODEL_API_KEY = the NVIDIA NIM API key for the openai-compat model provider (ADR-0089).
+# Seed it once in OpenBao at KV path `openbank/copilot-service`, property `MODEL_API_KEY`.
+# (No OIDC secret: copilot validates the customer JWT bearer-only via JWKS — no client secret.)
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: copilot-service-secrets
+  namespace: platform
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: copilot-service-secrets
+    creationPolicy: Owner
+    template:
+      mergePolicy: Merge
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+  data:
+    - secretKey: COPILOT_MODEL_API_KEY
+      remoteRef:
+        key: copilot-service
+        property: MODEL_API_KEY

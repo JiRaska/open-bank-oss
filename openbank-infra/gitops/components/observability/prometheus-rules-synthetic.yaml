@@ -1,0 +1,46 @@
+# Synthetic-probe alert rules (Dynatrace-parity #2). Fed by the blackbox Probe
+# CRs. probe_success/probe_ssl_earliest_cert_expiry are emitted per target URL
+# (label `instance`). Picked up automatically (ruleSelectorNilUsesHelmValues=false).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-synthetic-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.synthetic
+      rules:
+        - alert: SyntheticProbeDown
+          expr: probe_success == 0
+          for: 3m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Synthetic probe failing: {{ $labels.instance }}"
+            description: "Blackbox probe to {{ $labels.instance }} has failed for >3m — the public endpoint is down or unreachable from in-cluster."
+        - alert: SyntheticProbeSlow
+          expr: probe_duration_seconds > 5
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Synthetic probe slow: {{ $labels.instance }}"
+            description: "{{ $labels.instance }} took >5s to respond for >10m."
+        - alert: TLSCertExpiringSoon
+          expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 14
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "TLS cert expiring <14d: {{ $labels.instance }}"
+            description: "Certificate for {{ $labels.instance }} expires in {{ $value | printf \"%.1f\" }} days — check cert-manager/letsencrypt-prod renewal."
+        - alert: TLSCertExpiringCritical
+          expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 3
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "TLS cert expiring <3d: {{ $labels.instance }}"
+            description: "Certificate for {{ $labels.instance }} expires in {{ $value | printf \"%.1f\" }} days — renewal is failing, act now."

@@ -1,0 +1,153 @@
+# Log shipper: Grafana Alloy (DaemonSet) — ADR-0008 logs pillar, ADR-0082.
+#
+# WHY ALLOY (not Promtail): the modern `loki` chart no longer bundles Promtail,
+# and Promtail itself is EoL (superseded by Alloy). Alloy is the single Grafana
+# collector for logs+metrics+traces; here it runs as a per-node DaemonSet that
+# tails every pod's stdout/stderr and pushes to Loki. Crucially it parses the
+# JSON log line and lifts `trace_id` / `span_id` / `correlationId` into Loki
+# *structured metadata* — so the trace<->logs jump in Grafana is bidirectional
+# without those high-cardinality ids ever becoming stream labels (ADR-0082).
+#
+# This is the ingest half of the "single pane": a span in Tempo links to its
+# logs (tracesToLogsV2 on trace_id) and a log line links back to its trace
+# (derived field on trace_id) precisely because Alloy populates trace_id here.
+#
+# Applied with `kubectl apply` until the app-of-apps is wired (as tempo/loki).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: alloy
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: alloy
+    targetRevision: 0.10.1
+    helm:
+      releaseName: alloy
+      valuesObject:
+        controller:
+          type: daemonset
+          # Node-level log collector: run at system-node-critical so the DaemonSet
+          # pod can preempt a lower-priority pod and always schedule, even onto a
+          # bin-packed node. Without this, on small (t4g.small / c8gn.medium ~1.4Gi)
+          # nodes that fill up with workload pods the default-scheduler leaves the
+          # Alloy pod Pending forever (it won't preempt at priority 0) -> logs from
+          # that node are silently dropped and KubeDaemonSetRolloutStuck /
+          # KubePodNotReady fire. This matches the standard add-on DaemonSets
+          # (node-exporter, kube-proxy) which run node-critical for the same reason.
+          priorityClassName: system-node-critical
+          # DaemonSet must also land on the on-demand observability nodes
+          # (ADR-0082) to ship their logs — tolerate the workload taint.
+          tolerations:
+            - key: workload
+              operator: Equal
+              value: observability
+              effect: NoSchedule
+        alloy:
+          # Allow scheduling onto sandbox runner nodes (matches the old
+          # promtail toleration from loki-stack).
+          # 256Mi OOMKilled (exit 137, crashloop) the DaemonSet pod on the CI
+          # runner nodes — arc-runners with dind emit a huge log volume Alloy must
+          # buffer. 512Mi holds those nodes; service nodes stay well under it.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 512Mi
+          configMap:
+            content: |-
+              // ---- discover every pod on this node ----
+              discovery.kubernetes "pods" {
+                role = "pod"
+              }
+
+              // Keep useful target labels; drop the rest to keep streams cheap.
+              discovery.relabel "pod_logs" {
+                targets = discovery.kubernetes.pods.targets
+
+                // Drop CI/build-infra noise at the source. The ephemeral GitHub
+                // Actions runners (arc-runners, dind) and the Gradle build cache
+                // emit ~96% of all Loki volume (~1000 lines/s) — dockerd/containerd
+                // engine chatter and the runner agent streaming job-console lines
+                // that already live in the GitHub Actions UI. None of it belongs in
+                // the bank's log store, and it buries the actual service logs. This
+                // is also the dind volume that forced the alloy 512Mi memory bump.
+                rule {
+                  source_labels = ["__meta_kubernetes_namespace"]
+                  regex         = "arc-runners|gradle-build-cache"
+                  action        = "drop"
+                }
+
+                rule {
+                  source_labels = ["__meta_kubernetes_namespace"]
+                  target_label  = "namespace"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_name"]
+                  target_label  = "pod"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_container_name"]
+                  target_label  = "container"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+                  target_label  = "service"
+                }
+              }
+
+              // ---- tail container stdout/stderr ----
+              loki.source.kubernetes "pods" {
+                targets    = discovery.relabel.pod_logs.output
+                forward_to = [loki.process.parse.receiver]
+              }
+
+              // ---- parse JSON, lift correlation ids into structured metadata ----
+              loki.process "parse" {
+                // Quarkus structured JSON formatter (ADR-0082 Phase 3): level is
+                // top-level; trace context + correlationId are nested under "mdc".
+                stage.json {
+                  expressions = {
+                    level         = "level",
+                    trace_id      = "mdc.traceId",
+                    span_id       = "mdc.spanId",
+                    correlationId = "mdc.correlationId",
+                  }
+                }
+                // Low-cardinality -> label.
+                stage.labels {
+                  values = { level = "" }
+                }
+                // High-cardinality ids -> structured metadata (Loki 3.x).
+                // Queryable + linkable, never a stream label.
+                stage.structured_metadata {
+                  values = {
+                    trace_id      = "",
+                    span_id       = "",
+                    correlationId = "",
+                  }
+                }
+                forward_to = [loki.write.default.receiver]
+              }
+
+              loki.write "default" {
+                endpoint {
+                  url = "http://loki.observability.svc:3100/loki/api/v1/push"
+                }
+              }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

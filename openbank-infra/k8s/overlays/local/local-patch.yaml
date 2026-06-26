@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: openbank-api
+spec:
+  rules:
+    - host: api.openbank.localtest.me
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: openbank-admin-ui
+spec:
+  rules:
+    - host: admin.openbank.localtest.me
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openbank-admin-ui-config
+data:
+  NEXT_PUBLIC_ACCOUNT_SERVICE_URL: http://api.openbank.localtest.me/api/v1/accounts
+  NEXT_PUBLIC_LEDGER_SERVICE_URL: http://api.openbank.localtest.me/api/v1/ledger
+  NEXT_PUBLIC_TRANSACTION_SERVICE_URL: http://api.openbank.localtest.me/api/v1/transactions
+  NEXT_PUBLIC_KEYCLOAK_URL: http://auth.openbank.localtest.me
+  NEXT_PUBLIC_KEYCLOAK_REALM: openbank
+  NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: openbank-admin-ui

@@ -1,0 +1,1648 @@
+# Payment pipeline services: transaction-service (saga orchestrator), sepa-payment,
+# domestic-payment, sepa-instant (instruction processors), clearing-service (settlement).
+# All co-located in the `payments` namespace. Each service has its own CNPG Postgres
+# (see postgres.yaml) and connects to the shared Strimzi Kafka bus.
+# Readiness probes use TCP on the http port (not /q/health/ready): Kafka producer/
+# consumer health checks sit KO on idle topics — serve-before-traffic deadlock.
+# Flyway-at-start guarantees DB connectivity before the port opens.
+# Image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/<service>:sandbox-57d88d7
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# transaction-service  (port 8102)
+# Saga orchestrator: coordinates the payment execution flow across ledger,
+# compliance (sanctions/AML), and payment instruction services. Money-path.
+# Referenced by agent-service at transaction-service.payments.svc:8102
+# Progressive delivery: Deployment→Rollout (ADR-0098 Phase 2). Canary strategy
+# — 10% 5 min → 30% 5 min → 100%. Dual Services preserve DNS.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: transaction-service
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: transaction-service
+    app.kubernetes.io/part-of: payments
+spec:
+  # Abort and roll back automatically if pods haven't become healthy within
+  # 10 minutes (ADR-0098). Prevents a crashlooping canary from blocking at
+  # 10% indefinitely with no signal.
+  progressDeadlineSeconds: 600
+  progressDeadlineAbort: true
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: transaction-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: transaction-service
+        app.kubernetes.io/part-of: payments
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: transaction-service
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-a77d3125
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8102
+            - name: management
+              containerPort: 8085
+          env:
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://transaction-db-rw.payments.svc:5432/openbank_transactions
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://transaction-db-rw.payments.svc:5432/openbank_transactions
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: transaction-db-app
+                  key: password
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: transaction-service-oidc
+                  key: OIDC_CLIENT_SECRET
+            # Downstream money-path dependencies. Without these the rest-clients fall back to the
+            # application.yaml localhost defaults, so the payment saga's ledger posting and balance
+            # credit/debit silently fail and every transaction lands in COMPENSATED/FAILED.
+            - name: LEDGER_SERVICE_URL
+              value: http://ledger-service.ledger.svc:8101
+            - name: BALANCE_SERVICE_URL
+              value: http://balance-service.balances.svc:8103
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+  strategy:
+    canary:
+      stableService: transaction-service
+      canaryService: transaction-service-canary
+      analysis:
+        templates:
+          - clusterScope: true
+            templateName: openbank-money-path-canary
+        startingStep: 1
+        args:
+          - name: namespace
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Canary
+      steps:
+        - setWeight: 10
+        - pause:
+            duration: 5m
+        - setWeight: 30
+        - pause:
+            duration: 5m
+        - setWeight: 100
+---
+# Stable service — original DNS name preserved; Rollouts controller adds
+# rollouts-pod-template-hash selector to pin to stable replica set.
+apiVersion: v1
+kind: Service
+metadata:
+  name: transaction-service
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: transaction-service
+spec:
+  selector:
+    app.kubernetes.io/name: transaction-service
+  ports:
+    - name: http
+      port: 8102
+      targetPort: http
+---
+# Canary service — Rollouts controller updates selector to canary replica set.
+apiVersion: v1
+kind: Service
+metadata:
+  name: transaction-service-canary
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: transaction-service
+spec:
+  selector:
+    app.kubernetes.io/name: transaction-service
+  ports:
+    - name: http
+      port: 8102
+      targetPort: http
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# sepa-payment  (port 8115)
+# SEPA Credit Transfer instruction processor. Validates, screens (sanctions/AML
+# gate ADR-0032), and persists SCT payment records. Publishes events and
+# consumes payment requests from Kafka.
+# Progressive delivery: Deployment→Rollout (ADR-0098 Phase 3). Dual Services preserve DNS.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: sepa-payment
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: sepa-payment
+    app.kubernetes.io/part-of: payments
+spec:
+  # Abort and roll back automatically if pods haven't become healthy within
+  # 10 minutes (ADR-0098). Prevents a crashlooping canary from blocking at
+  # 10% indefinitely with no signal.
+  progressDeadlineSeconds: 600
+  progressDeadlineAbort: true
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sepa-payment
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sepa-payment
+        app.kubernetes.io/part-of: payments
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Carrier image holds only the pinned pyroscope.jar; cp it into the shared
+        # emptyDir the app -javaagents. Enable/disable profiling = pure gitops change.
+        - name: pyroscope-agent
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pyroscope-agent:2.5.4
+          command: ["/bin/cp", "/pyroscope.jar", "/opt/pyroscope/pyroscope.jar"]
+          volumeMounts:
+            - name: pyroscope-agent
+              mountPath: /opt/pyroscope
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      containers:
+        - name: sepa-payment
+
+
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-e8d9de3a2
+
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8115
+            - name: management
+              containerPort: 8085
+          env:
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://sepa-payment-db-rw.payments.svc:5432/openbank_sepa_payment
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://sepa-payment-db-rw.payments.svc:5432/openbank_sepa_payment
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sepa-payment-db-app
+                  key: password
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: sepa-payment-oidc
+                  key: OIDC_CLIENT_SECRET
+            # createPayment dedupes on the Idempotency-Key header via Redis (in-namespace, see
+            # redis.yaml) and screens via sanctions/aml — all defaulted to localhost, so the REST
+            # path 500'd. Wire them to the in-cluster services (mirrors domestic-payment below).
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://redis.payments.svc:6379
+            - name: SANCTIONS_SERVICE_URL
+              value: http://sanctions-service.sanctions.svc:8123
+            - name: AML_SERVICE_URL
+              value: http://aml-service.aml.svc:8117
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+            # Continuous profiling pilot (ADR-0082 §4). Agent jar copied in by the
+            # init container below; itimer => no perf_events, no extra capabilities.
+            # PYROSCOPE_APPLICATION_NAME MUST equal the OTel service.name so a Tempo
+            # span resolves to its flame graph (tracesToProfiles join).
+            - name: JAVA_TOOL_OPTIONS
+              value: "-javaagent:/opt/pyroscope/pyroscope.jar"
+            - name: PYROSCOPE_APPLICATION_NAME
+              value: openbank-sepa-payment
+            - name: PYROSCOPE_SERVER_ADDRESS
+              value: http://pyroscope.observability.svc:4040
+            - name: PYROSCOPE_FORMAT
+              value: jfr
+            - name: PYROSCOPE_PROFILER_EVENT
+              value: itimer
+            - name: OPENBANK_TEMPORAL_ENABLED
+              value: "true"
+            - name: OPENBANK_TEMPORAL_SERVER_URL
+              value: temporal-frontend.temporal.svc.cluster.local:7233
+            # ADR-0104 D3: build a real pacs.008 and submit it to the scheme gateway
+            # (the in-namespace clearing-simulator). Same-namespace call, OIDC Bearer via
+            # the shared openbank-services client. Flag flipped ON for the sandbox e2e —
+            # money-path, four-eyes; fail-closed (gateway down ⇒ payment holds at VALIDATED).
+            - name: CLEARING_SIMULATOR_URL
+              value: http://clearing-simulator.payments.svc:8139
+            - name: SEPA_SCHEME_SUBMISSION_ENABLED
+              value: "true"
+            # ADR-0108: after clearing-simulator returns ACSC (PROCESSING), book the outbound
+            # debit in transaction-service then advance to COMPLETED. Same namespace.
+            - name: TRANSACTION_SERVICE_URL
+              value: http://transaction-service.payments.svc:8102
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: pyroscope-agent
+              mountPath: /opt/pyroscope
+              readOnly: true
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: pyroscope-agent
+          emptyDir: {}
+  strategy:
+    canary:
+      stableService: sepa-payment
+      canaryService: sepa-payment-canary
+      analysis:
+        templates:
+          - clusterScope: true
+            templateName: openbank-money-path-canary
+        startingStep: 1
+        args:
+          - name: namespace
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Canary
+      steps:
+        - setWeight: 10
+        - pause:
+            duration: 5m
+        - setWeight: 30
+        - pause:
+            duration: 5m
+        - setWeight: 100
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sepa-payment
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: sepa-payment
+spec:
+  selector:
+    app.kubernetes.io/name: sepa-payment
+  ports:
+    - name: http
+      port: 8115
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sepa-payment-canary
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: sepa-payment
+spec:
+  selector:
+    app.kubernetes.io/name: sepa-payment
+  ports:
+    - name: http
+      port: 8115
+      targetPort: http
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# domestic-payment  (port 8116)
+# Czech domestic payment (CERTIS/SIPO) instruction processor. Same pattern as
+# sepa-payment with Czech-specific validation rules.
+# Progressive delivery: Deployment→Rollout (ADR-0098 Phase 3). Dual Services preserve DNS.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: domestic-payment
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: domestic-payment
+    app.kubernetes.io/part-of: payments
+spec:
+  # Abort and roll back automatically if pods haven't become healthy within
+  # 10 minutes (ADR-0098). Prevents a crashlooping canary from blocking at
+  # 10% indefinitely with no signal.
+  progressDeadlineSeconds: 600
+  progressDeadlineAbort: true
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: domestic-payment
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: domestic-payment
+        app.kubernetes.io/part-of: payments
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: domestic-payment
+
+
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-403d738f1
+
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8116
+            - name: management
+              containerPort: 8085
+          env:
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://domestic-payment-db-rw.payments.svc:5432/openbank_domestic_payment
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://domestic-payment-db-rw.payments.svc:5432/openbank_domestic_payment
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: domestic-payment-db-app
+                  key: password
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: domestic-payment-oidc
+                  key: OIDC_CLIENT_SECRET
+            # createPayment dedupes on the Idempotency-Key header via Redis (in-namespace, see
+            # redis.yaml) and screens via sanctions/aml — all defaulted to localhost, so the REST
+            # path 500'd / held in RECEIVED. Wire them to the in-cluster services.
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://redis.payments.svc:6379
+            - name: SANCTIONS_SERVICE_URL
+              value: http://sanctions-service.sanctions.svc:8123
+            - name: AML_SERVICE_URL
+              value: http://aml-service.aml.svc:8117
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+            - name: OPENBANK_TEMPORAL_ENABLED
+              value: "true"
+            - name: OPENBANK_TEMPORAL_SERVER_URL
+              value: temporal-frontend.temporal.svc.cluster.local:7233
+            # ADR-0104 D4: real ISO 20022 pacs.008 → clearing-simulator → pacs.002 pipeline.
+            # Fail-closed: gateway down ⇒ payment stays VALIDATED, never self-settles.
+            - name: CLEARING_SIMULATOR_URL
+              value: http://clearing-simulator.payments.svc:8139
+            - name: DOMESTIC_SCHEME_SUBMISSION_ENABLED
+              value: "true"
+            # ADR-0108: book funds in transaction-service after scheme ACSC.
+            - name: TRANSACTION_SERVICE_URL
+              value: http://transaction-service.payments.svc:8102
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+  strategy:
+    canary:
+      stableService: domestic-payment
+      canaryService: domestic-payment-canary
+      analysis:
+        templates:
+          - clusterScope: true
+            templateName: openbank-money-path-canary
+        startingStep: 1
+        args:
+          - name: namespace
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Canary
+      steps:
+        - setWeight: 10
+        - pause:
+            duration: 5m
+        - setWeight: 30
+        - pause:
+            duration: 5m
+        - setWeight: 100
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: domestic-payment
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: domestic-payment
+spec:
+  selector:
+    app.kubernetes.io/name: domestic-payment
+  ports:
+    - name: http
+      port: 8116
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: domestic-payment-canary
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: domestic-payment
+spec:
+  selector:
+    app.kubernetes.io/name: domestic-payment
+  ports:
+    - name: http
+      port: 8116
+      targetPort: http
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# sepa-instant  (port 8127)
+# SEPA Instant Credit Transfer (SCT Inst) — 10-second settlement window.
+# Same sanctions/AML screening gate (ADR-0032) as sepa-payment.
+# Progressive delivery: Deployment→Rollout (ADR-0098 Phase 3). Dual Services preserve DNS.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: sepa-instant
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: sepa-instant
+    app.kubernetes.io/part-of: payments
+spec:
+  # Abort and roll back automatically if pods haven't become healthy within
+  # 10 minutes (ADR-0098). Prevents a crashlooping canary from blocking at
+  # 10% indefinitely with no signal.
+  progressDeadlineSeconds: 600
+  progressDeadlineAbort: true
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sepa-instant
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sepa-instant
+        app.kubernetes.io/part-of: payments
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sepa-instant
+
+
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-dd0effdf
+
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8127
+            - name: management
+              containerPort: 8085
+          env:
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://sepa-instant-db-rw.payments.svc:5432/openbank_sepa_instant
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://sepa-instant-db-rw.payments.svc:5432/openbank_sepa_instant
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sepa-instant-db-app
+                  key: password
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: sepa-instant-oidc
+                  key: OIDC_CLIENT_SECRET
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+            - name: SANCTIONS_SERVICE_URL
+              value: http://sanctions-service.sanctions.svc:8123
+            - name: AML_SERVICE_URL
+              value: http://aml-service.aml.svc:8117
+            # NOTE: no FRAUD_SERVICE_URL — sepa-instant does not consume fraud scoring yet
+            # (zero `fraud` refs in src). A dangling env pointing at a non-existent "fraud-detection"
+            # Service was removed (#1827; the real service is fraud-service). Re-add FRAUD_SERVICE_URL
+            # pointing at fraud-service (port 8133) WITH the fraud-client code + threat-model update
+            # when instant-rail fraud screening is actually wired — that also lets gen-network-
+            # policies derive the payments→fraud-service ingress edge (least-privilege, ADR-0060).
+            # ADR-0104 D4: real ISO 20022 pacs.008 → clearing-simulator → pacs.002 pipeline
+            # (shipped in PR #1732). Fail-closed: gateway down ⇒ payment stays PROCESSING.
+            - name: CLEARING_SIMULATOR_URL
+              value: http://clearing-simulator.payments.svc:8139
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://redis.payments.svc:6379
+            - name: SEPA_INSTANT_SCHEME_SUBMISSION_ENABLED
+              value: "true"
+            - name: TRANSACTION_SERVICE_URL
+              value: http://transaction-service.payments.svc:8102
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+  strategy:
+    canary:
+      stableService: sepa-instant
+      canaryService: sepa-instant-canary
+      analysis:
+        templates:
+          - clusterScope: true
+            templateName: openbank-money-path-canary
+        startingStep: 1
+        args:
+          - name: namespace
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Canary
+      steps:
+        - setWeight: 10
+        - pause:
+            duration: 5m
+        - setWeight: 30
+        - pause:
+            duration: 5m
+        - setWeight: 100
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sepa-instant
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: sepa-instant
+spec:
+  selector:
+    app.kubernetes.io/name: sepa-instant
+  ports:
+    - name: http
+      port: 8127
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sepa-instant-canary
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: sepa-instant
+spec:
+  selector:
+    app.kubernetes.io/name: sepa-instant
+  ports:
+    - name: http
+      port: 8127
+      targetPort: http
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# clearing-service  (port 8124)
+# Net settlement / clearing batch processor. Consumes clearing batch events from
+# Kafka and produces net obligations for the ledger. No external ingress.
+# Progressive delivery: Deployment→Rollout (ADR-0098 Phase 3). Dual Services preserve DNS.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: clearing-service
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: clearing-service
+    app.kubernetes.io/part-of: payments
+spec:
+  # Abort and roll back automatically if pods haven't become healthy within
+  # 10 minutes (ADR-0098). Prevents a crashlooping canary from blocking at
+  # 10% indefinitely with no signal.
+  progressDeadlineSeconds: 600
+  progressDeadlineAbort: true
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: clearing-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: clearing-service
+        app.kubernetes.io/part-of: payments
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: clearing-service
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-ba90e1bd
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8124
+            - name: management
+              containerPort: 8085
+          env:
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://clearing-db-rw.payments.svc:5432/openbank_clearing
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://clearing-db-rw.payments.svc:5432/openbank_clearing
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clearing-db-app
+                  key: password
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: clearing-service-oidc
+                  key: OIDC_CLIENT_SECRET
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+  strategy:
+    canary:
+      stableService: clearing-service
+      canaryService: clearing-service-canary
+      analysis:
+        templates:
+          - clusterScope: true
+            templateName: openbank-money-path-canary
+        startingStep: 1
+        args:
+          - name: namespace
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Canary
+      steps:
+        - setWeight: 10
+        - pause:
+            duration: 5m
+        - setWeight: 30
+        - pause:
+            duration: 5m
+        - setWeight: 100
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clearing-service
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: clearing-service
+spec:
+  selector:
+    app.kubernetes.io/name: clearing-service
+  ports:
+    - name: http
+      port: 8124
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clearing-service-canary
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: clearing-service
+spec:
+  selector:
+    app.kubernetes.io/name: clearing-service
+  ports:
+    - name: http
+      port: 8124
+      targetPort: http
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# standing-order-service  (port 8121)
+# Recurring-payment mandates (trvalý příkaz). Customer-facing via the edge
+# (/customer/v1/standing-orders). Own CNPG DB (openbank_standing_orders) + the
+# shared openbank-services OIDC client + the Strimzi bus.
+#
+# FIRST ROLLOUT NOTE: this module had no prior sandbox image. Build + push once:
+#   openbank-infra/scripts/build-push-service.sh openbank-standing-order-service
+# then set the image tag below (auto-deploy will keep it current after the first
+# source change merges). Until the image exists ArgoCD shows this Deployment
+# Degraded (ImagePullBackOff) — it is an isolated new workload, no blast radius.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: standing-order-service
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: standing-order-service
+    app.kubernetes.io/part-of: payments
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: standing-order-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: standing-order-service
+        app.kubernetes.io/part-of: payments
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: standing-order-service
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-921c6570
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8121
+            - name: management
+              containerPort: 8085
+          env:
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://standing-order-db-rw.payments.svc:5432/openbank_standing_orders
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://standing-order-db-rw.payments.svc:5432/openbank_standing_orders
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: standing-order-db-app
+                  key: password
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: standing-order-oidc
+                  key: OIDC_CLIENT_SECRET
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://redis.payments.svc:6379
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 150m
+              memory: 384Mi
+            limits:
+              cpu: "1"
+              memory: 640Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: standing-order-service
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: standing-order-service
+spec:
+  selector:
+    app.kubernetes.io/name: standing-order-service
+  ports:
+    - name: http
+      port: 8121
+      targetPort: http
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# card-issuance-service  (port 8118)
+# Card lifecycle: issue + list (masked PAN) + suspend/resume (freeze/unfreeze).
+# Customer-facing via customer-edge (/customer/v1/cards). Kafka + CNPG.
+# Image pinned to the fleet tag for bootstrap; auto-deploy rewrites it once this
+# manifest exists.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: card-issuance-service
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: card-issuance-service
+    app.kubernetes.io/part-of: payments
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: card-issuance-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: card-issuance-service
+        app.kubernetes.io/part-of: payments
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: card-issuance-service
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-921c6570
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8118
+            - name: management
+              containerPort: 8085
+          env:
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://card-issuance-db-rw.payments.svc:5432/openbank_cards
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: postgresql://card-issuance-db-rw.payments.svc:5432/openbank_cards
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: card-issuance-db-app
+                  key: password
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+            - name: QUARKUS_SMALLRYE_REACTIVE_MESSAGING_KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://redis.payments.svc:6379
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: card-issuance-service-oidc
+                  key: OIDC_CLIENT_SECRET
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: card-issuance-service
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: card-issuance-service
+spec:
+  selector:
+    app.kubernetes.io/name: card-issuance-service
+  ports:
+    - name: http
+      port: 8118
+      targetPort: http
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# settlement-service  (port 8138)
+# ADR-0101 P3 — Temporal durable workflow for interbank settlement.
+# Feature flag openbank.temporal.enabled=false by default.
+# Temporal worker connects to temporal-frontend.temporal.svc:7233.
+# Progressive delivery: Deployment→Rollout (ADR-0098). Dual Services preserve DNS.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: settlement-service
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: settlement-service
+    app.kubernetes.io/part-of: payments
+spec:
+  progressDeadlineSeconds: 600
+  progressDeadlineAbort: true
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: settlement-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: settlement-service
+        app.kubernetes.io/part-of: payments
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: settlement-service
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-fdcb108f
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8138
+            - name: management
+              containerPort: 8085
+          env:
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://settlement-service-db-rw.payments.svc:5432/openbank_settlement
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://settlement-service-db-rw.payments.svc:5432/openbank_settlement
+            - name: QUARKUS_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: settlement-service-db-app
+                  key: username
+            - name: QUARKUS_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: settlement-service-db-app
+                  key: password
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: settlement-service-oidc
+                  key: OIDC_CLIENT_SECRET
+            # Temporal go-live (ADR-0101 P3, runbook 0006 Gate 1): settlement now runs its
+            # durable workflow. Namespace openbank-default + SERVER_URL + the temporal-platform
+            # NetworkPolicy are already in place; rollback = set this back to "false".
+            - name: OPENBANK_TEMPORAL_ENABLED
+              value: "true"
+            - name: OPENBANK_TEMPORAL_SERVER_URL
+              value: temporal-frontend.temporal.svc.cluster.local:7233
+            # GL accounts for the settlement double-entry. Both legs post to the customer
+            # deposit-control account (2100 CZK); the payer/payee customer dimension rides on
+            # each line's subAccountId (deposit-control sub-ledger, ADR-0039), so the SAME GL
+            # account on debit and credit is correct — it is a per-customer transfer, not a
+            # no-op. NOTE: CZK-only — a non-CZK settlement would need the matching per-currency
+            # control account (2101 EUR / 2102 USD / 2103 GBP), as the ledger validates that a
+            # line's base currency equals its GL account's currency.
+            - name: SETTLEMENT_GL_DEBIT_ACCOUNT_ID
+              value: "a0000000-0000-0000-0000-000000000002"
+            - name: SETTLEMENT_GL_CREDIT_ACCOUNT_ID
+              value: "a0000000-0000-0000-0000-000000000002"
+            - name: QUARKUS_MANAGEMENT_HOST
+              value: "0.0.0.0"
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 30
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+  strategy:
+    canary:
+      stableService: settlement-service
+      canaryService: settlement-service-canary
+      analysis:
+        templates:
+          - clusterScope: true
+            templateName: openbank-money-path-canary
+        startingStep: 1
+        args:
+          - name: namespace
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Canary
+      steps:
+        - setWeight: 10
+        - pause:
+            duration: 5m
+        - setWeight: 30
+        - pause:
+            duration: 5m
+        - setWeight: 100
+---
+# Stable service — original DNS name preserved; Rollouts controller adds
+# rollouts-pod-template-hash selector to pin to stable replica set.
+apiVersion: v1
+kind: Service
+metadata:
+  name: settlement-service
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: settlement-service
+spec:
+  selector:
+    app.kubernetes.io/name: settlement-service
+  ports:
+    - name: http
+      port: 8138
+      targetPort: http
+---
+# Canary service — Rollouts controller updates selector to canary replica set.
+apiVersion: v1
+kind: Service
+metadata:
+  name: settlement-service-canary
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: settlement-service
+spec:
+  selector:
+    app.kubernetes.io/name: settlement-service
+  ports:
+    - name: http
+      port: 8138
+      targetPort: http
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# clearing-simulator  (port 8139, mgmt 8087)
+# ADR-0104 D3: the SEPA scheme counterparty SIMULATOR — receives a real ISO 20022
+# pacs.008 from sepa-payment, XSD-validates it, and returns a realistic pacs.002
+# (+ camt.054 on settle). Stateless (no DB/Kafka/Redis). This is the swap-point for
+# a real scheme connector once licensed — it must NEVER be mistaken for a live rail.
+# Plain Deployment (not a Rollout): a simulator needs no progressive delivery.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clearing-simulator
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: clearing-simulator
+    app.kubernetes.io/part-of: payments
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: clearing-simulator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: clearing-simulator
+        app.kubernetes.io/part-of: payments
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: clearing-simulator
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-0af2ee215
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8139
+            - name: management
+              containerPort: 8087
+          env:
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: clearing-simulator-oidc
+                  key: OIDC_CLIENT_SECRET
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+            # ADR-0109: pacs.004 return simulator forwards R-transactions to sepa-payment.
+            - name: SEPA_PAYMENT_SERVICE_URL
+              value: http://sepa-payment-service.payments.svc:8108
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clearing-simulator
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: clearing-simulator
+spec:
+  selector:
+    app.kubernetes.io/name: clearing-simulator
+  ports:
+    - name: http
+      port: 8139
+      targetPort: http
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# swift-service  (port 8122)
+# CBPR+ SWIFT MT103→ISO 20022 pacs.008 gateway. Validates MT fields, builds a
+# faithful pacs.008 and submits it to the clearing-simulator; ACSC→SENT,
+# RJCT→REJECTED. Fail-closed: gateway unreachable ⇒ message holds at VALIDATED.
+# ADR-0104 D4. Money-path.
+# Progressive delivery: Rollout (ADR-0098). Canary strategy.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: swift-service
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: swift-service
+    app.kubernetes.io/part-of: payments
+spec:
+  progressDeadlineSeconds: 600
+  progressDeadlineAbort: true
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: swift-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: swift-service
+        app.kubernetes.io/part-of: payments
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: swift-service
+
+
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-52390dad
+
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8122
+            - name: management
+              containerPort: 8085
+          env:
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://swift-service-db-rw.payments.svc:5432/openbank_swift
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://swift-service-db-rw.payments.svc:5432/openbank_swift
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: swift-service-db-app
+                  key: password
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: swift-service-oidc
+                  key: OIDC_CLIENT_SECRET
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+            # ADR-0104 D4: real ISO 20022 pacs.008 → clearing-simulator → pacs.002 pipeline.
+            # Fail-closed: gateway down ⇒ message holds at VALIDATED, never self-settles.
+            - name: CLEARING_SIMULATOR_URL
+              value: http://clearing-simulator.payments.svc:8139
+            - name: SWIFT_SCHEME_SUBMISSION_ENABLED
+              value: "true"
+            # ADR-0108: transaction-service for post-ACSC settlement booking.
+            - name: TRANSACTION_SERVICE_URL
+              value: http://transaction-service.payments.svc:8102
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+  strategy:
+    canary:
+      stableService: swift-service
+      canaryService: swift-service-canary
+      analysis:
+        templates:
+          - clusterScope: true
+            templateName: openbank-money-path-canary
+        startingStep: 1
+        args:
+          - name: namespace
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Canary
+      steps:
+        - setWeight: 10
+        - pause:
+            duration: 5m
+        - setWeight: 30
+        - pause:
+            duration: 5m
+        - setWeight: 100
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: swift-service
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: swift-service
+spec:
+  selector:
+    app.kubernetes.io/name: swift-service
+  ports:
+    - name: http
+      port: 8122
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: swift-service-canary
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: swift-service
+spec:
+  selector:
+    app.kubernetes.io/name: swift-service
+  ports:
+    - name: http
+      port: 8122
+      targetPort: http

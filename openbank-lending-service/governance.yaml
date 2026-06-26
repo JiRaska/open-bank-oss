@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MPL-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: payments
+primaryDatastore: PostgreSQL
+schemaName: lending_schema
+dataLineageRole: both
+dataClassification: confidential
+retentionPolicy: 7 years
+evidenceExported: false
+schemaLineage:
+  ownedSchemas:
+    - lending_schema

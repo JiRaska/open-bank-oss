@@ -1,0 +1,86 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.notification.infrastructure.persistence.repository
+
+import com.openbank.notification.domain.model.DeviceRegistration
+import com.openbank.notification.infrastructure.persistence.entity.DeviceTokenEntity
+import io.quarkus.hibernate.reactive.panache.Panache
+import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.coroutines.awaitSuspending
+import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
+import java.time.Clock
+import java.time.Instant
+import java.util.UUID
+
+@ApplicationScoped
+class DeviceTokenRepository : PanacheRepository<DeviceTokenEntity> {
+    @Inject lateinit var clock: Clock
+
+
+    /**
+     * Active device tokens for a party — the PUSH fan-out target set.
+     *
+     * Returns a `Uni` (not `suspend`) so it composes inside [NotificationConsumer]'s reactive
+     * `Panache.withTransaction { }` chain, which deliberately avoids `suspend` on the Kafka
+     * polling thread (see the consumer's doc comment).
+     */
+    fun findActiveByParty(partyId: UUID): Uni<List<DeviceTokenEntity>> =
+        find("partyId = ?1 and status = ?2", partyId, "ACTIVE").list()
+
+    /** All tokens for a party, for the REST listing. */
+    suspend fun listByParty(partyId: UUID): List<DeviceTokenEntity> =
+        Panache.withSession { find("partyId", partyId).list() }.awaitSuspending()
+
+    /**
+     * Register (or refresh) a device token. Idempotent on (platform, token): a re-registration
+     * of the same provider token re-binds it to the current party and re-activates it rather
+     * than creating a duplicate row. Returns the persisted entity.
+     */
+    suspend fun register(reg: DeviceRegistration): DeviceTokenEntity = Panache.withTransaction {
+        find("platform = ?1 and token = ?2", reg.platform.name, reg.token).firstResult()
+            .flatMap { existing ->
+                val now = Instant.now(clock)
+                if (existing != null) {
+                    existing.partyId = reg.partyId
+                    existing.appInstance = reg.appInstance
+                    existing.appVersion = reg.appVersion
+                    existing.osVersion = reg.osVersion
+                    existing.status = "ACTIVE"
+                    existing.lastUsedAt = now
+                    existing.updatedAt = now
+                    Uni.createFrom().item(existing)
+                } else {
+                    val entity = DeviceTokenEntity().also {
+                        it.deviceId = UUID.randomUUID()
+                        it.partyId = reg.partyId
+                        it.appInstance = reg.appInstance
+                        it.platform = reg.platform.name
+                        it.token = reg.token
+                        it.appVersion = reg.appVersion
+                        it.osVersion = reg.osVersion
+                        it.status = "ACTIVE"
+                        it.createdAt = now
+                        it.updatedAt = now
+                    }
+                    persist(entity).map { entity }
+                }
+            }
+    }.awaitSuspending()
+
+    /**
+     * Retire device tokens the provider rejected (UNREGISTERED / INVALID_TOKEN) so they drop
+     * out of future fan-out. Uni-based for use inside the consumer's reactive chain.
+     */
+    fun invalidate(deviceIds: Collection<UUID>): Uni<Int> {
+        if (deviceIds.isEmpty()) return Uni.createFrom().item(0)
+        return update(
+            "status = 'INVALID', updatedAt = ?1 where deviceId in ?2",
+            Instant.now(clock),
+            deviceIds,
+        )
+    }
+}

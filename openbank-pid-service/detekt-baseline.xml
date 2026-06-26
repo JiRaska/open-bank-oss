@@ -1,0 +1,31 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+    <CurrentIssues>
+    <ID>LongMethod:PartyService.kt$PartyService$override suspend fun createParty(command: CreatePartyCommand): Party</ID>
+    <ID>LongParameterList:PartyResource.kt$PartyResource$( createPartyUseCase: CreatePartyUseCase, getPartyUseCase: GetPartyUseCase, updatePartyUseCase: UpdatePartyUseCase, manageRelationshipUseCase: ManageRelationshipUseCase, resolveIdentityUseCase: ResolveIdentityUseCase, registerIdentityUseCase: RegisterIdentityUseCase, resolveByIndexUseCase: ResolveByIndexUseCase, )</ID>
+    <ID>LongParameterList:PartyResource.kt$PartyResource$( @QueryParam("givenName") givenName: String?, @QueryParam("familyName") familyName: String?, @QueryParam("email") email: String?, @QueryParam("role") role: PartyRole?, @QueryParam("status") status: PartyStatus?, @QueryParam("limit") @DefaultValue("20") limit: Int, @QueryParam("afterId") afterId: UUID? )</ID>
+    <ID>MagicNumber:AuthzProducer.kt$AuthzProducer$500</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$InvalidPartyCaseTransitionMapper$400</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$PartyAlreadyExistsMapper$409</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$PartyNotFoundMapper$404</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$RelationshipAlreadyExistsMapper$409</ID>
+    <ID>MagicNumber:IdentityResolutionService.kt$IdentityResolutionService$16</ID>
+    <ID>MagicNumber:PartyRepositoryImpl.kt$PartyRepositoryImpl$12</ID>
+    <ID>MagicNumber:PartyRepositoryImpl.kt$PartyRepositoryImpl$31</ID>
+    <ID>MagicNumber:PidOutboxDispatcher.kt$PidOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:PidOutboxDispatcher.kt$PidOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:PidOutboxRepositoryImpl.kt$PidOutboxRepositoryImpl$4000</ID>
+    <ID>MatchingDeclarationName:PidOutboxPort.kt$PidOutboxRepository : OutboxRepository</ID>
+    <ID>SpreadOperator:PartyRepositoryImpl.kt$PartyRepositoryImpl$(where, *params.toTypedArray())</ID>
+    <ID>SwallowedException:PidOutboxDispatcher.kt$PidOutboxDispatcher$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:PidOutboxDispatcher.kt$PidOutboxDispatcher$ex: Exception</ID>
+    <ID>TooManyFunctions:PartyRepositoryImpl.kt$PartyRepositoryImpl : PartyRepositoryPanacheRepository</ID>
+    <ID>TooManyFunctions:PartyResource.kt$PartyResource</ID>
+    <ID>TooManyFunctions:PartyService.kt$PartyService : CreatePartyUseCaseGetPartyUseCaseUpdatePartyUseCaseManageRelationshipUseCase</ID>
+    <ID>UseCheckOrError:PartyRepositoryImpl.kt$PartyRelationshipRepositoryImpl$throw IllegalStateException("Relationship ${relationship.id} not found")</ID>
+    <ID>UseCheckOrError:PartyRepositoryImpl.kt$PartyRepositoryImpl$throw IllegalStateException("Party ${party.id} not found")</ID>
+    <ID>UseCheckOrError:PartyService.kt$PartyService$throw IllegalStateException("PID case lifecycle is not initialized for party ${command.partyId}")</ID>
+    <ID>UseRequire:PartyService.kt$PartyService$throw IllegalArgumentException("Relationship does not belong to party ${command.partyId}")</ID>
+  </CurrentIssues>
+</SmellBaseline>

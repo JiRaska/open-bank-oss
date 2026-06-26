@@ -1,0 +1,205 @@
+# ECR pull-through cache image rewrite (finops/nat-registry-cache-consolidation).
+#
+# Problem: containerd hosts.toml mirrors cannot add a path prefix — a mirror
+# for quay.io pointing at ECR would request /v2/prometheus/prometheus/... but
+# ECR pull-through expects /v2/quay/prometheus/prometheus/... (the rule prefix
+# "quay" must appear in the path). So hosts.toml silently falls back to the
+# origin registry over NAT.
+#
+# Fix: Kyverno rewrites image refs at admission time BEFORE containerd sees
+# them, injecting the correct ECR pull-through prefix. containerd then pulls
+# from private ECR via the ecr.dkr VPC Interface endpoint — zero NAT cost.
+#
+# Covered registries (pull-through cache rules in ecr-pull-through-cache.tf):
+#   quay.io          → 265175468565.dkr.ecr.eu-north-1.amazonaws.com/quay/
+#   registry.k8s.io  → 265175468565.dkr.ecr.eu-north-1.amazonaws.com/k8s/
+#   public.ecr.aws   → 265175468565.dkr.ecr.eu-north-1.amazonaws.com/ecr-public/
+#
+# Not covered here (separate mechanisms):
+#   docker.io  — in-cluster registry-cache via containerd hosts.toml (EC2NodeClass
+#                userData); transparent proxy, no prefix needed.
+#   ghcr.io    — needs GitHub PAT in Secrets Manager; see commented stub in
+#                ecr-pull-through-cache.tf. Left on NAT until creds available.
+#
+# Exclusion: images already referencing ECR (*.dkr.ecr.*.amazonaws.com) and
+# openbank internal images are never rewritten.
+#
+# CNPG exclusion (ADR-0092 debugging): CloudNativePG instance pods (label
+# cnpg.io/cluster) are NEVER rewritten. The CNPG operator reconciles by comparing
+# the running pod's image against the Cluster's spec.imageName; a mutating webhook
+# that rewrites the image makes the pod permanently "drift" from spec, so the
+# operator recreates the instance pod every reconcile (~every 10s) and the cluster
+# never reaches Ready. This is why every NEWLY created CNPG cluster (pact-broker-db,
+# fraud-db) entered an infinite rollout loop once rewrite-ghcr landed, while older
+# clusters — whose pods predate the rule — stayed healthy. CNPG must own its image
+# ref end-to-end; it pulls postgres from ghcr.io directly (one image, rarely, mostly
+# node-cached — negligible NAT cost). Applied to all rules: the incompatibility is
+# with image mutation per se, not any one registry.
+#
+# failurePolicy: Ignore — if Kyverno webhook is down, pods still start (they
+# pull from origin over NAT rather than being blocked). Acceptable for sandbox.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: ecr-pull-through-rewrite
+  annotations:
+    policies.kyverno.io/title: "Rewrite public registry images to ECR pull-through cache"
+    policies.kyverno.io/category: "FinOps"
+    policies.kyverno.io/severity: "low"
+    policies.kyverno.io/description: >
+      Rewrites quay.io, registry.k8s.io, and public.ecr.aws image references
+      to the ECR pull-through cache so containerd pulls via the ecr.dkr VPC
+      Interface endpoint instead of the NAT gateway.
+spec:
+  failurePolicy: Ignore
+  background: false
+  rules:
+    - name: rewrite-quay
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          - resources:
+              namespaces: [kube-system]
+              selector:
+                matchLabels:
+                  eks.amazonaws.com/component: "true"
+          # CNPG instance pods own their image ref (see header) — never rewrite.
+          - resources:
+              kinds: [Pod]
+              selector:
+                matchExpressions:
+                  - key: cnpg.io/cluster
+                    operator: Exists
+      mutate:
+        foreach:
+          - list: "request.object.spec.initContainers[]"
+            patchStrategicMerge:
+              spec:
+                initContainers:
+                  - name: "{{ element.name }}"
+                    image: "{{ regex_replace_all_literal('^quay\\.io/', element.image, '265175468565.dkr.ecr.eu-north-1.amazonaws.com/quay/') }}"
+          - list: "request.object.spec.containers[]"
+            patchStrategicMerge:
+              spec:
+                containers:
+                  - name: "{{ element.name }}"
+                    image: "{{ regex_replace_all_literal('^quay\\.io/', element.image, '265175468565.dkr.ecr.eu-north-1.amazonaws.com/quay/') }}"
+
+    - name: rewrite-registry-k8s
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          # CNPG instance pods own their image ref (see header) — never rewrite.
+          - resources:
+              kinds: [Pod]
+              selector:
+                matchExpressions:
+                  - key: cnpg.io/cluster
+                    operator: Exists
+      mutate:
+        foreach:
+          - list: "request.object.spec.initContainers[]"
+            patchStrategicMerge:
+              spec:
+                initContainers:
+                  - name: "{{ element.name }}"
+                    image: "{{ regex_replace_all_literal('^registry\\.k8s\\.io/', element.image, '265175468565.dkr.ecr.eu-north-1.amazonaws.com/k8s/') }}"
+          - list: "request.object.spec.containers[]"
+            patchStrategicMerge:
+              spec:
+                containers:
+                  - name: "{{ element.name }}"
+                    image: "{{ regex_replace_all_literal('^registry\\.k8s\\.io/', element.image, '265175468565.dkr.ecr.eu-north-1.amazonaws.com/k8s/') }}"
+
+    - name: rewrite-ecr-public
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          # CNPG instance pods own their image ref (see header) — never rewrite.
+          - resources:
+              kinds: [Pod]
+              selector:
+                matchExpressions:
+                  - key: cnpg.io/cluster
+                    operator: Exists
+      mutate:
+        foreach:
+          - list: "request.object.spec.initContainers[]"
+            patchStrategicMerge:
+              spec:
+                initContainers:
+                  - name: "{{ element.name }}"
+                    image: "{{ regex_replace_all_literal('^public\\.ecr\\.aws/', element.image, '265175468565.dkr.ecr.eu-north-1.amazonaws.com/ecr-public/') }}"
+          - list: "request.object.spec.containers[]"
+            patchStrategicMerge:
+              spec:
+                containers:
+                  - name: "{{ element.name }}"
+                    image: "{{ regex_replace_all_literal('^public\\.ecr\\.aws/', element.image, '265175468565.dkr.ecr.eu-north-1.amazonaws.com/ecr-public/') }}"
+
+    - name: rewrite-docker-hub
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          - resources:
+              kinds: [Pod]
+              selector:
+                matchExpressions:
+                  - key: cnpg.io/cluster
+                    operator: Exists
+      mutate:
+        foreach:
+          - list: "request.object.spec.initContainers[]"
+            patchStrategicMerge:
+              spec:
+                initContainers:
+                  - name: "{{ element.name }}"
+                    image: "{{ regex_replace_all_literal('^docker\\.io/', element.image, '265175468565.dkr.ecr.eu-north-1.amazonaws.com/docker-hub/') }}"
+          - list: "request.object.spec.containers[]"
+            patchStrategicMerge:
+              spec:
+                containers:
+                  - name: "{{ element.name }}"
+                    image: "{{ regex_replace_all_literal('^docker\\.io/', element.image, '265175468565.dkr.ecr.eu-north-1.amazonaws.com/docker-hub/') }}"
+
+    - name: rewrite-ghcr
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          # CNPG instance pods own their image ref (see header) — never rewrite.
+          # This is the rule that broke new CNPG clusters: postgres is on ghcr.io.
+          - resources:
+              kinds: [Pod]
+              selector:
+                matchExpressions:
+                  - key: cnpg.io/cluster
+                    operator: Exists
+      mutate:
+        foreach:
+          - list: "request.object.spec.initContainers[]"
+            patchStrategicMerge:
+              spec:
+                initContainers:
+                  - name: "{{ element.name }}"
+                    image: "{{ regex_replace_all_literal('^ghcr\\.io/', element.image, '265175468565.dkr.ecr.eu-north-1.amazonaws.com/ghcr/') }}"
+          - list: "request.object.spec.containers[]"
+            patchStrategicMerge:
+              spec:
+                containers:
+                  - name: "{{ element.name }}"
+                    image: "{{ regex_replace_all_literal('^ghcr\\.io/', element.image, '265175468565.dkr.ecr.eu-north-1.amazonaws.com/ghcr/') }}"

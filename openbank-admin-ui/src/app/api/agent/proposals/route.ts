@@ -1,0 +1,66 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+// BFF proxy for the agent HITL approval queue (ADR-0031 D4). The agent owns the
+// proposals store; the admin-ui lists pending proposals and records a human
+// decision. GET ?state=pending|all ; POST { proposalId, approve, decidedBy, reason }.
+
+import { NextRequest, NextResponse } from 'next/server'
+import { auth } from '@/auth'
+
+export const dynamic = 'force-dynamic'
+
+function agentBase(): string {
+  if (process.env.SERVICES_HOST === 'container') return 'http://openbank-agent-service:8109'
+  return (process.env.AGENT_SERVICE_URL ?? 'http://localhost:8109/mcp').replace(/\/mcp$/, '')
+}
+
+// ADR-0031 D3: the operator's Keycloak access token, relayed to agent-service's @RolesAllowed.
+async function operatorBearer(): Promise<string | null> {
+  return (await auth())?.user?.accessToken ?? null
+}
+
+export async function GET(req: NextRequest) {
+  const state = req.nextUrl.searchParams.get('state') ?? 'pending'
+  try {
+    const accessToken = await operatorBearer()
+    if (!accessToken) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 10000)
+    const res = await fetch(`${agentBase()}/api/v1/proposals?state=${encodeURIComponent(state)}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: 'no-store',
+      signal: ctrl.signal,
+    })
+    clearTimeout(timer)
+    return NextResponse.json(await res.json(), { status: res.status })
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : 'agent_unreachable' }, { status: 502 })
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json()
+    const { proposalId, approve, decidedBy, reason } = body ?? {}
+    if (!proposalId || typeof approve !== 'boolean' || !decidedBy) {
+      return NextResponse.json({ error: 'proposalId, approve (bool) and decidedBy are required' }, { status: 400 })
+    }
+    const accessToken = await operatorBearer()
+    if (!accessToken) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 10000)
+    const res = await fetch(`${agentBase()}/api/v1/proposals/${encodeURIComponent(proposalId)}/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ approve, decidedBy, reason: reason ?? null }),
+      signal: ctrl.signal,
+      cache: 'no-store',
+    })
+    clearTimeout(timer)
+    return NextResponse.json(await res.json(), { status: res.status })
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : 'agent_unreachable' }, { status: 502 })
+  }
+}

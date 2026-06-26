@@ -1,0 +1,7 @@
+# Customer help corpus for the assistant's search_help tool (ADR-0089 D4 grounding).
+# One markdown filename per line; lines starting with # are ignored.
+# Curated customer-facing help only — never internal ADRs or runbooks.
+posilani-plateb.md
+ztracena-karta.md
+poplatky.md
+sca-potvrzeni.md

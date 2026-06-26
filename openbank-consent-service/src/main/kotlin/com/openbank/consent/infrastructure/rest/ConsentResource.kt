@@ -1,0 +1,140 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.consent.infrastructure.rest
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.consent.application.port.`in`.*
+import com.openbank.consent.domain.model.ConsentValidationResult
+import com.openbank.libs.authz.Authorize
+import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.consent.infrastructure.rest.dto.*
+import jakarta.ws.rs.*
+import jakarta.ws.rs.core.Context
+import jakarta.ws.rs.core.MediaType
+import jakarta.ws.rs.core.Response
+import jakarta.ws.rs.core.UriInfo
+import java.util.UUID
+
+@Path("/api/v1/consents")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+class ConsentResource(
+    private val createConsent: CreateConsentUseCase,
+    private val revokeConsent: RevokeConsentUseCase,
+    private val getConsent: GetConsentUseCase,
+    private val validateConsent: ValidateConsentUseCase,
+    private val activateConsent: ActivateConsentUseCase,
+    private val idempotencyStore: IdempotencyStore,
+    private val objectMapper: ObjectMapper
+) {
+
+    @POST
+    suspend fun create(
+        request: CreateConsentRequest,
+        @HeaderParam("X-Request-ID") xRequestId: String?,
+        @Context uriInfo: UriInfo
+    ): Response {
+        val idempotencyKey = request.tppTransactionId?.takeIf { it.isNotBlank() }
+            ?: xRequestId?.takeIf { it.isNotBlank() }
+
+        idempotencyKey?.let { key ->
+            idempotencyStore.get(consentCreateKey(request.granteeId, request.partyId, key))?.let { cached ->
+                return Response.status(cached.statusCode)
+                    .entity(cached.responseBody)
+                    .type(MediaType.APPLICATION_JSON)
+                    .header("X-Idempotency-Replayed", "true")
+                    .build()
+            }
+        }
+
+        val consent = createConsent.createConsent(
+            CreateConsentCommand(
+                partyId = request.partyId,
+                granteeId = request.granteeId,
+                granteeType = request.granteeType,
+                granteeName = request.granteeName,
+                scopes = request.scopes,
+                accountIbans = request.accountIbans,
+                validTo = request.validTo,
+                redirectUri = request.redirectUri,
+                tppTransactionId = request.tppTransactionId ?: xRequestId,
+                ipAddress = null,
+                userAgent = null
+            )
+        )
+        val responseBody = ConsentResponse.from(consent)
+        idempotencyKey?.let { key ->
+            idempotencyStore.save(
+                consentCreateKey(request.granteeId, request.partyId, key),
+                201,
+                objectMapper.writeValueAsString(responseBody)
+            )
+        }
+
+        return Response.created(uriInfo.absolutePathBuilder.path(consent.id.toString()).build())
+            .entity(responseBody).build()
+    }
+
+    @GET
+    @Path("/{id}")
+    suspend fun getById(@PathParam("id") id: UUID): ConsentResponse =
+        ConsentResponse.from(getConsent.getConsent(id))
+
+    @GET
+    @Path("/party/{partyId}")
+    suspend fun listByParty(@PathParam("partyId") partyId: UUID): List<ConsentResponse> =
+        getConsent.listConsentsForParty(partyId).map { ConsentResponse.from(it) }
+
+    @GET
+    @Path("/grantee/{granteeId}")
+    suspend fun listByGrantee(@PathParam("granteeId") granteeId: String): List<ConsentResponse> =
+        getConsent.listConsentsForGrantee(granteeId).map { ConsentResponse.from(it) }
+
+    @DELETE
+    @Path("/{id}")
+    @Authorize(action = "consent.revoke", resource = "#id")
+    suspend fun revoke(
+        @PathParam("id") id: UUID,
+        @QueryParam("partyId") partyId: UUID,
+        request: RevokeConsentRequest
+    ): ConsentResponse {
+        val consent = revokeConsent.revokeConsent(RevokeConsentCommand(id, partyId, request.reason))
+        return ConsentResponse.from(consent)
+    }
+
+    @POST
+    @Path("/{id}/activate")
+    suspend fun activate(
+        @PathParam("id") id: UUID,
+        @QueryParam("scaSessionId") scaSessionId: UUID
+    ): ConsentResponse =
+        ConsentResponse.from(activateConsent.activateConsent(id, scaSessionId))
+
+    @POST
+    @Path("/{id}/reject")
+    suspend fun reject(
+        @PathParam("id") id: UUID,
+        @QueryParam("reason") reason: String
+    ): ConsentResponse =
+        ConsentResponse.from(activateConsent.rejectConsent(id, reason))
+
+    @POST
+    @Path("/{id}/validate")
+    suspend fun validate(
+        @PathParam("id") id: UUID,
+        request: ValidateConsentRequest
+    ): ConsentValidationResponse {
+        val result = validateConsent.validateConsent(
+            ValidateConsentCommand(id, request.granteeId, request.requiredScope, request.accountIban)
+        )
+        return when (result) {
+            is ConsentValidationResult.Valid -> ConsentValidationResponse(true, null, null)
+            is ConsentValidationResult.Invalid -> ConsentValidationResponse(false, result.reason, result.code)
+        }
+    }
+
+    private fun consentCreateKey(granteeId: String, partyId: UUID, requestId: String) =
+        "consent:create:$granteeId:$partyId:$requestId"
+}

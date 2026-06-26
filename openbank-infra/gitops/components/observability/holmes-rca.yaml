@@ -1,0 +1,252 @@
+# HolmesGPT alert-enrichment relay (ADR-0088 / Davis-lite). Alertmanager fires a
+# webhook here for critical alerts (route with continue:true → still pages via
+# GoAlert); this relay turns each firing alert into a HolmesGPT investigation and
+# posts the root-cause to Slack (#openbank-alerts) + Loki (source=holmes-rca, so
+# it is searchable and shows in Grafana next to the alert). In-cluster only, no
+# ingress. Stdlib-only Python on a stock image — no custom build, no extra deps.
+#
+# Safety: responds 200 immediately and investigates in a background thread (the
+# LLM call exceeds Alertmanager's webhook timeout); every step is wrapped so a
+# Holmes/Slack/Loki failure never affects the paging path. Per-fingerprint dedup
+# bounds the free Groq model to one investigation per alert per hour.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: holmes-rca-relay
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+data:
+  relay.py: |
+    # SPDX-License-Identifier: MPL-2.0
+    import json, os, time, threading, urllib.request
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    HOLMES = os.environ.get("HOLMES_URL", "http://holmesgpt-holmes.observability.svc:80") + "/api/chat"
+    LOKI   = os.environ.get("LOKI_URL", "http://loki.observability.svc:3100") + "/loki/api/v1/push"
+    SLACK  = os.environ.get("SLACK_WEBHOOK", "")
+    MODEL  = os.environ.get("HOLMES_MODEL", "")
+    DEDUP_TTL = int(os.environ.get("DEDUP_TTL", "3600"))
+    # Soft daily cap on LLM investigations. NVIDIA NIM has no strict daily token
+    # cap (unlike the former Groq free tier at 100k tokens/day). This cap is a
+    # cost-control backstop: at ~16k tokens/RCA and NVIDIA's per-token pricing,
+    # 50 calls/day stays well inside sandbox FinOps. Past the cap we post a plain
+    # Grafana pointer instead of calling the LLM — paging path (GoAlert) untouched.
+    DAILY_BUDGET = int(os.environ.get("DAILY_BUDGET", "50"))
+
+    _seen = {}
+    _day = [0, 0]  # [utc-day-ordinal, count-used-today]
+    _lock = threading.Lock()
+
+    def _budget_ok():
+        day = int(time.time() // 86400)
+        with _lock:
+            if day != _day[0]:
+                _day[0], _day[1] = day, 0
+            if _day[1] >= DAILY_BUDGET:
+                return False
+            _day[1] += 1
+            return True
+
+    def _post(url, payload, timeout):
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read().decode("utf-8", "replace")
+
+    def _rca_from(resp):
+        try:
+            d = json.loads(resp)
+        except Exception:
+            return resp[:6000]
+        if isinstance(d, dict):
+            for k in ("analysis", "response", "text", "answer", "result", "sections"):
+                if d.get(k):
+                    return d[k] if isinstance(d[k], str) else json.dumps(d[k])[:6000]
+            return json.dumps(d)[:6000]
+        return str(d)[:6000]
+
+    def investigate(alert):
+        lbl = alert.get("labels", {}) or {}
+        ann = alert.get("annotations", {}) or {}
+        name = lbl.get("alertname", "(alert)")
+        ask = (
+            "Root-cause this firing Prometheus alert. Give a concise probable cause and the "
+            "single most useful next step. Read-only investigation; do not page anyone.\n"
+            f"alertname={name}\nseverity={lbl.get('severity','')}\n"
+            f"service={lbl.get('service', lbl.get('job',''))}\nnamespace={lbl.get('namespace','')}\n"
+            f"pod={lbl.get('pod','')}\nsummary={ann.get('summary','')}\ndescription={ann.get('description','')}"
+        )
+        if not _budget_ok():
+            _deliver(name, lbl, "(daily HolmesGPT investigation budget reached — "
+                     "skipping LLM RCA (cost-control cap). "
+                     "Investigate in Grafana; the alert still paged via GoAlert.)")
+            return
+        body = {"ask": ask, "stream": False}
+        if MODEL:
+            body["model"] = MODEL
+        try:
+            rca = _rca_from(_post(HOLMES, body, 300))
+        except Exception as e:
+            rca = f"(HolmesGPT investigation failed: {e})"
+        _deliver(name, lbl, rca)
+
+    def _deliver(name, lbl, rca):
+        if SLACK:
+            try:
+                _post(SLACK, {"text": f":mag: *HolmesGPT RCA — {name}* ({lbl.get('severity','')})\n{rca}"[:3500]}, 15)
+            except Exception:
+                pass
+        try:
+            ns = str(int(time.time() * 1e9))
+            stream = {"source": "holmes-rca", "alertname": name, "severity": lbl.get("severity", ""),
+                      "namespace": lbl.get("namespace", ""), "service": lbl.get("service", lbl.get("job", ""))}
+            _post(LOKI, {"streams": [{"stream": stream, "values": [[ns, rca[:8000]]]}]}, 15)
+        except Exception:
+            pass
+
+    def _should(fp):
+        now = time.time()
+        with _lock:
+            for k, t in list(_seen.items()):
+                if now - t > DEDUP_TTL:
+                    _seen.pop(k, None)
+            if fp in _seen:
+                return False
+            _seen[fp] = now
+            return True
+
+    class H(BaseHTTPRequestHandler):
+        def do_POST(self):
+            if self.path.rstrip("/") != "/alert":
+                self.send_response(404); self.end_headers(); return
+            try:
+                n = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(n) or b"{}")
+            except Exception:
+                payload = {}
+            self.send_response(200); self.end_headers(); self.wfile.write(b"ok")
+            for a in payload.get("alerts", []):
+                if a.get("status", "firing") == "firing":
+                    fp = a.get("fingerprint") or json.dumps(a.get("labels", {}), sort_keys=True)
+                    if _should(fp):
+                        threading.Thread(target=investigate, args=(a,), daemon=True).start()
+
+        def do_GET(self):
+            self.send_response(200 if self.path == "/healthz" else 404); self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    if __name__ == "__main__":
+        ThreadingHTTPServer(("0.0.0.0", 8080), H).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: holmes-rca
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: holmes-rca
+    app.kubernetes.io/part-of: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: holmes-rca
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: holmes-rca
+        app.kubernetes.io/part-of: observability
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: relay
+          image: python:3.12-slim
+          command: ["python", "/app/relay.py"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # readOnlyRootFilesystem: stop CPython attempting any .pyc write next to the
+            # read-only ConfigMap-mounted script (the __main__ script isn't cached and the
+            # slim image ships precompiled stdlib, so this is belt-and-suspenders).
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: HOLMES_URL
+              value: http://holmesgpt-holmes.observability.svc:80
+            - name: LOKI_URL
+              value: http://loki.observability.svc:3100
+            # Match the route's repeat_interval (12h) so a still-firing alert is
+            # investigated at most once per period, not on every AM re-fire.
+            - name: DEDUP_TTL
+              value: "43200"
+            # Soft daily cap on LLM investigations (NVIDIA NIM, ~16k tokens/RCA).
+            # Past this the relay posts a Grafana pointer instead — prevents runaway
+            # cost on a burst of distinct criticals. Raise if sandbox alert volume
+            # grows or switch to per-token budget tracking (FinOps follow-up).
+            - name: DAILY_BUDGET
+              value: "50"
+            # Reuse the same Slack incoming webhook the slack-warning receiver uses
+            # (bound to #openbank-alerts). Synced by ESO into alertmanager-slack.
+            - name: SLACK_WEBHOOK
+              valueFrom:
+                secretKeyRef:
+                  name: alertmanager-slack
+                  key: SLACK_WEBHOOK
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: app
+              mountPath: /app
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 48Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: app
+          configMap:
+            name: holmes-rca-relay
+        - name: tmp
+          emptyDir: {}
+      nodeSelector:
+        workload: observability
+      tolerations:
+        - key: workload
+          operator: Equal
+          value: observability
+          effect: NoSchedule
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: holmes-rca
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: holmes-rca
+spec:
+  selector:
+    app.kubernetes.io/name: holmes-rca
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

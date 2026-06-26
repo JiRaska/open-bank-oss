@@ -1,0 +1,39 @@
+# Changelog
+
+## [0.3.1](https://github.com/JiRaska/open-bank/compare/settlement-service-v0.3.0...settlement-service-v0.3.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **settlement:** inject Clock into domain/application layers (ADR-0100, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2007](https://github.com/JiRaska/open-bank/issues/2007)) ([03ce1b9](https://github.com/JiRaska/open-bank/commit/03ce1b996b919fc540537a94c7c200f75f3aa1b1))
+
+## [0.3.0](https://github.com/JiRaska/open-bank/compare/settlement-service-v0.2.0...settlement-service-v0.3.0) (2026-06-25)
+
+
+### Features
+
+* **settlement:** DB-backed repository + REST origination endpoint (ADR-0101 P3) ([#1840](https://github.com/JiRaska/open-bank/issues/1840)) ([9e4cfd2](https://github.com/JiRaska/open-bank/commit/9e4cfd20fd68baf36bf9fb26d6b21308a6e65788))
+
+
+### Bug Fixes
+
+* **settlement:** run Temporal activities on a Vert.x context (reactive Panache) ([#1855](https://github.com/JiRaska/open-bank/issues/1855)) ([8dd371d](https://github.com/JiRaska/open-bank/commit/8dd371dac7b03aca0890a1ceb19ca073dc3c911e))
+
+## [0.2.0](https://github.com/JiRaska/open-bank/compare/settlement-service-v0.1.0...settlement-service-v0.2.0) (2026-06-21)
+
+
+### Features
+
+* **settlement:** add Temporal durable workflow for settlement orchestration (ADR-0101 P3) ([#1471](https://github.com/JiRaska/open-bank/issues/1471)) ([caa8c40](https://github.com/JiRaska/open-bank/commit/caa8c402bf5fa2f3efc2cacfa552cab545520ff6))
+* **settlement:** wire real balance/ledger adapters + OPA activity policy ([#1522](https://github.com/JiRaska/open-bank/issues/1522)) ([605d6cf](https://github.com/JiRaska/open-bank/commit/605d6cf81601696cd2b5b8fb2227dbbbd1f602d3))
+
+
+### Bug Fixes
+
+* **ci:** settlement governance.yaml + upload-artifact continue-on-error ([290b483](https://github.com/JiRaska/open-bank/commit/290b4830e95a7d641936b6b41e2813e37ec13958))
+* **settlement:** add reverseCredit compensation + fix all stub reversals (ADR-0101 P3) ([ea87e9b](https://github.com/JiRaska/open-bank/commit/ea87e9b807882e77ce5a3dd80ab594b3169284b0))
+* **settlement:** fix boot — TemporalConfig missing serverUrl/namespace, wrong port ([#1511](https://github.com/JiRaska/open-bank/issues/1511)) ([19303fa](https://github.com/JiRaska/open-bank/commit/19303fa0cf943bf885ffa7da06cd7afa6d28e156))
+* **settlement:** fix management host binding and datasource username default ([89f7276](https://github.com/JiRaska/open-bank/commit/89f72763c4f6ea558e49626421e9adf6715905d3))
+* **settlement:** remove server-url/namespace from YAML — SRCFG00050 at startup ([#1523](https://github.com/JiRaska/open-bank/issues/1523)) ([805b4c8](https://github.com/JiRaska/open-bank/commit/805b4c8bfd60f040f99311a80686c3903736a539))
+* **settlement:** wire real GL account UUIDs for ledger booking ([#1609](https://github.com/JiRaska/open-bank/issues/1609)) ([d2eeb94](https://github.com/JiRaska/open-bank/commit/d2eeb94a5a1d8240f0b6008eb370f0c0b99f3bc9))
+* **statement:** skip NOT_VIABLE debris accounts in period-close instead of failing ([#862](https://github.com/JiRaska/open-bank/issues/862)) ([#1554](https://github.com/JiRaska/open-bank/issues/1554)) ([e316032](https://github.com/JiRaska/open-bank/commit/e316032816ce7a25e689661552ab0e9591a5c237))

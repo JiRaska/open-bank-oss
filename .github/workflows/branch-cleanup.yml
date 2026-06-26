@@ -1,0 +1,80 @@
+name: Branch cleanup
+
+# Každé pondělí 4:00 UTC smaže větve, které nemají otevřený PR a jejichž poslední
+# commit je starší než 14 dní. Chrání: main, release-please-*, dependabot/*.
+# Auto-delete on merge (GitHub setting) pokrývá čerstvé mergnuté větve okamžitě;
+# tento workflow zachytí stragglery (ruční větve, failed auto-delete, worktree leftovers).
+
+on:
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run — only list, do not delete'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+jobs:
+  prune-stale-branches:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Prune stale branches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+          git fetch --prune origin
+
+          # Open PR heads — never touch these
+          OPEN_HEADS=$(gh api \
+            "repos/$GITHUB_REPOSITORY/pulls?state=open&per_page=100" \
+            --jq '.[].head.ref' | sort)
+
+          DELETED=0
+          SKIPPED=0
+          STALE_DAYS=14
+          CUTOFF=$(date -u -d "-${STALE_DAYS} days" +%s 2>/dev/null || \
+                   date -u -v-${STALE_DAYS}d +%s)  # GNU / BSD date
+
+          while IFS= read -r branch; do
+            branch="${branch#origin/}"
+
+            # Immutable whitelist
+            [[ "$branch" == "main" ]]              && { SKIPPED=$(( SKIPPED + 1 )); continue; }
+            [[ "$branch" == release-please--* ]]   && { SKIPPED=$(( SKIPPED + 1 )); continue; }
+            [[ "$branch" == dependabot/* ]]         && { SKIPPED=$(( SKIPPED + 1 )); continue; }
+
+            # Active PRs
+            if echo "$OPEN_HEADS" | grep -qxF "$branch"; then
+              SKIPPED=$(( SKIPPED + 1 )); continue
+            fi
+
+            # Age check: skip if last commit is recent
+            LAST=$(git log -1 --format="%ct" "origin/$branch" 2>/dev/null || echo 0)
+            if [[ "$LAST" -gt "$CUTOFF" ]]; then
+              echo "KEEP (recent):  $branch"
+              SKIPPED=$(( SKIPPED + 1 )); continue
+            fi
+
+            AGE=$(( ($(date -u +%s) - LAST) / 86400 ))
+            if [[ "$DRY_RUN" == "true" ]]; then
+              echo "DRY-RUN delete: $branch  (${AGE}d old)"
+            else
+              echo "Deleting:       $branch  (${AGE}d old)"
+              git push origin ":refs/heads/$branch" || \
+                echo "  WARNING: push delete failed for $branch — skipping"
+            fi
+            DELETED=$(( DELETED + 1 ))
+          done < <(git branch -r | grep "^  origin/" | grep -v "HEAD")
+
+          echo ""
+          echo "Summary: deleted=$DELETED  skipped=$SKIPPED  dry_run=$DRY_RUN"

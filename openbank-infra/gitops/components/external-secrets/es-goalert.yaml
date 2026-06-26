@@ -1,0 +1,26 @@
+# GoAlert data-encryption-key from OpenBao → goalert-secrets Secret (ADR-0088
+# on-call). The key GoAlert uses to encrypt at-rest data; from the
+# openbank/goalert KV path.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: goalert-secrets
+  namespace: observability
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: goalert-secrets
+    creationPolicy: Owner
+    template:
+      mergePolicy: Merge
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+  data:
+    - secretKey: data-encryption-key
+      remoteRef:
+        key: goalert
+        property: data-encryption-key

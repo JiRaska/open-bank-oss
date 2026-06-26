@@ -1,0 +1,264 @@
+quarkus:
+  application:
+    name: openbank-agent-service
+    version: 0.1.0
+
+  http:
+    port: 8109
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+      headers: Content-Type,Authorization,X-Session-Id
+
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      # `none` is correct for the in-cluster plain-http Keycloak leg; a real https deploy
+      # overrides it to `required` via OIDC_TLS_VERIFICATION to enforce certificate validation.
+      verification: ${OIDC_TLS_VERIFICATION:none}
+
+  # Outbound service-to-service auth (client-credentials). The MCP tool REST clients
+  # (ServiceClients, @RegisterProvider OidcClientRequestReactiveFilter) use this default
+  # oidc-client to mint an `openbank-services` token and attach it as a Bearer, so the
+  # assistant reaches the downstream banking services as a least-privilege service principal.
+  # Reuses the same client-id/secret/issuer as the resource-server oidc block above.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+    tls:
+      verification: ${OIDC_TLS_VERIFICATION:none}
+
+  smallrye-openapi:
+    path: /q/openapi
+    info-title: OpenBank Agent Service
+
+    info-version: 1.8.0
+    info-description: MCP server exposing OpenBank tools to AI agents
+
+  shutdown:
+    timeout: 30S
+
+  log:
+    level: INFO
+    console:
+      format: "%d{HH:mm:ss} %-5p traceId=%X{traceId} corrId=%X{correlationId} [%c{2.}] %s%e%n"
+
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+  rest-client:
+    account-service:
+      url: http://localhost:8100
+    opa:
+      url: http://localhost:8181
+    transaction-service:
+      url: http://localhost:8102
+    balance-service:
+      url: http://localhost:8103
+    consent-service:
+      url: http://localhost:8106
+    psd2-service:
+      url: http://localhost:8107
+    product-catalog:
+      url: http://localhost:8104
+    ledger-service:
+      url: http://localhost:8101
+    aml-service:
+      url: http://localhost:8117
+    sanctions-service:
+      url: http://localhost:8118
+    fx-service:
+      url: http://localhost:8119
+    clearing-service:
+      url: http://localhost:8124
+    interest-service:
+      url: http://localhost:8125
+    dispute-service:
+      url: http://localhost:8135
+    sepa-instant-service:
+      url: http://localhost:8127
+    # Observability stack (anonymous in-cluster read; no OIDC filter on these clients).
+    prometheus:
+      url: http://localhost:9090
+    loki:
+      url: http://localhost:3100
+    alertmanager:
+      url: http://localhost:9093
+
+  # Proposals store (ADR-0031 D4 HITL approval queue). The agent is otherwise stateless;
+  # this is its only table. In-cluster the URL/credentials come from the agent-db CNPG
+  # secret via QUARKUS_DATASOURCE_* env. Imperative JDBC + Flyway so the synchronous MCP
+  # tool path can write directly (the read tools stay reactive).
+  datasource:
+    db-kind: postgresql
+    username: ${QUARKUS_DATASOURCE_USERNAME:openbank}
+    password: ${QUARKUS_DATASOURCE_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    jdbc:
+      url: ${QUARKUS_DATASOURCE_JDBC_URL:jdbc:postgresql://localhost:5432/openbank_agent}
+  flyway:
+    migrate-at-start: true
+    connect-retries: 10
+
+"%dev":
+  quarkus:
+    oidc:
+      enabled: false
+    log:
+      level: DEBUG
+
+# No inbound auth when bootstrapped under @QuarkusTest — the unit/contract tests don't drive
+# the HTTP security layer, and a missing Keycloak would otherwise fail the resource-server init.
+"%test":
+  quarkus:
+    oidc:
+      enabled: false
+
+openbank:
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 50
+  api:
+    version: "1"
+  build:
+    time: "${BUILD_TIME:unknown}"
+  git:
+    commit: "${GIT_COMMIT:unknown}"
+
+mcp:
+  server:
+    name: openbank-mcp
+    version: 0.1.0
+    protocol-version: "2024-11-05"
+
+# Model gateway (ADR-0031 D6). Provider-agnostic: adding a model is a `models` entry, adding a
+# new backend kind is one ModelProvider adapter. The sandbox ships only the offline `mock`
+# provider; real backends (a hosted public API, a self-hosted vLLM endpoint) are added here with
+# no code change. Sensitive (PII / money-path) context routes to a `self-hosted` model when one
+# is registered.
+model-gateway:
+  # Offline `mock-echo` stays the default so the build/tests need no network or API key. Point a
+  # demo at a real backend by setting AGENT_DEFAULT_MODEL (or pick it in the admin-UI model picker).
+  default-model: ${AGENT_DEFAULT_MODEL:mock-echo}
+  models:
+    - id: mock-echo
+      provider: mock
+      sensitivity: hosted
+    # Groq — free, fast, OpenAI-compatible. `id` is sent verbatim as the upstream model name.
+    # Served by the single `openai-compat` adapter; needs GROQ_API_KEY (see agent.model.openai).
+    - id: llama-3.3-70b-versatile
+      provider: openai-compat
+      endpoint: https://api.groq.com/openai/v1
+      sensitivity: hosted
+    # The SAME openai-compat adapter serves any OpenAI-shaped backend — just change endpoint+key:
+    # - id: qwen2.5                       # self-hosted Ollama for the SELF_HOSTED (sensitive) tier
+    #   provider: openai-compat
+    #   endpoint: http://ollama:11434/v1
+    #   sensitivity: self-hosted
+
+# Agent policy gate (ADR-0031 D2/D9). The PDP is now the live OPA sidecar (ADR-0018):
+# agent.policy.enforcement controls D9 (ADR-0031): `advisory` audits every decision but never
+# blocks (safe to flip to `block` once an OPA sidecar is present in every deploy target).
+# With `block`, AgentPolicyGate blocks DENY calls UNLESS the PDP itself is unavailable, in which
+# case it degrades to advisory + logs a warn (so a dead OPA sidecar does not lock the assistant).
+# Set AGENT_POLICY_ENFORCEMENT=block in the k8s deployment env to enable enforcement in the sandbox.
+agent:
+  # API key for the openai-compat model backend (Groq by default). Empty in the committed config;
+  # supplied at runtime via GROQ_API_KEY (Vault/sealed-secret in a real deploy — never in git).
+  model:
+    openai:
+      api-key: ${GROQ_API_KEY:}
+  policy:
+    enforcement: ${AGENT_POLICY_ENFORCEMENT:advisory}
+    opa:
+      enabled: true
+  # D2 (ADR-0031): per-agent charter limits enforced by CharterRateLimiter. Mirrors the canonical
+  # values in openbank-libs/governance/agents.yaml; code reads from config so no YAML parsing at
+  # runtime. Adding an agent = one entry here + the charter entry in agents.yaml.
+  # Prompt-injection guardrail (ADR-0031 D6, pentest FIND-S4-05 follow-up). `block` stops a
+  # run whose user input matches a known injection phrasing; `advisory` only audits. Tool
+  # results are always wrapped in untrusted-data markers regardless of mode.
+  guardrail:
+    mode: ${AGENT_GUARDRAIL_MODE:block}
+  # Kill switch (ADR-0031 D7). Config baseline: global-enabled false halts every agent; per-agent
+  # `enabled` (charter entry below, default true) halts one. The runtime override is the
+  # agent_kill_switch table flipped via /api/v1/admin/agents (KillSwitchService), which wins.
+  kill-switch:
+    global-enabled: ${AGENT_KILL_SWITCH_GLOBAL_ENABLED:true}
+  # Scheduled compliance-officer oversight sweeps (ADR-0031 D9 phase 2). Off by default —
+  # the sandbox enables it with AGENT_OVERSIGHT_ENABLED=true. Every 30 minutes matches the
+  # charter's runs_per_day: 48 (agents.yaml); the charter rate limiter enforces it on top.
+  oversight:
+    enabled: ${AGENT_OVERSIGHT_ENABLED:false}
+    cron: ${AGENT_OVERSIGHT_CRON:0 0/30 * * * ?}
+  charter:
+    charters:
+      - agent-id: ui-assistant
+        tokens-per-run: 100000
+        runs-per-day: 500
+        # ADR-0080 P0: mirrors tools.allow for ui-assistant in agents.yaml. The gate denies any
+        # capability outside this set in-process (fail-safe, independent of the OPA sidecar), and
+        # only these tools are offered to the model / listed over MCP. AML/sanctions/payments reads
+        # were removed after the pentest drove aml_list_cases via prompt injection (FIND-S4-05).
+        allowed-capabilities:
+          - query.ledger.readonly
+          - query.gl.readonly
+          - query.catalog.readonly
+          - draft.ticket
+      # Runtime projection of the compliance-officer charter in agents.yaml (limits + tools.allow),
+      # deliberately NARROWER: flags.write is omitted for the unattended sweep — every finding goes
+      # through draft.ticket into the HITL queue instead. The charter is the upper bound, the
+      # runtime grant must be a subset (least privilege; the model is never offered the schema).
+      # Unlike the blanket admin bot this agent IS allowed the compliance/payments/disputes reads.
+      - agent-id: compliance-officer
+        tokens-per-run: 200000
+        runs-per-day: 48
+        allowed-capabilities:
+          - query.ledger.readonly
+          - query.gl.readonly
+          - query.catalog.readonly
+          - read.logs
+          - read.governance
+          - draft.ticket
+          - query.compliance.readonly
+          - query.payments.readonly
+          - query.disputes.readonly
+          - query.observability.readonly
+
+mp:
+  messaging:
+    incoming:
+      oversight-events:
+        connector: smallrye-kafka
+        topic: ${AGENT_OVERSIGHT_KAFKA_TOPIC:openbank.oversight-triggers}
+        group.id: agent-oversight-consumer
+        auto.offset.reset: latest
+        enabled: ${AGENT_OVERSIGHT_KAFKA_ENABLED:false}

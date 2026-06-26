@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: MPL-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: core
+primaryDatastore: PostgreSQL
+schemaName: transactions_schema
+dataLineageRole: both
+dataClassification: confidential
+retentionPolicy: 7 years
+evidenceExported: true
+lineage:
+  upstream:
+    - serviceName: fx-service
+      relationType: api
+      description: rates
+    - serviceName: sepa-payment
+      relationType: api
+      description: creates
+    - serviceName: sepa-instant
+      relationType: api
+      description: creates
+    - serviceName: domestic-payment
+      relationType: api
+      description: creates
+    - serviceName: standing-order-service
+      relationType: api
+      description: creates
+    - serviceName: swift-service
+      relationType: api
+      description: creates
+    - serviceName: clearing-service
+      relationType: api
+      description: settles
+    - serviceName: agent-service
+      relationType: api
+      description: MCP tool
+  downstream:
+    - serviceName: account-service
+      relationType: api
+      description: validates
+    - serviceName: ledger-service
+      relationType: api
+      description: posts GL
+    - serviceName: balance-service
+      relationType: api
+      description: updates
+    - serviceName: audit-service
+      relationType: topic
+      description: events
+    - serviceName: notification-service
+      relationType: topic
+      description: events
+schemaLineage:
+  ownedSchemas:
+    - transactions_schema
+  dependentSchemas:
+    - accounts_schema
+    - ledger_schema

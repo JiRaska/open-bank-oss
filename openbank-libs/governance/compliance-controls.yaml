@@ -1,0 +1,214 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+#
+# Compliance control catalogue — the source-of-truth mapping from regulatory
+# obligations to the platform controls that satisfy them, and to the evidence
+# that proves each control. Surfaced read-only in the admin-ui Control Tower
+# (/docs/control-tower) joined with derived signals (security-graph.json).
+#
+# Governance-as-code (ADR-0029): this catalogue is authored, but a control's
+# live STATUS is derived where a `derivedFrom` key points at a machine-readable
+# signal — so the Control Tower shows reality, not an aspirational claim. Honest
+# by construction: controls not yet enforced are marked `audit`/`planned`, never
+# dressed up as `enforced`.
+#
+# status vocabulary:
+#   enforced — control is active and blocking in the running platform
+#   partial  — control exists but is not yet fully enforced everywhere
+#   audit    — control runs in report-only mode (surfaces gaps, does not block)
+#   planned  — designed/decided (ADR) but not yet deployed
+#
+# derivedFrom (optional) — a dotted path into security-graph.json; when present
+# the UI overrides the authored status with the live-derived one:
+#   istio.mtls.strict            (bool)  → enforced / planned
+#   istio.jwt.present            (bool)
+#   istio.l7.defaultDeny         (bool)
+#   network.defaultDeny          (bool)
+#   supplyChain.enforced         (bool)  → enforced / audit
+
+schema: openbank.compliance-controls/v1
+
+# Regulatory frameworks referenced by the controls below (for the legend).
+frameworks:
+  - id: DORA
+    name: "DORA (Digital Operational Resilience Act)"
+  - id: NIS2
+    name: "NIS2 Directive"
+  - id: PSD2
+    name: "PSD2 / SCA-RTS"
+  - id: GDPR
+    name: "GDPR"
+  - id: AMLD
+    name: "AML / 5AMLD"
+  - id: EBA-ICT
+    name: "EBA Guidelines on ICT and security risk management"
+  - id: PCI-DSS
+    name: "PCI DSS"
+
+controls:
+  - id: net-segmentation
+    title: "Network segmentation (default-deny)"
+    category: "Network security"
+    frameworks: [NIS2, DORA]
+    references: ["NIS2 Art. 21", "DORA Art. 9"]
+    evidence: "Pod-scoped ingress allow-lists derived from declared GitOps edges (ADR-0081), every service namespace covered; VPC CNI enforcement via platform-tofu"
+    evidenceSource: "openbank-infra/scripts/gen-network-policies.py"
+    status: partial
+    derivedFrom: network.defaultDeny
+
+  - id: encryption-in-transit
+    title: "Encryption in transit (mTLS everywhere)"
+    category: "Cryptography"
+    frameworks: [NIS2, DORA, PCI-DSS]
+    references: ["NIS2 Art. 21", "DORA Art. 9", "PCI DSS 4.0 Req. 4"]
+    evidence: "Istio STRICT mTLS for all east-west traffic"
+    evidenceSource: "openbank-infra/k8s/base/istio.yaml"
+    status: enforced
+    derivedFrom: istio.mtls.strict
+
+  - id: strong-auth
+    title: "Strong customer / service authentication"
+    category: "Identity & access"
+    frameworks: [PSD2, EBA-ICT]
+    references: ["PSD2 RTS Art. 4", "EBA ICT 3.4.2"]
+    evidence: "Keycloak-issued JWT validated at the mesh edge; sca-service for SCA"
+    evidenceSource: "openbank-infra/k8s/base/istio.yaml"
+    status: enforced
+    derivedFrom: istio.jwt.present
+
+  - id: authz-least-privilege
+    title: "Least-privilege authorization (default-deny)"
+    category: "Identity & access"
+    frameworks: [EBA-ICT, DORA]
+    references: ["EBA ICT 3.4.3", "DORA Art. 9"]
+    evidence: "Istio L7 AuthorizationPolicy default-deny; OPA fine-grained authz (opt-in)"
+    evidenceSource: "openbank-infra/k8s/base/istio.yaml + openbank-infra/opa/"
+    status: partial
+    derivedFrom: istio.l7.defaultDeny
+
+  - id: secrets-management
+    title: "Centralised secrets management (no secrets in git)"
+    category: "Cryptography"
+    frameworks: [DORA, EBA-ICT, PCI-DSS]
+    references: ["DORA Art. 9", "EBA ICT 3.4.4", "PCI DSS 4.0 Req. 3"]
+    evidence: "HashiCorp Vault (KMS auto-unseal) + External Secrets Operator; git holds only references"
+    evidenceSource: "openbank-infra/gitops/apps/vault.yaml"
+    status: enforced
+
+  - id: supply-chain-integrity
+    title: "Software supply-chain integrity (signed images)"
+    category: "Supply chain"
+    frameworks: [DORA, EBA-ICT]
+    references: ["DORA Art. 8-9", "EBA ICT 3.6"]
+    evidence: "Kyverno Cosign image-signature verification + Rekor transparency log"
+    evidenceSource: "openbank-infra/gitops/components/kyverno/verify-images-policy.yaml"
+    status: audit
+    derivedFrom: supplyChain.enforced
+
+  - id: runtime-detection
+    title: "Runtime threat detection (syscall layer)"
+    category: "Runtime security"
+    frameworks: [DORA, NIS2]
+    references: ["DORA Art. 10", "NIS2 Art. 21"]
+    evidence: "Falco eBPF DaemonSet on app + observability nodes; stock ruleset, json events to Loki via Alloy"
+    evidenceSource: "openbank-infra/gitops/apps/falco.yaml"
+    status: audit
+
+  - id: vuln-scanning
+    title: "Vulnerability & secret scanning in CI"
+    category: "Supply chain"
+    frameworks: [DORA, EBA-ICT]
+    references: ["DORA Art. 8", "EBA ICT 3.6.3"]
+    evidence: "Trivy (fs/config), CodeQL (SAST), Gitleaks (secrets) on every PR"
+    evidenceSource: ".github/workflows/security.yml"
+    status: enforced
+
+  - id: image-scanning
+    title: "Container image scanning (deploy gate + registry re-scan)"
+    category: "Supply chain"
+    frameworks: [DORA, EBA-ICT]
+    references: ["DORA Art. 8", "EBA ICT 3.6.3"]
+    evidence: "Trivy scan of pushed images gates the deploy pipeline (fixable CRITICAL blocks); ECR scan-on-push re-evaluates stored images on CVE-db refresh"
+    evidenceSource: ".github/workflows/auto-deploy.yml"
+    status: enforced
+
+  - id: audit-trail
+    title: "Immutable audit trail"
+    category: "Auditability"
+    frameworks: [DORA, EBA-ICT, GDPR]
+    references: ["DORA Art. 12", "EBA ICT 3.4.6", "GDPR Art. 30"]
+    evidence: "audit-service with transactional outbox; tamper-evident event stream"
+    evidenceSource: "openbank-audit-service"
+    status: enforced
+
+  - id: sanctions-screening
+    title: "Synchronous sanctions / AML screening gate"
+    category: "Financial crime"
+    frameworks: [AMLD]
+    references: ["5AMLD Art. 13", "EU 2580/2001"]
+    evidence: "sanctions-service synchronous screening gate in payment execution (ADR-0032)"
+    evidenceSource: "docs/adr/0032-synchronous-sanctions-aml-screening-gate-in-payment-execution.md"
+    status: enforced
+
+  - id: observability
+    title: "Operational monitoring & telemetry"
+    category: "Operational resilience"
+    frameworks: [DORA, EBA-ICT]
+    references: ["DORA Art. 10", "EBA ICT 3.7"]
+    evidence: "Prometheus (metrics) + Tempo (traces) + Loki (logs), unified in Grafana"
+    evidenceSource: "openbank-infra/gitops/apps/kube-prometheus-stack.yaml"
+    status: enforced
+
+  - id: data-classification
+    title: "Data classification & retention"
+    category: "Data protection"
+    frameworks: [GDPR, EBA-ICT]
+    references: ["GDPR Art. 5", "GDPR Art. 25", "EBA ICT 3.4.1"]
+    evidence: "Per-service data classification + retention policy in the governance manifest"
+    evidenceSource: "openbank-admin-ui/src/lib/governance/manifest.ts"
+    status: partial
+
+  - id: threat-modelling
+    title: "Threat modelling for critical services"
+    category: "Secure SDLC"
+    frameworks: [EBA-ICT, DORA]
+    references: ["EBA ICT 3.3", "DORA Art. 8"]
+    evidence: "STRIDE threat models for money-path services (ADR-0030)"
+    evidenceSource: "docs/threat-models/"
+    status: partial
+
+  - id: business-continuity
+    title: "Business continuity & disaster recovery (RTO/RPO)"
+    category: "Operational resilience"
+    frameworks: [DORA]
+    references: ["DORA Art. 11", "DORA Art. 12"]
+    evidence: "Prioritised recovery plan, startup tiers, compliance gate (BCP)"
+    evidenceSource: "openbank-admin-ui /docs/bcp"
+    status: partial
+
+  - id: fraud-monitoring
+    title: "Transaction fraud monitoring (real-time risk scoring)"
+    category: "Financial crime"
+    frameworks: [PSD2, DORA]
+    references: ["PSD2 RTS Art. 3(1)(d)", "PSD2 RTS Art. 18", "EBA/GL/2018/05"]
+    evidence: "openbank-fraud-service skeleton: deterministic versioned rule engine + POST /api/v1/fraud/score verdict contract + scoring audit trail (ADR-0084 Phase 1). Not yet wired into payment surfaces; behavioural velocity aggregates and surface integration are Phase 2."
+    evidenceSource: "openbank-fraud-service/src/main/kotlin/com/openbank/fraud"
+    status: partial
+
+  - id: complaints-handling
+    title: "Complaints handling (statutory deadlines, register, reporting)"
+    category: "Conduct & customer protection"
+    frameworks: [PSD2]
+    references: ["PSD2 Art. 101", "EBA/ESMA JC 2018 35"]
+    evidence: "Complaint aggregate with statutory deadline clock, register projection, root-cause loop (ADR-0085)"
+    evidenceSource: "docs/adr/0085-complaints-handling.md"
+    status: planned
+
+  - id: dast-fuzzing
+    title: "Dynamic API security testing (contract-driven fuzzing)"
+    category: "Secure SDLC"
+    frameworks: [DORA, EBA-ICT]
+    references: ["DORA Art. 25", "EBA ICT 3.6.3"]
+    evidence: "Weekly schemathesis fuzz of service OpenAPI surfaces — no-5xx property + uniform auth enforcement (unauthenticated v1)"
+    evidenceSource: ".github/workflows/api-fuzz.yml"
+    status: audit

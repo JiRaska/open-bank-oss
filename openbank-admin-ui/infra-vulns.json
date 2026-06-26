@@ -1,0 +1,7 @@
+{
+  "schema": "openbank.infra-vulns/v1",
+  "source": "grype (ADR-0077)",
+  "scannedAt": null,
+  "note": "Placeholder. Run build-push-admin-ui.sh --scan-infra to populate with a real Grype scan of the running infra images, or wire the infra-vuln-scanner CronJob (ADR-0077 evolution). Until then the UI honestly shows 'not yet scanned'.",
+  "images": {}
+}

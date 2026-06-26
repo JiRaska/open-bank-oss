@@ -1,0 +1,12 @@
+# SCA (Strong Customer Authentication) domain namespace (ADR-0037). App plane.
+# Holds sca-service — the decoupled device-approval challenge handler (ADR-0021).
+# Internal ClusterIP only; PSD2 flows call it in-cluster from payment services.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sca
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

@@ -1,0 +1,70 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.transaction.infrastructure.messaging
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.transaction.application.port.out.TransactionEventPublisher
+import com.openbank.transaction.domain.event.TransactionCompletedEvent
+import com.openbank.transaction.domain.event.TransactionFailedEvent
+import com.openbank.transaction.domain.event.TransactionInitiatedEvent
+import com.openbank.transaction.domain.event.TransactionSettledEvent
+import com.openbank.transaction.domain.model.Transaction
+import jakarta.enterprise.context.ApplicationScoped
+import java.time.Clock
+import java.time.Instant
+import java.util.UUID
+
+@ApplicationScoped
+class LoggingTransactionEventPublisher(private val objectMapper: ObjectMapper, private val clock: Clock) :
+    TransactionEventPublisher {
+
+    override fun initiatedPayload(transaction: Transaction): String = objectMapper.writeValueAsString(
+        TransactionInitiatedEvent(
+            aggregateId = transaction.id,
+            version = transaction.version,
+            referenceNumber = transaction.referenceNumber,
+            type = transaction.type,
+            sourceAccountId = transaction.sourceAccountId,
+            targetAccountId = transaction.targetAccountId,
+            amount = transaction.amount.amount,
+            currencyCode = transaction.amount.currency.code,
+            initiatedByPartyId = transaction.initiatedByPartyId,
+            scaChallengeId = transaction.scaChallengeId,
+            scaExemption = transaction.scaExemption,
+            rail = transaction.rail ?: com.openbank.libs.domain.payment.PaymentRail.UNKNOWN,
+            instructionType = transaction.instructionType
+                ?: com.openbank.libs.domain.payment.InstructionType.UNKNOWN,
+        ),
+    )
+
+    override fun completedPayload(transaction: Transaction): String = objectMapper.writeValueAsString(
+        TransactionCompletedEvent(
+            aggregateId = transaction.id,
+            version = transaction.version,
+            referenceNumber = transaction.referenceNumber,
+        ),
+    )
+
+    override fun failedPayload(transaction: Transaction, reason: String): String = objectMapper.writeValueAsString(
+        TransactionFailedEvent(
+            aggregateId = transaction.id,
+            version = transaction.version,
+            referenceNumber = transaction.referenceNumber,
+            reason = reason,
+        ),
+    )
+
+    override fun settledPayload(transaction: Transaction, journalId: UUID): String = objectMapper.writeValueAsString(
+        TransactionSettledEvent(
+            aggregateId = transaction.id,
+            version = transaction.version,
+            referenceNumber = transaction.referenceNumber,
+            journalId = journalId,
+            originatingPaymentId = transaction.originatingPaymentId,
+            bookingDate = transaction.bookingDate,
+            settledAt = Instant.now(clock),
+        ),
+    )
+}

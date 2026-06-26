@@ -1,0 +1,84 @@
+# HolmesGPT — "Davis-lite" RCA agent (Dynatrace-parity #4). The one gap pure
+# OSS can't close with infra alone is Dynatrace's causal AI (Davis); HolmesGPT
+# is the closest analogue — an LLM that, given an alert, pulls Prometheus
+# metrics + Kubernetes state (READ-ONLY) and proposes a root cause. It fits the
+# bank's AI-governance posture (ADR-0031 model gateway / ADR-0089): model-
+# agnostic via litellm, uses the same NVIDIA NIM endpoint as copilot-service
+# (meta/llama-3.1-70b-instruct on integrate.api.nvidia.com/v1), reuses the
+# copilot-service NIM key — no new credential.
+#
+# SCOPE: this deploys the HolmesGPT *server* (investigation API). Auto-on-alert
+# RCA IS wired: Alertmanager fans critical alerts to the holmes-rca relay
+# (components/observability/holmes-rca.yaml), which calls /api/chat here and posts
+# the root-cause to Slack + Loki — alongside the unchanged Alertmanager→GoAlert→ntfy
+# paging path. Per-fingerprint dedup (12h) caps re-investigation of the same alert.
+# DAILY_BUDGET is set generously (50) — NVIDIA NIM has no strict daily token cap
+# like Groq's free tier; it degrades to a Grafana pointer only on genuine outages.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: holmesgpt
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://robusta-charts.storage.googleapis.com
+    chart: holmes
+    targetRevision: 0.32.0
+    helm:
+      valuesObject:
+        # NVIDIA NIM (OpenAI-compatible) via litellm. Key projected from the
+        # holmes-llm-secrets ExternalSecret (components/external-secrets/
+        # es-holmes-llm.yaml) which reuses the copilot-service NIM key.
+        # litellm resolves OPENAI_API_KEY + OPENAI_API_BASE for `openai/` models.
+        additionalEnvVars:
+          - name: OPENAI_API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: holmes-llm-secrets
+                key: NVIDIA_API_KEY
+          - name: OPENAI_API_BASE
+            value: https://integrate.api.nvidia.com/v1
+          - name: MODEL
+            value: openai/meta/llama-3.1-8b-instruct
+        modelList:
+          nvidia-llama-3.1-8b:
+            model: openai/meta/llama-3.1-8b-instruct
+            api_base: https://integrate.api.nvidia.com/v1
+            temperature: 0
+        # Read-only toolsets: cluster state + the in-cluster Prometheus. Grafana/
+        # Loki/Tempo toolsets are an easy follow-on once a Grafana SA token is
+        # provisioned; kept out here to avoid a new secret in the first cut.
+        toolsets:
+          kubernetes/core:
+            enabled: true
+          prometheus/metrics:
+            enabled: true
+            config:
+              prometheus_url: http://kube-prometheus-stack-prometheus.observability.svc:9090
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        nodeSelector:
+          workload: observability
+        tolerations:
+          - key: workload
+            operator: Equal
+            value: observability
+            effect: NoSchedule
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

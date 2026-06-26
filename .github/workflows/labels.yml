@@ -1,0 +1,105 @@
+name: Label sync
+
+# Applies .github/labels.yml to the repository's label set (governance-as-code, ADR-0029:
+# derive from code -> enforce in CI). Runs post-merge when the manifest changes, or on
+# demand. The sync is ADDITIVE: it creates-or-updates every managed label and never
+# deletes — pruning a label is destructive to issue history and stays a manual decision.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/labels.yml"
+      - ".github/workflows/labels.yml"
+  workflow_dispatch:
+
+# GITHUB_TOKEN only — labels are repo metadata under the `issues` scope. No Vault, no
+# cloud credentials, so this does NOT belong on the deploy pool (rules.yaml: ci_runners).
+# An explicit permissions block is exhaustive (drops all defaults), so `contents: read`
+# must be stated for actions/checkout, alongside the `issues: write` the sync needs.
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: label-sync
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    name: Sync labels
+    # Sandbox maintenance pool, same as the scans (ADR-0027 phase 0 / ADR-0040). This job
+    # deliberately depends on only ONE host binary — `curl` — which is present on every host
+    # in the pool. The earlier `gh`-based design was abandoned: `gh` is NOT uniformly
+    # available across the heterogeneous (darwin/linux x amd64/arm64) self-hosted fleet — it
+    # is absent on the Linux sandbox hosts and, on the macOS hosts, lives on a Homebrew PATH
+    # the runner service does not expose. So we talk to the GitHub REST API directly with
+    # `curl` and parse the manifest with a version-pinned `yq` fetched into RUNNER_TEMP.
+    runs-on: openbank-batch
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Provision yq
+        env:
+          YQ_VERSION: v4.44.6
+        run: |
+          set -euo pipefail
+          if command -v yq >/dev/null 2>&1; then
+            echo "yq already on PATH: $(command -v yq) ($(yq --version))"
+            exit 0
+          fi
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"   # darwin | linux
+          case "$(uname -m)" in
+            x86_64|amd64)  arch=amd64 ;;
+            arm64|aarch64) arch=arm64 ;;
+            *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;;
+          esac
+          url="https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_${os}_${arch}"
+          echo "==> fetching ${url}"
+          curl -fsSL --retry 3 -o "${RUNNER_TEMP}/yq" "${url}"
+          chmod +x "${RUNNER_TEMP}/yq"
+          echo "${RUNNER_TEMP}" >> "${GITHUB_PATH}"
+          "${RUNNER_TEMP}/yq" --version
+
+      - name: Apply labels.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GH_REPO}/labels"
+          auth=(-H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" -H "Content-Type: application/json")
+
+          # Percent-encode a label name for use in the REST path (names carry ':' etc.).
+          urlencode() {
+            local s="$1" o="" c i
+            for (( i=0; i<${#s}; i++ )); do
+              c="${s:i:1}"
+              case "$c" in
+                [a-zA-Z0-9.~_-]) o+="$c" ;;
+                *) printf -v c '%%%02X' "'$c"; o+="$c" ;;
+              esac
+            done
+            printf '%s' "$o"
+          }
+
+          # Additive create-or-update, never delete (ADR-0052): PATCH the label; if it does
+          # not exist yet (404), POST to create it. Any other status fails the job.
+          n=$(yq '.labels | length' .github/labels.yml)
+          for i in $(seq 0 $((n - 1))); do
+            name=$(yq ".labels[$i].name" .github/labels.yml)
+            enc=$(urlencode "$name")
+            post=$(yq -o=json -I=0 ".labels[$i] | {\"name\": .name, \"color\": .color, \"description\": (.description // \"\")}" .github/labels.yml)
+            patch=$(yq -o=json -I=0 ".labels[$i] | {\"new_name\": .name, \"color\": .color, \"description\": (.description // \"\")}" .github/labels.yml)
+            echo "==> ${name}"
+            code=$(curl -sS -o /dev/null -w '%{http_code}' -X PATCH "${auth[@]}" "${api}/${enc}" -d "${patch}")
+            if [ "${code}" = "404" ]; then
+              code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "${auth[@]}" "${api}" -d "${post}")
+            fi
+            case "${code}" in
+              200|201) echo "    ok (${code})" ;;
+              *) echo "    FAILED (${code}) for ${name}" >&2; exit 1 ;;
+            esac
+          done

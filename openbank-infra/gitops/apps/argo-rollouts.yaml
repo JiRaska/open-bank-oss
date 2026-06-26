@@ -1,0 +1,131 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors.
+#
+# Argo Rollouts controller — progressive delivery for money-path services (ADR-0098 Phase 1).
+#
+# Phase 1 scope: controller + CRDs installed, Prometheus metrics scraped,
+# dashboard reachable at argo-rollouts-dashboard.argo-rollouts.svc:3100 (ClusterIP —
+# access via `kubectl argo rollouts dashboard` or port-forward).
+# Phase 2: ledger / transaction / account migrated from Deployment → Rollout (separate PRs).
+# Phase 3: remaining ten money-path services migrated (separate PRs, one per service).
+#
+# No service mesh required: traffic splitting uses dual Kubernetes Services
+# (stable + canary) with pod-selector manipulation — native k8s, no Istio/Linkerd.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argo-rollouts
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://argoproj.github.io/argo-helm
+    chart: argo-rollouts
+    # Pin to a specific chart version — update to latest stable before each upgrade.
+    # Chart 2.41.0 ships Argo Rollouts controller v1.9.0 (skip v1.8.x — no
+    # breaking changes for our dual-Service canary setup).
+    targetRevision: 2.41.0
+    helm:
+      releaseName: argo-rollouts
+      valuesObject:
+        # Single replica is sufficient for the sandbox — scale to 2 for HA in prod.
+        replicaCount: 1
+
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
+
+        # Prometheus metrics on :8090/metrics — scraped by the ServiceMonitor below.
+        # The controller emits deployment outcome events (promoted / aborted) that
+        # feed the ADR-0061 CFR / MTTR recording rules (Phase 2 follow-up).
+        metrics:
+          enabled: true
+          serviceMonitor:
+            enabled: true
+            # Must match the label selector of the kube-prometheus-stack Prometheus
+            # instance (scraping selector: release=kube-prometheus-stack).
+            additionalLabels:
+              release: kube-prometheus-stack
+
+        # Dashboard: internal-only web UI at :3100 — no external Ingress (ADR-0056).
+        # Operators access via: kubectl argo rollouts dashboard
+        # Or: kubectl port-forward svc/argo-rollouts-dashboard 3100:3100 -n argo-rollouts
+        dashboard:
+          enabled: true
+          service:
+            type: ClusterIP
+            port: 3100
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
+          # podSecurityContext required: namespace enforces pod-security restricted
+          # which requires seccompProfile at pod OR container level.
+          podSecurityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containerSecurityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+
+        # Install CRDs: Rollout, AnalysisTemplate, ClusterAnalysisTemplate,
+        # AnalysisRun, Experiment, ClusterExperiment.
+        installCRDs: true
+
+        # Restricted PSS compliance — namespace is enforced: restricted.
+        containerSecurityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65532
+
+        podSecurityContext:
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+
+        # Lean sandbox scheduling: same pattern as Falco/Alloy/VPA.
+        # Karpenter will provision a node if capacity is unavailable.
+        podAnnotations:
+          cluster-autoscaler.kubernetes.io/safe-to-evict: "true"
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argo-rollouts
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    managedNamespaceMetadata:
+      labels:
+        openbank.io/plane: platform
+        pod-security.kubernetes.io/enforce: restricted
+        pod-security.kubernetes.io/audit: restricted
+        pod-security.kubernetes.io/warn: restricted
+    retry:
+      limit: 5
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 3m

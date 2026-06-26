@@ -1,0 +1,698 @@
+# Auto-deploy pipeline (ADR-0029 Layer B — continuous delivery axis).
+#
+# After every merge to main that changes service source, this workflow:
+#   1. Detects which Gradle modules changed (same logic as services-ci.yml).
+#   2. Builds a fast-jar for each changed service (Gradle build cache makes this
+#      near-instant when services-ci.yml already ran on the same commit).
+#   3. Bakes a linux/arm64 Docker image and pushes it to ECR with the tag
+#      `sandbox-<short-SHA>` — matching the convention used by build-push-service.sh.
+#   4. Rewrites the image: line in each service's gitops manifest.
+#   5. Opens a PR (`chore/gitops-auto-deploy-<sha>`) and enables auto-merge, so the
+#      manifest update lands on main as soon as CI is green.
+#
+# The PR is opened by github-actions[bot], which satisfies the issue-hygiene exemption
+# (bot PR → no Linked issues required) and GitHub treats the API-created commit as
+# verified, so the "require signed commits" ruleset is satisfied on merge.
+#
+# Security notes:
+#  - contents:write + pull-requests:write scoped to this workflow only.
+#  - ECR push uses IRSA (the ARC runner pod's IAM role) — no long-lived credentials.
+#  - The gitops change is a PR, not a direct push to main, so the normal review/CI
+#    gate (Validate manifests, Gitleaks, Trivy) still runs before the deploy lands.
+
+name: Auto deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "openbank-*/src/main/**"
+      - "openbank-libs/**"
+      # Governance catalogs are data for CI checks + admin-ui, not a compile
+      # input — an ADR/control edit must not trigger a 33-image fleet rebuild.
+      - "!openbank-libs/governance/**"
+      - "build-logic/**"
+  # Manual re-trigger: rebuild + push + gitops-PR on demand. Useful to recover
+  # after a failed auto-deploy run left the gitops image tags stale, without
+  # waiting for the next service-source merge.
+  workflow_dispatch:
+    inputs:
+      services:
+        description: "Space-separated module(s) to rebuild, e.g. 'openbank-party-service'. Blank = full deployable fleet."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
+
+concurrency:
+  # One deploy pipeline at a time — a second push while a deploy PR is open would
+  # update the same gitops lines, causing a merge conflict. Cancel the in-flight run
+  # and let the newer commit win.
+  group: auto-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── 1. Detect which service modules actually changed ─────────────────────────
+  changes:
+    name: Detect changed services
+    runs-on: openbank-build
+    timeout-minutes: 5
+    outputs:
+      services: ${{ steps.detect.outputs.services }}
+      any: ${{ steps.detect.outputs.any }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        run: |
+          set -euo pipefail
+          # Full fleet — same list as services-ci.yml (openbank-libs excluded: it has
+          # no Dockerfile, only its consumers need to be rebuilt when it changes).
+          ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent'
+
+          # Manual dispatch: rebuild the requested module(s), or the full deployable
+          # fleet when no input is given. Only services that actually carry a gitops
+          # manifest (an image:sandbox- pin) are eligible — the same filter the
+          # per-push path applies below. Lets ops recover stale image tags on demand.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            CANDIDATES="${{ github.event.inputs.services }}"
+            CANDIDATES="${CANDIDATES:-$ALL_SERVICES}"
+            DEPLOYABLE=()
+            for svc in $CANDIDATES; do
+              if grep -rlq "${svc}:sandbox-" openbank-infra/gitops/components 2>/dev/null; then
+                DEPLOYABLE+=("$svc")
+              else
+                echo "  skip ${svc} — no gitops manifest found"
+              fi
+            done
+            if [ "${#DEPLOYABLE[@]}" -eq 0 ]; then
+              echo "No deployable services to build."
+              echo "services=[]" >> "$GITHUB_OUTPUT"
+              echo "any=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            SERVICES_JSON="$(printf '%s\n' "${DEPLOYABLE[@]}" | jq -R . | jq -sc .)"
+            echo "workflow_dispatch → building: $SERVICES_JSON"
+            echo "services=$SERVICES_JSON" >> "$GITHUB_OUTPUT"
+            echo "any=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Which files changed in this push (compare to the parent commit)?
+          CHANGED_FILES="$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only HEAD 2>/dev/null)"
+
+          # Shared paths that affect every service. Governance catalogs
+          # (openbank-libs/governance/) are excluded — they are data for CI
+          # checks + admin-ui, not a compile input, so a mixed push touching a
+          # control catalog and one service must rebuild ONE service, not 33.
+          # NB: here-string, not `echo | grep -q` — under pipefail a -q early
+          # exit SIGPIPEs the echo and the match is racily mis-read as false
+          # (same footgun documented in services-ci.yml).
+          CODE_FILES="$(grep -vE '^openbank-libs/governance/' <<< "$CHANGED_FILES" || true)"
+          SHARED_CHANGED=0
+          grep -qE '^(openbank-libs|build-logic|gradle/|settings\.gradle\.kts|openbank-libs/gradle/)' <<< "$CODE_FILES" && SHARED_CHANGED=1 || true
+
+          if [ "$SHARED_CHANGED" = "1" ]; then
+            echo "Shared dependency changed → rebuilding all services."
+            SERVICES_JSON="$(echo "$ALL_SERVICES" | tr ' ' '\n' | jq -R . | jq -sc .)"
+          else
+            # Pick only services whose src/main or build file changed.
+            SERVICES=()
+            for svc in $ALL_SERVICES; do
+              if grep -qE "^${svc}/(src/main|build\.gradle\.kts)" <<< "$CHANGED_FILES"; then
+                # Only deploy services that have a gitops manifest (not lending, pid, etc.).
+                if grep -rlq "${svc}:sandbox-" openbank-infra/gitops/components 2>/dev/null; then
+                  SERVICES+=("$svc")
+                else
+                  echo "  skip ${svc} — no gitops manifest found"
+                fi
+              fi
+            done
+
+            if [ "${#SERVICES[@]}" -eq 0 ]; then
+              echo "No deployable services changed."
+              echo "services=[]" >> "$GITHUB_OUTPUT"
+              echo "any=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            SERVICES_JSON="$(printf '%s\n' "${SERVICES[@]}" | jq -R . | jq -sc .)"
+          fi
+
+          echo "Services to deploy: $SERVICES_JSON"
+          echo "services=$SERVICES_JSON" >> "$GITHUB_OUTPUT"
+          echo "any=true" >> "$GITHUB_OUTPUT"
+
+  # ── 2. Build fast-jars, bake images, push to ECR ─────────────────────────────
+  build-push:
+    name: Build + push
+    needs: changes
+    if: needs.changes.outputs.any == 'true'
+    runs-on: openbank-build
+    timeout-minutes: 90
+    env:
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      ECR_REGISTRY: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
+      # amazon-ecr-login (+ trivy's ECR pull) resolve the region from the
+      # environment. The ARC runner now authenticates via EKS Pod Identity, which
+      # — unlike the old IRSA webhook — does NOT inject AWS_REGION/AWS_DEFAULT_REGION
+      # into the pod. Without these the ECR login step fails "Region is missing",
+      # which is why every post-2026-06-12 main merge built no image and the gitops
+      # tags went stale (party/account-service stuck pre-#894). Mirrors _service-ci.yml.
+      AWS_REGION: eu-north-1
+      AWS_DEFAULT_REGION: eu-north-1
+    outputs:
+      # JSON map { "svc": "tag", … } written to $GITHUB_OUTPUT
+      image_tags: ${{ steps.collect.outputs.image_tags }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            25
+
+      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          cache-read-only: false   # deploy jobs update the cache too
+
+      # AWS auth via GitHub OIDC — webhook-independent. The EKS Pod Identity webhook
+      # (failurePolicy: Ignore, 10s timeout) intermittently fails to inject the credential env
+      # into a freshly-scheduled ARC runner pod, leaving it with NO AWS creds, so ECR login fails
+      # "Could not load credentials from any providers". GitHub OIDC mints a token this job
+      # exchanges for the build runner role directly via STS (the role trusts
+      # token.actions.githubusercontent.com for repo:JiRaska/open-bank:*) — no per-pod webhook
+      # dependency, deterministic. configure-aws-credentials exports the creds to the job env.
+      - name: Configure AWS credentials (GitHub OIDC)
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b # v5.0.0
+        with:
+          role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
+          aws-region: eu-north-1
+
+      - name: Clear stale ECR credentials (macOS keychain)
+        if: runner.os == 'macOS'
+        run: |
+          docker logout "$ECR_REGISTRY" 2>/dev/null || true
+          # docker logout clears ~/.docker/config.json but leaves the osxkeychain entry;
+          # the subsequent docker login then fails with "already exists in the keychain".
+          security delete-internet-password -s "$ECR_REGISTRY" 2>/dev/null || true
+
+      - name: ECR login
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+
+      - name: Build fast-jars (parallel)
+        id: build
+        run: |
+          set -euo pipefail
+          SERVICES='${{ needs.changes.outputs.services }}'
+          SHA="${GITHUB_SHA::8}"
+          TAG="sandbox-${SHA}"
+          FAILED=0
+
+          # Build all services in a SINGLE Gradle invocation with --parallel.
+          # Gradle manages its internal dependency graph: shared tasks
+          # (openbank-libs:compileKotlin, :jandex, :jar) execute exactly ONCE
+          # before any service-specific tasks, completely eliminating the race
+          # conditions that caused jandex/ZipException/Kotlin-daemon failures
+          # when multiple concurrent `./gradlew` processes wrote to the same
+          # openbank-libs/build/ directory or Gradle build-cache entries.
+          # --max-workers=4 limits JVM workers to fit the 16 GB Docker budget.
+          # --continue reports all failures before exiting non-zero.
+          TASKS=()
+          for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+            TASKS+=(":${svc}:quarkusBuild")
+          done
+
+          echo "==> Building ${#TASKS[@]} service(s) via single Gradle invocation (--parallel --max-workers=4)"
+          if ! ./gradlew "${TASKS[@]}" \
+                -Dquarkus.package.jar.type=fast-jar \
+                --parallel --max-workers=4 \
+                --build-cache --console=plain \
+                --continue 2>&1; then
+            FAILED=1
+          fi
+
+          [ "$FAILED" -eq 0 ] || { echo "One or more builds failed"; exit 1; }
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Docker push (parallel)
+        id: push
+        run: |
+          set -euo pipefail
+          SERVICES='${{ needs.changes.outputs.services }}'
+          TAG="${{ steps.build.outputs.tag }}"
+          FAILED=0
+
+          docker buildx create --use --name ob-deploy-builder \
+            --driver docker-container >/dev/null 2>&1 || \
+            docker buildx use ob-deploy-builder
+
+          push_one() {
+            local svc="$1"
+            local qa="${svc}/build/quarkus-app"
+            [ -f "${qa}/quarkus-run.jar" ] || \
+              { echo "[${svc}] quarkus-run.jar not found — skip push"; return 0; }
+
+            local port
+            port="$(grep -oE 'EXPOSE[[:space:]]+[0-9]+' "${svc}/Dockerfile" 2>/dev/null \
+              | grep -oE '[0-9]+' | head -1 || echo "8080")"
+
+            local image="${ECR_REGISTRY}/${svc}:${TAG}"
+            local ctx; ctx="$(mktemp -d)"
+            trap 'rm -rf "$ctx"' RETURN
+            cp -r "$qa" "${ctx}/quarkus-app"
+            # Gradle sets quarkus-app/lib/ files to 600 (owner-read-only). The
+            # container runs as non-root user `openbank` → ClassNotFoundException
+            # (QuarkusEntryPoint not loadable). Fix: PR #2141 pattern.
+            chmod -R a+r "${ctx}/quarkus-app"
+
+            # Dockerfile template lives in .github/workflows/Dockerfile.deploy to
+            # keep the heredoc out of the YAML (yamllint syntax-checks block scalars
+            # and treats zero-indented heredoc lines as invalid YAML nodes).
+            cp "${GITHUB_WORKSPACE}/.github/workflows/Dockerfile.deploy" \
+              "${ctx}/Dockerfile"
+            # EXPOSE is written dynamically after the static COPY/ENTRYPOINT lines.
+            echo "EXPOSE ${port}" >> "${ctx}/Dockerfile"
+
+            echo "==> [${svc}] docker push → ${image}"
+            docker buildx build \
+              --platform linux/arm64 \
+              --provenance=false \
+              -t "${image}" \
+              --push \
+              "${ctx}" 2>&1 | sed "s/^/[${svc}] /" || return 1
+          }
+
+          MAX_PARALLEL=3   # limit concurrent buildx to avoid OOM on 16GB Docker host
+          RUNNING=0; PIDS=(); SVCS=()
+
+          for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+            push_one "$svc" &
+            PIDS+=($!); SVCS+=("$svc"); RUNNING=$(( RUNNING + 1 ))
+            if [ "$RUNNING" -ge "$MAX_PARALLEL" ]; then
+              wait "${PIDS[0]}" || { echo "FAIL: ${SVCS[0]}"; FAILED=1; }
+              PIDS=("${PIDS[@]:1}"); SVCS=("${SVCS[@]:1}"); RUNNING=$(( RUNNING - 1 ))
+            fi
+          done
+          for pid in "${PIDS[@]}"; do wait "$pid" || FAILED=1; done
+
+          [ "$FAILED" -eq 0 ] || { echo "One or more docker pushes failed"; exit 1; }
+
+      # Sign every pushed image with the AWS KMS cosign key (ADR-0029/0030). kyverno's
+      # verify-openbank-image-signatures runs Enforce, so an UNSIGNED image is rejected
+      # at admission ("no signatures found") and ArgoCD stays OutOfSync — the build job
+      # used to push without signing, which is the other half of why deploys never landed.
+      # cosign v2 is pinned on purpose: kyverno 3.2.6 finds only the legacy sha256-<digest>.sig
+      # tag scheme; cosign v3 writes OCI-referrer sigs it cannot read (see #770).
+      - name: Sign images (cosign v2 + KMS)
+        run: |
+          set -uo pipefail
+          SERVICES='${{ needs.changes.outputs.services }}'
+          TAG="${{ steps.build.outputs.tag }}"
+          COSIGN_KEY="awskms:///alias/openbank-cosign-signing"
+          COSIGN_VERSION="v2.4.3"
+          arch="$(uname -m)"; case "$arch" in aarch64) arch=arm64 ;; x86_64) arch=amd64 ;; esac
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"; case "$os" in darwin) os=darwin ;; *) os=linux ;; esac
+          bin="$(command -v cosign || true)"
+          if ! { [ -n "$bin" ] && cosign version 2>/dev/null | grep -Eq 'GitVersion:[[:space:]]*v2\.'; }; then
+            bin="${RUNNER_TEMP}/cosign2"
+            curl -fsSL -o "$bin" "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-${os}-${arch}"
+            chmod +x "$bin"
+          fi
+          rc=0
+          for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+            img="${ECR_REGISTRY}/${svc}:${TAG}"
+            echo "==> cosign sign ${img}"
+            COSIGN_YES=true "$bin" sign --key "$COSIGN_KEY" "$img" || { echo "::error::cosign sign failed for ${svc}"; rc=1; }
+          done
+          [ "$rc" -eq 0 ] || { echo "One or more image signatures failed — kyverno would reject these"; exit 1; }
+
+      # Scan the images that were actually pushed — the trivy fs scan in
+      # security.yml covers lockfiles in the repo, NOT the packaged jars + OS
+      # layer of the runtime image (base-image CVEs slip through it). Gate on
+      # fixable CRITICALs: vuln_management SLA is 7 days for critical, so
+      # deploying a known-fixable CRITICAL is pointless churn. HIGH is reported
+      # advisory. A failed gate fails this job → the gitops PR never opens →
+      # the vulnerable tag is never referenced by a manifest.
+      - name: Install Trivy
+        run: |
+          # The ARC runner image already bakes trivy (arc-runners.tf toolchain), so use
+          # it and skip the download — the install.sh curl from raw.githubusercontent.com
+          # is unauthenticated and rate-limited on the shared runners (it was failing the
+          # job at this step once the credentials fix let the pipeline get this far).
+          if command -v trivy >/dev/null 2>&1; then
+            echo "Using pre-baked trivy: $(trivy --version 2>/dev/null | head -1)"; exit 0
+          fi
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin v0.63.0
+
+      - name: Prune Docker build cache before scan
+        run: |
+          # Remove buildx builder, stopped containers, dangling images, and build cache
+          # accumulated during the push phase. Without this, the node accumulates multiple
+          # ARM64 image layers + buildx volumes and hits DiskPressure or OOM during the
+          # Trivy scan when it pulls the ECR images again for analysis. The pushed images
+          # are already in ECR; we only need disk space for Trivy to re-pull and scan them.
+          docker buildx rm ob-deploy-builder 2>/dev/null || true
+          docker system prune -f --volumes 2>/dev/null || true
+          df -h /
+
+      - name: Trivy image scan (gate fixable CRITICAL, report HIGH)
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          SERVICES='${{ needs.changes.outputs.services }}'
+          TAG="${{ steps.build.outputs.tag }}"
+          FAILED=0
+
+          for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+            # Mirror push_one's skip: no fast-jar → nothing was pushed.
+            [ -f "${svc}/build/quarkus-app/quarkus-run.jar" ] || continue
+            image="${ECR_REGISTRY}/${svc}:${TAG}"
+
+            echo "==> [${svc}] trivy image ${image}"
+            # Advisory report — full HIGH+CRITICAL table in the job log.
+            # `|| true`: --exit-code 0 covers vuln-found, but trivy still exits
+            # non-zero on infra errors; blocking is the gate run's job below,
+            # which reports them cleanly instead of an opaque set -e abort.
+            trivy image --scanners vuln --severity CRITICAL,HIGH \
+              --ignore-unfixed --format table --exit-code 0 "${image}" \
+              2>&1 | sed "s/^/[${svc}] /" || true
+
+            # Gate — fixable CRITICALs (or a scan error) block the deploy.
+            if ! trivy image --scanners vuln --severity CRITICAL \
+                 --ignore-unfixed --quiet --exit-code 1 "${image}" \
+                 2>&1 | sed "s/^/[${svc}] /"; then
+              echo "[${svc}] fixable CRITICAL CVEs (or scan error) — blocking deploy"
+              FAILED=1
+            fi
+          done
+
+          [ "$FAILED" -eq 0 ] || { echo "Image scan gate failed"; exit 1; }
+
+      # Deploy-time provenance: attach a signed CycloneDX SBOM ATTESTATION to each pushed
+      # image (ADR-0030 D4), complementing the release-time bundle (release-please.yml) and
+      # the image SIGNATURE above. trivy generates the image SBOM (OS layer + jars, which a
+      # source scan misses); cosign attest binds it to the image digest with the same KMS key.
+      # Non-fatal: kyverno enforces the signature, not (yet) the attestation, so an attest
+      # hiccup must never block a deploy.
+      - name: Attest image SBOMs (cosign + KMS)
+        timeout-minutes: 15
+        # Strictly non-fatal: kyverno enforces the image signature, not (yet) the
+        # attestation, so nothing here — not even a failed cosign download — may block a
+        # deploy. continue-on-error guarantees the deploy proceeds regardless.
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          SERVICES='${{ needs.changes.outputs.services }}'
+          TAG="${{ steps.build.outputs.tag }}"
+          COSIGN_KEY="awskms:///alias/openbank-cosign-signing"
+          COSIGN_VERSION="v2.4.3"
+          arch="$(uname -m)"; case "$arch" in aarch64) arch=arm64 ;; x86_64) arch=amd64 ;; esac
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"; case "$os" in darwin) os=darwin ;; *) os=linux ;; esac
+          bin="$(command -v cosign || true)"
+          if ! { [ -n "$bin" ] && cosign version 2>/dev/null | grep -Eq 'GitVersion:[[:space:]]*v2\.'; }; then
+            bin="${RUNNER_TEMP}/cosign2"
+            curl -fsSL -o "$bin" "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-${os}-${arch}"
+            chmod +x "$bin"
+          fi
+          for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+            [ -f "${svc}/build/quarkus-app/quarkus-run.jar" ] || continue
+            image="${ECR_REGISTRY}/${svc}:${TAG}"
+            sbom="${RUNNER_TEMP}/${svc}.cdx.json"
+            if ! trivy image --format cyclonedx --output "$sbom" "$image" 2>/dev/null; then
+              echo "::warning::[${svc}] trivy image SBOM generation failed — skipping attestation"; continue
+            fi
+            echo "==> cosign attest (cyclonedx) ${image}"
+            COSIGN_YES=true "$bin" attest --key "$COSIGN_KEY" --type cyclonedx --predicate "$sbom" "$image" \
+              || echo "::warning::[${svc}] cosign attest failed"
+          done
+
+      - name: Collect image tags
+        id: collect
+        run: |
+          set -euo pipefail
+          SERVICES='${{ needs.changes.outputs.services }}'
+          TAG="${{ steps.build.outputs.tag }}"
+
+          # Emit { "openbank-account-service": "sandbox-abc1234", … }
+          # -c (compact) is required: a pretty-printed (multi-line) jq value breaks the
+          # `key=value` $GITHUB_OUTPUT format ("Invalid format") — this step never ran
+          # before the credentials fix let the pipeline reach it.
+          MAP="{}"
+          for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+            MAP="$(echo "$MAP" | jq -c --arg k "$svc" --arg v "$TAG" '. + {($k): $v}')"
+          done
+          echo "image_tags=${MAP}" >> "$GITHUB_OUTPUT"
+
+  # ── 2b. Contract gate: can-i-deploy (ADR-0092) ───────────────────────────────
+  # For each changed service, ask the Pact Broker whether the version about to ship
+  # has verified contracts before the gitops image-tag PR opens — the same
+  # fail-closed shape as the Trivy image-scan gate, once flipped to enforce.
+  #
+  # ENFORCE (ADR-0092): non-zero exit from can-i-deploy blocks the gitops-pr job.
+  # Broker has been stable since ADR-0092; consumer pacts + provider verification
+  # results land via _service-ci on the same main SHA (--retry-while-unknown covers
+  # the race). Services with no contracts are trivially deployable (404 probe below).
+  can-i-deploy:
+    name: can-i-deploy
+    needs: [changes, build-push]
+    if: needs.changes.outputs.any == 'true'
+    runs-on: openbank-build
+    timeout-minutes: 10
+    env:
+      PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
+      PACT_BROKER_USERNAME: ${{ vars.PACT_BROKER_USERNAME }}
+      PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
+      PACT_STANDALONE_VERSION: "2.6.2"
+    steps:
+      # The pact CLI runs natively on the ARC runner pod (which resolves the broker's
+      # cluster DNS); the pact-cli docker image would run in dind and could not. The
+      # standalone ships a linux arm64 build for the Graviton runner.
+      - name: can-i-deploy (per changed service)
+        if: ${{ vars.PACT_BROKER_URL != '' }}
+        run: |
+          set -uo pipefail
+          SERVICES='${{ needs.changes.outputs.services }}'
+          arch="$(uname -m)"; case "$arch" in aarch64|arm64) a=arm64 ;; *) a=x86_64 ;; esac
+          tgz="pact-${PACT_STANDALONE_VERSION}-linux-${a}.tar.gz"
+          url="https://github.com/pact-foundation/pact-ruby-standalone/releases/download/v${PACT_STANDALONE_VERSION}/${tgz}"
+          if ! curl -fsSL -o /tmp/pact.tgz "$url"; then
+            echo "::error::could not download pact standalone ($url) — cannot run contract gate"
+            exit 1
+          fi
+          mkdir -p /tmp/pact && tar -xzf /tmp/pact.tgz -C /tmp/pact
+          CLI="/tmp/pact/pact/bin/pact-broker"
+          # Ensure sandbox environment is registered — idempotent, 409 = already exists.
+          "$CLI" create-environment --name sandbox --display-name Sandbox --no-production \
+            --broker-base-url "$PACT_BROKER_URL" \
+            --broker-username "$PACT_BROKER_USERNAME" \
+            --broker-password "$PACT_BROKER_PASSWORD" \
+            && echo "  ✓ sandbox environment ready" \
+            || echo "::warning::could not ensure sandbox environment (may already exist — continuing)"
+          rc=0
+          for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+            # A service that has never published a contract is not a Pacticipant in the
+            # broker; `can-i-deploy` then errors with "Pacticipant <svc> not found" (matrix
+            # 400) and the verdict reads as "NOT deployable". But a service with NO contracts
+            # cannot break any consumer/provider expectation, so it is trivially deployable.
+            # Probe the broker first: a 404 on /pacticipants/<svc> means "no contracts" → skip
+            # the (erroring) matrix query and treat it as deployable. (pid-service hit exactly
+            # this — it has no pacts; ADR-0092.)
+            code="$(curl -s -o /dev/null -w '%{http_code}' \
+              -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
+              "${PACT_BROKER_URL}/pacticipants/${svc}" || echo 000)"
+            if [ "$code" = "404" ]; then
+              echo "  ✓ ${svc} has no contracts in the broker (not a Pacticipant) — deployable"
+              continue
+            fi
+            # --latest main: ask "can the latest version tagged 'main' go to sandbox?"
+            # _service-ci.yml publishes every version with tags:[$branch] so the broker
+            # index has a 'main'-tagged entry for each service's last main-branch build.
+            # --version $SHA would error ("No pacts or verifications") when path-scoped CI
+            # skipped this service on the triggering commit (ADR-0092).
+            # record-deployment (gitops-pr job) still pins the exact $GITHUB_SHA so the
+            # broker tracks what is actually deployed.
+            echo "==> can-i-deploy ${svc} (latest/main) → environment sandbox"
+            if "$CLI" can-i-deploy \
+                 --pacticipant "$svc" --latest main \
+                 --to-environment sandbox \
+                 --broker-base-url "$PACT_BROKER_URL" \
+                 --broker-username "$PACT_BROKER_USERNAME" \
+                 --broker-password "$PACT_BROKER_PASSWORD" \
+                 --retry-while-unknown 3 --retry-interval 5; then
+              echo "  ✓ ${svc} deployable"
+            else
+              echo "::error::can-i-deploy: ${svc} NOT deployable — deployment blocked (ADR-0092)"
+              rc=1
+            fi
+          done
+          # Enforce: non-zero rc blocks the deploy (ADR-0092).
+          exit $rc
+
+  # ── 3. Update gitops manifests + open auto-merge PR ──────────────────────────
+  gitops-pr:
+    name: Gitops PR
+    needs: [changes, build-push, can-i-deploy]
+    if: needs.changes.outputs.any == 'true'
+    runs-on: openbank-build
+    timeout-minutes: 10
+    env:
+      ECR_REGISTRY: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
+    steps:
+      # persist-credentials: false — otherwise actions/checkout leaves its own
+      # Authorization extraheader in the git config AND peter-evans/create-pull-request
+      # adds the token header too, so the branch push sends two Authorization headers
+      # ("Duplicate header: Authorization" → git 400) and the gitops PR never opens.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Rewrite image tags in gitops manifests
+        id: rewrite
+        run: |
+          set -euo pipefail
+          IMAGE_TAGS='${{ needs.build-push.outputs.image_tags }}'
+          UPDATED=()
+
+          for svc in $(echo "$IMAGE_TAGS" | jq -r 'keys[]'); do
+            tag="$(echo "$IMAGE_TAGS" | jq -r --arg k "$svc" '.[$k]')"
+            image="${ECR_REGISTRY}/${svc}"
+
+            # Find the gitops manifest that references this service's ECR image.
+            manifests="$(grep -rl "${image}:sandbox-" openbank-infra/gitops/components 2>/dev/null || true)"
+            if [ -z "$manifests" ]; then
+              echo "WARN: no gitops manifest references ${image}:sandbox-* — skip"
+              continue
+            fi
+
+            for f in $manifests; do
+              old_tag="$(grep -oE "${image}:sandbox-[A-Za-z0-9._-]+" "$f" | head -1 | cut -d: -f2 || true)"
+              if [ "$old_tag" = "$tag" ]; then
+                echo "  [${svc}] already at ${tag} in ${f}"
+                continue
+              fi
+              sed -i.bak "s|${image}:sandbox-[A-Za-z0-9._-]*|${image}:${tag}|g" "$f"
+              rm -f "${f}.bak"
+              echo "  [${svc}] ${old_tag:-?} → ${tag} in ${f}"
+              UPDATED+=("$f")
+            done
+          done
+
+          if [ "${#UPDATED[@]}" -eq 0 ]; then
+            echo "No manifests changed — all images already up to date."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            printf '%s\n' "${UPDATED[@]}"
+          fi
+
+      - name: Open gitops PR
+        id: gitops_pr
+        if: steps.rewrite.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          # GITOPS_PR_TOKEN (a fine-grained PAT / GitHub App token with contents+pull_requests
+          # write) so the PR actually triggers the required checks — a PR opened with the
+          # default GITHUB_TOKEN does NOT trigger workflows (anti-recursion), so the required
+          # checks (all-green / Validate manifests / Gitleaks / issue-hygiene) never run and
+          # the PR can never auto-merge. Falls back to GITHUB_TOKEN so the pipeline still opens
+          # a (manually-mergeable) PR if the secret is not set.
+          token: ${{ secrets.GITOPS_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          branch: chore/gitops-auto-deploy-${{ github.sha }}
+          delete-branch: true
+          commit-message: "chore(gitops): auto-deploy sandbox-${{ github.sha && github.sha || '' }}"
+          title: "chore(gitops): auto-deploy services @ ${{ github.sha }}"
+          body: |
+            Automated gitops image-tag update triggered by commit ${{ github.sha }}.
+
+            **Changed services:** ${{ needs.changes.outputs.services }}
+
+            Each image tag was updated to `sandbox-${{ github.sha }}` (the short SHA of the
+            triggering commit). ArgoCD syncs automatically after merge.
+
+            ## Linked issues
+
+            N/A — automated gitops update, no user-visible change.
+          labels: |
+            chore
+            gitops
+
+      # peter-evans/create-pull-request has no auto-merge input (the old `auto-merge: squash`
+      # was silently ignored). Enable it explicitly. Only effective when GITOPS_PR_TOKEN is set
+      # — otherwise the GITHUB_TOKEN PR's required checks never run and there is nothing to
+      # merge against (an admin merges it by hand, as today).
+      # github-script (octokit), NOT gh — the openbank-build runner image has no gh CLI.
+      # enablePullRequestAutoMerge is rejected ("Pull request is in clean status") until the
+      # PR's required check runs register, which lags PR creation, so retry until it sticks.
+      - name: Enable auto-merge
+        if: steps.gitops_pr.outputs.pull-request-number != ''
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ secrets.GITOPS_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const pull_number = Number('${{ steps.gitops_pr.outputs.pull-request-number }}');
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner, repo: context.repo.repo, pull_number,
+            });
+            const mutation = `mutation($id: ID!) {
+              enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) {
+                pullRequest { number }
+              }
+            }`;
+            for (let i = 1; i <= 8; i++) {
+              try {
+                await github.graphql(mutation, { id: pr.node_id });
+                core.info(`auto-merge enabled (attempt ${i})`);
+                return;
+              } catch (e) {
+                core.info(`attempt ${i}/8 not ready: ${e.message}`);
+                await new Promise(r => setTimeout(r, 12000));
+              }
+            }
+            core.notice('could not enable auto-merge after retries — check GITOPS_PR_TOKEN / branch protection');
+
+      # Record that these service versions are now deployed to sandbox so that future
+      # can-i-deploy calls by consumers can verify against the correct provider version.
+      # Called optimistically at PR-open time (not after ArgoCD sync) — close enough for
+      # the advisory gate; tighten to ArgoCD post-sync hook when enforcement is flipped on.
+      - name: Record sandbox deployment in Pact broker
+        if: ${{ vars.PACT_BROKER_URL != '' && steps.rewrite.outputs.changed == 'true' }}
+        env:
+          PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
+          PACT_BROKER_USERNAME: ${{ vars.PACT_BROKER_USERNAME }}
+          PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
+          PACT_STANDALONE_VERSION: "2.6.2"
+        run: |
+          set -uo pipefail
+          SERVICES='${{ needs.changes.outputs.services }}'
+          arch="$(uname -m)"; case "$arch" in aarch64|arm64) a=arm64 ;; *) a=x86_64 ;; esac
+          tgz="pact-${PACT_STANDALONE_VERSION}-linux-${a}.tar.gz"
+          url="https://github.com/pact-foundation/pact-ruby-standalone/releases/download/v${PACT_STANDALONE_VERSION}/${tgz}"
+          if ! curl -fsSL -o /tmp/pact.tgz "$url"; then
+            echo "::warning::could not download pact standalone — skipping record-deployment"
+            exit 0
+          fi
+          mkdir -p /tmp/pact && tar -xzf /tmp/pact.tgz -C /tmp/pact
+          CLI="/tmp/pact/pact/bin/pact-broker"
+          for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+            echo "==> record-deployment ${svc} @ ${GITHUB_SHA::8} → sandbox"
+            "$CLI" record-deployment \
+              --pacticipant "$svc" --version "$GITHUB_SHA" \
+              --environment sandbox \
+              --broker-base-url "$PACT_BROKER_URL" \
+              --broker-username "$PACT_BROKER_USERNAME" \
+              --broker-password "$PACT_BROKER_PASSWORD" \
+              && echo "  ✓ recorded" \
+              || echo "::warning::record-deployment failed for ${svc} (advisory — non-blocking)"
+          done

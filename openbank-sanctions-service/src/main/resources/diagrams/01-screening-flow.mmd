@@ -1,0 +1,21 @@
+%% title: Sanctions Screening Flow
+sequenceDiagram
+  participant C as Caller<br/>(payment-svc, kyc-svc)
+  participant S as sanctions-service
+  participant L as SanctionsList<br/>(EU/OFAC/UN cache)
+  participant Out as Outbox
+  participant K as Kafka<br/>sanctions.events
+
+  C->>S: POST /api/v1/sanctions/screen<br/>{name, dateOfBirth, country}
+  S->>L: lookup name against<br/>current list versions
+  alt Match found
+    L-->>S: hit (riskScore, listSource, matchedAlias)
+    S->>Out: write SanctionsHit event
+    S-->>C: 200 OK<br/>{outcome: HIT, riskScore, evidence}
+  else No match
+    L-->>S: clear
+    S-->>C: 200 OK<br/>{outcome: CLEAR}
+  end
+
+  Out->>K: publish sanctions.hit.v1<br/>(every 500ms)
+  K->>K: fan-out to consumers<br/>(audit, fraud, compliance UI)

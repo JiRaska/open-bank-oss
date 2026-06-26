@@ -1,0 +1,123 @@
+quarkus:
+  application:
+    name: openbank-customer-edge
+    version: 0.3.0
+
+  # Redis: pending-onboarding store for four-eyes auto-resume (ADR-0072).
+  redis:
+    hosts: ${QUARKUS_REDIS_HOSTS:redis://localhost:6379}
+
+  http:
+    port: 8128
+    # Lazy authentication: only issue an auth challenge when an endpoint actually
+    # requires an identity. With the default proactive auth, the class-level
+    # @RolesAllowed("ROLE_CUSTOMER") pre-empts method-level @PermitAll and returns
+    # 401 (www-authenticate: Bearer) even for the public onboarding routes, so the
+    # retail app cannot register. Lazy auth lets @PermitAll (/onboarding/start) be
+    # truly anonymous while @RolesAllowed routes (/accounts, /balances, …) stay
+    # enforced — they still 401 without a valid customer token.
+    auth:
+      proactive: false
+
+  management:
+    port: 8085
+
+  # Inbound auth: validate customer JWT from openbank-customers realm (ADR-0065).
+  oidc:
+    enabled: true
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://keycloak.iam.svc:8080/realms/openbank-customers}
+    client-id: ${OIDC_CLIENT_ID:openbank-edge}
+    token:
+      # Pin the issuer to the customers-realm PUBLIC issuer. JWKS is fetched via the
+      # in-cluster auth-server-url (keycloak.iam.svc), but customer tokens carry
+      # iss=<public kc host>, so the discovered (internal) issuer != token iss — which is
+      # why this was previously disabled with `any`. The correct fix validates iss against
+      # the public URL explicitly (independent of the JWKS-fetch URL), not turning issuer
+      # validation off. Env-overridable so a host change needs no rebuild.
+      issuer: ${QUARKUS_OIDC_TOKEN_ISSUER:https://kc.open-bank.tech/realms/openbank-customers}
+    roles:
+      role-claim-path: realm_access/roles
+
+  # Outbound auth config (used by UpstreamClient directly, not Quarkus OIDC client ext).
+  # UpstreamClient fetches a service-account token via HTTP client_credentials to this endpoint
+  # and caches it until TOKEN_REFRESH_BUFFER_SECONDS before expiry.
+
+  smallrye-openapi:
+    path: /q/openapi
+
+mp:
+  messaging:
+    outgoing:
+      # Structured customer audit trail -> audit-service tap (best-effort; see EdgeAuditPublisher).
+      customer-audit-out:
+        connector: smallrye-kafka
+        topic: openbank.customer.audit
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+    incoming:
+      # pid party events — the onboarding auto-resume consumer (OnboardingResumeService) filters
+      # for IdentityVerificationCaseDecided to replay a paused onboarding (ADR-0072). Latest offset
+      # so a fresh deploy doesn't reprocess history; gated by openbank.edge.identity-resume-enabled.
+      party-events-in:
+        connector: smallrye-kafka
+        topic: party.events
+        group.id: customer-edge-onboarding-resume
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto.offset.reset: latest
+
+kafka:
+  bootstrap:
+    servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+  # Upstream service base URLs (in-cluster DNS).
+  # The edge strips the /customer prefix and forwards to the matching service.
+# Customer edge upstream service endpoints + UpstreamClient singleton timeouts.
+openbank:
+  edge:
+    account-service-url: ${ACCOUNT_SERVICE_URL:http://account-service.accounts.svc:8100}
+    balance-service-url: ${BALANCE_SERVICE_URL:http://balance-service.balances.svc:8103}
+    transaction-service-url: ${TRANSACTION_SERVICE_URL:http://transaction-service.payments.svc:8102}
+    domestic-payment-service-url: ${DOMESTIC_PAYMENT_SERVICE_URL:http://domestic-payment.payments.svc:8116}
+    sepa-payment-service-url: ${SEPA_PAYMENT_SERVICE_URL:http://sepa-payment.payments.svc:8115}
+    sca-service-url:     ${SCA_SERVICE_URL:http://sca-service.sca.svc:8110}
+    party-service-url:   ${PARTY_SERVICE_URL:http://party-service.party.svc:8111}
+    pid-service-url:     ${PID_SERVICE_URL:http://pid-service.pid.svc:8105}
+    # Identity-resolution dedup gate (ADR-0072 §6 / ADR-0094). Off until the id==sub re-linking
+    # decision is settled; flip via IDENTITY_RESOLUTION_ENABLED once pid is the dedup authority.
+    identity-resolution-enabled: ${IDENTITY_RESOLUTION_ENABLED:false}
+    # Onboarding auto-resume (ADR-0072): when on, a four-eyes case decision replays the paused
+    # onboarding (OnboardingResumeService consumes party.events). Off until verified end-to-end.
+    identity-resume-enabled: ${IDENTITY_RESUME_ENABLED:false}
+    # Keycloak Admin API for setting the party_id user attribute after MATCH_EXISTING re-link
+    # (issue #1270 PR3). client-secret supplied via OPENBANK_EDGE_KEYCLOAK_ADMIN_CLIENT_SECRET.
+    keycloak-admin-url: ${KEYCLOAK_ADMIN_URL:http://keycloak.iam.svc:8080}
+    keycloak-admin-realm: ${KEYCLOAK_ADMIN_REALM:openbank-customers}
+    keycloak-admin-client-id: ${KEYCLOAK_ADMIN_CLIENT_ID:customer-edge-admin}
+    notification-service-url: ${NOTIFICATION_SERVICE_URL:http://notification-service.notifications.svc:8112}
+    statement-service-url: ${STATEMENT_SERVICE_URL:http://statement-service.statements.svc:8136}
+    standing-order-service-url: ${STANDING_ORDER_SERVICE_URL:http://standing-order-service.payments.svc:8121}
+    fx-service-url:      ${FX_SERVICE_URL:http://fx-service.fx.svc:8119}
+    card-issuance-service-url: ${CARD_ISSUANCE_SERVICE_URL:http://card-issuance-service.payments.svc:8118}
+    dispute-service-url: ${DISPUTE_SERVICE_URL:http://dispute-service.dispute.svc:8135}
+    # CNB JERR registry XML — bank code list, refreshed every 24 h (CnbBanksClient).
+    # Override with CNB_BANKS_URL env var if the CNB endpoint changes.
+    cnb-banks-url: ${CNB_BANKS_URL:https://apl.cnb.cz/apljerrpp/jerr_banky.xml}
+  upstream:
+    connect-timeout-ms: 5000
+    request-timeout-ms: 10000
+    # M2M (client_credentials) creds for the operator realm. token-url and client-id
+    # have sensible defaults in UpstreamClient; the SECRET is supplied at runtime via the
+    # env var OPENBANK_UPSTREAM_CLIENT_SECRET, which Quarkus maps to the dotted property
+    # `openbank.upstream.client-secret` (standard ENV→property mapping, like
+    # QUARKUS_DATASOURCE_PASSWORD). Do NOT declare client-secret here with a
+    # ${UPSTREAM_OIDC_CLIENT_SECRET:} expansion: a property name in ENV_VAR form is not
+    # resolved reliably and silently yields "", which makes every token fetch 401.
+
+# OPA sidecar (ADR-0034). Advisory mode by default.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:true}"

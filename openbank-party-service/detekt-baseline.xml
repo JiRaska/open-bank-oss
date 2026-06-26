@@ -1,0 +1,32 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+    <CurrentIssues>
+    <ID>CastToNullableType:TestJsonWebToken.kt$TestJsonWebToken$as</ID>
+    <ID>MagicNumber:AuthzProducer.kt$AuthzProducer$500</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$FeatureDisabledMapper$404</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$PartyAlreadyExistsMapper$409</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$PartyNotFoundMapper$404</ID>
+    <ID>MagicNumber:FlagdProducer.kt$FlagdProducer$100</ID>
+    <ID>MagicNumber:PartyOutboxDispatcher.kt$PartyOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:PartyOutboxDispatcher.kt$PartyOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:PartyOutboxRepositoryImpl.kt$PartyOutboxRepositoryImpl$4000</ID>
+    <ID>MagicNumber:PartyResource.kt$PartyResource$10</ID>
+    <ID>MagicNumber:PartyResource.kt$PartyResource$100</ID>
+    <ID>MagicNumber:PartyResource.kt$PartyResource$1024</ID>
+    <ID>MagicNumber:PartyResource.kt$PartyResource$201</ID>
+    <ID>MagicNumber:PartyResource.kt$PartyResource$401</ID>
+    <ID>MagicNumber:PartyResource.kt$PartyResource$403</ID>
+    <ID>MagicNumber:PartyResource.kt$PartyResource$404</ID>
+    <ID>MagicNumber:PartyResource.kt$PartyResource$413</ID>
+    <ID>MatchingDeclarationName:PartyOutboxPort.kt$PartyOutboxRepository : OutboxRepository</ID>
+    <ID>SwallowedException:PartyOutboxDispatcher.kt$PartyOutboxDispatcher$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:KycAmlEventConsumer.kt$KycAmlEventConsumer$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:PartyOutboxDispatcher.kt$PartyOutboxDispatcher$ex: Exception</ID>
+    <ID>TooManyFunctions:PartyPort.kt$PartyUseCase</ID>
+    <ID>TooManyFunctions:PartyPorts.kt$PartyRepository</ID>
+    <ID>TooManyFunctions:PartyRepositoryImpl.kt$PartyRepositoryImpl : PartyRepositoryPanacheRepository</ID>
+    <ID>TooManyFunctions:PartyResource.kt$PartyResource</ID>
+    <ID>TooManyFunctions:PartyService.kt$PartyService : PartyUseCase</ID>
+  </CurrentIssues>
+</SmellBaseline>

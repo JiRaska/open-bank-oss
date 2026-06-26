@@ -1,0 +1,175 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: TPP Registry Service API
+  version: 1.0.0
+  description: Third Party Provider registry — registration, authorization checks, EBA sync, blacklisting.
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8123
+    description: Local development
+tags:
+  - name: TPP Registry
+
+paths:
+  /api/v1/tpp-registry/check:
+    get:
+      tags: [TPP Registry]
+      summary: Check TPP authorization
+      operationId: checkTppAuthorization
+      parameters:
+        - name: tppId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: permission
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [AIS, PIS, PIIS]
+      responses:
+        '200':
+          description: Authorization result
+
+  /api/v1/tpp-registry:
+    post:
+      tags: [TPP Registry]
+      summary: Register a new TPP
+      operationId: registerTpp
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterTppRequest'
+      responses:
+        '201':
+          description: TPP registered
+    get:
+      tags: [TPP Registry]
+      summary: List registered TPPs
+      operationId: listTpps
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: TPP list
+
+  /api/v1/tpp-registry/{tppId}:
+    get:
+      tags: [TPP Registry]
+      summary: Get TPP by ID
+      operationId: getTpp
+      parameters:
+        - $ref: '#/components/parameters/tppId'
+      responses:
+        '200':
+          description: TPP detail
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/tpp-registry/{tppId}/blacklist:
+    post:
+      tags: [TPP Registry]
+      summary: Blacklist a TPP
+      operationId: blacklistTpp
+      parameters:
+        - $ref: '#/components/parameters/tppId'
+        - name: Idempotency-Key
+          in: header
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: TPP blacklisted
+
+  /api/v1/tpp-registry/sync/eba:
+    post:
+      tags: [TPP Registry]
+      summary: Trigger EBA register sync
+      operationId: triggerEbaSync
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Sync triggered
+
+  /api/v1/tpp-registry/sync/state:
+    get:
+      tags: [TPP Registry]
+      summary: Get EBA sync state
+      operationId: getEbaSyncState
+      responses:
+        '200':
+          description: Sync state
+
+components:
+  parameters:
+    tppId:
+      name: tppId
+      in: path
+      required: true
+      schema:
+        type: string
+
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    RegisterTppRequest:
+      type: object
+      required: [tppId, name, permissions, eidasCertFingerprint]
+      properties:
+        tppId:
+          type: string
+        name:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+            enum: [AIS, PIS, PIIS]
+        eidasCertFingerprint:
+          type: string
+        countryCode:
+          type: string
+        nca:
+          type: string
+
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.openbank.governance.HibernateSequenceGuardTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-06-14T08:09:56.097Z" hostname="openbank-build-bwkbp-runner-mz5kg" time="1.413">
+  <properties/>
+  <testcase name="every PanacheEntity table has a matching hibernate sequence()" classname="com.openbank.governance.HibernateSequenceGuardTest" time="0.149"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[WARNING: A Java agent has been loaded dynamically (/home/runner/_work/.gradle-svc/openbank-sepa-payment/caches/modules-2/files-2.1/net.bytebuddy/byte-buddy-agent/1.17.8/f09415827a71be7ed621c7bd02550678f28bc81c/byte-buddy-agent-1.17.8.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+]]></system-err>
+</testsuite>

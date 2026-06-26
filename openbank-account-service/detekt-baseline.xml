@@ -1,0 +1,34 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+    <CurrentIssues>
+    <ID>LongParameterList:AccountService.kt$AccountService$( private val accountRepository: AccountRepository, private val balancePort: BalanceQueryPort, private val eventPublisher: AccountEventPublisher, private val ibanGenerator: IbanGenerator, private val pocketRepository: CurrencyPocketRepository, private val sanctionsScreening: AccountSanctionsScreeningPort, private val metrics: DomainMetrics )</ID>
+    <ID>LongParameterList:PartyEventConsumer.kt$PartyEventConsumer$( private val accountUseCase: AccountUseCase, private val accountRepository: AccountRepository, private val objectMapper: ObjectMapper, @ConfigProperty(name = "openbank.account.onboarding.default-product-id", defaultValue = "00000000-0000-0000-0000-0000000000c2") private val defaultProductId: String, @ConfigProperty(name = "openbank.account.onboarding.default-currency", defaultValue = "CZK") private val defaultCurrency: String, @ConfigProperty(name = "openbank.account.onboarding.system-actor-id", defaultValue = "00000000-0000-0000-0000-0000000005ec") private val systemActorId: String, private val welcomeBonusPort: WelcomeBonusPort, // Sandbox onboarding incentive: a one-time incoming credit granted as the account activates. // Default OFF — must never run in production (it conjures money from the bank's clearing account). @ConfigProperty(name = "openbank.welcome-bonus.enabled", defaultValue = "false") private val welcomeBonusEnabled: Boolean, @ConfigProperty(name = "openbank.welcome-bonus.amount", defaultValue = "100000.00") private val welcomeBonusAmount: BigDecimal, @ConfigProperty(name = "openbank.welcome-bonus.currency", defaultValue = "CZK") private val welcomeBonusCurrency: String, private val notificationRequestPort: NotificationRequestPort, )</ID>
+    <ID>MagicNumber:AccountOutboxDispatcher.kt$AccountOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:AccountOutboxDispatcher.kt$AccountOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:AccountOutboxRepositoryImpl.kt$AccountOutboxRepositoryImpl$4000</ID>
+    <ID>MagicNumber:AccountResource.kt$AccountResource$201</ID>
+    <ID>MagicNumber:AccountResource.kt$AccountResource$400</ID>
+    <ID>MagicNumber:AuthorizationResource.kt$AuthorizationResource$201</ID>
+    <ID>MagicNumber:BalanceServiceClient.kt$BalanceServiceClient$404</ID>
+    <ID>MagicNumber:IbanGenerator.kt$IbanGenerator$10</ID>
+    <ID>MagicNumber:IbanGenerator.kt$IbanGenerator$98</ID>
+    <ID>MagicNumber:PartyEventConsumer.kt$PartyEventConsumer$50</ID>
+    <ID>MagicNumber:SanctionsScreeningAdapter.kt$SanctionsScreeningAdapter$400</ID>
+    <ID>MagicNumber:SanctionsScreeningAdapter.kt$SanctionsScreeningAdapter$499</ID>
+    <ID>MatchingDeclarationName:AccountOutboxPort.kt$AccountOutboxRepository : OutboxRepository</ID>
+    <ID>MatchingDeclarationName:ExceptionMappers.kt$AccountNotFoundExceptionMapper : ExceptionMapper</ID>
+    <ID>NewLineAtEndOfFile:AccountServiceTest.kt$com.openbank.account.application.usecase.AccountServiceTest.kt</ID>
+    <ID>NewLineAtEndOfFile:AccountTest.kt$com.openbank.account.domain.model.AccountTest.kt</ID>
+    <ID>SwallowedException:AccountOutboxDispatcher.kt$AccountOutboxDispatcher$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:AccountOutboxDispatcher.kt$AccountOutboxDispatcher$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:PartyEventConsumer.kt$PartyEventConsumer$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SanctionsScreeningAdapter.kt$SanctionsScreeningAdapter$e: Exception</ID>
+    <ID>TooManyFunctions:AccountPorts.kt$AccountUseCase</ID>
+    <ID>TooManyFunctions:AccountResource.kt$AccountResource</ID>
+    <ID>TooManyFunctions:AccountService.kt$AccountService : AccountUseCase</ID>
+    <ID>UnusedParameter:IbanGenerator.kt$IbanGenerator$currency: CurrencyCode</ID>
+    <ID>UseCheckOrError:AccountRepositoryImpl.kt$AccountRepositoryImpl$throw IllegalStateException("Account ${entity.id} not found for update")</ID>
+    <ID>UseCheckOrError:CurrencyPocketRepositoryImpl.kt$CurrencyPocketRepositoryImpl$throw IllegalStateException("Pocket ${pocket.id} not found for update")</ID>
+  </CurrentIssues>
+</SmellBaseline>

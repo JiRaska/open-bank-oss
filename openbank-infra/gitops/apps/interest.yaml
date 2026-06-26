@@ -1,0 +1,33 @@
+# interest domain: interest-service + single-owner CNPG Postgres + Redis. Onboarded so the
+# agent MCP read tools (*) return real data (ADR-0037 domain=namespace).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: interest
+  namespace: argocd
+  annotations:
+    # Server-Side Diff must run the Kyverno verify-images mutation in its dry-run, otherwise the
+    # digest-pinning annotation it injects reads as a permanent OutOfSync diff (issue #856).
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/interest-service
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: interest
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - ServerSideApply=true

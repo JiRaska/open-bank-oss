@@ -1,0 +1,15 @@
+# OpenTofu / Terraform local state & caches — never commit
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Local variable files may hold account IDs / sizing — keep examples only
+*.tfvars
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

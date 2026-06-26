@@ -1,0 +1,47 @@
+# GlitchTip secret (ADR-0075), sourced from Vault KV `openbank/glitchtip`.
+# Projects the Django SECRET_KEY into the `glitchtip-secrets` Secret that the
+# GlitchTip Helm release reads (apps/glitchtip.yaml → glitchtip.existingSecret).
+#   - SECRET_KEY    Django secret key (random, >=50 chars)
+#
+# DATABASE_URL is intentionally NOT here: the chart runs Postgres in-cluster via
+# CloudNativePG (postgresql.enabled) and wires DATABASE_URL from the generated
+# `glitchtip-pg-app` secret — so the only secret we own is SECRET_KEY.
+#
+# Runbook (out-of-band, once): write it into Vault, e.g.
+#   vault kv put openbank/glitchtip SECRET_KEY="$(openssl rand -base64 48)"
+#
+# Keycloak SSO (ADR-0075): the `openbank-glitchtip` confidential client secret
+# also lives under this KV path as OIDC_CLIENT_SECRET — the value that substitutes
+# the __GLITCHTIP_CLIENT_SECRET__ placeholder in the openbank realm import
+# (components/keycloak/realm-template.json) AND the secret on the GlitchTip allauth
+# SocialApp (provider_id=keycloak). NOT projected into a k8s Secret here: the
+# SocialApp is DB state and the realm-import secret is built out-of-band. Keep it
+# stable (must match on both ends); do NOT regenerate.
+#
+# creationPolicy: Owner — ESO creates and owns the Secret; the IgnoreExtraneous
+# annotation stops ArgoCD's prune from removing this ESO-owned Secret (not in git).
+# The `observability` namespace is created by apps/glitchtip.yaml; ESO retries
+# until it exists.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: glitchtip-secrets
+  namespace: observability
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: glitchtip-secrets
+    creationPolicy: Owner
+    template:
+      mergePolicy: Merge
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+  data:
+    - secretKey: SECRET_KEY
+      remoteRef:
+        key: glitchtip
+        property: SECRET_KEY

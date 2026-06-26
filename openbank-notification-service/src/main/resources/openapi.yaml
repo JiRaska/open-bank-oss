@@ -1,0 +1,372 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: Notification Service API
+  version: 1.2.0
+  description: Notification delivery management — query sent/pending notifications, manage push device tokens.
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8125
+    description: Local development
+tags:
+  - name: Notifications
+  - name: Devices
+  - name: Ops — Dispatch Control
+
+paths:
+  /api/v1/devices:
+    post:
+      tags: [Devices]
+      summary: Register (upsert) a push device token for a party
+      operationId: registerDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterDeviceRequest'
+      responses:
+        '201':
+          description: Device registered (token not echoed back)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceResponse'
+        '400':
+          description: Missing or invalid fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    get:
+      tags: [Devices]
+      summary: List a party's registered devices (no tokens returned)
+      operationId: listDevices
+      parameters:
+        - name: partyId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Device list
+        '400':
+          description: partyId query parameter is required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/notifications:
+    get:
+      tags: [Notifications]
+      summary: List notifications
+      operationId: listNotifications
+      parameters:
+        - name: partyId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, SENT, FAILED, READ]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Notifications
+
+  /api/v1/notifications/{id}:
+    get:
+      tags: [Notifications]
+      summary: Get notification by ID
+      operationId: getNotification
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Notification detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/ops/dispatch:
+    get:
+      tags: [Ops — Dispatch Control]
+      summary: Current dispatch desired-state, deferred-review flag and recent history
+      operationId: getDispatchControl
+      responses:
+        '200':
+          description: Current snapshot plus recent history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DispatchControlView'
+
+  /api/v1/ops/dispatch/halt:
+    post:
+      tags: [Ops — Dispatch Control]
+      summary: Break-glass — halt dispatch immediately (single actor, deferred review required)
+      operationId: haltDispatch
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+      responses:
+        '200':
+          description: New halted snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DispatchControlSnapshot'
+
+  /api/v1/ops/dispatch/resume/propose:
+    post:
+      tags: [Ops — Dispatch Control]
+      summary: Propose a resume (four-eyes — a different actor must approve)
+      operationId: proposeResume
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+      responses:
+        '202':
+          description: Proposal accepted, awaiting a second actor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProposalView'
+
+  /api/v1/ops/dispatch/resume/{proposalId}/approve:
+    post:
+      tags: [Ops — Dispatch Control]
+      summary: Approve and execute a resume (approver must differ from proposer)
+      operationId: approveResume
+      parameters:
+        - name: proposalId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+      responses:
+        '200':
+          description: New enabled snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DispatchControlSnapshot'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Four-eyes violation (approver equals proposer)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/ops/dispatch/resume/{proposalId}/reject:
+    post:
+      tags: [Ops — Dispatch Control]
+      summary: Reject a pending resume proposal
+      operationId: rejectResume
+      parameters:
+        - name: proposalId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+      responses:
+        '200':
+          description: Rejected proposal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProposalView'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    NotificationResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        partyId:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [EMAIL, SMS, PUSH]
+        status:
+          type: string
+        subject:
+          type: string
+        body:
+          type: string
+        sentAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+    RegisterDeviceRequest:
+      type: object
+      required: [partyId, platform, token, appInstance]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        platform:
+          type: string
+          enum: [FCM, APNS]
+        token:
+          type: string
+          description: Provider-issued push token (FCM registration / APNs device token)
+        appInstance:
+          type: string
+          description: Stable per-install identifier
+        appVersion:
+          type: string
+          nullable: true
+        osVersion:
+          type: string
+          nullable: true
+
+    DeviceResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        partyId:
+          type: string
+          format: uuid
+        platform:
+          type: string
+          enum: [FCM, APNS]
+        appInstance:
+          type: string
+        appVersion:
+          type: string
+          nullable: true
+        osVersion:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE, INVALID]
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ReasonRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          nullable: true
+
+    DispatchControlSnapshot:
+      type: object
+      properties:
+        controlKey:
+          type: string
+        state:
+          type: string
+          enum: [ENABLED, HALTED]
+        version:
+          type: integer
+          format: int64
+        reason:
+          type: string
+          nullable: true
+        actor:
+          type: string
+          nullable: true
+        effectiveFrom:
+          type: string
+          format: date-time
+        deferredReviewRequired:
+          type: boolean
+
+    DispatchControlView:
+      type: object
+      properties:
+        current:
+          $ref: '#/components/schemas/DispatchControlSnapshot'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/DispatchControlSnapshot'
+
+    ProposalView:
+      type: object
+      properties:
+        proposalId:
+          type: string
+        state:
+          type: string
+          enum: [PROPOSED, APPROVED, REJECTED, WITHDRAWN, EXECUTED]

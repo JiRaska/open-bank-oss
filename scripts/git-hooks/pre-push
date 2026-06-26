@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Guard: blocks pushing to a branch that has an open PR from another session.
+set -euo pipefail
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [[ "$BRANCH" == "main" || "$BRANCH" == "HEAD" ]]; then exit 0; fi
+WORKTREE_ROOT=$(git rev-parse --show-toplevel)
+if [[ "$WORKTREE_ROOT" == /tmp/openbank-pr-* ]]; then exit 0; fi
+command -v gh &>/dev/null || exit 0
+OPEN_PRS=$(gh pr list --head "$BRANCH" --state open --json number,title,url 2>/dev/null || true)
+PR_COUNT=$(echo "$OPEN_PRS" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
+if [[ "$PR_COUNT" -gt 0 ]]; then
+  PR_INFO=$(echo "$OPEN_PRS" | python3 -c "
+import json,sys
+for p in json.load(sys.stdin): print(f\"  #{p['number']} {p['title']}\n  {p['url']}\")
+" 2>/dev/null)
+  echo ""; echo "BRANCH CLAIMING GUARD — push blocked"
+  echo "Branch '$BRANCH' already has an open PR:"; echo "$PR_INFO"
+  echo ""; echo "Options:"
+  echo "  Create your own branch:  git checkout -b <type>/<summary> origin/main"
+  echo "  Use isolated worktree:   git worktree add /tmp/openbank-pr-<name> $BRANCH"
+  echo "  Override (YOUR PR only): git push --no-verify"
+  exit 1
+fi
+exit 0

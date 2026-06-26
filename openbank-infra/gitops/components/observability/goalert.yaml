@@ -1,0 +1,170 @@
+# GoAlert — on-call scheduling, escalation & paging (ADR-0088 §D1). Apache-2.0,
+# single Go binary + Postgres. Alertmanager's critical route will be re-pointed from
+# the interim direct ntfy webhook (Step 0) to GoAlert, which owns schedules/escalation/
+# ack and fans out to ntfy as a contact method. Cluster-internal only (ADR-0056) — no
+# Ingress; reachable via the admin-ui BFF / port-forward.
+#
+# RUNTIME CONFIG IS OPERATOR WORK (not GitOps): after this lands, create the admin user
+#   kubectl -n observability exec deploy/goalert -- goalert add-user --user admin --pass <pw> --admin
+# then in the UI build the escalation policy + service, generate a Generic API integration
+# key, add an ntfy webhook contact method, and re-point Alertmanager's 'ntfy' receiver URL
+# to the GoAlert generic endpoint. The encryption-key secret `goalert-secrets` is created
+# out-of-band (precedented: GlitchTip/OpenBao bootstrap) — never committed.
+---
+# Single-owner Postgres for GoAlert, reconciled by the cluster-wide CNPG operator.
+# WAL archiving + daily base backups to S3 (ADR-0088 D1 "backup from day one"); the
+# first backed-up sandbox CNPG cluster (cf. runbook 0003 backup gap). Credentials via
+# IRSA on the goalert-db ServiceAccount (role openbank-cnpg-backup) — barman-cloud reads
+# the SDK chain (inheritFromIAMRole), no static keys.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: goalert-db
+  namespace: observability
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 192Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  # IRSA: the goalert-db SA assumes openbank-cnpg-backup for barman S3 access.
+  serviceAccountTemplate:
+    metadata:
+      annotations:
+        eks.amazonaws.com/role-arn: arn:aws:iam::265175468565:role/openbank-cnpg-backup
+  bootstrap:
+    initdb:
+      database: goalert
+      owner: goalert
+  backup:
+    retentionPolicy: "7d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-cnpg-backups-265175468565/goalert-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: goalert-db-daily
+  namespace: observability
+spec:
+  schedule: "0 20 3 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: goalert-db
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: goalert
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: goalert
+    app.kubernetes.io/part-of: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: goalert
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: goalert
+        app.kubernetes.io/part-of: observability
+    spec:
+      nodeSelector:
+        workload: observability
+      tolerations:
+        - key: workload
+          operator: Equal
+          value: observability
+          effect: NoSchedule
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: goalert
+          image: goalert/goalert:v0.34.1
+          # GoAlert serves + auto-runs DB migrations on start.
+          env:
+            - name: GOALERT_LISTEN
+              value: ":8080"
+            # Keycloak OIDC SSO (set in the DB via `goalert set-config`) builds its
+            # callback from PUBLIC_URL, so it must be the browser-reachable URL.
+            # GoAlert has no ingress (ADR-0056) → accessed via port-forward:
+            #   kubectl -n observability port-forward svc/goalert 8081:8080
+            # Trade-off: alert-notification links also use this, so they resolve only
+            # via that port-forward in the sandbox (no public on-call ingress yet).
+            - name: GOALERT_PUBLIC_URL
+              value: "http://localhost:8081"
+            # CNPG-generated app secret (uri = postgresql://goalert:***@goalert-db-rw:5432/goalert).
+            - name: GOALERT_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: goalert-db-app
+                  key: uri
+            - name: GOALERT_DATA_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: goalert-secrets
+                  key: data-encryption-key
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          # TCP probe — avoids guessing GoAlert's HTTP health path; generous startup for
+          # the DB to come up + migrations to run.
+          startupProbe:
+            tcpSocket:
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 15
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: goalert
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: goalert
+    app.kubernetes.io/part-of: observability
+spec:
+  selector:
+    app.kubernetes.io/name: goalert
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

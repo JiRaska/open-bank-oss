@@ -1,0 +1,103 @@
+# ADR-0099 Tier 1 — weekly CronJob to keep OpenBao database engine config current
+#
+# Runs every Sunday at 02:00 UTC — outside banking hours, well within the 90-day
+# PCI DSS Req. 8.2.4 rotation window (ADR-0099 §Tier 1 / §Phase 1).
+#
+# The Job executes the configure.sh from the openbao-db-rotation-config ConfigMap.
+# It authenticates via the Kubernetes auth method (role `db-admin`) using its own
+# ServiceAccount token — no standing token secret is required (runbook 0006).
+#
+# RBAC: ServiceAccount `openbao-db-admin` is bound to a narrowly scoped OpenBao
+# policy (database/config/* write + database/roles/* write) — configured out-of-band
+# by runbook 0006. No data-plane KV read access.
+#
+# PSS restricted: non-root, no capabilities, seccompProfile RuntimeDefault.
+# Image: same quay.io/openbao/openbao tag as the server (pinned, ADR-0027).
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-db-admin
+  namespace: vault
+  labels:
+    app.kubernetes.io/part-of: openbao
+    openbank.io/plane: platform
+    openbank.io/adr: "0099"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: openbao-db-rotation-sync
+  namespace: vault
+  labels:
+    app.kubernetes.io/part-of: openbao
+    openbank.io/plane: platform
+    openbank.io/adr: "0099"
+  annotations:
+    # Describe what this Job does for the audit trail and runbook readers.
+    openbank.io/description: "ADR-0099 Tier 1: re-asserts OpenBao database engine config weekly"
+    openbank.io/runbook: "docs/runbooks/0006-openbao-dynamic-db.md"
+spec:
+  # Sunday 02:00 UTC — outside banking hours, within PCI DSS 90-day window.
+  schedule: "0 2 * * 0"
+  # Keep the last 3 successful and 1 failed job for post-mortem inspection.
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  # Do not allow concurrent runs — the configure.sh is idempotent but concurrent
+  # writes to the same OpenBao paths would produce confusing audit entries.
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      # Retry up to 2 times on transient OpenBao unavailability; alert on final failure.
+      backoffLimit: 2
+      # Hard deadline: if the script hasn't finished in 10 minutes something is wrong.
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: openbao
+            openbank.io/plane: platform
+        spec:
+          serviceAccountName: openbao-db-admin
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: configure
+              # Pin the same image tag as the server (openbao.yaml targetRevision 0.28.3
+              # deploys openbao 2.5.4). Update together when the server image is bumped.
+              image: quay.io/openbao/openbao:2.5.4
+              command: ["/bin/sh", "/config/configure.sh"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                capabilities:
+                  drop:
+                    - ALL
+              env:
+                - name: BAO_ADDR
+                  value: "http://openbao.vault.svc:8200"
+                # BAO_TOKEN is intentionally left unset; configure.sh authenticates
+                # via the Kubernetes auth method using the pod's projected SA token.
+                # This avoids any long-lived token secret (ADR-0034 zero-standing-token).
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+              volumeMounts:
+                - name: config
+                  mountPath: /config
+                  readOnly: true
+          volumes:
+            - name: config
+              configMap:
+                name: openbao-db-rotation-config
+                defaultMode: 0555

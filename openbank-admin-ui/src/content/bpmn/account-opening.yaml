@@ -1,0 +1,119 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# BPMN process diagram (ADR-0019/0029). Authored as data; validated by
+# src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
+
+name: Account Opening
+desc: Proces otevření nového bankovního účtu od žádosti po aktivaci
+regulation: CNB Vyhláška 163/2014 + AML 5AMLD
+services:
+  - party-service
+  - kyc-service
+  - aml-service
+  - account-service
+  - notification-service
+steps:
+  - id: start
+    type: start
+    x: 60
+    y: 100
+    label: Žádost
+  - id: id-check
+    type: task
+    x: 180
+    y: 100
+    label: Ověření identity (KYC)
+    lane: compliance
+    apis:
+      - POST /api/v1/kyc/verify
+    relatedServices:
+      - kyc-service
+      - party-service
+    emits:
+      - openbank.kyc.events
+    consumes:
+      - openbank.party.events
+  - id: aml
+    type: task
+    x: 340
+    y: 100
+    label: AML Screening
+    lane: compliance
+    apis:
+      - POST /api/v1/aml/screen
+    relatedServices:
+      - aml-service
+    emits:
+      - openbank.aml.events
+    consumes:
+      - openbank.party.events
+  - id: gw1
+    type: gateway
+    x: 480
+    y: 100
+    label: Schváleno?
+  - id: reject
+    type: end-err
+    x: 480
+    y: 220
+    label: Zamítnuto
+  - id: create
+    type: task
+    x: 600
+    y: 100
+    label: Vytvoření účtu
+    lane: core
+    apis:
+      - POST /api/v1/accounts
+    relatedServices:
+      - account-service
+    emits:
+      - openbank.accounts.account.created
+  - id: iban
+    type: task
+    x: 740
+    y: 100
+    label: Přidělení IBAN
+    lane: core
+    apis:
+      - POST /api/v1/accounts/{id}/iban
+    relatedServices:
+      - account-service
+  - id: notify
+    type: task
+    x: 880
+    y: 100
+    label: Notifikace
+    lane: platform
+    apis:
+      - POST /api/v1/notifications
+    relatedServices:
+      - notification-service
+    consumes:
+      - openbank.notification.requests
+  - id: end
+    type: end
+    x: 980
+    y: 100
+    label: Aktivní
+flows:
+  - from: start
+    to: id-check
+  - from: id-check
+    to: aml
+  - from: aml
+    to: gw1
+  - from: gw1
+    to: reject
+    label: Ne
+  - from: gw1
+    to: create
+    label: Ano
+  - from: create
+    to: iban
+  - from: iban
+    to: notify
+    kind: async
+    topic: openbank.notification.requests
+  - from: notify
+    to: end

@@ -1,0 +1,100 @@
+# DB-layer alert rules (Dynatrace-parity #0). The fleet's 26 CNPG Postgres
+# clusters now run the built-in exporter (spec.monitoring.enablePodMonitor on
+# every Cluster), so `cnpg_*` series exist for connections, replication lag,
+# deadlocks, transaction-id age and WAL archiving. This was the biggest blind
+# spot vs an APM like Dynatrace, which auto-discovers every DB instance: before
+# this, a saturated pool / replication stall / approaching xid wraparound was
+# only visible indirectly once the *application* latency moved.
+#
+# Picked up automatically (ruleSelectorNilUsesHelmValues=false). Single-instance
+# sandbox clusters have no replica, so the replication/streaming alerts simply
+# have no series and never fire — they become meaningful once prod runs 3 nodes.
+#
+# NOTE: cnpg_* metric names follow CloudNativePG's default monitoring queries.
+# Once the PodMonitors are scraping, verify panel/alert series in Grafana
+# Explore (`{__name__=~"cnpg_.+"}`) and tune any name that shifted across CNPG
+# versions before relying on these for paging.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-db-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.db.postgres
+      rules:
+        - alert: PostgresInstanceDown
+          expr: cnpg_collector_up == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Postgres {{ $labels.namespace }}/{{ $labels.pod }} exporter down"
+            description: "CNPG collector cannot reach Postgres on {{ $labels.pod }} for >2m — the instance is likely down or unreachable."
+        - alert: PostgresConnectionsSaturated
+          # Open backends approaching max_connections — the classic 'too many
+          # clients already' precursor. Ratio joins the pool count to the
+          # instance's configured ceiling.
+          expr: |
+            sum by (namespace, pod) (cnpg_backends_total)
+              / on (namespace, pod) group_left
+              max by (namespace, pod) (cnpg_pg_settings_setting{name="max_connections"})
+              > 0.80
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres connections >80% on {{ $labels.namespace }}/{{ $labels.pod }}"
+            description: "Backends are above 80% of max_connections for >10m — raise the pool ceiling or fix a connection leak before clients are refused."
+        - alert: PostgresReplicationLagHigh
+          expr: cnpg_pg_replication_lag > 30
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres replication lag >30s on {{ $labels.namespace }}/{{ $labels.pod }}"
+            description: "Streaming replica is >30s behind the primary for >5m — failover would lose recent transactions."
+        - alert: PostgresDeadlocksGrowing
+          expr: rate(cnpg_pg_stat_database_deadlocks[5m]) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres deadlocks on {{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.datname }})"
+            description: "Deadlocks are being detected continuously for >10m — contended write ordering, money-path correctness risk."
+        - alert: PostgresTransactionWraparoundRisk
+          # xid age climbing toward the 2^31 wraparound horizon. autovacuum
+          # freezes at 200M by default; 300M means freezing is falling behind.
+          expr: cnpg_pg_database_xid_age > 300000000
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres xid age high on {{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.datname }})"
+            description: "Transaction-id age >300M and rising — autovacuum freezing is behind; left unchecked this ends in a forced read-only shutdown."
+        - alert: PostgresWALArchiveFailing
+          # Directly relevant to the PG 16→18 upgrade blocker: no point planning
+          # pg_upgrade if WAL archiving (the basis of backup/PITR) is failing.
+          expr: rate(cnpg_pg_stat_archiver_failed_count[15m]) > 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Postgres WAL archiving failing on {{ $labels.namespace }}/{{ $labels.pod }}"
+            description: "archive_command has been failing for >15m — backups/PITR are not durable. Blocks safe pg_upgrade (runbook 0003)."
+        - alert: PostgresLowCacheHitRatio
+          expr: |
+            sum by (namespace, pod) (rate(cnpg_pg_stat_database_blks_hit[10m]))
+              / clamp_min(
+                  sum by (namespace, pod) (rate(cnpg_pg_stat_database_blks_hit[10m]))
+                    + sum by (namespace, pod) (rate(cnpg_pg_stat_database_blks_read[10m])),
+                  1)
+              < 0.90
+          for: 30m
+          labels:
+            severity: info
+          annotations:
+            summary: "Postgres cache hit ratio <90% on {{ $labels.namespace }}/{{ $labels.pod }}"
+            description: "Buffer cache hit ratio below 90% for >30m — under-sized shared_buffers or a missing index causing heavy disk reads."

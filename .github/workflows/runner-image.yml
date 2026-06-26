@@ -1,0 +1,74 @@
+name: Runner image
+
+# Rebuild + push the custom ARC runner image (ADR-0053) whenever its source
+# changes on main. Runs on the openbank-deploy scale set — the only pool whose
+# pod ServiceAccount carries the IRSA role allowed to push to ECR (the build
+# pool has no cloud-write creds, by design). PR jobs never target this pool.
+#
+# This pushes the :latest tag and prints the immutable digest to the job
+# summary. local.runner_image in arc-runners.tf pins that digest by hand — bump
+# it from the digest below, then `tofu apply` to roll the scale sets. (Fully
+# automating the digest bump + apply is a deliberate follow-up: it needs a
+# write-back token + tofu in CI.)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - openbank-infra/aws/envs/sandbox-platform/runner-image/**
+      - .github/workflows/runner-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runner-image
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-north-1
+  ECR_REPO: openbank-ci-runner
+
+jobs:
+  build-push:
+    name: build + push runner image
+    runs-on: openbank-deploy
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # IRSA on the openbank-deploy pod SA provides the AWS identity. This action
+      # consumes those ambient pod creds via the AWS SDK and configures the dind
+      # docker auth — so the runner image needs no aws CLI baked in (it isn't;
+      # the image bakes only the CI toolchain — see runner-image/Dockerfile).
+      - name: ECR login
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+
+      - name: Build + push (arm64)
+        working-directory: openbank-infra/aws/envs/sandbox-platform/runner-image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          IMAGE="${REGISTRY}/${ECR_REPO}"
+          docker buildx create --use --name obrunner --driver docker-container >/dev/null 2>&1 || docker buildx use obrunner
+          docker buildx build --platform linux/arm64 --provenance=false \
+            --metadata-file /tmp/buildx-meta.json \
+            -t "${IMAGE}:latest" --push .
+
+      - name: Resolve + report digest
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          IMAGE="${REGISTRY}/${ECR_REPO}"
+          # Digest comes straight from the buildx push metadata — no aws CLI /
+          # ECR describe round-trip (jq is baked into the runner image).
+          DIGEST="$(jq -r '."containerimage.digest"' /tmp/buildx-meta.json)"
+          {
+            echo "## Runner image pushed"
+            echo ""
+            echo "\`${IMAGE}@${DIGEST}\`"
+            echo ""
+            echo "Pin this digest in \`local.runner_image\` (arc-runners.tf) and \`tofu apply\`."
+          } >> "$GITHUB_STEP_SUMMARY"

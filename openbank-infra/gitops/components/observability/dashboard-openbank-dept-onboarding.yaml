@@ -1,0 +1,407 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-dept-onboarding
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/part-of: observability
+data:
+  openbank-dept-onboarding.json: |
+    {
+      "id": null,
+      "uid": "openbank-dept-onboarding",
+      "title": "OpenBank — Onboarding & Customer Service",
+      "description": "Department view for branch/customer operations: the onboarding funnel (party -> KYC -> verified -> account), SCA challenge health, and account closures. Domain metrics per ADR-0077/0079.",
+      "tags": ["openbank", "department", "onboarding"],
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": { "from": "now-24h", "to": "now" },
+      "timepicker": {},
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "pluginId": "prometheus",
+            "label": "Datasource",
+            "hide": 0,
+            "refresh": 1,
+            "options": [],
+            "current": {}
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Parties Created",
+          "type": "stat",
+          "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "area"
+          },
+          "targets": [
+            {
+              "expr": "sum(increase(openbank_parties_created_total{job=\"observability/openbank-services\"}[$__range]))",
+              "legendFormat": "created",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "KYC Submissions",
+          "type": "stat",
+          "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "area"
+          },
+          "targets": [
+            {
+              "expr": "sum(increase(openbank_kyc_submissions_total{job=\"observability/openbank-services\"}[$__range]))",
+              "legendFormat": "kyc submitted",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Parties Verified",
+          "type": "stat",
+          "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "area"
+          },
+          "targets": [
+            {
+              "expr": "sum(increase(openbank_parties_verified_total{job=\"observability/openbank-services\"}[$__range]))",
+              "legendFormat": "verified",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Accounts Opened",
+          "type": "stat",
+          "gridPos": { "x": 12, "y": 0, "w": 4, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "area"
+          },
+          "targets": [
+            {
+              "expr": "sum(increase(openbank_accounts_created_total{job=\"observability/openbank-services\"}[$__range]))",
+              "legendFormat": "accounts",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "Verification Conversion %",
+          "type": "gauge",
+          "gridPos": { "x": 16, "y": 0, "w": 4, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "orange", "value": 40 },
+                  { "color": "green", "value": 70 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "showThresholdLabels": false,
+            "showThresholdMarkers": true
+          },
+          "targets": [
+            {
+              "expr": "100 * (sum(increase(openbank_parties_verified_total{job=\"observability/openbank-services\"}[$__range])) or vector(0)) / clamp_min(sum(increase(openbank_parties_created_total{job=\"observability/openbank-services\"}[$__range])), 1)",
+              "legendFormat": "conversion",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "title": "SCA Success Rate %",
+          "type": "gauge",
+          "gridPos": { "x": 20, "y": 0, "w": 4, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "orange", "value": 70 },
+                  { "color": "green", "value": 90 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "showThresholdLabels": false,
+            "showThresholdMarkers": true
+          },
+          "targets": [
+            {
+              "expr": "100 * (sum(increase(openbank_sca_completions_total{outcome=\"completed\",job=\"observability/openbank-services\"}[$__range])) or vector(0)) / clamp_min(sum(increase(openbank_sca_completions_total{job=\"observability/openbank-services\"}[$__range])), 1)",
+              "legendFormat": "sca success",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "title": "Onboarding Funnel Trend (1h rates)",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 4, "w": 16, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": { "lineWidth": 1, "fillOpacity": 10 }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] },
+            "tooltip": { "mode": "multi" }
+          },
+          "targets": [
+            {
+              "expr": "sum(increase(openbank_parties_created_total{job=\"observability/openbank-services\"}[1h]))",
+              "legendFormat": "parties created",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(increase(openbank_kyc_submissions_total{job=\"observability/openbank-services\"}[1h]))",
+              "legendFormat": "kyc submitted",
+              "refId": "B"
+            },
+            {
+              "expr": "sum(increase(openbank_parties_verified_total{job=\"observability/openbank-services\"}[1h]))",
+              "legendFormat": "verified",
+              "refId": "C"
+            },
+            {
+              "expr": "sum(increase(openbank_accounts_created_total{job=\"observability/openbank-services\"}[1h]))",
+              "legendFormat": "accounts opened",
+              "refId": "D"
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "title": "SCA Challenges by Method",
+          "type": "piechart",
+          "gridPos": { "x": 16, "y": 4, "w": 8, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "palette-classic" }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "pieType": "donut",
+            "legend": { "displayMode": "table", "placement": "right", "values": ["value"] },
+            "tooltip": { "mode": "single" }
+          },
+          "targets": [
+            {
+              "expr": "sum by (method) (increase(openbank_sca_challenges_total{job=\"observability/openbank-services\"}[$__range]))",
+              "legendFormat": "{{method}}",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "title": "SCA Completions by Outcome",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 12, "w": 8, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": { "lineWidth": 1, "fillOpacity": 10 }
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "failed" },
+                "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+              },
+              {
+                "matcher": { "id": "byName", "options": "completed" },
+                "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }]
+              }
+            ]
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] },
+            "tooltip": { "mode": "multi" }
+          },
+          "targets": [
+            {
+              "expr": "sum by (outcome) (increase(openbank_sca_completions_total{job=\"observability/openbank-services\"}[1h]))",
+              "legendFormat": "{{outcome}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "title": "Accounts Closed by Reason",
+          "type": "timeseries",
+          "gridPos": { "x": 8, "y": 12, "w": 8, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": { "lineWidth": 1, "fillOpacity": 10 }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] },
+            "tooltip": { "mode": "multi" }
+          },
+          "targets": [
+            {
+              "expr": "sum by (reason) (increase(openbank_accounts_closed_total{job=\"observability/openbank-services\"}[1h]))",
+              "legendFormat": "{{reason}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 11,
+          "title": "Onboarding APIs — Request Rate by Namespace",
+          "type": "timeseries",
+          "gridPos": { "x": 16, "y": 12, "w": 8, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": { "lineWidth": 1, "fillOpacity": 10 }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean"] },
+            "tooltip": { "mode": "multi" }
+          },
+          "targets": [
+            {
+              "expr": "sum by (namespace) (rate(http_server_requests_seconds_count{job=\"observability/openbank-services\", namespace=~\"onboarding|party|kyc|sca|accounts\", uri!~\"/q/.*\"}[5m]))",
+              "legendFormat": "{{namespace}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "title": "Onboarding Services — Warnings & Errors",
+          "type": "logs",
+          "gridPos": { "x": 0, "y": 20, "w": 24, "h": 9 },
+          "datasource": { "type": "loki", "uid": "loki" },
+          "options": {
+            "showTime": true,
+            "showLabels": false,
+            "showCommonLabels": false,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": false,
+            "enableLogDetails": true,
+            "dedupStrategy": "none",
+            "sortOrder": "Descending"
+          },
+          "targets": [
+            {
+              "expr": "{namespace=~\"onboarding|party|kyc|sca\", level=~\"(?i)(warn|warning|error)\"}",
+              "refId": "A"
+            }
+          ]
+        }
+      ]
+    }

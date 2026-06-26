@@ -1,0 +1,840 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+asyncapi: 3.0.0
+info:
+  title: OpenBank Async Event API
+  version: 1.0.0
+  description: |
+    Kafka event streams across all OpenBank services.
+    All topics follow the naming convention: openbank.{domain}.{aggregate}.{event}
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+
+servers:
+  production:
+    host: kafka:9092
+    protocol: kafka
+    description: OpenBank Kafka broker (docker-compose network)
+  local:
+    host: localhost:9093
+    protocol: kafka
+    description: Local Kafka (Redpanda via docker-compose)
+
+defaultContentType: application/json
+
+channels:
+  account-events-out:
+    address: openbank.accounts.account.created
+    description: Published when a new account is opened
+    messages:
+      AccountCreated:
+        $ref: '#/components/messages/AccountCreated'
+
+  account-status-changed:
+    address: openbank.accounts.account.status-changed
+    description: Published when account status transitions (ACTIVE/FROZEN/CLOSED)
+    messages:
+      AccountStatusChanged:
+        $ref: '#/components/messages/AccountStatusChanged'
+
+  ledger-journal-posted:
+    address: openbank.ledger.journal.posted
+    description: Published when a double-entry journal posting is completed
+    messages:
+      JournalPosted:
+        $ref: '#/components/messages/JournalPosted'
+
+  ledger-journal-reversed:
+    address: openbank.ledger.journal.reversed
+    description: Published when a journal entry is reversed
+    messages:
+      JournalReversed:
+        $ref: '#/components/messages/JournalReversed'
+
+  sepa-payment-events:
+    address: openbank.payments.sepa.event
+    description: SEPA payment lifecycle events (created, processing, completed, rejected, recalled)
+    messages:
+      SepaPaymentEvent:
+        $ref: '#/components/messages/SepaPaymentEvent'
+
+  sepa-instant-events:
+    address: openbank.payments.sct-inst.event
+    description: SEPA Instant payment lifecycle events
+    messages:
+      SctInstEvent:
+        $ref: '#/components/messages/SctInstEvent'
+
+  domestic-payment-events:
+    address: openbank.payments.domestic.event
+    description: Czech domestic payment lifecycle events
+    messages:
+      DomesticPaymentEvent:
+        $ref: '#/components/messages/DomesticPaymentEvent'
+
+  transaction-events:
+    address: openbank.transactions.transaction.event
+    description: Transaction booked/reversed events
+    messages:
+      TransactionEvent:
+        $ref: '#/components/messages/TransactionEvent'
+
+  balance-events:
+    address: openbank.balances.balance.event
+    description: Balance change events (credit/debit/hold)
+    messages:
+      BalanceEvent:
+        $ref: '#/components/messages/BalanceEvent'
+
+  kyc-events-out:
+    address: openbank.kyc.case.event
+    description: KYC case status changes — consumed by notification-service and audit-service
+    messages:
+      KycCaseEvent:
+        $ref: '#/components/messages/KycCaseEvent'
+
+  aml-events:
+    address: openbank.aml.case.event
+    description: AML case created/decision events
+    messages:
+      AmlCaseEvent:
+        $ref: '#/components/messages/AmlCaseEvent'
+
+  party-events:
+    address: openbank.parties.party.event
+    description: Party created/updated/KYC-linked events
+    messages:
+      PartyEvent:
+        $ref: '#/components/messages/PartyEvent'
+
+  consent-events:
+    address: openbank.consents.consent.event
+    description: Consent lifecycle events (created, activated, revoked, expired)
+    messages:
+      ConsentEvent:
+        $ref: '#/components/messages/ConsentEvent'
+
+  card-events:
+    address: openbank.cards.card.event
+    description: Card issuance and status change events
+    messages:
+      CardEvent:
+        $ref: '#/components/messages/CardEvent'
+
+  standing-order-events:
+    address: openbank.standing-orders.order.event
+    description: Standing order lifecycle events
+    messages:
+      StandingOrderEvent:
+        $ref: '#/components/messages/StandingOrderEvent'
+
+  fx-events:
+    address: openbank.fx.conversion.completed
+    description: FX conversion completed events
+    messages:
+      FxConversionEvent:
+        $ref: '#/components/messages/FxConversionEvent'
+
+  clearing-events:
+    address: openbank.clearing.batch.event
+    description: Clearing batch settled/failed events
+    messages:
+      ClearingBatchEvent:
+        $ref: '#/components/messages/ClearingBatchEvent'
+
+  audit-events-in:
+    address: openbank.audit.events-in
+    description: Fan-in audit channel — all services publish here, audit-service consumes
+    messages:
+      AuditEvent:
+        $ref: '#/components/messages/AuditEvent'
+
+  notification-events-in:
+    address: openbank.notifications.events-in
+    description: Notification request channel — consumed by notification-service
+    messages:
+      NotificationRequest:
+        $ref: '#/components/messages/NotificationRequest'
+
+  swift-events:
+    address: openbank.payments.swift.event
+    description: |
+      SWIFT message lifecycle events (sent, acknowledged, rejected, failed).
+      Consumed by audit-service and notification-service.
+    messages:
+      SwiftMessageEvent:
+        $ref: '#/components/messages/SwiftMessageEvent'
+
+  dispute-events:
+    address: openbank.disputes.dispute.event
+    description: Card dispute lifecycle events (opened, evidence-submitted, resolved, chargebacked)
+    messages:
+      DisputeEvent:
+        $ref: '#/components/messages/DisputeEvent'
+
+  interest-events:
+    address: openbank.interest.accrual.event
+    description: Interest accrual and capitalisation events
+    messages:
+      InterestAccrualEvent:
+        $ref: '#/components/messages/InterestAccrualEvent'
+
+  sanctions-events:
+    address: openbank.sanctions.screening.event
+    description: Sanctions screening result events (clear, hit, pending-review)
+    messages:
+      SanctionsScreeningEvent:
+        $ref: '#/components/messages/SanctionsScreeningEvent'
+
+operations:
+  publishAccountCreated:
+    action: send
+    channel:
+      $ref: '#/channels/account-events-out'
+    summary: account-service publishes AccountCreated
+
+  publishAccountStatusChanged:
+    action: send
+    channel:
+      $ref: '#/channels/account-status-changed'
+    summary: account-service publishes AccountStatusChanged
+
+  publishLedgerJournalPosted:
+    action: send
+    channel:
+      $ref: '#/channels/ledger-journal-posted'
+    summary: ledger-service publishes JournalPosted
+
+  publishLedgerJournalReversed:
+    action: send
+    channel:
+      $ref: '#/channels/ledger-journal-reversed'
+    summary: ledger-service publishes JournalReversed
+
+  publishSepaPaymentEvent:
+    action: send
+    channel:
+      $ref: '#/channels/sepa-payment-events'
+    summary: sepa-payment-service publishes SepaPaymentEvent
+
+  publishKycEvent:
+    action: send
+    channel:
+      $ref: '#/channels/kyc-events-out'
+    summary: kyc-service publishes KycCaseEvent
+
+  consumeAuditEvents:
+    action: receive
+    channel:
+      $ref: '#/channels/audit-events-in'
+    summary: audit-service consumes all domain events
+
+  consumeNotificationEvents:
+    action: receive
+    channel:
+      $ref: '#/channels/notification-events-in'
+    summary: notification-service consumes notification requests
+
+  publishSwiftEvent:
+    action: send
+    channel:
+      $ref: '#/channels/swift-events'
+    summary: swift-service publishes SwiftMessageEvent on status transitions
+
+  publishDisputeEvent:
+    action: send
+    channel:
+      $ref: '#/channels/dispute-events'
+    summary: dispute-service publishes DisputeEvent on lifecycle changes
+
+  publishInterestAccrualEvent:
+    action: send
+    channel:
+      $ref: '#/channels/interest-events'
+    summary: interest-service publishes InterestAccrualEvent
+
+  publishSanctionsEvent:
+    action: send
+    channel:
+      $ref: '#/channels/sanctions-events'
+    summary: sanctions-service publishes SanctionsScreeningEvent
+
+components:
+  messages:
+    AccountCreated:
+      name: AccountCreated
+      title: Account Created
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/AccountCreatedPayload'
+
+    AccountStatusChanged:
+      name: AccountStatusChanged
+      title: Account Status Changed
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/AccountStatusChangedPayload'
+
+    JournalPosted:
+      name: JournalPosted
+      title: Journal Posted
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/JournalEventPayload'
+
+    JournalReversed:
+      name: JournalReversed
+      title: Journal Reversed
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/JournalEventPayload'
+
+    SepaPaymentEvent:
+      name: SepaPaymentEvent
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/PaymentEventPayload'
+
+    SctInstEvent:
+      name: SctInstEvent
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/PaymentEventPayload'
+
+    DomesticPaymentEvent:
+      name: DomesticPaymentEvent
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/PaymentEventPayload'
+
+    TransactionEvent:
+      name: TransactionEvent
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/TransactionEventPayload'
+
+    BalanceEvent:
+      name: BalanceEvent
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/BalanceEventPayload'
+
+    KycCaseEvent:
+      name: KycCaseEvent
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/KycCaseEventPayload'
+
+    AmlCaseEvent:
+      name: AmlCaseEvent
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/AmlCaseEventPayload'
+
+    PartyEvent:
+      name: PartyEvent
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/PartyEventPayload'
+
+    ConsentEvent:
+      name: ConsentEvent
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ConsentEventPayload'
+
+    CardEvent:
+      name: CardEvent
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/CardEventPayload'
+
+    StandingOrderEvent:
+      name: StandingOrderEvent
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/StandingOrderEventPayload'
+
+    FxConversionEvent:
+      name: FxConversionEvent
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/FxConversionEventPayload'
+
+    ClearingBatchEvent:
+      name: ClearingBatchEvent
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ClearingBatchEventPayload'
+
+    AuditEvent:
+      name: AuditEvent
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/AuditEventPayload'
+
+    NotificationRequest:
+      name: NotificationRequest
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/NotificationRequestPayload'
+
+    SwiftMessageEvent:
+      name: SwiftMessageEvent
+      title: SWIFT Message Event
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SwiftMessageEventPayload'
+
+    DisputeEvent:
+      name: DisputeEvent
+      title: Card Dispute Event
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/DisputeEventPayload'
+
+    InterestAccrualEvent:
+      name: InterestAccrualEvent
+      title: Interest Accrual Event
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/InterestAccrualEventPayload'
+
+    SanctionsScreeningEvent:
+      name: SanctionsScreeningEvent
+      title: Sanctions Screening Event
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SanctionsScreeningEventPayload'
+
+  schemas:
+    EventEnvelope:
+      type: object
+      required: [eventType, aggregateId, occurredAt, correlationId]
+      properties:
+        eventType:
+          type: string
+        aggregateId:
+          type: string
+          format: uuid
+        aggregateType:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+        correlationId:
+          type: string
+        requestedBy:
+          type: string
+          format: uuid
+
+    AccountCreatedPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            accountId:
+              type: string
+              format: uuid
+            partyId:
+              type: string
+              format: uuid
+            productId:
+              type: string
+            accountType:
+              type: string
+            currencyCode:
+              type: string
+            accountNumber:
+              type: string
+
+    AccountStatusChangedPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            accountId:
+              type: string
+              format: uuid
+            previousStatus:
+              type: string
+            newStatus:
+              type: string
+            reason:
+              type: string
+
+    JournalEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            journalId:
+              type: string
+              format: uuid
+            transactionId:
+              type: string
+              format: uuid
+            entries:
+              type: array
+              items:
+                type: object
+                properties:
+                  accountId:
+                    type: string
+                    format: uuid
+                  side:
+                    type: string
+                    enum: [DEBIT, CREDIT]
+                  amount:
+                    type: number
+                  currency:
+                    type: string
+
+    PaymentEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            paymentId:
+              type: string
+              format: uuid
+            status:
+              type: string
+            amount:
+              type: number
+            currencyCode:
+              type: string
+            debtorAccountId:
+              type: string
+              format: uuid
+            creditorIban:
+              type: string
+            endToEndId:
+              type: string
+
+    TransactionEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            transactionId:
+              type: string
+              format: uuid
+            referenceNumber:
+              type: string
+            type:
+              type: string
+            amount:
+              type: number
+            currencyCode:
+              type: string
+            status:
+              type: string
+
+    BalanceEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            accountId:
+              type: string
+              format: uuid
+            currency:
+              type: string
+            operation:
+              type: string
+              enum: [CREDIT, DEBIT, HOLD_PLACED, HOLD_RELEASED, INITIALIZED]
+            amount:
+              type: number
+            newAvailableBalance:
+              type: number
+
+    KycCaseEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            kycCaseId:
+              type: string
+              format: uuid
+            partyId:
+              type: string
+              format: uuid
+            status:
+              type: string
+            riskLevel:
+              type: string
+
+    AmlCaseEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            amlCaseId:
+              type: string
+              format: uuid
+            partyId:
+              type: string
+              format: uuid
+            triggerType:
+              type: string
+            decision:
+              type: string
+              nullable: true
+
+    PartyEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            partyId:
+              type: string
+              format: uuid
+            partyType:
+              type: string
+            legalName:
+              type: string
+
+    ConsentEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            consentId:
+              type: string
+              format: uuid
+            partyId:
+              type: string
+              format: uuid
+            granteeId:
+              type: string
+            status:
+              type: string
+            scopes:
+              type: array
+              items:
+                type: string
+
+    CardEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            cardId:
+              type: string
+              format: uuid
+            partyId:
+              type: string
+              format: uuid
+            accountId:
+              type: string
+              format: uuid
+            status:
+              type: string
+            maskedPan:
+              type: string
+
+    StandingOrderEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            orderId:
+              type: string
+              format: uuid
+            debtorAccountId:
+              type: string
+              format: uuid
+            status:
+              type: string
+            nextExecutionDate:
+              type: string
+              format: date
+
+    FxConversionEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            conversionId:
+              type: string
+              format: uuid
+            sourceAccountId:
+              type: string
+              format: uuid
+            fromCurrency:
+              type: string
+            toCurrency:
+              type: string
+            fromAmount:
+              type: number
+            toAmount:
+              type: number
+            appliedRate:
+              type: number
+
+    ClearingBatchEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            batchId:
+              type: string
+              format: uuid
+            rail:
+              type: string
+            status:
+              type: string
+            itemCount:
+              type: integer
+            totalAmount:
+              type: number
+
+    AuditEventPayload:
+      type: object
+      required: [eventType, aggregateId, aggregateType, occurredAt]
+      properties:
+        eventType:
+          type: string
+        aggregateId:
+          type: string
+        aggregateType:
+          type: string
+        actorId:
+          type: string
+        actorType:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+        correlationId:
+          type: string
+        payload:
+          type: object
+
+    NotificationRequestPayload:
+      type: object
+      required: [partyId, channel, templateId]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        channel:
+          type: string
+          enum: [EMAIL, SMS, PUSH]
+        templateId:
+          type: string
+          enum: [ACCOUNT_OPENED, PAYMENT_COMPLETED, KYC_REJECTED, OTP_CODE, WELCOME]
+        variables:
+          type: object
+          additionalProperties:
+            type: string
+
+    SwiftMessageEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            swiftMessageId:
+              type: string
+              format: uuid
+            messageType:
+              type: string
+              enum: [MT103, MT202, MT900, MT910, MT940, MT950, MT199]
+            senderBic:
+              type: string
+            receiverBic:
+              type: string
+            transactionReference:
+              type: string
+            currency:
+              type: string
+            amountMinorUnits:
+              type: integer
+              format: int64
+            previousStatus:
+              type: string
+              enum: [PENDING, VALIDATED, SENT, ACKNOWLEDGED, REJECTED, FAILED]
+            newStatus:
+              type: string
+              enum: [PENDING, VALIDATED, SENT, ACKNOWLEDGED, REJECTED, FAILED]
+            ackRef:
+              type: string
+              nullable: true
+            rejectionReason:
+              type: string
+              nullable: true
+
+    DisputeEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            disputeId:
+              type: string
+              format: uuid
+            cardId:
+              type: string
+              format: uuid
+            partyId:
+              type: string
+              format: uuid
+            transactionId:
+              type: string
+              format: uuid
+            status:
+              type: string
+              enum: [OPENED, EVIDENCE_SUBMITTED, UNDER_REVIEW, RESOLVED_MERCHANT, RESOLVED_CUSTOMER, CHARGEBACKED, CLOSED]
+            disputeType:
+              type: string
+              enum: [UNAUTHORIZED, ITEM_NOT_RECEIVED, ITEM_NOT_AS_DESCRIBED, DUPLICATE_CHARGE, OTHER]
+
+    InterestAccrualEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            accrualId:
+              type: string
+              format: uuid
+            accountId:
+              type: string
+              format: uuid
+            accrualType:
+              type: string
+              enum: [DAILY_ACCRUAL, CAPITALISATION, PENALTY]
+            currency:
+              type: string
+            accrualAmount:
+              type: number
+            accrualDate:
+              type: string
+              format: date
+            annualRate:
+              type: number
+
+    SanctionsScreeningEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            screeningId:
+              type: string
+              format: uuid
+            partyId:
+              type: string
+              format: uuid
+            subjectName:
+              type: string
+            screeningType:
+              type: string
+              enum: [PARTY_ONBOARDING, PAYMENT_COUNTERPARTY, PERIODIC_REVIEW]
+            result:
+              type: string
+              enum: [CLEAR, HIT, POTENTIAL_MATCH, PENDING_REVIEW]
+            listNames:
+              type: array
+              items:
+                type: string
+              description: Sanctions lists that produced a hit (e.g. EU, OFAC, UN)

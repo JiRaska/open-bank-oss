@@ -1,0 +1,48 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: openbank-api
+spec:
+  rules:
+    - host: api.open-bank.tech
+  tls:
+    - hosts:
+        - api.open-bank.tech
+      secretName: openbank-api-tls
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: openbank-admin-ui
+spec:
+  rules:
+    - host: admin.open-bank.tech
+  tls:
+    - hosts:
+        - admin.open-bank.tech
+      secretName: openbank-admin-ui-tls
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: openbank-apex-redirect
+  annotations:
+    nginx.ingress.kubernetes.io/permanent-redirect: "https://admin.open-bank.tech"
+spec:
+  rules:
+    - host: open-bank.tech
+  tls:
+    - hosts:
+        - open-bank.tech
+      secretName: openbank-apex-tls
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openbank-admin-ui-config
+data:
+  NEXT_PUBLIC_API_BASE_URL: https://api.open-bank.tech
+  NEXT_PUBLIC_KEYCLOAK_URL: https://kc.open-bank.tech
+  NEXT_PUBLIC_KEYCLOAK_REALM: openbank
+  NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: openbank-admin-ui
+  CORS_ORIGINS: https://admin.open-bank.tech

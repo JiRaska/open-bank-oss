@@ -1,0 +1,139 @@
+quarkus:
+  application:
+    name: openbank-onboarding-service
+    version: 0.1.0
+  http:
+    port: 8130
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+      headers: Content-Type,Authorization
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: postgresql://localhost:5432/openbank_onboarding
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_onboarding
+  flyway:
+    migrate-at-start: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+  hibernate-orm:
+    database:
+      generation: none
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  rest-client:
+    "party-service":
+      url: ${PARTY_SERVICE_URL:http://openbank-party-service:8090}
+      connect-timeout: 3000
+      read-timeout: 5000
+  smallrye-reactive-messaging:
+    kafka:
+      bootstrap-servers: localhost:29092
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+    console:
+      json: true
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-onboarding-service
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+mp:
+  messaging:
+    incoming:
+      party-events-in:
+        connector: smallrye-kafka
+        client.id: onboarding-service-party-${quarkus.uuid}
+        group.id: onboarding-service-party
+        topic: openbank.party.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto.offset.reset: earliest
+      kyc-events-in:
+        connector: smallrye-kafka
+        client.id: onboarding-service-kyc-${quarkus.uuid}
+        group.id: onboarding-service-kyc
+        topic: openbank.kyc.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto.offset.reset: earliest
+      sca-events-in:
+        connector: smallrye-kafka
+        client.id: onboarding-service-sca-${quarkus.uuid}
+        group.id: onboarding-service-sca
+        topic: openbank.sca.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto.offset.reset: earliest
+
+openbank:
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 100
+  api:
+    version: "1"
+  build:
+    time: "${BUILD_TIME:unknown}"
+  git:
+    commit: "${GIT_COMMIT:unknown}"
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+    oidc:
+      enabled: false
+
+"%test":
+  quarkus:
+    datasource:
+      username: openbank
+      password: openbank_secret
+      reactive:
+        url: vertx-reactive:postgresql://localhost:5432/openbank_onboarding_it
+      jdbc:
+        url: jdbc:postgresql://localhost:5432/openbank_onboarding_it
+    devservices:
+      enabled: false
+    management:
+      enabled: false
+    oidc:
+      enabled: false
+    scheduler:
+      enabled: false

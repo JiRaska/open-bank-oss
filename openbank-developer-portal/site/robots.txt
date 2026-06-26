@@ -1,0 +1,3 @@
+# Public PSD2/XS2A documentation — intended to be indexed. Nothing sensitive is served.
+User-agent: *
+Allow: /

@@ -1,0 +1,31 @@
+name: Runner smoke test
+
+# Validates the self-hosted sandbox runner (openbank-infra/aws) actually picks up
+# and executes jobs. Triggered by pushing this branch, or manually.
+on:
+  push:
+    branches: [ci/self-hosted-runner]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Self-hosted runner smoke
+    runs-on: openbank-build
+    timeout-minutes: 10
+    steps:
+      - name: Runner facts
+        run: |
+          echo "host:   $(hostname)"
+          echo "kernel: $(uname -sr)"
+          echo "arch:   $(arch)"
+          docker version --format 'docker: {{.Server.Version}}' || echo "docker: not available"
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Verify checkout
+        run: |
+          echo "checked out $(git rev-parse --short HEAD)"
+          git status --short | head

@@ -1,0 +1,32 @@
+# Statements banking domain: statement-service + its single-owner CNPG Postgres +
+# OIDC ExternalSecret. statement-service owns the monthly per-pocket period-close
+# record (ADR-0035) and a local account_registry projection driving the scheduled
+# close. CNPG generates the DB secret; ESO syncs the OIDC client secret from Vault.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: statements
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/statements
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: statements
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false

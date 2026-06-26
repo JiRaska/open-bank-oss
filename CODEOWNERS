@@ -1,0 +1,55 @@
+# OpenBank Code Owners
+#
+# This file defines required reviewers for changes to specific paths.
+# Used together with branch protection to enforce review on sensitive code.
+#
+# Order matters — last matching rule wins.
+# Reference: https://docs.github.com/en/repositories/managing-your-repositories-settings-and-features/customizing-your-repository/about-code-owners
+#
+# As the project grows, additional maintainers will be added per area.
+# Adding yourself to CODEOWNERS requires sustained, high-quality contributions
+# in that area and approval from existing maintainers.
+
+# Default — everything requires owner review
+*                                       @JiRaska
+
+# --- Critical financial logic (require 2 approvals via branch protection) ---
+/openbank-ledger-service/               @JiRaska
+/openbank-transaction-service/          @JiRaska
+/openbank-account-service/              @JiRaska
+/openbank-balance-service/              @JiRaska
+
+# --- Payment rails ---
+/openbank-sepa-payment/                 @JiRaska
+/openbank-sepa-instant/                 @JiRaska
+/openbank-domestic-payment/             @JiRaska
+/openbank-clearing-service/             @JiRaska
+/openbank-swift-service/                @JiRaska
+/openbank-fx-service/                   @JiRaska
+
+# --- Compliance & risk ---
+/openbank-aml-service/                  @JiRaska
+/openbank-kyc-service/                  @JiRaska
+/openbank-sanctions-service/            @JiRaska
+/openbank-audit-service/                @JiRaska
+
+# --- Identity, auth, consent ---
+/openbank-sca-service/                  @JiRaska
+/openbank-consent-service/              @JiRaska
+/openbank-tpp-registry-service/         @JiRaska
+/openbank-psd2-service/                 @JiRaska
+
+# --- Platform / infra ---
+/openbank-infra/                        @JiRaska
+/openbank-libs/                         @JiRaska
+
+# --- CI / security tooling ---
+/.github/                               @JiRaska
+/.gitignore                             @JiRaska
+/.gitattributes                         @JiRaska
+/SECURITY.md                            @JiRaska
+/CODEOWNERS                             @JiRaska
+/LICENSE                                @JiRaska
+
+# --- Architecture decisions ---
+/docs/adr/                              @JiRaska

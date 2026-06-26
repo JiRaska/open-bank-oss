@@ -1,0 +1,31 @@
+# Keycloak bootstrap admin credentials from Vault → existing keycloak-bootstrap
+# Secret (keys admin-username, admin-password), consumed by the Keycloak
+# Deployment's KC_BOOTSTRAP_ADMIN_* env. creationPolicy Owner: ESO owns and
+# re-creates the Secret (see es-account-service-oidc).
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: keycloak-bootstrap
+  namespace: iam
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: keycloak-bootstrap
+    creationPolicy: Owner
+    template:
+      mergePolicy: Merge
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+  data:
+    - secretKey: admin-username
+      remoteRef:
+        key: keycloak-bootstrap
+        property: admin-username
+    - secretKey: admin-password
+      remoteRef:
+        key: keycloak-bootstrap
+        property: admin-password

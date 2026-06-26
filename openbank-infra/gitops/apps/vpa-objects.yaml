@@ -1,0 +1,37 @@
+# VPA recommendation objects for all deployed OpenBank services.
+#
+# Separate from the `vpa` app (controller install) so the two can sync
+# independently: the controller must be Ready before CRDs are registered,
+# but ArgoCD retries syncPolicy handles this ordering via the retry backoff.
+#
+# Objects carry explicit namespace metadata so this single App deploys to
+# multiple namespaces (ArgoCD default-project allows any destination namespace).
+# updateMode: Off on every object — recommendations only, no pod evictions.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vpa-objects
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/vpa-objects
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vpa   # default; individual objects override via metadata.namespace
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+    retry:
+      limit: 20         # CRD may not exist yet if vpa app is still syncing
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 10m

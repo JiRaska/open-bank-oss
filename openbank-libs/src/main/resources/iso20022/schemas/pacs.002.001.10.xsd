@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ISO 20022 pacs.002.001.10 — FIToFIPaymentStatusReport (FI-to-FI Payment Status Report)
+
+  PROVENANCE / STATUS (ADR-0104, D1 / D2)
+  =======================================
+  Structurally-faithful WORKING SUBSET of the official ISO 20022 pacs.002.001.10 schema,
+  vendored so the scheme simulator's status response (ACSC ack / RJCT reject) can be
+  built and XSD-validated with zero external dependencies (JDK JAXP only).
+
+  Not the full official schema. Models the message tree, namespace and constrained types
+  for the status fields the simulator emits: original references, transaction status, and
+  an optional status reason code. See pacs.008.001.08.xsd for the swap-in TODO that applies
+  identically here.
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.002.001.10"
+           targetNamespace="urn:iso:std:iso:20022:tech:xsd:pacs.002.001.10"
+           elementFormDefault="qualified">
+
+  <xs:element name="Document" type="Document"/>
+
+  <xs:complexType name="Document">
+    <xs:sequence>
+      <xs:element name="FIToFIPmtStsRpt" type="FIToFIPaymentStatusReportV10"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="FIToFIPaymentStatusReportV10">
+    <xs:sequence>
+      <xs:element name="GrpHdr" type="GroupHeader91"/>
+      <xs:element name="TxInfAndSts" type="PaymentTransaction110" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="GroupHeader91">
+    <xs:sequence>
+      <xs:element name="MsgId" type="Max35Text"/>
+      <xs:element name="CreDtTm" type="ISODateTime"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="PaymentTransaction110">
+    <xs:sequence>
+      <xs:element name="OrgnlEndToEndId" type="Max35Text" minOccurs="0"/>
+      <xs:element name="OrgnlTxId" type="Max35Text" minOccurs="0"/>
+      <xs:element name="TxSts" type="ExternalPaymentTransactionStatus1Code"/>
+      <xs:element name="StsRsnInf" type="StatusReasonInformation12" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="StatusReasonInformation12">
+    <xs:sequence>
+      <xs:element name="Rsn" type="StatusReason6Choice"/>
+      <xs:element name="AddtlInf" type="Max105Text" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="StatusReason6Choice">
+    <xs:sequence>
+      <xs:element name="Cd" type="ExternalStatusReason1Code"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:simpleType name="Max35Text">
+    <xs:restriction base="xs:string">
+      <xs:minLength value="1"/>
+      <xs:maxLength value="35"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="Max105Text">
+    <xs:restriction base="xs:string">
+      <xs:minLength value="1"/>
+      <xs:maxLength value="105"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="ISODateTime">
+    <xs:restriction base="xs:dateTime"/>
+  </xs:simpleType>
+
+  <xs:simpleType name="ExternalPaymentTransactionStatus1Code">
+    <xs:restriction base="xs:string">
+      <xs:minLength value="1"/>
+      <xs:maxLength value="4"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="ExternalStatusReason1Code">
+    <xs:restriction base="xs:string">
+      <xs:minLength value="1"/>
+      <xs:maxLength value="4"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+</xs:schema>

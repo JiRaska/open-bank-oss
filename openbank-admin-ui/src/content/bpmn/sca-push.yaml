@@ -1,0 +1,123 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# BPMN process diagram (ADR-0019/0029). Authored as data; validated by
+# src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
+
+name: SCA Push Approval
+desc: Enrollment zařízení a decoupled push-schválení (dynamic linking, nikdy auto-approve)
+regulation: PSD2 RTS on SCA + ADR-0021
+services:
+  - sca-service
+  - notification-service
+steps:
+  - id: start
+    type: start
+    x: 60
+    y: 100
+    label: Login / platba
+  - id: enroll
+    type: task
+    x: 175
+    y: 100
+    label: Registrace zařízení
+    lane: psd2
+    apis:
+      - POST /api/v1/sca/parties/{partyId}/devices
+    relatedServices:
+      - sca-service
+    emits:
+      - openbank.sca.challenge.event
+  - id: onboard
+    type: event
+    x: 175
+    y: 220
+    label: Onboarding stage++
+    consumes:
+      - openbank.sca.challenge.event
+  - id: initiate
+    type: task
+    x: 300
+    y: 100
+    label: Iniciace SCA výzvy
+    lane: psd2
+    apis:
+      - POST /api/v1/sca/challenges
+    relatedServices:
+      - sca-service
+  - id: push
+    type: task
+    x: 425
+    y: 100
+    label: Push notifikace
+    lane: platform
+    relatedServices:
+      - sca-service
+      - notification-service
+  - id: approve
+    type: task
+    x: 550
+    y: 100
+    label: Schválení na zařízení
+    lane: psd2
+    relatedServices:
+      - sca-service
+  - id: decide
+    type: task
+    x: 675
+    y: 100
+    label: Ověření podpisu
+    lane: psd2
+    apis:
+      - POST /api/v1/sca/challenges/{id}/decision
+    relatedServices:
+      - sca-service
+  - id: gw
+    type: gateway
+    x: 800
+    y: 100
+    label: Podpis OK?
+  - id: fail
+    type: end-err
+    x: 800
+    y: 220
+    label: Zamítnuto / Expirace
+  - id: verify
+    type: task
+    x: 920
+    y: 100
+    label: Verifikace výzvy
+    lane: psd2
+    apis:
+      - POST /api/v1/sca/challenges/{id}/verify
+    relatedServices:
+      - sca-service
+  - id: end
+    type: end
+    x: 1040
+    y: 100
+    label: Ověřeno (SCA)
+flows:
+  - from: start
+    to: enroll
+  - from: enroll
+    to: initiate
+  - from: enroll
+    to: onboard
+    kind: async
+    topic: openbank.sca.challenge.event
+  - from: initiate
+    to: push
+  - from: push
+    to: approve
+  - from: approve
+    to: decide
+  - from: decide
+    to: gw
+  - from: gw
+    to: fail
+    label: Ne
+  - from: gw
+    to: verify
+    label: Ano
+  - from: verify
+    to: end

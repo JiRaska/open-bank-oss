@@ -1,0 +1,78 @@
+# Cluster edge. ingress-nginx (not the AWS ALB controller) keeps the edge
+# cloud-agnostic per ADR-0027 — the only AWS coupling is the Service annotation
+# that asks the in-tree cloud provider for an NLB. Single replica for sandbox
+# FinOps; prod should raise replicaCount and add PodDisruptionBudget.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ingress-nginx
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://kubernetes.github.io/ingress-nginx
+    chart: ingress-nginx
+    targetRevision: 4.15.1
+    helm:
+      valuesObject:
+        controller:
+          config:
+            # Larger header buffer for OIDC: next-auth's /api/auth/callback sets a
+            # large Set-Cookie (session JWT), which overflows the default 4k/8k
+            # proxy buffer and 502s the admin-ui login. Set globally — per-Ingress
+            # annotation is not honoured by this controller.
+            proxy-buffer-size: "32k"
+            allow-snippet-annotations: "true"
+            # Since ingress-nginx v1.12 (post CVE-2023-5043/5044), snippet
+            # annotations are classified "Critical" risk and are REJECTED unless
+            # the risk level is raised — even with allow-snippet-annotations=true.
+            # Without this, controller v1.15.1 drops every Ingress carrying a
+            # configuration-snippet/server-snippet (admin-ui security headers, the
+            # Keycloak /admin block) from nginx.conf, so those hosts fall back to
+            # the fake default cert ("Kubernetes Ingress Controller Fake
+            # Certificate"). Critical is acceptable on this single-tenant cluster;
+            # re-evaluate for multi-tenant prod (prefer dropping snippets there).
+            annotations-risk-level: "Critical"
+          replicaCount: 1
+          # The admission webhook only validates Ingress objects; its Helm-hook
+          # certgen Jobs deadlock ArgoCD sync (hook stuck "Pending deletion").
+          # Disabled for the sandbox — re-enable in prod where Ingress is
+          # multi-tenant and validation matters.
+          admissionWebhooks:
+            enabled: false
+          # Allow configuration-snippet and server-snippet annotations on Ingress
+          # objects — required for security headers (more_set_headers) and the
+          # Keycloak admin path block (location ~* ^/admin { return 403 }).
+          # Safe for this single-tenant cluster; re-evaluate for multi-tenant prod.
+          allowSnippetAnnotations: true
+          service:
+            type: LoadBalancer
+            # Cluster (not Local) so any NLB AZ-IP reaches the single controller
+            # replica via kube-proxy — lets us point sslip.io at any NLB IP
+            # without AZ-pinning. Loses real client IP, fine for the sandbox
+            # (the IP allow-list is enforced at the NLB SG, below).
+            externalTrafficPolicy: Cluster
+            annotations:
+              service.beta.kubernetes.io/aws-load-balancer-type: nlb
+              service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+          ingressClassResource:
+            default: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ingress-nginx
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

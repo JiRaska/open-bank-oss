@@ -1,0 +1,65 @@
+# pid-service domain namespace (ADR-0002: domain = namespace).
+# Holds pid-service (the identity golden record, ADR-0072 / ADR-0094) and its
+# single-owner CNPG Postgres. Identity-critical; non-money-path per rules.yaml.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pid
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+# Single-owner Postgres for pid-service, reconciled by the CNPG operator.
+# CNPG generates the `pid-db-app` secret and `pid-db-rw` Service.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pid-db
+  namespace: pid
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  bootstrap:
+    initdb:
+      database: openbank_pid
+      owner: openbank
+  # Continuous WAL + base-backup to S3 (CNPG Barman). pid holds the identity golden
+  # record (RČ blind index, party_external_ids — ADR-0072); restorability is a
+  # production-readiness gap (prod-readiness C5). Mirrors components/party/namespace.yaml.
+  # Sandbox S3 lifecycle expires after 35d; prod needs compliance retention.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/pid-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+# Daily base backup — WAL archiving alone is not restorable (the C5 gap the comment above
+# flags). Staggered off-peak (the fleet batches at 02:19). CNPG cron is 6-field.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: pid-db-daily
+  namespace: pid
+spec:
+  schedule: "0 15 3 * * *"
+  backupOwnerReference: self
+  method: barmanObjectStore
+  cluster:
+    name: pid-db

@@ -1,0 +1,32 @@
+# Keycloak identity provider + its single-owner CNPG Postgres, in the `iam`
+# namespace (ADR-0037: identity domain = namespace). Backs the Milník A login
+# loop. The bootstrap-admin and realm-import secrets are created out-of-band
+# (kubectl), never committed — the Application syncs only the namespace,
+# CNPG Cluster, Deployment, Service and Ingress.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keycloak
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/keycloak
+    # realm-template.json lives here as the documented source for the
+    # out-of-band realm-import secret — it is NOT a k8s manifest, so restrict
+    # the directory source to yaml or ArgoCD tries to apply it and fails.
+    directory:
+      include: '*.yaml'
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: iam
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

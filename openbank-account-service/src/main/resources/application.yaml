@@ -1,0 +1,209 @@
+quarkus:
+  application:
+    name: openbank-account-service
+    # version is intentionally not set here: it is inherited from the Gradle
+    # build version (sourced from version.txt — ADR-0029 D2 single source of truth).
+
+  http:
+    port: 8100
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+      headers: Content-Type,Authorization,Idempotency-Key
+
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: vertx-reactive:postgresql://localhost:5432/openbank_accounts
+
+  flyway:
+    migrate-at-start: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+    locations: db/migration
+    datasource:
+      db-kind: postgresql
+      username: openbank
+      password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+      jdbc:
+        url: jdbc:postgresql://localhost:5432/openbank_accounts
+
+  hibernate-orm:
+    database:
+      generation: none
+
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+
+  # M2M client for outbound service-to-service calls made WITHOUT an inbound user token
+  # (the welcome-bonus grant is fired from a Kafka consumer). client_credentials grant on
+  # openbank-services, which carries ROLE_OPERATOR — required by transaction-service.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+    tls:
+      verification: none
+
+  redis:
+    hosts: redis://localhost:6379
+
+  rest-client:
+    balance-service:
+      url: ${BALANCE_SERVICE_URL:http://localhost:8103}
+    transaction-service:
+      url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
+    "sanctions-service":
+      url: ${SANCTIONS_SERVICE_URL:http://openbank-sanctions-service:8110}
+      connect-timeout: 3000
+      read-timeout: 5000
+
+  shutdown:
+    timeout: 30S
+
+  smallrye-reactive-messaging:
+    kafka:
+      bootstrap-servers: localhost:29092
+
+  smallrye-health:
+    ui:
+      enable: true
+    root-path: /q/health
+
+  log:
+    level: INFO
+    console:
+      format: '{"timestamp":"%d{yyyy-MM-dd HH:mm:ss.SSS}","level":"%p","logger":"%c{3.}","message":"%s","traceId":"%X{traceId}","spanId":"%X{spanId}"}%n'
+      json: true
+
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-account-service
+        service.version: ${quarkus.application.version}
+
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+mp:
+  messaging:
+    outgoing:
+      account-events-out:
+        connector: smallrye-kafka
+        client.id: account-service-${quarkus.uuid}
+        topic: openbank.accounts.account.created
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+      account-outbox-out:
+        connector: smallrye-kafka
+        client.id: account-outbox-service-${quarkus.uuid}
+        topic: openbank.accounts.account.created
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Customer-facing notification requests (ADR-0070) drained by notification-service.
+      notification-requests-out:
+        connector: smallrye-kafka
+        client.id: account-service-notif-${quarkus.uuid}
+        topic: openbank.notification.requests
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+    incoming:
+      # Onboarding account lifecycle (ADR-0073): open a PENDING_ACTIVATION account on
+      # PARTY_CREATED and activate it when the party clears KYC + AML.
+      party-events-in:
+        connector: smallrye-kafka
+        topic: openbank.party.events
+        group.id: openbank-account-service
+        auto.offset.reset: earliest
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+        format: "%d{HH:mm:ss} %-5p [%c{2.}] %s%e%n"
+    oidc:
+      enabled: false
+
+"%test":
+  quarkus:
+    datasource:
+      username: openbank
+      password: openbank_secret
+      reactive:
+        url: vertx-reactive:postgresql://localhost:5432/openbank_accounts_it
+      jdbc:
+        url: jdbc:postgresql://localhost:5432/openbank_accounts_it
+    redis:
+      hosts: redis://:openbank_cache_secret@localhost:6379
+    oidc:
+      enabled: false
+    devservices:
+      enabled: false
+    management:
+      enabled: false
+
+openbank:
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 200
+  api:
+    version: "1"
+  build:
+    time: "${BUILD_TIME:unknown}"
+  git:
+    commit: "${GIT_COMMIT:unknown}"
+  outbox:
+    dispatch-enabled: true
+
+# OPA sidecar (ADR-0034). Advisory mode by default.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:false}"

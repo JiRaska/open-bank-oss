@@ -1,0 +1,28 @@
+# HolmesGPT LLM key from OpenBao → holmes-llm-secrets Secret. Pulls the NVIDIA
+# NIM key from vault KV path copilot/NVIDIA_API_KEY (same secret copilot-service
+# uses via copilot-nvidia-api-key ESO). HolmesGPT is the OSS "Davis-lite": an LLM
+# that reads Prometheus/k8s (read-only) to root-cause an alert; uses NVIDIA NIM
+# meta/llama-3.1-70b-instruct — no daily token cap unlike the former Groq tier.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: holmes-llm-secrets
+  namespace: observability
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: holmes-llm-secrets
+    creationPolicy: Owner
+    template:
+      mergePolicy: Merge
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+  data:
+    - secretKey: NVIDIA_API_KEY
+      remoteRef:
+        key: copilot
+        property: NVIDIA_API_KEY

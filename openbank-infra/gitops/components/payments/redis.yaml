@@ -1,0 +1,132 @@
+# Redis idempotency cache for the payments namespace (domestic-payment / sepa-payment
+# dedupe createPayment on the Idempotency-Key header). Ephemeral on purpose —
+# persistence is disabled (--save "" --appendonly no), so a restart just clears
+# in-flight idempotency keys, which is acceptable for the sandbox. Prod should use an
+# operator-managed HA Redis. Pinned to the alpine image's redis uid 999/gid 1000 to
+# satisfy PSS restricted; /data is a writable emptyDir so the root fs can stay read-only.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/part-of: payments
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: valkey/valkey:8-alpine
+          args: ["--save", "", "--appendonly", "no"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 192Mi
+        # Cache-layer observability (Dynatrace-parity #0). redis_exporter speaks
+        # the Valkey/Redis protocol and exposes redis_* metrics on :9121
+        # (connected clients, ops/s, keyspace hits/misses, memory, evictions).
+        # Scraped via the redis-metrics PodMonitor below.
+        - name: exporter
+          # Non-alpine tag: it is multi-arch (incl. linux/arm64); the -alpine
+          # variant resolved to amd64 only → "exec format error" on the Graviton
+          # (arm64) nodes. valkey:8-alpine is multi-arch, hence redis stayed up.
+          image: oliver006/redis_exporter:v1.62.0
+          args: ["--redis.addr=redis://localhost:6379"]
+          ports:
+            - name: redis-metrics
+              containerPort: 9121
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: redis
+spec:
+  selector:
+    app.kubernetes.io/name: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+# Cache-layer observability (Dynatrace-parity #0). Scrapes the redis_exporter
+# sidecar so the payments idempotency cache is no longer a black box. The fleet
+# PodMonitor only scrapes Quarkus services on the `management` port, so Valkey
+# needs its own.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: redis-metrics
+  namespace: payments
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  namespaceSelector:
+    matchNames:
+      - payments
+  podMetricsEndpoints:
+    - port: redis-metrics
+      path: /metrics
+      interval: 30s

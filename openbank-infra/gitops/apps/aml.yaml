@@ -1,0 +1,29 @@
+# aml-service: AML screening case lifecycle + onboarding auto-screen (ADR-0073). Namespace: aml.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aml
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/aml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: aml
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false

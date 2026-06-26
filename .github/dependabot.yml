@@ -1,0 +1,98 @@
+version: 2
+updates:
+  # Gradle / Kotlin / JVM
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Prague"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "java"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      quarkus:
+        patterns:
+          - "io.quarkus:*"
+          - "io.quarkiverse.*:*"
+      kotlin:
+        patterns:
+          - "org.jetbrains.kotlin*"
+          - "org.jetbrains.kotlinx*"
+      testing:
+        patterns:
+          - "org.junit*"
+          - "io.mockk*"
+          - "org.assertj*"
+          - "io.rest-assured*"
+      # Catch-all so misc minor/patch JVM bumps consolidate into one PR.
+      jvm-minor:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Admin UI
+  - package-ecosystem: "npm"
+    directory: "/openbank-admin-ui"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Prague"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "javascript"
+    commit-message:
+      prefix: "chore(deps-ui)"
+      include: "scope"
+    groups:
+      next:
+        patterns:
+          - "next"
+          - "@next/*"
+          - "eslint-config-next"
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react*"
+      # Catch-all so minor/patch bumps (radix-ui, recharts, ...) land in ONE PR
+      # instead of flooding the runner budget with a dozen separate runs.
+      ui-minor:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(ci)"
+
+  # Docker
+  - package-ecosystem: "docker"
+    directory: "/openbank-infra"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore(docker)"

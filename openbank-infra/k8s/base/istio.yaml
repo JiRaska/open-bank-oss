@@ -1,0 +1,100 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+#
+# Istio service mesh wiring for the openbank namespace. Provides:
+#   - mTLS for every east-west call (PeerAuthentication STRICT)
+#   - JWT validation at the mesh edge (RequestAuthentication against Keycloak)
+#   - Default-allow→default-deny policy gradient
+#
+# Prerequisites (cluster admin):
+#   - Istio control plane installed in istio-system (istioctl install --set profile=default)
+#   - foo-system pre-existing OR via Helm Operator
+#   - The `openbank` namespace must have label `istio-injection=enabled` (done in namespace.yaml)
+#
+# Addresses Op-ex 5 from the SBOM follow-up and K4 from the 2026-05-28 audit
+# (no mTLS between services).
+
+# 1) STRICT mTLS for every pod in the openbank namespace. Non-mTLS traffic is
+#    rejected — clear-text intra-cluster calls become impossible.
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: openbank-mtls-strict
+  namespace: openbank
+spec:
+  mtls:
+    mode: STRICT
+---
+# 2) Allow plain HTTP from the ingress controllers (north-south) — they
+#    terminate TLS at the edge and don't speak mTLS to backends.
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: api-gateway-mtls-permissive
+  namespace: openbank
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: api-gateway
+  mtls:
+    mode: PERMISSIVE
+---
+# 3) JWT validation at the gateway. Tokens are issued by Keycloak
+#    (openbank realm). Routes that need auth get a per-route AuthorizationPolicy.
+apiVersion: security.istio.io/v1
+kind: RequestAuthentication
+metadata:
+  name: keycloak-jwt
+  namespace: openbank
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: api-gateway
+  jwtRules:
+    - issuer: "http://keycloak.openbank.svc:8080/realms/openbank"
+      jwksUri: "http://keycloak.openbank.svc:8080/realms/openbank/protocol/openid-connect/certs"
+      audiences:
+        - openbank-services
+      forwardOriginalToken: true
+---
+# 4) Default-deny at the mesh layer: only requests authenticated by the
+#    keycloak-jwt rule above are forwarded to backends. Combined with the
+#    NetworkPolicy default-deny this is layered defence: NetworkPolicy stops
+#    L3/L4 traffic, AuthorizationPolicy stops L7 unauthenticated requests.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: openbank-require-jwt
+  namespace: openbank
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            requestPrincipals: ["*"]
+    # Allow intra-mesh service-to-service calls authenticated by mTLS
+    # (covered by PeerAuthentication STRICT above).
+    - from:
+        - source:
+            principals: ["cluster.local/ns/openbank/sa/*"]
+---
+# 5) Telemetry: every service emits OTLP traces + metrics through the mesh.
+#    Defaults to Tempo/Loki sidecars if present, otherwise the OpenTelemetry
+#    collector picks them up via the existing Quarkus OTEL config.
+apiVersion: telemetry.istio.io/v1
+kind: Telemetry
+metadata:
+  name: openbank-telemetry
+  namespace: openbank
+spec:
+  tracing:
+    - randomSamplingPercentage: 10.0
+  metrics:
+    - providers:
+        - name: prometheus
+  accessLogging:
+    - providers:
+        - name: otel

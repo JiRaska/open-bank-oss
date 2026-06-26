@@ -1,0 +1,32 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:SecurityScannerService.kt$SecurityScannerService$fun scanService(name: String, url: String): ServiceScanResult</ID>
+    <ID>LongMethod:SecurityScannerService.kt$SecurityScannerService$fun scanService(name: String, url: String): ServiceScanResult</ID>
+    <ID>LongParameterList:IctIncidentService.kt$IctIncidentService$( id: UUID, status: IncidentStatus, containedAt: Instant?, resolvedAt: Instant?, rtoMinutes: Int?, rpoMinutes: Int? )</ID>
+    <ID>MagicNumber:IctIncidentResource.kt$IctIncidentResource$201</ID>
+    <ID>MagicNumber:IctIncidentService.kt$IctIncidentService$200</ID>
+    <ID>MagicNumber:SecurityOutboxRepositoryImpl.kt$SecurityOutboxRepositoryImpl$4000</ID>
+    <ID>MagicNumber:SecurityScannerResource.kt$SecurityScannerResource$404</ID>
+    <ID>MagicNumber:SecurityScannerService.kt$SecurityScannerService$0.8</ID>
+    <ID>MagicNumber:SecurityScannerService.kt$SecurityScannerService$100</ID>
+    <ID>MagicNumber:SecurityScannerService.kt$SecurityScannerService$15</ID>
+    <ID>MagicNumber:SecurityScannerService.kt$SecurityScannerService$200</ID>
+    <ID>MagicNumber:SecurityScannerService.kt$SecurityScannerService$3</ID>
+    <ID>MagicNumber:SecurityScannerService.kt$SecurityScannerService$30</ID>
+    <ID>MagicNumber:SecurityScannerService.kt$SecurityScannerService$5</ID>
+    <ID>MagicNumber:SecurityScannerService.kt$SecurityScannerService$5.3</ID>
+    <ID>MagicNumber:SecurityScannerService.kt$SecurityScannerService$599</ID>
+    <ID>MagicNumber:SecurityScannerService.kt$SecurityScannerService$6.5</ID>
+    <ID>MagicNumber:SecurityScannerService.kt$SecurityScannerService$60</ID>
+    <ID>MagicNumber:SecurityScannerService.kt$SecurityScannerService$7.5</ID>
+    <ID>MagicNumber:SecurityScannerService.kt$SecurityScannerService$70</ID>
+    <ID>MagicNumber:SecurityScannerService.kt$SecurityScannerService$80</ID>
+    <ID>MagicNumber:SecurityScannerService.kt$SecurityScannerService$90</ID>
+    <ID>MagicNumber:SecurityScannerService.kt$SecurityScannerService$95</ID>
+    <ID>SwallowedException:SecurityScannerService.kt$SecurityScannerService$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SecurityScannerService.kt$SecurityScannerService$e: Exception</ID>
+    <ID>TooManyFunctions:SecurityOutboxRepositoryImpl.kt$SecurityOutboxRepositoryImpl : SecurityOutboxRepositoryPanacheRepository</ID>
+  </CurrentIssues>
+</SmellBaseline>

@@ -1,0 +1,559 @@
+{
+  "schema": "openbank.cluster-topology/v1",
+  "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
+  "generatedAt": "2026-06-26T03:54:46.142Z",
+  "counts": {
+    "namespaces": 49,
+    "networkPolicies": 67,
+    "externalSecrets": 45,
+    "clusterPolicies": 3
+  },
+  "groups": [
+    {
+      "id": "domain",
+      "label": "Byznys domény",
+      "labelEn": "Business domains",
+      "color": "#326CE5",
+      "icon": "bank",
+      "blurb": "Každá doména banky běží ve vlastním zapečeném namespace — jako oddělené patro budovy."
+    },
+    {
+      "id": "identity",
+      "label": "Identita & tajemství",
+      "labelEn": "Identity & secrets",
+      "color": "#8b5cf6",
+      "icon": "lock",
+      "blurb": "Kdo se přihlásí a kde leží klíče: Keycloak, OpenBao, secrety, certifikáty."
+    },
+    {
+      "id": "backbone",
+      "label": "Páteř",
+      "labelEn": "Backbone",
+      "color": "#0ea5e9",
+      "icon": "network",
+      "blurb": "Co spojuje vše dohromady: fronta zpráv, vstupní brána, observabilita, GitOps."
+    },
+    {
+      "id": "platform",
+      "label": "Platforma & CI",
+      "labelEn": "Platform & CI",
+      "color": "#10b981",
+      "icon": "cpu",
+      "blurb": "Provozní mozek a továrna: AI agent, runnery, autoscaling, admission policy, skenery."
+    }
+  ],
+  "namespaces": [
+    {
+      "name": "accounts",
+      "group": "domain",
+      "role": "Účty zákazníků",
+      "declared": true
+    },
+    {
+      "name": "admin-ui",
+      "group": "platform",
+      "role": "Admin portál (tato aplikace)",
+      "declared": true
+    },
+    {
+      "name": "aml",
+      "group": "domain",
+      "role": "AML — praní špinavých peněz",
+      "declared": true
+    },
+    {
+      "name": "arc-runners",
+      "group": "platform",
+      "role": "CI runnery (GitHub Actions)",
+      "declared": false
+    },
+    {
+      "name": "arc-systems",
+      "group": "platform",
+      "role": "CI runner controller",
+      "declared": false
+    },
+    {
+      "name": "argo-rollouts",
+      "group": "domain",
+      "role": "argo-rollouts",
+      "declared": true
+    },
+    {
+      "name": "audit",
+      "group": "domain",
+      "role": "Auditní záznamy",
+      "declared": true
+    },
+    {
+      "name": "balances",
+      "group": "domain",
+      "role": "Zůstatky (projekce ledgeru)",
+      "declared": true
+    },
+    {
+      "name": "cert-manager",
+      "group": "identity",
+      "role": "cert-manager — TLS certifikáty",
+      "declared": true
+    },
+    {
+      "name": "cnpg-system",
+      "group": "platform",
+      "role": "CloudNativePG operátor",
+      "declared": false
+    },
+    {
+      "name": "consent",
+      "group": "domain",
+      "role": "Souhlasy (PSD2)",
+      "declared": true
+    },
+    {
+      "name": "customer-edge",
+      "group": "domain",
+      "role": "Edge pro mobilní app",
+      "declared": true
+    },
+    {
+      "name": "developer-portal",
+      "group": "domain",
+      "role": "developer-portal",
+      "declared": true
+    },
+    {
+      "name": "dispute",
+      "group": "domain",
+      "role": "Spory a chargebacky",
+      "declared": true
+    },
+    {
+      "name": "external-dns",
+      "group": "backbone",
+      "role": "External DNS",
+      "declared": true
+    },
+    {
+      "name": "external-secrets",
+      "group": "identity",
+      "role": "External Secrets Operator (OpenBao→k8s)",
+      "declared": true
+    },
+    {
+      "name": "falco",
+      "group": "domain",
+      "role": "falco",
+      "declared": true
+    },
+    {
+      "name": "finops-agent",
+      "group": "domain",
+      "role": "finops-agent",
+      "declared": true
+    },
+    {
+      "name": "fraud",
+      "group": "domain",
+      "role": "fraud",
+      "declared": true
+    },
+    {
+      "name": "fx",
+      "group": "domain",
+      "role": "Směnárna / FX kurzy",
+      "declared": true
+    },
+    {
+      "name": "gradle-build-cache",
+      "group": "platform",
+      "role": "Gradle build cache",
+      "declared": true
+    },
+    {
+      "name": "iam",
+      "group": "identity",
+      "role": "Keycloak — IAM / OIDC",
+      "declared": true
+    },
+    {
+      "name": "identity",
+      "group": "identity",
+      "role": "Identita",
+      "declared": false
+    },
+    {
+      "name": "ingress-nginx",
+      "group": "backbone",
+      "role": "Vstupní brána (ingress)",
+      "declared": true
+    },
+    {
+      "name": "interest",
+      "group": "domain",
+      "role": "Úroky a kapitalizace",
+      "declared": true
+    },
+    {
+      "name": "keda",
+      "group": "platform",
+      "role": "KEDA — autoscaling",
+      "declared": false
+    },
+    {
+      "name": "kyc",
+      "group": "domain",
+      "role": "KYC — poznej svého klienta",
+      "declared": true
+    },
+    {
+      "name": "kyverno",
+      "group": "platform",
+      "role": "Kyverno — admission policy & podpisy",
+      "declared": true
+    },
+    {
+      "name": "ledger",
+      "group": "domain",
+      "role": "Hlavní kniha (double-entry GL)",
+      "declared": true
+    },
+    {
+      "name": "messaging",
+      "group": "backbone",
+      "role": "Apache Kafka — sběrnice událostí",
+      "declared": true
+    },
+    {
+      "name": "notifications",
+      "group": "domain",
+      "role": "Notifikace",
+      "declared": true
+    },
+    {
+      "name": "observability",
+      "group": "backbone",
+      "role": "Prometheus / Grafana / Loki / Tempo",
+      "declared": true
+    },
+    {
+      "name": "onboarding",
+      "group": "domain",
+      "role": "Onboarding zákazníků",
+      "declared": true
+    },
+    {
+      "name": "open-banking",
+      "group": "domain",
+      "role": "Open Banking / TPP",
+      "declared": false
+    },
+    {
+      "name": "pact-broker",
+      "group": "domain",
+      "role": "pact-broker",
+      "declared": true
+    },
+    {
+      "name": "party",
+      "group": "domain",
+      "role": "Strany / klientská identita",
+      "declared": true
+    },
+    {
+      "name": "payments",
+      "group": "domain",
+      "role": "Platby (SEPA/domácí/SCT Inst)",
+      "declared": true
+    },
+    {
+      "name": "pid",
+      "group": "domain",
+      "role": "pid",
+      "declared": true
+    },
+    {
+      "name": "platform",
+      "group": "platform",
+      "role": "AI agent + řídicí plocha",
+      "declared": true
+    },
+    {
+      "name": "psd2",
+      "group": "domain",
+      "role": "psd2",
+      "declared": true
+    },
+    {
+      "name": "registry-cache",
+      "group": "platform",
+      "role": "Cache image registru",
+      "declared": true
+    },
+    {
+      "name": "reposilite",
+      "group": "domain",
+      "role": "reposilite",
+      "declared": true
+    },
+    {
+      "name": "sanctions",
+      "group": "domain",
+      "role": "Sankční screening",
+      "declared": true
+    },
+    {
+      "name": "sca",
+      "group": "domain",
+      "role": "Silné ověření (SCA)",
+      "declared": true
+    },
+    {
+      "name": "security-scanner",
+      "group": "platform",
+      "role": "Bezpečnostní skener",
+      "declared": true
+    },
+    {
+      "name": "statements",
+      "group": "domain",
+      "role": "Výpisy",
+      "declared": true
+    },
+    {
+      "name": "temporal",
+      "group": "domain",
+      "role": "temporal",
+      "declared": true
+    },
+    {
+      "name": "vault",
+      "group": "identity",
+      "role": "OpenBao — trezor tajemství",
+      "declared": true
+    },
+    {
+      "name": "vpa",
+      "group": "domain",
+      "role": "vpa",
+      "declared": true
+    }
+  ],
+  "securityLayers": [
+    {
+      "id": "edge",
+      "label": "Edge",
+      "icon": "globe",
+      "status": "partial",
+      "analogy": "Ostraha a turniket u vchodu do banky.",
+      "summary": "CloudFront + WAF + TLS na hranici, než provoz vůbec dorazí do clusteru.",
+      "controls": [
+        "CloudFront/WAF",
+        "TLS (ACM/cert-manager)",
+        "ingress-nginx"
+      ],
+      "adr": [
+        "0027"
+      ],
+      "detailRoute": "/docs/cloud-architecture"
+    },
+    {
+      "id": "network",
+      "label": "Síť (segmentace)",
+      "icon": "network",
+      "status": "planned",
+      "analogy": "Zamčené dveře mezi patry — bez propustky se mezi odděleními neprojde.",
+      "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 67 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
+      "controls": [
+        "NetworkPolicy (67 / 49)",
+        "per-namespace deny-by-default (cíl)"
+      ],
+      "adr": [
+        "0081"
+      ]
+    },
+    {
+      "id": "identity",
+      "label": "Identita & autorizace",
+      "icon": "lock",
+      "status": "live",
+      "analogy": "Občanka a oprávnění — každý ukáže, kdo je a co smí.",
+      "summary": "Keycloak OIDC pro lidi i služby; OPA policy gate pro AI agenta a (cíl) REST.",
+      "controls": [
+        "Keycloak OIDC",
+        "OPA policy gate",
+        "role-based guards"
+      ],
+      "adr": [
+        "0018",
+        "0034",
+        "0080"
+      ]
+    },
+    {
+      "id": "pod",
+      "label": "Pod hardening",
+      "icon": "shield",
+      "status": "partial",
+      "analogy": "Každý zaměstnanec pracuje v rukavicích a bez klíčů od trezoru.",
+      "summary": "runAsNonRoot ✓, seccomp RuntimeDefault ✓, read-only FS ✓.",
+      "controls": [
+        "runAsNonRoot",
+        "seccomp RuntimeDefault",
+        "drop ALL caps (cíl)",
+        "read-only rootfs (cíl)"
+      ],
+      "adr": [
+        "0081"
+      ]
+    },
+    {
+      "id": "image",
+      "label": "Image (dodavatelský řetězec)",
+      "icon": "box",
+      "status": "partial",
+      "analogy": "Zapečetěná, zarentgenovaná a podepsaná zásilka — víš, co je uvnitř a že s ní nikdo nehnul.",
+      "summary": "Multi-stage non-root image + CycloneDX SBOM + Cosign podpis (KMS). Kyverno ověřuje, zatím v režimu Audit (ne Enforce).",
+      "controls": [
+        "multi-stage JRE-only",
+        "non-root",
+        "CycloneDX SBOM",
+        "Cosign podpis",
+        "kyverno verify (Audit)"
+      ],
+      "adr": [
+        "0029",
+        "0030"
+      ],
+      "detailRoute": "#image"
+    },
+    {
+      "id": "secrets",
+      "label": "Tajemství",
+      "icon": "key",
+      "status": "live",
+      "analogy": "Trezor s časovým zámkem — hesla nikdy neleží v kódu.",
+      "summary": "OpenBao drží tajemství; 45 ExternalSecret je sype do k8s. Žádný secret v gitu.",
+      "controls": [
+        "OpenBao",
+        "External Secrets (45)",
+        "KMS unseal"
+      ],
+      "adr": [
+        "0007",
+        "0017"
+      ]
+    }
+  ],
+  "imageAnatomy": {
+    "multiStage": true,
+    "buildBase": "eclipse-temurin:25-jdk-alpine",
+    "runtimeBase": "eclipse-temurin:25-jre-alpine",
+    "steps": [
+      {
+        "id": "build",
+        "label": "Build stage (JDK)",
+        "status": "live",
+        "adr": [],
+        "detail": "Plný JDK (eclipse-temurin:25-jdk-alpine) zkompiluje a sestaví aplikaci. Tento stage se NEDISTRIBUUJE — zůstává v něm jen nářadí."
+      },
+      {
+        "id": "runtime",
+        "label": "Runtime stage (JRE-only)",
+        "status": "live",
+        "adr": [],
+        "detail": "Distribuuje se jen štíhlý JRE (eclipse-temurin:25-jre-alpine) + aplikace. Menší image = menší útočná plocha, žádný kompilátor/shell nářadí navíc."
+      },
+      {
+        "id": "nonroot",
+        "label": "Non-root uživatel",
+        "status": "live",
+        "adr": [
+          "0081"
+        ],
+        "detail": "Proces běží jako `openbank` (ne root). I kdyby útočník unikl z aplikace, nemá v kontejneru práva roota."
+      },
+      {
+        "id": "fastjar",
+        "label": "Quarkus fast-jar vrstvy",
+        "status": "live",
+        "adr": [],
+        "detail": "Závislosti (lib/) jsou ve vlastní vrstvě oddělené od kódu aplikace — rychlejší rebuild, lepší cache, čitelný obsah."
+      },
+      {
+        "id": "podsec",
+        "label": "Pod securityContext",
+        "status": "live",
+        "adr": [
+          "0081"
+        ],
+        "detail": "Kubernetes navíc vynucuje: runAsNonRoot ✓, seccomp RuntimeDefault ✓, fsGroup ✓. Read-only root FS a drop-ALL-caps jsou cíl."
+      },
+      {
+        "id": "sbom",
+        "label": "CycloneDX SBOM",
+        "status": "live",
+        "adr": [
+          "0029"
+        ],
+        "detail": "Ke každému image se generuje seznam materiálu (Software Bill of Materials) — přesně víme, jaké knihovny a verze jsou uvnitř, pro skenování zranitelností."
+      },
+      {
+        "id": "sign",
+        "label": "Cosign podpis (KMS)",
+        "status": "live",
+        "adr": [
+          "0029",
+          "0030"
+        ],
+        "detail": "Build pipeline podepíše každý image klíčem v AWS KMS. Ověřitelné: `cosign verify`. Tamper-evidence — podepsaný digest nelze podvrhnout."
+      },
+      {
+        "id": "verify",
+        "label": "Kyverno admission verify",
+        "status": "partial",
+        "adr": [
+          "0030"
+        ],
+        "detail": "Kyverno při nasazení ověřuje podpis proti veřejnému klíči. Zatím v režimu Audit (reportuje); flip na Enforce (blokovat nepodepsané) až po pokrytí celé flotily."
+      }
+    ]
+  },
+  "planVsReality": [
+    {
+      "item": "Namespace segmentace",
+      "plan": "Doménová izolace, 1 ns / doména",
+      "reality": "49 namespaců",
+      "status": "live"
+    },
+    {
+      "item": "NetworkPolicy (east-west)",
+      "plan": "deny-by-default v každém ns",
+      "reality": "67 / 49 ns má NetworkPolicy → většina provozu otevřená",
+      "status": "planned"
+    },
+    {
+      "item": "Podpis image",
+      "plan": "Enforce — blokovat nepodepsané",
+      "reality": "Cosign podpis zapojen, kyverno zatím Audit",
+      "status": "partial"
+    },
+    {
+      "item": "Tajemství",
+      "plan": "OpenBao + ESO, nic v gitu",
+      "reality": "45 ExternalSecret",
+      "status": "live"
+    },
+    {
+      "item": "Pod hardening",
+      "plan": "non-root + seccomp + read-only FS + drop caps",
+      "reality": "non-root ✓, seccomp ✓, read-only/caps jen místy",
+      "status": "partial"
+    },
+    {
+      "item": "Admission policy",
+      "plan": "sada kyverno policies",
+      "reality": "3 ClusterPolicy (image-verify)",
+      "status": "partial"
+    }
+  ]
+}

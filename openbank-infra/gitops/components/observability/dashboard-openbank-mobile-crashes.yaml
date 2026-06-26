@@ -1,0 +1,51 @@
+# Mobile crashes & release health (ADR-0075 / ADR-0082) — surfaces GlitchTip on
+# the same Grafana pane as backend telemetry via the grafana-sentry-datasource.
+# The note panel documents the crash -> backend-trace pivot (by X-Correlation-ID),
+# which is how a mobile failure is tied to the exact server-side Tempo trace.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-mobile-crashes
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  openbank-mobile-crashes.json: |
+    {
+      "id": null,
+      "uid": "openbank-mobile",
+      "title": "OpenBank — Mobile Crashes & Release Health",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "5m",
+      "time": { "from": "now-24h", "to": "now" },
+      "panels": [
+        {
+          "id": 1,
+          "title": "How to read this board",
+          "type": "text",
+          "gridPos": { "x": 0, "y": 0, "w": 24, "h": 4 },
+          "options": {
+            "mode": "markdown",
+            "content": "Mobile crashes land in **GlitchTip** (in-cluster, Sentry-protocol; PII stripped on-device per ADR-0075). Every event is tagged with **X-Correlation-ID** and **party_id**. To go from a crash to the backend cause: copy the crash's `correlationId`, open **Explore → Loki** `{} | correlationId=\"<id>\"`, then click the `trace_id` derived field to land on the exact **Tempo** trace. When the app shares the W3C `trace_id` (Sentry performance), the crash links to the backend trace directly."
+          }
+        },
+        {
+          "id": 2,
+          "title": "Open issues",
+          "type": "table",
+          "gridPos": { "x": 0, "y": 4, "w": 24, "h": 12 },
+          "datasource": { "type": "grafana-sentry-datasource", "uid": "glitchtip" },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": { "type": "grafana-sentry-datasource", "uid": "glitchtip" },
+              "queryType": "issues",
+              "issuesQuery": "is:unresolved",
+              "issuesSort": "freq",
+              "limit": 50
+            }
+          ]
+        }
+      ]
+    }

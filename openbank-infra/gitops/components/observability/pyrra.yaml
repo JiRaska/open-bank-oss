@@ -1,0 +1,242 @@
+# Pyrra — SLO-as-code (ADR-0088 §D2). Apache-2.0. Two components, vendored from the
+# upstream pyrra-dev/pyrra v0.10.0 manifests, adapted to ns observability + the
+# kube-prometheus-stack Prometheus + the on-demand observability node pool (ADR-0082):
+#   - pyrra-kubernetes: operator that reconciles ServiceLevelObjective CRs into multi-
+#     window burn-rate PrometheusRules (the Prometheus picks them up — ruleSelectorNil
+#     UsesHelmValues:false selects ALL rules, so no special label is needed).
+#   - pyrra-api: the error-budget UI, querying Prometheus; reachable via the admin-ui
+#     BFF / port-forward (cluster-internal only, ADR-0056 — no Ingress).
+# Replaces the hand-written burn-rate rules in prometheus-rules-tier1 with declarative SLOs.
+# CRD lives in pyrra-crd.yaml (sync-wave -2). A sample fleet-availability SLO is at the end.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pyrra-kubernetes
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: pyrra
+    app.kubernetes.io/component: kubernetes
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pyrra-api
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: pyrra
+    app.kubernetes.io/component: api
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pyrra-kubernetes
+  labels:
+    app.kubernetes.io/name: pyrra
+    app.kubernetes.io/component: kubernetes
+rules:
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["prometheusrules"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["prometheusrules/status"]
+    verbs: ["get"]
+  - apiGroups: ["pyrra.dev"]
+    resources: ["servicelevelobjectives"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["pyrra.dev"]
+    resources: ["servicelevelobjectives/status"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: ["pyrra.dev"]
+    resources: ["servicelevelobjectives/finalizers"]
+    verbs: ["update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pyrra-kubernetes
+  labels:
+    app.kubernetes.io/name: pyrra
+    app.kubernetes.io/component: kubernetes
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: pyrra-kubernetes
+subjects:
+  - kind: ServiceAccount
+    name: pyrra-kubernetes
+    namespace: observability
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pyrra-kubernetes
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: pyrra
+    app.kubernetes.io/component: kubernetes
+spec:
+  selector:
+    app.kubernetes.io/name: pyrra
+    app.kubernetes.io/component: kubernetes
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: 8080
+    - name: http
+      port: 9444
+      targetPort: 9444
+    - name: webhooks
+      port: 9443
+      targetPort: 9443
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pyrra-api
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: pyrra
+    app.kubernetes.io/component: api
+spec:
+  selector:
+    app.kubernetes.io/name: pyrra
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 9099
+      targetPort: 9099
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pyrra-kubernetes
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: pyrra
+    app.kubernetes.io/component: kubernetes
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pyrra
+      app.kubernetes.io/component: kubernetes
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pyrra
+        app.kubernetes.io/component: kubernetes
+    spec:
+      serviceAccountName: pyrra-kubernetes
+      nodeSelector:
+        kubernetes.io/os: linux
+        workload: observability
+      tolerations:
+        - key: workload
+          operator: Equal
+          value: observability
+          effect: NoSchedule
+      containers:
+        - name: pyrra
+          image: ghcr.io/pyrra-dev/pyrra:v0.9.0
+          args: ["kubernetes"]
+          ports:
+            - name: http
+              containerPort: 9444
+            - name: webhooks
+              containerPort: 9443
+            - name: metrics
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 192Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pyrra-api
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: pyrra
+    app.kubernetes.io/component: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pyrra
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pyrra
+        app.kubernetes.io/component: api
+    spec:
+      serviceAccountName: pyrra-api
+      nodeSelector:
+        kubernetes.io/os: linux
+        workload: observability
+      tolerations:
+        - key: workload
+          operator: Equal
+          value: observability
+          effect: NoSchedule
+      containers:
+        - name: pyrra
+          image: ghcr.io/pyrra-dev/pyrra:v0.9.0
+          args:
+            - api
+            - --api-url=http://pyrra-kubernetes.observability.svc:9444
+            - --prometheus-url=http://kube-prometheus-stack-prometheus.observability.svc:9090
+          ports:
+            - name: http
+              containerPort: 9099
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 192Mi
+---
+# Sample SLO (ADR-0088 §D2): fleet HTTP availability — the share of non-5xx responses
+# across every Quarkus service (http_server_requests, ADR-0077). Has live data (idle
+# sandbox still serves management/health traffic). Pyrra reconciles this into multi-window
+# burn-rate PrometheusRules; the error budget shows in the pyrra-api UI. Per-payment-rail
+# SLOs (openbank_payments_*) are added the same way once the rails carry traffic.
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-api-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+spec:
+  target: "99.5"
+  window: 30d
+  description: "Fleet HTTP availability — non-5xx share of Quarkus http_server_requests (ADR-0088 D2)."
+  indicator:
+    ratio:
+      errors:
+        # Exclude health/readiness/liveness probe endpoints — they are Kubernetes
+        # infrastructure traffic, not business requests. Keycloak's /health/ready
+        # returning 503 during rolling restarts was burning the error budget.
+        metric: http_server_requests_seconds_count{status=~"5..",uri!~"/health.*|/q/health.*|/q/metrics|/metrics|/actuator/health.*"}
+      total:
+        metric: http_server_requests_seconds_count{uri!~"/health.*|/q/health.*|/q/metrics|/metrics|/actuator/health.*"}

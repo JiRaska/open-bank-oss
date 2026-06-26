@@ -1,0 +1,107 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.balance.application.port.out
+
+import com.openbank.balance.domain.model.Balance
+import com.openbank.balance.domain.model.BalanceEvent
+import com.openbank.balance.domain.model.BalanceHold
+import java.math.BigDecimal
+import java.util.UUID
+
+/** Outbound persistence port for the per-account, per-currency balance aggregate. */
+interface BalanceRepository {
+
+    suspend fun findByAccountIdAndCurrency(accountId: UUID, currency: String): Balance?
+
+    suspend fun findAllByAccountId(accountId: UUID): List<Balance>
+
+    suspend fun save(balance: Balance): Balance
+
+    suspend fun update(balance: Balance): Balance
+
+    /** Sum of booked amounts across all accounts, grouped by currency (ADR-0039 reconciliation). */
+    suspend fun sumBookedByCurrency(): Map<String, BigDecimal>
+
+    /**
+     * Sum of booked deltas applied to ([accountId], [currency]) with a booking date *strictly after*
+     * [asOf], read from the dated ledger-projection audit (`ledger_projection_event`). Used to rewind
+     * the current booked balance to a point in time: `bookedAsOf = current − sumBookedDeltaAfter(asOf)`.
+     * Returns ZERO when the projection ledger holds no later movements (e.g. projection disabled, or a
+     * period with no activity after [asOf]) — so the rewind degrades to the current balance, never errors.
+     */
+    suspend fun sumBookedDeltaAfter(accountId: UUID, currency: String, asOf: java.time.LocalDate): BigDecimal
+}
+
+/** Outbound persistence port for reservations (holds) against a balance. */
+interface HoldRepository {
+
+    suspend fun findById(holdId: UUID): BalanceHold?
+
+    suspend fun findActiveByAccountId(accountId: UUID): List<BalanceHold>
+
+    /**
+     * Active (not yet released) holds whose referenceId matches — used by the ledger projection to
+     * release the cover hold of the originating payment (referenceId == transactionId) as it applies
+     * the booked delta (ADR-0039 Phase D).
+     */
+    suspend fun findActiveByReferenceId(referenceId: String): List<BalanceHold>
+
+    suspend fun save(hold: BalanceHold): BalanceHold
+
+    suspend fun update(hold: BalanceHold): BalanceHold
+}
+
+/** Outbound port for publishing balance domain events to the broker. */
+interface BalanceEventPublisher {
+
+    suspend fun publish(event: BalanceEvent)
+}
+
+/**
+ * Outbound port for the ledger projection (ADR-0039 Phase D). Applies a signed booked delta to the
+ * projected balance and records the dedup marker in the SAME transaction, so an at-least-once
+ * redelivery of the same ledger event can never double-apply the movement.
+ */
+interface LedgerProjectionPort {
+
+    /**
+     * Atomically: record the dedup marker for ([journalEntryId], [accountId], [currency]) and apply
+     * [delta] to that balance (initializing a zero balance if none exists yet — a posted accounting
+     * fact must land even on an account the read-model has not seen). Returns the updated [Balance],
+     * or `null` if the marker already existed (duplicate delivery — nothing was applied).
+     */
+    @Suppress("LongParameterList")
+    suspend fun applyBookedDelta(
+        journalEntryId: UUID,
+        accountId: UUID,
+        currency: String,
+        delta: BigDecimal,
+        transactionId: UUID,
+        entryDate: java.time.LocalDate,
+    ): Balance?
+}
+
+/** Result of an idempotent movement: the resulting [balance] and whether THIS call actually applied
+ *  it ([applied] = false means a duplicate referenceId was detected and nothing changed). */
+data class MovementOutcome(val balance: Balance, val applied: Boolean)
+
+/**
+ * Outbound port for the idempotent DIRECT credit/debit path (the money movement the transaction saga
+ * drives). Each call records a dedup marker for ([accountId], [currency], referenceId, operation) in
+ * the SAME transaction as the balance mutation, so a retried credit/debit with the same referenceId
+ * applies exactly once. The balance must already exist (a movement is not an account-opening event).
+ */
+interface BalanceMovementPort {
+
+    /** Idempotently credit [amount]. Returns the resulting balance and whether it was applied now. */
+    suspend fun applyCredit(accountId: UUID, currency: String, referenceId: String, amount: BigDecimal): MovementOutcome
+
+    /**
+     * Idempotently debit [amount]. Returns the resulting balance and whether it was applied now.
+     * Throws [IllegalArgumentException] (overdraft guard) if the first application would breach the
+     * floor — the caller maps it to an insufficient-funds error; a duplicate never re-checks/throws.
+     */
+    suspend fun applyDebit(accountId: UUID, currency: String, referenceId: String, amount: BigDecimal): MovementOutcome
+}

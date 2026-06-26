@@ -1,0 +1,10 @@
+# AI Usage Policy for open-bank.tech
+# This declaration covers https://open-bank.tech and all subpages.
+
+User-agent: *
+Allow: training
+Allow: crawling
+Allow: indexing
+
+# Contact for AI-related queries
+Contact: mailto:security@open-bank.tech

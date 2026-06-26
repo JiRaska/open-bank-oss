@@ -1,0 +1,40 @@
+# Public ingress for the customer AI assistant (ADR-0089). Its OWN host (copilot.open-bank.tech)
+# with a dedicated Let's Encrypt cert — kept off the edge host so the app's TLS pin on
+# customer.open-bank.tech (ADR-0066 S3) is untouched. The app reaches the assistant here with the
+# customer session bearer; copilot validates it (OIDC resource server) and propagates it to the
+# customer edge for its READ tools. external-dns publishes the A record from the host below.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: copilot
+  namespace: platform
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Mobile app in foreground does < 5 req/s; a chat turn is one request.
+    nginx.ingress.kubernetes.io/limit-rps: "10"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "3"
+    # SSE (Server-Sent Events) requires unbuffered responses so the mobile client
+    # receives tokens incrementally. Without this nginx buffers the entire LLM output
+    # and delivers it in one batch, defeating real-time streaming. Timeout 1 h covers
+    # the longest plausible conversation turn (model latency + tool calls).
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - copilot.open-bank.tech
+      secretName: copilot-tls
+  rules:
+    - host: copilot.open-bank.tech
+      http:
+        paths:
+          - path: /api/v1/copilot
+            pathType: Prefix
+            backend:
+              service:
+                name: copilot-service
+                port:
+                  number: 8131

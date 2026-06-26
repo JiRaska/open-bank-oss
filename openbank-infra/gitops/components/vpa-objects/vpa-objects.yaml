@@ -1,0 +1,398 @@
+# VerticalPodAutoscaler objects for all deployed OpenBank services.
+#
+# updateMode: Off — the VPA recommender fills status.recommendation but
+# NEVER modifies or evicts pods. Operators read recommendations via the
+# FinOps right-sizing panel in admin-ui (Prometheus scrape of VPA metrics).
+#
+# Container names must match the pod spec; they follow the convention
+# "<service>-service" as defined in each component's Deployment yaml.
+# The payments namespace hosts two deployments (transaction + sepa-payment).
+#
+# Add a VPA object per-service when the service is first deployed to a
+# new namespace so that recommendations accumulate from day one.
+
+# ── Core banking ─────────────────────────────────────────────────────────────
+
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: account-service-vpa
+  namespace: accounts
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: account-service
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: account-service
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 2000m
+          memory: 2Gi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: balance-service-vpa
+  namespace: balances
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: balance-service
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: balance-service
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 2000m
+          memory: 2Gi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: ledger-service-vpa
+  namespace: ledger
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ledger-service
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: ledger-service
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 2000m
+          memory: 2Gi
+---
+# Payments namespace: two deployments — SEPA instant + transaction saga
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: transaction-service-vpa
+  namespace: payments
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: transaction-service
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: transaction-service
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 2000m
+          memory: 2Gi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: sepa-payment-vpa
+  namespace: payments
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sepa-payment
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: sepa-payment
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 2000m
+          memory: 2Gi
+---
+# ── FX & interest ─────────────────────────────────────────────────────────────
+
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: fx-service-vpa
+  namespace: fx
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: fx-service
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: fx-service
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 1000m
+          memory: 1Gi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: interest-service-vpa
+  namespace: interest
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: interest-service
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: interest-service
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 1000m
+          memory: 1Gi
+---
+# ── Onboarding & identity ─────────────────────────────────────────────────────
+
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: party-service-vpa
+  namespace: party
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: party-service
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: party-service
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 1000m
+          memory: 1Gi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: kyc-service-vpa
+  namespace: kyc
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kyc-service
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: kyc-service
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 1000m
+          memory: 1Gi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: consent-service-vpa
+  namespace: consent
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: consent-service
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: consent-service
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 1000m
+          memory: 1Gi
+---
+# ── Compliance & risk ─────────────────────────────────────────────────────────
+
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: aml-service-vpa
+  namespace: aml
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: aml-service
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: aml-service
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 1000m
+          memory: 1Gi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: dispute-service-vpa
+  namespace: dispute
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: dispute-service
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: dispute-service
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 1000m
+          memory: 1Gi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: psd2-service-vpa
+  namespace: psd2
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: psd2-service
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: psd2-service
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 1000m
+          memory: 1Gi
+---
+# ── Platform ──────────────────────────────────────────────────────────────────
+
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: audit-service-vpa
+  namespace: audit
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: audit-service
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: audit-service
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 1000m
+          memory: 1Gi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: customer-edge-vpa
+  namespace: customer-edge
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: customer-edge
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: customer-edge
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 2000m
+          memory: 2Gi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: fraud-service-vpa
+  namespace: fraud
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: fraud-service
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: fraud-service
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 1000m
+          memory: 1Gi
+---
+# Copilot runs in the shared 'platform' namespace (ADR-0089)
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: copilot-service-vpa
+  namespace: platform
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: copilot-service
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: copilot-service
+        minAllowed:
+          cpu: 100m
+          memory: 256Mi
+        maxAllowed:
+          cpu: 4000m
+          memory: 8Gi

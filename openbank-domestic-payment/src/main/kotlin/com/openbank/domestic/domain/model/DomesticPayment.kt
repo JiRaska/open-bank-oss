@@ -1,0 +1,130 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.domestic.domain.model
+
+import java.math.BigDecimal
+import java.time.Clock
+import java.time.Instant
+import java.util.UUID
+
+enum class DomesticPaymentStatus {
+    RECEIVED,
+    VALIDATED,
+    SENT_TO_CLEARING,
+    SETTLED,
+    REJECTED,
+    RETURNED,
+    CANCELLED,
+}
+
+enum class DomesticPaymentPriority { STANDARD, URGENT, INSTANT }
+
+enum class DomesticTransferScope { OWN_ACCOUNTS, INTERNAL_CLIENT, TECHNICAL_ACCOUNT }
+
+enum class DomesticRejectReason {
+    INVALID_ACCOUNT_NUMBER,
+    INVALID_BANK_CODE,
+    BENEFICIARY_ACCOUNT_CLOSED,
+    INSUFFICIENT_FUNDS,
+    AMOUNT_LIMIT_EXCEEDED,
+    AML_HOLD,
+    SANCTIONS_HIT,
+    TECHNICAL_ERROR,
+}
+
+data class DomesticPayment(
+    val id: UUID,
+    val idempotencyKey: String,
+    val status: DomesticPaymentStatus,
+    val debtorAccountId: UUID,
+    val debtorAccountNumber: String,
+    val debtorBankCode: String,
+    val debtorName: String,
+    val creditorAccountNumber: String,
+    val creditorBankCode: String,
+    val creditorName: String,
+    val amount: BigDecimal,
+    val currency: String,
+    val variableSymbol: String?,
+    val specificSymbol: String?,
+    val constantSymbol: String?,
+    val messageForPayee: String?,
+    val priority: DomesticPaymentPriority,
+    val transferScope: DomesticTransferScope,
+    val technicalAccountCode: String?,
+    val statementLabel: String?,
+    val endToEndId: String,
+    val rejectReason: DomesticRejectReason?,
+    val rejectDetail: String?,
+    val submittedAt: Instant?,
+    val settledAt: Instant?,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+) {
+    fun transitionTo(
+        targetStatus: DomesticPaymentStatus,
+        reason: DomesticRejectReason? = null,
+        detail: String? = null,
+        clock: Clock,
+    ): DomesticPayment {
+        val now = Instant.now(clock)
+        require(canTransitionTo(targetStatus)) {
+            "Invalid domestic payment status transition: $status -> $targetStatus"
+        }
+        require(targetStatus != DomesticPaymentStatus.REJECTED || reason != null) {
+            "Reject reason is required for REJECTED status"
+        }
+
+        return copy(
+            status = targetStatus,
+            rejectReason = if (targetStatus == DomesticPaymentStatus.REJECTED) reason else null,
+            rejectDetail = if (targetStatus == DomesticPaymentStatus.REJECTED) detail else null,
+            submittedAt = when (targetStatus) {
+                DomesticPaymentStatus.VALIDATED,
+                DomesticPaymentStatus.SENT_TO_CLEARING,
+                DomesticPaymentStatus.SETTLED,
+                DomesticPaymentStatus.REJECTED,
+                DomesticPaymentStatus.RETURNED,
+                DomesticPaymentStatus.CANCELLED,
+                -> submittedAt ?: now
+                DomesticPaymentStatus.RECEIVED -> submittedAt
+            },
+            settledAt = when (targetStatus) {
+                DomesticPaymentStatus.SETTLED,
+                DomesticPaymentStatus.RETURNED,
+                DomesticPaymentStatus.CANCELLED,
+                -> now
+                else -> settledAt
+            },
+            updatedAt = now,
+        )
+    }
+
+    fun canTransitionTo(targetStatus: DomesticPaymentStatus): Boolean = when (status) {
+        DomesticPaymentStatus.RECEIVED -> targetStatus in setOf(
+            DomesticPaymentStatus.VALIDATED,
+            DomesticPaymentStatus.REJECTED,
+            DomesticPaymentStatus.CANCELLED,
+        )
+
+        DomesticPaymentStatus.VALIDATED -> targetStatus in setOf(
+            DomesticPaymentStatus.SENT_TO_CLEARING,
+            DomesticPaymentStatus.REJECTED,
+            DomesticPaymentStatus.CANCELLED,
+        )
+
+        DomesticPaymentStatus.SENT_TO_CLEARING -> targetStatus in setOf(
+            DomesticPaymentStatus.SETTLED,
+            DomesticPaymentStatus.RETURNED,
+            DomesticPaymentStatus.REJECTED,
+        )
+
+        DomesticPaymentStatus.SETTLED,
+        DomesticPaymentStatus.REJECTED,
+        DomesticPaymentStatus.RETURNED,
+        DomesticPaymentStatus.CANCELLED,
+        -> false
+    }
+}

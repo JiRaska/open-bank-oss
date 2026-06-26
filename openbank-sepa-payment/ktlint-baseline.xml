@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="src/main/kotlin/com/openbank/sepa/application/port/in/SepaPaymentPorts.kt">
+        <error line="5" column="9" source="standard:package-name" />
+        <error line="26" column="28" source="standard:trailing-comma-on-declaration-site" />
+        <error line="33" column="24" source="standard:trailing-comma-on-declaration-site" />
+        <error line="40" column="37" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sepa/application/port/out/ScreeningPorts.kt">
+        <error line="37" column="31" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sepa/application/usecase/SepaPaymentService.kt">
+        <error line="82" column="28" source="standard:trailing-comma-on-call-site" />
+        <error line="90" column="72" source="standard:trailing-comma-on-call-site" />
+        <error line="91" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="109" column="109" source="standard:trailing-comma-on-call-site" />
+        <error line="126" column="32" source="standard:function-literal" />
+        <error line="126" column="76" source="standard:binary-expression-wrapping" />
+        <error line="126" column="89" source="standard:binary-expression-wrapping" />
+        <error line="126" column="121" source="standard:max-line-length" />
+        <error line="126" column="123" source="standard:function-literal" />
+        <error line="133" column="32" source="standard:function-literal" />
+        <error line="133" column="76" source="standard:binary-expression-wrapping" />
+        <error line="133" column="89" source="standard:binary-expression-wrapping" />
+        <error line="133" column="121" source="standard:max-line-length" />
+        <error line="133" column="123" source="standard:function-literal" />
+        <error line="146" column="24" source="standard:trailing-comma-on-declaration-site" />
+        <error line="154" column="80" source="standard:trailing-comma-on-call-site" />
+        <error line="155" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="169" column="52" source="standard:argument-list-wrapping" />
+        <error line="170" column="59" source="standard:trailing-comma-on-call-site" />
+        <error line="184" column="31" source="standard:trailing-comma-on-declaration-site" />
+        <error line="196" column="50" source="standard:trailing-comma-on-call-site" />
+        <error line="197" column="18" source="standard:trailing-comma-on-call-site" />
+        <error line="215" column="89" source="standard:function-signature" />
+        <error line="220" column="51" source="standard:trailing-comma-on-call-site" />
+        <error line="229" column="103" source="standard:trailing-comma-on-call-site" />
+        <error line="244" column="80" source="standard:trailing-comma-on-call-site" />
+        <error line="245" column="14" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sepa/domain/event/SepaPaymentEvents.kt">
+        <error line="25" column="28" source="standard:trailing-comma-on-declaration-site" />
+        <error line="34" column="28" source="standard:trailing-comma-on-declaration-site" />
+        <error line="44" column="25" source="standard:trailing-comma-on-call-site" />
+        <error line="58" column="21" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sepa/domain/model/SepaPayment.kt">
+        <error line="12" column="15" source="standard:enum-wrapping" />
+        <error line="12" column="26" source="standard:enum-wrapping" />
+        <error line="12" column="38" source="standard:enum-wrapping" />
+        <error line="12" column="49" source="standard:enum-wrapping" />
+        <error line="12" column="59" source="standard:enum-wrapping" />
+        <error line="12" column="69" source="standard:enum-wrapping" />
+        <error line="18" column="25" source="standard:enum-wrapping" />
+        <error line="18" column="39" source="standard:enum-wrapping" />
+        <error line="18" column="55" source="standard:enum-wrapping" />
+        <error line="19" column="18" source="standard:enum-wrapping" />
+        <error line="19" column="41" source="standard:enum-wrapping" />
+        <error line="19" column="51" source="standard:enum-wrapping" />
+        <error line="19" column="66" source="standard:enum-wrapping" />
+        <error line="42" column="27" source="standard:trailing-comma-on-declaration-site" />
+        <error line="48" column="37" source="standard:trailing-comma-on-declaration-site" />
+        <error line="51" column="17" source="standard:argument-list-wrapping" />
+        <error line="51" column="77" source="standard:argument-list-wrapping" />
+        <error line="51" column="79" source="standard:function-literal" />
+        <error line="51" column="80" source="standard:wrapping" />
+        <error line="51" column="121" source="standard:max-line-length" />
+        <error line="51" column="129" source="standard:function-literal" />
+        <error line="63" column="44" source="standard:trailing-comma-on-declaration-site" />
+        <error line="69" column="44" source="standard:trailing-comma-on-declaration-site" />
+        <error line="72" column="28" source="standard:trailing-comma-on-call-site" />
+        <error line="80" column="40" source="standard:trailing-comma-on-call-site" />
+        <error line="86" column="40" source="standard:trailing-comma-on-call-site" />
+        <error line="92" column="39" source="standard:trailing-comma-on-call-site" />
+        <error line="98" column="36" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sepa/domain/screening/ScreeningPolicy.kt">
+        <error line="22" column="31" source="standard:trailing-comma-on-declaration-site" />
+        <error line="48" column="55" source="standard:function-signature" />
+        <error line="53" column="56" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sepa/infrastructure/authz/AuthzProducer.kt">
+        <error line="26" column="53" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sepa/infrastructure/client/AmlCaseAdapter.kt">
+        <error line="24" column="5" source="standard:class-signature" />
+        <error line="24" column="53" source="standard:class-signature" />
+        <error line="24" column="53" source="standard:trailing-comma-on-declaration-site" />
+        <error line="48" column="54" source="standard:trailing-comma-on-call-site" />
+        <error line="49" column="14" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sepa/infrastructure/client/AmlServiceClient.kt">
+        <error line="34" column="9" source="standard:function-signature" />
+        <error line="35" column="9" source="standard:function-signature" />
+        <error line="35" column="38" source="standard:function-signature" />
+        <error line="35" column="38" source="standard:trailing-comma-on-declaration-site" />
+        <error line="49" column="31" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sepa/infrastructure/client/SanctionsScreeningAdapter.kt">
+        <error line="29" column="5" source="standard:class-signature" />
+        <error line="29" column="59" source="standard:class-signature" />
+        <error line="29" column="59" source="standard:trailing-comma-on-declaration-site" />
+        <error line="35" column="110" source="standard:function-signature" />
+        <error line="47" column="98" source="standard:trailing-comma-on-call-site" />
+        <error line="54" column="72" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sepa/infrastructure/client/SanctionsServiceClient.kt">
+        <error line="40" column="44" source="standard:trailing-comma-on-declaration-site" />
+        <error line="48" column="49" source="standard:trailing-comma-on-declaration-site" />
+        <error line="53" column="5" source="standard:class-signature" />
+        <error line="54" column="5" source="standard:class-signature" />
+        <error line="54" column="35" source="standard:class-signature" />
+        <error line="54" column="35" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sepa/infrastructure/idempotency/IdempotencyConfig.kt">
+        <error line="27" column="77" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sepa/infrastructure/outbox/SepaPaymentOutboxBacklogGauge.kt">
+        <error line="6" column="1" source="standard:import-ordering" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sepa/infrastructure/persistence/mapper/SepaPaymentMapper.kt">
+        <error line="56" column="26" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sepa/infrastructure/persistence/repository/SepaPaymentOutboxRepositoryImpl.kt">
+        <error line="21" column="41" source="standard:class-signature" />
+        <error line="21" column="70" source="standard:class-signature" />
+        <error line="26" column="85" source="standard:function-signature" />
+        <error line="31" column="52" source="standard:trailing-comma-on-call-site" />
+        <error line="35" column="52" source="standard:function-signature" />
+        <error line="40" column="52" source="standard:trailing-comma-on-call-site" />
+        <error line="96" column="30" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sepa/infrastructure/persistence/repository/SepaPaymentRepositoryImpl.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="22" column="5" source="standard:class-signature" />
+        <error line="22" column="66" source="standard:class-signature" />
+        <error line="22" column="66" source="standard:trailing-comma-on-declaration-site" />
+        <error line="23" column="28" source="standard:class-signature" />
+        <error line="41" column="20" source="standard:trailing-comma-on-declaration-site" />
+        <error line="42" column="26" source="standard:function-expression-body" />
+        <error line="48" column="36" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sepa/infrastructure/rest/SepaPaymentResource.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="41" column="43" source="standard:trailing-comma-on-declaration-site" />
+        <error line="49" column="63" source="standard:trailing-comma-on-declaration-site" />
+        <error line="74" column="79" source="standard:function-expression-body" />
+        <error line="85" column="61" source="standard:trailing-comma-on-declaration-site" />
+        <error line="92" column="32" source="standard:trailing-comma-on-call-site" />
+        <error line="93" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="105" column="52" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sepa/infrastructure/rest/dto/SepaPaymentDtos.kt">
+        <error line="28" column="28" source="standard:trailing-comma-on-declaration-site" />
+        <error line="42" column="32" source="standard:trailing-comma-on-call-site" />
+        <error line="49" column="37" source="standard:trailing-comma-on-declaration-site" />
+        <error line="55" column="36" source="standard:trailing-comma-on-call-site" />
+        <error line="79" column="27" source="standard:trailing-comma-on-declaration-site" />
+        <error line="102" column="26" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/governance/HibernateSequenceGuardTest.kt">
+        <error line="54" column="33" source="standard:trailing-comma-on-call-site" />
+        <error line="68" column="36" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/sepa/domain/model/SepaPaymentTest.kt">
+        <error line="27" column="22" source="standard:trailing-comma-on-call-site" />
+        <error line="55" column="58" source="standard:trailing-comma-on-call-site" />
+        <error line="57" column="1" source="standard:final-newline" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/sepa/domain/screening/ScreeningPolicyTest.kt">
+        <error line="15" column="53" source="standard:trailing-comma-on-declaration-site" />
+        <error line="27" column="66" source="standard:trailing-comma-on-call-site" />
+        <error line="65" column="63" source="standard:no-multi-spaces" />
+        <error line="66" column="51" source="standard:trailing-comma-on-call-site" />
+        <error line="66" column="52" source="standard:no-multi-spaces" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/sepa/infrastructure/outbox/SepaPaymentOutboxBacklogGaugeTest.kt">
+        <error line="6" column="1" source="standard:import-ordering" />
+    </file>
+</baseline>

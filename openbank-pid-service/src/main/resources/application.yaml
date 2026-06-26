@@ -1,0 +1,214 @@
+quarkus:
+  application:
+    name: openbank-pid-service
+
+  http:
+    port: 8105
+
+    # Lazy (non-proactive) authentication. The OpenID4VCI credential endpoint is @PermitAll yet
+    # receives the wallet's OWN opaque access token in `Authorization: Bearer` — with proactive auth
+    # Quarkus would try to validate that as a Keycloak JWT and 401 before the method runs. Lazy auth
+    # only authenticates when a @RolesAllowed/@Authorize method is actually hit, so public endpoints
+    # ignore a non-Keycloak bearer while secured endpoints still enforce. Mirrors customer-edge (ADR-0094).
+    auth:
+      proactive: false
+
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+    limits:
+      max-body-size: 10M
+    idle-timeout: 60S
+    read-timeout: 30S
+
+  datasource:
+    db-kind: postgresql
+    username: ${QUARKUS_DATASOURCE_USERNAME:openbank}
+    password: ${QUARKUS_DATASOURCE_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: ${QUARKUS_DATASOURCE_REACTIVE_URL:postgresql://localhost:5432/openbank_pid}
+    jdbc:
+      url: ${QUARKUS_DATASOURCE_JDBC_URL:jdbc:postgresql://localhost:5432/openbank_pid}
+
+  flyway:
+    migrate-at-start: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+  hibernate-orm:
+    database:
+      generation: none
+    log:
+      sql: false
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+
+  oidc:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: ${QUARKUS_OIDC_CLIENT_ID:openbank-services}
+    credentials:
+      secret: ${QUARKUS_OIDC_CREDENTIALS_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+
+  opentelemetry:
+    tracer:
+      exporter:
+        otlp:
+          endpoint: ${QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4317}
+
+  smallrye-openapi:
+    path: /q/openapi
+    info-title: OpenBank PID Service
+    info-version: 0.1.0
+    info-description: Unified identity management — Party Identification Data
+
+  shutdown:
+    timeout: 30S
+
+  smallrye-health:
+    root-path: /q/health
+
+  log:
+    level: ${QUARKUS_LOG_LEVEL:INFO}
+    console:
+      format: "%d{HH:mm:ss} %-5p [%c{2.}] (%t) %s%e%n"
+
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+"%test":
+  quarkus:
+    # health/metrics on the main HTTP port under test — RestAssured targets a single port,
+    # so the management interface (default :8085) must be folded back in (else /q/health/* 404s).
+    management:
+      enabled: false
+    # No OIDC discovery at boot in tests.
+    oidc:
+      enabled: false
+    devservices:
+      enabled: false
+  # OPA is not present in CI integration tests — disable enforce so @Authorize methods on
+  # /parties/resolve and other endpoints proceed in advisory mode (no 503 from absent sidecar).
+  authz:
+    enforce: "false"
+
+mp:
+  messaging:
+    outgoing:
+      party-events-out:
+        connector: smallrye-kafka
+        client.id: pid-service-${quarkus.uuid}
+        topic: party.events
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Transactional-outbox drain channel (PidOutboxDispatcher -> KafkaPidOutboxEventPublisher).
+      # Without this connector the @Channel("pid-events-out") emitter is unwired and the service
+      # CrashLoops at boot ("no connector for channel pid-events-out") — a latent defect that only
+      # surfaces on a real boot (guarded now by PidBootSmokeIT, issue #1163 class).
+      pid-events-out:
+        connector: smallrye-kafka
+        client.id: pid-outbox-${quarkus.uuid}
+        topic: openbank.pid.events
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+
+openbank:
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 100
+  api:
+    version: "1"
+  outbox:
+    dispatch-enabled: true
+  build:
+    time: "${BUILD_TIME:unknown}"
+  git:
+    commit: "${GIT_COMMIT:unknown}"
+  pid:
+    # Keyed blind-index pepper for Czech RČ (ADR-0072).
+    # Sourced from Vault in production; intentionally absent here so the service
+    # starts without Vault during local dev / CI — tier-1 RČ lookup is skipped
+    # when this is blank, and a WARN is emitted. Set via env OPENBANK_PID_BIRTH_NUMBER_PEPPER.
+    birth-number-pepper: "${OPENBANK_PID_BIRTH_NUMBER_PEPPER:}"
+    eudi:
+      # Backing store for the EUDI issuer/verifier state — the Token Status List (revocation +
+      # allocation counter), in-flight OpenID4VCI offers, and in-flight OpenID4VP exchanges (ADR-0094).
+      # `postgres` (default) persists them to the backed-up CNPG database so revocations and the
+      # allocation counter SURVIVE A POD RESTART and are correct across replicas — the eIDAS 2.0 go-live
+      # requirement. `memory` is the heap-only path, fast for tests/dev but NOT durable/multi-replica.
+      # Evaluated at BUILD time (@IfBuildProperty) — set OPENBANK_PID_EUDI_PERSISTENCE at image build to
+      # select the in-memory path; unit tests construct the in-memory stores directly (no CDI).
+      persistence: "${OPENBANK_PID_EUDI_PERSISTENCE:postgres}"
+      # EUDI trusted issuers (ADR-0094): JSON array [{"iss":"<issuer>","jwks":{"keys":[...]}}].
+      # Empty (default) ⇒ every wallet presentation fails closed (never tier-0-matches). In production
+      # this is the eIDAS trust framework; for sandbox it is a static allow-list set via env.
+      trusted-issuers-json: "${OPENBANK_PID_EUDI_TRUSTED_ISSUERS:[]}"
+      trusted-list:
+        # eIDAS Trusted List trust framework (ADR-0094). A SIGNED list of trusted EUDI issuers the RP
+        # fetches + verifies against `anchor-jwks` (the scheme operator's public key) and refreshes on a
+        # schedule — trust derives from the anchor's signature, not raw config, and rotates without a
+        # restart. `url` is the production pull; `inline` provides a signed list JWT directly (sandbox).
+        # Absent ⇒ inert (only the static trusted-issuers-json applies). Fail-closed: a bad/unsigned list
+        # never widens or empties trust. Modelled as a JWT (typ=trustedlist+jwt) for the EUDIW profile.
+        url: "${OPENBANK_PID_EUDI_TRUSTED_LIST_URL:}"
+        inline: "${OPENBANK_PID_EUDI_TRUSTED_LIST_INLINE:}"
+        anchor-jwks: "${OPENBANK_PID_EUDI_TRUSTED_LIST_ANCHOR_JWKS:}"
+        refresh: "${OPENBANK_PID_EUDI_TRUSTED_LIST_REFRESH:1h}"
+      # OpenID4VP Relying-Party identity + cross-device direct_post callback (ADR-0094). client-id is
+      # the `aud` the wallet must bind into its key-binding JWT; response-uri is where the wallet POSTs
+      # its presentation (must be reachable by the wallet in production). exchange-ttl bounds the
+      # single-use nonce's lifetime.
+      client-id: "${OPENBANK_PID_EUDI_CLIENT_ID:openbank-pid}"
+      response-uri: "${OPENBANK_PID_EUDI_RESPONSE_URI:http://localhost:8105/api/v1/parties/eudi/presentation-responses}"
+      exchange-ttl-seconds: "${OPENBANK_PID_EUDI_EXCHANGE_TTL_SECONDS:300}"
+      # Signed Request Object (JAR / RFC 9101, ADR-0094): when an issuer key is configured the
+      # authorization request is delivered as a signed JWT the wallet fetches from this base URI via
+      # `request_uri` (tamper-evident); otherwise the params are inlined in the openid4vp:// URI.
+      request-object-uri-base: "${OPENBANK_PID_EUDI_REQUEST_OBJECT_URI_BASE:http://localhost:8105/api/v1/parties/eudi/request-objects}"
+      request-object-ttl-seconds: "${OPENBANK_PID_EUDI_REQUEST_OBJECT_TTL_SECONDS:300}"
+      issuer:
+        # OpenID4VCI credential issuance (ADR-0094) — the bank as a PID/(Q)EAA issuer. The EC P-256
+        # PRIVATE signing JWK (sourced from Vault in production); absent/empty ⇒ issuance DISABLED
+        # fail-closed (a bank must never issue an unsigned credential). issuer-id is the credential
+        # `iss` and the metadata `credential_issuer`.
+        signing-key-jwk: "${OPENBANK_PID_EUDI_ISSUER_SIGNING_KEY_JWK:}"
+        issuer-id: "${OPENBANK_PID_EUDI_ISSUER_ID:https://pid.open-bank.tech}"
+        offer-ttl-seconds: "${OPENBANK_PID_EUDI_ISSUER_OFFER_TTL_SECONDS:600}"
+        credential-ttl-seconds: "${OPENBANK_PID_EUDI_ISSUER_CREDENTIAL_TTL_SECONDS:31536000}"
+        # Token Status List (revocation, ADR-0094): the list id (path segment) + how long a published
+        # status-list token is cacheable. The signed bit array lets a relying party check revocation.
+        status-list-id: "${OPENBANK_PID_EUDI_ISSUER_STATUS_LIST_ID:1}"
+        status-list-ttl-seconds: "${OPENBANK_PID_EUDI_ISSUER_STATUS_LIST_TTL_SECONDS:3600}"
+
+# OPA sidecar (ADR-0034). Advisory mode by default.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:true}"

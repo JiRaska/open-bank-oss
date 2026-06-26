@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="src/main/kotlin/com/openbank/aml/application/port/in/AmlCasePorts.kt">
+        <error line="5" column="9" source="standard:package-name" />
+        <error line="23" column="31" source="standard:trailing-comma-on-declaration-site" />
+        <error line="31" column="24" source="standard:trailing-comma-on-declaration-site" />
+        <error line="39" column="26" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/aml/application/port/out/AmlCasePorts.kt">
+        <error line="1" column="1" source="standard:filename" />
+        <error line="33" column="20" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/aml/application/port/out/AmlOutboxPort.kt">
+        <error line="28" column="43" source="standard:trailing-comma-on-declaration-site" />
+        <error line="42" column="27" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/aml/application/usecase/AmlCaseService.kt">
+        <error line="27" column="5" source="standard:class-signature" />
+        <error line="28" column="5" source="standard:class-signature" />
+        <error line="28" column="43" source="standard:class-signature" />
+        <error line="28" column="43" source="standard:trailing-comma-on-declaration-site" />
+        <error line="29" column="5" source="standard:class-signature" />
+        <error line="54" column="28" source="standard:trailing-comma-on-call-site" />
+        <error line="62" column="25" source="standard:argument-list-wrapping" />
+        <error line="62" column="71" source="standard:argument-list-wrapping" />
+        <error line="62" column="95" source="standard:argument-list-wrapping" />
+        <error line="62" column="106" source="standard:argument-list-wrapping" />
+        <error line="62" column="121" source="standard:max-line-length" />
+        <error line="62" column="122" source="standard:argument-list-wrapping" />
+        <error line="70" column="78" source="standard:function-signature" />
+        <error line="76" column="51" source="standard:trailing-comma-on-call-site" />
+        <error line="85" column="99" source="standard:trailing-comma-on-call-site" />
+        <error line="94" column="46" source="standard:trailing-comma-on-call-site" />
+        <error line="106" column="56" source="standard:trailing-comma-on-declaration-site" />
+        <error line="108" column="55" source="standard:trailing-comma-on-declaration-site" />
+        <error line="111" column="85" source="standard:function-signature" />
+        <error line="116" column="83" source="standard:trailing-comma-on-call-site" />
+        <error line="119" column="92" source="standard:function-signature" />
+        <error line="133" column="51" source="standard:trailing-comma-on-call-site" />
+        <error line="134" column="18" source="standard:trailing-comma-on-call-site" />
+        <error line="135" column="14" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/aml/domain/event/AmlCaseEvents.kt">
+        <error line="26" column="28" source="standard:trailing-comma-on-declaration-site" />
+        <error line="37" column="28" source="standard:trailing-comma-on-declaration-site" />
+        <error line="52" column="21" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/aml/domain/model/AmlCase.kt">
+        <error line="15" column="14" source="standard:trailing-comma-on-declaration-site" />
+        <error line="22" column="25" source="standard:trailing-comma-on-declaration-site" />
+        <error line="29" column="13" source="standard:trailing-comma-on-declaration-site" />
+        <error line="51" column="27" source="standard:trailing-comma-on-declaration-site" />
+        <error line="58" column="37" source="standard:trailing-comma-on-declaration-site" />
+        <error line="72" column="28" source="standard:trailing-comma-on-call-site" />
+        <error line="81" column="36" source="standard:trailing-comma-on-call-site" />
+        <error line="87" column="36" source="standard:trailing-comma-on-call-site" />
+        <error line="93" column="34" source="standard:trailing-comma-on-call-site" />
+        <error line="97" column="30" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/aml/infrastructure/authz/AuthzProducer.kt">
+        <error line="27" column="53" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/aml/infrastructure/idempotency/IdempotencyConfig.kt">
+        <error line="27" column="77" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/aml/infrastructure/kafka/KafkaAmlOutboxEventPublisher.kt">
+        <error line="35" column="5" source="standard:class-signature" />
+        <error line="35" column="75" source="standard:class-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/aml/infrastructure/kafka/PartyEventConsumer.kt">
+        <error line="62" column="18" source="standard:trailing-comma-on-call-site" />
+        <error line="74" column="22" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/aml/infrastructure/outbox/AmlOutboxBacklogGauge.kt">
+        <error line="54" column="31" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/aml/infrastructure/outbox/AmlOutboxDispatcher.kt">
+        <error line="38" column="65" source="standard:trailing-comma-on-call-site" />
+        <error line="40" column="46" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/aml/infrastructure/persistence/mapper/AmlCaseMapper.kt">
+        <error line="54" column="26" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/aml/infrastructure/persistence/repository/AmlCaseRepositoryImpl.kt">
+        <error line="23" column="5" source="standard:class-signature" />
+        <error line="23" column="58" source="standard:class-signature" />
+        <error line="23" column="58" source="standard:trailing-comma-on-declaration-site" />
+        <error line="24" column="24" source="standard:class-signature" />
+        <error line="27" column="84" source="standard:function-signature" />
+        <error line="45" column="20" source="standard:trailing-comma-on-declaration-site" />
+        <error line="71" column="86" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/aml/infrastructure/persistence/repository/AmlOutboxRepositoryImpl.kt">
+        <error line="6" column="1" source="standard:import-ordering" />
+        <error line="21" column="33" source="standard:class-signature" />
+        <error line="21" column="54" source="standard:class-signature" />
+        <error line="23" column="58" source="standard:function-signature" />
+        <error line="26" column="77" source="standard:function-signature" />
+        <error line="29" column="68" source="standard:function-signature" />
+        <error line="34" column="44" source="standard:trailing-comma-on-call-site" />
+        <error line="38" column="52" source="standard:function-signature" />
+        <error line="41" column="43" source="standard:function-signature" />
+        <error line="46" column="44" source="standard:trailing-comma-on-call-site" />
+        <error line="54" column="81" source="standard:function-signature" />
+        <error line="94" column="28" source="standard:argument-list-wrapping" />
+        <error line="94" column="43" source="standard:argument-list-wrapping" />
+        <error line="94" column="56" source="standard:argument-list-wrapping" />
+        <error line="94" column="72" source="standard:argument-list-wrapping" />
+        <error line="120" column="30" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/aml/infrastructure/rest/AmlCaseResource.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="42" column="43" source="standard:trailing-comma-on-declaration-site" />
+        <error line="50" column="63" source="standard:trailing-comma-on-declaration-site" />
+        <error line="74" column="70" source="standard:function-expression-body" />
+        <error line="85" column="61" source="standard:trailing-comma-on-declaration-site" />
+        <error line="93" column="32" source="standard:trailing-comma-on-call-site" />
+        <error line="94" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="105" column="9" source="standard:function-signature" />
+        <error line="106" column="9" source="standard:function-signature" />
+        <error line="106" column="42" source="standard:function-signature" />
+        <error line="106" column="42" source="standard:trailing-comma-on-declaration-site" />
+        <error line="107" column="17" source="standard:function-expression-body" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/aml/infrastructure/rest/dto/AmlCaseDtos.kt">
+        <error line="25" column="31" source="standard:trailing-comma-on-declaration-site" />
+        <error line="37" column="38" source="standard:trailing-comma-on-call-site" />
+        <error line="45" column="26" source="standard:trailing-comma-on-declaration-site" />
+        <error line="52" column="30" source="standard:trailing-comma-on-call-site" />
+        <error line="75" column="27" source="standard:trailing-comma-on-declaration-site" />
+        <error line="97" column="26" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/aml/application/usecase/AmlCaseServiceTest.kt">
+        <error line="71" column="18" source="standard:trailing-comma-on-call-site" />
+        <error line="100" column="49" source="standard:trailing-comma-on-call-site" />
+        <error line="101" column="22" source="standard:trailing-comma-on-call-site" />
+        <error line="112" column="9" source="standard:function-signature" />
+        <error line="113" column="9" source="standard:function-signature" />
+        <error line="113" column="52" source="standard:function-signature" />
+        <error line="113" column="52" source="standard:trailing-comma-on-declaration-site" />
+        <error line="114" column="9" source="standard:function-signature" />
+        <error line="124" column="46" source="standard:trailing-comma-on-call-site" />
+        <error line="146" column="34" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/aml/domain/model/AmlCaseTest.kt">
+        <error line="27" column="56" source="standard:trailing-comma-on-call-site" />
+        <error line="54" column="58" source="standard:trailing-comma-on-call-site" />
+        <error line="56" column="1" source="standard:final-newline" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/aml/infrastructure/outbox/AmlOutboxDispatchTest.kt">
+        <error line="61" column="35" source="standard:function-signature" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/aml/integration/AmlOutboxDispatchIT.kt">
+        <error line="51" column="52" source="standard:function-signature" />
+        <error line="69" column="32" source="standard:parameter-list-wrapping" />
+        <error line="69" column="32" source="standard:function-signature" />
+        <error line="69" column="47" source="standard:parameter-list-wrapping" />
+        <error line="69" column="47" source="standard:function-signature" />
+        <error line="69" column="66" source="standard:parameter-list-wrapping" />
+        <error line="69" column="66" source="standard:function-signature" />
+        <error line="69" column="85" source="standard:parameter-list-wrapping" />
+        <error line="69" column="85" source="standard:function-signature" />
+        <error line="69" column="102" source="standard:parameter-list-wrapping" />
+        <error line="69" column="102" source="standard:function-signature" />
+        <error line="69" column="120" source="standard:parameter-list-wrapping" />
+        <error line="69" column="120" source="standard:function-signature" />
+        <error line="69" column="121" source="standard:max-line-length" />
+        <error line="87" column="61" source="standard:function-signature" />
+        <error line="114" column="1" source="standard:spacing-between-declarations-with-annotations" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/governance/HibernateSequenceGuardTest.kt">
+        <error line="54" column="33" source="standard:trailing-comma-on-call-site" />
+        <error line="68" column="36" source="standard:trailing-comma-on-call-site" />
+    </file>
+</baseline>

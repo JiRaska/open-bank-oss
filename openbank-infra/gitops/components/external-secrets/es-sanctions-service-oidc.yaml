@@ -1,0 +1,25 @@
+# sanctions-service OIDC client secret from OpenBao → sanctions-service-oidc
+# Secret (key OIDC_CLIENT_SECRET), shared openbank-services realm client.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: sanctions-service-oidc
+  namespace: sanctions
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: sanctions-service-oidc
+    creationPolicy: Owner
+    template:
+      mergePolicy: Merge
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+  data:
+    - secretKey: OIDC_CLIENT_SECRET
+      remoteRef:
+        key: sanctions-service
+        property: OIDC_CLIENT_SECRET

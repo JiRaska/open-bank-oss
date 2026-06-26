@@ -1,0 +1,89 @@
+# Kafka UI — read-only web console for the Strimzi Kafka cluster.
+# Deployed in the messaging namespace alongside the broker and Apicurio registry.
+# Cluster-internal only: admin-ui reaches it server-side via kafka-ui.messaging.svc:8080;
+# no Ingress is needed and none is created (no external attack surface).
+# Auth: the pod is intentionally unauthenticated at the app layer — network
+# policy (kyverno or future NetworkPolicy) restricts access to the messaging
+# namespace + admin-ui pod; this matches the posture of Apicurio registry
+# (also internal-only, no app-layer auth).
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-ui
+  namespace: messaging
+  labels:
+    app.kubernetes.io/name: kafka-ui
+    app.kubernetes.io/part-of: messaging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka-ui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka-ui
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kafka-ui
+          image: provectuslabs/kafka-ui:v0.7.2
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: KAFKA_CLUSTERS_0_NAME
+              value: openbank
+            - name: KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+            - name: KAFKA_CLUSTERS_0_SCHEMAREGISTRY
+              value: http://apicurio-registry.messaging.svc:8080/apis/ccompat/v6
+            - name: DYNAMIC_CONFIG_ENABLED
+              value: "false"
+            - name: AUTH_TYPE
+              value: DISABLED
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-ui
+  namespace: messaging
+  labels:
+    app.kubernetes.io/name: kafka-ui
+    app.kubernetes.io/part-of: messaging
+spec:
+  selector:
+    app.kubernetes.io/name: kafka-ui
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

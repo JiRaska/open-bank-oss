@@ -1,0 +1,352 @@
+# Metrics plane: Prometheus + Grafana + kube-state-metrics + node-exporter
+# (alertmanager disabled — no routing configured in the sandbox). Lean FinOps
+# sizing per ADR-0027: single Prometheus replica, 12h retention, gp3 PVC.
+# serviceMonitorSelectorNilUsesHelmValues=false so app ServiceMonitors are
+# picked up regardless of release labels. Grafana has no Ingress — the edge NLB
+# is IP-locked and Grafana keeps the chart-default admin; reach it via
+# `kubectl -n observability port-forward svc/kube-prometheus-stack-grafana 3000:80`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 87.0.0
+    helm:
+      valuesObject:
+        # Alerting plane (ADR-0082 / ADR-0077 Phase 4). Enabled with a lean
+        # single replica. The sandbox routes everything to a no-op receiver so
+        # alerts are visible in the Alertmanager UI + Grafana alert list without
+        # needing creds; prod wires Slack/PagerDuty via ESO (a slack_configs
+        # block referencing a Vault-sourced webhook secret).
+        alertmanager:
+          enabled: true
+          alertmanagerSpec:
+            replicas: 1
+            # Mount the GoAlert integration URL (with its token) from a Secret so the
+            # token stays out of git (ADR-0088 D1). Lands at /etc/alertmanager/secrets/
+            # goalert-webhook-url/url and is referenced via webhook url_file below.
+            # alertmanager-slack carries the Slack incoming-webhook URL (ESO ←
+            # openbank/alertmanager SLACK_WEBHOOK); mounted at /etc/alertmanager/
+            # secrets/alertmanager-slack/SLACK_WEBHOOK and read via api_url_file.
+            secrets:
+              - goalert-webhook-url
+              - alertmanager-slack
+            # On-demand observability pool (ADR-0082) — survive spot reclamation.
+            nodeSelector:
+              workload: observability
+            tolerations:
+              - key: workload
+                operator: Equal
+                value: observability
+                effect: NoSchedule
+            resources:
+              requests:
+                cpu: 20m
+                memory: 64Mi
+              limits:
+                cpu: 100m
+                memory: 128Mi
+          config:
+            route:
+              receiver: 'null'
+              group_by: ['alertname', 'service']
+              group_wait: 30s
+              group_interval: 5m
+              repeat_interval: 4h
+              routes:
+                # Davis-lite (ADR-0088): auto root-cause enrichment via HolmesGPT.
+                # `continue: true` so the SAME critical alert ALSO falls through to the
+                # GoAlert paging route below — Holmes enriches, it never pages.
+                - matchers:
+                    - severity = "critical"
+                  receiver: 'holmes-rca'
+                  continue: true
+                  group_interval: 10m
+                  repeat_interval: 12h   # re-investigate a still-firing alert at most twice a day
+                - matchers:
+                    - severity = "critical"
+                  receiver: 'goalert'   # ADR-0088 §D1: page on-call via GoAlert — escalation,
+                  # ack and dedup — which fans out to ntfy. Critical pages, never just Slack.
+                - matchers:
+                    - severity = "warning"
+                  receiver: 'slack-warning'   # ADR-0077 Phase 4: non-paging visibility.
+                  # warning -> Slack only (no on-call page); critical stays on GoAlert above.
+            receivers:
+              - name: 'null'
+              - name: 'holmes-rca'
+                webhook_configs:
+                  # In-cluster relay (components/observability/holmes-rca.yaml): turns the
+                  # alert into a HolmesGPT investigation and posts the RCA to Slack + Loki.
+                  # Not paging; failures here never affect the GoAlert path.
+                  - url: http://holmes-rca.observability.svc:8080/alert
+                    send_resolved: false
+              - name: 'goalert'
+                webhook_configs:
+                  # GoAlert's Prometheus-Alertmanager integration parses this webhook and
+                  # raises/clears alerts on the 'openbank-alerts' service (send_resolved auto-
+                  # closes). The URL carries the integration token, so it is read from the
+                  # mounted Secret (url_file) — never committed to git.
+                  - url_file: /etc/alertmanager/secrets/goalert-webhook-url/url
+                    send_resolved: true
+              - name: 'slack-warning'
+                slack_configs:
+                  # Non-paging warning feed. The incoming-webhook URL is the secret and
+                  # carries its own target channel, so it is read from the mounted Secret
+                  # (api_url_file) — never committed to git. `channel` is required by the
+                  # schema but the incoming webhook posts to its own bound channel.
+                  - api_url_file: /etc/alertmanager/secrets/alertmanager-slack/SLACK_WEBHOOK
+                    channel: '#openbank-alerts'
+                    send_resolved: true
+                    title: '{{ .CommonLabels.alertname }} ({{ .CommonLabels.severity }})'
+                    text: >-
+                      {{ range .Alerts }}{{ .Annotations.summary }}
+                      {{ .Annotations.description }}
+                      {{ end }}
+        prometheus:
+          prometheusSpec:
+            replicas: 1
+            # 12h retention (FinOps per ADR-0027; the 5Gi PVC below is sized for it).
+            # GOTCHA (governance-as-code, ADR-0029): for Prometheus >= 3.11 the operator
+            # renders this into the Prometheus *config file* (storage.tsdb.retention.time)
+            # and NO LONGER passes the --storage.tsdb.retention.time CLI flag. So
+            # /api/v1/status/flags reports the binary's built-in DEFAULT (15d) and is NOT
+            # the effective value — that looks like GitOps drift but isn't. Verify the
+            # live retention via /api/v1/status/runtimeinfo -> storageRetention (or the
+            # rendered config Secret's storage.tsdb.retention.time). A retention change
+            # only takes effect once the Prometheus pod reloads/restarts. Do NOT "fix"
+            # the apparent 15d by bumping this value or forcing the CLI flag back.
+            retention: 12h
+            # Pin to the on-demand observability node pool (ADR-0082): spot
+            # reclamation was killing Prometheus mid-WAL-replay every ~15-30 min.
+            nodeSelector:
+              workload: observability
+            tolerations:
+              - key: workload
+                operator: Equal
+                value: observability
+                effect: NoSchedule
+            # Accept Tempo metrics-generator remote-write (ADR-0082) and store
+            # exemplars so a point on a latency histogram links straight to the
+            # one slow trace that produced it.
+            enableRemoteWriteReceiver: true
+            enableFeatures:
+              - exemplar-storage
+            # Pick up ServiceMonitors/PodMonitors from any namespace without
+            # requiring the chart's release label, so account-service (and the
+            # rest of the fleet) can ship their own monitors.
+            serviceMonitorSelectorNilUsesHelmValues: false
+            podMonitorSelectorNilUsesHelmValues: false
+            ruleSelectorNilUsesHelmValues: false
+            probeSelectorNilUsesHelmValues: false
+            scrapeConfigSelectorNilUsesHelmValues: false
+            resources:
+              requests:
+                cpu: 200m
+                memory: 512Mi
+              limits:
+                cpu: "1"
+                memory: 1536Mi
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: gp3
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      # FinOps 2026-06-05: 10Gi → 5Gi; with 12h retention
+                      # the sandbox Prometheus never fills more than ~2Gi.
+                      storage: 5Gi
+        grafana:
+          enabled: true
+          # Security patch (ADR-0079 lifecycle): 13.0.1-security-01 -> 13.0.2.
+          image:
+            tag: "13.0.2"
+          defaultDashboardsTimezone: browser
+          # INTERNAL ONLY — no ingress by decision (ADR-0056: the admin-UI BFF
+          # is the sole public browser->cluster path; Grafana's pre-auth
+          # surface stays off the internet). Access via
+          # openbank-infra/scripts/grafana-local.sh (port-forward :3000).
+          # Login is still Keycloak SSO (realm openbank, same users/roles as
+          # admin-ui): public+PKCE client with a localhost redirect — the
+          # browser leg reaches kc.open-bank.tech, the token/userinfo
+          # back-channel goes in-cluster like admin-ui's KEYCLOAK_URL split.
+          # Role mapping: ROLE_ADMIN -> Admin, ROLE_OPERATOR -> Editor,
+          # everyone else -> Viewer.
+          grafana.ini:
+            server:
+              root_url: http://localhost:3000
+            auth.generic_oauth:
+              enabled: true
+              name: OpenBank SSO
+              allow_sign_up: true
+              client_id: openbank-grafana
+              scopes: openid profile email
+              auth_url: https://kc.open-bank.tech/realms/openbank/protocol/openid-connect/auth
+              token_url: http://keycloak.iam.svc:8080/realms/openbank/protocol/openid-connect/token
+              api_url: http://keycloak.iam.svc:8080/realms/openbank/protocol/openid-connect/userinfo
+              use_pkce: true
+              use_refresh_token: true
+              login_attribute_path: preferred_username
+              name_attribute_path: name
+              email_attribute_path: email
+              role_attribute_path: contains(realm_access.roles[*], 'ROLE_ADMIN') && 'Admin' || (contains(realm_access.roles[*], 'ROLE_OPERATOR') && 'Editor' || 'Viewer')
+          # Sentry-protocol datasource plugin so GlitchTip mobile crashes
+          # (ADR-0075) sit on the same pane as backend telemetry (ADR-0082).
+          plugins:
+            - grafana-sentry-datasource
+            # Polystat hex-grid panel for the SOC "fleet error budget" view
+            # (per-service health as colored hexagons). Latest compatible build
+            # resolved by Grafana at startup, like the sentry datasource above.
+            - grafana-polystat-panel
+          # GlitchTip API token, injected from the ESO-managed grafana-glitchtip
+          # Secret (components/external-secrets/es-grafana-glitchtip.yaml).
+          # optional:true → Grafana stays healthy before the token is in Vault;
+          # the datasource simply can't query until it is wired.
+          envValueFrom:
+            GLITCHTIP_API_TOKEN:
+              secretKeyRef:
+                name: grafana-glitchtip
+                key: token
+                optional: true
+          persistence:
+            enabled: false
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+          # We define Prometheus + Tempo ourselves (below) to wire the full
+          # correlation web, so disable the chart's auto-provisioned default.
+          sidecar:
+            datasources:
+              defaultDatasourceEnabled: false
+          # The correlation backbone (ADR-0082). Every datasource cross-links to
+          # the others via trace_id, so one click pivots metrics<->traces<->logs.
+          additionalDataSources:
+            - name: Prometheus
+              type: prometheus
+              uid: prometheus
+              access: proxy
+              url: http://kube-prometheus-stack-prometheus.observability.svc:9090
+              isDefault: true
+              jsonData:
+                httpMethod: POST
+                # Exemplar on any metric -> jump to the trace in Tempo.
+                exemplarTraceIdDestinations:
+                  - name: trace_id
+                    datasourceUid: tempo
+                    urlDisplayLabel: "View trace"
+            - name: Tempo
+              type: tempo
+              uid: tempo
+              access: proxy
+              url: http://tempo.observability.svc:3200
+              jsonData:
+                # span -> its logs (Alloy populated trace_id in Loki).
+                tracesToLogsV2:
+                  datasourceUid: loki
+                  filterByTraceID: true
+                  spanStartTimeShift: '-1h'
+                  spanEndTimeShift: '1h'
+                # span -> RED metrics from the metrics-generator.
+                tracesToMetrics:
+                  datasourceUid: prometheus
+                  spanStartTimeShift: '-1h'
+                  spanEndTimeShift: '1h'
+                  queries:
+                    - name: 'Request rate'
+                      query: 'sum(rate(traces_spanmetrics_calls_total{$__tags}[5m]))'
+                    - name: 'Error rate'
+                      query: 'sum(rate(traces_spanmetrics_calls_total{status_code="STATUS_CODE_ERROR",$__tags}[5m]))'
+                # Auto service map + node graph from service-graph metrics.
+                serviceMap:
+                  datasourceUid: prometheus
+                nodeGraph:
+                  enabled: true
+                lokiSearch:
+                  datasourceUid: loki
+                # span -> CPU/alloc flame graph in Pyroscope (ADR-0082).
+                tracesToProfiles:
+                  datasourceUid: pyroscope
+                  profileTypeId: "process_cpu:cpu:nanoseconds:cpu:nanoseconds"
+                  tags:
+                    - key: service.name
+                      value: service_name
+            - name: Pyroscope
+              type: grafana-pyroscope-datasource
+              uid: pyroscope
+              access: proxy
+              url: http://pyroscope.observability.svc:4040
+            # Mobile crash & release health (ADR-0075) via the Sentry protocol.
+            # Events carry X-Correlation-ID + party_id, so a crash pivots to its
+            # backend Tempo trace/Loki logs by correlationId (ADR-0082).
+            - name: GlitchTip
+              type: grafana-sentry-datasource
+              uid: glitchtip
+              access: proxy
+              # IN-CLUSTER service, NOT the public host. The glitchtip.open-bank.tech
+              # ingress deliberately routes ONLY the ingest paths
+              # (/api/<n>/(store|envelope|security|minidump|unreal)/) so the UI/API are
+              # not exposed publicly — so the public host 404s the /api/0/... query API
+              # the sentry datasource needs. Grafana runs in-cluster, so it queries the
+              # full API straight on the web Service. (Verified: /api/0/organizations/ →
+              # 200, org slug "openbank".)
+              url: http://glitchtip-web.observability.svc
+              jsonData:
+                url: http://glitchtip-web.observability.svc
+                orgSlug: openbank
+              secureJsonData:
+                authToken: $GLITCHTIP_API_TOKEN
+        nodeExporter:
+          enabled: true
+        # EKS managed control plane: AWS runs (and hides) kube-controller-manager,
+        # kube-scheduler, etcd and kube-proxy — none expose scrapeable metrics
+        # endpoints to the cluster. Leaving these chart defaults enabled created
+        # ServiceMonitors pointing at non-existent control-plane endpoints, whose
+        # "target down" rules fire KubeControllerManagerDown / KubeSchedulerDown as
+        # permanent false-positive criticals. Disabling each component drops both
+        # its ServiceMonitor and the matching default alert rules (ADR-0088 D1 —
+        # found while wiring ntfy last-mile, 2026-06-13).
+        kubeControllerManager:
+          enabled: false
+        kubeScheduler:
+          enabled: false
+        kubeEtcd:
+          enabled: false
+        kubeProxy:
+          enabled: false
+        kube-state-metrics:
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 192Mi
+        prometheusOperator:
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

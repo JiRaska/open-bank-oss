@@ -1,0 +1,138 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# BPMN process diagram (ADR-0019/0029). Authored as data; validated by
+# src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
+
+name: Účetní závěrky (EoD/EoM/EoY)
+desc: Denní/měsíční/roční uzávěrka — FX přeocenění, reconciliace, statementy, atestace
+regulation: IFRS + BCBS 239 + ADR-0046/0069/0078
+services:
+  - ledger-service
+  - statement-service
+  - balance-service
+  - fx-service
+steps:
+  - id: start
+    type: start
+    x: 60
+    y: 100
+    label: Cron (EoD 15:00)
+  - id: fxreval
+    type: task
+    x: 185
+    y: 100
+    label: FX přeocenění (ČNB)
+    lane: core
+    apis:
+      - POST /api/v1/ledger/fx-revaluation
+    relatedServices:
+      - ledger-service
+      - fx-service
+    emits:
+      - openbank.ledger.journal.posted
+  - id: recon
+    type: task
+    x: 320
+    y: 100
+    label: EoD reconciliace
+    lane: core
+    relatedServices:
+      - ledger-service
+      - balance-service
+  - id: gwbal
+    type: gateway
+    x: 440
+    y: 100
+    label: Sedí?
+  - id: drift
+    type: end-err
+    x: 440
+    y: 220
+    label: Drift / Alert
+  - id: close
+    type: task
+    x: 565
+    y: 100
+    label: EoM uzávěrka pocketů
+    lane: core
+    apis:
+      - POST /api/v1/statements/close-runs
+    relatedServices:
+      - statement-service
+      - transaction-service
+      - balance-service
+    emits:
+      - openbank.statement.event
+  - id: trial
+    type: task
+    x: 700
+    y: 100
+    label: EoY trial balance
+    lane: core
+    apis:
+      - GET /api/v1/ledger/close/trial-balance
+    relatedServices:
+      - ledger-service
+  - id: gwtb
+    type: gateway
+    x: 820
+    y: 100
+    label: Vyrovnáno?
+  - id: unbal
+    type: end-err
+    x: 820
+    y: 220
+    label: Nevyrovnáno (409)
+  - id: attest
+    type: task
+    x: 940
+    y: 100
+    label: Atestace roku
+    lane: compliance
+    apis:
+      - POST /api/v1/ledger/close/{year}/attest
+    relatedServices:
+      - ledger-service
+    emits:
+      - openbank.ledger.journal.posted
+  - id: projection
+    type: event
+    x: 940
+    y: 220
+    label: Balance/Audit projekce
+    consumes:
+      - openbank.ledger.journal.posted
+  - id: end
+    type: end
+    x: 1060
+    y: 100
+    label: ATTESTED
+flows:
+  - from: start
+    to: fxreval
+  - from: fxreval
+    to: recon
+  - from: recon
+    to: gwbal
+  - from: gwbal
+    to: drift
+    label: Ne
+  - from: gwbal
+    to: close
+    label: Ano
+  - from: close
+    to: trial
+  - from: trial
+    to: gwtb
+  - from: gwtb
+    to: unbal
+    label: Ne
+  - from: gwtb
+    to: attest
+    label: Ano
+  - from: attest
+    to: projection
+    kind: async
+    topic: openbank.ledger.journal.posted
+  - from: attest
+    to: end

@@ -1,0 +1,17 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+    <CurrentIssues>
+    <ID>EmptyFunctionBlock:KafkaStandingOrderEventPublisher.kt$KafkaStandingOrderEventPublisher${}</ID>
+    <ID>MagicNumber:AuthzProducer.kt$AuthzProducer$500</ID>
+    <ID>MagicNumber:StandingOrderOutboxDispatcher.kt$StandingOrderOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:StandingOrderOutboxDispatcher.kt$StandingOrderOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:StandingOrderOutboxRepositoryImpl.kt$StandingOrderOutboxRepositoryImpl$4000</ID>
+    <ID>MagicNumber:StandingOrderResource.kt$StandingOrderResource$201</ID>
+    <ID>MatchingDeclarationName:StandingOrderOutboxPort.kt$StandingOrderOutboxRepository : OutboxRepository</ID>
+    <ID>MatchingDeclarationName:StandingOrderPorts.kt$StandingOrderRepository</ID>
+    <ID>SwallowedException:StandingOrderOutboxDispatcher.kt$StandingOrderOutboxDispatcher$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:StandingOrderOutboxDispatcher.kt$StandingOrderOutboxDispatcher$ex: Exception</ID>
+    <ID>UnusedParameter:KafkaStandingOrderEventPublisher.kt$KafkaStandingOrderEventPublisher$id: java.util.UUID</ID>
+  </CurrentIssues>
+</SmellBaseline>

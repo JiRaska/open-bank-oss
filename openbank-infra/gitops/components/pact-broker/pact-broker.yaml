@@ -1,0 +1,146 @@
+# Pact Broker (ADR-0092) — the contract registry for the CI publish → verify →
+# can-i-deploy pipeline. Backed by the single-owner CNPG `pact-broker-db`; DB
+# credentials come from the CNPG-generated `pact-broker-db-app` secret. Basic-auth
+# credentials come from the ESO-synced `pact-broker-basic-auth` secret
+# (es-pact-broker.yaml ← OpenBao openbank/pact-broker).
+#
+# Exposure (ADR-0092, documented ADR-0056 exception): reached via the nginx
+# Ingress at https://pact.open-bank.tech (ingress.yaml) because the openbank-build
+# runner pool is mixed (ARC + external Hetzner/Mac) and external runners can't use
+# cluster DNS. Basic-auth gates every path except the heartbeat; humans can also
+# port-forward (openbank-infra/scripts/pact-broker-local.sh).
+#
+# Image: pinned multi-arch tag (amd64 + arm64) — the cluster runs Graviton nodes,
+# so an amd64-only tag would CrashLoop / fail to schedule. Verified arm64 in the
+# Docker Hub manifest for this tag. (Legacy `-multi` suffix is no longer needed;
+# dated tags are multi-arch by default.)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pact-broker
+  namespace: pact-broker
+  labels:
+    app.kubernetes.io/name: pact-broker
+    app.kubernetes.io/part-of: platform
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pact-broker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pact-broker
+    spec:
+      containers:
+        - name: pact-broker
+          image: pactfoundation/pact-broker:2.138.0-pactbroker2.119.0
+          ports:
+            - name: http
+              containerPort: 9292
+          env:
+            # --- datasource (CNPG pact-broker-db) ---
+            - name: PACT_BROKER_DATABASE_ADAPTER
+              value: postgres
+            - name: PACT_BROKER_DATABASE_HOST
+              value: pact-broker-db-rw.pact-broker.svc
+            - name: PACT_BROKER_DATABASE_PORT
+              value: "5432"
+            - name: PACT_BROKER_DATABASE_NAME
+              value: pact_broker
+            - name: PACT_BROKER_DATABASE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: pact-broker-db-app
+                  key: username
+            - name: PACT_BROKER_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pact-broker-db-app
+                  key: password
+            # --- app ---
+            - name: PACT_BROKER_PORT
+              value: "9292"
+            - name: PACT_BROKER_LOG_LEVEL
+              value: info
+            # Bind the heartbeat probe path publicly (no auth) so k8s probes pass
+            # even with basic-auth enabled; heartbeat does not touch the DB.
+            - name: PACT_BROKER_PUBLIC_HEARTBEAT
+              value: "true"
+            # Public base URL (ADR-0092): the broker sits behind the nginx ingress
+            # which terminates TLS and forwards over http; pin the front-channel URL
+            # so generated HAL links + can-i-deploy badges resolve to https, not the
+            # internal http Service. (Mirrors the Keycloak KC_HOSTNAME split.)
+            - name: PACT_BROKER_BASE_URL
+              value: https://pact.open-bank.tech
+            # Don't seed the bundled "Example App/API" pacticipants — this is a real
+            # contract registry, not a demo.
+            - name: PACT_BROKER_SEED_EXAMPLE_DATA
+              value: "false"
+            # --- basic auth (ESO ← OpenBao openbank/pact-broker) ---
+            # Write creds gate publish/can-i-deploy from CI; read-only creds let
+            # humans browse the matrix UI without write power.
+            - name: PACT_BROKER_BASIC_AUTH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: pact-broker-basic-auth
+                  key: username
+            - name: PACT_BROKER_BASIC_AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pact-broker-basic-auth
+                  key: password
+            - name: PACT_BROKER_BASIC_AUTH_READ_ONLY_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: pact-broker-basic-auth
+                  key: read-only-username
+            - name: PACT_BROKER_BASIC_AUTH_READ_ONLY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pact-broker-basic-auth
+                  key: read-only-password
+          # Heartbeat (no DB) for liveness; readiness too — the broker runs its DB
+          # migrations synchronously on boot before it starts serving, so a 200 on
+          # heartbeat implies migrations are done and the app is ready.
+          livenessProbe:
+            httpGet:
+              path: /diagnostic/status/heartbeat
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /diagnostic/status/heartbeat
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 12
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pact-broker
+  namespace: pact-broker
+  labels:
+    app.kubernetes.io/name: pact-broker
+spec:
+  selector:
+    app.kubernetes.io/name: pact-broker
+  ports:
+    - name: http
+      port: 9292
+      targetPort: http

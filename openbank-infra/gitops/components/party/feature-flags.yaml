@@ -1,0 +1,30 @@
+# Feature flags for party-service (ADR-0067) — flag-as-code, the GitOps source of truth.
+# ArgoCD syncs this ConfigMap; the flagd sidecar (see party-service.yaml) mounts it and
+# hot-reloads on change. To flip the pilot flag, change defaultVariant off→on and let ArgoCD
+# sync — no image rebuild. flagd schema: https://flagd.dev/schema/v0/flags.json
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: party-feature-flags
+  namespace: party
+  labels:
+    app.kubernetes.io/name: party-service
+    app.kubernetes.io/part-of: party
+    openbank.io/config: feature-flags
+data:
+  flags.json: |
+    {
+      "$schema": "https://flagd.dev/schema/v0/flags.json",
+      "flags": {
+        "party-list-enriched": {
+          "state": "ENABLED",
+          "variants": { "on": true, "off": false },
+          "defaultVariant": "on"
+        },
+        "party-search": {
+          "state": "ENABLED",
+          "variants": { "on": true, "off": false },
+          "defaultVariant": "on"
+        }
+      }
+    }

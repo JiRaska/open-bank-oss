@@ -1,0 +1,235 @@
+# Per-service CI dispatcher.
+#
+#  changes  -> works out which Gradle modules a push/PR actually touched and emits
+#              a JSON matrix. Shared changes (openbank-libs, version catalog, root
+#              build, the reusable workflow itself) fan out to EVERY module because
+#              everything depends on them. Pushes to main always build everything.
+#  build    -> calls the reusable _service-ci.yml once per changed module (matrix),
+#              so each service reports its own green/red status check.
+#
+# Minutes governance (GitHub Free, private repo = 2000 min/mo):
+#  - path-scoped matrix: a typical PR builds only the handful of touched services
+#  - concurrency: cancel superseded runs on the same ref
+name: Services CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Nightly full-fleet health build. PRs are path-scoped (only changed services build),
+  # so a PR that breaks a service it does NOT touch ships green and the breakage only
+  # surfaces post-merge — where nobody watches. (account-service did not compile on main
+  # for ~14 commits this way.) This scheduled run rebuilds EVERY module daily and, on
+  # failure, opens an actionable tracking issue so a rotting fleet is caught in <24h.
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC daily
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  # Don't let the nightly run cancel an in-flight PR/main run (or vice-versa): give the
+  # scheduled/manual fleet build its own concurrency lane.
+  group: services-ci-${{ github.ref }}-${{ github.event_name == 'schedule' && 'nightly' || 'ci' }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect changed services
+    runs-on: openbank-build
+    timeout-minutes: 5
+    outputs:
+      services: ${{ steps.detect.outputs.services }}
+      any: ${{ steps.detect.outputs.any }}
+    steps:
+      # harden-runner omitted on the self-hosted sandbox runner — egress is enforced
+      # at the infra layer (egress-only SG, isolated VPC, ADR-0027), so the eBPF shim
+      # for ephemeral hosted runners is redundant here.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - id: detect
+        run: |
+          set -euo pipefail
+          # Canonical Gradle module list — DISCOVERED from the tree exactly like
+          # settings.gradle.kts (every `openbank-*` dir with a build.gradle.kts), NOT hardcoded.
+          # A hardcoded list silently drifts: a newly-added service is absent from it, so its
+          # build job is skipped on the PR that introduces it AND in the nightly full-fleet run,
+          # yet `all-green` passes (skipped != failed) — a branch-protection hole that let
+          # openbank-fraud-service (and anacredit-service, analytics-sink) merge unbuilt (#1001).
+          # Deriving it from the same rule as settings.gradle.kts keeps CI and the build in sync
+          # and builds a new service on its introducing PR. `openbank-admin-ui` (Next.js) and
+          # `openbank-infra` (OpenTofu) have no build.gradle.kts, so neither is picked up.
+          ALL=$(for d in openbank-*/; do if [ -f "${d}build.gradle.kts" ]; then printf '%s ' "${d%/}"; fi; done)
+
+          if [ "${{ github.event_name }}" = "push" ] \
+             || [ "${{ github.event_name }}" = "schedule" ] \
+             || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Event ${{ github.event_name }} -> build all modules (full-fleet)."
+            CHANGED="$ALL"
+          else
+            BASE="origin/${{ github.base_ref }}"
+            # Persistent self-hosted runners REUSE the git workdir between jobs,
+            # so the `origin/<base>` remote-tracking ref can be stale from an
+            # earlier run. Force it to the true remote tip with an explicit
+            # refspec (a bare `git fetch origin main` updates FETCH_HEAD but does
+            # NOT reliably move refs/remotes/origin/main). A stale base silently
+            # mis-computes the diff and under-builds changed services — a
+            # branch-protection hole. Full depth (no --depth=1): a shallow graft
+            # would break merge-base once main advances past this PR's base.
+            git fetch --no-tags --force origin \
+              "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" \
+              >/dev/null 2>&1 || true
+            # Compute the merge-base explicitly rather than leaning on the
+            # three-dot shorthand's ref resolution, then diff from it. Equivalent
+            # to BASE...HEAD but observable and robust to odd ref state.
+            MB=$(git merge-base "$BASE" HEAD 2>/dev/null || echo "$BASE")
+            FILES=$(git diff --name-only "$MB" HEAD)
+            echo "Detect: base=$BASE merge-base=$MB changed-files=$(echo "$FILES" | grep -c . || true)"
+            echo "Changed files:"; echo "$FILES" | sed 's/^/  /'
+
+            # Code-global inputs every module compiles/tests against -> rebuild all.
+            # (openbank-libs, version catalog, root build, gradle.properties,
+            # build-logic.) A change here can alter any service's compile or test
+            # inputs, so the whole fleet must rebuild.
+            # NB: feed grep via a here-string, NOT `echo "$FILES" | grep -q`.
+            # Under `set -o pipefail`, `grep -q` exits on first match and closes
+            # the pipe, so the upstream `echo` gets SIGPIPE (exit 141) and the
+            # pipeline returns 141 -> the `if` mis-reads a successful match as
+            # FALSE. Whether it fires depends racily on how far down the (sorted)
+            # file list the match sits, so early-sorting modules (account-service,
+            # openbank-libs) were silently dropped from the matrix. A here-string
+            # has no pipe and no SIGPIPE, so the test is deterministic.
+            # Governance catalogs (openbank-libs/governance/) are data for CI
+            # checks + admin-ui, not a compile/test input of any module — an
+            # ADR/control-catalog edit must not cost a 28-module fleet run.
+            FILES_CODE=$(grep -vE '^openbank-libs/governance/' <<< "$FILES" || true)
+            if grep -qE '^(openbank-libs/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_CODE"; then
+              echo "Decision: code-global change -> build all modules."
+              CHANGED="$ALL"
+            else
+              echo "Decision: per-module fan-out (no code-global change)."
+              CHANGED=""
+              for m in $ALL; do
+                if grep -qE "^${m}/" <<< "$FILES_CODE"; then
+                  CHANGED="$CHANGED $m"
+                fi
+              done
+              # A change to the CI recipe itself (services-ci / _service-ci) can NOT
+              # alter any service's compile/test inputs, so it does NOT warrant a
+              # 28-module fan-out -- that is what turned the trivial #547 cache-flag
+              # flip into a flaky full-fleet run. The recipe still needs validating
+              # end-to-end, so build ONE canary: openbank-libs runs the same job
+              # template -- checkout, toolchain, setup-gradle and :build (each service's
+              # tests boot their own Testcontainers, #578; there is no shared infra boot
+              # step left to exercise) -- exercising the entire recipe on a single job.
+              # Skip the canary if a real service is already in the matrix (it validates
+              # the recipe too).
+              if [ -z "${CHANGED// /}" ] \
+                 && grep -qE '^\.github/workflows/(services-ci|_service-ci)\.yml' <<< "$FILES"; then
+                echo "Decision: recipe-only change -> build canary openbank-libs."
+                CHANGED="openbank-libs"
+              fi
+            fi
+          fi
+
+          # grep -v exits 1 when CHANGED is empty (PR touched no service module);
+          # `|| true` stops `set -e` from aborting — empty is valid (build nothing).
+          CHANGED=$(echo "$CHANGED" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' || true)
+          echo "Modules to build: ${CHANGED:-<none>}"
+          if [ -z "${CHANGED// /}" ]; then
+            echo "services=[]" >> "$GITHUB_OUTPUT"
+            echo "any=false" >> "$GITHUB_OUTPUT"
+          else
+            JSON=$(printf '%s\n' $CHANGED | sort -u | jq -R . | jq -cs .)
+            echo "services=$JSON" >> "$GITHUB_OUTPUT"
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: changes
+    if: needs.changes.outputs.any == 'true'
+    strategy:
+      fail-fast: false
+      # Cap concurrent matrix jobs. The ARC init container raises fs.aio-max-nr to
+      # 1048576 (arc-runners.tf aio_sysctl_init_container — issue #1329 resolved).
+      # Hetzner hosts default to 65536; at max-parallel=8 all 8 Redpanda containers
+      # race to claim async-I/O contexts simultaneously and exhaust the pool
+      # (balance/ledger/lending flakes observed in the 2026-06-23 full-fleet run).
+      # Set 4: safe for both runner pools; the TC pre-warm step already serialises
+      # the registry-cache cold-start window, so the NAT benefit is preserved.
+      # Raise back to 8 once runner-tune-hetzner runs and persists aio-max-nr=1048576.
+      max-parallel: 4
+      matrix:
+        service: ${{ fromJSON(needs.changes.outputs.services) }}
+    uses: ./.github/workflows/_service-ci.yml
+    with:
+      service: ${{ matrix.service }}
+    # Pass the Pact Broker password (secret) through to the reusable workflow
+    # (ADR-0092); vars.PACT_BROKER_URL/_USERNAME are available to it automatically.
+    secrets: inherit
+
+  # Single required status check that aggregates the matrix, so branch protection
+  # can require "Services CI / all-green" without enumerating every service.
+  all-green:
+    name: all-green
+    needs: [changes, build]
+    if: always()
+    runs-on: openbank-build
+    timeout-minutes: 2
+    steps:
+      - name: Verify no service failed
+        run: |
+          if [ "${{ needs.build.result }}" = "failure" ] || [ "${{ needs.build.result }}" = "cancelled" ]; then
+            echo "One or more service builds failed."; exit 1
+          fi
+          echo "All changed services built green (or nothing to build)."
+
+  # Nightly-only: turn a failed full-fleet build into an actionable, deduplicated issue.
+  # Runs solely for the scheduled run so PR/push failures (already visible as red checks)
+  # don't spam issues.
+  nightly-health-alert:
+    name: nightly fleet-health alert
+    needs: [changes, build]
+    if: always() && github.event_name == 'schedule' && (needs.build.result == 'failure' || needs.changes.result == 'failure')
+    runs-on: openbank-build
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      # actions/github-script (not the `gh` CLI): the self-hosted `openbank-build`
+      # runners have no `gh` binary, so the previous `gh issue create` step failed
+      # with `gh: command not found` (exit 127) on every nightly — the fleet rotted
+      # red for days with NO issue ever opened. github-script talks to the REST API
+      # over the runner's bundled node, which IS present (it runs admin-ui and other
+      # JS actions), so the alert actually fires.
+      - name: Open or update the fleet-health tracking issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const detected = new Date().toISOString();
+            // Dedupe on the marker label: one open "fleet is red" issue, commented on
+            // until it is fixed and closed — not a fresh issue every night.
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', labels: 'fleet-health',
+            });
+            if (open.length > 0) {
+              const n = open[0].number;
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: n,
+                body: `Still failing as of the latest nightly full-fleet run.\n\nRun: ${runUrl}\nDetected: ${detected}`,
+              });
+              core.info(`Commented on existing fleet-health issue #${n}.`);
+            } else {
+              const { data: created } = await github.rest.issues.create({
+                owner, repo,
+                title: 'Nightly full-fleet build is failing',
+                labels: ['fleet-health', 'bug'],
+                body: `The scheduled full-fleet build failed — a service on \`main\` no longer compiles or its tests are red, even though no recent PR touched it (path-scoped CI cannot catch this). Investigate which module is red in the run and open a fix PR.\n\nRun: ${runUrl}\nDetected: ${detected}`,
+              });
+              core.info(`Opened a new fleet-health issue #${created.number}.`);
+            }

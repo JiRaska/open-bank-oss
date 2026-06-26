@@ -1,0 +1,219 @@
+# statement-service: monthly per-pocket period-close record (ADR-0035). Reactive
+# Postgres datasource + Flyway JDBC migrations against the single-owner CNPG cluster.
+# Consumes the account-service `openbank.accounts.account.created` stream into a local
+# account_registry (enumeration source for the scheduled close) and publishes
+# `openbank.statement.event` via its outbox dispatcher to the Strimzi Kafka bus. Reads
+# transaction-service (booked entries), balance-service (closing balance, fail-closed
+# reconciliation) and account-service (pocket metadata) over their in-cluster http legs.
+# OIDC bearer-token validation points at Keycloak; shares the openbank-services client.
+# Reachable only in-cluster via ClusterIP, no ingress. The scheduled monthly close stays
+# disabled (openbank.statement.scheduled-close.enabled=false) until the registry back-fills.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: statement-service
+  namespace: statements
+  labels:
+    app.kubernetes.io/name: statement-service
+    app.kubernetes.io/part-of: statements
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: statement-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: statement-service
+        app.kubernetes.io/part-of: statements
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: statement-service
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-statement-service:sandbox-40e0c9d1c
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8136
+            - name: management
+              containerPort: 8085
+          env:
+            # Reactive + JDBC (Flyway) legs onto the same CNPG primary; username is
+            # the `openbank` owner, password from the CNPG-generated app secret.
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://statements-db-rw.statements.svc:5432/openbank_statement
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://statements-db-rw.statements.svc:5432/openbank_statement
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: statements-db-app
+                  key: password
+            # Kafka in (account stream → registry) + out (statement outbox) → Strimzi
+            # bootstrap. Must be env KAFKA_BOOTSTRAP_SERVERS: the SmallRye connector
+            # ignores the quarkus.* key, so any other key leaves it on its localhost default.
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+            # OIDC resource-server: validate bearer tokens over the internal http leg;
+            # shares the openbank-services client with the other services.
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: statement-service-oidc
+                  key: OIDC_CLIENT_SECRET
+            # Cross-service reads over in-cluster http legs (ClusterIP DNS).
+            - name: TRANSACTION_SERVICE_URL
+              value: http://transaction-service.payments.svc:8102
+            - name: BALANCE_SERVICE_URL
+              value: http://balance-service.balances.svc:8103
+            - name: ACCOUNT_SERVICE_URL
+              value: http://account-service.accounts.svc:8100
+            - name: PARTY_SERVICE_URL
+              value: http://party-service.party.svc:8111
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+            - name: OPENBANK_TEMPORAL_ENABLED
+              value: "true"
+            - name: OPENBANK_TEMPORAL_SERVER_URL
+              value: temporal-frontend.temporal.svc.cluster.local:7233
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          # Readiness is TCP on http, not /q/health/ready: the Kafka producer's
+          # readiness sits KO until the first event is sent (lazy connect), which with
+          # an idle outbox would never flip. Flyway-at-start guarantees DB connectivity
+          # before the port opens. Liveness uses http health.
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 384Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: statement-service
+  namespace: statements
+  labels:
+    app.kubernetes.io/name: statement-service
+spec:
+  selector:
+    app.kubernetes.io/name: statement-service
+  ports:
+    - name: http
+      port: 8136
+      targetPort: http
+    # Quarkus management interface (health + Prometheus /q/metrics). Exposed so the
+    # ServiceMonitor (below) can scrape the close-cadence counters (ADR-0069 D3 / #470).
+    - name: management
+      port: 8085
+      targetPort: management
+---
+# ADR-0069 D3 / issue #470 — scrape the close-cadence metrics. kube-prometheus-stack runs with
+# serviceMonitorSelectorNilUsesHelmValues=false, so this ServiceMonitor is discovered regardless
+# of labels. (This is the first ServiceMonitor in the fleet; others can follow the same shape.)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: statement-service
+  namespace: statements
+  labels:
+    app.kubernetes.io/name: statement-service
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: statement-service
+  endpoints:
+    - port: management
+      path: /q/metrics
+      interval: 60s
+---
+# Close-cadence alerts (ADR-0069 D3 / issue #470). Loaded by Prometheus
+# (ruleSelectorNilUsesHelmValues=false). NOTE: end-to-end NOTIFICATION is gated on sandbox
+# Alertmanager routing being enabled; until then these evaluate and surface in the Prometheus/
+# Alertmanager UI but do not page.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: statement-close
+  namespace: statements
+  labels:
+    app.kubernetes.io/name: statement-service
+spec:
+  groups:
+    - name: statement-close
+      rules:
+        - alert: StatementCloseFailures
+          expr: increase(openbank_statement_close_failures_total[1h]) > 0
+          for: 5m
+          labels:
+            severity: warning
+            service: statement-service
+          annotations:
+            summary: "Statement period-close failures in the last hour"
+            description: "{{ $value }} pocket-month close(s) failed (reason label on the metric). Inspect /api/v1/statements/close-runs."
+        - alert: StatementCloseCadenceStalled
+          # The monthly cron should produce at least one run per ~31 days; no run in 35 days =
+          # cadence stalled (cron disabled, scheduler crashed, or registry empty).
+          #
+          # Reads the GAUGE openbank_statement_close_last_run_timestamp_seconds (epoch s of the last
+          # finished close), NOT a counter over a [35d] window. A counter window can only see as far
+          # back as Prometheus retention (12h declared / ~15d live in the sandbox — both far under the
+          # 35d window), so once a legitimate monthly run ages past retention the [35d] query reads 0
+          # → permanent false positive. A gauge's current value is always scrapeable regardless of
+          # retention; the service derives it from the persisted statement_close_run log
+          # (CloseLastRunGauge re-reads the latest finished run each tick) so it is restart-safe.
+          #
+          # Fires when: the gauge is absent (service down / never scraped), has never been stamped
+          # (== 0, cadence never ran), or its last run is older than 35d. max() collapses the brief
+          # two-pod overlap during a rollout (a freshly started pod reads 0 until its first scheduled
+          # refresh reads the DB; `for: 1h` absorbs that race).
+          expr: |
+            absent(openbank_statement_close_last_run_timestamp_seconds)
+            or (max(openbank_statement_close_last_run_timestamp_seconds) == 0)
+            or (time() - max(openbank_statement_close_last_run_timestamp_seconds) > 35 * 24 * 3600)
+          for: 1h
+          labels:
+            severity: warning
+            service: statement-service
+          annotations:
+            summary: "Statement close cadence has not run in 35 days"
+            description: "No statement close run completed in 35 days — the monthly cron may be disabled or failing."

@@ -1,0 +1,70 @@
+# Egress/ingress lockdown for the RUM gateway (ADR-0088 D4b, threat model E1/E2).
+# The gateway is the only public-internet-facing pod in `observability`, so it
+# gets an explicit default-deny with a tight allow-list — no arbitrary egress
+# (kills the SSRF/pivot vector E1) and ingress only from the nginx controller.
+#
+# Allowed egress: DNS; Tempo (the in-VPC sink, TB-3); and the Keycloak JWKS the
+# oidc auth extension needs. The JWKS lives at the token issuer
+# (kc.open-bank.tech/realms/openbank-customers); depending on how that host
+# resolves in-cluster it is reached via the ingress-nginx controller (443) or
+# Keycloak directly (iam:8080) — both are allowed; VERIFY which path actually
+# carries the JWKS fetch post-deploy and tighten to the one that works.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rum-gateway
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: rum-gateway
+      app.kubernetes.io/name: opentelemetry-collector
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only the nginx ingress controller may reach the OTLP-HTTP receiver.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 4318
+  egress:
+    # DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Tempo (in-VPC sink, TB-3).
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tempo
+      ports:
+        - protocol: TCP
+          port: 4317
+    # Keycloak JWKS for OIDC verification — direct to the realm server…
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: iam
+      ports:
+        - protocol: TCP
+          port: 8080
+    # …or via the ingress controller if the public issuer host resolves there.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 443

@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: MPL-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only.
+# Schema: openbank-libs/governance/governance.schema.json
+#
+# openbank-clearing-simulator is a NON-PRODUCTION scheme/clearing counterparty (ADR-0104 D2):
+# stateless, deterministic, no datastore, no posting authority, contacts no real network.
+dataDomain: payments
+primaryDatastore: None (stateless)
+schemaName: none
+dataLineageRole: internal
+dataClassification: internal
+retentionPolicy: none (stateless — persists nothing)
+evidenceExported: false
+lineage:
+  upstream:
+    - serviceName: sepa-payment
+      relationType: api
+      description: receives pacs.008 credit transfers (D3 pilot), returns pacs.002 / camt.054

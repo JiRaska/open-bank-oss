@@ -1,0 +1,88 @@
+# Vertical Pod Autoscaler — recommender only (ADR-0099 phase 3 prerequisite).
+#
+# Installs the VPA CRDs and recommender component via the Fairwinds Helm chart.
+# updateMode: Off on all VPA objects means the recommender fills
+# `status.recommendation` but NEVER evicts or patches pods — zero impact on
+# running workloads. The admission-controller and updater are disabled entirely
+# to avoid webhook interactions with Kyverno and Karpenter.
+#
+# Recommendations are scraped from Prometheus
+# (vpa_recommender_target_request_*) and surfaced on the FinOps right-sizing
+# panel in admin-ui.
+#
+# VPA + Karpenter: Off mode is safe. The only known conflict is Auto/Recreate
+# mode where VPA evictions race with Karpenter scale-down — does not apply here.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vpa
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://charts.fairwinds.com/stable
+    chart: vpa
+    targetRevision: 4.6.0
+    helm:
+      releaseName: vpa
+      valuesObject:
+        # Install the CRDs so VPA objects in service namespaces are valid.
+        crds:
+          install: true
+
+        recommender:
+          enabled: true
+          extraArgs:
+            # Lower confidence threshold → recommendations appear faster on
+            # low-traffic sandbox pods (default 0.95 needs >100 samples).
+            recommendation-margin-fraction: "0.15"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+
+        # Updater would evict pods to apply recommendations — keep OFF.
+        updater:
+          enabled: false
+
+        # Admission-controller webhook would conflict with Kyverno at admission
+        # time and is unnecessary in Off mode — keep OFF.
+        admissionController:
+          enabled: false
+
+        # Lean sandbox scheduling: same pattern as Falco/Alloy (Falco gotcha
+        # 2026-06). Low cpu request so the DS fits on bin-packed nodes.
+        podPriorityClassName: system-cluster-critical
+        tolerations:
+          - key: workload
+            operator: Equal
+            value: observability
+            effect: NoSchedule
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vpa
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    managedNamespaceMetadata:
+      labels:
+        openbank.io/plane: platform
+        pod-security.kubernetes.io/enforce: restricted
+        pod-security.kubernetes.io/audit: restricted
+        pod-security.kubernetes.io/warn: restricted
+    retry:
+      limit: 5
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 3m

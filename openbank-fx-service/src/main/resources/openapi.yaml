@@ -1,0 +1,276 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: FX Service API
+  version: 1.2.0
+  description: >-
+    Foreign exchange rates and currency conversion. On convert, the converting party's name is
+    synchronously screened against the sanctions lists (ADR-0032): a clean party settles the
+    conversion (SETTLED), a sanctions hit fails it (FAILED) with a CRITICAL AML case opened, and a
+    sub-threshold potential hit or a screening-service outage holds the conversion in PENDING for
+    review (fail-closed — never settled un-screened).
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8118
+    description: Local development
+tags:
+  - name: FX
+
+paths:
+  /api/v1/fx/rates:
+    get:
+      tags: [FX]
+      summary: Get all FX rates
+      operationId: getAllRates
+      responses:
+        '200':
+          description: All rates
+
+  /api/v1/fx/rates/{base}/{quote}:
+    get:
+      tags: [FX]
+      summary: Get rate for currency pair
+      operationId: getRate
+      parameters:
+        - name: base
+          in: path
+          required: true
+          schema:
+            type: string
+            example: EUR
+        - name: quote
+          in: path
+          required: true
+          schema:
+            type: string
+            example: CZK
+      responses:
+        '200':
+          description: Exchange rate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExchangeRateResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/fx/convert:
+    post:
+      tags: [FX]
+      summary: Convert amount between currencies
+      operationId: convertCurrency
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConvertRequest'
+      responses:
+        '200':
+          description: Conversion result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversionResponse'
+
+  /api/v1/fx/rates/{base}/{quote}/history:
+    get:
+      tags: [FX]
+      summary: Historical rates for a currency pair, newest first
+      operationId: getRateHistory
+      parameters:
+        - name: base
+          in: path
+          required: true
+          schema: {type: string, example: EUR}
+        - name: quote
+          in: path
+          required: true
+          schema: {type: string, example: CZK}
+        - name: source
+          in: query
+          description: Filter by ingestion source (omit for all sources)
+          schema:
+            type: string
+            enum: [ECB, CNB, INTERNAL, REUTERS, BLOOMBERG]
+        - name: from
+          in: query
+          description: ISO-8601 instant — lower bound on validFrom (inclusive)
+          schema: {type: string, format: date-time}
+        - name: to
+          in: query
+          description: ISO-8601 instant — upper bound on validFrom (inclusive)
+          schema: {type: string, format: date-time}
+        - name: limit
+          in: query
+          description: Maximum records to return (1–365, default 100)
+          schema: {type: integer, default: 100}
+        - name: offset
+          in: query
+          description: Zero-based page offset
+          schema: {type: integer, default: 0}
+      responses:
+        '200':
+          description: Historical rate records (empty list if none stored yet)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FxRateHistoryItem'
+        '400':
+          description: Bad query parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/fx/conversions/{id}:
+    get:
+      tags: [FX]
+      summary: Get conversion by ID
+      operationId: getConversion
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Conversion detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversionResponse'
+
+components:
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    ExchangeRateResponse:
+      type: object
+      properties:
+        baseCurrency:
+          type: string
+        quoteCurrency:
+          type: string
+        rate:
+          type: number
+        spread:
+          type: number
+        validAt:
+          type: string
+          format: date-time
+
+    ConvertRequest:
+      type: object
+      required: [partyId, partyName, fromCurrency, toCurrency, fromAmountMinorUnits]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+          nullable: true
+        partyName:
+          type: string
+          description: Name of the converting party, screened against the sanctions lists (ADR-0032).
+        fromCurrency:
+          type: string
+        toCurrency:
+          type: string
+        fromAmountMinorUnits:
+          type: integer
+          format: int64
+
+    ConversionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        sourceAccountId:
+          type: string
+          format: uuid
+        fromCurrency:
+          type: string
+        toCurrency:
+          type: string
+        fromAmount:
+          type: number
+        toAmount:
+          type: number
+        appliedRate:
+          type: number
+        status:
+          type: string
+          enum: [PENDING, SETTLED, FAILED, REVERSED]
+        convertedAt:
+          type: string
+          format: date-time
+
+    FxRateHistoryItem:
+      type: object
+      description: A single historical FX rate snapshot (one row of the append-only fx_rates table).
+      properties:
+        id:
+          type: string
+          format: uuid
+        baseCurrency:
+          type: string
+          example: EUR
+        quoteCurrency:
+          type: string
+          example: CZK
+        bidRate:
+          type: string
+          description: Bank buy rate (decimal string)
+        askRate:
+          type: string
+          description: Bank sell rate (decimal string)
+        midRate:
+          type: string
+          description: Mid-point of bid and ask — computed val on FxRate domain object, always present
+        rateType:
+          type: string
+          enum: [SPOT, FORWARD, INDICATIVE, INTERBANK]
+        source:
+          type: string
+          enum: [ECB, CNB, INTERNAL, REUTERS, BLOOMBERG]
+        validFrom:
+          type: string
+          format: date-time
+          description: When this rate became valid
+        validTo:
+          type: string
+          format: date-time
+          description: When this rate expired (or far-future for open-ended rates)
+        createdAt:
+          type: string
+          format: date-time
+
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string

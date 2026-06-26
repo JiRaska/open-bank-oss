@@ -1,0 +1,93 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+"use client"
+import { signIn } from "next-auth/react"
+import { useSearchParams } from "next/navigation"
+import { Suspense } from "react"
+
+function LoginContent() {
+  const params = useSearchParams()
+  const error = params.get("error")
+  const callbackUrl = params.get("callbackUrl") || "/dashboard"
+
+  return (
+    <div style={{
+      minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
+    background: "var(--bg, #f8fafc)", fontFamily: "var(--font-sans, 'Inter', system-ui, sans-serif)",
+    }}>
+      <div style={{
+        width: "380px", background: "var(--surface, #ffffff)", border: "1px solid var(--border, #e2e8f0)",
+        borderRadius: "16px", padding: "40px", boxShadow: "var(--shadow-lg, 0 10px 15px -3px rgba(0,0,0,0.1))",
+      }}>
+        {/* Logo */}
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "32px" }}>
+          <div style={{
+            width: "40px", height: "40px", background: "var(--sidebar-accent, #6366f1)", borderRadius: "10px",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <path d="M3 9h18M9 21V9"/>
+            </svg>
+          </div>
+          <div>
+            <div style={{ fontSize: "16px", fontWeight: 700, color: "var(--text-primary, #0f172a)" }}>OpenBank Admin</div>
+            <div style={{ fontSize: "11px", color: "var(--text-tertiary, #94a3b8)" }}>Operations Portal</div>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: "8px", fontSize: "20px", fontWeight: 700, color: "var(--text-primary, #0f172a)" }}>
+          Přihlášení
+        </div>
+        <div style={{ marginBottom: "28px", fontSize: "13px", color: "var(--text-secondary, #475569)" }}>
+          Přihlaste se pomocí firemního účtu Keycloak
+        </div>
+
+        {error && (
+          <div style={{
+            marginBottom: "20px", padding: "12px 14px", borderRadius: "8px",
+            background: "#fef2f2", border: "1px solid #fecaca",
+            fontSize: "13px", color: "#dc2626",
+          }}>
+            {error === "SessionExpired" ? "Vaše relace vypršela. Přihlaste se znovu." : "Chyba přihlášení. Zkuste to znovu."}
+          </div>
+        )}
+
+        <button
+          onClick={() => signIn("keycloak", { callbackUrl })}
+          style={{
+            width: "100%", padding: "12px", borderRadius: "8px",
+            background: "var(--sidebar-accent, #6366f1)", border: "none", color: "#ffffff",
+            fontSize: "14px", fontWeight: 600, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: "10px",
+            transition: "opacity 0.15s, background-color 0.15s",
+          }}
+          onMouseEnter={e => (e.currentTarget.style.opacity = "0.9")}
+          onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+            <polyline points="10 17 15 12 10 7"/>
+            <line x1="15" y1="12" x2="3" y2="12"/>
+          </svg>
+          Přihlásit se přes Keycloak SSO
+        </button>
+
+        <div style={{ marginTop: "24px", padding: "12px", background: "var(--surface-2, #f8fafc)", borderRadius: "8px", fontSize: "11px", color: "var(--text-tertiary, #94a3b8)" }}>
+          <strong style={{ color: "var(--text-secondary, #475569)" }}>Zero-Trust Security</strong><br/>
+          Přístup je řízen rolemi (RBAC). Všechny akce jsou auditovány dle EBA ICT Risk a PSD2 požadavků.
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginContent />
+    </Suspense>
+  )
+}

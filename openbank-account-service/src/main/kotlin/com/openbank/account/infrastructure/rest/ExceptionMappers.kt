@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.account.infrastructure.rest
+
+import com.openbank.account.application.usecase.AccountNotFoundException
+import com.openbank.libs.api.error.ApiError
+import jakarta.ws.rs.core.Response
+import jakarta.ws.rs.ext.ExceptionMapper
+import jakarta.ws.rs.ext.Provider
+import java.util.UUID
+
+// Generic IllegalArgument/IllegalState/Exception mappers are provided by openbank-libs
+// (com.openbank.libs.api.error.CommonExceptionMappers) with log-correlated traceIds.
+// Declaring them here too is a non-deterministic JAX-RS @Provider collision (ADR-0048/0049 D4).
+@Provider
+class AccountNotFoundExceptionMapper : ExceptionMapper<AccountNotFoundException> {
+    override fun toResponse(exception: AccountNotFoundException): Response = Response.status(Response.Status.NOT_FOUND)
+        .entity(
+            ApiError(
+                traceId = UUID.randomUUID().toString(),
+                status = 404,
+                code = "ACCOUNT_NOT_FOUND",
+                message = exception.message ?: "Account not found",
+            ),
+        )
+        .build()
+}

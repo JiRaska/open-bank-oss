@@ -1,0 +1,126 @@
+# Postgres fleet dashboard (Dynatrace-parity #0). Renders the cnpg_* series that
+# the CNPG built-in exporter emits once spec.monitoring.enablePodMonitor is set
+# on each Cluster. One $cluster variable filters to a single database; "All"
+# gives a fleet roll-up. This is the DB pane that the stack was missing — the
+# 18 existing dashboards were app/RED/SLO only, with no view of the data tier.
+#
+# Metric names match CloudNativePG's default monitoring queries; if a panel is
+# empty after rollout, confirm the series name in Grafana Explore
+# (`{__name__=~"cnpg_.+"}`) — names can shift across CNPG versions.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-postgres
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  openbank-postgres.json: |
+    {
+      "id": null,
+      "uid": "openbank-postgres",
+      "title": "OpenBank — Postgres (CNPG) Fleet",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": { "from": "now-6h", "to": "now" },
+      "templating": {
+        "list": [
+          { "name": "datasource", "type": "datasource", "pluginId": "prometheus", "label": "Metrics", "current": {} },
+          { "name": "cluster", "type": "query", "datasource": "${datasource}", "label": "Cluster", "query": "label_values(cnpg_collector_up, cluster)", "includeAll": true, "multi": true, "current": { "text": "All", "value": "$__all" } }
+        ]
+      },
+      "panels": [
+        {
+          "title": "Instances up",
+          "type": "stat",
+          "datasource": "${datasource}",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "fieldConfig": { "defaults": { "mappings": [], "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+          "targets": [ { "refId": "A", "expr": "sum(cnpg_collector_up{cluster=~\"$cluster\"})" } ]
+        },
+        {
+          "title": "Instances down",
+          "type": "stat",
+          "datasource": "${datasource}",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } } },
+          "targets": [ { "refId": "A", "expr": "count(cnpg_collector_up{cluster=~\"$cluster\"} == 0) or vector(0)" } ]
+        },
+        {
+          "title": "Connection utilisation (% of max_connections)",
+          "type": "timeseries",
+          "datasource": "${datasource}",
+          "gridPos": { "h": 4, "w": 12, "x": 12, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "custom": { "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "legendFormat": "{{namespace}}/{{pod}}", "expr": "sum by (namespace,pod) (cnpg_backends_total{cluster=~\"$cluster\"}) / on(namespace,pod) group_left max by (namespace,pod) (cnpg_pg_settings_setting{name=\"max_connections\"})" } ]
+        },
+        {
+          "title": "Active backends",
+          "type": "timeseries",
+          "datasource": "${datasource}",
+          "gridPos": { "h": 7, "w": 12, "x": 0, "y": 4 },
+          "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "legendFormat": "{{namespace}}/{{pod}}", "expr": "sum by (namespace,pod) (cnpg_backends_total{cluster=~\"$cluster\"})" } ]
+        },
+        {
+          "title": "Cache hit ratio",
+          "type": "timeseries",
+          "datasource": "${datasource}",
+          "gridPos": { "h": 7, "w": 12, "x": 12, "y": 4 },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "custom": { "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "legendFormat": "{{namespace}}/{{pod}}", "expr": "sum by (namespace,pod) (rate(cnpg_pg_stat_database_blks_hit{cluster=~\"$cluster\"}[5m])) / clamp_min(sum by (namespace,pod) (rate(cnpg_pg_stat_database_blks_hit{cluster=~\"$cluster\"}[5m])) + sum by (namespace,pod) (rate(cnpg_pg_stat_database_blks_read{cluster=~\"$cluster\"}[5m])), 1)" } ]
+        },
+        {
+          "title": "Replication lag (s)",
+          "type": "timeseries",
+          "datasource": "${datasource}",
+          "gridPos": { "h": 7, "w": 12, "x": 0, "y": 11 },
+          "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "legendFormat": "{{namespace}}/{{pod}}", "expr": "cnpg_pg_replication_lag{cluster=~\"$cluster\"}" } ]
+        },
+        {
+          "title": "Deadlocks (rate /s)",
+          "type": "timeseries",
+          "datasource": "${datasource}",
+          "gridPos": { "h": 7, "w": 12, "x": 12, "y": 11 },
+          "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "legendFormat": "{{namespace}}/{{datname}}", "expr": "sum by (namespace,datname) (rate(cnpg_pg_stat_database_deadlocks{cluster=~\"$cluster\"}[5m]))" } ]
+        },
+        {
+          "title": "Commit / rollback (tx/s)",
+          "type": "timeseries",
+          "datasource": "${datasource}",
+          "gridPos": { "h": 7, "w": 12, "x": 0, "y": 18 },
+          "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 10 } } },
+          "targets": [
+            { "refId": "A", "legendFormat": "commit {{namespace}}/{{datname}}", "expr": "sum by (namespace,datname) (rate(cnpg_pg_stat_database_xact_commit{cluster=~\"$cluster\"}[5m]))" },
+            { "refId": "B", "legendFormat": "rollback {{namespace}}/{{datname}}", "expr": "sum by (namespace,datname) (rate(cnpg_pg_stat_database_xact_rollback{cluster=~\"$cluster\"}[5m]))" }
+          ]
+        },
+        {
+          "title": "Database size",
+          "type": "timeseries",
+          "datasource": "${datasource}",
+          "gridPos": { "h": 7, "w": 6, "x": 12, "y": 18 },
+          "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "legendFormat": "{{namespace}}/{{datname}}", "expr": "cnpg_pg_database_size_bytes{cluster=~\"$cluster\"}" } ]
+        },
+        {
+          "title": "Transaction-id age (wraparound headroom)",
+          "type": "timeseries",
+          "datasource": "${datasource}",
+          "gridPos": { "h": 7, "w": 6, "x": 18, "y": 18 },
+          "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 10 }, "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 300000000 }, { "color": "red", "value": 1000000000 } ] } } },
+          "targets": [ { "refId": "A", "legendFormat": "{{namespace}}/{{datname}}", "expr": "max by (namespace,datname) (cnpg_pg_database_xid_age{cluster=~\"$cluster\"})" } ]
+        },
+        {
+          "title": "WAL archive failures (rate /s)",
+          "type": "timeseries",
+          "datasource": "${datasource}",
+          "gridPos": { "h": 7, "w": 24, "x": 0, "y": 25 },
+          "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "legendFormat": "{{namespace}}/{{pod}}", "expr": "sum by (namespace,pod) (rate(cnpg_pg_stat_archiver_failed_count{cluster=~\"$cluster\"}[15m]))" } ]
+        }
+      ]
+    }

@@ -1,0 +1,37 @@
+# ADR-0099 OpenBao post-install configuration — Tier 1 (DB dynamic secrets) +
+# Tier 2 (OIDC client secret + JWT key rotation CronJobs).
+#
+# This Application is intentionally separate from openbao.yaml (the Helm release)
+# so the kustomize overlay can reconcile without touching the Helm-managed objects.
+# Sync-wave "1" ensures the vault namespace exists before this app syncs.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: openbao-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/openbao
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vault
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m

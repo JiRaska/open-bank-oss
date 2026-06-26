@@ -1,0 +1,549 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: Ledger Service API
+  version: 1.5.0
+  description: Double-entry journal ledger — query journal entries and transaction postings.
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8107
+    description: Local development
+tags:
+  - name: Ledger
+  - name: YearClose
+
+paths:
+  /api/v1/journals:
+    get:
+      tags: [Ledger]
+      summary: List journal entries (cursor-paginated)
+      operationId: listJournals
+      parameters:
+        - name: accountId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Journal entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalPage'
+
+  /api/v1/journals/{journalId}:
+    get:
+      tags: [Ledger]
+      summary: Get journal entry by ID
+      operationId: getJournal
+      parameters:
+        - name: journalId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Journal entry detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalEntryResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/journals/sub-ledger-balances:
+    get:
+      tags: [Ledger]
+      summary: Per-customer deposit-control sub-ledger balances (ADR-0039 Phase B)
+      description: >
+        Aggregates POSTED journal lines that carry a sub_account_id, grouped by
+        (subAccountId, currency). Used to tie the GL deposit-control account out against the
+        per-account balance read-model (analytická evidence, CNB 563/1991 + 501/2002).
+      operationId: getSubLedgerBalances
+      parameters:
+        - name: asOf
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: subAccountId
+          in: query
+          description: Optional filter to a single customer account.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Sub-ledger balances
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubLedgerBalancesResponse'
+
+  /api/v1/journals/transaction/{transactionId}:
+    get:
+      tags: [Ledger]
+      summary: Get journal entries for a transaction
+      operationId: getJournalsByTransaction
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Journal entries for transaction
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/JournalEntryResponse'
+
+  /api/v1/control-accounts/{controlAccountId}/tie-out:
+    get:
+      tags: [Ledger]
+      summary: Sub-ledger tie-out for a deposit-control GL account (ADR-0039 Phase B)
+      description: >
+        Asserts Σ(per-customer sub-ledger lines) == GL aggregate balance for the given
+        deposit-control account. A non-zero delta is a reconciliation break (incident).
+        Returns one entry per currency found in the control account's posted lines.
+        Empty list means no posted activity yet.
+      operationId: controlAccountTieOut
+      parameters:
+        - name: controlAccountId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: asOf
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Tie-out result per currency
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ControlAccountTieOutResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/ledger/close/trial-balance:
+    get:
+      tags: [YearClose]
+      summary: Fiscal-year GL trial balance, grouped by account type (ADR-0078 D5)
+      description: >
+        Computed on demand from POSTED journal activity with entryDate inside the fiscal year,
+        per GL account, grouped by ASSET/LIABILITY/EQUITY/INCOME/EXPENSE. The double-entry
+        invariant (sum of debits == sum of credits over the whole GL) is reported as `balanced`;
+        `contentHash` is the SHA-256 of the canonical trial-balance JSON — the attestation anchor.
+      operationId: getFiscalYearTrialBalance
+      parameters:
+        - name: fiscalYear
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Fiscal-year trial balance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FiscalYearTrialBalanceResponse'
+
+  /api/v1/ledger/close/{fiscalYear}:
+    get:
+      tags: [YearClose]
+      summary: Get the year-close record for a fiscal year
+      operationId: getYearClose
+      parameters:
+        - $ref: '#/components/parameters/FiscalYearPath'
+      responses:
+        '200':
+          description: Year-close record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YearCloseRecordResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [YearClose]
+      summary: Create or refresh the DRAFT year-close record from the current trial balance
+      description: >
+        Idempotent per fiscal year while the record is DRAFT (the record id is stable; the
+        snapshot — totals, account count, content hash, computedAt — is refreshed). Conflicts
+        (409) once the year is ATTESTED, or when the GL does not balance.
+      operationId: createYearCloseDraft
+      parameters:
+        - $ref: '#/components/parameters/FiscalYearPath'
+      responses:
+        '200':
+          description: DRAFT year-close record (created or refreshed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YearCloseRecordResponse'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/ledger/close/{fiscalYear}/attest:
+    post:
+      tags: [YearClose]
+      summary: Attest the DRAFT year close (DRAFT → ATTESTED)
+      description: >
+        Re-verifies the draft's content hash against a FRESH trial-balance computation; any
+        drift (late postings into the closed year) fails closed with 409. The attesting
+        principal is taken from the verified JWT. Emits a YearCloseAttested event via the
+        transactional outbox in the same transaction as the status flip. Only a fiscal year
+        that has fully ended can be attested.
+      operationId: attestYearClose
+      parameters:
+        - $ref: '#/components/parameters/FiscalYearPath'
+      responses:
+        '200':
+          description: ATTESTED year-close record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YearCloseRecordResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/ledger/close/{fiscalYear}/verify:
+    get:
+      tags: [YearClose]
+      summary: Re-verify a year close against a fresh trial balance (read-only)
+      description: >
+        Recomputes the fiscal-year trial balance and compares its content hash to the one anchored
+        on the year-close record, WITHOUT flipping any state. Reports drift (matches=false) rather
+        than failing, so an auditor can continuously prove a sealed (ATTESTED) period is unchanged
+        or detect a stale DRAFT. Only an absent record is an error (404).
+      operationId: verifyYearClose
+      parameters:
+        - $ref: '#/components/parameters/FiscalYearPath'
+      responses:
+        '200':
+          description: Verification verdict (match / drift, both hashes)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YearCloseVerificationResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  parameters:
+    FiscalYearPath:
+      name: fiscalYear
+      in: path
+      required: true
+      schema:
+        type: integer
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Conflict:
+      description: Conflict (fail-closed close invariant — attested immutability, hash drift, unbalanced GL, open year)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    ControlAccountTieOutResponse:
+      type: object
+      description: Sub-ledger tie-out result for one deposit-control account and one currency.
+      properties:
+        controlAccountId:
+          type: string
+          format: uuid
+        currency:
+          type: string
+        asOf:
+          type: string
+          format: date
+        glNet:
+          type: number
+          description: GL aggregate net (credit minus debit) for the control account.
+        subLedgerNet:
+          type: number
+          description: Sum of per-customer sub-ledger nets for the control account.
+        delta:
+          type: number
+          description: glNet minus subLedgerNet. Zero means tied-out; non-zero is a break.
+        tiedOut:
+          type: boolean
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubLedgerBalanceLineResponse'
+
+    SubLedgerBalanceLineResponse:
+      type: object
+      properties:
+        subAccountId:
+          type: string
+          format: uuid
+        currency:
+          type: string
+        totalDebit:
+          type: number
+        totalCredit:
+          type: number
+        net:
+          type: number
+
+    JournalLineResponse:
+      type: object
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        side:
+          type: string
+          enum: [DEBIT, CREDIT]
+        amount:
+          type: number
+        currency:
+          type: string
+        subAccountId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Sub-ledger dimension; present only on deposit-control legs (ADR-0039 Phase B).
+
+    SubLedgerBalanceResponse:
+      type: object
+      properties:
+        subAccountId:
+          type: string
+          format: uuid
+        currency:
+          type: string
+        totalDebit:
+          type: number
+        totalCredit:
+          type: number
+        net:
+          type: number
+          description: Customer-owed booked amount (credit − debit; liability is credit-normal).
+
+    SubLedgerBalancesResponse:
+      type: object
+      properties:
+        asOf:
+          type: string
+          format: date
+        balances:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubLedgerBalanceResponse'
+
+    JournalEntryResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        transactionId:
+          type: string
+          format: uuid
+        description:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/JournalLineResponse'
+        postedAt:
+          type: string
+          format: date-time
+
+    JournalPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/JournalEntryResponse'
+        pagination:
+          type: object
+          properties:
+            nextCursor:
+              type: string
+              nullable: true
+            hasMore:
+              type: boolean
+
+    TrialBalanceLineResponse:
+      type: object
+      properties:
+        glAccountId:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [ASSET, LIABILITY, EQUITY, INCOME, EXPENSE]
+        currency:
+          type: string
+        totalDebit:
+          type: number
+        totalCredit:
+          type: number
+        net:
+          type: number
+          description: totalDebit − totalCredit.
+
+    TrialBalanceSectionResponse:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [ASSET, LIABILITY, EQUITY, INCOME, EXPENSE]
+        totalDebit:
+          type: number
+        totalCredit:
+          type: number
+        net:
+          type: number
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrialBalanceLineResponse'
+
+    FiscalYearTrialBalanceResponse:
+      type: object
+      properties:
+        fiscalYear:
+          type: integer
+        totalDebit:
+          type: number
+        totalCredit:
+          type: number
+        balanced:
+          type: boolean
+          description: Double-entry invariant over the whole GL — sum(debits) == sum(credits).
+        accountCount:
+          type: integer
+          description: Distinct GL accounts with activity in the fiscal year.
+        contentHash:
+          type: string
+          description: SHA-256 (lowercase hex) of the canonical trial-balance JSON — the attestation anchor.
+        sections:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrialBalanceSectionResponse'
+
+    YearCloseRecordResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        fiscalYear:
+          type: integer
+        status:
+          type: string
+          enum: [DRAFT, ATTESTED]
+        computedAt:
+          type: string
+          format: date-time
+        totalDebits:
+          type: number
+        totalCredits:
+          type: number
+        accountCount:
+          type: integer
+        contentHash:
+          type: string
+        draftedBy:
+          type: string
+          nullable: true
+          description: >
+            OIDC subject of the maker — who created or last refreshed the DRAFT (from the verified
+            JWT). Four-eyes (#869): the attestor must differ from this author; a null value (a
+            draft predating four-eyes tracking) cannot be attested and yields a 409.
+        attestedBy:
+          type: string
+          nullable: true
+          description: OIDC subject of the attesting principal (from the verified JWT).
+        attestedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    YearCloseVerificationResponse:
+      type: object
+      description: Read-only re-verification of a year-close record against a fresh trial balance.
+      properties:
+        fiscalYear:
+          type: integer
+        status:
+          type: string
+          enum: [DRAFT, ATTESTED]
+        recordedHash:
+          type: string
+          description: The content hash anchored on the year-close record.
+        recomputedHash:
+          type: string
+          description: The content hash of a freshly computed trial balance for the same year.
+        matches:
+          type: boolean
+          description: True if recordedHash == recomputedHash (the period is unchanged).
+        balanced:
+          type: boolean
+          description: True if the freshly computed trial balance still balances (debits == credits).
+        recomputedAt:
+          type: string
+          format: date-time
+
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string

@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# BPMN process diagram (ADR-0019/0029). Authored as data; validated by
+# src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
+
+name: Interest Accrual
+desc: Denní výpočet a připisování úroků na účty
+regulation: Accounting Standards
+services:
+  - interest-service
+  - ledger-service
+  - account-service
+  - balance-service
+  - notification-service
+steps:
+  - id: start
+    type: start
+    x: 60
+    y: 100
+    label: Batch Trigger
+  - id: load
+    type: task
+    x: 180
+    y: 100
+    label: Načtení účtů
+    lane: core
+    apis:
+      - GET /api/v1/accounts/active
+    relatedServices:
+      - account-service
+  - id: calc
+    type: task
+    x: 320
+    y: 100
+    label: Výpočet úroku
+    lane: core
+    apis:
+      - POST /api/v1/interest/calculate
+    relatedServices:
+      - interest-service
+  - id: post
+    type: task
+    x: 460
+    y: 100
+    label: Journal Entry
+    lane: core
+    apis:
+      - POST /api/v1/ledger/post
+    relatedServices:
+      - ledger-service
+  - id: balance
+    type: task
+    x: 600
+    y: 100
+    label: Update Balance
+    lane: core
+    apis:
+      - PUT /api/v1/balance/update
+    relatedServices:
+      - balance-service
+  - id: notify
+    type: task
+    x: 740
+    y: 100
+    label: Notifikace
+    lane: platform
+    apis:
+      - POST /api/v1/notifications
+    relatedServices:
+      - notification-service
+    consumes:
+      - openbank.notification.requests
+  - id: end
+    type: end
+    x: 860
+    y: 100
+    label: Dokončeno
+flows:
+  - from: start
+    to: load
+  - from: load
+    to: calc
+  - from: calc
+    to: post
+  - from: post
+    to: balance
+  - from: balance
+    to: notify
+    kind: async
+    topic: openbank.notification.requests
+  - from: notify
+    to: end

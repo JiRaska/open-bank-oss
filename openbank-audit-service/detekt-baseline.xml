@@ -1,0 +1,19 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+    <CurrentIssues>
+    <ID>MagicNumber:AuditConsumer.kt$AuditConsumer$200</ID>
+    <ID>MagicNumber:AuditOutboxDispatcher.kt$AuditOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:AuditOutboxDispatcher.kt$AuditOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:AuditOutboxRepositoryImpl.kt$AuditOutboxRepositoryImpl$4000</ID>
+    <ID>LoopWithTooManyJumpStatements:AuditRepository.kt$AuditRepository$suspend fun verifyChain(fromEntryId: UUID? = null): ChainVerification</ID>
+    <ID>MagicNumber:AuditResource.kt$AuditResource$400</ID>
+    <ID>MagicNumber:AuditResource.kt$AuditResource$500</ID>
+    <ID>MatchingDeclarationName:AuditOutboxPort.kt$AuditOutboxRepository : OutboxRepository</ID>
+    <ID>NestedBlockDepth:AuditRepository.kt$AuditRepository$suspend fun verifyChain(fromEntryId: UUID? = null): ChainVerification</ID>
+    <ID>NewLineAtEndOfFile:AuditConsumerTest.kt$com.openbank.audit.application.AuditConsumerTest.kt</ID>
+    <ID>SwallowedException:AuditOutboxDispatcher.kt$AuditOutboxDispatcher$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:AuditConsumer.kt$AuditConsumer$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:AuditOutboxDispatcher.kt$AuditOutboxDispatcher$ex: Exception</ID>
+  </CurrentIssues>
+</SmellBaseline>

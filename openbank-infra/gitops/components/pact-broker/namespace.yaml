@@ -1,0 +1,18 @@
+# Pact Broker (contract-testing pipeline, ADR-0092). Own namespace on the infra
+# plane (ADR-0037: a platform capability, not a business domain). Its single-owner
+# CNPG Postgres `pact-broker-db` is co-located here.
+#
+# PSS: audit/warn restricted only — NOT enforce. The upstream Phusion-Passenger
+# `pactfoundation/pact-broker` image is not yet restricted-compliant (it does not
+# run as an arbitrary non-root UID with drop-ALL); enforce would block the rollout.
+# Same posture as registry-cache: violations surface in the audit log, and
+# hardening the pod spec then flipping to enforce is a tracked follow-up.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pact-broker
+  labels:
+    openbank.io/plane: infra
+    app.kubernetes.io/part-of: platform
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

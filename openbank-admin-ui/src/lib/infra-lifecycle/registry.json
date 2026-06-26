@@ -1,0 +1,94 @@
+{
+  "_comment": "Infrastructure lifecycle registry (ADR-0077). Maps each /infrastructure component to its endoflife.date product slug, how its RUNNING version is detected, and a release-notes URL template ({version} = recommended target). eolProduct=null is an honest GAP (no public lifecycle feed). versionSource: 'gitops' = the generator greps imageGrep from the GitOps tree at build; 'probe' = the BFF reads it live at runtime (see lifecycle route); 'unknown' = not detectable in v1. NEVER hand-type a version here.",
+  "components": [
+    {
+      "id": "postgres",
+      "eolProduct": "postgresql",
+      "versionSource": "gitops",
+      "imageGrep": "cloudnative-pg/postgresql",
+      "releaseNotes": "https://www.postgresql.org/docs/release/{version}/"
+    },
+    {
+      "id": "kafka",
+      "eolProduct": "apache-kafka",
+      "versionSource": "unknown",
+      "releaseNotes": "https://kafka.apache.org/downloads"
+    },
+    {
+      "id": "keycloak",
+      "eolProduct": "keycloak",
+      "versionSource": "gitops",
+      "imageGrep": "keycloak/keycloak",
+      "releaseNotes": "https://github.com/keycloak/keycloak/releases/tag/{version}"
+    },
+    {
+      "id": "valkey",
+      "eolProduct": "valkey",
+      "versionSource": "gitops",
+      "imageGrep": "valkey/valkey",
+      "releaseNotes": "https://github.com/valkey-io/valkey/releases"
+    },
+    {
+      "id": "openbao",
+      "eolProduct": "openbao",
+      "versionSource": "probe",
+      "releaseNotes": "https://github.com/openbao/openbao/releases/tag/v{version}"
+    },
+    {
+      "id": "schema-registry",
+      "eolProduct": null,
+      "versionSource": "gitops",
+      "imageGrep": "apicurio-registry",
+      "releaseNotes": "https://github.com/Apicurio/apicurio-registry/releases"
+    },
+    {
+      "id": "grafana",
+      "eolProduct": "grafana",
+      "versionSource": "probe",
+      "releaseNotes": "https://github.com/grafana/grafana/releases/tag/v{version}"
+    },
+    {
+      "id": "prometheus",
+      "eolProduct": "prometheus",
+      "versionSource": "probe",
+      "releaseNotes": "https://github.com/prometheus/prometheus/releases/tag/v{version}"
+    },
+    {
+      "id": "loki",
+      "eolProduct": "grafana-loki",
+      "versionSource": "probe",
+      "releaseNotes": "https://github.com/grafana/loki/releases/tag/v{version}"
+    },
+    {
+      "id": "tempo",
+      "eolProduct": null,
+      "versionSource": "probe",
+      "releaseNotes": "https://github.com/grafana/tempo/releases"
+    },
+    {
+      "id": "alloy",
+      "eolProduct": null,
+      "versionSource": "probe",
+      "releaseNotes": "https://github.com/grafana/alloy/releases"
+    },
+    {
+      "id": "pyroscope",
+      "eolProduct": null,
+      "versionSource": "probe",
+      "releaseNotes": "https://github.com/grafana/pyroscope/releases"
+    },
+    {
+      "id": "glitchtip",
+      "eolProduct": null,
+      "versionSource": "probe",
+      "releaseNotes": "https://gitlab.com/glitchtip/glitchtip/-/releases"
+    },
+    {
+      "id": "kafka-ui",
+      "eolProduct": null,
+      "versionSource": "gitops",
+      "imageGrep": "provectuslabs/kafka-ui",
+      "releaseNotes": "https://github.com/provectus/kafka-ui/releases"
+    }
+  ]
+}

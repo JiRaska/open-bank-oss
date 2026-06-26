@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-bank.tech/governance/governance.schema.json",
+  "title": "openbank per-service governance.yaml",
+  "description": "Declarative, curatorial governance facts for one released module (ADR-0071). Lives at the module root next to version.txt and is reviewed WITH the service. Carries ONLY what cannot be derived from code. Derived fields (flywayDeclaredVersion, apiVersion, moneyPath) and runtime fields (flywayCurrentVersion, flywayDrift, schema driftStatus) MUST NOT appear here — the generator and the runtime path own those respectively.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "dataDomain",
+    "primaryDatastore",
+    "schemaName",
+    "dataLineageRole",
+    "dataClassification",
+    "retentionPolicy"
+  ],
+  "properties": {
+    "dataDomain": {
+      "description": "Business data domain the service belongs to.",
+      "enum": ["core", "payments", "compliance", "identity", "open-banking", "platform"]
+    },
+    "primaryDatastore": {
+      "description": "Primary persistent datastore, e.g. 'PostgreSQL', 'none (stateless)'.",
+      "type": "string",
+      "minLength": 1
+    },
+    "schemaName": {
+      "description": "Primary DB schema this service owns, e.g. 'accounts_schema'. Use 'n/a' if stateless.",
+      "type": "string",
+      "minLength": 1
+    },
+    "dataLineageRole": {
+      "description": "Role in cross-service data lineage.",
+      "enum": ["producer", "consumer", "both", "internal"]
+    },
+    "dataClassification": {
+      "description": "Highest sensitivity of data the service handles (GDPR Art. 30 / DORA Art. 8).",
+      "enum": ["public", "internal", "confidential", "restricted", "unknown"]
+    },
+    "retentionPolicy": {
+      "description": "Human-readable retention statement, e.g. '7 years', 'transient'. GDPR Art. 5(1)(e).",
+      "type": "string",
+      "minLength": 1
+    },
+    "evidenceExported": {
+      "description": "Whether this service exports signed compliance evidence (ADR-0029/0030).",
+      "type": "boolean"
+    },
+    "lineage": {
+      "description": "Declared upstream/downstream service relationships. Runtime interface discovery is separate.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "upstream": { "type": "array", "items": { "$ref": "#/$defs/lineageNode" } },
+        "downstream": { "type": "array", "items": { "$ref": "#/$defs/lineageNode" } }
+      }
+    },
+    "schemaLineage": {
+      "description": "Declared schema ownership. driftStatus is RUNTIME and is added by /api/services/governance, not here.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ownedSchemas": { "type": "array", "items": { "type": "string" } },
+        "dependentSchemas": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  "$defs": {
+    "lineageNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["serviceName", "relationType"],
+      "properties": {
+        "serviceName": {
+          "description": "Counterparty service short name, e.g. 'transaction-service'.",
+          "type": "string",
+          "minLength": 1
+        },
+        "relationType": {
+          "enum": ["api", "topic", "datastore", "unknown"]
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

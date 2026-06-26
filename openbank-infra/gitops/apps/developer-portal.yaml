@@ -1,0 +1,29 @@
+# developer-portal: public PSD2/XS2A documentation surface (ADR-0093). Static, external,
+# WAF-fronted. Onboarded via the app-of-apps so it deploys with the rest of GitOps.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: developer-portal
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/developer-portal
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: developer-portal
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m

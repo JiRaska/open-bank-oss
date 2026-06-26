@@ -1,0 +1,75 @@
+name: Fleet sweep
+description: Track a cross-service change rolled out one PR per service
+labels: ["sweep", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A **fleet sweep** applies the same change across many services as **one PR per
+        service** (e.g. an `@Authorize` rollout, a docs-as-service migration). This issue is
+        the single tracker: each service PR references it with `Refs #<this-issue>`, and you
+        tick the box as each merges. Close the issue when the list is fully checked.
+
+  - type: input
+    id: theme
+    attributes:
+      label: Sweep theme
+      description: One line — what identical change lands in each service.
+      placeholder: "Add OPA @Authorize to every command endpoint (ADR-0034)"
+    validations:
+      required: true
+
+  - type: input
+    id: adr
+    attributes:
+      label: Driving ADR
+      description: The decision this sweep executes. A sweep without an ADR is usually a sign the decision is not yet recorded.
+      placeholder: "ADR-0034"
+    validations:
+      required: true
+
+  - type: textarea
+    id: recipe
+    attributes:
+      label: Per-service recipe
+      description: The exact, repeatable change applied to each service — so any contributor can pick up the next one.
+      placeholder: |
+        1. Add AuthzProducer to <service>/.../config
+        2. Annotate command handlers with @Authorize
+        3. Add opa policy yaml under <service>/src/main/resources
+        4. Bump version.txt (feat -> minor), update openapi if API changed
+    validations:
+      required: true
+
+  - type: textarea
+    id: services
+    attributes:
+      label: Service checklist
+      description: One task-list item per service. Paste the service list, then check each as its PR merges.
+      value: |
+        - [ ] openbank-account-service
+        - [ ] openbank-ledger-service
+        - [ ] openbank-transaction-service
+        - [ ] openbank-balance-service
+    validations:
+      required: true
+
+  - type: dropdown
+    id: money-path
+    attributes:
+      label: Does the sweep touch any money-path service?
+      description: If yes, add the `money-path` label — each such PR needs 2 approvals + an up-to-date threat model (rules.yaml).
+      options:
+        - "No"
+        - "Yes — money-path services included"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: done
+    attributes:
+      label: Sweep definition of done
+      options:
+        - label: Every service PR references this issue (`Refs #<n>`).
+        - label: Each PR bumps its own version.txt and passes the local gate.
+        - label: The recipe above stayed identical across services (divergence noted if not).

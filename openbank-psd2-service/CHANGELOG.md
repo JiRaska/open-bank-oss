@@ -1,0 +1,75 @@
+# Changelog
+
+## [0.8.0](https://github.com/JiRaska/open-bank/compare/psd2-service-v0.7.0...psd2-service-v0.8.0) (2026-06-25)
+
+
+### Features
+
+* **product-catalog,libs:** inject Clock for DST determinism (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2165](https://github.com/JiRaska/open-bank/issues/2165)) ([4956fc3](https://github.com/JiRaska/open-bank/commit/4956fc3eca24ea884281d09cd5c667c9f2f0dfb3))
+
+## [0.7.0](https://github.com/JiRaska/open-bank/compare/psd2-service-v0.6.0...psd2-service-v0.7.0) (2026-06-25)
+
+
+### Features
+
+* **psd2:** inject Clock for DST determinism (ADR-0100 Layer 1) ([#2089](https://github.com/JiRaska/open-bank/issues/2089)) ([5740caf](https://github.com/JiRaska/open-bank/commit/5740caf8d1e59c4d40b72c5ec5fcd82d67395f44)), closes [#1612](https://github.com/JiRaska/open-bank/issues/1612)
+
+## [0.6.0](https://github.com/JiRaska/open-bank/compare/psd2-service-v0.5.0...psd2-service-v0.6.0) (2026-06-25)
+
+
+### Features
+
+* **c2-kover:** Kover coverage gate + anacredit oidc boot fix + AML FT interceptor fix (18 services) ([ad26ca7](https://github.com/JiRaska/open-bank/commit/ad26ca7d58e62c8822e11f66f346926acc453058))
+
+
+### Bug Fixes
+
+* **customer-edge:** fix SCA challenge 400 — switch body from String to JsonNode ([213e577](https://github.com/JiRaska/open-bank/commit/213e577b9fb53a83f2fe8a28d294c5380381c0bf))
+
+## [0.5.0](https://github.com/JiRaska/open-bank/compare/psd2-service-v0.4.0...psd2-service-v0.5.0) (2026-06-15)
+
+
+### Features
+
+* **psd2:** Berlin Group XS2A consent + AIS endpoints (ADR-0090 P1) ([#1117](https://github.com/JiRaska/open-bank/issues/1117)) ([970c0c7](https://github.com/JiRaska/open-bank/commit/970c0c71a3803e0fb819c142c3e9c60fd8f48df2))
+* **psd2:** Berlin Group XS2A payment initiation (ADR-0090 P2) ([#1120](https://github.com/JiRaska/open-bank/issues/1120)) ([20e1b3b](https://github.com/JiRaska/open-bank/commit/20e1b3b4ebecfc25aaa710654ecf75f92f0e690d)), closes [#1118](https://github.com/JiRaska/open-bank/issues/1118)
+* **psd2:** ČOBS Czech payment products on Berlin /v1 (ADR-0090 P3) ([#1121](https://github.com/JiRaska/open-bank/issues/1121)) ([43ad9b8](https://github.com/JiRaska/open-bank/commit/43ad9b8047df2249750ddd6f1da14fcd4488c30a)), closes [#1118](https://github.com/JiRaska/open-bank/issues/1118)
+* **psd2:** eIDAS QSEAL message signing + deprecate bespoke API (ADR-0090 P4) ([#1123](https://github.com/JiRaska/open-bank/issues/1123)) ([7c901dc](https://github.com/JiRaska/open-bank/commit/7c901dc3bb22b5663548dc87c69bb93a53363999)), closes [#1118](https://github.com/JiRaska/open-bank/issues/1118)
+
+## [0.4.0](https://github.com/JiRaska/open-bank/compare/psd2-service-v0.3.0...psd2-service-v0.4.0) (2026-06-12)
+
+
+### Features
+
+* **domestic-payment:** wire DomainMetrics counters (ADR-0077 Phase 2 sweep) ([#684](https://github.com/JiRaska/open-bank/issues/684)) ([7bc6633](https://github.com/JiRaska/open-bank/commit/7bc663347fd81e5fe0f49076e7eb64055b4baa5e))
+* **psd2:** outbox backlog gauge + countProcessable (ADR-0077/0079) ([#807](https://github.com/JiRaska/open-bank/issues/807)) ([428c661](https://github.com/JiRaska/open-bank/commit/428c6617efb65b3b9d584420c666a4a3b4407001))
+
+## [0.3.0](https://github.com/JiRaska/open-bank/compare/psd2-service-v0.2.0...psd2-service-v0.3.0) (2026-06-09)
+
+
+### Features
+
+* **admin-ui:** derive governance manifest from governance.yaml (ADR-0071 phase 2) ([#498](https://github.com/JiRaska/open-bank/issues/498)) ([46c85e9](https://github.com/JiRaska/open-bank/commit/46c85e98fe1e887eb82e2110efb5286fe0220d12))
+
+
+### Bug Fixes
+
+* **gitops:** single-owner ArgoCD apps for product-catalog and audit-oidc ([#609](https://github.com/JiRaska/open-bank/issues/609)) ([48959b1](https://github.com/JiRaska/open-bank/commit/48959b1459fe696b05f0ec983a4daec3fce24207))
+
+## [0.2.0](https://github.com/JiRaska/open-bank/compare/psd2-service-v0.1.0...psd2-service-v0.2.0) (2026-06-06)
+
+
+### Features
+
+* **build-logic:** convention plugin openbank.quarkus-service (ADR-0049 D1) ([#344](https://github.com/JiRaska/open-bank/issues/344)) ([da71b7e](https://github.com/JiRaska/open-bank/commit/da71b7e1705649c453b252c32fa06dc098210d63))
+
+
+### Bug Fixes
+
+* **gitops:** add Kafka value.deserializer env vars for payment services ([#366](https://github.com/JiRaska/open-bank/issues/366)) ([b578775](https://github.com/JiRaska/open-bank/commit/b57877557a04f6d4b7fe19bba90db3494eb6d6de))
+* **infra:** restore Keycloak login theme to dark blue/cyan ([#358](https://github.com/JiRaska/open-bank/issues/358)) ([2e56cbc](https://github.com/JiRaska/open-bank/commit/2e56cbc39dab44a2a7c6ed66edea533aebdca317))
+
+
+### Security
+
+* **libs:** harden shared config + DB constraints + logging (beta pentest) ([#342](https://github.com/JiRaska/open-bank/issues/342)) ([e368296](https://github.com/JiRaska/open-bank/commit/e3682965a4f7df3b7328e8a741e4809604706390))

@@ -1,0 +1,431 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: Sanctions Screening Service API
+  version: 1.0.0
+  description: Real-time sanctions screening against EU, UN, OFAC, HM Treasury and CNB lists.
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8123
+    description: Local development
+tags:
+  - name: Sanctions
+  - name: SanctionsLists
+
+paths:
+  /api/v1/sanctions:
+    get:
+      tags: [Sanctions]
+      summary: List all sanctions checks
+      operationId: listSanctionsChecks
+      responses:
+        '200':
+          description: All checks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SanctionsCheck'
+
+  /api/v1/sanctions/screen:
+    post:
+      tags: [Sanctions]
+      summary: Screen an entity against all enabled sanctions lists
+      operationId: screenEntity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenEntityCommand'
+      responses:
+        '201':
+          description: Screening result created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SanctionsCheck'
+
+  /api/v1/sanctions/review:
+    post:
+      tags: [Sanctions]
+      summary: Submit a manual review decision for a hit or potential hit
+      operationId: reviewSanctionsHit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewCommand'
+      responses:
+        '200':
+          description: Review recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SanctionsCheck'
+
+  /api/v1/sanctions/hits:
+    get:
+      tags: [Sanctions]
+      summary: List all confirmed hits
+      operationId: listSanctionsHits
+      responses:
+        '200':
+          description: Confirmed hits
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SanctionsCheck'
+
+  /api/v1/sanctions/pending:
+    get:
+      tags: [Sanctions]
+      summary: List potential hits awaiting manual review
+      operationId: listPendingReviews
+      responses:
+        '200':
+          description: Potential hits
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SanctionsCheck'
+
+  /api/v1/sanctions/{id}:
+    get:
+      tags: [Sanctions]
+      summary: Get a sanctions check by ID
+      operationId: getSanctionsCheck
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Sanctions check
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SanctionsCheck'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/sanctions/lists:
+    get:
+      tags: [SanctionsLists]
+      summary: List all configured sanctions lists
+      operationId: listSanctionsLists
+      responses:
+        '200':
+          description: All lists
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SanctionsList'
+
+  /api/v1/sanctions/lists/{id}:
+    get:
+      tags: [SanctionsLists]
+      summary: Get a sanctions list by ID
+      operationId: getSanctionsList
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Sanctions list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SanctionsList'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [SanctionsLists]
+      summary: Update a sanctions list configuration
+      operationId: updateSanctionsList
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSanctionsListRequest'
+      responses:
+        '200':
+          description: Updated list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SanctionsList'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/sanctions/lists/{listType}/refresh:
+    post:
+      tags: [SanctionsLists]
+      summary: Trigger manual refresh of a specific list
+      operationId: refreshSanctionsList
+      parameters:
+        - name: listType
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Refresh triggered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SanctionsList'
+
+  /api/v1/sanctions/lists/refresh-all:
+    post:
+      tags: [SanctionsLists]
+      summary: Trigger manual refresh of all enabled lists
+      operationId: refreshAllSanctionsLists
+      responses:
+        '200':
+          description: All enabled lists refreshed
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SanctionsList'
+
+components:
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    ScreenEntityCommand:
+      type: object
+      required: [idempotencyKey, entityType, name]
+      properties:
+        idempotencyKey:
+          type: string
+          description: Client-assigned idempotency key; identical key returns the original result.
+        entityType:
+          type: string
+          enum: [INDIVIDUAL, ORGANIZATION, VESSEL, AIRCRAFT]
+        name:
+          type: string
+        aliases:
+          type: array
+          items:
+            type: string
+          default: []
+        dateOfBirth:
+          type: string
+          format: date
+        nationality:
+          type: string
+          description: ISO 3166-1 alpha-2 country code
+        identifiers:
+          type: object
+          additionalProperties:
+            type: string
+          description: "Arbitrary identifiers e.g. passport, taxId"
+          default: {}
+
+    ReviewCommand:
+      type: object
+      required: [checkId, reviewedBy, note, newStatus]
+      properties:
+        checkId:
+          type: string
+          format: uuid
+        reviewedBy:
+          type: string
+        note:
+          type: string
+        newStatus:
+          type: string
+          enum: [CLEAR, HIT, POTENTIAL_HIT, WHITELISTED, ESCALATED]
+
+    SanctionsCheck:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        idempotencyKey:
+          type: string
+        entityType:
+          type: string
+          enum: [INDIVIDUAL, ORGANIZATION, VESSEL, AIRCRAFT]
+        name:
+          type: string
+        aliases:
+          type: array
+          items:
+            type: string
+        dateOfBirth:
+          type: string
+          format: date
+          nullable: true
+        nationality:
+          type: string
+          nullable: true
+        identifiers:
+          type: object
+          additionalProperties:
+            type: string
+        status:
+          type: string
+          enum: [CLEAR, HIT, POTENTIAL_HIT, WHITELISTED, ESCALATED]
+        matches:
+          type: array
+          items:
+            $ref: '#/components/schemas/SanctionsMatch'
+        overallScore:
+          type: number
+          format: double
+          minimum: 0.0
+          maximum: 1.0
+        checkedLists:
+          type: array
+          items:
+            type: string
+            enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, CNB_DOMESTIC]
+        reviewedBy:
+          type: string
+          nullable: true
+        reviewNote:
+          type: string
+          nullable: true
+        checkedAt:
+          type: string
+          format: date-time
+        reviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    SanctionsMatch:
+      type: object
+      properties:
+        listType:
+          type: string
+          enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, CNB_DOMESTIC]
+        matchType:
+          type: string
+          enum: [EXACT, FUZZY, PHONETIC, ALIAS]
+        matchScore:
+          type: number
+          format: double
+          minimum: 0.0
+          maximum: 1.0
+        matchedName:
+          type: string
+        matchedId:
+          type: string
+          nullable: true
+        listEntryDate:
+          type: string
+          nullable: true
+        programs:
+          type: array
+          items:
+            type: string
+
+    SanctionsList:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        listType:
+          type: string
+        displayName:
+          type: string
+        sourceUrl:
+          type: string
+        enabled:
+          type: boolean
+        lastUpdatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastEntryCount:
+          type: integer
+          nullable: true
+        cronHour:
+          type: integer
+          minimum: 0
+          maximum: 23
+        cronMinute:
+          type: integer
+          minimum: 0
+          maximum: 59
+        cronDays:
+          type: string
+          example: "MON,TUE,WED,THU,FRI"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    UpdateSanctionsListRequest:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          nullable: true
+        sourceUrl:
+          type: string
+          nullable: true
+        cronHour:
+          type: integer
+          minimum: 0
+          maximum: 23
+          nullable: true
+        cronMinute:
+          type: integer
+          minimum: 0
+          maximum: 59
+          nullable: true
+        cronDays:
+          type: string
+          nullable: true
+          example: "MON,WED,FRI"
+
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string

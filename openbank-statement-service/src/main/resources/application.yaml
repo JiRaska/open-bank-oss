@@ -1,0 +1,178 @@
+quarkus:
+  application:
+    name: openbank-statement-service
+    version: 0.2.0
+  http:
+    port: 8136
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+      headers: Content-Type,Authorization,Idempotency-Key
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: postgresql://localhost:5432/openbank_statement
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_statement
+  flyway:
+    migrate-at-start: true
+    validate-on-migrate: false
+    connect-retries: 10
+    connect-retries-interval: 2S
+  hibernate-orm:
+    database:
+      generation: none
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  # M2M client for the outbound account/transaction/balance reads done during period close +
+  # reconciliation (those upstreams are role-gated; without a bearer they 401). client_credentials
+  # on openbank-services (ROLE_OPERATOR), attached by OidcClientRequestReactiveFilter on the clients.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+    tls:
+      verification: none
+  rest-client:
+    transaction-api:
+      url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
+      scope: jakarta.inject.Singleton
+    balance-api:
+      url: ${BALANCE_SERVICE_URL:http://localhost:8105}
+      scope: jakarta.inject.Singleton
+    account-api:
+      url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      scope: jakarta.inject.Singleton
+    party-api:
+      url: ${PARTY_SERVICE_URL:http://localhost:8111}
+      scope: jakarta.inject.Singleton
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+    console:
+      json: true
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-statement-service
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  scheduler:
+    enabled: true
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+    oidc:
+      enabled: false
+"%test":
+  quarkus:
+    # Dedicated IT Postgres on the warm CI stack (ADR-0043); CI auto-creates any
+    # openbank_*_it database referenced here. Dev Services stay OFF — tests hit
+    # localhost:5432 exactly as on a workstation.
+    datasource:
+      username: openbank
+      password: openbank_secret
+      reactive:
+        url: vertx-reactive:postgresql://localhost:5432/openbank_statement_it
+      jdbc:
+        url: jdbc:postgresql://localhost:5432/openbank_statement_it
+    management:
+      enabled: false
+    devservices:
+      enabled: false
+    oidc:
+      enabled: false
+    # ADR-0050: disable the @Scheduled outbox tick under test so the integration test
+    # drives dispatchScheduledBatch() explicitly and never races the assertions.
+    scheduler:
+      enabled: false
+
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:true}"
+
+openbank:
+  statement:
+    close-cron: "0 30 2 1 * ?"
+    scheduled-close:
+      # ADR-0069 D3 / issue #470: enabled now that the close cadence is hardened —
+      # self-healing catch-up, durable close-run + failure telemetry, period.close_failed
+      # events, and Prometheus alerting (ServiceMonitor/PrometheusRule). The cron fires on
+      # the 1st at 02:30 and closes through the prior month; missed runs self-heal next pass.
+      # Under %test quarkus.scheduler.enabled=false keeps it from firing during tests.
+      enabled: true
+  temporal:
+    enabled: false
+    server-url: localhost:7233
+    namespace: openbank-statements
+    task-queue: openbank-statements
+  outbox:
+    dispatch-enabled: true
+    poll-interval: 5s
+    initial-delay: 5s
+
+mp:
+  messaging:
+    incoming:
+      # Account-service account stream → local AccountRegistry projection (enumeration source for the
+      # scheduled monthly period-close). The consumer filters by eventType (AccountCreated) and upserts
+      # idempotently; auto.offset.reset=earliest back-fills the full account history on first deploy.
+      account-events-in:
+        connector: smallrye-kafka
+        topic: openbank.accounts.account.created
+        group.id: openbank-statement-service
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto.offset.reset: earliest
+    outgoing:
+      statement-events-out:
+        connector: smallrye-kafka
+        client.id: statement-service-${quarkus.uuid}
+        topic: openbank.statement.event
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer

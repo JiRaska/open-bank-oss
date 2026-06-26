@@ -1,0 +1,85 @@
+# Legacy sandbox TLS trust root, kept for any host still on sslip.io. With
+# open-bank.tech now delegated to Route53, real Let's Encrypt certs are minted
+# via the DNS-01 issuers at the bottom of this file — that's what the admin-ui
+# and Keycloak Ingresses reference. This self-signed CA signs leaf certs for
+# the sslip hosts (browser shows a one-time warning); remove once nothing uses
+# the openbank-ca issuer.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-bootstrap
+spec:
+  selfSigned: {}
+---
+# Root CA certificate, signed by the self-signed bootstrap issuer. The
+# resulting secret (in cert-manager's namespace) is what the CA ClusterIssuer
+# below uses to sign all leaf certs.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: openbank-sandbox-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: OpenBank Sandbox Root CA
+  secretName: openbank-sandbox-ca
+  duration: 8760h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned-bootstrap
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+# CA issuer used by Ingress resources (cert-manager.io/cluster-issuer:
+# openbank-ca). Reads the root CA secret from cert-manager's namespace
+# (controller --cluster-resource-namespace, default cert-manager).
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: openbank-ca
+spec:
+  ca:
+    secretName: openbank-sandbox-ca
+---
+# Let's Encrypt via ACME DNS-01 (Route53). DNS-01 is mandatory here: the edge
+# NLB is IP-locked, so LE can't reach an HTTP-01 challenge — but it validates a
+# _acme-challenge TXT record instead, which cert-manager writes to the
+# open-bank.tech zone. AWS access is EKS Pod Identity (modules/dns binds a
+# Route53 role to the cert-manager controller SA) — no accessKeyID/secret here.
+# hostedZoneID is omitted on purpose: cert-manager discovers the zone by name
+# (route53:ListHostedZonesByName).
+#
+# STAGING first — untrusted certs, but generous rate limits to prove the
+# pipeline. Flip Ingress annotations to letsencrypt-prod once a staging cert
+# goes Ready.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: jiri@iraska.cz
+    privateKeySecretRef:
+      name: letsencrypt-staging-account
+    solvers:
+      - dns01:
+          route53:
+            region: eu-north-1
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: jiri@iraska.cz
+    privateKeySecretRef:
+      name: letsencrypt-prod-account
+    solvers:
+      - dns01:
+          route53:
+            region: eu-north-1

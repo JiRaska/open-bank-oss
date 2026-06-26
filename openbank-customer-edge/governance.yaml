@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: MPL-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: platform
+primaryDatastore: none (stateless)
+schemaName: n/a
+dataLineageRole: internal
+dataClassification: confidential
+retentionPolicy: N/A
+evidenceExported: false
+lineage:
+  upstream:
+    - serviceName: party-service
+      relationType: api
+      description: onboarding
+    - serviceName: account-service
+      relationType: api
+      description: proxy
+    - serviceName: sca-service
+      relationType: api
+      description: proxy

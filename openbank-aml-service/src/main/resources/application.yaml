@@ -1,0 +1,169 @@
+quarkus:
+  application:
+    name: openbank-aml-service
+    version: 0.1.0
+  http:
+    port: 8117
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+      headers: Content-Type,Authorization,Idempotency-Key
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: postgresql://localhost:5432/openbank_aml
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_aml
+  flyway:
+    migrate-at-start: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+  hibernate-orm:
+    database:
+      generation: none
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  redis:
+    hosts: redis://localhost:6379
+  smallrye-reactive-messaging:
+    kafka:
+      bootstrap-servers: localhost:29092
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+    console:
+      json: true
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-aml-service
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+mp:
+  messaging:
+    outgoing:
+      # ADR-0050 transactional-outbox egress. The dispatcher sets the Kafka key (= aggregate id, N2)
+      # and ce-id/idempotency-key/ce-type headers (N3) via OutgoingKafkaRecordMetadata, so both a key
+      # and a value serializer are required here.
+      aml-events-out:
+        connector: smallrye-kafka
+        client.id: aml-service-${quarkus.uuid}
+        topic: openbank.aml.events
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+    incoming:
+      # Onboarding AML screening (ADR-0073): open a screening case on PARTY_CREATED.
+      party-events-in:
+        connector: smallrye-kafka
+        topic: openbank.party.events
+        group.id: openbank-aml-service
+        auto.offset.reset: earliest
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+    oidc:
+      enabled: false
+"%test":
+  quarkus:
+    # Dedicated IT Postgres on the warm CI stack (ADR-0043); CI auto-creates any openbank_*_it
+    # database referenced here. Dev Services stay OFF — tests hit localhost:5432 exactly as on a
+    # workstation.
+    datasource:
+      username: openbank
+      password: openbank_secret
+      reactive:
+        url: postgresql://localhost:5432/openbank_aml_it
+      jdbc:
+        url: jdbc:postgresql://localhost:5432/openbank_aml_it
+    devservices:
+      enabled: false
+    management:
+      enabled: false
+    oidc:
+      enabled: false
+    # ADR-0050: disable the @Scheduled outbox tick under test so the integration test drives
+    # dispatch() explicitly and never races the assertions.
+    scheduler:
+      enabled: false
+  # OPA is not present in CI integration tests — disable enforce so @Authorize methods proceed
+  # in advisory mode and the outbox dispatch IT is not blocked by 503s from the absent sidecar.
+  authz:
+    enforce: "false"
+openbank:
+  outbox:
+    dispatch-enabled: true
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 100
+  resilience:
+    circuit-breaker:
+      enabled: true
+      request-volume-threshold: 10
+      failure-ratio: 0.5
+      success-threshold: 5
+      delay-ms: 10000
+    retry:
+      enabled: true
+      max-retries: 2
+      delay-ms: 300
+      jitter-ms: 150
+    timeout:
+      enabled: true
+      value-ms: 15000
+  api:
+    version: "1"
+  build:
+    time: "${BUILD_TIME:unknown}"
+  git:
+    commit: "${GIT_COMMIT:unknown}"
+
+# OPA sidecar (ADR-0034). Advisory mode by default — denies logged at WARN,
+# request still proceeds. Flip to enforce: AUTHZ_ENFORCE=true.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:true}"

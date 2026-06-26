@@ -1,0 +1,30 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>LongMethod:FxConversionPosting.kt$FxConversionPosting$fun build( journalId: UUID, customerSellPocketGl: UUID, fxPositionSellGl: UUID, fxPositionBuyGl: UUID, customerBuyPocketGl: UUID, marginIncomeGl: UUID, sellAmount: Money, grossBuyAmount: Money, customerBuyAmount: Money, fxRate: BigDecimal, ): List&lt;JournalLine&gt;</ID>
+    <ID>LongMethod:FxRevaluationPosting.kt$FxRevaluationPosting$fun build(journalId: UUID, exchangeDiffGlId: UUID, inputs: List&lt;FxRevaluationInput&gt;): List&lt;JournalLine&gt;</ID>
+    <ID>LongParameterList:FxConversionPosting.kt$FxConversionPosting$( journalId: UUID, customerSellPocketGl: UUID, fxPositionSellGl: UUID, fxPositionBuyGl: UUID, customerBuyPocketGl: UUID, marginIncomeGl: UUID, sellAmount: Money, grossBuyAmount: Money, customerBuyAmount: Money, fxRate: BigDecimal, )</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$GlAccountValidationExceptionMapper$422</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$IllegalArgumentExceptionMapper$422</ID>
+    <ID>MagicNumber:FxConversionPosting.kt$FxConversionPosting$3</ID>
+    <ID>MagicNumber:FxConversionPosting.kt$FxConversionPosting$4</ID>
+    <ID>MagicNumber:FxConversionPosting.kt$FxConversionPosting$5</ID>
+    <ID>MagicNumber:FxServiceCnbRateAdapter.kt$FxServiceCnbRateAdapter$404</ID>
+    <ID>MagicNumber:FxServiceCnbRateAdapter.kt$FxServiceCnbRateAdapter$8_000</ID>
+    <ID>MagicNumber:LedgerOutboxDispatcher.kt$LedgerOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:LedgerOutboxDispatcher.kt$LedgerOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:PanacheJournalRepository.kt$PanacheJournalRepository$3</ID>
+    <ID>SerialVersionUIDInSerializableClass:JournalEntities.kt$JournalEntryEntityId : Serializable</ID>
+    <ID>ThrowsCount:LedgerService.kt$LedgerService$private suspend fun loadAndValidateGlAccounts(lines: List&lt;JournalLineRequest&gt;): Map&lt;UUID, GlAccount&gt;</ID>
+    <ID>TooGenericExceptionCaught:FxRevaluationScheduler.kt$FxRevaluationScheduler$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:JournalPartitionMaintainer.kt$JournalPartitionMaintainer$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:TieOutScheduler.kt$TieOutScheduler$ex: Exception</ID>
+    <ID>TooManyFunctions:LedgerOutboxRepositoryImpl.kt$LedgerOutboxRepositoryImpl : LedgerOutboxRepositoryPanacheRepository</ID>
+    <ID>TooManyFunctions:LedgerPorts.kt$JournalRepository</ID>
+    <ID>TooManyFunctions:LedgerService.kt$LedgerService : LedgerUseCase</ID>
+    <ID>TooManyFunctions:PanacheJournalRepository.kt$PanacheJournalRepository : JournalRepositoryPanacheRepository</ID>
+    <ID>UnusedPrivateMember:JournalEntryTest.kt$JournalEntryTest$private fun czk(amount: String)</ID>
+    <ID>UseCheckOrError:PanacheJournalRepository.kt$PanacheJournalRepository$throw IllegalStateException("null UUID in trial balance row")</ID>
+  </CurrentIssues>
+</SmellBaseline>

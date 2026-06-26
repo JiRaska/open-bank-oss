@@ -1,0 +1,2013 @@
+# OpenBank Local Development Environment
+# Usage: make up | make down | make logs | make ps
+# Requirements: Docker Desktop >= 4.x, docker-compose v2, 16GB RAM recommended
+
+services:
+
+  # ─────────────────────────────────────────────
+  # PostgreSQL (CloudNativePG emulated locally)
+  # ─────────────────────────────────────────────
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:16.3-alpine}
+    container_name: openbank-postgres
+    restart: unless-stopped
+    command: >
+      postgres
+        -c max_connections=500
+        -c shared_buffers=128MB
+        -c work_mem=4MB
+        -c maintenance_work_mem=32MB
+        -c effective_cache_size=256MB
+        -c wal_buffers=8MB
+        -c checkpoint_completion_target=0.9
+        -c random_page_cost=1.1
+    environment:
+      POSTGRES_USER: openbank
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openbank"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - openbank-net
+
+  # ─────────────────────────────────────────────
+  # Kafka (KRaft mode — no ZooKeeper)
+  # ─────────────────────────────────────────────
+  kafka:
+    image: ${KAFKA_IMAGE:-apache/kafka:3.7.0}
+    container_name: openbank-kafka
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_METADATA_LOG_DIR: /var/lib/kafka/data
+      CLUSTER_ID: "f4mXx4bST5Sp1bNgFMn8sQ"
+      KAFKA_HEAP_OPTS: "-Xmx256m -Xms128m"
+    ports:
+      - "29092:29092"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/9092'"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    networks:
+      - openbank-net
+
+  # ─────────────────────────────────────────────
+  # Apicurio Schema Registry
+  # ─────────────────────────────────────────────
+  schema-registry:
+    image: apicurio/apicurio-registry-mem:2.6.2.Final
+    container_name: openbank-schema-registry
+    restart: unless-stopped
+    environment:
+      QUARKUS_HTTP_PORT: 8081
+      JAVA_TOOL_OPTIONS: "-Xmx128m -Xms64m"
+    ports:
+      - "8081:8081"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+
+  # ─────────────────────────────────────────────
+  # ClickHouse (analytics warehouse — bronze/silver, ADR-0022/0023)
+  # The store of record for the analytics layer. The bronze/silver/integrity_anchors/
+  # reload_proposals DDL is source-controlled in openbank-analytics-sink and applied here
+  # once, on first init, via /docker-entrypoint-initdb.d. Container port stays 8123; the
+  # host publish uses 8129 because 8123 is already taken by sanctions-service.
+  # ─────────────────────────────────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: openbank-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: openbank_analytics
+      CLICKHOUSE_USER: analytics
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-CHANGE_ME_LOCAL_DEV_ONLY}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ../openbank-analytics-sink/src/main/resources/clickhouse/V1__analytics_bronze_silver.sql:/docker-entrypoint-initdb.d/01-analytics.sql:ro
+    ports:
+      - "8129:8123"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8123/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - openbank-net
+
+  # ─────────────────────────────────────────────
+  # Valkey (Redis-compatible cache)
+  # ─────────────────────────────────────────────
+  valkey:
+    image: ${VALKEY_IMAGE:-valkey/valkey:7.2-alpine}
+    container_name: openbank-valkey
+    restart: unless-stopped
+    command: valkey-server --save 60 1 --loglevel warning --requirepass ${VALKEY_PASSWORD}
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-a", "${VALKEY_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - openbank-net
+
+  # ─────────────────────────────────────────────
+  # HashiCorp Vault (dev mode for local)
+  # ─────────────────────────────────────────────
+  vault:
+    image: hashicorp/vault:1.17.2
+    container_name: openbank-vault
+    restart: unless-stopped
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD}
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+      VAULT_ADDR: http://0.0.0.0:8200
+    ports:
+      - "8200:8200"
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - vault_data:/vault/data
+      - ./docker/vault/init:/vault/init:ro
+    command: >
+      sh -c "vault server -dev &
+             sleep 3 &&
+             export VAULT_ADDR=http://127.0.0.1:8200 &&
+             export VAULT_TOKEN=${VAULT_DEV_ROOT_TOKEN} &&
+             export VAULT_DEV_ROOT_TOKEN=${VAULT_DEV_ROOT_TOKEN} &&
+             sh /vault/init/init.sh &&
+             wait"
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - openbank-net
+
+  # ─────────────────────────────────────────────
+  # Keycloak (IAM)
+  # ─────────────────────────────────────────────
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.5
+    container_name: openbank-keycloak
+    restart: unless-stopped
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/openbank_keycloak
+      KC_DB_USERNAME: openbank
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: 8080
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_HTTP_ENABLED: "true"
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      KC_CACHE: local
+      JAVA_OPTS_APPEND: "-Xms256m -Xmx384m"
+    command: start-dev --import-realm
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./docker/keycloak/realm:/opt/keycloak/data/import:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/8080 && echo -e \"GET /realms/master HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" >&3 && grep -q \"200 OK\" <&3'"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - openbank-net
+
+  # ─────────────────────────────────────────────
+  # Kafka UI (development convenience)
+  # ─────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    container_name: openbank-kafka-ui
+    restart: unless-stopped
+    environment:
+      KAFKA_CLUSTERS_0_NAME: openbank-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+      DYNAMIC_CONFIG_ENABLED: "true"
+      JAVA_OPTS: "-Xmx128m -Xms64m"
+    ports:
+      - "8090:8080"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+
+  # ─────────────────────────────────────────────
+  # Prometheus
+  # ─────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: openbank-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-remote-write-receiver'
+      - '--enable-feature=exemplar-storage'
+      - '--storage.tsdb.retention.time=7d'
+      - '--query.max-concurrency=2'
+      - '--storage.tsdb.min-block-duration=2h'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    networks:
+      - openbank-net
+
+  # ─────────────────────────────────────────────
+  # Grafana
+  # ─────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: openbank-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_RENDERING_CONCURRENT_RENDER_LIMIT: "2"
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - openbank-net
+
+  # ─────────────────────────────────────────────
+  # Loki (log aggregation)
+  # ─────────────────────────────────────────────
+  loki:
+    image: grafana/loki:3.3.2
+    container_name: openbank-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki_data:/loki
+    networks:
+      - openbank-net
+
+  # ─────────────────────────────────────────────
+  # Tempo (distributed tracing)
+  # ─────────────────────────────────────────────
+  tempo:
+    image: grafana/tempo:2.6.1
+    container_name: openbank-tempo
+    restart: unless-stopped
+    user: root
+    command: ["-config.file=/etc/tempo.yaml"]
+    ports:
+      - "3200:3200"   # Tempo UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    volumes:
+      - ./docker/tempo/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo_data:/tmp/tempo
+    networks:
+      - openbank-net
+
+  # ─────────────────────────────────────────────
+  # Kafka topic initializer (one-shot)
+  # ─────────────────────────────────────────────
+  kafka-init:
+    image: ${KAFKA_IMAGE:-apache/kafka:3.7.0}
+    container_name: openbank-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./docker/kafka/create-topics.sh:/create-topics.sh:ro
+    command: ["bash", "/create-topics.sh"]
+    networks:
+      - openbank-net
+    restart: "no"
+
+  # ─────────────────────────────────────────────
+  # OPA — agent policy engine (ADR-0018 + ADR-0031 D2/D8)
+  # Serves the agent-charter decision API that gates the MCP /tools/call endpoint.
+  # The charters in openbank-libs/governance/agents.yaml are the single source of truth:
+  # mounted at the `agents` data namespace (data.agents.*), the shape agents.rego expects.
+  # Dormant by default — agent-service ships agent.policy.opa.enabled=false (build-time), so it
+  # still uses deny-by-default and never calls this sidecar until enforcement is switched on.
+  # ─────────────────────────────────────────────
+  opa:
+    image: openpolicyagent/opa:1.17.0
+    container_name: openbank-opa
+    restart: unless-stopped
+    command:
+      - "run"
+      - "--server"
+      - "--addr=0.0.0.0:8181"
+      - "--log-level=info"
+      - "-b"
+      - "/bundle"
+    volumes:
+      # Layout mirrors openbank-infra/opa/build-bundle.sh; new non-test policies must be added here too.
+      - ../openbank-libs/governance/agents.yaml:/bundle/agents/data.yaml:ro
+      - ../openbank-libs/governance/rules.yaml:/bundle/rules/data.yaml:ro
+      - ./opa/policies/agents.rego:/bundle/agents.rego:ro
+      - ../openbank-libs/governance/policies/rest.rego:/bundle/rest.rego:ro
+      - ./opa/bundle.manifest:/bundle/.manifest:ro
+    ports:
+      - "8181:8181"
+    networks:
+      - openbank-net
+
+  # ─────────────────────────────────────────────
+  # Application Services
+  # ─────────────────────────────────────────────
+  account-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-account-service
+    image: openbank/account-service:local
+    container_name: openbank-account-service
+    restart: unless-stopped
+    stop_grace_period: 35s
+    stop_signal: SIGTERM
+    environment:
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      QUARKUS_MANAGEMENT_PORT: "8085"
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_accounts
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_accounts
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      QUARKUS_HTTP_PORT: "8100"
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    ports:
+      - "8100:8100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  aml-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-aml-service
+    image: openbank/aml-service:local
+    container_name: openbank-aml-service
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_aml
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_aml
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS: "/api/v1/info,/q/health,/q/health/*,/api/v1/aml,/api/v1/aml/*"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__POLICY: permit
+      QUARKUS_HTTP_AUTH_PROACTIVE: "false"
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_PORT: 8117
+      QUARKUS_LOG_LEVEL: INFO
+      QUARKUS_LOG_CONSOLE_JSON: "false"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CLIENT_ID: openbank-services
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_OIDC_ENABLED: "false"
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+    ports:
+      - "8117:8117"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  audit-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-audit-service
+    image: openbank/audit-service:local
+    container_name: openbank-audit-service
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_audit
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_audit
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS: "/api/v1/info,/q/health,/q/health/*,/api/v1/audit,/api/v1/audit/*"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__POLICY: permit
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_PORT: 8113
+      QUARKUS_LOG_LEVEL: INFO
+      QUARKUS_LOG_CONSOLE_JSON: "false"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CLIENT_ID: openbank-services
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+    ports:
+      - "8113:8113"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8113/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  # ─────────────────────────────────────────────
+  # Analytics sink (event-fed warehouse writer — ADR-0022/0023)
+  # Consumes the same outbox/domain-event topics as the audit service and writes the bronze
+  # log to ClickHouse. Owns no OLTP database (no postgres/flyway). The three build-time gates
+  # are enabled here so all the real adapters run end-to-end: F1 ClickHouse sink, F6 Vault
+  # crypto-shred, F7 Apicurio schema governance. HTTP on 8134.
+  # ─────────────────────────────────────────────
+  analytics-sink:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-analytics-sink
+    image: openbank/analytics-sink:local
+    container_name: openbank-analytics-sink
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_SMALLRYE_REACTIVE_MESSAGING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # F1 — durable bronze over the ClickHouse HTTP interface.
+      ANALYTICS_SINK_TYPE: clickhouse
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_DB: openbank_analytics
+      CLICKHOUSE_USER: analytics
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-CHANGE_ME_LOCAL_DEV_ONLY}
+      # F6 — crypto-shred via Vault Transit (engine + analytics-* policy provisioned in vault/init).
+      ANALYTICS_ERASURE_BACKEND: vault
+      ANALYTICS_VAULT_URL: http://vault:8200
+      ANALYTICS_VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN}
+      ANALYTICS_VAULT_TRANSIT_MOUNT: transit
+      ANALYTICS_VAULT_KEY_PREFIX: analytics
+      # F7 — schema governance catalogue loaded from the Apicurio registry.
+      ANALYTICS_SCHEMA_BACKEND: apicurio
+      ANALYTICS_SCHEMA_APICURIO_URL: http://schema-registry:8081
+      ANALYTICS_SCHEMA_APICURIO_GROUP: default
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_HTTP_PORT: 8134
+      QUARKUS_LOG_LEVEL: INFO
+      QUARKUS_LOG_CONSOLE_JSON: "false"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CLIENT_ID: openbank-services
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+    ports:
+      - "8134:8134"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      vault:
+        condition: service_healthy
+      schema-registry:
+        condition: service_started
+    networks:
+      - openbank-net
+    # Probe liveness, not readiness: readiness is intentionally lag-gated (F8 / DORA RPO),
+    # so on a cold start replaying history it stays DOWN until caught up — that is healthy.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/q/health/live || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+
+  balance-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-balance-service
+    image: openbank/balance-service:local
+    container_name: openbank-balance-service
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_balances
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_balances
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS: "/api/v1/info,/q/health,/q/health/*,/api/v1/balances,/api/v1/balances/*"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__POLICY: permit
+      QUARKUS_HTTP_CORS: "true"
+      QUARKUS_HTTP_CORS_HEADERS: "Content-Type,Authorization,Idempotency-Key"
+      QUARKUS_HTTP_CORS_METHODS: "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+      QUARKUS_HTTP_CORS_ORIGINS: http://localhost:3000
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_PORT: 8103
+      QUARKUS_LOG_LEVEL: INFO
+      QUARKUS_LOG_CONSOLE_JSON: "false"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CLIENT_ID: openbank-services
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+    ports:
+      - "8103:8103"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8103/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  card-issuance-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-card-issuance-service
+    image: openbank/card-issuance-service:local
+    container_name: openbank-card-issuance-service
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_cards
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_cards
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_FLYWAY_VALIDATE_ON_MIGRATE: "false"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS: "/api/v1/info,/q/health,/q/health/*"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__POLICY: permit
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_PORT: 8118
+      QUARKUS_LOG_LEVEL: INFO
+      QUARKUS_LOG_CONSOLE_JSON: "false"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CLIENT_ID: openbank-services
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+    ports:
+      - "8118:8118"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  clearing-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-clearing-service
+    image: openbank/clearing-service:local
+    container_name: openbank-clearing-service
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_clearing
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_clearing
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_VALIDATE_ON_MIGRATE: "false"
+      QUARKUS_HTTP_CORS: "true"
+      QUARKUS_HTTP_CORS_HEADERS: "Content-Type,Authorization,Idempotency-Key"
+      QUARKUS_HTTP_CORS_METHODS: "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+      QUARKUS_HTTP_CORS_ORIGINS: http://localhost:3000
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+    ports:
+      - "8124:8124"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8124/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  consent-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-consent-service
+    image: openbank/consent-service:local
+    container_name: openbank-consent-service
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_consents
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_consents
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS: "/api/v1/info,/q/health,/q/health/*"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__POLICY: permit
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_PORT: 8106
+      QUARKUS_LOG_LEVEL: INFO
+      QUARKUS_LOG_CONSOLE_JSON: "false"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CLIENT_ID: openbank-services
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+    ports:
+      - "8106:8106"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  dispute-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-dispute-service
+    image: openbank/dispute-service:local
+    container_name: openbank-dispute-service
+    restart: unless-stopped
+    environment:
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_dispute
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_dispute
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_VALIDATE_ON_MIGRATE: "false"
+      QUARKUS_HTTP_CORS: "true"
+      QUARKUS_HTTP_CORS_HEADERS: "Content-Type,Authorization,Idempotency-Key"
+      QUARKUS_HTTP_CORS_METHODS: "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+      QUARKUS_HTTP_CORS_ORIGINS: http://localhost:3000
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+    ports:
+      - "8135:8135"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8135/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  domestic-payment:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-domestic-payment
+    image: openbank/domestic-payment:local
+    entrypoint: ["java", "-Djava.util.logging.manager=org.jboss.logmanager.LogManager", "-Dmp.messaging.incoming.payment-requests-in.value.deserializer=org.apache.kafka.common.serialization.StringDeserializer", "-Dmp.messaging.incoming.payment-requests-in.bootstrap.servers=kafka:9092", "-jar", "/app/quarkus-run.jar"]
+    container_name: openbank-domestic-payment
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+
+      QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_domestic_payments
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_domestic_payments
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_FLYWAY_VALIDATE_ON_MIGRATE: "false"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS: "/api/v1/info,/q/health,/q/health/*,/api/v1/domestic-payments,/api/v1/domestic-payments/*"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__POLICY: permit
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_PORT: 8116
+      QUARKUS_LOG_LEVEL: INFO
+      QUARKUS_LOG_CONSOLE_JSON: "false"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CLIENT_ID: openbank-services
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+    ports:
+      - "8116:8116"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  interest-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-interest-service
+    image: openbank/interest-service:local
+    container_name: openbank-interest-service
+    restart: unless-stopped
+    environment:
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_interest
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_interest
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_VALIDATE_ON_MIGRATE: "false"
+      QUARKUS_HTTP_CORS: "true"
+      QUARKUS_HTTP_CORS_HEADERS: "Content-Type,Authorization,Idempotency-Key"
+      QUARKUS_HTTP_CORS_METHODS: "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+      QUARKUS_HTTP_CORS_ORIGINS: http://localhost:3000
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    ports:
+      - "8125:8125"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  kyc-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-kyc-service
+    image: openbank/kyc-service:local
+    container_name: openbank-kyc-service
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_kyc
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_kyc
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS: "/api/v1/info,/q/health,/q/health/*,/api/v1/kyc,/api/v1/kyc/*"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__POLICY: permit
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_PORT: 8114
+      QUARKUS_LOG_LEVEL: INFO
+      QUARKUS_LOG_CONSOLE_JSON: "false"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CLIENT_ID: openbank-services
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+    ports:
+      - "8114:8114"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      # Use the management port (8085) like the rest of the fleet — app port
+      # (8114) requires more init before responding. Also bumped start_period
+      # 90s → 300s because under memory pressure JVM startup can take 3-5 min
+      # (observed 298 s after OOM cascade thrashing); 90 s caused false unhealthy
+      # and restart loops that never recovered.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 300s
+
+  ledger-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-ledger-service
+    image: openbank/ledger-service:local
+    container_name: openbank-ledger-service
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_ledger
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_ledger
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS: "/api/v1/info,/q/health,/q/health/*,/api/v1/journals,/api/v1/journals/*"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__POLICY: permit
+      QUARKUS_HTTP_CORS: "true"
+      QUARKUS_HTTP_CORS_HEADERS: "Content-Type,Authorization,Idempotency-Key"
+      QUARKUS_HTTP_CORS_METHODS: "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+      QUARKUS_HTTP_CORS_ORIGINS: http://localhost:3000
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_PORT: 8101
+      QUARKUS_LOG_LEVEL: INFO
+      QUARKUS_LOG_CONSOLE_JSON: "false"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CLIENT_ID: openbank-services
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+    ports:
+      - "8101:8101"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  notification-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-notification-service
+    image: openbank/notification-service:local
+    container_name: openbank-notification-service
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_notifications
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_notifications
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS: "/api/v1/info,/api/v1/notifications,/api/v1/notifications/*,/q/health,/q/health/*"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__POLICY: permit
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_PORT: 8112
+      QUARKUS_LOG_LEVEL: INFO
+      QUARKUS_MAILER_HOST: mailhog
+      QUARKUS_MAILER_PORT: 1025
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CLIENT_ID: openbank-services
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+    ports:
+      - "8112:8112"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8112/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  party-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-party-service
+    image: openbank/party-service:local
+    container_name: openbank-party-service
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_parties
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_parties
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS: "/api/v1/info,/q/health,/q/health/*,/api/v1/parties,/api/v1/parties/*"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__POLICY: permit
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_PORT: 8111
+      QUARKUS_LOG_LEVEL: INFO
+      QUARKUS_LOG_CONSOLE_JSON: "false"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CLIENT_ID: openbank-services
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+    ports:
+      - "8111:8111"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8111/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  pid-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-pid-service
+    image: openbank/pid-service:local
+    container_name: openbank-pid-service
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_pid
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_pid
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS: "/api/v1/info,/q/health,/q/health/*"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__POLICY: permit
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_PORT: 8105
+      QUARKUS_LOG_LEVEL: INFO
+      QUARKUS_LOG_CONSOLE_JSON: "false"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CLIENT_ID: openbank-services
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+    ports:
+      - "8105:8105"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8105/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  sca-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-sca-service
+    image: openbank/sca-service:local
+    container_name: openbank-sca-service
+    restart: unless-stopped
+    environment:
+      QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_sca
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_sca
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS: "/api/v1/info,/q/health,/q/health/*"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__POLICY: permit
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_PORT: 8110
+      QUARKUS_LOG_LEVEL: INFO
+      QUARKUS_LOG_CONSOLE_JSON: "false"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CLIENT_ID: openbank-services
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+    ports:
+      - "8110:8110"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  sepa-instant-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-sepa-instant
+    image: openbank/sepa-instant:local
+    container_name: openbank-sepa-instant-service
+    restart: unless-stopped
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx192m -Xms64m -Dmp.messaging.incoming.sct-inst-requests-in.bootstrap.servers=kafka:9092 -Dmp.messaging.incoming.sct-inst-requests-in.value.deserializer=org.apache.kafka.common.serialization.StringDeserializer"
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      OPENBANK_SCT_INST_EXECUTION_TIMEOUT_SECONDS: 10
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_sepa_instant
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_sepa_instant
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_VALIDATE_ON_MIGRATE: "false"
+      QUARKUS_HTTP_CORS: "true"
+      QUARKUS_HTTP_CORS_HEADERS: "Content-Type,Authorization,Idempotency-Key"
+      QUARKUS_HTTP_CORS_METHODS: "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+      QUARKUS_HTTP_CORS_ORIGINS: http://localhost:3000
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+    ports:
+      - "8127:8127"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  sepa-payment:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-sepa-payment
+    image: openbank/sepa-payment:local
+    entrypoint: ["java", "-Djava.util.logging.manager=org.jboss.logmanager.LogManager", "-Dmp.messaging.incoming.payment-requests-in.value.deserializer=org.apache.kafka.common.serialization.StringDeserializer", "-Dmp.messaging.incoming.payment-requests-in.bootstrap.servers=kafka:9092", "-jar", "/app/quarkus-run.jar"]
+    container_name: openbank-sepa-payment
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+
+      QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_sepa_payments
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_sepa_payments
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_FLYWAY_VALIDATE_ON_MIGRATE: "false"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS: "/api/v1/info,/q/health,/q/health/*,/api/v1/sepa-payments,/api/v1/sepa-payments/*"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__POLICY: permit
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_PORT: 8115
+      QUARKUS_LOG_LEVEL: INFO
+      QUARKUS_LOG_CONSOLE_JSON: "false"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CLIENT_ID: openbank-services
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+    ports:
+      - "8115:8115"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  # sanctions-service was previously missing from compose despite a built image
+  # and a running container (started manually on the openbank-net network).
+  # Re-added so `docker compose up -d --force-recreate sanctions-service` works
+  # and rebuild scripts no longer fail with "no such service".
+  sanctions-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-sanctions-service
+    image: openbank/sanctions-service:local
+    container_name: openbank-sanctions-service
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_sanctions
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_sanctions
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_FLYWAY_VALIDATE_ON_MIGRATE: "false"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS: "/api/v1/info,/q/health,/q/health/*,/api/v1/sanctions,/api/v1/sanctions/*"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__POLICY: permit
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_PORT: 8123
+      QUARKUS_LOG_LEVEL: INFO
+      QUARKUS_LOG_CONSOLE_JSON: "false"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CLIENT_ID: openbank-services
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+    ports:
+      - "8123:8123"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  tpp-registry-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-tpp-registry-service
+    image: openbank/tpp-registry-service:local
+    container_name: openbank-tpp-registry-service
+    restart: unless-stopped
+    environment:
+      QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_tpp_registry
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_tpp_registry
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS: "/api/v1/info,/q/health,/q/health/*"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__POLICY: permit
+      QUARKUS_HTTP_CORS: "true"
+      QUARKUS_HTTP_CORS_HEADERS: "Content-Type,Authorization,Idempotency-Key"
+      QUARKUS_HTTP_CORS_METHODS: "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+      QUARKUS_HTTP_CORS_ORIGINS: http://localhost:3000
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_PORT: 8108
+      QUARKUS_LOG_LEVEL: INFO
+      QUARKUS_LOG_CONSOLE_JSON: "false"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CLIENT_ID: openbank-services
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+    ports:
+      - "8108:8108"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  psd2-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-psd2-service
+    image: openbank/psd2-service:local
+    container_name: openbank-psd2-service
+    restart: unless-stopped
+    environment:
+      QUARKUS_HTTP_PORT: "8107"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: "8085"
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_psd2
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_psd2
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_FLYWAY_VALIDATE_ON_MIGRATE: "false"
+      QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CLIENT_ID: openbank-services
+      QUARKUS_OIDC_CREDENTIALS_SECRET: ${OIDC_CLIENT_SECRET:-changeme_local_oidc_client_dev_only}
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_LOG_LEVEL: INFO
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    ports:
+      - "8107:8107"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8107/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  agent-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-agent-service
+    image: openbank/agent-service:local
+    container_name: openbank-agent-service
+    restart: unless-stopped
+    environment:
+      QUARKUS_HTTP_PORT: "8109"
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: "8085"
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_agents
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_agents
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_FLYWAY_VALIDATE_ON_MIGRATE: "false"
+      QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CLIENT_ID: openbank-services
+      QUARKUS_OIDC_CREDENTIALS_SECRET: ${OIDC_CLIENT_SECRET:-changeme_local_oidc_client_dev_only}
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_LOG_LEVEL: INFO
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # Points the OPA rest-client at the sidecar. Unused until the service is built with
+      # agent.policy.opa.enabled=true (build-time); harmless while deny-by-default is active.
+      QUARKUS_REST_CLIENT_OPA_URL: http://opa:8181
+    ports:
+      - "8109:8109"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8109/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  transaction-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-transaction-service
+    image: openbank/transaction-service:local
+    container_name: openbank-transaction-service
+    restart: unless-stopped
+    environment:
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: "8085"
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_transactions
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_transactions
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      QUARKUS_HTTP_PORT: "8102"
+      LEDGER_SERVICE_URL: http://ledger-service:8101
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+    ports:
+      - "8102:8102"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  fx-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-fx-service
+    image: openbank/fx-service:local
+    container_name: openbank-fx-service
+    restart: unless-stopped
+    environment:
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: "8085"
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_fx
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_fx
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      QUARKUS_HTTP_PORT: "8119"
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+    ports:
+      - "8119:8119"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  standing-order-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-standing-order-service
+    image: openbank/standing-order-service:local
+    container_name: openbank-standing-order-service
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_standing_orders
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_standing_orders
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_HTTP_PORT: 8121
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+    ports:
+      - "8121:8121"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  swift-service:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-swift-service
+    image: openbank/swift-service:local
+    container_name: openbank-swift-service
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_swift
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_swift
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_HTTP_PORT: 8122
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+    ports:
+      - "8122:8122"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  security-scanner:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-security-scanner
+    image: openbank/security-scanner:local
+    container_name: openbank-security-scanner
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_security
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_security
+      QUARKUS_DATASOURCE_USERNAME: openbank
+      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_HTTP_PORT: 8120
+      QUARKUS_MANAGEMENT_ENABLED: "true"
+      QUARKUS_MANAGEMENT_PORT: 8085
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+      QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
+      QUARKUS_OIDC_CLIENT_ID: openbank-services
+      QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
+      QUARKUS_HTTP_AUTH_PROACTIVE: "false"
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS: /*
+      QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__POLICY: permit
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+    ports:
+      - "8120:8120"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  product-catalog:
+    build:
+      context: ..
+      dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
+      args:
+        SERVICE_DIR: openbank-product-catalog
+    image: openbank/product-catalog:local
+    container_name: openbank-product-catalog
+    restart: unless-stopped
+    environment:
+      QUARKUS_HTTP_PORT: 8104
+      QUARKUS_DEV_UI_ENABLED: "false"
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+      QUARKUS_SHUTDOWN_TIMEOUT: 30S
+      QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
+      QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
+      QUARKUS_HTTP_HEADER__X_XSS_PROTECTION__VALUE: "1; mode=block"
+      QUARKUS_HTTP_HEADER__REFERRER_POLICY__VALUE: strict-origin-when-cross-origin
+      QUARKUS_HTTP_HEADER__PERMISSIONS_POLICY__VALUE: "geolocation=(), microphone=(), camera=()"
+      QUARKUS_HTTP_HEADER__CONTENT_SECURITY_POLICY__VALUE: "default-src 'self'"
+      QUARKUS_HTTP_HEADER__STRICT_TRANSPORT_SECURITY__VALUE: "max-age=31536000; includeSubDomains"
+    ports:
+      - "8104:8104"
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8104/q/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  admin-ui:
+    build:
+      context: ..
+      dockerfile: openbank-admin-ui/Dockerfile
+      args:
+        BUILD_VERSION: ${ADMIN_UI_VERSION:-0.1.0-local}
+        BUILD_GIT_SHA: ${ADMIN_UI_GIT_SHA:-unknown}
+        BUILD_DATE: ${ADMIN_UI_BUILD_DATE:-unknown}
+    image: openbank/admin-ui:local
+    container_name: openbank-admin-ui
+    restart: unless-stopped
+    environment:
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: openbank_nextauth_secret_local_dev_only
+      KEYCLOAK_CLIENT_ID: openbank-admin-ui
+      KEYCLOAK_CLIENT_SECRET: changeme_local_admin_ui_dev_only
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_PUBLIC_URL: http://localhost:8080
+      KEYCLOAK_REALM: openbank
+      NEXT_PUBLIC_KEYCLOAK_URL: http://localhost:8080
+      SERVICES_HOST: container
+    ports:
+      - "3000:3000"
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    networks:
+      - openbank-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  postgres_data:
+  kafka_data:
+  valkey_data:
+  vault_data:
+  clickhouse_data:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  tempo_data:
+
+networks:
+  openbank-net:
+    driver: bridge
+    ipam:
+      config:
+        # DO NOT use 172.20.0.0/16 here. On the ephemeral EKS CI runners (ADR-0053)
+        # this compose stack runs inside dind, sharing the runner pod's network
+        # namespace — and 172.20.0.0/16 is the cluster Service CIDR (kube-dns is
+        # 172.20.0.10). A docker bridge on that CIDR installs a more-specific route
+        # that black-holes all traffic to kube-dns, killing pod DNS mid-build:
+        # `docker compose up` / Testcontainers pulls and the runner's job-completion
+        # callback then hang until the 35-min job timeout. This range is private,
+        # outside both the Service CIDR and the VPC CIDR (10.80.0.0/16), and away
+        # from the common home/Docker-Desktop 192.168.{0,1}.x ranges.
+        - subnet: 192.168.240.0/20

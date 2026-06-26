@@ -1,0 +1,331 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-event-bus
+  namespace: observability
+  labels:
+    grafana_dashboard: '1'
+    app.kubernetes.io/part-of: observability
+data:
+  openbank-event-bus.json: |
+    {
+      "id": null,
+      "uid": "openbank-evb",
+      "title": "OpenBank — Event Bus & Outbox Health",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "browser",
+      "templating": {
+        "list": [
+          {
+            "current": {
+              "selected": false,
+              "text": "Prometheus",
+              "value": "prometheus"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "name": "datasource",
+            "options": [],
+            "query": "prometheus",
+            "refresh": 1,
+            "type": "datasource",
+            "label": "Datasource"
+          }
+        ]
+      },
+      "annotations": {
+        "list": []
+      },
+      "links": [],
+      "panels": [
+        {
+          "id": 1,
+          "type": "timeseries",
+          "title": "Outbox Dispatch Rate by Service",
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 14,
+            "h": 8
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "sum by (service) (rate(openbank_outbox_dispatched_total{job=\"observability/openbank-services\"}[1m]))",
+              "legendFormat": "{{service}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "Dead-Letter Rate (should be ≈ 0)",
+          "gridPos": {
+            "x": 14,
+            "y": 0,
+            "w": 10,
+            "h": 8
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "sum by (service) (rate(openbank_outbox_dead_total{job=\"observability/openbank-services\"}[1m]))",
+              "legendFormat": "{{service}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Dead Letters Today",
+          "gridPos": {
+            "x": 0,
+            "y": 8,
+            "w": 5,
+            "h": 4
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "sum(increase(openbank_outbox_dead_total{job=\"observability/openbank-services\"}[24h])) or vector(0)",
+              "legendFormat": "",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "red"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 4,
+          "type": "gauge",
+          "title": "Dispatch Success Rate %",
+          "gridPos": {
+            "x": 5,
+            "y": 8,
+            "w": 6,
+            "h": 4
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "100 * (sum(rate(openbank_outbox_dispatched_total{job=\"observability/openbank-services\"}[5m])) or vector(0)) / clamp_min((sum(rate(openbank_outbox_dispatched_total{job=\"observability/openbank-services\"}[5m])) or vector(0)) + (sum(rate(openbank_outbox_dead_total{job=\"observability/openbank-services\"}[5m])) or vector(0)), 0.0001)",
+              "legendFormat": "",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "showThresholdLabels": false,
+            "showThresholdMarkers": true
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 99
+                  },
+                  {
+                    "color": "green",
+                    "value": 99.9
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "Outbox Backlog by Service (PENDING + FAILED)",
+          "gridPos": {
+            "x": 11,
+            "y": 8,
+            "w": 13,
+            "h": 4
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "max by (service) (openbank_outbox_backlog{job=\"observability/openbank-services\"})",
+              "legendFormat": "{{service}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "Total Event Throughput",
+          "gridPos": {
+            "x": 0,
+            "y": 12,
+            "w": 24,
+            "h": 6
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "sum(rate(openbank_outbox_dispatched_total{job=\"observability/openbank-services\"}[1m])) or vector(0)",
+              "legendFormat": "Total Events/s",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        }
+      ],
+      "tags": [
+        "openbank"
+      ]
+    }

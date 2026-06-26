@@ -1,0 +1,371 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: Balance Service API
+  version: 1.4.0
+  description: >-
+    Account balance management — holds, credits, debits, multi-currency. Per ADR-0039 (Phase A) a
+    read-only reconciliation ties out, per currency, the ledger deposit-control balance against the
+    sum of booked balances here, surfacing any drift between the two writers until balance becomes a
+    true ledger projection.
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8103
+    description: Local development
+tags:
+  - name: Balances
+  - name: Reconciliation
+
+paths:
+  /api/v1/balances/{accountId}:
+    get:
+      tags: [Balances]
+      summary: Get all balances for an account
+      operationId: getBalances
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      responses:
+        '200':
+          description: All currency balances
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BalanceResponse'
+
+  /api/v1/balances/{accountId}/{currency}:
+    get:
+      tags: [Balances]
+      summary: Get balance for specific currency
+      operationId: getBalance
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: currency
+          in: path
+          required: true
+          schema:
+            type: string
+            example: CZK
+        - name: asOf
+          in: query
+          required: false
+          description: >-
+            Optional point-in-time read: returns the end-of-day booked balance as of this date
+            (rewinding the current balance by ledger-projection deltas booked after it). Omit for the
+            current live balance. Available equals booked and holds are omitted for historical reads.
+          schema:
+            type: string
+            format: date
+            example: '2026-06-07'
+      responses:
+        '200':
+          description: Balance for currency
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BalanceResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/balances/{accountId}/holds:
+    post:
+      tags: [Balances]
+      summary: Place a hold on funds
+      operationId: placeHold
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaceHoldRequest'
+      responses:
+        '200':
+          description: Hold placed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HoldResponse'
+
+  /api/v1/balances/holds/{holdId}:
+    delete:
+      tags: [Balances]
+      summary: Release a hold
+      operationId: releaseHold
+      parameters:
+        - name: holdId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Hold released
+
+  /api/v1/balances/{accountId}/credit:
+    post:
+      tags: [Balances]
+      summary: Credit an account
+      description: >-
+        Idempotent on the request `referenceId`: a retried credit with the same referenceId applies
+        the movement exactly once (the dedup marker and the balance change are written in one
+        transaction), so an at-least-once delivery or client retry never double-counts.
+      operationId: creditAccount
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MoneyMovementRequest'
+      responses:
+        '200':
+          description: Updated balance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BalanceResponse'
+
+  /api/v1/balances/{accountId}/debit:
+    post:
+      tags: [Balances]
+      summary: Debit an account
+      description: >-
+        Idempotent on the request `referenceId` (see credit): a retried debit applies exactly once;
+        the overdraft guard runs only on the first application, and a duplicate returns the
+        already-debited balance without re-checking funds.
+      operationId: debitAccount
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MoneyMovementRequest'
+      responses:
+        '200':
+          description: Updated balance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BalanceResponse'
+        '422':
+          description: Insufficient funds
+
+  /api/v1/balances/{accountId}/initialize:
+    post:
+      tags: [Balances]
+      summary: Initialize balance for a new account
+      operationId: initializeBalance
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InitializeBalanceRequest'
+      responses:
+        '201':
+          description: Balance initialized
+
+  /api/v1/balances/reconciliation:
+    post:
+      tags: [Reconciliation]
+      summary: Run the control-account ⇄ sub-ledger reconciliation for a date
+      description: >-
+        Runs the ADR-0039 Phase A tie-out as of the given date (default today), comparing the ledger
+        deposit-control balance against the sum of booked balances per currency, persisting the run
+        and surfacing drift. Read-only — mutates no balance.
+      operationId: runReconciliation
+      parameters:
+        - name: asOf
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+      responses:
+        '201':
+          description: Reconciliation report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReconciliationReport'
+
+  /api/v1/balances/reconciliation/latest:
+    get:
+      tags: [Reconciliation]
+      summary: Get the most recent reconciliation run
+      operationId: getLatestReconciliation
+      responses:
+        '200':
+          description: Latest reconciliation report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReconciliationReport'
+        '404':
+          description: No reconciliation has been run yet
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    accountId:
+      name: accountId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    BalanceResponse:
+      type: object
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        currency:
+          type: string
+        availableBalance:
+          type: number
+        currentBalance:
+          type: number
+        reservedBalance:
+          type: number
+        pendingBalance:
+          type: number
+        lastUpdatedAt:
+          type: string
+          format: date-time
+
+    PlaceHoldRequest:
+      type: object
+      required: [amount, currency, reason]
+      properties:
+        amount:
+          type: number
+        currency:
+          type: string
+        reason:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+
+    HoldResponse:
+      type: object
+      properties:
+        holdId:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        amount:
+          type: number
+        currency:
+          type: string
+        reason:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    MoneyMovementRequest:
+      type: object
+      required: [amount, currency, referenceId, description]
+      properties:
+        amount:
+          type: number
+        currency:
+          type: string
+        referenceId:
+          type: string
+        description:
+          type: string
+
+    InitializeBalanceRequest:
+      type: object
+      required: [currency]
+      properties:
+        currency:
+          type: string
+        initialAmount:
+          type: number
+          default: 0
+
+    ReconciliationReport:
+      type: object
+      description: >-
+        One ADR-0039 Phase A reconciliation run — per-currency tie-out of the ledger deposit-control
+        balance against the sum of balance-service booked balances.
+      properties:
+        asOf:
+          type: string
+          format: date
+        generatedAt:
+          type: string
+          format: date-time
+        tolerance:
+          type: number
+          description: Absolute difference tolerated before a currency is flagged as drifted.
+        hasDrift:
+          type: boolean
+          description: True when any currency drifted beyond tolerance — the alerting signal.
+        driftedCurrencies:
+          type: array
+          items:
+            type: string
+        currencies:
+          type: array
+          items:
+            $ref: '#/components/schemas/CurrencyReconciliation'
+
+    CurrencyReconciliation:
+      type: object
+      properties:
+        currency:
+          type: string
+        ledgerControlBalance:
+          type: number
+          description: Ledger deposit-control credit-normal balance (credit − debit) for the currency.
+        subLedgerBookedSum:
+          type: number
+          description: Sum of balance-service booked amounts across all accounts in the currency.
+        difference:
+          type: number
+          description: subLedgerBookedSum − ledgerControlBalance; zero (within tolerance) means agreement.
+        withinTolerance:
+          type: boolean
+
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string

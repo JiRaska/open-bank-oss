@@ -1,0 +1,284 @@
+# 31. AI agent governance and operations: agents-as-code, policy-gated MCP, human-in-the-loop, AI-attributed audit
+
+Date: 2026-05-30
+Status: Accepted
+Author(s): jiri.raska
+
+> **Ratification (2026-06-10).** The load-bearing controls are in place and deployed, so the
+> decision is ratified and the phasing (D9) becomes the execution plan:
+> - **D1** — agents-as-code: canonical `openbank-libs/governance/agents.yaml` charters consumed by
+>   both the OPA bundle and the runtime; `CharterRegistry` + `CharterRateLimiter` in service.
+> - **D2** — policy-gated MCP: `OpaPolicyDecisionPoint` + `agents.rego` (deny-by-default PEP) on
+>   every `tools/call`. Sidecar **enforcement** wiring is the open tail (PR #638) — until it lands
+>   the gate runs `advisory` per D9 phase 1.
+> - **D4** — human-in-the-loop: proposal queue + admin-UI approvals shipped (#657).
+> - Read-only MCP oversight tools across 7 domains (#639); `agent-service` deployed at v1.6.0.
+>
+> Ratification does **not** widen blast radius: agents stay `advisory` + proposal-only until the D9
+> gates flip. Acceptance unblocks the remaining tail — enforcement (D2 sidecar), the oversight
+> trigger (D9 phase 2), AI-attributed tool-execution audit (D5), and the AGPL agent-runtime repo
+> (D8, issue #224) — without re-litigating the decision each time.
+
+## Context
+
+OpenBank already has the load-bearing pieces for AI agents but no decision that ties them into a
+governed system:
+
+- An **MCP endpoint** exists (`openbank-agent-service`, JSON-RPC 2.0 at `/mcp`, `tools/list` +
+  `tools/call` via `McpToolRegistry`) — but every tool is reachable by anyone who can call it; there is
+  no per-agent authorization, no least-privilege tool catalog, no kill switch.
+- The **audit envelope** (`openbank-libs/audit/AuditEvent`) already models `actorType`, `actorId`,
+  `operation`, `result`, `traceId` and a sanitized payload, mapped to GDPR Art. 30 / DORA Art. 17 — but
+  nothing emits an AI actor, captures the model id, the prompt hash, or the policy decision behind an
+  action.
+- **Governance is already code** (`rules.yaml`, ADR-0029): money-path services, coverage floors, vuln
+  SLAs, the "change X ⇒ require Y" rules. **OPA/Rego is already an accepted policy engine** (ADR-0018,
+  sidecar per service) and is reused as admission control (ADR-0030 D4). Yet no policy describes what an
+  *agent* may do.
+- **Skills** (`/ship-check`, `/bump`, `/open-pr`, `/release`) already encapsulate the recurring
+  engineering workflow and mirror the CI gates — the natural action surface for a development agent.
+- The release **evidence bundle** already reserves an `ai_attribution` field (ADR-0029 D6) that is today
+  empty.
+
+What is missing is the **governing decision**: who the agents are, what each may see and do, where a
+human must decide, and how every agent action becomes tamper-evident audit. Two distinct agent
+populations are in scope and must share one governed substrate rather than fork into two systems:
+
+1. **Control / oversight agents** — business & risk roles that watch the *running bank* (AML/sanctions
+   signals, ledger integrity, vuln-SLA breaches, SLOs) and produce **proposals**, never direct action on
+   money. A human assigns work and approves outcomes through the admin UI.
+2. **Development / domain agents** — one agent per bounded context that maintains *its own services* by
+   following the existing skills, `rules.yaml` and ADRs: drafts ADRs, opens PRs. Merge stays human.
+
+The new regulatory driver is the **EU AI Act**: AI used for creditworthiness assessment is high-risk
+(Annex III), which mandates human oversight, record-keeping, transparency and logging. These are exactly
+the human-in-the-loop and immutable-audit controls below — they are not optional ergonomics, they are the
+compliance surface. DORA treats the agent runtime as an ICT component; GDPR/PSD2/CNB apply unchanged.
+
+Status legend: 🟢 GREEN = built + tested; 🟡 YELLOW = scaffolded; ⬜ PLANNED = scoped here.
+
+## Decision
+
+We will run AI agents as **governed, least-privilege workloads** whose every action passes through the
+**same governance gates as a human** (PR → CI gates → OPA policy → required approvals) and is recorded as
+**AI-attributed audit**. The governing principle:
+
+> **Agents propose; governance disposes. An agent never holds more privilege than a human — it holds
+> less.** An agent is just another `actor` in the audit envelope (`actorType = AI_AGENT`).
+
+### D1 — Agents as code: `agents.yaml` + per-agent charter
+
+- A new machine-readable **`openbank-libs/governance/agents.yaml`** (sibling of `rules.yaml`, same
+  authoritative-source convention) declares every agent's **charter** answering five questions:
+  *plane* (control | development), *data scope* (what it may read, PII masked via existing `PiiMasking`),
+  *tools* (which MCP tools it may call — allow/deny), *requires_human* (what must be approved), and
+  *limits* (token/run budgets, kill switch).
+- `agents.yaml` consumes `rules.yaml` (money_path_services, review approvals, vuln SLAs) as input so agent
+  policy cannot drift from governance. ⬜ PLANNED.
+
+### D2 — Policy-gated MCP: OPA in front of every `tools/call`
+
+- The MCP endpoint becomes a **policy enforcement point**: before dispatching any `tools/call`, it queries
+  OPA (`/v1/data/openbank/agents/allow`) with `{ agent, tool, resource, plane, attributes }`. Deny is the
+  default; an allow requires a matching rule. Reuses the ADR-0018 OPA deployment and Rego bundle — **no
+  new policy engine**.
+- The MCP **tool catalog is tiered**: `read` (query ledger read-only, read catalog/logs — PII masked),
+  `write-proposal` (draft ticket, open PR, draft ADR), and a hard-`deny` tier (move money, approve/merge
+  own PR, read raw secrets). Forbidden tools are never registered for an agent identity. ⬜ PLANNED.
+
+### D3 — Verifiable agent identity and least privilege
+
+- Each agent runs as an in-cluster workload (consistent with ADR-0027) with a **SPIFFE/SPIRE workload
+  identity**. Signing material is a **short-TTL SVID / ephemeral credential issued per run**, not a
+  long-lived key sitting in the agent's reach — a compromised agent must not be able to mint validly
+  signed malicious commits indefinitely (the signing root stays in Vault, ADR-0017; the agent never holds
+  it). This gives non-repudiation — an action traces to a specific agent identity, not a shared account.
+- Segregation of duties is enforced in policy: a development agent may *open* a PR but may not *merge* or
+  *approve* it; an author identity ≠ an approver identity. ⬜ PLANNED.
+
+### D4 — Human-in-the-loop, two channels
+
+- **Development plane** reuses the existing HITL: GitHub PR + CODEOWNERS + branch protection. Agents work
+  **only through skills** (`/ship-check`, `/bump`, `/open-pr`, `/release`) — the skills already mirror the
+  CI gates, so an agent that uses them inherits governance for free. Money-path merge still needs **2
+  human approvals + threat model** (ADR-0030 D2). New ADRs are drafted `Status: Proposed`; a human accepts.
+- **Control plane** adds a lightweight **approval queue** surfaced in the admin UI governance view (the
+  same place vuln SLAs and coverage already surface, ADR-0029 D3 / ADR-0030 D1): the agent writes a
+  proposal, a human approves/rejects **with a recorded reason**, and only then may any downstream action
+  run. A human can also **assign work** to an agent from this view. ⬜ PLANNED.
+
+### D5 — AI-attributed, tamper-evident audit
+
+- The existing `AuditEvent` is emitted for every agent action with `actorType = AI_AGENT` and a payload
+  carrying `model_id`, `model_version`, `prompt_hash`, `tool_calls[]`, `policy_decision` (ALLOW/DENY),
+  and — for approved proposals — `human_approver` and `reason`. No new audit infrastructure; new fields in
+  the sanitized payload only.
+- Events flow over the existing `audit-events-out` Kafka channel to an append-only store; the chain is
+  made **tamper-evident** by hash-chaining and cosign (reusing ADR-0029/0030 signing). This populates the
+  hitherto-empty `ai_attribution` field of the release evidence bundle (ADR-0029 D6). 🟡 audit envelope
+  exists; ⬜ AI fields + tamper-evidence PLANNED.
+
+### D6 — Open, model-agnostic technology stack
+
+The runtime is assembled from open components, all in-cluster (ADR-0027), with **no dependency on any
+single vendor's agent SDK** — tools via MCP, policy via Rego, models via a gateway:
+
+- **Durable orchestration: Temporal.** An agent is a **durable, replayable workflow**, not a fire-and-
+  forget script: every step (LLM call, tool call, approval wait) is a persisted event with full history.
+  LLM calls are Temporal activities (retry, timeout, compensation). This makes the *envelope* around the
+  non-deterministic LLM deterministic and reconstructable — the single biggest banking-grade lift, and the
+  audit substrate DORA Art. 17 wants.
+- **Reasoning loop: LangGraph** (or equivalent) as the agent state graph, executed as Temporal activities.
+- **Model serving: hybrid via gateway.** **vLLM** serves self-hosted open-weight models for sensitive /
+  air-gapped / data-residency work; a capable hosted model (Anthropic API) handles general reasoning;
+  both sit behind an open **LLM gateway (LiteLLM)**. The gateway is a **trust boundary and must be HA** —
+  it sees every (masked) prompt and is in the path of every action; it is not a single point of failure.
+  Sensitive-data routing pins to the self-hosted tier.
+- **Guardrails (input + output): Llama Guard / NeMo Guardrails + a prompt-injection filter** in front of
+  the reasoning loop — see the prompt-injection risk in Consequences. All data an agent *reads* is treated
+  as untrusted, with instruction/data separation.
+- **Memory / RAG: pgvector** (reuses Postgres) to ground agents in `rules.yaml`, ADRs and code.
+- **LLM observability: Langfuse** (self-hostable) on top of OpenTelemetry (ADR-0008) — prompt/response
+  tracing, eval, cost, and the approval-without-edit metric that detects rubber-stamping (Consequences).
+- **Identity: SPIFFE/SPIRE** (D3); **policy: OPA/Rego** (D2); **tools: MCP** (existing). ⬜ PLANNED.
+
+### D7 — Observability, budgets, kill switch
+
+- Every agent run is an OpenTelemetry trace (ADR-0008; `CorrelationIdFilter` already provides the
+  correlation id used as `traceId`). Per-agent **token/cost budgets** and **run quotas** from `agents.yaml`
+  are enforced at the gateway, and a per-agent and global **kill switch** halts agents without a redeploy.
+  ⬜ PLANNED.
+
+### D8 — Licensing and IP strategy (deviates from MPL-2.0)
+
+The agent component is the part of OpenBank we intend to **commercialize**, so it does **not** ship under
+the repo-wide MPL-2.0 (ADR-0012). We will:
+
+- License the agent component under **AGPL-3.0** — the network/SaaS copyleft is the moat: a competitor who
+  runs it as a service must publish their modifications, which blocks silent strip-mining.
+- Offer a parallel **commercial license** (open-core / dual-licensing). AGPL alone is still free software
+  and does not by itself generate revenue; the revenue lever is selling a commercial exception + closed
+  enterprise features on top.
+- This dual-license requires that the project **own the copyright in all contributions**, so the agent
+  component switches from the repo's **DCO to a CLA**. This is itself an amendment to **ADR-0012** and must
+  be recorded there, scoped to this component only.
+- The agent component lives in a **separate repository / module with its own LICENSE and CLA**, not mixed
+  into the MPL services. `rules.yaml`'s `license_denylist` (which lists AGPL-3.0 as incompatible with
+  MPL-2.0 *in the same file*) gets an explicit, documented **carve-out** for this component so governance
+  and reality agree. Combining AGPL agent code with MPL `openbank-libs` is one-directional and acceptable
+  (MPL files stay MPL; the conveyed agent work is AGPL); the carve-out makes that intentional, not a leak.
+
+**Seam (resolved 2026-06-01):** the MPL/AGPL boundary is the **`ModelProvider` port** in
+`openbank-agent-service`. The MPL monorepo keeps only the **governance plumbing** that belongs in a
+banking codebase — the model gateway *port*, the OPA policy gate, AI-attributed audit, the `agents.yaml`
+charters, and reference/mock provider adapters. The **commercialised agent runtime** — autonomous
+multi-step orchestration and proprietary model adapters — is implemented behind that port in the
+**separate AGPL-3.0 + CLA repository** and plugged in at deploy time. This keeps the demo
+(provider-agnostic gateway + offline mock, no production runtime) cleanly MPL-2.0 inside the monorepo
+without prejudging the runtime's license, and gives the `license_denylist` carve-out a precise edge to
+sit on: nothing AGPL is conveyed from the monorepo; the AGPL work *consumes* the MPL port, one-directional.
+
+✅ — seam decided and demonstrated (PR #216); separate AGPL repo created: JiRaska/openbank-agent-runtime (AGPL-3.0 + commercial dual-license, CLA, CODEOWNERS scaffold); `license_boundary_exceptions` carve-out added to `rules.yaml`. (Considered and rejected for now: BSL 1.1 / FSL — source-available with direct
+commercial control but not OSI-"open"; revisit if AGPL+dual-license friction proves too high.)
+
+### D9 — Phasing (blast radius increases only as controls land)
+
+1. **Policy skeleton** (D1+D2): `agents.yaml` + Rego, OPA gating `tools/call`, **deny-by-default + audit
+   only** — no agent acts yet.
+2. **Read-only oversight** (control plane): one or two agents (e.g. compliance, SRE-watch) that only read
+   and write proposals to the queue. Fully HITL, near-zero blast radius.
+3. **One development agent on one NON-money-path service**: opens PRs via skills; a human merges.
+4. **Expand** to more domains and, with 2 approvals + threat model, to money-path services.
+5. **Provenance + tamper-evidence** (D5) and EU AI Act technical documentation.
+
+## Alternatives considered
+
+- **Let agents call MCP tools directly without a policy layer.** Pros: simplest, the endpoint exists.
+  Cons: no least privilege, no segregation of duties, no record of *why* an action was permitted — fails
+  DORA/AI Act. Rejected — OPA gating (D2) is the enforcement point, mirroring ADR-0030's "produced but not
+  enforced is theatre".
+- **A bespoke agent permission model in code.** Cons: re-invents what OPA/Rego already does (ADR-0018) and
+  the exact pattern the 2026-05-28 audit punished (`@PermitAll` shortcuts). Rejected — reuse OPA.
+- **Single hosted model, no gateway.** Pros: fastest to build. Cons: vendor lock-in and no path for
+  air-gapped / sovereign data — unacceptable for a bank's reference architecture. Rejected — hybrid via
+  gateway (D6).
+- **Give agents autonomy on money-path with post-hoc review.** Cons: violates the EU AI Act human-
+  oversight requirement and the existing 2-approval money-path rule. Rejected — agents propose, humans
+  dispose (the core principle).
+- **Two separate stacks for oversight vs. development agents.** Cons: duplicates identity, policy, audit;
+  doubles the attack surface. Rejected — one governed substrate, two planes.
+
+## Consequences
+
+**Positive**
+- Every agent action is least-privilege, policy-checked, and recorded with model attribution and the human
+  who approved it — the exact evidence chain DORA / EU AI Act / CNB expect.
+- Reuses existing assets (MCP endpoint, `AuditEvent`, `rules.yaml`, OPA, skills, evidence bundle); little
+  net-new infrastructure, mostly wiring and policy.
+- The empty `ai_attribution` field becomes real data; releases gain provable AI provenance.
+- Model-agnostic by construction — sovereign/air-gapped option without re-architecting.
+
+**Negative**
+- **Prompt injection is the primary residual risk and OPA does not stop it.** An agent that *reads* bank
+  data (transactions, tickets, logs) can ingest adversarial text that hijacks its reasoning into misusing
+  a *permitted* tool. OPA bounds *which* tools, not *whether a permitted tool is used maliciously*.
+  Mitigation (D6): treat all read data as untrusted, instruction/data separation, guardrails + injection
+  filter — defence-in-depth, not elimination.
+- **LLM output is non-deterministic — `prompt_hash` does not buy reproducibility.** The same input need
+  not yield the same action; a regulator expecting reproducible decisions will not get it. Pinned model
+  versions, temperature 0 and full I/O logging narrow this but do not guarantee it. Stated plainly so the
+  ADR does not overclaim.
+- **The approval queue can degrade into rubber-stamping**, hollowing out the very human-oversight control
+  the EU AI Act argument rests on. Must rate-limit proposals, aggregate, and track approval-without-edit
+  rate as a red flag (D6/D7) — same bypass risk as ADR-0030 triage.
+- **Signing-key custody.** Even with short-TTL SVIDs (D3), a compromised agent can sign actions within its
+  credential window; blast radius is bounded by TTL + per-action issuance, not zero.
+- OPA gating adds latency and a hard, fail-closed dependency on the policy bundle; a bad or unavailable
+  bundle blocks all agents (also a DoS surface).
+- The LLM gateway concentrates every (masked) prompt and is in every action path — an availability and
+  data-exposure single point unless HA + sensitive-data routing hold (D6).
+- Dual-licensing requires a CLA and copyright ownership (D8) — contributor friction and an ADR-0012
+  amendment; a wrong carve-out risks licence leakage between AGPL and MPL code.
+
+**Neutral**
+- Agents become first-class `actor`s in the same governance machinery as humans; no parallel rulebook.
+- Reuses ADR-0018 OPA, ADR-0017 Vault, ADR-0027 in-cluster runtime, ADR-0008 OTel; adds Temporal /
+  LangGraph / vLLM+LiteLLM / Langfuse / guardrails / pgvector (D6) — net-new but all open.
+- **EU AI Act scope is per-agent, not blanket.** Devops/oversight agents that only produce proposals are
+  likely *limited/minimal* risk, not Annex III high-risk; only an agent touching a creditworthiness/
+  scoring decision about a person is high-risk. Over-claiming high-risk status manufactures needless
+  compliance burden — classify each agent's charter individually.
+
+## Compliance impact
+
+- PCI DSS: Req. 7 (least privilege) and Req. 10 (audit trail) — agent tool gating + AI-attributed audit.
+- DORA:    Art. 8–10 (ICT risk + change governance for the agent runtime), Art. 17 (incident
+  reconstruction via traceId), Art. 28–30 (the model provider as ICT third party) — directly supported.
+- GDPR:    Art. 30 (records of processing — agent actions in the audit log), Art. 25/32 (PII masking on
+  agent data scope) — supported.
+- PSD2:    SCA/consent paths remain human-gated; agents may propose but not act on money-path.
+- CNB:     supports auditability and operational-resilience expectations for automated decisioning.
+- EU AI Act: classified **per agent**, not blanket (see Consequences). Oversight/devops agents are
+  proposal-only and likely limited/minimal risk. For any agent that touches a high-risk flow (Annex III,
+  e.g. creditworthiness), Art. 14 (human oversight), Art. 12 (record-keeping/logging) and Art. 13
+  (transparency) are implemented by the HITL channels (D4) and AI-attributed audit (D5), and such agents
+  are proposal-only by policy.
+
+## References
+
+- ADR-0002 — Hexagonal architecture (agents act through ports/skills, not around them).
+- ADR-0012 — MPL license + DCO (this ADR deviates: AGPL + CLA for the agent component, D8 — amend there).
+- ADR-0008 — OpenTelemetry (agent-run tracing).
+- ADR-0017 — Secrets via Vault (agent signing-key custody).
+- ADR-0018 — OPA for fine-grained authz (reused as the agent policy engine, deny-by-default).
+- ADR-0027 — Cloud-agnostic in-cluster substrate (where agent workloads + open-weight models run).
+- ADR-0029 — Versioning, release and governance as code (`rules.yaml`, evidence bundle `ai_attribution`).
+- ADR-0030 — Supply-chain security (admission control / OPA pattern reused; "enforce, don't just produce").
+- `openbank-agent-service/.../mcp/McpEndpoint.kt` — the MCP endpoint this ADR turns into a policy enforcement point.
+- `openbank-libs/audit/AuditEvent.kt` — the audit envelope extended with AI attribution.
+- `openbank-libs/governance/rules.yaml` — governance input consumed by `agents.yaml`.
+- `.claude/skills/{ship-check,bump,open-pr,release}` — the development-agent action surface.
+- EU AI Act (Reg. 2024/1689) Annex III, Art. 12–14; NIST AI RMF — external references.
+- Temporal (durable workflow orchestration), LangGraph, vLLM + LiteLLM, Langfuse, Llama Guard /
+  NeMo Guardrails, SPIFFE/SPIRE, pgvector — open runtime components (D6).
+- AGPL-3.0 + commercial dual-licensing, CLA vs DCO — licensing/IP strategy (D8).

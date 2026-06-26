@@ -1,0 +1,269 @@
+# agent-service: the admin-UI AI assistant backend (ADR-0031 D6). A provider-agnostic
+# model gateway + MCP tool registry + policy gate. In the sandbox it runs the free
+# OpenAI-compatible Groq backend (llama-3.3-70b-versatile); the GROQ_API_KEY is synced
+# from Vault by ESO (es-agent-service). It is stateless (no DB, no Kafka): it only reads
+# the banking domain services over their in-cluster ClusterIPs via the MCP tools.
+# OIDC is disabled — the assistant endpoints carry no @RolesAllowed and the only caller
+# is the admin-ui BFF over the in-cluster network. The gate ENFORCES
+# (AGENT_POLICY_ENFORCEMENT=block, ADR-0080 P0): an in-process charter allow-list denies
+# non-charter capabilities locally. This Deployment ALSO runs an OPA sidecar serving the
+# agents.rego bundle over localhost:8181 — the Phase-2 external PDP (ADR-0031 D2). Either
+# way the gate fails *safe*: a PDP connectivity error degrades to advisory (audits, never
+# hard-blocks) so a dead/missing sidecar can't lock the assistant out.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-service
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: agent-service
+    app.kubernetes.io/part-of: platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-service
+        app.kubernetes.io/part-of: platform
+      annotations:
+        # Roll the pod when the OPA policy bundle changes (subPath mounts don't hot-reload).
+        # Must match agent-opa-bundle's openbank.tech/policy-checksum (CI verifies, no drift).
+        openbank.tech/policy-checksum: "8962c9570cf4e465"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent-service
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-agent-service:sandbox-5b32941c
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8109
+            - name: management
+              containerPort: 8085
+          env:
+            # OIDC points at the in-cluster Keycloak (same posture as the other banking
+            # services). Drives BOTH the resource-server validation AND the outbound
+            # oidc-client (client-credentials) the MCP tool clients use to authenticate.
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            # openbank-services client secret — lets the agent mint a client-credentials
+            # token (ROLE_OPERATOR) so its read tools reach the banking services as a
+            # least-privilege service principal. Same Secret as the Groq key.
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: agent-service-secrets
+                  key: OIDC_CLIENT_SECRET
+                  # Optional so a timing gap (key added after deploy) doesn't CrashLoop the
+                  # pod; until the key is present the service token can't be minted and the
+                  # read tools return 401 — no worse than before. Add the key + restart -> real data.
+                  optional: true
+            # ADR-0080 P0 (pentest FIND-S4-05): enforce the policy gate. With the in-process
+            # charter allow-list, a capability outside the ui-assistant charter (e.g. AML reads)
+            # is denied locally — block makes that DENY actually stop the call. Allowed tools whose
+            # only PDP is the (not-yet-deployed) OPA sidecar still proceed: a PDP connectivity error
+            # degrades to advisory, so block does not lock out the assistant.
+            - name: AGENT_POLICY_ENFORCEMENT
+              value: block
+            # ADR-0031 D9 phase 2: the scheduled compliance-officer oversight sweep. Proposal-only
+            # output into the HITL queue; charter-rate-limited to 48 runs/day (every 30 min).
+            - name: AGENT_OVERSIGHT_ENABLED
+              value: "true"
+            # Free OpenAI-compatible backend (Groq).
+            - name: AGENT_DEFAULT_MODEL
+              value: llama-3.3-70b-versatile
+            - name: GROQ_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: agent-service-secrets
+                  key: GROQ_API_KEY
+            # MCP tool backends — in-cluster ClusterIPs. get_account hits account-service
+            # (accounts ns, live); balance via balance-service (balances ns, live).
+            - name: QUARKUS_REST_CLIENT_ACCOUNT_SERVICE_URL
+              value: http://account-service.accounts.svc:8100
+            - name: QUARKUS_REST_CLIENT_BALANCE_SERVICE_URL
+              value: http://balance-service.balances.svc:8103
+            - name: QUARKUS_REST_CLIENT_TRANSACTION_SERVICE_URL
+              value: http://transaction-service.payments.svc:8102
+            # Two more deployed services (real data): product-catalog (public reads) + ledger.
+            - name: QUARKUS_REST_CLIENT_PRODUCT_CATALOG_URL
+              value: http://product-catalog.accounts.svc:8104
+            - name: QUARKUS_REST_CLIENT_LEDGER_SERVICE_URL
+              value: http://ledger-service.ledger.svc:8101
+            # Extended MCP read coverage (aml/sanctions/clearing/sepa-instant are deployed;
+            # fx/interest/dispute are not yet — their tools register and degrade to an honest
+            # "Tool execution failed" until the service is onboarded).
+            - name: QUARKUS_REST_CLIENT_AML_SERVICE_URL
+              value: http://aml-service.aml.svc:8117
+            - name: QUARKUS_REST_CLIENT_SANCTIONS_SERVICE_URL
+              value: http://sanctions-service.sanctions.svc:8123
+            - name: QUARKUS_REST_CLIENT_CLEARING_SERVICE_URL
+              value: http://clearing-service.payments.svc:8124
+            - name: QUARKUS_REST_CLIENT_SEPA_INSTANT_SERVICE_URL
+              value: http://sepa-instant.payments.svc:8127
+            - name: QUARKUS_REST_CLIENT_FX_SERVICE_URL
+              value: http://fx-service.fx.svc:8119
+            - name: QUARKUS_REST_CLIENT_INTEREST_SERVICE_URL
+              value: http://interest-service.interest.svc:8125
+            - name: QUARKUS_REST_CLIENT_DISPUTE_SERVICE_URL
+              value: http://dispute-service.dispute.svc:8135
+            # Observability stack (anonymous in-cluster read) — query.observability.readonly tools.
+            - name: QUARKUS_REST_CLIENT_PROMETHEUS_URL
+              value: http://kube-prometheus-stack-prometheus.observability.svc:9090
+            - name: QUARKUS_REST_CLIENT_LOKI_URL
+              value: http://loki.observability.svc:3100
+            - name: QUARKUS_REST_CLIENT_ALERTMANAGER_URL
+              value: http://kube-prometheus-stack-alertmanager.observability.svc:9093
+            # Proposals store (ADR-0031 D4): single-owner CNPG agent-db in this namespace.
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://agent-db-rw.platform.svc:5432/openbank_agent
+            - name: QUARKUS_DATASOURCE_USERNAME
+              valueFrom: { secretKeyRef: { name: agent-db-app, key: username } }
+            - name: QUARKUS_DATASOURCE_PASSWORD
+              valueFrom: { secretKeyRef: { name: agent-db-app, key: password } }
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+            # Policy decision point: the OPA sidecar in this pod (localhost:8181), serving
+            # the agents.rego bundle (ADR-0031 D2). AGENT_POLICY_ENFORCEMENT=block is already
+            # set above (ADR-0080 P0); the gate degrades to advisory if this PDP is unreachable.
+            - name: QUARKUS_REST_CLIENT_OPA_URL
+              value: http://localhost:8181
+            # ADR-0031 D9 P2 (Refs #703): Kafka event trigger for compliance-officer sweep.
+            # Wakes the oversight sweep immediately when AML/sanctions events arrive, in addition
+            # to the 30-minute scheduler cadence. Topic managed by Strimzi topic operator.
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "openbank-cluster-kafka-bootstrap.messaging.svc:9092"
+            - name: AGENT_OVERSIGHT_KAFKA_ENABLED
+              value: "true"
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+        # OPA policy decision point (ADR-0031 D2 / ADR-0034 pattern). Serves the
+        # agents.rego bundle (agent-opa-bundle ConfigMap) over localhost:8181. The
+        # agent-service policy gate queries data.openbank.agents.decision per tool call.
+        - name: opa
+          image: openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            # Bind on the pod network (was 127.0.0.1) so kubelet httpGet probes can reach
+            # OPA's /health endpoint. OPA has no `health` CLI subcommand (the previous exec
+            # probe `/opa health …` failed with "unknown command", so the sidecar never went
+            # Ready and the whole agent pod was stuck — ADR-0080 P2 fix). The image is scratch
+            # (no shell/wget) so an in-container exec HTTP check isn't possible either.
+            # Reachability is fenced by the agent NetworkPolicy; OPA serves only policy
+            # decisions (data.openbank.agents.decision), no secrets.
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            # OPA writes temp files during bundle load — required with readOnlyRootFilesystem: true.
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: agent-opa-bundle
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-service
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: agent-service
+spec:
+  selector:
+    app.kubernetes.io/name: agent-service
+  ports:
+    - name: http
+      port: 8109
+      targetPort: http

@@ -1,0 +1,995 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.customeredge
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.customeredge.infrastructure.rest.CustomerEdgeResource
+import com.openbank.customeredge.infrastructure.rest.PaymentSessionStore
+import com.openbank.customeredge.infrastructure.rest.UpstreamClient
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
+import jakarta.ws.rs.core.Response
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
+import java.time.Clock
+import java.util.UUID
+
+/**
+ * Unit tests for CustomerEdgeResource business logic (ADR-0069).
+ * Integration tests (endpoint + OIDC) are covered by the @QuarkusTest suite; here
+ * we focus on the party-id claim resolution logic which is purely algorithmic.
+ */
+@Suppress("LargeClass") // one test class mirrors one large resource (CustomerEdgeResource is @Suppress'd too)
+class CustomerEdgeResourceTest {
+
+    // ── read ownership (IDOR guard) for getAccount / getBalance (finding A1) ─
+    // account-service and balance-service scope reads by id only, so the edge must
+    // verify the account belongs to the JWT party before proxying. Mirrors the guard
+    // already applied to transactions/statements/payments.
+
+    private fun resourceFor(upstream: UpstreamClient, callerParty: UUID): CustomerEdgeResource = CustomerEdgeResource(
+        upstream,
+        mockk(relaxed = true),
+        PaymentSessionStore(),
+        mockk(relaxed = true),
+        Clock.systemUTC(),
+    ).apply {
+        jwt = mockk {
+            every { getClaim<String>("party_id") } returns callerParty.toString()
+            every { subject } returns callerParty.toString()
+        }
+        objectMapper = ObjectMapper()
+        accountServiceUrl = "http://account"
+        balanceServiceUrl = "http://balance"
+    }
+
+    private fun accountJson(accountId: UUID, ownerParty: UUID) =
+        Response.ok("""{"id":"$accountId","partyId":"$ownerParty"}""").build()
+
+    @Test
+    fun `getBalance rejects an account owned by another party and does not proxy (IDOR guard)`() {
+        val caller = UUID.randomUUID()
+        val other = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/accounts/$acct") }, any()) } returns accountJson(acct, other)
+        val resp = resourceFor(upstream, caller).getBalance(acct)
+        assertThat(resp.status).isEqualTo(403)
+        verify(exactly = 0) { upstream.get(match { it.contains("/balances/") }, any()) }
+    }
+
+    @Test
+    fun `getBalance proxies to balance-service when the account belongs to the caller`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/accounts/$acct") }, any()) } returns accountJson(acct, caller)
+        every { upstream.get(match { it.contains("/balances/$acct") }, any()) } returns
+            Response.ok("""[{"currency":"EUR","amount":"10.00"}]""").build()
+        val resp = resourceFor(upstream, caller).getBalance(acct)
+        assertThat(resp.status).isEqualTo(200)
+        verify { upstream.get(match { it.contains("/balances/$acct") }, any()) }
+    }
+
+    @Test
+    fun `getAccount rejects another party's account and serves the caller's own`() {
+        val caller = UUID.randomUUID()
+        val other = UUID.randomUUID()
+        val mine = UUID.randomUUID()
+        val theirs = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/accounts/$mine") }, any()) } returns accountJson(mine, caller)
+        every { upstream.get(match { it.contains("/accounts/$theirs") }, any()) } returns accountJson(theirs, other)
+        val r = resourceFor(upstream, caller)
+        assertThat(r.getAccount(theirs).status).isEqualTo(403)
+        assertThat(r.getAccount(mine).status).isEqualTo(200)
+    }
+
+    @Test
+    fun `getBalance returns 403 (not 404) for a non-existent account — no existence oracle`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } returns Response.status(404).build()
+        assertThat(resourceFor(upstream, caller).getBalance(acct).status).isEqualTo(403)
+    }
+
+    // ── party_id claim resolution (B1 fix, ADR-0069 §2) ─────────────────────
+
+    @Test
+    fun `party_id claim is preferred over sub when both present`() {
+        val partyId = UUID.randomUUID().toString()
+        val keycloakUuid = UUID.randomUUID().toString()
+        val resolved = CustomerEdgeResource.resolvePartyIdClaim(
+            partyIdClaim = partyId,
+            sub = keycloakUuid,
+        )
+        assertThat(resolved).isEqualTo(partyId)
+    }
+
+    @Test
+    fun `falls back to sub when party_id claim is absent`() {
+        val keycloakUuid = UUID.randomUUID().toString()
+        val resolved = CustomerEdgeResource.resolvePartyIdClaim(
+            partyIdClaim = null,
+            sub = keycloakUuid,
+        )
+        assertThat(resolved).isEqualTo(keycloakUuid)
+    }
+
+    @Test
+    fun `falls back to sub when party_id claim is blank`() {
+        val keycloakUuid = UUID.randomUUID().toString()
+        val resolved = CustomerEdgeResource.resolvePartyIdClaim(
+            partyIdClaim = "  ",
+            sub = keycloakUuid,
+        )
+        assertThat(resolved).isEqualTo(keycloakUuid)
+    }
+
+    @Test
+    fun `returns null when both party_id and sub are absent`() {
+        val resolved = CustomerEdgeResource.resolvePartyIdClaim(
+            partyIdClaim = null,
+            sub = null,
+        )
+        assertThat(resolved).isNull()
+    }
+
+    @Test
+    fun `returns null when both party_id and sub are blank`() {
+        val resolved = CustomerEdgeResource.resolvePartyIdClaim(
+            partyIdClaim = "",
+            sub = "   ",
+        )
+        assertThat(resolved).isNull()
+    }
+
+    // ── transaction-read ownership: account-owner extraction (IDOR guard) ────────
+
+    @Test
+    fun `extracts the owning partyId from an account payload`() {
+        val party = "8044e05a-a93e-4403-a7db-1a7adf01f298"
+        val body = """{"id":"6c2c9c26-5b26-422d-b618-6c407f548d0d","accountNumber":"CZ09...",""" +
+            """"partyId":"$party","currencyCode":"CZK","status":"ACTIVE"}"""
+        assertThat(CustomerEdgeResource.extractOwnerPartyId(body)).isEqualTo(party)
+    }
+
+    @Test
+    fun `owner extraction returns null when no partyId field is present`() {
+        val body = """{"error":"not found"}"""
+        assertThat(CustomerEdgeResource.extractOwnerPartyId(body)).isNull()
+    }
+
+    @Test
+    fun `extracted owner not matching the caller is rejected (IDOR guard)`() {
+        val caller = UUID.randomUUID().toString()
+        val otherOwner = UUID.randomUUID().toString()
+        val body = """{"id":"${UUID.randomUUID()}","partyId":"$otherOwner","status":"ACTIVE"}"""
+        // The edge compares this against the caller's party; a mismatch must NOT be treated as owned.
+        assertThat(CustomerEdgeResource.extractOwnerPartyId(body)).isNotEqualTo(caller)
+    }
+
+    // ── payment-initiation ownership: debtor account parsing (IDOR bypass guard) ──
+
+    private val mapper = com.fasterxml.jackson.databind.ObjectMapper()
+
+    @Test
+    fun `parses the debtorAccountId from a payment-initiation body`() {
+        val debtor = "6c2c9c26-5b26-422d-b618-6c407f548d0d"
+        val body = """{"debtorAccountId":"$debtor","amount":250.00,"currency":"CZK","creditorName":"Alice"}"""
+        assertThat(CustomerEdgeResource.parseDebtorAccountId(mapper, body)).isEqualTo(debtor)
+    }
+
+    @Test
+    fun `parse returns null when debtorAccountId is absent (rejected by the edge)`() {
+        val body = """{"amount":250.00,"currency":"CZK","creditorName":"Alice"}"""
+        assertThat(CustomerEdgeResource.parseDebtorAccountId(mapper, body)).isNull()
+    }
+
+    @Test
+    fun `a duplicate debtorAccountId resolves to the LAST value, matching the upstream parser`() {
+        // Closes the IDOR bypass: the edge must ownership-check the same value the upstream uses.
+        val own = "6c2c9c26-5b26-422d-b618-6c407f548d0d"
+        val victim = "11111111-2222-3333-4444-555555555555"
+        val body = """{"debtorAccountId":"$own","amount":1,"currency":"CZK","debtorAccountId":"$victim"}"""
+        assertThat(CustomerEdgeResource.parseDebtorAccountId(mapper, body)).isEqualTo(victim)
+    }
+
+    @Test
+    fun `injectField overwrites a field and keeps nested objects valid`() {
+        val jwtParty = "8044e05a-a93e-4403-a7db-1a7adf01f298"
+        // Body with a NESTED object (dynamicLinkingData) and a spoofed partyId.
+        val body = """{"purpose":"PAYMENT_INITIATION","partyId":"spoofed",""" +
+            """"dynamicLinkingData":{"amount":"250.00","currency":"CZK"}}"""
+        val out = CustomerEdgeResource.injectField(mapper, body, "partyId", jwtParty)!!
+        val node = mapper.readTree(out)
+        assertThat(node.get("partyId").asText()).isEqualTo(jwtParty) // JWT value wins
+        assertThat(node.get("dynamicLinkingData").get("amount").asText()).isEqualTo("250.00") // nested preserved
+    }
+
+    @Test
+    fun `device registration partyId injection keeps a nested-object body valid JSON`() {
+        // registerDevice (POST /devices): the OLD string-surgery (body.trimEnd('}') + ...) corrupted a
+        // body whose LAST field is a nested object — it appended after the inner brace, producing
+        // invalid JSON. Jackson injection must preserve the nesting and overwrite any client partyId.
+        val jwtParty = "8044e05a-a93e-4403-a7db-1a7adf01f298"
+        val body = """{"platform":"FCM","token":"abc123","partyId":"spoofed",""" +
+            """"clientMeta":{"appVersion":"1.2.0","osVersion":"iOS 17.4"}}"""
+        val out = CustomerEdgeResource.injectField(mapper, body, "partyId", jwtParty)!!
+        val node = mapper.readTree(out)
+        assertThat(node.get("partyId").asText()).isEqualTo(jwtParty) // JWT value wins
+        assertThat(node.get("token").asText()).isEqualTo("abc123") // scalars preserved
+        assertThat(node.get("clientMeta").get("osVersion").asText()).isEqualTo("iOS 17.4") // nested preserved
+    }
+
+    @Test
+    fun `onboarding account partyId injection keeps a nested-object body valid JSON`() {
+        // openAccount (POST /onboarding/account): same corruption class — a body ending in a nested
+        // object (e.g. accountPreferences) would be mangled by string surgery. partyId comes from the
+        // JWT, never the body (IDOR prevention), so a client-supplied value must be overwritten.
+        val jwtParty = "8044e05a-a93e-4403-a7db-1a7adf01f298"
+        val body = """{"productId":"CURRENT_EUR","accountType":"CURRENT","partyId":"spoofed",""" +
+            """"accountPreferences":{"statementChannel":"PUSH","currencyCode":"EUR"}}"""
+        val out = CustomerEdgeResource.injectField(mapper, body, "partyId", jwtParty)!!
+        val node = mapper.readTree(out)
+        assertThat(node.get("partyId").asText()).isEqualTo(jwtParty) // JWT value wins
+        assertThat(node.get("accountType").asText()).isEqualTo("CURRENT") // scalars preserved
+        assertThat(node.get("accountPreferences").get("currencyCode").asText()).isEqualTo("EUR") // nested preserved
+    }
+
+    @Test
+    fun `injectField returns null on a malformed (non-object) body so the route can reject it`() {
+        // Both routes treat a null from injectField as a malformed body and reject (4xx) rather than
+        // forwarding a corrupt payload upstream.
+        assertThat(CustomerEdgeResource.injectField(mapper, "not json", "partyId", "x")).isNull()
+        assertThat(CustomerEdgeResource.injectField(mapper, """["a","b"]""", "partyId", "x")).isNull()
+    }
+
+    // ── statement render: currency + format allow-lists (deny-by-default) ────────
+
+    @Test
+    fun `valid 3-letter uppercase currency passes the render guard`() {
+        assertThat(CustomerEdgeResource.isValidCurrency("CZK")).isTrue()
+        assertThat(CustomerEdgeResource.isValidCurrency("EUR")).isTrue()
+    }
+
+    @Test
+    fun `malformed currency is rejected (blocks path injection)`() {
+        assertThat(CustomerEdgeResource.isValidCurrency("czk")).isFalse() // lowercase
+        assertThat(CustomerEdgeResource.isValidCurrency("CZ")).isFalse() // too short
+        assertThat(CustomerEdgeResource.isValidCurrency("CZKK")).isFalse() // too long
+        assertThat(CustomerEdgeResource.isValidCurrency("../")).isFalse() // traversal attempt
+        assertThat(CustomerEdgeResource.isValidCurrency("C K")).isFalse() // space
+    }
+
+    @Test
+    fun `format allow-list normalises known formats and defaults blank to PDF`() {
+        assertThat(CustomerEdgeResource.normalizeStatementFormat(null)).isEqualTo("PDF")
+        assertThat(CustomerEdgeResource.normalizeStatementFormat("")).isEqualTo("PDF")
+        assertThat(CustomerEdgeResource.normalizeStatementFormat("pdf")).isEqualTo("PDF")
+        assertThat(CustomerEdgeResource.normalizeStatementFormat("camt_053")).isEqualTo("CAMT_053")
+        assertThat(CustomerEdgeResource.normalizeStatementFormat("camt053")).isEqualTo("CAMT_053")
+        assertThat(CustomerEdgeResource.normalizeStatementFormat(" MT940 ")).isEqualTo("MT940")
+    }
+
+    @Test
+    fun `format allow-list rejects anything unknown (route returns 400)`() {
+        assertThat(CustomerEdgeResource.normalizeStatementFormat("xml")).isNull()
+        assertThat(CustomerEdgeResource.normalizeStatementFormat("../etc/passwd")).isNull()
+        assertThat(CustomerEdgeResource.normalizeStatementFormat("PDF;rm -rf")).isNull()
+    }
+
+    // ── domestic-payment enrichment: IBAN→BBAN, creditor parse, request build ────
+
+    @Test
+    fun `czech IBAN splits into account number and bank code`() {
+        // CZ65 0800 0000 1920 0014 5399 → bank 0800, prefix 000019 (→19), base 2000145399
+        val parsed = CustomerEdgeResource.czechIbanToBban("CZ6508000000192000145399")
+        assertThat(parsed).isEqualTo("19-2000145399" to "0800")
+    }
+
+    @Test
+    fun `czech IBAN with zero prefix drops the prefix`() {
+        // bank 2010, prefix 000000 → dropped, base 0000200145 → 200145
+        val parsed = CustomerEdgeResource.czechIbanToBban("CZ6520100000000000200145")
+        assertThat(parsed?.second).isEqualTo("2010")
+        assertThat(parsed?.first).doesNotContain("-") // no prefix segment
+    }
+
+    @Test
+    fun `non-czech or malformed IBAN is rejected`() {
+        assertThat(CustomerEdgeResource.czechIbanToBban("DE89370400440532013000")).isNull() // not CZ
+        assertThat(CustomerEdgeResource.czechIbanToBban("CZ6508")).isNull() // too short
+        assertThat(CustomerEdgeResource.czechIbanToBban("CZXX08000000192000145399")).isNull() // non-digit
+    }
+
+    @Test
+    fun `creditor account parses number and 4-digit bank code`() {
+        assertThat(CustomerEdgeResource.parseCreditorAccount("2000145399/0800")).isEqualTo("2000145399" to "0800")
+        assertThat(CustomerEdgeResource.parseCreditorAccount(" 19-2000145399 / 0800 ")).isEqualTo(
+            "19-2000145399" to "0800",
+        )
+    }
+
+    @Test
+    fun `malformed creditor account is rejected`() {
+        assertThat(CustomerEdgeResource.parseCreditorAccount("2000145399")).isNull() // no bank
+        assertThat(CustomerEdgeResource.parseCreditorAccount("2000145399/080")).isNull() // bank not 4 digits
+        assertThat(CustomerEdgeResource.parseCreditorAccount("../etc/0800")).isNull() // injection-ish
+        assertThat(CustomerEdgeResource.parseCreditorAccount("2000145399/08AB")).isNull() // non-digit bank
+    }
+
+    @Test
+    fun `creditor account accepts Czech IBAN as fallback`() {
+        // IBAN CZ6508000000192000145399 → 19-2000145399/0800
+        assertThat(CustomerEdgeResource.czechIbanToBban("CZ6508000000192000145399"))
+            .isEqualTo("19-2000145399" to "0800")
+        // IBAN-only string that parseCreditorAccount rejects → czechIbanToBban kicks in
+        assertThat(CustomerEdgeResource.parseCreditorAccount("CZ6508000000192000145399")).isNull()
+        assertThat(CustomerEdgeResource.czechIbanToBban("CZ6508000000192000145399")).isNotNull()
+    }
+
+    @Test
+    fun `buildDomesticRequest enriches the lightweight body into the full instruction`() {
+        val app = """{"debtorAccountId":"ignored","amount":"250.00","currency":"CZK",""" +
+            """"creditorAccountNumber":"2000145399/0800","creditorName":"Alice Novak",""" +
+            """"variableSymbol":"1234567890","reference":"Faktura 5"}"""
+        val out = CustomerEdgeResource.buildDomesticRequest(
+            mapper,
+            app,
+            "6c2c9c26-5b26-422d-b618-6c407f548d0d",
+            "19-2000145399",
+            "2010",
+            "Bob Dluznik",
+            "2000145399",
+            "0800",
+        )!!
+        val node = mapper.readTree(out)
+        assertThat(node.get("debtorAccountNumber").asText()).isEqualTo("19-2000145399")
+        assertThat(node.get("debtorBankCode").asText()).isEqualTo("2010")
+        assertThat(node.get("debtorName").asText()).isEqualTo("Bob Dluznik")
+        assertThat(node.get("creditorAccountNumber").asText()).isEqualTo("2000145399")
+        assertThat(node.get("creditorBankCode").asText()).isEqualTo("0800")
+        assertThat(node.get("creditorName").asText()).isEqualTo("Alice Novak")
+        assertThat(node.get("amount").decimalValue()).isEqualByComparingTo(java.math.BigDecimal("250.00"))
+        assertThat(node.get("amount").isNumber).isTrue() // emitted as a JSON number, not a string
+        assertThat(node.get("variableSymbol").asText()).isEqualTo("1234567890")
+        assertThat(node.get("messageForPayee").asText()).isEqualTo("Faktura 5")
+        assertThat(node.get("priority").asText()).isEqualTo("STANDARD")
+        assertThat(node.has("specificSymbol")).isFalse() // absent optional not emitted
+    }
+
+    @Test
+    fun `buildDomesticRequest returns null when a required field is missing`() {
+        assertThat(
+            CustomerEdgeResource.buildDomesticRequest(
+                mapper,
+                """{"creditorName":"A"}""",
+                "d",
+                "da",
+                "db",
+                "dn",
+                "ca",
+                "cb",
+            ),
+        ).isNull() // no amount
+        assertThat(
+            CustomerEdgeResource.buildDomesticRequest(
+                mapper,
+                """{"amount":"10.00"}""",
+                "d",
+                "da",
+                "db",
+                "dn",
+                "ca",
+                "cb",
+            ),
+        ).isNull() // no creditorName
+    }
+
+    @Test
+    fun `buildDomesticRequest forwards priority from body (URGENT, INSTANT, unknown defaults to STANDARD)`() {
+        fun build(priorityField: String?) = CustomerEdgeResource.buildDomesticRequest(
+            mapper,
+            """{"amount":"10.00","creditorName":"A"${priorityField?.let { ""","priority":"$it"""" } ?: ""}}""",
+            "d",
+            "da",
+            "db",
+            "dn",
+            "ca",
+            "cb",
+        )!!.let { mapper.readTree(it).get("priority").asText() }
+
+        assertThat(build("URGENT")).isEqualTo("URGENT")
+        assertThat(build("INSTANT")).isEqualTo("INSTANT")
+        assertThat(build("STANDARD")).isEqualTo("STANDARD")
+        assertThat(build(null)).isEqualTo("STANDARD") // absent → default
+        assertThat(build("INVALID")).isEqualTo("STANDARD") // unknown → default
+    }
+
+    @Test
+    fun `buildSepaRequest enriches the lightweight body (IBAN-native, type SCT)`() {
+        val app = """{"debtorAccountId":"ignored","amount":"120.00","currency":"EUR",""" +
+            """"creditorIban":"DE89370400440532013000","creditorName":"Hans Muller",""" +
+            """"creditorBic":"COBADEFFXXX","reference":"Invoice 42"}"""
+        val out = CustomerEdgeResource.buildSepaRequest(
+            mapper,
+            app,
+            "6c2c9c26-5b26-422d-b618-6c407f548d0d",
+            "CZ6508000000192000145399",
+            "Bob Platce",
+        )!!
+        val node = mapper.readTree(out)
+        assertThat(node.get("type").asText()).isEqualTo("SCT")
+        assertThat(node.get("debtorIban").asText()).isEqualTo("CZ6508000000192000145399")
+        assertThat(node.get("debtorName").asText()).isEqualTo("Bob Platce")
+        assertThat(node.get("creditorIban").asText()).isEqualTo("DE89370400440532013000")
+        assertThat(node.get("creditorName").asText()).isEqualTo("Hans Muller")
+        assertThat(node.get("creditorBic").asText()).isEqualTo("COBADEFFXXX")
+        assertThat(node.get("amount").decimalValue()).isEqualByComparingTo(java.math.BigDecimal("120.00"))
+        assertThat(node.get("amount").isNumber).isTrue()
+        assertThat(node.get("currency").asText()).isEqualTo("EUR")
+        assertThat(node.get("remittanceInfo").asText()).isEqualTo("Invoice 42")
+    }
+
+    @Test
+    fun `buildSepaRequest returns null when creditorIban or amount is missing`() {
+        assertThat(
+            CustomerEdgeResource.buildSepaRequest(
+                mapper,
+                """{"amount":"10.00","creditorName":"X"}""",
+                "d",
+                "di",
+                "dn",
+            ),
+        ).isNull() // no creditorIban
+        assertThat(
+            CustomerEdgeResource.buildSepaRequest(
+                mapper,
+                """{"creditorIban":"DE89","creditorName":"X"}""",
+                "d",
+                "di",
+                "dn",
+            ),
+        ).isNull() // no amount
+    }
+
+    // ── upstream query building: cursor injection guard ─────────────────────────
+
+    @Test
+    fun `query carries the verified accountId, limit and an absent cursor`() {
+        val accountId = UUID.randomUUID()
+        val q = CustomerEdgeResource.buildTransactionsQuery(accountId, 20, null)
+        assertThat(q).isEqualTo("?accountId=$accountId&limit=20")
+    }
+
+    @Test
+    fun `a cursor that tries to inject a second accountId is URL-encoded, not appended raw`() {
+        val accountId = UUID.randomUUID()
+        val victim = UUID.randomUUID()
+        val q = CustomerEdgeResource.buildTransactionsQuery(accountId, 20, "abc&accountId=$victim")
+        // Exactly one accountId param (the verified one); the injected one is encoded into the cursor.
+        assertThat(q.split("accountId=")).hasSize(2)
+        assertThat(q).doesNotContain("&accountId=$victim")
+        assertThat(q).contains("%26accountId%3D") // & and = encoded
+    }
+
+    // ── own-account transfers (POST /transfers) ─────────────────────────────────
+
+    private fun transferResourceFor(upstream: UpstreamClient, callerParty: UUID): CustomerEdgeResource =
+        resourceFor(upstream, callerParty).apply {
+            transactionServiceUrl = "http://tx"
+        }
+
+    private fun transferBody(src: UUID, dst: UUID, amount: String = "250.00") =
+        """{"sourceAccountId":"$src","targetAccountId":"$dst","amount":"$amount","currency":"CZK"}"""
+
+    @Test
+    fun `createTransfer rejects a source account owned by another party (IDOR guard)`() {
+        val caller = UUID.randomUUID()
+        val other = UUID.randomUUID()
+        val src = UUID.randomUUID()
+        val dst = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/accounts/$src") }, any()) } returns accountJson(src, other)
+        val resp = transferResourceFor(upstream, caller).createTransfer(transferBody(src, dst), null)
+        assertThat(resp.status).isEqualTo(403)
+        verify(exactly = 0) { upstream.post(any(), any(), any()) }
+    }
+
+    @Test
+    fun `createTransfer rejects a target account owned by another party (no cross-party deposits)`() {
+        val caller = UUID.randomUUID()
+        val other = UUID.randomUUID()
+        val src = UUID.randomUUID()
+        val dst = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/accounts/$src") }, any()) } returns accountJson(src, caller)
+        every { upstream.get(match { it.contains("/accounts/$dst") }, any()) } returns accountJson(dst, other)
+        val resp = transferResourceFor(upstream, caller).createTransfer(transferBody(src, dst), null)
+        assertThat(resp.status).isEqualTo(403)
+        verify(exactly = 0) { upstream.post(any(), any(), any()) }
+    }
+
+    @Test
+    fun `createTransfer rejects identical source and target`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val resp = transferResourceFor(upstream, caller).createTransfer(transferBody(acct, acct), null)
+        assertThat(resp.status).isEqualTo(400)
+    }
+
+    @Test
+    fun `createTransfer forwards a TRANSFER saga with the caller's idempotency key when both legs are owned`() {
+        val caller = UUID.randomUUID()
+        val src = UUID.randomUUID()
+        val dst = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/accounts/$src") }, any()) } returns accountJson(src, caller)
+        every { upstream.get(match { it.contains("/accounts/$dst") }, any()) } returns accountJson(dst, caller)
+        var forwarded: String? = null
+        every { upstream.post(match { it.contains("/api/v1/transactions") }, any(), any()) } answers {
+            forwarded = thirdArg()
+            Response.status(201).entity("""{"id":"${UUID.randomUUID()}","status":"COMPLETED"}""").build()
+        }
+
+        val resp = transferResourceFor(upstream, caller)
+            .createTransfer(transferBody(src, dst, amount = "1500.50"), "app-key-1")
+
+        assertThat(resp.status).isEqualTo(201)
+        val node = mapper.readTree(forwarded!!)
+        assertThat(node.get("type").asText()).isEqualTo("TRANSFER")
+        assertThat(node.get("sourceAccountId").asText()).isEqualTo(src.toString())
+        assertThat(node.get("targetAccountId").asText()).isEqualTo(dst.toString())
+        assertThat(node.get("amount").decimalValue()).isEqualByComparingTo(java.math.BigDecimal("1500.50"))
+        assertThat(node.get("currencyCode").asText()).isEqualTo("CZK")
+        assertThat(node.get("idempotencyKey").asText()).isEqualTo("app-key-1")
+        assertThat(node.get("valueDate").asText()).isNotBlank()
+    }
+
+    @Test
+    fun `parseTransferRequest rejects non-positive amounts and malformed ids`() {
+        val src = UUID.randomUUID()
+        val dst = UUID.randomUUID()
+        assertThat(CustomerEdgeResource.parseTransferRequest(mapper, transferBody(src, dst, amount = "0"))).isNull()
+        assertThat(CustomerEdgeResource.parseTransferRequest(mapper, transferBody(src, dst, amount = "-5"))).isNull()
+        assertThat(
+            CustomerEdgeResource.parseTransferRequest(
+                mapper,
+                """{"sourceAccountId":"nonsense","targetAccountId":"$dst","amount":"10"}""",
+            ),
+        ).isNull()
+        assertThat(CustomerEdgeResource.parseTransferRequest(mapper, "not json")).isNull()
+        assertThat(CustomerEdgeResource.parseTransferRequest(mapper, transferBody(src, dst))).isNotNull()
+    }
+
+    // ── SCA settlement gate (ADR-0021): payments only behind a consumed challenge ──
+
+    private fun paymentResourceFor(upstream: UpstreamClient, callerParty: UUID): CustomerEdgeResource =
+        resourceFor(upstream, callerParty).apply {
+            domesticPaymentServiceUrl = "http://dompay"
+            scaServiceUrl = "http://sca"
+            partyServiceUrl = "http://party"
+        }
+
+    private fun domesticBody(debtor: UUID) = """{"debtorAccountId":"$debtor","amount":"250.00","currency":"CZK",""" +
+        """"creditorAccountNumber":"2000145399/0800","creditorName":"Alice"}"""
+
+    private fun stubOwnedCzAccount(upstream: UpstreamClient, caller: UUID, acct: UUID) {
+        every { upstream.get(match { it.contains("/accounts/$acct") }, any()) } returns Response.ok(
+            """{"id":"$acct","partyId":"$caller","accountNumber":"CZ6508000000192000145399"}""",
+        ).build()
+        every { upstream.get(match { it.contains("/parties/$caller") }, any()) } returns Response.ok(
+            """{"id":"$caller","legalName":"Jan Novák"}""",
+        ).build()
+    }
+
+    @Test
+    fun `a domestic payment without an SCA challenge is refused and never reaches the payment rail`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        stubOwnedCzAccount(upstream, caller, acct)
+
+        val resp = paymentResourceFor(upstream, caller).createDomesticPayment(domesticBody(acct), null, null)
+
+        assertThat(resp.status).isEqualTo(403)
+        assertThat(resp.entity.toString()).contains("SCA_REQUIRED")
+        verify(exactly = 0) { upstream.post(match { it.contains("dompay") }, any(), any(), any()) }
+    }
+
+    @Test
+    fun `a domestic payment forwards only after sca-service consumes the challenge for THIS operation`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val challengeId = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        stubOwnedCzAccount(upstream, caller, acct)
+        var consumeBody: String? = null
+        every { upstream.post(match { it.contains("/challenges/$challengeId/consume") }, any(), any()) } answers {
+            consumeBody = thirdArg()
+            Response.ok("""{"id":"$challengeId","status":"COMPLETED"}""").build()
+        }
+        every { upstream.post(match { it.contains("dompay") }, any(), any(), any()) } returns
+            Response.status(201).entity("""{"id":"${UUID.randomUUID()}","status":"RECEIVED"}""").build()
+
+        val resp = paymentResourceFor(upstream, caller)
+            .createDomesticPayment(domesticBody(acct), "key-1", challengeId.toString())
+
+        assertThat(resp.status).isEqualTo(201)
+        // The consume carries exactly the operation being executed (dynamic linking input).
+        val node = mapper.readTree(consumeBody!!)
+        assertThat(node.get("partyId").asText()).isEqualTo(caller.toString())
+        assertThat(node.get("amount").asText()).isEqualTo("250.00")
+        assertThat(node.get("currency").asText()).isEqualTo("CZK")
+        assertThat(node.get("creditor").asText()).isEqualTo("2000145399/0800")
+        verify(exactly = 1) { upstream.post(match { it.contains("dompay") }, any(), any(), any()) }
+    }
+
+    @Test
+    fun `a rejected consume (replay, mismatch, not approved) blocks the payment`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val challengeId = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        stubOwnedCzAccount(upstream, caller, acct)
+        every { upstream.post(match { it.contains("/consume") }, any(), any()) } returns
+            Response.status(409).entity("""{"code":"VALIDATION_ERROR","message":"already consumed"}""").build()
+
+        val resp = paymentResourceFor(upstream, caller)
+            .createDomesticPayment(domesticBody(acct), null, challengeId.toString())
+
+        assertThat(resp.status).isEqualTo(403)
+        assertThat(resp.entity.toString()).contains("SCA_REJECTED")
+        verify(exactly = 0) { upstream.post(match { it.contains("dompay") }, any(), any(), any()) }
+    }
+
+    @Test
+    fun `createTransfer threads the customer identity and the RTS Art 15 exemption to the saga`() {
+        val caller = UUID.randomUUID()
+        val src = UUID.randomUUID()
+        val dst = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/accounts/$src") }, any()) } returns accountJson(src, caller)
+        every { upstream.get(match { it.contains("/accounts/$dst") }, any()) } returns accountJson(dst, caller)
+        var forwarded: String? = null
+        every { upstream.post(match { it.contains("/api/v1/transactions") }, any(), any()) } answers {
+            forwarded = thirdArg()
+            Response.status(201).entity("""{"id":"${UUID.randomUUID()}","status":"COMPLETED"}""").build()
+        }
+
+        transferResourceFor(upstream, caller).createTransfer(transferBody(src, dst), null)
+
+        val node = mapper.readTree(forwarded!!)
+        assertThat(node.get("initiatedByPartyId").asText()).isEqualTo(caller.toString())
+        assertThat(node.get("scaExemption").asText()).isEqualTo("PSD2_RTS_ART15_OWN_ACCOUNT")
+    }
+
+    // ── standing orders (recurring payments) ──
+
+    private fun soResourceFor(upstream: UpstreamClient, callerParty: UUID): CustomerEdgeResource =
+        resourceFor(upstream, callerParty).apply {
+            standingOrderServiceUrl = "http://so"
+        }
+
+    @Test
+    fun `createStandingOrder rejects a debit account owned by another party (IDOR guard)`() {
+        val caller = UUID.randomUUID()
+        val other = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/accounts/$acct") }, any()) } returns accountJson(acct, other)
+        val body = """{"debitAccountId":"$acct","creditorIban":"CZ123","creditorName":"Landlord",""" +
+            """"amountMinorUnits":1500000,"currency":"CZK","frequency":"MONTHLY",""" +
+            """"paymentType":"DOMESTIC","startDate":"2026-07-01"}"""
+        val resp = soResourceFor(upstream, caller).createStandingOrder(body, null)
+        assertThat(resp.status).isEqualTo(403)
+        verify(exactly = 0) { upstream.post(match { it.contains("/standing-orders") }, any(), any()) }
+    }
+
+    @Test
+    fun `createStandingOrder injects partyId and an idempotency key for an owned account`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/accounts/$acct") }, any()) } returns accountJson(acct, caller)
+        var forwarded: String? = null
+        every { upstream.post(match { it.contains("/api/v1/standing-orders") }, any(), any()) } answers {
+            forwarded = thirdArg()
+            Response.status(201).entity("""{"id":"${UUID.randomUUID()}","status":"ACTIVE"}""").build()
+        }
+        val body = """{"debitAccountId":"$acct","creditorIban":"CZ123","creditorName":"Landlord",""" +
+            """"amountMinorUnits":1500000,"currency":"CZK","frequency":"MONTHLY",""" +
+            """"paymentType":"DOMESTIC","startDate":"2026-07-01"}"""
+        val resp = soResourceFor(upstream, caller).createStandingOrder(body, "idem-1")
+        assertThat(resp.status).isEqualTo(201)
+        val node = mapper.readTree(forwarded!!)
+        assertThat(node.get("partyId").asText()).isEqualTo(caller.toString())
+        assertThat(node.get("idempotencyKey").asText()).isEqualTo("idem-1")
+    }
+
+    @Test
+    fun `pauseStandingOrder refuses an order owned by another party`() {
+        val caller = UUID.randomUUID()
+        val other = UUID.randomUUID()
+        val soId = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/standing-orders/$soId") }, any()) } returns
+            Response.ok("""{"id":"$soId","partyId":"$other","status":"ACTIVE"}""").build()
+        val resp = soResourceFor(upstream, caller).pauseStandingOrder(soId)
+        assertThat(resp.status).isEqualTo(403)
+        verify(exactly = 0) { upstream.post(match { it.contains("/pause") }, any(), any()) }
+    }
+
+    @Test
+    fun `cancelStandingOrder forwards a DELETE for the caller's own order`() {
+        val caller = UUID.randomUUID()
+        val soId = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/standing-orders/$soId") }, any()) } returns
+            Response.ok("""{"id":"$soId","partyId":"$caller","status":"ACTIVE"}""").build()
+        every { upstream.delete(match { it.contains("/standing-orders/$soId") }, any()) } returns
+            Response.noContent().build()
+        val resp = soResourceFor(upstream, caller).cancelStandingOrder(soId)
+        assertThat(resp.status).isEqualTo(204)
+        verify(exactly = 1) { upstream.delete(match { it.contains("/standing-orders/$soId") }, any()) }
+    }
+
+    // ── self-service onboarding (POST /onboarding/register, ADR-0069 Phase 2) ──
+
+    // ── self-service onboarding (POST /onboarding/register, ADR-0069 Phase 2) ──
+
+    @Test
+    fun `registerParty creates the party with id equal to the JWT sub (B1 invariant)`() {
+        val sub = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        var forwarded: String? = null
+        every { upstream.post(match { it.contains("/api/v1/parties") }, any(), any(), any()) } answers {
+            forwarded = thirdArg()
+            Response.status(201)
+                .entity("""{"id":"$sub","status":"PENDING_KYC","legalName":"Jan Novák"}""").build()
+        }
+        val resource = CustomerEdgeResource(
+            upstream,
+            mockk(relaxed = true),
+            PaymentSessionStore(),
+            mockk(relaxed = true),
+            Clock.systemUTC(),
+        ).apply {
+            jwt = mockk {
+                every { getClaim<String>("party_id") } returns null
+                every { subject } returns sub.toString()
+            }
+            objectMapper = ObjectMapper()
+            partyServiceUrl = "http://party"
+        }
+
+        val resp = resource.registerParty("""{"legalName":"Jan Novák","email":"jan@example.cz"}""")
+
+        assertThat(resp.status).isEqualTo(201)
+        val node = mapper.readTree(forwarded!!)
+        assertThat(node.get("id").asText()).isEqualTo(sub.toString())
+        assertThat(node.get("partyType").asText()).isEqualTo("INDIVIDUAL")
+        assertThat(node.get("legalName").asText()).isEqualTo("Jan Novák")
+        assertThat(node.get("email").asText()).isEqualTo("jan@example.cz")
+        assertThat(resp.entity.toString()).contains(""""partyId":"$sub"""")
+    }
+
+    @Test
+    fun `registerParty falls back to the token name and email claims when the body omits them`() {
+        val sub = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        var forwarded: String? = null
+        every { upstream.post(any(), any(), any(), any()) } answers {
+            forwarded = thirdArg()
+            Response.status(201).entity("""{"id":"$sub","status":"PENDING_KYC"}""").build()
+        }
+        val resource = CustomerEdgeResource(
+            upstream,
+            mockk(relaxed = true),
+            PaymentSessionStore(),
+            mockk(relaxed = true),
+            Clock.systemUTC(),
+        ).apply {
+            jwt = mockk {
+                every { getClaim<String>("party_id") } returns null
+                every { subject } returns sub.toString()
+                every { getClaim<String>("name") } returns "Eva Malá"
+                every { getClaim<String>("email") } returns "eva@example.cz"
+            }
+            objectMapper = ObjectMapper()
+            partyServiceUrl = "http://party"
+        }
+
+        val resp = resource.registerParty("{}")
+
+        assertThat(resp.status).isEqualTo(201)
+        val node = mapper.readTree(forwarded!!)
+        assertThat(node.get("legalName").asText()).isEqualTo("Eva Malá")
+        assertThat(node.get("email").asText()).isEqualTo("eva@example.cz")
+    }
+
+    // ── FX rate-sheet projection (kurzovní lístek) ──
+
+    @Test
+    fun `mapFxRate projects a single pair to mid-price with timestamp`() {
+        val upstream = """{"baseCurrency":"EUR","quoteCurrency":"CZK","bidRate":"24.80","askRate":"25.20",
+            "rateType":"SPOT","source":"ECB","validFrom":"2026-06-14T00:00:00Z"}"""
+        val out = mapper.readTree(CustomerEdgeResource.mapFxRate(mapper, upstream, "EUR", "CZK")!!)
+        assertThat(out.get("base").asText()).isEqualTo("EUR")
+        assertThat(out.get("quote").asText()).isEqualTo("CZK")
+        assertThat(out.get("rate").asText()).isEqualTo("25") // (24.80+25.20)/2 = 25.00 → stripped
+        assertThat(out.get("timestamp").asText()).isEqualTo("2026-06-14T00:00:00Z")
+    }
+
+    @Test
+    fun `mapFxRateList projects the rate sheet keeping bid ask and mid`() {
+        val upstream = """[
+            {"baseCurrency":"EUR","quoteCurrency":"CZK","bidRate":"24.80","askRate":"25.20",
+             "validFrom":"2026-06-14T00:00:00Z"},
+            {"baseCurrency":"USD","quoteCurrency":"CZK","bidRate":"22.90","askRate":"23.10",
+             "createdAt":"2026-06-14T12:00:00Z"}
+        ]"""
+        val out = mapper.readTree(CustomerEdgeResource.mapFxRateList(mapper, upstream)!!)
+        assertThat(out.isArray).isTrue()
+        assertThat(out.size()).isEqualTo(2)
+        val eur = out.get(0)
+        assertThat(eur.get("base").asText()).isEqualTo("EUR")
+        assertThat(eur.get("quote").asText()).isEqualTo("CZK")
+        assertThat(eur.get("rate").asText()).isEqualTo("25")
+        assertThat(eur.get("bid").asText()).isEqualTo("24.8")
+        assertThat(eur.get("ask").asText()).isEqualTo("25.2")
+        assertThat(eur.get("timestamp").asText()).isEqualTo("2026-06-14T00:00:00Z")
+        assertThat(out.get(1).get("timestamp").asText()).isEqualTo("2026-06-14T12:00:00Z")
+    }
+
+    @Test
+    fun `mapFxRateList skips rows missing currency or rate but keeps the good ones`() {
+        val upstream = """[
+            {"baseCurrency":"EUR","quoteCurrency":"CZK","bidRate":"24.80","askRate":"25.20"},
+            {"baseCurrency":"GBP"},
+            {"quoteCurrency":"CZK","bidRate":"1.0","askRate":"1.0"}
+        ]"""
+        val out = mapper.readTree(CustomerEdgeResource.mapFxRateList(mapper, upstream)!!)
+        assertThat(out.size()).isEqualTo(1)
+        assertThat(out.get(0).get("base").asText()).isEqualTo("EUR")
+    }
+
+    @Test
+    fun `mapFxRateList returns null on a non-array body`() {
+        assertThat(CustomerEdgeResource.mapFxRateList(mapper, """{"not":"an array"}""")).isNull()
+    }
+
+    @Test
+    fun `mapFxRateList enriches bank rows with CNB reference mid and spreadPct`() {
+        // CNB fixing row (source=CNB) must NOT appear in output; its midRate becomes the reference.
+        // Bank row (source=INTERNAL) must gain refMid and spreadPct = (ask-refMid)/refMid*100.
+        val upstream = """[
+            {"baseCurrency":"EUR","quoteCurrency":"CZK","source":"CNB",
+             "bidRate":"24.90","askRate":"25.10","midRate":"25.00",
+             "validFrom":"2026-06-14T00:00:00Z"},
+            {"baseCurrency":"EUR","quoteCurrency":"CZK","source":"INTERNAL",
+             "bidRate":"24.75","askRate":"25.25","midRate":"25.00",
+             "validFrom":"2026-06-14T00:00:00Z"}
+        ]"""
+        val out = mapper.readTree(CustomerEdgeResource.mapFxRateList(mapper, upstream)!!)
+        assertThat(out.isArray).isTrue()
+        // CNB row must be excluded from the output
+        assertThat(out.size()).isEqualTo(1)
+        val row = out.get(0)
+        assertThat(row.get("base").asText()).isEqualTo("EUR")
+        // refMid comes from the CNB midRate field
+        assertThat(row.get("refMid").asText()).isEqualTo("25")
+        // spreadPct = (ask 25.25 - refMid 25.00) / 25.00 * 100 = 1.00
+        assertThat(row.get("spreadPct").asText()).isEqualTo("1")
+    }
+
+    @Test
+    fun `mapFxRateList omits refMid and spreadPct when no CNB rate is present for the pair`() {
+        val upstream = """[
+            {"baseCurrency":"USD","quoteCurrency":"CZK","source":"INTERNAL",
+             "bidRate":"22.90","askRate":"23.10","validFrom":"2026-06-14T00:00:00Z"}
+        ]"""
+        val out = mapper.readTree(CustomerEdgeResource.mapFxRateList(mapper, upstream)!!)
+        assertThat(out.size()).isEqualTo(1)
+        assertThat(out.get(0).has("refMid")).isFalse()
+        assertThat(out.get(0).has("spreadPct")).isFalse()
+    }
+
+    // --- isValidInstant ---
+
+    @Test
+    fun `isValidInstant accepts a well-formed ISO-8601 instant`() {
+        assertThat(CustomerEdgeResource.isValidInstant("2026-01-15T00:00:00Z")).isTrue()
+        assertThat(CustomerEdgeResource.isValidInstant("2025-06-01T12:30:00.000Z")).isTrue()
+    }
+
+    @Test
+    fun `isValidInstant rejects malformed strings`() {
+        assertThat(CustomerEdgeResource.isValidInstant("not-a-date")).isFalse()
+        assertThat(CustomerEdgeResource.isValidInstant("2026-13-01T00:00:00Z")).isFalse()
+        assertThat(CustomerEdgeResource.isValidInstant("2026-01-01")).isFalse() // date only, not instant
+        assertThat(CustomerEdgeResource.isValidInstant("")).isFalse()
+    }
+
+    // --- fxRateHistory (unit — upstream wiring + param validation) ---
+
+    private fun fxResource(upstream: UpstreamClient, callerParty: UUID): CustomerEdgeResource =
+        CustomerEdgeResource(upstream, mockk(relaxed = true), PaymentSessionStore(), mockk(relaxed = true), Clock.systemUTC()).apply {
+            jwt = mockk {
+                every { getClaim<String>("party_id") } returns callerParty.toString()
+                every { subject } returns callerParty.toString()
+            }
+            objectMapper = ObjectMapper()
+            fxServiceUrl = "http://fx"
+        }
+
+    @Test
+    fun `fxRateHistory returns 400 for invalid currency code`() {
+        val caller = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>(relaxed = true)
+        val resp = fxResource(upstream, caller).fxRateHistory("eur", "CZK", null, null, null, null)
+        assertThat(resp.status).isEqualTo(400)
+    }
+
+    @Test
+    fun `fxRateHistory returns 400 for malformed from instant`() {
+        val caller = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>(relaxed = true)
+        val resp = fxResource(upstream, caller).fxRateHistory("EUR", "CZK", "not-a-date", null, null, null)
+        assertThat(resp.status).isEqualTo(400)
+    }
+
+    @Test
+    fun `fxRateHistory returns 400 for malformed to instant`() {
+        val caller = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>(relaxed = true)
+        val resp = fxResource(upstream, caller).fxRateHistory("EUR", "CZK", null, "bad", null, null)
+        assertThat(resp.status).isEqualTo(400)
+    }
+
+    @Test
+    fun `fxRateHistory builds correct upstream URL without source filter`() {
+        val caller = UUID.randomUUID()
+        val urlSlot = slot<String>()
+        val upstream = mockk<UpstreamClient> {
+            every { get(capture(urlSlot), any()) } returns Response.ok("""[]""").build()
+        }
+        fxResource(upstream, caller).fxRateHistory("EUR", "CZK", null, null, 30, null)
+        assertThat(urlSlot.captured).doesNotContain("source=INTERNAL")
+        assertThat(urlSlot.captured).contains("/api/v1/fx/rates/EUR/CZK/history")
+        assertThat(urlSlot.captured).contains("limit=30")
+    }
+
+    @Test
+    fun `fxRateHistory caps limit at 365`() {
+        val caller = UUID.randomUUID()
+        val urlSlot = slot<String>()
+        val upstream = mockk<UpstreamClient> {
+            every { get(capture(urlSlot), any()) } returns Response.ok("""[]""").build()
+        }
+        fxResource(upstream, caller).fxRateHistory("EUR", "CZK", null, null, 9999, null)
+        assertThat(urlSlot.captured).contains("limit=365")
+    }
+
+    @Test
+    fun `fxRateHistory forwards from and to as encoded params`() {
+        val caller = UUID.randomUUID()
+        val urlSlot = slot<String>()
+        val upstream = mockk<UpstreamClient> {
+            every { get(capture(urlSlot), any()) } returns Response.ok("""[]""").build()
+        }
+        fxResource(
+            upstream,
+            caller,
+        ).fxRateHistory("EUR", "CZK", "2026-01-01T00:00:00Z", "2026-06-01T00:00:00Z", null, null)
+        assertThat(urlSlot.captured).contains("from=")
+        assertThat(urlSlot.captured).contains("to=")
+    }
+}

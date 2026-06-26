@@ -1,0 +1,170 @@
+quarkus:
+  application:
+    name: openbank-sepa-instant
+    version: 0.1.0
+  http:
+    port: 8127
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+      headers: Content-Type,Authorization,Idempotency-Key
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: postgresql://localhost:5432/openbank_sepa_instant
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_sepa_instant
+  flyway:
+    migrate-at-start: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+  hibernate-orm:
+    database:
+      generation: none
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  # Outbound service-to-service token (ADR-0104 D3 / Bug #3): the rest-clients (sanctions, aml,
+  # fraud, clearing-simulator) mint an openbank-services M2M token via this oidc-client. Without
+  # it the default client is "not initialized" → no Authorization header → downstream 401 (the
+  # scheme submission held every payment in VALIDATED). Reuses the resource-server's keycloak URL,
+  # client id and secret. Disabled under %test; the IT enables + stubs it, units use a producer.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+  rest-client:
+    sanctions-service:
+      url: ${SANCTIONS_SERVICE_URL:http://localhost:8123}
+      scope: jakarta.inject.Singleton
+    aml-service:
+      url: ${AML_SERVICE_URL:http://localhost:8117}
+      scope: jakarta.inject.Singleton
+    fraud-service:
+      url: ${FRAUD_SERVICE_URL:http://localhost:8133}
+      scope: jakarta.inject.Singleton
+    clearing-simulator:
+      url: ${CLEARING_SIMULATOR_URL:http://localhost:8139}
+      scope: jakarta.inject.Singleton
+    transaction-service:
+      url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
+      scope: jakarta.inject.Singleton
+  redis:
+    hosts: redis://localhost:6379
+  smallrye-reactive-messaging:
+    kafka:
+      bootstrap-servers: "${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}"
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+    console:
+      json: true
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-sepa-instant
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+mp:
+  messaging:
+    outgoing:
+      sct-inst-events-out:
+        connector: smallrye-kafka
+        client.id: sepa-instant-${quarkus.uuid}
+        topic: openbank.sepa.instant.events
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+    oidc:
+      enabled: false
+"%test":
+  quarkus:
+    oidc:
+      enabled: false
+    oidc-client:
+      enabled: false
+    management:
+      enabled: false
+    devservices:
+      enabled: false
+openbank:
+  bank:
+    # OpenBank's own BIC — used as the debtor agent (DbtrAgt) in the pacs.008 (ADR-0104 D4).
+    bic: ${OPENBANK_BIC:OPBKCZ22}
+  sct-inst:
+    execution-timeout-seconds: 10
+    recall-window-days: 10
+    scheme-submission:
+      # ADR-0104 D4 (SCT Inst). OFF by default: behaviour unchanged (screening → PROCESSING) until on.
+      enabled: ${SCT_INST_SCHEME_SUBMISSION_ENABLED:false}
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 500
+  resilience:
+    circuit-breaker:
+      enabled: true
+      request-volume-threshold: 20
+      failure-ratio: 0.3
+      success-threshold: 10
+      delay-ms: 5000
+    retry:
+      enabled: true
+      max-retries: 2
+      delay-ms: 100
+      jitter-ms: 50
+    timeout:
+      enabled: true
+      value-ms: 10000
+  api:
+    version: "1"
+
+# OPA sidecar (ADR-0034). Advisory mode by default.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:false}"

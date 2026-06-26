@@ -1,0 +1,180 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: Clearing Service API
+  version: 1.0.0
+  description: Payment clearing and settlement — batch submission, cycle triggering, position management.
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8114
+    description: Local development
+tags:
+  - name: Clearing
+
+paths:
+  /api/v1/clearing/submit:
+    post:
+      tags: [Clearing]
+      summary: Submit a payment to clearing
+      operationId: submitToClearing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitPaymentRequest'
+      responses:
+        '200':
+          description: Clearing item created
+
+  /api/v1/clearing/batches:
+    get:
+      tags: [Clearing]
+      summary: List clearing batches
+      operationId: listClearingBatches
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: rail
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of batches
+
+  /api/v1/clearing/batches/{id}:
+    get:
+      tags: [Clearing]
+      summary: Get clearing batch by ID
+      operationId: getClearingBatch
+      parameters:
+        - $ref: '#/components/parameters/batchId'
+      responses:
+        '200':
+          description: Batch detail
+
+  /api/v1/clearing/batches/{id}/items:
+    get:
+      tags: [Clearing]
+      summary: Get items in a clearing batch
+      operationId: getBatchItems
+      parameters:
+        - $ref: '#/components/parameters/batchId'
+      responses:
+        '200':
+          description: Batch items
+
+  /api/v1/clearing/batches/{id}/settle:
+    post:
+      tags: [Clearing]
+      summary: Settle a clearing batch
+      operationId: settleBatch
+      parameters:
+        - $ref: '#/components/parameters/batchId'
+      responses:
+        '200':
+          description: Settlement initiated
+
+  /api/v1/clearing/cycle/trigger:
+    post:
+      tags: [Clearing]
+      summary: Trigger a clearing cycle
+      operationId: triggerClearingCycle
+      parameters:
+        - name: rail
+          in: query
+          schema:
+            type: string
+            default: SEPA_SCT
+      responses:
+        '200':
+          description: Cycle triggered
+
+  /api/v1/clearing/positions/{cycleId}:
+    get:
+      tags: [Clearing]
+      summary: Get settlement positions for a cycle
+      operationId: getSettlementPositions
+      parameters:
+        - name: cycleId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Settlement positions
+
+  /api/v1/clearing/items/{id}:
+    get:
+      tags: [Clearing]
+      summary: Get clearing item by ID
+      operationId: getClearingItem
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Clearing item
+
+  /api/v1/clearing/items/by-payment/{paymentId}:
+    get:
+      tags: [Clearing]
+      summary: Get clearing items for a payment
+      operationId: getClearingItemsByPayment
+      parameters:
+        - name: paymentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Clearing items
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    batchId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    SubmitPaymentRequest:
+      type: object
+      required: [paymentId, rail, amount, currency]
+      properties:
+        paymentId:
+          type: string
+          format: uuid
+        rail:
+          type: string
+          enum: [SEPA_SCT, SEPA_SCT_INST, CZ_DOMESTIC, SWIFT]
+        amount:
+          type: number
+        currency:
+          type: string
+        debtorIban:
+          type: string
+        creditorIban:
+          type: string

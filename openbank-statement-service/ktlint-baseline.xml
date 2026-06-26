@@ -1,0 +1,220 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="src/main/kotlin/com/openbank/statement/application/port/in/CloseRunUseCases.kt">
+        <error line="4" column="9" source="standard:package-name" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/application/port/in/StatementUseCases.kt">
+        <error line="4" column="9" source="standard:package-name" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/application/port/out/CloseRunPorts.kt">
+        <error line="1" column="1" source="standard:filename" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/application/port/out/StatementPorts.kt">
+        <error line="25" column="9" source="standard:function-signature" />
+        <error line="26" column="9" source="standard:function-signature" />
+        <error line="27" column="9" source="standard:function-signature" />
+        <error line="28" column="9" source="standard:function-signature" />
+        <error line="28" column="23" source="standard:function-signature" />
+        <error line="74" column="5" source="standard:class-signature" />
+        <error line="75" column="5" source="standard:class-signature" />
+        <error line="76" column="5" source="standard:class-signature" />
+        <error line="77" column="5" source="standard:class-signature" />
+        <error line="77" column="25" source="standard:class-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/application/usecase/CloseOrchestrator.kt">
+        <error line="6" column="1" source="standard:import-ordering" />
+        <error line="49" column="22" source="standard:class-signature" />
+        <error line="97" column="28" source="standard:argument-list-wrapping" />
+        <error line="97" column="36" source="standard:argument-list-wrapping" />
+        <error line="97" column="52" source="standard:argument-list-wrapping" />
+        <error line="97" column="66" source="standard:argument-list-wrapping" />
+        <error line="97" column="80" source="standard:argument-list-wrapping" />
+        <error line="110" column="19" source="standard:function-signature" />
+        <error line="134" column="19" source="standard:function-signature" />
+        <error line="171" column="27" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/application/usecase/StatementService.kt">
+        <error line="51" column="25" source="standard:class-signature" />
+        <error line="51" column="45" source="standard:class-signature" />
+        <error line="51" column="69" source="standard:class-signature" />
+        <error line="51" column="92" source="standard:class-signature" />
+        <error line="58" column="9" source="standard:function-signature" />
+        <error line="59" column="9" source="standard:function-signature" />
+        <error line="60" column="9" source="standard:function-signature" />
+        <error line="60" column="29" source="standard:function-signature" />
+        <error line="82" column="30" source="standard:function-signature" />
+        <error line="97" column="30" source="standard:function-signature" />
+        <error line="122" column="30" source="standard:function-signature" />
+        <error line="159" column="41" source="standard:function-signature" />
+        <error line="179" column="41" source="standard:function-signature" />
+        <error line="226" column="73" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/domain/close/CloseCalendar.kt">
+        <error line="56" column="63" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/domain/model/StatementModel.kt">
+        <error line="38" column="5" source="standard:class-signature" />
+        <error line="39" column="5" source="standard:class-signature" />
+        <error line="40" column="5" source="standard:class-signature" />
+        <error line="40" column="25" source="standard:class-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/domain/reconcile/ReconciliationPolicy.kt">
+        <error line="25" column="13" source="standard:class-signature" />
+        <error line="26" column="13" source="standard:class-signature" />
+        <error line="27" column="13" source="standard:class-signature" />
+        <error line="27" column="35" source="standard:class-signature" />
+        <error line="32" column="9" source="standard:function-signature" />
+        <error line="33" column="9" source="standard:function-signature" />
+        <error line="34" column="9" source="standard:function-signature" />
+        <error line="34" column="37" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/domain/render/Camt053Renderer.kt">
+        <error line="6" column="1" source="standard:no-unused-imports" />
+        <error line="82" column="9" source="standard:function-signature" />
+        <error line="83" column="9" source="standard:function-signature" />
+        <error line="84" column="9" source="standard:function-signature" />
+        <error line="85" column="9" source="standard:function-signature" />
+        <error line="86" column="9" source="standard:function-signature" />
+        <error line="86" column="22" source="standard:function-signature" />
+        <error line="99" column="41" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/domain/render/Mt940Renderer.kt">
+        <error line="54" column="33" source="standard:argument-list-wrapping" />
+        <error line="54" column="44" source="standard:argument-list-wrapping" />
+        <error line="54" column="60" source="standard:argument-list-wrapping" />
+        <error line="54" column="73" source="standard:argument-list-wrapping" />
+        <error line="54" column="89" source="standard:argument-list-wrapping" />
+        <error line="54" column="103" source="standard:argument-list-wrapping" />
+        <error line="54" column="120" source="standard:argument-list-wrapping" />
+        <error line="54" column="121" source="standard:max-line-length" />
+        <error line="54" column="132" source="standard:argument-list-wrapping" />
+        <error line="54" column="134" source="standard:argument-list-wrapping" />
+        <error line="58" column="48" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/domain/render/StatementRenderer.kt">
+        <error line="16" column="9" source="standard:class-signature" />
+        <error line="17" column="9" source="standard:class-signature" />
+        <error line="18" column="9" source="standard:class-signature" />
+        <error line="18" column="26" source="standard:class-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/infrastructure/client/RestClients.kt">
+        <error line="46" column="41" source="standard:annotation-spacing" />
+        <error line="76" column="53" source="standard:annotation-spacing" />
+        <error line="101" column="5" source="standard:class-signature" />
+        <error line="102" column="5" source="standard:class-signature" />
+        <error line="102" column="35" source="standard:class-signature" />
+        <error line="120" column="5" source="standard:class-signature" />
+        <error line="121" column="5" source="standard:class-signature" />
+        <error line="121" column="32" source="standard:class-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/infrastructure/client/RestPortAdapters.kt">
+        <error line="28" column="5" source="standard:class-signature" />
+        <error line="28" column="59" source="standard:class-signature" />
+        <error line="29" column="5" source="standard:class-signature" />
+        <error line="70" column="5" source="standard:class-signature" />
+        <error line="70" column="55" source="standard:class-signature" />
+        <error line="89" column="74" source="standard:function-signature" />
+        <error line="110" column="58" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/infrastructure/kafka/AccountRegistryConsumer.kt">
+        <error line="28" column="5" source="standard:class-signature" />
+        <error line="29" column="5" source="standard:class-signature" />
+        <error line="29" column="44" source="standard:class-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/infrastructure/metrics/CloseMetricsAdapter.kt">
+        <error line="24" column="5" source="standard:class-signature" />
+        <error line="24" column="41" source="standard:class-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/infrastructure/outbox/StatementOutboxDispatcher.kt">
+        <error line="50" column="46" source="standard:function-signature" />
+        <error line="72" column="5" source="standard:class-signature" />
+        <error line="73" column="5" source="standard:class-signature" />
+        <error line="74" column="5" source="standard:class-signature" />
+        <error line="75" column="5" source="standard:class-signature" />
+        <error line="75" column="25" source="standard:class-signature" />
+        <error line="93" column="5" source="standard:class-signature" />
+        <error line="93" column="81" source="standard:class-signature" />
+        <error line="133" column="66" source="standard:function-signature" />
+        <error line="139" column="48" source="standard:function-signature" />
+        <error line="152" column="65" source="standard:function-signature" />
+        <error line="176" column="28" source="standard:argument-list-wrapping" />
+        <error line="176" column="43" source="standard:argument-list-wrapping" />
+        <error line="176" column="56" source="standard:argument-list-wrapping" />
+        <error line="176" column="72" source="standard:argument-list-wrapping" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/infrastructure/persistence/repository/AccountRegistryRepositoryImpl.kt">
+        <error line="18" column="5" source="standard:class-signature" />
+        <error line="18" column="43" source="standard:class-signature" />
+        <error line="26" column="91" source="standard:function-signature" />
+        <error line="40" column="52" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/infrastructure/persistence/repository/CloseRunRepositoryImpl.kt">
+        <error line="21" column="5" source="standard:class-signature" />
+        <error line="21" column="43" source="standard:class-signature" />
+        <error line="31" column="59" source="standard:function-signature" />
+        <error line="67" column="47" source="standard:function-signature" />
+        <error line="74" column="63" source="standard:function-signature" />
+        <error line="81" column="72" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/infrastructure/persistence/repository/StatementPeriodRepositoryImpl.kt">
+        <error line="31" column="83" source="standard:function-signature" />
+        <error line="74" column="31" source="standard:function-signature" />
+        <error line="87" column="9" source="standard:function-signature" />
+        <error line="88" column="9" source="standard:function-signature" />
+        <error line="89" column="9" source="standard:function-signature" />
+        <error line="89" column="29" source="standard:function-signature" />
+        <error line="112" column="79" source="standard:function-signature" />
+        <error line="121" column="92" source="standard:function-signature" />
+        <error line="135" column="5" source="standard:class-signature" />
+        <error line="135" column="43" source="standard:class-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/infrastructure/rest/CloseRunResource.kt">
+        <error line="34" column="5" source="standard:class-signature" />
+        <error line="35" column="5" source="standard:class-signature" />
+        <error line="35" column="43" source="standard:class-signature" />
+        <error line="46" column="34" source="standard:function-signature" />
+        <error line="60" column="35" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/statement/infrastructure/rest/StatementResource.kt">
+        <error line="50" column="23" source="standard:function-signature" />
+        <error line="54" column="35" source="standard:function-literal" />
+        <error line="54" column="53" source="standard:argument-list-wrapping" />
+        <error line="54" column="77" source="standard:argument-list-wrapping" />
+        <error line="54" column="86" source="standard:argument-list-wrapping" />
+        <error line="54" column="92" source="standard:argument-list-wrapping" />
+        <error line="54" column="112" source="standard:argument-list-wrapping" />
+        <error line="54" column="113" source="standard:argument-list-wrapping" />
+        <error line="54" column="121" source="standard:max-line-length" />
+        <error line="54" column="123" source="standard:function-literal" />
+        <error line="70" column="23" source="standard:function-signature" />
+        <error line="74" column="35" source="standard:function-literal" />
+        <error line="74" column="53" source="standard:argument-list-wrapping" />
+        <error line="74" column="78" source="standard:argument-list-wrapping" />
+        <error line="74" column="87" source="standard:argument-list-wrapping" />
+        <error line="74" column="93" source="standard:argument-list-wrapping" />
+        <error line="74" column="113" source="standard:argument-list-wrapping" />
+        <error line="74" column="114" source="standard:argument-list-wrapping" />
+        <error line="74" column="121" source="standard:max-line-length" />
+        <error line="74" column="124" source="standard:function-literal" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/statement/infrastructure/outbox/StatementOutboxDispatchTest.kt">
+        <error line="68" column="34" source="standard:function-signature" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/statement/integration/StatementOutboxDispatchIT.kt">
+        <error line="72" column="32" source="standard:parameter-list-wrapping" />
+        <error line="72" column="32" source="standard:function-signature" />
+        <error line="72" column="47" source="standard:parameter-list-wrapping" />
+        <error line="72" column="47" source="standard:function-signature" />
+        <error line="72" column="66" source="standard:parameter-list-wrapping" />
+        <error line="72" column="66" source="standard:function-signature" />
+        <error line="72" column="85" source="standard:parameter-list-wrapping" />
+        <error line="72" column="85" source="standard:function-signature" />
+        <error line="72" column="102" source="standard:parameter-list-wrapping" />
+        <error line="72" column="102" source="standard:function-signature" />
+        <error line="72" column="120" source="standard:parameter-list-wrapping" />
+        <error line="72" column="120" source="standard:function-signature" />
+        <error line="72" column="121" source="standard:max-line-length" />
+        <error line="91" column="67" source="standard:function-signature" />
+        <error line="118" column="1" source="standard:spacing-between-declarations-with-annotations" />
+    </file>
+</baseline>

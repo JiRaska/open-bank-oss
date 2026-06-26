@@ -1,0 +1,73 @@
+# Synthetics dashboard (Dynatrace-parity #2). Uptime, latency and TLS-expiry per
+# probed endpoint, from the blackbox Probe CRs. The "is the front door open?"
+# view that complements the inside-out RED/SLO dashboards.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-synthetics
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  openbank-synthetics.json: |
+    {
+      "id": null,
+      "uid": "openbank-synthetics",
+      "title": "OpenBank — Synthetics (Blackbox)",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "1m",
+      "time": { "from": "now-24h", "to": "now" },
+      "templating": { "list": [ { "name": "datasource", "type": "datasource", "pluginId": "prometheus", "label": "Metrics", "current": {} } ] },
+      "panels": [
+        {
+          "title": "Endpoints up",
+          "type": "stat",
+          "datasource": "${datasource}",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+          "targets": [ { "refId": "A", "expr": "sum(probe_success)" } ]
+        },
+        {
+          "title": "Endpoints down",
+          "type": "stat",
+          "datasource": "${datasource}",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } } },
+          "targets": [ { "refId": "A", "expr": "count(probe_success == 0) or vector(0)" } ]
+        },
+        {
+          "title": "Availability (24h)",
+          "type": "timeseries",
+          "datasource": "${datasource}",
+          "gridPos": { "h": 4, "w": 12, "x": 12, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "custom": { "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "legendFormat": "{{instance}}", "expr": "avg_over_time(probe_success[24h])" } ]
+        },
+        {
+          "title": "Probe success",
+          "type": "timeseries",
+          "datasource": "${datasource}",
+          "gridPos": { "h": 7, "w": 12, "x": 0, "y": 4 },
+          "fieldConfig": { "defaults": { "unit": "bool", "min": 0, "max": 1, "custom": { "fillOpacity": 20, "drawStyle": "line", "lineInterpolation": "stepAfter" } } },
+          "targets": [ { "refId": "A", "legendFormat": "{{instance}}", "expr": "probe_success" } ]
+        },
+        {
+          "title": "Probe duration",
+          "type": "timeseries",
+          "datasource": "${datasource}",
+          "gridPos": { "h": 7, "w": 12, "x": 12, "y": 4 },
+          "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "legendFormat": "{{instance}}", "expr": "probe_duration_seconds" } ]
+        },
+        {
+          "title": "TLS certificate — days until expiry",
+          "type": "bargauge",
+          "datasource": "${datasource}",
+          "gridPos": { "h": 7, "w": 24, "x": 0, "y": 11 },
+          "options": { "orientation": "horizontal", "displayMode": "gradient" },
+          "fieldConfig": { "defaults": { "unit": "d", "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "yellow", "value": 14 }, { "color": "green", "value": 30 } ] } } },
+          "targets": [ { "refId": "A", "legendFormat": "{{instance}}", "expr": "(probe_ssl_earliest_cert_expiry - time()) / 86400" } ]
+        }
+      ]
+    }

@@ -1,0 +1,32 @@
+# psd2 domain: psd2-service + single-owner CNPG Postgres + Redis. Onboarded (ADR-0090,
+# ADR-0037 domain=namespace) so the Berlin Group XS2A (consent/AIS + PIS) + ČOBS endpoints
+# run in the sandbox. eIDAS QSEAL enforcement is OFF here (no TPP certs in the sandbox).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: psd2
+  namespace: argocd
+  annotations:
+    # Server-Side Diff must run the Kyverno verify-images mutation in its dry-run, otherwise the
+    # digest-pinning annotation it injects reads as a permanent OutOfSync diff (issue #856).
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/psd2-service
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: psd2
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m

@@ -1,0 +1,249 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.transaction.application.usecase
+
+import com.openbank.libs.api.pagination.CursorEncoder
+import com.openbank.libs.api.pagination.CursorPage
+import com.openbank.libs.api.pagination.PageInfo
+import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.domain.money.Money
+import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.transaction.application.port.`in`.GetTransactionQuery
+import com.openbank.transaction.application.port.`in`.InitiateTransactionCommand
+import com.openbank.transaction.application.port.`in`.ListTransactionsQuery
+import com.openbank.transaction.application.port.`in`.ReverseTransactionCommand
+import com.openbank.transaction.application.port.`in`.TransactionUseCase
+import com.openbank.transaction.application.port.out.FxRatePort
+import com.openbank.transaction.application.port.out.TransactionEventPublisher
+import com.openbank.transaction.application.port.out.TransactionRepository
+import com.openbank.transaction.domain.model.Transaction
+import com.openbank.transaction.domain.model.TransactionStatus
+import com.openbank.transaction.domain.saga.SagaState
+import com.openbank.transaction.domain.settlement.SettlementDateResolver
+import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
+import java.math.RoundingMode
+import java.time.Clock
+import java.time.Instant
+import java.util.UUID
+
+@ApplicationScoped
+class TransactionService(
+    private val transactionRepository: TransactionRepository,
+    private val eventPublisher: TransactionEventPublisher,
+    private val sagaOrchestrator: PaymentSagaOrchestrator,
+    private val fxRatePort: FxRatePort,
+    private val clock: Clock,
+) : TransactionUseCase {
+
+    @Inject
+    constructor(
+        transactionRepository: TransactionRepository,
+        eventPublisher: TransactionEventPublisher,
+        sagaOrchestrator: PaymentSagaOrchestrator,
+        fxRatePort: FxRatePort,
+    ) : this(transactionRepository, eventPublisher, sagaOrchestrator, fxRatePort, Clock.systemUTC())
+
+    companion object {
+        private const val TRANSACTION_INITIATED_EVENT = "openbank.transactions.transaction.initiated"
+        private const val TRANSACTION_COMPLETED_EVENT = "openbank.transactions.transaction.completed"
+        private const val TRANSACTION_FAILED_EVENT = "openbank.transactions.transaction.failed"
+
+        // Scale for the implied FX rate on a sell-specified conversion (ADR-0107): rate is
+        // derived as settlement/payment and only carried for the ledger's FX posting.
+        private const val IMPLIED_FX_RATE_SCALE = 8
+    }
+
+    override suspend fun initiateTransaction(command: InitiateTransactionCommand): Transaction {
+        val existing = transactionRepository.findByIdempotencyKey(command.idempotencyKey)
+        if (existing != null) return existing
+
+        CurrencyCode.of(command.currencyCode)
+        val amount = Money.of(command.amount, command.currencyCode)
+        // Business-rule violation (well-formed request, value breaks an invariant) ->
+        // IllegalStateException maps to 422 via openbank-libs CommonExceptionMappers, in
+        // contrast to IllegalArgumentException (malformed input) which maps to 400.
+        check(amount.isPositive()) { "Amount must be positive" }
+
+        // Non-repudiation gate (ADR-0021): a CUSTOMER-initiated movement must carry either the
+        // consumed, device-signed SCA challenge that authorised it, or a documented exemption
+        // (PSD2 RTS Art. 15 own-account transfers). Bank/system postings (no customer party —
+        // interest, fees, clearing) are out of SCA scope by definition.
+        if (command.initiatedByPartyId != null) {
+            require(command.scaChallengeId != null || !command.scaExemption.isNullOrBlank()) {
+                "Customer-initiated transaction requires an SCA challenge or a documented exemption"
+            }
+        }
+
+        val (fxRate, baseAmount) = resolveSettlement(amount, command.settlementCurrencyCode, command.settlementAmount)
+
+        val dates = SettlementDateResolver.resolve(
+            now = Instant.now(clock),
+            paymentCurrency = amount.currency.code,
+            settlementCurrency = baseAmount.currency.code,
+            requestedValueDate = command.valueDate,
+        )
+
+        val transaction = Transaction(
+            id = UUID.randomUUID(),
+            referenceNumber = generateReferenceNumber(),
+            type = command.type,
+            sourceAccountId = command.sourceAccountId,
+            targetAccountId = command.targetAccountId,
+            amount = amount,
+            fxRate = fxRate,
+            baseAmount = baseAmount,
+            status = TransactionStatus.PENDING,
+            description = command.description,
+            valueDate = dates.valueDate,
+            bookingDate = dates.bookingDate,
+            initiatedAt = Instant.now(clock),
+            completedAt = null,
+            failedAt = null,
+            failureReason = null,
+            idempotencyKey = command.idempotencyKey,
+            version = 0L,
+            initiatedByPartyId = command.initiatedByPartyId,
+            scaChallengeId = command.scaChallengeId,
+            scaExemption = command.scaExemption,
+            rail = command.rail,
+            instructionType = command.instructionType,
+        )
+
+        val saved = transactionRepository.save(
+            transaction = transaction,
+            outboxMessage = OutboxMessage(
+                aggregateId = transaction.id,
+                eventType = TRANSACTION_INITIATED_EVENT,
+                payload = eventPublisher.initiatedPayload(transaction),
+            ),
+        )
+
+        val saga = sagaOrchestrator.startSaga(saved)
+
+        // The orchestrator runs to a terminal state synchronously: COMPLETED on a successful
+        // ledger posting, otherwise COMPENSATED/FAILED. Close the transaction lifecycle to match
+        // and emit the corresponding domain event through the outbox.
+        return if (saga.state == SagaState.COMPLETED) {
+            val completed = saved.complete(clock)
+            transactionRepository.update(
+                transaction = completed,
+                outboxMessage = OutboxMessage(
+                    aggregateId = completed.id,
+                    eventType = TRANSACTION_COMPLETED_EVENT,
+                    payload = eventPublisher.completedPayload(completed),
+                ),
+            )
+        } else {
+            val reason = saga.failureReason ?: "Payment saga did not complete (state=${saga.state})"
+            val failed = saved.fail(reason, clock)
+            transactionRepository.update(
+                transaction = failed,
+                outboxMessage = OutboxMessage(
+                    aggregateId = failed.id,
+                    eventType = TRANSACTION_FAILED_EVENT,
+                    payload = eventPublisher.failedPayload(failed, reason),
+                ),
+            )
+        }
+    }
+
+    override suspend fun getTransaction(query: GetTransactionQuery): Transaction =
+        transactionRepository.findById(query.transactionId)
+            ?: throw TransactionNotFoundException("Transaction not found: ${query.transactionId}")
+
+    override suspend fun reverseTransaction(command: ReverseTransactionCommand): Transaction {
+        // Idempotency: return existing reversal if already processed with the same key
+        val existing = transactionRepository.findByIdempotencyKey(command.idempotencyKey)
+        if (existing != null) return existing
+
+        val original = transactionRepository.findById(command.originalTransactionId)
+            ?: throw IllegalArgumentException("Transaction ${command.originalTransactionId} not found")
+        check(original.status == TransactionStatus.COMPLETED) {
+            "Cannot reverse a ${original.status} transaction"
+        }
+        val targetAccountId = checkNotNull(original.sourceAccountId) {
+            "Cannot reverse transaction ${original.id}: no source account"
+        }
+
+        // Mark original as reversed; no domain event — the reversal transaction carries the audit trail
+        transactionRepository.update(original.reverse())
+
+        // Initiate reversal credit — flows through the normal saga as an incoming credit
+        // (sourceAccountId=null → no balance cover needed; DEBIT cash-clearing, CREDIT deposit-control)
+        return initiateTransaction(
+            InitiateTransactionCommand(
+                idempotencyKey = command.idempotencyKey,
+                type = com.openbank.transaction.domain.model.TransactionType.REVERSAL,
+                sourceAccountId = null,
+                targetAccountId = targetAccountId,
+                amount = original.amount.amount,
+                currencyCode = original.amount.currency.code,
+                description = "Reversal: ${command.reason}",
+                valueDate = java.time.LocalDate.now(clock),
+                initiatedBy = UUID.fromString("00000000-0000-0000-0000-000000000001"),
+            ),
+        )
+    }
+
+    override suspend fun listTransactions(query: ListTransactionsQuery): CursorPage<Transaction> {
+        val afterId = query.afterCursor?.let { UUID.fromString(CursorEncoder.decode(it)) }
+        val transactions = transactionRepository.findByAccountId(query.accountId, query.limit + 1, afterId)
+        val hasNext = transactions.size > query.limit
+        val page = if (hasNext) transactions.dropLast(1) else transactions
+        val nextCursor = if (hasNext) CursorEncoder.encode(page.last().id.toString()) else null
+        return CursorPage(
+            data = page,
+            pagination = PageInfo(
+                limit = query.limit,
+                hasNextPage = hasNext,
+                nextCursor = nextCursor,
+            ),
+        )
+    }
+
+    // Resolves the settlement (account/booking) leg of a payment. When the customer settles in the
+    // same currency the payment is denominated in, there is no FX (identity base amount, null rate).
+    // Otherwise the account is debited in the settlement currency, so we convert the payment amount
+    // payment->settlement via fx-service (askRate, matching the fx-service convert convention) and
+    // carry the applied rate for the ledger's cross-currency (four-legged) FX posting.
+    private suspend fun resolveSettlement(
+        amount: Money,
+        settlementCurrencyCode: String?,
+        settlementAmount: java.math.BigDecimal? = null,
+    ): Pair<java.math.BigDecimal?, Money> {
+        val paymentCcy = amount.currency.code
+        val settlementCcy = settlementCurrencyCode?.takeIf { it.isNotBlank() } ?: paymentCcy
+        if (settlementCcy == paymentCcy) return null to amount
+
+        val settlement = CurrencyCode.of(settlementCcy)
+
+        // Sell-specified (ADR-0107 pocket sweep): the caller fixes the settlement (sell)
+        // amount — the full source-pocket balance — so the debit zeroes the pocket exactly.
+        // The applied rate is implied (settlement / payment); the bank keeps the spread in
+        // the FX-position GL, as on the derived path.
+        settlementAmount?.takeIf { it.signum() > 0 }?.let { sell ->
+            val base = sell.setScale(settlement.defaultFractionDigits, RoundingMode.HALF_UP)
+            val impliedRate = base.divide(amount.amount, IMPLIED_FX_RATE_SCALE, RoundingMode.HALF_UP)
+            return impliedRate to Money.of(base, settlementCcy)
+        }
+
+        val rate = fxRatePort.getRate(paymentCcy, settlementCcy)
+            ?: throw FxRateUnavailableException("No FX rate quoted for $paymentCcy/$settlementCcy")
+        val baseAmount = amount.amount
+            .multiply(rate.askRate)
+            .setScale(settlement.defaultFractionDigits, RoundingMode.HALF_UP)
+        return rate.askRate to Money.of(baseAmount, settlementCcy)
+    }
+
+    private fun generateReferenceNumber(): String {
+        val timestamp = clock.millis().toString()
+        val random = (1000..9999).random()
+        return "TXN$timestamp$random"
+    }
+}
+
+class TransactionNotFoundException(message: String) : RuntimeException(message)
+class FxRateUnavailableException(message: String) : RuntimeException(message)

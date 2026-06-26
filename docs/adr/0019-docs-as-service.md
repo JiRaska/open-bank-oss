@@ -1,0 +1,183 @@
+# 19. Docs-as-Service — services self-publish their bundled documentation
+
+Date: 2026-05-29
+Status: Accepted
+Supersedes: nothing (additive)
+Implements: openbank-libs `com.openbank.libs.docs`
+
+## Context
+
+Per-service documentation lived as Markdown files in each service repo,
+bundled into the **admin-ui** Docker image at build time and served by a
+filesystem proxy in the admin-ui itself. The original Docs-1 / Docs-2 / Docs-3
+pilot (commits `1824468`, `637ebe0`, `fe345ca`) used this model.
+
+Three forcing problems:
+
+1. **Docs version drift from code version.** The admin-ui image is rebuilt
+   independently of services. A service released today could be paired with
+   docs from a week ago. For audit and operations runbooks this divergence is
+   wrong by construction.
+2. **Static bundle, no live signal.** The bundle path required a host mount
+   in dev and a custom bake step in the Dockerfile. Nothing per-service was
+   testable as "the service publishes its own contract."
+3. **Fleet-wide rebuild whenever any docs change.** A typo fix in
+   account-service forced rebuilding admin-ui plus re-uploading the entire
+   docs bundle layer.
+
+Compare existing "service self-publishes its own metadata" patterns we already
+use: `/q/health` (Quarkus health extension), `/q/metrics` (Micrometer),
+`/q/openapi` (OpenAPI Schema), `/api/v1/info` from openbank-libs
+`ServiceInfoResource`. All of these expose service-owned data over the
+service's own port. Docs should follow the same pattern.
+
+Backstage TechDocs uses the same idea at a higher level (services own their
+docs, a portal aggregates). We don't need Backstage today but we want the
+file layout to be Backstage-compatible so a future migration is mechanical.
+
+## Decision
+
+Each service self-publishes its bundled documentation under the well-known
+prefix `/q/openbank/docs` on the service's own HTTP port. The implementation
+lives in `openbank-libs` so every service inherits the endpoint by virtue of
+depending on libs.
+
+### File-system contract per service
+
+```
+src/main/resources/
+  docs/
+    README.cs.md
+    README.en.md
+    01-overview.cs.md
+    01-overview.en.md
+    02-architecture.cs.md
+    02-architecture.en.md
+    03-api.cs.md
+    03-api.en.md
+    04-data.cs.md
+    04-data.en.md
+    05-operations.cs.md
+    05-operations.en.md
+    06-compliance.cs.md
+    06-compliance.en.md
+  diagrams/                       (optional; Phase 5b)
+    01-some-flow.mmd              raw Mermaid source
+    02-er-schema.mmd
+    03-state-machine.mmd
+```
+
+- Section numbering mirrors **arc42-lite** (overview / architecture / API / data
+  / operations / compliance).
+- `<slug>.<lang>.md` naming carries i18n; the platform's two pilot languages
+  are `cs` and `en`. Single-language services may ship `<slug>.md` (the
+  language-agnostic fallback).
+- Diagrams are flat (`diagrams/<NN>-<slug>.mmd`), Mermaid only — BPMN viewer
+  is a heavy front-end dep and is deliberately out of scope.
+
+### HTTP contract
+
+```
+GET /q/openbank/docs[?lang=cs]
+    schema "openbank.docs.v4"
+    {
+      service, version, buildTime, gitCommit,
+      available, requestedLang, availableLanguages,
+      links: { openapi, swagger, health, metrics, info, docsMeta },
+      diagrams: [ { slug, title, bytes, etag } ... ],
+      items:    [ { slug, lang, availableLanguages, title, bytes, etag } ... ]
+    }
+
+GET /q/openbank/docs/_meta
+    catalogue-wide etag for change detection
+
+GET /q/openbank/docs/{slug}[?lang=cs]
+    text/markdown; charset=utf-8
+    ETag + If-None-Match → 304
+
+GET /q/openbank/docs/_diagrams/{slug}
+    text/vnd.mermaid; charset=utf-8
+    ETag + If-None-Match → 304
+```
+
+- Slug regex: `^[a-z0-9-]{1,60}$` — blocks path traversal.
+- Lang regex: `^[a-z]{2}$` — blocks header injection.
+- Classpath-resource lookup; cannot escape the JAR even if the regex were bypassed.
+- `@PermitAll` because the prefix is meant for the network-gated management
+  port. Do not expose `/q/openbank/docs` to the public Internet.
+
+### Admin-ui consumption
+
+The admin-ui treats per-service docs as **server-rendered content**. Routes:
+
+- `/services` — overview, lists every candidate service and probes
+  `/api/services/<id>/docs` to find which have docs available.
+- `/services/[name]/docs/[[...slug]]` — server component, reads markdown via a
+  shared loader (`src/lib/services/docs.ts`) that fetches live from the
+  service for runnable services or from an image-baked bundle for `libs`
+  (which has no runnable service to host the endpoint).
+- `/services/[name]/diagrams/[slug]` — Mermaid viewer, renders via the
+  existing `MermaidEnhancer` (client-only enhancement).
+
+The admin-ui does **not** mount any service repo path at runtime. It reaches
+service endpoints through its `/api/svc/<service>` proxy, so links stay
+first-party.
+
+### Schema versioning
+
+Wire schema is a single string published in the index payload:
+
+- `openbank.docs.v1` — initial (Phase 1, items only)
+- `openbank.docs.v2` — adds per-item `lang` + `availableLanguages` (Phase i18n)
+- `openbank.docs.v3` — adds top-level `links` (Phase 5)
+- `openbank.docs.v4` — adds top-level `diagrams` (Phase 5b)
+
+Each bump is **additive only** — older clients ignore unknown fields. Removal
+of a field requires a major schema bump and a 6-month deprecation overlap
+identical to the API versioning rule from ADR 0009.
+
+## Consequences
+
+**Positive.**
+
+- Docs version always equals running code version — same JAR, same release.
+- Service owns its docs end-to-end; no admin-ui rebuild on doc change.
+- Backstage-compatible file layout (`docs/`, `<slug>.<lang>.md`) — future
+  migration to a real TechDocs server is a file move, not a rewrite.
+- Same `/q/...` ergonomics ops already know from health/metrics/openapi.
+- Unit-testable in libs (`DocsCatalogTest`, `DiagramsCatalogTest`) without
+  touching Quarkus.
+
+**Negative / accepted trade-offs.**
+
+- Service must be running for admin-ui to show its docs. Mitigated by a 2 s
+  fetch timeout + graceful "service offline" UX in the docs page. The
+  always-on `libs` exception covers the only artefact that has no runtime.
+- Each service carries its docs in its JAR — small (kB per file) but multiplied
+  across the fleet. Acceptable given the consistency win.
+- Phase 4 fleet rollout (every service ships its `docs/` tree) is a multi-
+  session content-authoring task. Tracked separately; the platform is in place
+  whether the content is or not.
+
+## Implementation status
+
+- ✅ libs primitives — `DocsResource`, `DocsCatalog`, `ClasspathMarkdownLoader`,
+  `DocsCatalogProducer` (Phase 1)
+- ✅ openbank-libs `docs/` pilot — 7 sections × 2 languages (Phase 2 / i18n)
+- ✅ openbank-account-service pilot — 7 sections × 2 languages + 3 diagrams
+- ✅ openbank-balance-service pilot — 7 sections × 2 languages
+- ✅ admin-ui server-rendered docs page + i18n cookie + version chip (Phase 3)
+- ✅ admin-ui live fetch via `/api/svc` proxy (Phase 3)
+- ✅ Well-known endpoint chips — openapi / swagger / health / metrics / info /
+  docsMeta (Phase 5)
+- ✅ Diagram auto-render — `DiagramsCatalog`, `_diagrams/{slug}` endpoint,
+  admin-ui `/services/[name]/diagrams/[slug]` viewer (Phase 5b)
+- 🟡 Phase 4 fleet rollout — pending content authoring per service
+
+## Related
+
+- ADR 0014 — openbank-libs centralization roadmap (rationale for adding more
+  capabilities to libs rather than to every service)
+- ADR 0020 — Kover coverage gate on libs (covers the docs primitives)
+- Pilot services: `openbank-libs/docs/`, `openbank-account-service/src/main/resources/docs/`,
+  `openbank-balance-service/src/main/resources/docs/`

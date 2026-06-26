@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="src/main/kotlin/com/openbank/anacredit/application/AnaCreditService.kt">
+        <error line="24" column="5" source="standard:class-signature" />
+        <error line="24" column="53" source="standard:class-signature" />
+        <error line="25" column="30" source="standard:class-signature" />
+        <error line="25" column="52" source="standard:class-signature" />
+        <error line="27" column="78" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/anacredit/application/port/in/AnaCreditUseCases.kt">
+        <error line="4" column="9" source="standard:package-name" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/anacredit/domain/report/AnaCreditCreditRecord.kt">
+        <error line="33" column="5" source="standard:class-signature" />
+        <error line="34" column="5" source="standard:class-signature" />
+        <error line="35" column="5" source="standard:class-signature" />
+        <error line="35" column="24" source="standard:class-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/anacredit/domain/report/AnaCreditReturnBuilder.kt">
+        <error line="45" column="94" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/anacredit/infrastructure/rest/AnaCreditResource.kt">
+        <error line="48" column="39" source="standard:function-signature" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/anacredit/domain/eligibility/AnaCreditEligibilityPolicyTest.kt">
+        <error line="23" column="78" source="standard:argument-list-wrapping" />
+        <error line="54" column="78" source="standard:argument-list-wrapping" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/anacredit/domain/report/AnaCreditReturnBuilderTest.kt">
+        <error line="34" column="35" source="standard:argument-list-wrapping" />
+        <error line="34" column="58" source="standard:argument-list-wrapping" />
+        <error line="34" column="87" source="standard:argument-list-wrapping" />
+        <error line="34" column="94" source="standard:argument-list-wrapping" />
+        <error line="34" column="97" source="standard:argument-list-wrapping" />
+        <error line="34" column="121" source="standard:max-line-length" />
+        <error line="34" column="129" source="standard:argument-list-wrapping" />
+        <error line="34" column="136" source="standard:argument-list-wrapping" />
+        <error line="34" column="139" source="standard:argument-list-wrapping" />
+        <error line="34" column="164" source="standard:argument-list-wrapping" />
+        <error line="34" column="170" source="standard:argument-list-wrapping" />
+        <error line="34" column="171" source="standard:argument-list-wrapping" />
+        <error line="35" column="35" source="standard:argument-list-wrapping" />
+        <error line="35" column="58" source="standard:argument-list-wrapping" />
+        <error line="35" column="87" source="standard:argument-list-wrapping" />
+        <error line="35" column="94" source="standard:argument-list-wrapping" />
+        <error line="35" column="97" source="standard:argument-list-wrapping" />
+        <error line="35" column="121" source="standard:max-line-length" />
+        <error line="35" column="129" source="standard:argument-list-wrapping" />
+        <error line="35" column="136" source="standard:argument-list-wrapping" />
+        <error line="35" column="139" source="standard:argument-list-wrapping" />
+        <error line="35" column="164" source="standard:argument-list-wrapping" />
+        <error line="35" column="167" source="standard:argument-list-wrapping" />
+        <error line="35" column="168" source="standard:argument-list-wrapping" />
+        <error line="45" column="35" source="standard:argument-list-wrapping" />
+        <error line="45" column="58" source="standard:argument-list-wrapping" />
+        <error line="45" column="81" source="standard:argument-list-wrapping" />
+        <error line="45" column="110" source="standard:argument-list-wrapping" />
+        <error line="45" column="117" source="standard:argument-list-wrapping" />
+        <error line="45" column="120" source="standard:argument-list-wrapping" />
+        <error line="45" column="121" source="standard:max-line-length" />
+        <error line="45" column="152" source="standard:argument-list-wrapping" />
+        <error line="45" column="159" source="standard:argument-list-wrapping" />
+        <error line="45" column="160" source="standard:argument-list-wrapping" />
+        <error line="46" column="35" source="standard:argument-list-wrapping" />
+        <error line="46" column="58" source="standard:argument-list-wrapping" />
+        <error line="46" column="81" source="standard:argument-list-wrapping" />
+        <error line="46" column="110" source="standard:argument-list-wrapping" />
+        <error line="46" column="116" source="standard:argument-list-wrapping" />
+        <error line="46" column="119" source="standard:argument-list-wrapping" />
+        <error line="46" column="121" source="standard:max-line-length" />
+        <error line="46" column="151" source="standard:argument-list-wrapping" />
+        <error line="46" column="157" source="standard:argument-list-wrapping" />
+        <error line="46" column="158" source="standard:argument-list-wrapping" />
+        <error line="72" column="42" source="standard:argument-list-wrapping" />
+        <error line="72" column="68" source="standard:argument-list-wrapping" />
+        <error line="72" column="89" source="standard:argument-list-wrapping" />
+        <error line="72" column="121" source="standard:max-line-length" />
+        <error line="72" column="133" source="standard:argument-list-wrapping" />
+        <error line="73" column="39" source="standard:argument-list-wrapping" />
+        <error line="73" column="66" source="standard:argument-list-wrapping" />
+        <error line="73" column="89" source="standard:argument-list-wrapping" />
+        <error line="73" column="118" source="standard:argument-list-wrapping" />
+        <error line="73" column="121" source="standard:max-line-length" />
+        <error line="73" column="124" source="standard:argument-list-wrapping" />
+        <error line="73" column="127" source="standard:argument-list-wrapping" />
+        <error line="73" column="159" source="standard:argument-list-wrapping" />
+        <error line="73" column="165" source="standard:argument-list-wrapping" />
+        <error line="73" column="166" source="standard:argument-list-wrapping" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/anacredit/infrastructure/rest/AnaCreditResourceTest.kt">
+        <error line="18" column="17" source="standard:statement-wrapping" />
+        <error line="18" column="49" source="standard:statement-wrapping" />
+        <error line="18" column="64" source="standard:statement-wrapping" />
+    </file>
+</baseline>

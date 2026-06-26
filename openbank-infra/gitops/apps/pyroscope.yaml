@@ -1,0 +1,67 @@
+# Continuous profiling backend: Grafana Pyroscope (ADR-0082, the 4th pillar).
+# Single-binary monolith on a gp3 PVC — same lean sandbox profile as Tempo/Loki.
+# Services push JVM profiles (async-profiler) here; in Grafana a slow span in
+# Tempo links straight to its flame graph via tracesToProfiles, so "why is this
+# money-path slow" goes from a guess to a CPU/alloc profile in one click.
+#
+# Profile INGEST (the per-service half) is opt-in and off by default: the
+# Pyroscope Java agent is attached via JAVA_TOOL_OPTIONS in each service's gitops
+# Deployment (separate follow-up — a bank enables profiling deliberately, never
+# fleet-wide-on by default). This app provides the sink + the Grafana wiring.
+#
+# Applied with `kubectl apply` until the app-of-apps is wired (as tempo/loki).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pyroscope
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: pyroscope
+    targetRevision: 1.13.4
+    helm:
+      releaseName: pyroscope
+      valuesObject:
+        fullnameOverride: pyroscope
+        pyroscope:
+          replicaCount: 1
+          # On-demand observability node pool (ADR-0082) — survive spot reclamation.
+          nodeSelector:
+            workload: observability
+          tolerations:
+            - key: workload
+              operator: Equal
+              value: observability
+              effect: NoSchedule
+          persistence:
+            enabled: true
+            size: 10Gi
+            storageClassName: gp3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 768Mi
+        # Single-binary 'all' target; no microservices split for the sandbox.
+        alloy:
+          enabled: false
+        agent:
+          enabled: false
+        minio:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

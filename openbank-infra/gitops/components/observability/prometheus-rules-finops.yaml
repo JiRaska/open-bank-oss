@@ -1,0 +1,180 @@
+# FinOps cost anomaly detection rules (ADR-0112). Five detectors correspond to the
+# recurring AWS cost incidents documented in the ADR: NAT drain, cross-AZ traffic,
+# Karpenter node churn, EBS attachment failures, and CI runner pool pressure.
+# All alerts route to GoAlert (which triggers the finops-agent Temporal workflow).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-finops-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    openbank.io/finops-detector: "true"
+spec:
+  groups:
+    - name: openbank.finops.nat-egress
+      interval: 5m
+      rules:
+        # D1a: Absolute daily NAT egress threshold (50 GB). Uses a 24h rate window
+        # normalised to bytes/day. Fires if any namespace exceeds the threshold.
+        - alert: FinOpsNatEgressSpikeAbsolute
+          expr: |
+            sum by (namespace) (
+              rate(container_network_transmit_bytes_total{
+                namespace!~"kube-system|monitoring|observability|cert-manager"
+              }[24h])
+            ) * 86400 > 53687091200
+          for: 30m
+          labels:
+            severity: warning
+            detector: D1
+            team: platform
+            route: finops-agent
+          annotations:
+            summary: "NAT egress spike — {{ $labels.namespace }} > 50 GB/day"
+            description: "Namespace {{ $labels.namespace }} transmitted {{ $value | humanize1024 }}B in the last 24 h. Threshold: 50 GB. Possible cross-AZ routing or data exfiltration."
+            runbook: "https://github.com/JiRaska/open-bank/blob/main/docs/runbooks/0006-nat-egress-drain.md"
+
+        # D1b: Relative threshold — 200 % of the 7-day rolling average.
+        # Catches fast-rising namespaces even below the absolute threshold.
+        # Uses a subquery for the baseline so we avoid the rate([7d]) long-window
+        # anti-pattern (Prometheus rate() is designed for short windows).
+        - alert: FinOpsNatEgressSpikeRelative
+          expr: |
+            (
+              sum by (namespace) (rate(container_network_transmit_bytes_total[5m]))
+            ) /
+            (
+              avg_over_time(
+                sum by (namespace) (rate(container_network_transmit_bytes_total[5m]))[7d:5m]
+              ) + 1
+            ) > 2
+          for: 20m
+          labels:
+            severity: warning
+            detector: D1
+            team: platform
+            route: finops-agent
+          annotations:
+            summary: "NAT egress 2× rolling avg — {{ $labels.namespace }}"
+            description: "{{ $labels.namespace }} current egress rate is {{ $value | humanizePercentage }} of its 7-day average. Possible overnight batch runaway. Note: subquery requires 7d of retention — alert may be absent on fresh clusters."
+            runbook: "https://github.com/JiRaska/open-bank/blob/main/docs/runbooks/0006-nat-egress-drain.md"
+
+    - name: openbank.finops.karpenter-churn
+      interval: 5m
+      rules:
+        # D3: Node churn rate. Karpenter exports karpenter_nodes_total with
+        # lifecycle phase labels. High disruption/termination rate outside the
+        # maintenance window indicates misconfigured consolidation.
+        - alert: FinOpsKarpenterNodeChurnHigh
+          expr: |
+            increase(karpenter_nodes_total{lifecycle="terminating"}[1h]) > 3
+          for: 10m
+          labels:
+            severity: warning
+            detector: D3
+            team: platform
+            route: finops-agent
+          annotations:
+            summary: "Karpenter node churn high — {{ $value }} terminations/h"
+            description: "{{ $value }} nodes terminated in the last hour. If outside 20:00–07:00 UTC maintenance window, check disruption budget and consolidation policy."
+            runbook: "https://github.com/JiRaska/open-bank/blob/main/docs/runbooks/0002-karpenter-node-drain.md"
+
+        # D3b: Node churn specifically OUTSIDE the maintenance window.
+        - alert: FinOpsKarpenterChurnOutsideMaintenance
+          expr: |
+            (hour() >= 7 and hour() < 20) and
+            increase(karpenter_nodes_total{lifecycle="terminating"}[30m]) > 2
+          for: 5m
+          labels:
+            severity: critical
+            detector: D3
+            team: platform
+            route: finops-agent
+          annotations:
+            summary: "Node churn during business hours — {{ $value }} nodes"
+            description: "Karpenter terminated {{ $value }} nodes during business hours (07:00–20:00 UTC). This causes unnecessary EBS detach races and cross-AZ traffic spikes. Prometheus server UTC assumed."
+            runbook: "https://github.com/JiRaska/open-bank/blob/main/docs/runbooks/0002-karpenter-node-drain.md"
+
+    - name: openbank.finops.ebs-health
+      interval: 2m
+      rules:
+        # D4: EBS volume attachment failures. FailedAttachVolume events precede
+        # crashlooping pods by 2–5 minutes. Early detection allows manual force-detach.
+        - alert: FinOpsEbsAttachmentFailing
+          expr: |
+            increase(kube_event_count{
+              reason="FailedAttachVolume",
+              type="Warning"
+            }[10m]) > 0
+          for: 2m
+          labels:
+            severity: warning
+            detector: D4
+            team: platform
+            route: finops-agent
+          annotations:
+            summary: "EBS attachment failure — {{ $labels.namespace }}/{{ $labels.name }}"
+            description: "PVC attachment failure detected. Node drain race or stuck finalizer. Check: kubectl describe pvc -n {{ $labels.namespace }} and force-detach runbook."
+            runbook: "https://github.com/JiRaska/open-bank/blob/main/docs/runbooks/0004-ebs-stuck-finalizer.md"
+
+        # D4b: PVC stuck in Pending/Lost phase for >5 minutes.
+        - alert: FinOpsPvcStuck
+          expr: |
+            kube_persistentvolumeclaim_status_phase{phase=~"Pending|Lost"} == 1
+          for: 5m
+          labels:
+            severity: warning
+            detector: D4
+            team: platform
+            route: finops-agent
+          annotations:
+            summary: "PVC stuck in {{ $labels.phase }} — {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }}"
+            description: "PVC {{ $labels.persistentvolumeclaim }} in {{ $labels.namespace }} has been {{ $labels.phase }} for >5 minutes. Likely requires force-detach or node drain."
+            runbook: "https://github.com/JiRaska/open-bank/blob/main/docs/runbooks/0004-ebs-stuck-finalizer.md"
+
+    - name: openbank.finops.ci-runner-pressure
+      interval: 1m
+      rules:
+        # D5: ARC runner queue depth. High queue depth means jobs are waiting for runners —
+        # this precedes the aio-max-nr exhaustion that caused CI fleet outages.
+        # Requires ARC to expose ephemeralrunnerset_running_runners metric.
+        # Note: the +1 guard is applied AFTER aggregation to avoid adding 1 per time-series.
+        - alert: FinOpsCiRunnerQueueHigh
+          expr: |
+            sum(actions_runner_controller_ephemeral_runner_sets_assigned_runners) /
+            (sum(actions_runner_controller_ephemeral_runner_sets_running_runners) + 1) > 0.8
+          for: 5m
+          labels:
+            severity: warning
+            detector: D5
+            team: platform
+            route: finops-agent
+          annotations:
+            summary: "CI runner pool > 80% utilisation"
+            description: "ARC runner pool is at {{ $value | humanizePercentage }} capacity. Scale-up recommended to prevent aio-max-nr exhaustion and job queuing."
+            runbook: "https://github.com/JiRaska/open-bank/blob/main/docs/runbooks/0007-arc-runner-scale.md"
+
+    - name: openbank.finops.ai-costs
+      interval: 15m
+      rules:
+        # AI token budget overage — requires Langfuse→Prometheus bridge (ADR-0112 P1).
+        # The bridge exposes langfuse_agent_tokens_total{agent_id, model} counter.
+        # on(agent_id) ensures the budget scalar matches by agent_id to avoid cross-label
+        # vector matching failures when langfuse_agent_daily_budget_usd carries extra labels.
+        - alert: FinOpsAgentTokenBudgetExceeded
+          expr: |
+            (
+              increase(langfuse_agent_tokens_total[24h]) * on(model) group_left()
+              langfuse_model_cost_per_token
+            ) > on(agent_id) langfuse_agent_daily_budget_usd
+          for: 0m
+          labels:
+            severity: warning
+            detector: D6
+            team: platform
+            route: finops-agent
+          annotations:
+            summary: "AI agent {{ $labels.agent_id }} exceeded daily token budget"
+            description: "Agent {{ $labels.agent_id }} used {{ $value }} USD in the last 24h, exceeding its budget. Kill switch available in IAOps console. Requires ADR-0112 P1 Langfuse bridge — alert will be absent until the bridge is deployed."
+            runbook: "https://github.com/JiRaska/open-bank/blob/main/docs/runbooks/0008-ai-token-budget.md"

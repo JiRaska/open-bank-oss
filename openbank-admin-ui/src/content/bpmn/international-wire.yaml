@@ -1,0 +1,106 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# BPMN process diagram (ADR-0019/0029). Authored as data; validated by
+# src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
+
+name: International Wire (SWIFT)
+desc: Zpracování mezinárodní platby mimo SEPA prostor
+regulation: CBPR2 + AML
+services:
+  - fx-service
+  - sanctions-service
+  - aml-service
+  - account-service
+  - swift-service
+  - clearing-service
+steps:
+  - id: start
+    type: start
+    x: 60
+    y: 100
+    label: Iniciace
+  - id: fx
+    type: task
+    x: 180
+    y: 100
+    label: FX Konverze
+    lane: core
+    apis:
+      - GET /api/v1/fx/rate
+    relatedServices:
+      - fx-service
+  - id: aml
+    type: task
+    x: 320
+    y: 100
+    label: Sankce & AML
+    lane: compliance
+    apis:
+      - POST /api/v1/sanctions/screen
+    relatedServices:
+      - sanctions-service
+      - aml-service
+  - id: gw1
+    type: gateway
+    x: 440
+    y: 100
+    label: Prošlo?
+  - id: reject
+    type: end-err
+    x: 440
+    y: 220
+    label: Blokováno
+  - id: debit
+    type: task
+    x: 560
+    y: 100
+    label: Debit
+    lane: core
+    apis:
+      - POST /api/v1/accounts/debit
+    relatedServices:
+      - account-service
+  - id: swift
+    type: task
+    x: 700
+    y: 100
+    label: MT103 Generování
+    lane: payment
+    apis:
+      - POST /api/v1/swift/outward
+    relatedServices:
+      - swift-service
+  - id: clearing
+    type: task
+    x: 840
+    y: 100
+    label: Nostro Settlement
+    lane: payment
+    apis:
+      - POST /api/v1/clearing/settle
+    relatedServices:
+      - clearing-service
+  - id: end
+    type: end
+    x: 960
+    y: 100
+    label: Odesláno
+flows:
+  - from: start
+    to: fx
+  - from: fx
+    to: aml
+  - from: aml
+    to: gw1
+  - from: gw1
+    to: reject
+    label: Ne
+  - from: gw1
+    to: debit
+    label: Ano
+  - from: debit
+    to: swift
+  - from: swift
+    to: clearing
+  - from: clearing
+    to: end

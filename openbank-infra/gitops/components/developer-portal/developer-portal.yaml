@@ -1,0 +1,53 @@
+# OpenBank Developer Portal — public PSD2/XS2A documentation (ADR-0093). Static nginx, no
+# backend, no secrets, no DB: a TPP-facing read-only surface. The hard public edge lives on the
+# Ingress (TLS + ModSecurity/OWASP CRS WAF + rate limit + headers); the pod just serves files.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: developer-portal
+  namespace: developer-portal
+  labels: {app.kubernetes.io/name: developer-portal, app.kubernetes.io/part-of: developer-portal}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app.kubernetes.io/name: developer-portal}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: developer-portal, app.kubernetes.io/part-of: developer-portal}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: developer-portal
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-developer-portal:sandbox-sec1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 10, failureThreshold: 3}
+          livenessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 15, failureThreshold: 3}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            - {name: cache, mountPath: /var/cache/nginx}
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 200m, memory: 128Mi}
+      volumes:
+        - {name: tmp, emptyDir: {}}
+        - {name: cache, emptyDir: {}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: developer-portal
+  namespace: developer-portal
+  labels: {app.kubernetes.io/name: developer-portal}
+spec:
+  selector: {app.kubernetes.io/name: developer-portal}
+  ports: [{name: http, port: 8080, targetPort: http}]

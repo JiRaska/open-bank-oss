@@ -1,0 +1,57 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.transaction.infrastructure.client
+
+import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.smallrye.mutiny.Uni
+import jakarta.ws.rs.*
+import jakarta.ws.rs.core.MediaType
+import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
+import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
+import java.math.BigDecimal
+import java.util.UUID
+
+@RegisterRestClient(configKey = "ledger-service")
+@RegisterProvider(OidcClientRequestReactiveFilter::class)
+@Path("/api/v1/journals")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+interface LedgerRestClient {
+
+    @POST
+    fun postJournal(request: PostJournalRequest): Uni<JournalResponse>
+
+    @POST
+    @Path("/{journalId}/reverse")
+    fun reverseJournal(@PathParam("journalId") journalId: UUID, request: ReverseJournalRequest): Uni<JournalResponse>
+}
+
+data class PostJournalRequest(
+    val idempotencyKey: String,
+    val transactionId: UUID,
+    val entryDate: String,
+    val valueDate: String,
+    val description: String?,
+    val lines: List<JournalLineRequest>,
+    val createdBy: UUID,
+)
+
+data class JournalLineRequest(
+    val glAccountId: UUID,
+    val side: String,
+    val amount: BigDecimal,
+    val currencyCode: String,
+    val fxRate: BigDecimal?,
+    val baseAmount: BigDecimal,
+    val baseCurrencyCode: String,
+    // Sub-ledger dimension (ADR-0039 Phase B): the customer account whose deposit-control pocket
+    // this leg belongs to. Set only on deposit-control legs; null on cash-clearing / FX-position
+    // legs. Nullable + default keeps the ledger contract backward-compatible.
+    val subAccountId: UUID? = null,
+)
+
+data class ReverseJournalRequest(val reason: String, val reversedBy: UUID)
+
+data class JournalResponse(val id: UUID, val transactionId: UUID, val status: String)

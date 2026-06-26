@@ -1,0 +1,13 @@
+# Consent domain namespace (ADR-0037). App plane.
+# Holds consent-service — manages PSD2 consent lifecycle, AIS/PIS permissions,
+# and TPP access grants. Internal ClusterIP; called by psd2-service + payment
+# services for consent validation before payment initiation.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: consent
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

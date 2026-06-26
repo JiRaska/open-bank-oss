@@ -1,0 +1,159 @@
+{
+  "id": "openbank",
+  "realm": "openbank",
+  "displayName": "OpenBank",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "realm": [
+      {
+        "name": "ROLE_ADMIN",
+        "description": "Bank administrator"
+      },
+      {
+        "name": "ROLE_OPERATOR",
+        "description": "Bank operator"
+      },
+      {
+        "name": "ROLE_VIEWER",
+        "description": "Read-only access"
+      },
+      {
+        "name": "ROLE_API",
+        "description": "Machine-to-machine API access"
+      },
+      {
+        "name": "ROLE_DEMO",
+        "description": "Demo account — full access except Settings"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "openbank-services",
+      "name": "OpenBank Services",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "CHANGE_ME_LOCAL_DEV_ONLY",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ],
+      "attributes": {}
+    },
+    {
+      "clientId": "openbank-admin-ui",
+      "name": "OpenBank Admin UI",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000"
+      ],
+      "attributes": {},
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ],
+      "secret": "changeme_local_admin_ui_dev_only"
+    }
+  ],
+  "users": [
+    {
+      "username": "admin@openbank.local",
+      "email": "admin@openbank.local",
+      "firstName": "Admin",
+      "lastName": "OpenBank",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Admin1234!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "ROLE_ADMIN",
+        "ROLE_OPERATOR",
+        "ROLE_VIEWER"
+      ]
+    },
+    {
+      "username": "operator@openbank.local",
+      "email": "operator@openbank.local",
+      "firstName": "Operator",
+      "lastName": "OpenBank",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Operator1234!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "ROLE_OPERATOR",
+        "ROLE_VIEWER"
+      ]
+    },
+    {
+      "username": "demo@openbank.local",
+      "email": "demo@openbank.local",
+      "firstName": "Demo",
+      "lastName": "OpenBank",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "OpenBank+",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "ROLE_ADMIN",
+        "ROLE_OPERATOR",
+        "ROLE_VIEWER",
+        "ROLE_COMPLIANCE",
+        "ROLE_PAYMENTS",
+        "ROLE_AUDITOR",
+        "ROLE_DEMO"
+      ]
+    },
+    {
+      "username": "service-account-openbank-services",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-services",
+      "realmRoles": [
+        "ROLE_OPERATOR"
+      ]
+    }
+  ]
+}

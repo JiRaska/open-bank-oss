@@ -1,0 +1,105 @@
+name: Verify release evidence
+
+# Consumer/auditor side of the release evidence bundle (ADR-0029 D2 / ADR-0030 D4).
+# Given a release tag, download its evidence bundle and cryptographically verify every
+# document against the AWS KMS cosign key, then check the manifest's digests match the
+# files. This is the regulator-facing "how anyone verifies our provenance" tool AND the
+# precursor to the enforced provenance.gate — prove the bundle on real releases here
+# before flipping enforcement at deploy.
+#
+# Manual (a specific tag) by default; non-destructive, read-only on the repo.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to verify, e.g. pid-service-v0.5.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write   # OIDC → assume the build-runner role to read the KMS public key
+
+jobs:
+  verify:
+    name: Verify ${{ inputs.tag }}
+    runs-on: openbank-batch
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b # v5.0.0
+        with:
+          role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
+          aws-region: eu-north-1   # KMS cosign key + ECR live in eu-north-1 (matches auto-deploy)
+
+      - name: Download release assets
+        run: |
+          set -euo pipefail
+          # Use the REST API (gh CLI is absent on part of the openbank-batch runner pool).
+          mkdir -p ev && cd ev
+          api() { curl -sS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
+          rel="$(api "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}")"
+          echo "$rel" | python3 -c "import json,sys; [print(a['id'], a['name']) for a in json.load(sys.stdin).get('assets',[])]" \
+            | while read -r aid aname; do
+                curl -sSL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/octet-stream" \
+                  -o "$aname" "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${aid}"
+              done
+          echo "Downloaded:"; ls -la
+          ls *.sig >/dev/null 2>&1 || { echo "::error::no assets found on release ${TAG}"; exit 1; }
+
+      - name: Verify signatures (cosign + KMS) and manifest digests
+        run: |
+          set -euo pipefail
+          COSIGN_KEY="awskms:///alias/openbank-cosign-signing"
+          COSIGN_VERSION="v2.4.3"
+          arch="$(uname -m)"; case "$arch" in aarch64) arch=arm64 ;; x86_64) arch=amd64 ;; esac
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"; case "$os" in darwin) os=darwin ;; *) os=linux ;; esac
+          bin="$(command -v cosign || true)"
+          if ! { [ -n "$bin" ] && cosign version 2>/dev/null | grep -Eq 'GitVersion:[[:space:]]*v2\.'; }; then
+            bin="${RUNNER_TEMP}/cosign2"
+            curl -fsSL -o "$bin" "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-${os}-${arch}"
+            chmod +x "$bin"
+          fi
+          cd ev
+          rc=0
+          shopt -s nullglob
+          sigs=( *.sig )
+          [ ${#sigs[@]} -gt 0 ] || { echo "::error::no signed evidence found for $TAG"; exit 1; }
+          for sig in "${sigs[@]}"; do
+            doc="${sig%.sig}"
+            if [ ! -f "$doc" ]; then echo "::error::signature $sig without document $doc"; rc=1; continue; fi
+            if "$bin" verify-blob --key "$COSIGN_KEY" --signature "$sig" "$doc"; then
+              echo "OK signature: $doc"
+            else
+              echo "::error::cosign verify-blob FAILED for $doc"; rc=1
+            fi
+          done
+
+          # Cross-check the manifest's recorded digests against the actual files.
+          for ev in *.evidence.json; do
+            [ -f "$ev" ] || continue
+            python3 - "$ev" <<'PY' || rc=1
+          import json, sys, hashlib, os
+          m = json.load(open(sys.argv[1]))
+          def sha(p): return hashlib.sha256(open(p, "rb").read()).hexdigest()
+          ok = True
+          for key in ("sbom", "slsa_provenance", "vex"):
+              ref = m.get(key) or {}
+              f, want = ref.get("file"), ref.get("sha256")
+              if not f or not want:
+                  continue
+              if not os.path.exists(f):
+                  print(f"::error::{key} file {f} referenced by manifest is missing"); ok = False; continue
+              got = sha(f)
+              if got != want:
+                  print(f"::error::{key} digest mismatch for {f}: manifest {want} != actual {got}"); ok = False
+              else:
+                  print(f"OK digest: {f}")
+          sys.exit(0 if ok else 1)
+          PY
+          done
+          [ "$rc" -eq 0 ] && echo "✅ evidence bundle for $TAG verified" || { echo "❌ verification failed"; exit 1; }

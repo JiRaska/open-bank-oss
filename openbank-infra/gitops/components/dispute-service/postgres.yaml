@@ -1,0 +1,55 @@
+# Single-owner Postgres for dispute-service (cluster-wide CNPG operator). Generates
+# the dispute-db-app secret (username/password) + dispute-db-rw Service the Deployment uses.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: dispute-db
+  namespace: dispute
+spec:
+  # DB-layer observability (Dynatrace-parity #0): CNPG runs its built-in
+  # Prometheus exporter on :9187 and creates a PodMonitor the operator owns.
+  # kube-prometheus-stack selects PodMonitors cluster-wide (NilUsesHelmValues
+  # =false), so this lights up cnpg_* metrics (connections, replication lag,
+  # deadlocks, xid age, WAL archiving) with zero app changes.
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_dispute
+      owner: openbank
+
+  # WAL archiving + daily base backups to S3 (ADR-0035, #863 pattern). Credentials via EKS Pod
+  # Identity on the dispute-db ServiceAccount (aws/.../db-backups.tf) — barman reads the SDK chain,
+  # no secret. Sandbox S3 lifecycle expires after 35d; prod needs compliance retention.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/dispute-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: dispute-db-daily
+  namespace: dispute
+spec:
+  schedule: "0 19 2 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: dispute-db

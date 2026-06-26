@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: MPL-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: core
+primaryDatastore: Redis
+schemaName: balances_schema
+dataLineageRole: consumer
+dataClassification: internal
+retentionPolicy: 3 years
+evidenceExported: false
+lineage:
+  upstream:
+    - serviceName: transaction-service
+      relationType: api
+      description: updates
+    - serviceName: account-service
+      relationType: api
+      description: init
+    - serviceName: agent-service
+      relationType: api
+      description: MCP tool
+schemaLineage:
+  ownedSchemas:
+    - balances_schema
+  dependentSchemas:
+    - accounts_schema
+    - transactions_schema

@@ -1,0 +1,8 @@
+# OpenBank PSD2 XS2A Developer Portal — responsible disclosure (RFC 9116).
+# NOTE: `Expires` must always be a future date — renew this file annually (and ensure
+# the security@ mailbox is monitored) or scanners will flag it as stale.
+Contact: mailto:security@open-bank.tech
+Expires: 2027-06-15T00:00:00.000Z
+Preferred-Languages: en, cs
+Canonical: https://developer.open-bank.tech/.well-known/security.txt
+Policy: https://developer.open-bank.tech/.well-known/security.txt

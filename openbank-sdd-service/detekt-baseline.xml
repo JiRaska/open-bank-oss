@@ -1,0 +1,11 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+    <CurrentIssues>
+    <ID>LongParameterList:SddResource.kt$SddResource$( private val register: RegisterMandateUseCase, private val confirm: ConfirmMandateUseCase, private val manage: ManageMandateUseCase, private val amend: AmendMandateUseCase, private val authorise: AuthoriseCollectionUseCase, private val refund: AssessRefundUseCase, private val list: ListMandatesUseCase, )</ID>
+    <ID>MagicNumber:SddOutboxDispatcher.kt$KafkaSddOutboxEventPublisher$3000</ID>
+    <ID>MagicNumber:SddOutboxDispatcher.kt$SddOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:SddOutboxDispatcher.kt$SddOutboxDispatcher$30000</ID>
+    <ID>TooManyFunctions:SddMandateService.kt$SddMandateService : RegisterMandateUseCaseConfirmMandateUseCaseManageMandateUseCaseAmendMandateUseCaseAuthoriseCollectionUseCaseAssessRefundUseCaseListMandatesUseCase</ID>
+  </CurrentIssues>
+</SmellBaseline>

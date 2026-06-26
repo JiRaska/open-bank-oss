@@ -1,0 +1,118 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.standingorder.application.usecase
+
+import com.openbank.standingorder.application.port.`in`.CreateStandingOrderCommand
+import com.openbank.standingorder.application.port.out.StandingOrderRepository
+import com.openbank.standingorder.domain.model.Frequency
+import com.openbank.standingorder.domain.model.PaymentType
+import com.openbank.standingorder.domain.model.StandingOrder
+import com.openbank.standingorder.domain.model.StandingOrderStatus
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.mockk
+import io.mockk.slot
+import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
+import java.time.Clock
+import java.time.Instant
+import java.time.LocalDate
+import java.util.UUID
+
+class StandingOrderServiceTest {
+
+    private val repo: StandingOrderRepository = mockk()
+    private val service = StandingOrderService(repo, Clock.fixed(FIXED_NOW, java.time.ZoneOffset.UTC))
+
+    @Test
+    fun `create() is idempotent`(): Unit = runBlocking {
+        val existing = standingOrder()
+        val cmd = createCommand()
+        coEvery { repo.findByIdempotencyKey(cmd.idempotencyKey) } returns existing
+
+        val result = service.create(cmd)
+
+        assertThat(result).isEqualTo(existing)
+        coVerify(exactly = 0) { repo.save(any()) }
+    }
+
+    @Test
+    fun `pause() saves with PAUSED status`(): Unit = runBlocking {
+        val id = UUID.fromString("00000000-0000-0000-0000-000000000101")
+        val order = standingOrder(id = id, status = StandingOrderStatus.ACTIVE)
+        coEvery { repo.findById(id) } returns order
+        val saved = slot<StandingOrder>()
+        coEvery { repo.save(capture(saved)) } answers { saved.captured }
+
+        val result = service.pause(id, "operator-1")
+
+        assertThat(result.status).isEqualTo(StandingOrderStatus.PAUSED)
+        assertThat(saved.captured.status).isEqualTo(StandingOrderStatus.PAUSED)
+        coVerify(exactly = 1) { repo.save(any()) }
+    }
+
+    @Test
+    fun `cancel() saves with CANCELLED status`(): Unit = runBlocking {
+        val id = UUID.fromString("00000000-0000-0000-0000-000000000102")
+        val order = standingOrder(id = id, status = StandingOrderStatus.ACTIVE)
+        coEvery { repo.findById(id) } returns order
+        val saved = slot<StandingOrder>()
+        coEvery { repo.save(capture(saved)) } answers { saved.captured }
+
+        val result = service.cancel(id, "operator-1")
+
+        assertThat(result.status).isEqualTo(StandingOrderStatus.CANCELLED)
+        assertThat(saved.captured.status).isEqualTo(StandingOrderStatus.CANCELLED)
+        coVerify(exactly = 1) { repo.save(any()) }
+    }
+
+    private fun createCommand() = CreateStandingOrderCommand(
+        idempotencyKey = "idem-1",
+        partyId = UUID.fromString("00000000-0000-0000-0000-000000000201"),
+        debitAccountId = UUID.fromString("00000000-0000-0000-0000-000000000202"),
+        creditorIban = "DE89370400440532013000",
+        creditorName = "Creditor",
+        creditorBic = "DEUTDEFF",
+        amountMinorUnits = 2500L,
+        currency = "EUR",
+        frequency = Frequency.MONTHLY,
+        paymentType = PaymentType.SEPA_CREDIT,
+        remittanceInfo = "Rent",
+        startDate = LocalDate.of(2026, 2, 1),
+        endDate = LocalDate.of(2026, 12, 31),
+    )
+
+    private fun standingOrder(
+        id: UUID = UUID.fromString("00000000-0000-0000-0000-000000000301"),
+        status: StandingOrderStatus = StandingOrderStatus.ACTIVE,
+    ) = StandingOrder(
+        id = id,
+        idempotencyKey = "idem-existing",
+        partyId = UUID.fromString("00000000-0000-0000-0000-000000000302"),
+        debitAccountId = UUID.fromString("00000000-0000-0000-0000-000000000303"),
+        creditorIban = "DE89370400440532013000",
+        creditorName = "Creditor",
+        creditorBic = "DEUTDEFF",
+        amountMinorUnits = 2500L,
+        currency = "EUR",
+        frequency = Frequency.MONTHLY,
+        paymentType = PaymentType.SEPA_CREDIT,
+        remittanceInfo = "Rent",
+        startDate = LocalDate.of(2026, 2, 1),
+        endDate = LocalDate.of(2026, 12, 31),
+        nextExecutionDate = LocalDate.of(2026, 2, 1),
+        lastExecutionDate = null,
+        executionCount = 0,
+        failureCount = 0,
+        status = status,
+        createdAt = FIXED_NOW,
+        updatedAt = FIXED_NOW,
+    )
+
+    companion object {
+        val FIXED_NOW: Instant = Instant.parse("2026-01-15T10:15:30Z")
+    }
+}

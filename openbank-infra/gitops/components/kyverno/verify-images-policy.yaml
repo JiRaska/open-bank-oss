@@ -1,0 +1,77 @@
+# Image-signature verification policy (ADR-0030 D4). Requires every openbank-*
+# image pulled into the cluster to carry a valid Cosign signature.
+#
+# Rollout (ADR-0029/0030 D4):
+#   1. (done) Audit — surface unsigned images, break nothing.
+#   2. (done) Trust root chosen = AWS KMS key alias/openbank-cosign-signing (ECC_NIST_P256);
+#      build-push-{service,admin-ui}.sh sign every pushed image. The attestor below is that key's
+#      PUBLIC key (offline key verify; kyverno also checks the Rekor transparency-log entry).
+#   2b.(done) Signature DISCOVERY fix. kyverno 3.2.6 finds signatures only via the legacy
+#      `sha256-<digest>.sig` tag scheme; cosign v3 writes OCI 1.1 *referrer* signatures on ECR
+#      (no .sig tag) which kyverno could not find ("no signatures found" for the whole fleet —
+#      a first Enforce attempt on 2026-06-11 was reverted because of this). Fixed by pinning
+#      cosign v2 in the build-push scripts (tag-based signatures) and re-signing the running
+#      fleet. Revisit to cosign v3 + referrers once kyverno verifies referrers. See #770.
+#   3. (done) Enforce. The whole running fleet verifies in kyverno (verifiedCount=1). Unsigned
+#      openbank-* images are now rejected at admission.
+#      Caveat: only CURRENT workload templates were back-signed; a `kubectl rollout undo` to a
+#      pre-signing revision references an unsigned historical tag and will be REJECTED — rebuild
+#      (build-push-*.sh signs) or sign that digest first.
+#   4. (planned) SBOM-attestation rule — the provenance gate beyond signatures (ADR-0030 D4).
+#      auto-deploy.yml now runs `cosign attest --type cyclonedx` on every pushed image (KMS key),
+#      and release-please.yml attaches a signed evidence bundle per release. To enforce provenance
+#      at admission, add a SECOND verifyImages rule here requiring that SBOM attestation
+#      (predicateType https://cyclonedx.org/bom), staged Audit -> Enforce — but ONLY after the
+#      running fleet has been redeployed so every live image carries the attestation, else Audit
+#      floods with violations and Enforce would reject the fleet (cf. the step-3 #770 revert).
+#      Until then the provenance gate is ADVISORY (rules.yaml: provenance.enforced=advisory,
+#      enforce_criteria). The signature rule below stays Enforce regardless.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-openbank-image-signatures
+  annotations:
+    policies.kyverno.io/title: Verify OpenBank image signatures (ADR-0030 D4)
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Enforces that every openbank-* container image carries a valid Cosign
+      signature (KMS public key + Rekor tlog); unsigned images are rejected at
+      admission. Signatures are tag-based (cosign v2) so kyverno 3.2.6 finds them.
+spec:
+  validationFailureAction: Enforce
+  background: false
+  webhookTimeoutSeconds: 30
+  failurePolicy: Ignore
+  rules:
+    - name: verify-cosign-signature
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      verifyImages:
+        - imageReferences:
+            - "265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-*"
+          # Audit-only: do not rewrite the image to its digest or fail the pod.
+          mutateDigest: false
+          verifyDigest: false
+          required: true
+          attestors:
+            - count: 1
+              entries:
+                # Public key of the AWS KMS signing key alias/openbank-cosign-signing.
+                # Images are signed with `cosign sign --key awskms:///alias/openbank-cosign-signing`;
+                # kyverno verifies offline against this public key (no KMS/AWS access in-cluster).
+                # Rotate: re-run `cosign public-key --key awskms:///alias/openbank-cosign-signing`
+                # and replace the PEM below.
+                - keys:
+                    publicKeys: |-
+                      -----BEGIN PUBLIC KEY-----
+                      MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEASBZ76uZt2fJEJp0RiQx1hnJgbGV
+                      M2Uw+35xUGfcZpBvpA+4nTW5zy2VVZ2JxT++6Gt0wPuUyL7aJpOAvqDvJw==
+                      -----END PUBLIC KEY-----
+                    # ECC_NIST_P256 → ECDSA-P256 over SHA-256 (Cosign default hash).
+                    # Set explicitly so it matches the kyverno-defaulted live object
+                    # and ArgoCD doesn't report perpetual drift on this field.
+                    signatureAlgorithm: sha256

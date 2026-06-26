@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: MPL-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: open-banking
+primaryDatastore: none (stateless)
+schemaName: n/a
+dataLineageRole: consumer
+dataClassification: confidential
+retentionPolicy: 5 years
+evidenceExported: true
+lineage:
+  downstream:
+    - serviceName: consent-service
+      relationType: api
+      description: checks
+    - serviceName: sca-service
+      relationType: api
+      description: triggers
+    - serviceName: tpp-registry-service
+      relationType: api
+      description: validates
+schemaLineage:
+  dependentSchemas:
+    - consents_schema
+    - sca_schema
+    - tpp_schema

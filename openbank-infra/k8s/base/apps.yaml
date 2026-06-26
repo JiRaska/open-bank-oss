@@ -1,0 +1,1541 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: account-service-config
+data:
+  QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://openbank-cnpg-rw:5432/openbank_accounts
+  QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://openbank-cnpg-rw:5432/openbank_accounts
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: account-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: account-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: account-service
+        app.kubernetes.io/component: service
+    spec:
+      containers:
+        - name: account-service
+          image: openbank-account-service:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: openbank-shared-config
+            - secretRef:
+                name: openbank-shared-secrets
+            - configMapRef:
+                name: account-service-config
+          ports:
+            - name: http
+              containerPort: 8100
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+          startupProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: account-service
+spec:
+  selector:
+    app.kubernetes.io/name: account-service
+  ports:
+    - name: http
+      port: 8100
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: account-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: account-service
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ledger-service-config
+data:
+  QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://openbank-cnpg-rw:5432/openbank_ledger
+  QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://openbank-cnpg-rw:5432/openbank_ledger
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ledger-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ledger-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ledger-service
+        app.kubernetes.io/component: service
+    spec:
+      containers:
+        - name: ledger-service
+          image: openbank-ledger-service:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: openbank-shared-config
+            - secretRef:
+                name: openbank-shared-secrets
+            - configMapRef:
+                name: ledger-service-config
+          ports:
+            - name: http
+              containerPort: 8101
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+          startupProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ledger-service
+spec:
+  selector:
+    app.kubernetes.io/name: ledger-service
+  ports:
+    - name: http
+      port: 8101
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ledger-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ledger-service
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: transaction-service-config
+data:
+  QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://openbank-cnpg-rw:5432/openbank_transactions
+  QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://openbank-cnpg-rw:5432/openbank_transactions
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transaction-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: transaction-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: transaction-service
+        app.kubernetes.io/component: service
+    spec:
+      containers:
+        - name: transaction-service
+          image: openbank-transaction-service:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: openbank-shared-config
+            - secretRef:
+                name: openbank-shared-secrets
+            - configMapRef:
+                name: transaction-service-config
+          ports:
+            - name: http
+              containerPort: 8102
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+          startupProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: transaction-service
+spec:
+  selector:
+    app.kubernetes.io/name: transaction-service
+  ports:
+    - name: http
+      port: 8102
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: transaction-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: transaction-service
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: balance-service-config
+data:
+  QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://openbank-cnpg-rw:5432/openbank_balances
+  QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://openbank-cnpg-rw:5432/openbank_balances
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: balance-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: balance-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: balance-service
+        app.kubernetes.io/component: service
+    spec:
+      containers:
+        - name: balance-service
+          image: openbank-balance-service:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: openbank-shared-config
+            - secretRef:
+                name: openbank-shared-secrets
+            - configMapRef:
+                name: balance-service-config
+          ports:
+            - name: http
+              containerPort: 8103
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+          startupProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: balance-service
+spec:
+  selector:
+    app.kubernetes.io/name: balance-service
+  ports:
+    - name: http
+      port: 8103
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: balance-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: balance-service
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: consent-service-config
+data:
+  QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://openbank-cnpg-rw:5432/openbank_consents
+  QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://openbank-cnpg-rw:5432/openbank_consents
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: consent-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: consent-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: consent-service
+        app.kubernetes.io/component: service
+    spec:
+      containers:
+        - name: consent-service
+          image: openbank-consent-service:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: openbank-shared-config
+            - secretRef:
+                name: openbank-shared-secrets
+            - configMapRef:
+                name: consent-service-config
+          ports:
+            - name: http
+              containerPort: 8106
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+          startupProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: consent-service
+spec:
+  selector:
+    app.kubernetes.io/name: consent-service
+  ports:
+    - name: http
+      port: 8106
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: consent-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: consent-service
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: psd2-service-config
+data:
+  QUARKUS_HTTP_PORT: "8107"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: psd2-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: psd2-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: psd2-service
+        app.kubernetes.io/component: service
+    spec:
+      containers:
+        - name: psd2-service
+          image: openbank-psd2-service:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: openbank-shared-config
+            - secretRef:
+                name: openbank-shared-secrets
+            - configMapRef:
+                name: psd2-service-config
+          ports:
+            - name: http
+              containerPort: 8107
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+          startupProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 150m
+              memory: 256Mi
+            limits:
+              cpu: 750m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: psd2-service
+spec:
+  selector:
+    app.kubernetes.io/name: psd2-service
+  ports:
+    - name: http
+      port: 8107
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: psd2-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: psd2-service
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tpp-registry-service-config
+data:
+  QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://openbank-cnpg-rw:5432/openbank_tpp_registry
+  QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://openbank-cnpg-rw:5432/openbank_tpp_registry
+  QUARKUS_HTTP_PORT: "8108"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tpp-registry-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tpp-registry-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tpp-registry-service
+        app.kubernetes.io/component: service
+    spec:
+      containers:
+        - name: tpp-registry-service
+          image: openbank-tpp-registry-service:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: openbank-shared-config
+            - secretRef:
+                name: openbank-shared-secrets
+            - configMapRef:
+                name: tpp-registry-service-config
+          ports:
+            - name: http
+              containerPort: 8108
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+          startupProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 150m
+              memory: 256Mi
+            limits:
+              cpu: 750m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tpp-registry-service
+spec:
+  selector:
+    app.kubernetes.io/name: tpp-registry-service
+  ports:
+    - name: http
+      port: 8108
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tpp-registry-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: tpp-registry-service
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sca-service-config
+data:
+  QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://openbank-cnpg-rw:5432/openbank_sca
+  QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://openbank-cnpg-rw:5432/openbank_sca
+  QUARKUS_HTTP_PORT: "8110"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sca-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sca-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sca-service
+        app.kubernetes.io/component: service
+    spec:
+      containers:
+        - name: sca-service
+          image: openbank-sca-service:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: openbank-shared-config
+            - secretRef:
+                name: openbank-shared-secrets
+            - configMapRef:
+                name: sca-service-config
+          ports:
+            - name: http
+              containerPort: 8110
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+          startupProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sca-service
+spec:
+  selector:
+    app.kubernetes.io/name: sca-service
+  ports:
+    - name: http
+      port: 8110
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: sca-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sca-service
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-service-config
+data:
+  QUARKUS_HTTP_PORT: "8109"
+  SERVICES_ACCOUNT_SERVICE_URL: http://account-service:8100
+  SERVICES_TRANSACTION_SERVICE_URL: http://transaction-service:8102
+  SERVICES_BALANCE_SERVICE_URL: http://balance-service:8103
+  SERVICES_CONSENT_SERVICE_URL: http://consent-service:8106
+  SERVICES_PSD2_SERVICE_URL: http://psd2-service:8107
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-service
+        app.kubernetes.io/component: service
+    spec:
+      containers:
+        - name: agent-service
+          image: openbank-agent-service:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: openbank-shared-config
+            - secretRef:
+                name: openbank-shared-secrets
+            - configMapRef:
+                name: agent-service-config
+          ports:
+            - name: http
+              containerPort: 8109
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+          startupProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 150m
+              memory: 256Mi
+            limits:
+              cpu: 750m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-service
+spec:
+  selector:
+    app.kubernetes.io/name: agent-service
+  ports:
+    - name: http
+      port: 8109
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: agent-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: agent-service
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: party-service-config
+data:
+  QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://openbank-cnpg-rw:5432/openbank_parties
+  QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://openbank-cnpg-rw:5432/openbank_parties
+  QUARKUS_HTTP_PORT: "8111"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: party-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: party-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: party-service
+        app.kubernetes.io/component: service
+    spec:
+      containers:
+        - name: party-service
+          image: openbank-party-service:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: openbank-shared-config
+            - secretRef:
+                name: openbank-shared-secrets
+            - configMapRef:
+                name: party-service-config
+          ports:
+            - name: http
+              containerPort: 8111
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+          startupProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: party-service
+spec:
+  selector:
+    app.kubernetes.io/name: party-service
+  ports:
+    - name: http
+      port: 8111
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: party-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: party-service
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: notification-service-config
+data:
+  QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://openbank-cnpg-rw:5432/openbank_notifications
+  QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://openbank-cnpg-rw:5432/openbank_notifications
+  QUARKUS_HTTP_PORT: "8112"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notification-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notification-service
+        app.kubernetes.io/component: service
+    spec:
+      containers:
+        - name: notification-service
+          image: openbank-notification-service:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: openbank-shared-config
+            - secretRef:
+                name: openbank-shared-secrets
+            - configMapRef:
+                name: notification-service-config
+          ports:
+            - name: http
+              containerPort: 8112
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+          startupProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-service
+spec:
+  selector:
+    app.kubernetes.io/name: notification-service
+  ports:
+    - name: http
+      port: 8112
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: notification-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: notification-service
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: audit-service-config
+data:
+  QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://openbank-cnpg-rw:5432/openbank_audit
+  QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://openbank-cnpg-rw:5432/openbank_audit
+  QUARKUS_HTTP_PORT: "8113"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audit-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: audit-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: audit-service
+        app.kubernetes.io/component: service
+    spec:
+      containers:
+        - name: audit-service
+          image: openbank-audit-service:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: openbank-shared-config
+            - secretRef:
+                name: openbank-shared-secrets
+            - configMapRef:
+                name: audit-service-config
+          ports:
+            - name: http
+              containerPort: 8113
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+          startupProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audit-service
+spec:
+  selector:
+    app.kubernetes.io/name: audit-service
+  ports:
+    - name: http
+      port: 8113
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: audit-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: audit-service
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kyc-service-config
+data:
+  QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://openbank-cnpg-rw:5432/openbank_kyc
+  QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://openbank-cnpg-rw:5432/openbank_kyc
+  QUARKUS_HTTP_PORT: "8114"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kyc-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kyc-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kyc-service
+        app.kubernetes.io/component: service
+    spec:
+      containers:
+        - name: kyc-service
+          image: openbank-kyc-service:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: openbank-shared-config
+            - secretRef:
+                name: openbank-shared-secrets
+            - configMapRef:
+                name: kyc-service-config
+          ports:
+            - name: http
+              containerPort: 8114
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+          startupProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kyc-service
+spec:
+  selector:
+    app.kubernetes.io/name: kyc-service
+  ports:
+    - name: http
+      port: 8114
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: kyc-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kyc-service
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sepa-service-config
+data:
+  QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://openbank-cnpg-rw:5432/openbank_sepa_payments
+  QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://openbank-cnpg-rw:5432/openbank_sepa_payments
+  QUARKUS_HTTP_PORT: "8115"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sepa-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sepa-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sepa-service
+        app.kubernetes.io/component: service
+    spec:
+      containers:
+        - name: sepa-service
+          image: openbank-sepa-payment:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: openbank-shared-config
+            - secretRef:
+                name: openbank-shared-secrets
+            - configMapRef:
+                name: sepa-service-config
+          ports:
+            - name: http
+              containerPort: 8115
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+          startupProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sepa-service
+spec:
+  selector:
+    app.kubernetes.io/name: sepa-service
+  ports:
+    - name: http
+      port: 8115
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: sepa-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sepa-service
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: domestic-service-config
+data:
+  QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://openbank-cnpg-rw:5432/openbank_domestic_payments
+  QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://openbank-cnpg-rw:5432/openbank_domestic_payments
+  QUARKUS_HTTP_PORT: "8116"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: domestic-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: domestic-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: domestic-service
+        app.kubernetes.io/component: service
+    spec:
+      containers:
+        - name: domestic-service
+          image: openbank-domestic-payment:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: openbank-shared-config
+            - secretRef:
+                name: openbank-shared-secrets
+            - configMapRef:
+                name: domestic-service-config
+          ports:
+            - name: http
+              containerPort: 8116
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+          startupProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: domestic-service
+spec:
+  selector:
+    app.kubernetes.io/name: domestic-service
+  ports:
+    - name: http
+      port: 8116
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: domestic-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: domestic-service
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aml-service-config
+data:
+  QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://openbank-cnpg-rw:5432/openbank_aml
+  QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://openbank-cnpg-rw:5432/openbank_aml
+  QUARKUS_HTTP_PORT: "8117"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aml-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: aml-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: aml-service
+        app.kubernetes.io/component: service
+    spec:
+      containers:
+        - name: aml-service
+          image: openbank-aml-service:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: openbank-shared-config
+            - secretRef:
+                name: openbank-shared-secrets
+            - configMapRef:
+                name: aml-service-config
+          ports:
+            - name: http
+              containerPort: 8117
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+          startupProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aml-service
+spec:
+  selector:
+    app.kubernetes.io/name: aml-service
+  ports:
+    - name: http
+      port: 8117
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: aml-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: aml-service
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openbank-admin-ui-config
+data:
+  NEXT_PUBLIC_ACCOUNT_SERVICE_URL: http://api.openbank.example.local/api/v1/accounts
+  NEXT_PUBLIC_LEDGER_SERVICE_URL: http://api.openbank.example.local/api/v1/ledger
+  NEXT_PUBLIC_TRANSACTION_SERVICE_URL: http://api.openbank.example.local/api/v1/transactions
+  NEXT_PUBLIC_KEYCLOAK_URL: http://auth.openbank.example.local
+  NEXT_PUBLIC_KEYCLOAK_REALM: openbank
+  NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: openbank-admin-ui
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openbank-admin-ui
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: openbank-admin-ui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: openbank-admin-ui
+        app.kubernetes.io/component: frontend
+    spec:
+      containers:
+        - name: admin-ui
+          image: openbank-admin-ui:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: openbank-admin-ui-config
+          ports:
+            - name: http
+              containerPort: 3000
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            failureThreshold: 24
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openbank-admin-ui
+spec:
+  selector:
+    app.kubernetes.io/name: openbank-admin-ui
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: openbank-admin-ui
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: openbank-admin-ui
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

@@ -1,0 +1,264 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="src/main/kotlin/com/openbank/sca/application/port/in/ScaUseCases.kt">
+        <error line="5" column="9" source="standard:package-name" />
+        <error line="7" column="1" source="standard:no-wildcard-imports" />
+        <error line="15" column="29" source="standard:trailing-comma-on-declaration-site" />
+        <error line="19" column="5" source="standard:class-signature" />
+        <error line="20" column="5" source="standard:class-signature" />
+        <error line="21" column="5" source="standard:class-signature" />
+        <error line="21" column="21" source="standard:class-signature" />
+        <error line="21" column="21" source="standard:trailing-comma-on-declaration-site" />
+        <error line="28" column="38" source="standard:trailing-comma-on-declaration-site" />
+        <error line="35" column="29" source="standard:trailing-comma-on-declaration-site" />
+        <error line="74" column="26" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sca/application/port/out/ScaOutboxPort.kt">
+        <error line="1" column="1" source="standard:filename" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sca/application/port/out/ScaPorts.kt">
+        <error line="92" column="29" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sca/application/usecase/NotificationDispatchGuard.kt">
+        <error line="16" column="5" source="standard:class-signature" />
+        <error line="16" column="55" source="standard:class-signature" />
+        <error line="16" column="55" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sca/application/usecase/ScaService.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="8" column="1" source="standard:no-wildcard-imports" />
+        <error line="9" column="1" source="standard:no-wildcard-imports" />
+        <error line="10" column="1" source="standard:no-wildcard-imports" />
+        <error line="27" column="34" source="standard:parameter-list-wrapping" />
+        <error line="27" column="54" source="standard:parameter-list-wrapping" />
+        <error line="27" column="58" source="standard:class-signature" />
+        <error line="27" column="75" source="standard:argument-list-wrapping" />
+        <error line="27" column="121" source="standard:max-line-length" />
+        <error line="27" column="122" source="standard:argument-list-wrapping" />
+        <error line="49" column="44" source="standard:trailing-comma-on-declaration-site" />
+        <error line="73" column="46" source="standard:trailing-comma-on-call-site" />
+        <error line="93" column="82" source="standard:trailing-comma-on-call-site" />
+        <error line="166" column="46" source="standard:trailing-comma-on-call-site" />
+        <error line="167" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="179" column="36" source="standard:no-multi-spaces" />
+        <error line="180" column="35" source="standard:no-multi-spaces" />
+        <error line="182" column="37" source="standard:no-multi-spaces" />
+        <error line="183" column="38" source="standard:no-multi-spaces" />
+        <error line="183" column="69" source="standard:trailing-comma-on-call-site" />
+        <error line="184" column="22" source="standard:trailing-comma-on-call-site" />
+        <error line="185" column="18" source="standard:trailing-comma-on-call-site" />
+        <error line="186" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="215" column="48" source="standard:trailing-comma-on-call-site" />
+        <error line="225" column="52" source="standard:trailing-comma-on-call-site" />
+        <error line="227" column="29" source="standard:trailing-comma-on-call-site" />
+        <error line="294" column="32" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sca/domain/model/DeviceApproval.kt">
+        <error line="24" column="12" source="standard:trailing-comma-on-declaration-site" />
+        <error line="30" column="11" source="standard:trailing-comma-on-declaration-site" />
+        <error line="45" column="57" source="standard:trailing-comma-on-declaration-site" />
+        <error line="58" column="57" source="standard:trailing-comma-on-declaration-site" />
+        <error line="76" column="28" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sca/domain/model/ScaChallenge.kt">
+        <error line="14" column="14" source="standard:trailing-comma-on-declaration-site" />
+        <error line="22" column="26" source="standard:trailing-comma-on-declaration-site" />
+        <error line="30" column="14" source="standard:trailing-comma-on-declaration-site" />
+        <error line="53" column="57" source="standard:trailing-comma-on-declaration-site" />
+        <error line="61" column="43" source="standard:trailing-comma-on-call-site" />
+        <error line="68" column="78" source="standard:trailing-comma-on-call-site" />
+        <error line="77" column="27" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sca/infrastructure/DeviceApprovalAdapters.kt">
+        <error line="39" column="29" source="standard:trailing-comma-on-declaration-site" />
+        <error line="67" column="5" source="standard:class-signature" />
+        <error line="68" column="5" source="standard:class-signature" />
+        <error line="68" column="43" source="standard:class-signature" />
+        <error line="68" column="43" source="standard:trailing-comma-on-declaration-site" />
+        <error line="69" column="5" source="standard:class-signature" />
+        <error line="76" column="54" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sca/infrastructure/ScaAdapters.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="52" column="37" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sca/infrastructure/authz/AuthzProducer.kt">
+        <error line="26" column="53" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sca/infrastructure/idempotency/IdempotencyConfig.kt">
+        <error line="27" column="77" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sca/infrastructure/messaging/KafkaScaOutboxEventPublisher.kt">
+        <error line="19" column="5" source="standard:class-signature" />
+        <error line="19" column="75" source="standard:class-signature" />
+        <error line="20" column="5" source="standard:class-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sca/infrastructure/outbox/ScaOutboxBacklogGauge.kt">
+        <error line="6" column="1" source="standard:import-ordering" />
+        <error line="27" column="5" source="standard:class-signature" />
+        <error line="28" column="5" source="standard:class-signature" />
+        <error line="28" column="40" source="standard:class-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sca/infrastructure/outbox/ScaOutboxDispatcher.kt">
+        <error line="19" column="56" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sca/infrastructure/persistence/entity/EnrolledDeviceEntity.kt">
+        <error line="10" column="1" source="standard:no-wildcard-imports" />
+        <error line="43" column="30" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sca/infrastructure/persistence/entity/ScaChallengeEntity.kt">
+        <error line="7" column="1" source="standard:no-wildcard-imports" />
+        <error line="9" column="1" source="standard:no-wildcard-imports" />
+        <error line="90" column="13" source="standard:multiline-if-else" />
+        <error line="90" column="32" source="standard:argument-list-wrapping" />
+        <error line="90" column="47" source="standard:argument-list-wrapping" />
+        <error line="90" column="64" source="standard:argument-list-wrapping" />
+        <error line="90" column="85" source="standard:argument-list-wrapping" />
+        <error line="90" column="106" source="standard:argument-list-wrapping" />
+        <error line="90" column="121" source="standard:max-line-length" />
+        <error line="90" column="122" source="standard:argument-list-wrapping" />
+        <error line="91" column="14" source="standard:multiline-if-else" />
+        <error line="94" column="30" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sca/infrastructure/persistence/repository/EnrolledDeviceRepositoryImpl.kt">
+        <error line="17" column="38" source="standard:class-signature" />
+        <error line="17" column="64" source="standard:class-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sca/infrastructure/persistence/repository/ScaChallengeRepositoryImpl.kt">
+        <error line="17" column="36" source="standard:class-signature" />
+        <error line="17" column="60" source="standard:class-signature" />
+        <error line="28" column="59" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sca/infrastructure/persistence/repository/ScaOutboxRepositoryImpl.kt">
+        <error line="6" column="1" source="standard:import-ordering" />
+        <error line="19" column="33" source="standard:class-signature" />
+        <error line="19" column="54" source="standard:class-signature" />
+        <error line="21" column="58" source="standard:function-signature" />
+        <error line="24" column="77" source="standard:function-signature" />
+        <error line="29" column="44" source="standard:trailing-comma-on-call-site" />
+        <error line="33" column="52" source="standard:function-signature" />
+        <error line="38" column="44" source="standard:trailing-comma-on-call-site" />
+        <error line="94" column="30" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/sca/infrastructure/rest/ScaResource.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="8" column="1" source="standard:no-wildcard-imports" />
+        <error line="9" column="1" source="standard:no-wildcard-imports" />
+        <error line="13" column="1" source="standard:no-wildcard-imports" />
+        <error line="18" column="1" source="standard:no-wildcard-imports" />
+        <error line="30" column="29" source="standard:trailing-comma-on-declaration-site" />
+        <error line="34" column="5" source="standard:class-signature" />
+        <error line="35" column="5" source="standard:class-signature" />
+        <error line="35" column="21" source="standard:class-signature" />
+        <error line="35" column="21" source="standard:trailing-comma-on-declaration-site" />
+        <error line="42" column="38" source="standard:trailing-comma-on-declaration-site" />
+        <error line="62" column="26" source="standard:trailing-comma-on-declaration-site" />
+        <error line="75" column="25" source="standard:trailing-comma-on-declaration-site" />
+        <error line="88" column="40" source="standard:trailing-comma-on-call-site" />
+        <error line="103" column="33" source="standard:trailing-comma-on-declaration-site" />
+        <error line="119" column="43" source="standard:trailing-comma-on-declaration-site" />
+        <error line="125" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="130" column="57" source="standard:trailing-comma-on-declaration-site" />
+        <error line="149" column="50" source="standard:trailing-comma-on-call-site" />
+        <error line="150" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="158" column="20" source="standard:trailing-comma-on-call-site" />
+        <error line="213" column="46" source="standard:trailing-comma-on-call-site" />
+        <error line="214" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="233" column="49" source="standard:trailing-comma-on-call-site" />
+        <error line="234" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="256" column="44" source="standard:trailing-comma-on-call-site" />
+        <error line="257" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="339" column="79" source="standard:function-signature" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/governance/HibernateSequenceGuardTest.kt">
+        <error line="54" column="33" source="standard:trailing-comma-on-call-site" />
+        <error line="68" column="36" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/sca/application/usecase/ScaServiceTest.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="73" column="41" source="standard:trailing-comma-on-call-site" />
+        <error line="93" column="35" source="standard:trailing-comma-on-call-site" />
+        <error line="94" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="98" column="18" source="standard:argument-list-wrapping" />
+        <error line="98" column="29" source="standard:argument-list-wrapping" />
+        <error line="98" column="31" source="standard:function-literal" />
+        <error line="98" column="49" source="standard:argument-list-wrapping" />
+        <error line="98" column="55" source="standard:function-literal" />
+        <error line="98" column="100" source="standard:binary-expression-wrapping" />
+        <error line="98" column="114" source="standard:binary-expression-wrapping" />
+        <error line="98" column="121" source="standard:max-line-length" />
+        <error line="98" column="123" source="standard:function-literal" />
+        <error line="98" column="124" source="standard:argument-list-wrapping" />
+        <error line="98" column="126" source="standard:function-literal" />
+        <error line="117" column="35" source="standard:trailing-comma-on-call-site" />
+        <error line="118" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="143" column="35" source="standard:trailing-comma-on-call-site" />
+        <error line="144" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="165" column="31" source="standard:trailing-comma-on-call-site" />
+        <error line="166" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="188" column="39" source="standard:trailing-comma-on-call-site" />
+        <error line="189" column="22" source="standard:trailing-comma-on-call-site" />
+        <error line="207" column="39" source="standard:trailing-comma-on-call-site" />
+        <error line="208" column="22" source="standard:trailing-comma-on-call-site" />
+        <error line="226" column="32" source="standard:trailing-comma-on-call-site" />
+        <error line="227" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="322" column="111" source="standard:trailing-comma-on-call-site" />
+        <error line="339" column="108" source="standard:trailing-comma-on-call-site" />
+        <error line="358" column="119" source="standard:trailing-comma-on-call-site" />
+        <error line="375" column="109" source="standard:trailing-comma-on-call-site" />
+        <error line="392" column="119" source="standard:trailing-comma-on-call-site" />
+        <error line="407" column="18" source="standard:argument-list-wrapping" />
+        <error line="407" column="29" source="standard:argument-list-wrapping" />
+        <error line="407" column="31" source="standard:function-literal" />
+        <error line="407" column="63" source="standard:argument-list-wrapping" />
+        <error line="407" column="69" source="standard:function-literal" />
+        <error line="407" column="101" source="standard:binary-expression-wrapping" />
+        <error line="407" column="115" source="standard:binary-expression-wrapping" />
+        <error line="407" column="121" source="standard:max-line-length" />
+        <error line="407" column="124" source="standard:function-literal" />
+        <error line="407" column="125" source="standard:argument-list-wrapping" />
+        <error line="407" column="127" source="standard:function-literal" />
+        <error line="408" column="18" source="standard:argument-list-wrapping" />
+        <error line="408" column="29" source="standard:argument-list-wrapping" />
+        <error line="408" column="31" source="standard:function-literal" />
+        <error line="408" column="32" source="standard:wrapping" />
+        <error line="408" column="55" source="standard:argument-list-wrapping" />
+        <error line="408" column="61" source="standard:function-literal" />
+        <error line="408" column="62" source="standard:wrapping" />
+        <error line="408" column="99" source="standard:binary-expression-wrapping" />
+        <error line="408" column="117" source="standard:binary-expression-wrapping" />
+        <error line="408" column="121" source="standard:max-line-length" />
+        <error line="408" column="126" source="standard:function-literal" />
+        <error line="408" column="127" source="standard:argument-list-wrapping" />
+        <error line="408" column="129" source="standard:function-literal" />
+        <error line="449" column="35" source="standard:trailing-comma-on-call-site" />
+        <error line="450" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="496" column="9" source="standard:function-signature" />
+        <error line="497" column="9" source="standard:function-signature" />
+        <error line="497" column="40" source="standard:function-signature" />
+        <error line="497" column="40" source="standard:trailing-comma-on-declaration-site" />
+        <error line="502" column="45" source="standard:trailing-comma-on-call-site" />
+        <error line="509" column="29" source="standard:trailing-comma-on-call-site" />
+        <error line="519" column="46" source="standard:trailing-comma-on-declaration-site" />
+        <error line="531" column="57" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/sca/domain/model/DeviceApprovalTest.kt">
+        <error line="37" column="38" source="standard:trailing-comma-on-call-site" />
+        <error line="44" column="9" source="standard:function-signature" />
+        <error line="45" column="9" source="standard:function-signature" />
+        <error line="45" column="34" source="standard:function-signature" />
+        <error line="45" column="34" source="standard:trailing-comma-on-declaration-site" />
+        <error line="57" column="32" source="standard:trailing-comma-on-call-site" />
+        <error line="58" column="10" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/sca/domain/model/ScaChallengeTest.kt">
+        <error line="79" column="46" source="standard:trailing-comma-on-declaration-site" />
+        <error line="89" column="57" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/sca/infrastructure/JcaDeviceAssertionVerifierTest.kt">
+        <error line="73" column="52" source="standard:function-signature" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/sca/infrastructure/outbox/ScaOutboxBacklogGaugeTest.kt">
+        <error line="6" column="1" source="standard:import-ordering" />
+    </file>
+</baseline>

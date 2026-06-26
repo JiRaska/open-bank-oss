@@ -1,0 +1,37 @@
+# ExternalSecret: customers realm JSON from Vault → keycloak-customers-realm-import Secret.
+# Keycloak will auto-import this realm on cold start (--import-realm flag, same as the
+# operator realm). The realm is kept in Vault so credentials (SMTP, future IdP secrets)
+# are never committed to git.
+#
+# Sandbox bootstrap: until Vault has the key, seed it manually:
+#   vault kv put secret/keycloak-customers-realm-import \
+#     openbank-customers-realm.json=@openbank-infra/gitops/components/keycloak/customers-realm-template.json
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: keycloak-customers-realm-import
+  namespace: iam
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: keycloak-customers-realm-import
+    creationPolicy: Owner
+    template:
+      engineVersion: v2
+      mergePolicy: Merge
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+      data:
+        openbank-customers-realm.json: >-
+          {{ index . "openbank-customers-realm.json" | mustFromJson
+             | merge (dict "loginTheme" "openbank" "displayNameHtml" "OpenBank")
+             | mustToJson }}
+  data:
+    - secretKey: openbank-customers-realm.json
+      remoteRef:
+        key: keycloak-customers-realm-import
+        property: openbank-customers-realm.json

@@ -1,0 +1,126 @@
+# 115. KYC engine — risk-based checks, ČNB four-eyes gate, sandbox straight-through mode
+
+Date: 2026-06-25
+Author: Claude (paired with Jiří Raška)
+Status: Accepted
+
+## Context
+
+`openbank-kyc-service` implements KYC case management. ADR-0068 (onboarding cockpit) documents the
+operator UI flow; ADR-0069 (customer onboarding journey) documents the customer-facing flow. Neither
+documents what the KYC engine itself checks, how the four-eyes gate works mechanically, or why a
+`openbank.kyc.auto-approve` feature flag exists.
+
+This ADR captures those decisions so they can be audited against ČNB AML requirements.
+
+## Decision
+
+**1. KYC case lifecycle.**
+
+```
+OPEN → DOCUMENTS_REQUIRED → UNDER_REVIEW → APPROVED (terminal)
+                                          → REJECTED  (terminal)
+OPEN / DOCUMENTS_REQUIRED / UNDER_REVIEW → EXPIRED   (terminal, time-driven)
+```
+
+Terminal states: `APPROVED`, `REJECTED`, `EXPIRED`. A party with an active (non-terminal) case
+cannot have a second case opened (409 Conflict from the operator-facing path; idempotent reuse
+on the event-driven path).
+
+**2. Mandatory check set.**
+
+Every case opens with five checks in `PENDING` status:
+
+| CheckType | What it validates |
+|-----------|------------------|
+| `IDENTITY` | Government-issued ID document verification |
+| `ADDRESS` | Proof of address |
+| `PEP_SCREENING` | Politically Exposed Person screening |
+| `SANCTIONS_SCREENING` | Sanctions list check (delegates to openbank-sanctions-service) |
+| `ADVERSE_MEDIA` | Negative news screening |
+
+Initial `riskLevel` is `MEDIUM` for all new parties — the conservative default. An operator may
+downgrade to `LOW` or escalate to `HIGH`/`VERY_HIGH` based on check outcomes.
+
+**3. Four-eyes gate — state-based, not role-based.**
+
+The four-eyes requirement (ADR-0068) is enforced by the **state machine**, not by role separation:
+
+- `approve` and `reject` are only valid from `UNDER_REVIEW`. Attempting either on a case in any
+  other state throws `InvalidStateTransitionException` → HTTP 422.
+- The reviewer identity (`approvedBy`/`reviewedBy`) must come from the authenticated security
+  context — it is never accepted from the request body.
+- Minimum reason length is **10 characters** (ČNB AML Act No. 253/2008 Coll. §8 audit trail).
+
+**Important limitation:** there is a single `ROLE_KYC` role. The system does not technically
+prevent the same user who opened a case from also approving it. Maker-checker separation at the
+user level relies on **organisational control** (assigning different operators to opener and
+reviewer roles in Keycloak), not on a code-level enforcement. A future hardening step should
+introduce `ROLE_KYC_OPENER` and `ROLE_KYC_REVIEWER` as distinct roles.
+
+**4. Sandbox straight-through processing (STP).**
+
+`openbank.kyc.auto-approve` (default: `false`) enables sandbox onboarding without an operator:
+
+- When `true`, a case opened via the `PARTY_CREATED` Kafka event is auto-evaluated (all checks →
+  `PASSED`) and immediately approved (`reviewedBy = "sandbox-auto-approval"`).
+- **MUST remain `false` in production.** Flipping it in production bypasses the four-eyes gate
+  entirely and violates the AML Act.
+- This is a SmallRye config property, not an OpenFeature feature flag (ADR-0067). Changing it
+  requires a service restart.
+
+**5. Periodic re-KYC.**
+
+Approved KYC cases are not permanent. A regulatory re-KYC programme (cadence: LOW=5 years,
+MEDIUM=3 years, HIGH/VERY_HIGH=1 year) is out of scope for this ADR. It requires a Temporal
+scheduled workflow to identify expired approvals and re-open cases.
+
+## Alternatives considered
+
+- **External KYC provider (Onfido, Jumio, Sum Sub).** Faster time-to-live, managed identity
+  verification, but vendor lock-in and data residency risk for ČNB/GDPR. Deferred as a future
+  integration option.
+- **Fully automated KYC (no four-eyes).** Eliminates manual review but violates ČNB AML
+  requirements for MEDIUM+ risk parties.
+- **Role-split enforcement now.** `ROLE_KYC_OPENER` vs `ROLE_KYC_REVIEWER` at code level would
+  be the strongest control, but requires Keycloak role restructuring across the fleet. Deferred
+  to a follow-up hardening ADR.
+
+## Consequences
+
+**Positive**
+- Four-eyes state gate meets the baseline ČNB AML four-eyes requirement.
+- STP flag enables sandbox e2e onboarding without operator intervention.
+- Minimum reason length enforces an auditable paper trail for every approval/rejection.
+
+**Negative**
+- A single `ROLE_KYC` user can both open and approve a case — maker-checker is organisational
+  convention, not a technical guarantee. This is a gap for a production audit.
+- No integration with an external PEP/sanctions database yet — `SANCTIONS_SCREENING` delegates
+  to `openbank-sanctions-service`, which uses an internal watchlist.
+- Periodic re-KYC is not implemented.
+
+**Neutral**
+- `riskLevel = MEDIUM` as default is conservative; operators can downgrade after check completion.
+- The event-driven open path (`openCaseForParty`) is idempotent (reuse on retry); the operator
+  path (`openCase`) rejects duplicates with 409.
+
+## Compliance impact
+
+- GDPR Art. 9: KYC data are sensitive personal data → legal basis is AML Act obligation;
+  retention is 5 years after end of business relationship (AML Act §16) per ADR-0117.
+- AML Act No. 253/2008 §8: four-eyes gate + auditable reason enforced.
+- PSD2: KYC is a prerequisite for onboarding, not a payment flow control.
+- ČNB: full AML compliance requires integration with a certified external watchlist provider
+  before production go-live.
+- DORA: not applicable to this ADR specifically.
+
+## References
+
+- `openbank-kyc-service/src/main/kotlin/.../application/KycService.kt`
+- `openbank-kyc-service/src/main/kotlin/.../domain/model/KycCase.kt`
+- `openbank-libs/src/main/kotlin/com/openbank/libs/security/Roles.kt` (single `ROLE_KYC`)
+- ADR-0068 (onboarding cockpit — four-eyes UI)
+- ADR-0069 (customer onboarding journey)
+- ADR-0032 (synchronous AML/sanctions screening gate)
+- AML Act No. 253/2008 Coll. §8 (Czech AML — audit trail requirement)

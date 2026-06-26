@@ -1,0 +1,166 @@
+quarkus:
+  application:
+    name: openbank-notification-service
+    version: 0.4.0
+  http:
+    port: 8112
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+      headers: Content-Type,Authorization
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: postgresql://localhost:5432/openbank_notifications
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_notifications
+  flyway:
+    migrate-at-start: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+  hibernate-orm:
+    database:
+      generation: none
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  smallrye-reactive-messaging:
+    kafka:
+      bootstrap-servers: localhost:29092
+  mailer:
+    host: localhost
+    port: 1025
+    start-tls: DISABLED
+    auth-methods: DISABLED
+    from: noreply@openbank.cz
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+    console:
+      json: true
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-notification-service
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+mp:
+  messaging:
+    incoming:
+      notification-events-in:
+        connector: smallrye-kafka
+        client.id: notification-service-${quarkus.uuid}
+        group.id: notification-service
+        topic: openbank.notification.requests
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto.offset.reset: earliest
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+    oidc:
+      enabled: false
+    mailer:
+      mock: true
+"%test":
+  quarkus:
+    # Dedicated IT Postgres on the warm CI stack (ADR-0043); CI auto-creates any
+    # openbank_*_it database referenced here. Dev Services stay OFF — tests hit
+    # localhost:5432 exactly as on a workstation.
+    datasource:
+      username: openbank
+      password: openbank_secret
+      reactive:
+        url: vertx-reactive:postgresql://localhost:5432/openbank_notification_it
+      jdbc:
+        url: jdbc:postgresql://localhost:5432/openbank_notification_it
+    devservices:
+      enabled: false
+    management:
+      enabled: false
+    oidc:
+      enabled: false
+    mailer:
+      mock: true
+    # Disable the @Scheduled outbox tick under test so the consumer IT never races
+    # an unrelated background dispatch against its assertions.
+    scheduler:
+      enabled: false
+openbank:
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 100
+  outbox:
+    dispatch-enabled: true
+  api:
+    version: "1"
+  build:
+    time: "${BUILD_TIME:unknown}"
+  git:
+    commit: "${GIT_COMMIT:unknown}"
+  # Outbound oversight webhook (ADR-0059). OFF by default; the URL is injected
+  # from Vault via ExternalSecret (never in git). Only anonymized, allow-listed
+  # oversight signals egress — see com.openbank.notification.application.OversightWebhook.
+  notification:
+    webhook:
+      slack:
+        enabled: ${SLACK_WEBHOOK_ENABLED:false}
+        url: ${SLACK_WEBHOOK_URL:}
+    # Push delivery (FCM / APNs). OFF by default — a disabled adapter records the push as a
+    # successful no-op (skipped), exactly like the EMAIL stub. Credentials are injected at
+    # runtime from Vault via ExternalSecret (never in git). A PUSH notification fans out to
+    # every ACTIVE device token registered for the party (see device_tokens / DeviceResource).
+    push:
+      fcm:
+        enabled: ${FCM_ENABLED:false}
+        # Service-account JSON (raw or Base64). Grants the firebase.messaging scope.
+        service-account-json: ${FCM_SERVICE_ACCOUNT_JSON:}
+        # Optional; falls back to project_id from the service-account JSON.
+        project-id: ${FCM_PROJECT_ID:}
+      apns:
+        enabled: ${APNS_ENABLED:false}
+        key-id: ${APNS_KEY_ID:}
+        team-id: ${APNS_TEAM_ID:}
+        bundle-id: ${APNS_BUNDLE_ID:cz.openbank.app}
+        # .p8 PKCS#8 EC private key (raw PEM or Base64).
+        private-key: ${APNS_PRIVATE_KEY:}
+        # true → APNs sandbox host (debug builds); false → production.
+        sandbox: ${APNS_SANDBOX:false}

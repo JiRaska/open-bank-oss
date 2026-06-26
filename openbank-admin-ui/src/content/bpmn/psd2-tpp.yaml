@@ -1,0 +1,121 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# BPMN process diagram (ADR-0019/0029). Authored as data; validated by
+# src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
+
+name: PSD2 Third-Party Access
+desc: Onboarding TPP a udělení souhlasu (Consent) k přístupu
+regulation: PSD2 RTS on SCA and CSC
+services:
+  - tpp-registry-service
+  - psd2-service
+  - sca-service
+  - consent-service
+  - audit-service
+  - party-service
+steps:
+  - id: start
+    type: start
+    x: 60
+    y: 100
+    label: TPP Request
+  - id: eidas
+    type: task
+    x: 180
+    y: 100
+    label: eIDAS Check
+    lane: psd2
+    apis:
+      - POST /api/v1/psd2/verify-cert
+    relatedServices:
+      - psd2-service
+  - id: registry
+    type: task
+    x: 320
+    y: 100
+    label: Registry Lookup
+    lane: psd2
+    apis:
+      - GET /api/v1/tpp-registry/check
+    relatedServices:
+      - tpp-registry-service
+  - id: gw1
+    type: gateway
+    x: 440
+    y: 100
+    label: Validní?
+  - id: reject
+    type: end-err
+    x: 440
+    y: 220
+    label: Zamítnuto
+  - id: consent
+    type: task
+    x: 560
+    y: 100
+    label: Consent Init
+    lane: psd2
+    apis:
+      - POST /api/v1/consents
+    relatedServices:
+      - consent-service
+  - id: sca
+    type: task
+    x: 700
+    y: 100
+    label: Zákazník SCA
+    lane: psd2
+    apis:
+      - POST /api/v1/sca/challenge
+    relatedServices:
+      - sca-service
+  - id: token
+    type: task
+    x: 840
+    y: 100
+    label: Access Token
+    lane: identity
+    apis:
+      - POST /api/v1/oauth/token
+    relatedServices:
+      - party-service
+  - id: audit
+    type: task
+    x: 960
+    y: 100
+    label: Audit Log
+    lane: compliance
+    apis:
+      - POST /api/v1/audit/log
+    relatedServices:
+      - audit-service
+    consumes:
+      - openbank.consent.events
+  - id: end
+    type: end
+    x: 1060
+    y: 100
+    label: Aktivní
+flows:
+  - from: start
+    to: eidas
+  - from: eidas
+    to: registry
+  - from: registry
+    to: gw1
+  - from: gw1
+    to: reject
+    label: Ne
+  - from: gw1
+    to: consent
+    label: Ano
+  - from: consent
+    to: sca
+  - from: sca
+    to: token
+  - from: token
+    to: audit
+    kind: async
+    topic: openbank.consent.events
+  - from: audit
+    to: end

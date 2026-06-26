@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: customer-edge
+  labels:
+    app.kubernetes.io/part-of: customer-edge
+    openbank.tech/service: "true"
+    # Last app namespace without PSS — the Deployment already satisfies
+    # restricted (runAsNonRoot+seccomp pod-level, drop ALL container-level).
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

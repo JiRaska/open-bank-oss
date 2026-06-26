@@ -1,0 +1,20 @@
+# Domain event topic owned by ledger-service. Declared explicitly (the broker
+# does not auto-create topics) so the Strimzi topic operator manages it and the
+# producer channel `ledger-events-out` has a destination. Lives in the
+# `messaging` namespace (where the Strimzi entity/topic operator watches) even
+# though it is logically owned by the ledger domain — cross-namespace by design,
+# mirroring the centralized broker. Single partition + RF 1 to match the
+# single-broker sandbox; prod should raise partitions for parallelism and RF to 3.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.ledger.journal.posted
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

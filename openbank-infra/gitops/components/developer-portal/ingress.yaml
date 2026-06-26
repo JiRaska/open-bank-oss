@@ -1,0 +1,56 @@
+# Public edge for the developer portal (ADR-0093). developer.open-bank.tech, browser-trusted
+# Let's Encrypt (DNS-01, same issuer as admin/customer). Hardened: ModSecurity + OWASP Core Rule
+# Set in BLOCKING mode (the controller image ships the module + CRS), per-IP rate limiting, forced
+# TLS, and strict security headers. The portal serves only static public docs, so this WAF guards a
+# read-only surface — defence in depth, not the sole control.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: developer-portal
+  namespace: developer-portal
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Rotate the TLS private key on every renewal — best practice for a public internet surface.
+    cert-manager.io/private-key-rotation-policy: "Always"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+
+    # ── WAF: ModSecurity + OWASP CRS, scoped to THIS ingress (not cluster-wide) ──
+    nginx.ingress.kubernetes.io/enable-modsecurity: "true"
+    nginx.ingress.kubernetes.io/enable-owasp-core-rules: "true"
+    nginx.ingress.kubernetes.io/modsecurity-snippet: |
+      SecRuleEngine On
+      SecRequestBodyAccess On
+      SecRequestBodyLimit 1048576
+      SecAuditEngine RelevantOnly
+      SecAuditLog /dev/stdout
+      SecAuditLogFormat JSON
+      # Paranoia level 1 (low false positives for a docs site); raise later if needed.
+      SecAction "id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1"
+
+    # ── Per-client rate limiting (static docs: generous but bounded) ──
+    nginx.ingress.kubernetes.io/limit-rps: "30"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "3"
+    nginx.ingress.kubernetes.io/limit-connections: "20"
+
+    # ── Edge security headers (belt-and-suspenders on top of the nginx.conf in the pod) ──
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "Strict-Transport-Security: max-age=63072000; includeSubDomains; preload";
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [developer.open-bank.tech]
+      secretName: developer-portal-tls
+  rules:
+    - host: developer.open-bank.tech
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: developer-portal
+                port:
+                  number: 8080

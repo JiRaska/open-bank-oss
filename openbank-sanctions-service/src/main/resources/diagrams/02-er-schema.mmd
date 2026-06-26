@@ -1,0 +1,48 @@
+%% title: ER schema — sanctions data model
+erDiagram
+  SANCTIONS_LIST ||--o{ SANCTIONS_LIST_ENTRY : "1..N entries"
+  SANCTIONS_CHECK ||--o{ SANCTIONS_OUTBOX : "emits"
+
+  SANCTIONS_LIST {
+    bigserial id PK
+    text source "EU|OFAC|UN|NATIONAL"
+    text version "publisher revision id"
+    text url "where it was fetched from"
+    timestamptz refreshed_at
+    boolean enabled "ops can disable a list"
+    integer entry_count
+  }
+
+  SANCTIONS_LIST_ENTRY {
+    bigserial id PK
+    bigint list_id FK
+    text name_primary
+    text aliases "JSON array"
+    text country
+    date date_of_birth
+    text reason "SDN|TERRORISM|FINANCIAL_FRAUD|..."
+    timestamptz first_listed_at
+  }
+
+  SANCTIONS_CHECK {
+    bigserial id PK
+    uuid request_id UK
+    text screened_name
+    text date_of_birth
+    text country
+    text outcome "HIT|CLEAR"
+    numeric risk_score
+    text matched_list_source
+    text matched_aliases "JSON array"
+    timestamptz checked_at
+  }
+
+  SANCTIONS_OUTBOX {
+    bigserial id PK
+    uuid event_id UK
+    text event_type "sanctions.hit.v1|list.refreshed.v1"
+    text payload "JSONB"
+    text status "PENDING|PUBLISHED|FAILED"
+    timestamptz created_at
+    timestamptz published_at
+  }

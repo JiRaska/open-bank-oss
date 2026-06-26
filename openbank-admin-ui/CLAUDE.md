@@ -1,0 +1,126 @@
+# openbank-admin-ui — agent & contributor guide
+
+Next.js (App Router, standalone) operator console for the OpenBank fleet. The browser reaches cluster
+services **only** through the BFF proxy (`/api/svc/<k8s-name>/<path>`, ADR-0056) — never a `localhost`
+port or in-cluster `.svc` DNS name. See the root `CLAUDE.md` for monorepo-wide rules.
+
+## Non-negotiable UI rules (enforced by tests — don't relearn these page-by-page)
+
+### 1. Graceful-state rule — never leak a raw backend failure
+
+In the sandbox most of the 28-service fleet isn't deployed, so BFF/internal calls legitimately fail. A
+page must **never** render a raw `HTTP 404`, a hand-written "Cannot reach X", or a red `alert-error`
+box. Those read as "the app is broken" when the truth is usually "this service isn't deployed here yet".
+
+**Do this instead** (read `src/app/accounts/page.tsx` or `src/app/audit/page.tsx` as the reference):
+
+- Hold a typed state: `const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)`.
+- On a non-OK BFF response: `setUnavailable({ kind: await classifyBffFailure(res) })` and **return** — do
+  not `throw` a `` `HTTP ${res.status}` `` string.
+- On a thrown fetch (timeout/abort/network): `catch { setUnavailable({ kind: 'unreachable' }) }`.
+- Render the shared panel: `<DataUnavailable kind={unavailable.kind} service="X-service" feature={t('…','…')} lang={language} dense />`.
+- For loaded-but-empty results use `kind="no_data"`. For user-initiated **write** actions (form submit,
+  freeze/close) a calm inline message via `t(czech, english)` is fine — but still never a raw HTTP status.
+
+Helpers: `src/components/feedback/DataUnavailable.tsx` (the panel, bilingual copy per `kind`) and
+`src/lib/services/bff.ts` → `classifyBffFailure(res)` (404 `Unknown service`→`not_deployed`, 401→
+`unauthorized`, 502 `upstream_unreachable`→`unreachable`, bare 404→`not_found`, else `error`).
+
+**Enforcement:** `src/test/graceful-states.guard.test.ts` scans every `src/app/**/page.tsx` and fails CI
+if a page reintroduces a banned anti-pattern (raw `` `HTTP ${ ``, `className="alert-error"`,
+"cannot/could not reach" copy). Every **new** page must comply — this is not optional.
+
+### 2. Search & pagination rule — validate client-side, cap the request, page the render
+
+- **Validate before you call.** Never send free text to a typed backend endpoint. The account-service
+  rejects a non-IBAN with a raw `Invalid IBAN: <value>` at its domain boundary, so an IBAN field must be
+  validated with `isValidIban()` (`src/lib/validation/iban.ts`, ISO 13616 mod-97) **before** the BFF
+  call; on failure show an inline field hint, don't fetch.
+- **Cap the request.** Always pass a bounded `limit` (default `PAGE_SIZE = 25`) — never fetch an unbounded
+  list.
+- **Page the render.** Show a bounded slice with a "Load more" control rather than dumping thousands of
+  rows into the DOM.
+
+Backend fulltext search (`q=`) across the fleet is the money-path work tracked separately (ADR-0055 /
+issues #66–68); until it lands, the UI degrades through rule #1 instead of surfacing a raw error.
+
+### 3. Read-only-consumer rule — the operator console never *produces* governance data
+
+The admin-ui **displays** state; it does not generate it. Two consequences, both industry-standard:
+
+- **Security scanning is a CI/CD concern, never a UI button.** Never let the browser trigger a live scan
+  (no `POST /scan`). SAST/DAST/dependency/secret scans run in the pipeline (`.github/workflows/security.yml`
+  — Trivy, CodeQL, Gitleaks). The page is a read-only view of the latest verdict. A privileged, expensive
+  fleet action behind a UI button is an anti-pattern (OWASP DevSecOps / EBA ICT risk).
+- **CI artifacts are baked into the image and served read-only.** Test/coverage and security reports follow
+  the same pattern as the SBOM bundle: the deploy build summarises real CI output into a JSON
+  (`test-results.json`, `security-report.json`), bakes it into the image, and an internal route serves it
+  (`OPENBANK_TEST_RESULTS`, `OPENBANK_SECURITY_REPORT`). Never fabricate numbers; a service with no report
+  shows `0` (honest "not run here"). Collectors: `scripts/collect-test-results.mjs`. Routes:
+  `src/app/api/test-results/route.ts`, `src/app/api/security/route.ts` — both prefer the bundled file, fall
+  back to a live read-only source if configured, else degrade through rule #1.
+- **Where the bundle comes from.** `build-push-admin-ui.sh` runs the collector before the image build and
+  bakes `openbank-admin-ui/test-results.json` (gitignored — derived, never committed). It reads JUnit XML
+  from `${TEST_RESULTS_REPO:-<repo-root>}/openbank-*/build/test-results/`, so in CI (which runs
+  `./gradlew test` first) the numbers are real; a clean surgical checkout has no XML, so point
+  `TEST_RESULTS_REPO` at a checkout that has built+tested. A guard keeps an existing non-empty bundle rather
+  than clobbering it with an all-zero collect, so the page never silently regresses to zeros.
+
+### 4. Bilingual-by-default rule — every user-facing string switches with the language toggle
+
+The console is bilingual (cs/en). The top-right toggle flips a client context
+(`useLanguage().t(cs, en)` from `@/lib/i18n/LanguageContext`) that every consumer re-renders from. The
+Sidebar/Header were wired up, but page **bodies** were historically authored with hardcoded English (or,
+worse, hardcoded Czech) JSX text — so toggling the language changed the chrome but not the content. That
+is the bug this rule exists to prevent: it isn't "i18n is broken", the strings were simply never wrapped.
+
+**The rule:** a page renders **no** hardcoded human-language copy. Every user-facing string goes through
+`t('Česky', 'English')` — both arguments filled, never one-sided, never Czech-only. This includes JSX
+text nodes, `placeholder`, `aria-label`, `title`, `alt`, option labels, table headers, and badge text.
+Brand/technical tokens that read identically in both languages (IBAN, SWIFT, VoP, "Party ID", regulator
+acronyms) may be wrapped as `t('X', 'X')` so intent stays explicit.
+
+**Footguns** (these silently break the build or the toggle):
+- `.map(t => …)` / `.filter(t => …)` **shadows** the translation function `t`. Rename the loop var
+  (`item`, `row`, `v`) — never let a callback param eat `t`.
+- A helper sub-component defined outside the page component needs its **own** `const { t } = useLanguage()`
+  (all admin-ui pages are `'use client'`), or take `t` as a prop. Never reference `t` out of scope.
+
+**Enforcement:** `src/test/i18n.guard.test.ts` scans every `src/app/**/page.tsx` and fails CI on
+multi-word hardcoded JSX text or hardcoded `aria-label`/`alt`. It is a **ratchet**: a `BASELINE` set lists
+the not-yet-swept long-form docs pages (they may still contain copy); every other page must be clean, and
+once a baseline page is swept it must be deleted from `BASELINE` (the test fails telling you to) — so
+coverage only ever grows. New pages must comply from day one.
+
+### 5. App-shell rule — every operator page renders inside the Sidebar + Header
+
+The console wraps each page in the app shell — the **Sidebar** (nav) + **Header** — via a per-route
+`layout.tsx`. The root `app/layout.tsx` mounts only providers (Session/Language), **not** the shell, so
+a route subtree with no shell `layout.tsx` renders the page **bare**: no sidebar, no header. To an
+operator that reads as "it opened in a new window, the nav is gone". This is the bug this rule prevents
+— FinOps/DevOps (and, it turned out, observability) shipped a `page.tsx` with no `layout.tsx`.
+
+**The rule:** every operator page resolves an app-shell layout — a `layout.tsx` in its **own directory
+or an ancestor** (below `app/`) that renders `<Sidebar>`. When you add a new top-level route, add its
+`layout.tsx` too (copy `src/app/dashboard/layout.tsx`: Sidebar + Header + scrollable `<main>`). Nested
+routes inherit the nearest ancestor shell, so a sub-route (e.g. `system/tests/`) needs no layout of its
+own as long as a parent (`system/`) has one.
+
+**Enforcement:** `src/test/layout-shell.guard.test.ts` scans every `src/app/**/page.tsx` and fails CI if
+its route subtree has no shell layout. Intentionally shell-less pages (auth screens, the `/` redirect)
+are listed in `EXEMPT`. New pages must comply from day one.
+
+## Versioning
+
+Any change under `src/**` bumps `version.txt` **and** `package.json` `version` (kept equal; the build
+script enforces it). `feat`→minor, `fix`/`perf`→patch, `BREAKING CHANGE`→major. admin-ui is **not** a
+money-path service, so a non-breaking change is auto-merge-eligible after the independent review gate.
+
+## Build & verify
+
+```
+npm run type-check      # tsc --noEmit
+npm run test            # vitest run (includes the graceful-state guard)
+npx next build          # full production build
+npx eslint .            # lint
+```

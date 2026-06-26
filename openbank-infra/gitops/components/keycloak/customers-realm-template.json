@@ -1,0 +1,370 @@
+{
+  "realm": "openbank-customers",
+  "displayName": "OpenBank",
+  "displayNameHtml": "OpenBank",
+  "enabled": true,
+  "loginTheme": "openbank",
+  "sslRequired": "external",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "offlineSessionIdleTimeout": 2592000,
+  "refreshTokenMaxReuse": 0,
+  "revokeRefreshToken": true,
+  "clients": [
+    {
+      "clientId": "openbank-app",
+      "name": "OpenBank Customer App",
+      "description": "Native mobile/cross-platform customer app (ADR-0064 KMP, ADR-0065 customer edge)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "tech.openbank.app://oauth/callback",
+        "http://localhost:*"
+      ],
+      "webOrigins": ["+"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "backchannel.logout.session.required": "true",
+        "post.logout.redirect.uris": "tech.openbank.app://oauth/logout"
+      },
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "accounts:read",
+        "payments:initiate"
+      ],
+      "optionalClientScopes": [
+        "statements:read",
+        "sca:enroll-device",
+        "sca:decide",
+        "telemetry:rum"
+      ],
+      "protocolMappers": [
+        {
+          "name": "party-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "party_id",
+            "claim.name": "party_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "aggregate.attrs": "false"
+          }
+        },
+        {
+          "comment": "This realm import defines explicit (non-default) client scopes, so Keycloak does NOT attach the built-in 'basic' and 'roles' scopes that normally carry `sub` and realm_access.roles. Both are declared directly on the client so customer-edge can resolve identity (sub→partyId, ADR-0065/0069) and authorize (@RolesAllowed ROLE_CUSTOMER).",
+          "name": "sub",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "consentRequired": false,
+          "config": {
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "comment": "Adds openbank-edge to the JWT aud claim so that the copilot-service (OIDC client-id=openbank-edge, application-type=service) accepts customer bearer tokens. Quarkus service-type rejects JWTs whose aud is present but does not include client-id; tokens without an explicit audience mapper carry only Keycloak's built-in 'account' audience, which causes Quarkus to fall back to introspection (denied — public client, no secret). id.token.claim=false keeps the ID token lean.",
+          "name": "openbank-edge-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "openbank-edge",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "customer-edge-admin",
+      "name": "Customer Edge Admin",
+      "description": "Service-account client for customer-edge: sets party_id user attribute after identity re-link (issue #1270 PR3 / ADR-0072 §5). Has manage-users on this realm only.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "attributes": {
+        "client_credentials.use_refresh_token": "false"
+      }
+    }
+  ],
+  "clientScopes": [
+    {
+      "comment": "This explicit-scope realm import does NOT get Keycloak's built-in client scopes. The app's authorize request includes scope=openid profile (OAuth2/OIDC standard), so 'profile' must exist as an assigned scope or Keycloak rejects the request ('Invalid scopes: openid profile'). The app reads identity via the sub + realm-roles mappers on openbank-app, not profile claims, so this scope is intentionally claim-less — it only satisfies request validation.",
+      "name": "profile",
+      "description": "OIDC profile scope (request-validation only; claims come from mappers)",
+      "protocol": "openid-connect",
+      "attributes": {
+        "display.on.consent.screen": "false",
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "accounts:read",
+      "description": "Read access to the customer's own accounts and balances",
+      "protocol": "openid-connect",
+      "attributes": {
+        "consent.screen.text": "View your account balances and details",
+        "display.on.consent.screen": "true",
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "payments:initiate",
+      "description": "Initiate payments from the customer's own accounts (requires SCA)",
+      "protocol": "openid-connect",
+      "attributes": {
+        "consent.screen.text": "Initiate payments on your behalf (requires confirmation)",
+        "display.on.consent.screen": "true",
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "statements:read",
+      "description": "Read account statements",
+      "protocol": "openid-connect",
+      "attributes": {
+        "consent.screen.text": "View your account statements",
+        "display.on.consent.screen": "true",
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "sca:enroll-device",
+      "description": "Enrol a trusted device for Strong Customer Authentication",
+      "protocol": "openid-connect",
+      "attributes": {
+        "consent.screen.text": "Register this device for secure authentication",
+        "display.on.consent.screen": "true",
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "sca:decide",
+      "description": "Record SCA approval/denial decisions from an enrolled device",
+      "protocol": "openid-connect",
+      "attributes": {
+        "consent.screen.text": "Approve or deny payment requests on this device",
+        "display.on.consent.screen": "true",
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "comment": "RUM O4 consent enforcement (ADR-0088/O4). When the app requests this optional scope and the user consents, Keycloak fires the openbank-rum audience mapper, adding 'openbank-rum' to the JWT aud claim. The RUM gateway OIDC extension accepts only audience=openbank-rum; tokens with only aud=openbank-app are rejected 401 — server-side enforcement without custom OTel processors.",
+      "name": "telemetry:rum",
+      "description": "Allow the app to send anonymised performance telemetry to the RUM gateway",
+      "protocol": "openid-connect",
+      "attributes": {
+        "consent.screen.text": "Share anonymised app performance data to help improve the service",
+        "display.on.consent.screen": "true",
+        "include.in.token.scope": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "openbank-rum-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "openbank-rum",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "ROLE_CUSTOMER",
+        "description": "Authenticated retail customer — access to own resources only (deny-by-default via OPA, ADR-0065)"
+      },
+      {
+        "name": "default-roles-openbank-customers",
+        "description": "${role_default-roles}",
+        "composite": true,
+        "composites": {
+          "realm": ["ROLE_CUSTOMER", "offline_access", "uma_authorization"],
+          "client": { "account": ["view-profile", "manage-account"] }
+        }
+      }
+    ]
+  },
+  "defaultRole": {
+    "name": "default-roles-openbank-customers",
+    "description": "${role_default-roles}"
+  },
+  "protocolMappers": [],
+  "authenticationFlows": [],
+  "requiredActions": [
+    {
+      "alias": "VERIFY_EMAIL",
+      "name": "Verify Email",
+      "providerId": "VERIFY_EMAIL",
+      "enabled": false,
+      "defaultAction": false,
+      "priority": 50
+    },
+    {
+      "alias": "webauthn-register",
+      "name": "Webauthn Register",
+      "providerId": "webauthn-register",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 70
+    },
+    {
+      "alias": "webauthn-register-passwordless",
+      "name": "Webauthn Register Passwordless",
+      "providerId": "webauthn-register-passwordless",
+      "enabled": true,
+      "defaultAction": true,
+      "priority": 80
+    }
+  ],
+  "authenticationFlows": [
+    {
+      "alias": "openbank-passkey-browser",
+      "description": "Passkey-first browser flow (ADR-0066). No password — WebAuthn/FIDO2 is the sole authentication factor.",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "auth-cookie",
+          "authenticatorFlow": false,
+          "requirement": "ALTERNATIVE",
+          "priority": 10,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticatorFlow": true,
+          "requirement": "ALTERNATIVE",
+          "priority": 20,
+          "autheticatorFlow": true,
+          "flowAlias": "openbank-passkey-forms",
+          "userSetupAllowed": false
+        }
+      ]
+    },
+    {
+      "alias": "openbank-passkey-forms",
+      "description": "Passkey authenticator subflow",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "webauthn-authenticator-passwordless",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        }
+      ]
+    },
+    {
+      "alias": "openbank-passkey-registration",
+      "description": "Registration flow for passkey-first onboarding (ADR-0066).",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "registration-page-form",
+          "authenticatorFlow": true,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "autheticatorFlow": true,
+          "flowAlias": "openbank-passkey-registration-form",
+          "userSetupAllowed": false
+        }
+      ]
+    },
+    {
+      "alias": "openbank-passkey-registration-form",
+      "description": "Registration form subflow",
+      "providerId": "form-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "registration-user-creation",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticator": "webauthn-register-passwordless-action",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 50,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        }
+      ]
+    }
+  ],
+  "browserFlow": "openbank-passkey-browser",
+  "registrationFlow": "openbank-passkey-registration",
+  "webAuthnPolicyRpEntityName": "OpenBank",
+  "webAuthnPolicySignatureAlgorithms": ["ES256"],
+  "webAuthnPolicyRpId": "open-bank.tech",
+  "webAuthnPolicyAttestationConveyancePreference": "none",
+  "webAuthnPolicyAuthenticatorAttachment": "platform",
+  "webAuthnPolicyRequireResidentKey": "Yes",
+  "webAuthnPolicyUserVerificationRequirement": "required",
+  "webAuthnPolicyPasswordlessSignatureAlgorithms": ["ES256"],
+  "webAuthnPolicyPasswordlessRpEntityName": "OpenBank",
+  "webAuthnPolicyPasswordlessRpId": "open-bank.tech",
+  "webAuthnPolicyPasswordlessAttestationConveyancePreference": "none",
+  "webAuthnPolicyPasswordlessAuthenticatorAttachment": "platform",
+  "webAuthnPolicyPasswordlessRequireResidentKey": "Yes",
+  "webAuthnPolicyPasswordlessUserVerificationRequirement": "required"
+}

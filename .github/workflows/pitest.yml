@@ -1,0 +1,77 @@
+# SPDX-License-Identifier: MPL-2.0
+# Mutation testing — pitest on money-path domain layers (ADR-0063, ADR-0030 D3).
+# Run: weekly on Sunday 03:00 UTC (low-traffic window) + manual dispatch.
+# NOT part of the per-PR gate (cost); advisory alert on score < 70%.
+
+name: Mutation testing (pitest)
+
+on:
+  schedule:
+    - cron: "0 3 * * 0"   # Sunday 03:00 UTC — info.solidsoft.pitest 1.19.0 is Gradle 9 compatible
+  workflow_dispatch:
+    inputs:
+      services:
+        description: "Space-separated list of service modules to run pitest on (the matrix below is the source of truth)"
+        required: false
+        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service"
+
+jobs:
+  pitest:
+    name: pitest / ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - openbank-ledger-service
+          - openbank-balance-service
+          # Fleet rollout (#1266): money-path services with substantive domain math.
+          # Thin-domain services (clearing / swift / lending — 1 domain file each) are
+          # skipped on purpose — mutation testing there is noise, not signal (ADR-0063).
+          - openbank-account-service
+          - openbank-transaction-service
+          - openbank-fx-service
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "25"
+          distribution: temurin
+          cache: gradle
+
+      - name: Run pitest on domain layer
+        run: ./gradlew :${{ matrix.service }}:pitest
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.daemon=false -Xmx2g"
+
+      - name: Upload pitest XML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pitest-${{ matrix.service }}
+          path: ${{ matrix.service }}/build/reports/pitest/
+          retention-days: 30
+
+      - name: Check mutation threshold (advisory)
+        if: always()
+        run: |
+          XML="${{ matrix.service }}/build/reports/pitest/mutations.xml"
+          if [ ! -f "$XML" ]; then
+            echo "::warning file=$XML::pitest XML report not found — no mutations detected or pitest failed"
+            exit 0
+          fi
+          TOTAL=$(grep -o '<mutation ' "$XML" | wc -l | tr -d ' ')
+          KILLED=$(grep -o 'status="KILLED"' "$XML" | wc -l | tr -d ' ')
+          if [ "$TOTAL" -eq "0" ]; then
+            echo "::warning::No mutations generated for ${{ matrix.service }} domain layer — check targetClasses config"
+            exit 0
+          fi
+          SCORE=$(( KILLED * 100 / TOTAL ))
+          echo "Mutation score: ${SCORE}% (${KILLED}/${TOTAL} killed)"
+          if [ "$SCORE" -lt "70" ]; then
+            echo "::warning::Mutation score ${SCORE}% is below the 70% advisory threshold for ${{ matrix.service }}"
+          else
+            echo "::notice::Mutation score ${SCORE}% — OK"
+          fi

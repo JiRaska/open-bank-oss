@@ -1,0 +1,65 @@
+# Single-owner Postgres for Keycloak, reconciled by the cluster-wide CNPG
+# operator. Sandbox runs one instance for FinOps; prod should raise instances
+# to 3 for HA. CNPG generates the `keycloak-db-app` secret (keys: username,
+# password) for the `keycloak` owner and a read-write Service `keycloak-db-rw`
+# — both consumed by the Keycloak Deployment.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: keycloak-db
+  namespace: iam
+spec:
+  # DB-layer observability (Dynatrace-parity #0): CNPG runs its built-in
+  # Prometheus exporter on :9187 and creates a PodMonitor the operator owns.
+  # kube-prometheus-stack selects PodMonitors cluster-wide (NilUsesHelmValues
+  # =false), so this lights up cnpg_* metrics (connections, replication lag,
+  # deadlocks, xid age, WAL archiving) with zero app changes.
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 5Gi
+    resizeInUseVolumes: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      # WAL default (512MB) fills a 1Gi PVC; archive_mode=on means S3 holds
+      # all WALs, so local retention can be minimal.
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: keycloak
+      owner: keycloak
+
+  # WAL archiving + daily base backups to S3 (ADR-0035, #863 pattern). Credentials via EKS Pod
+  # Identity on the keycloak-db ServiceAccount (aws/.../db-backups.tf) — barman reads the SDK chain,
+  # no secret. Sandbox S3 lifecycle expires after 35d; prod needs compliance retention.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/keycloak-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: keycloak-db-daily
+  namespace: iam
+spec:
+  schedule: "0 19 2 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: keycloak-db

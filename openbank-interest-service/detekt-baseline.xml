@@ -1,0 +1,24 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>LongParameterList:InterestService.kt$InterestService$( private val configRepo: InterestRateConfigRepository, private val accrualRepo: InterestAccrualRepository, private val capitalizationRepo: InterestCapitalizationRepository, private val taxProfilePort: TaxProfilePort, private val withholdingTaxRepo: WithholdingTaxRepository, private val eventOutbox: InterestEventOutbox, @ConfigProperty(name = "openbank.interest.day-count-convention", defaultValue = "ACT_365") private val defaultDayCount: String, )</ID>
+    <ID>MagicNumber:InterestOutboxDispatcher.kt$InterestOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:InterestOutboxDispatcher.kt$InterestOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:InterestResource.kt$InterestResource$201</ID>
+    <ID>MagicNumber:InterestResource.kt$InterestResource$404</ID>
+    <ID>MagicNumber:InterestService.kt$InterestService$10</ID>
+    <ID>MagicNumber:InterestService.kt$InterestService$360</ID>
+    <ID>MagicNumber:InterestService.kt$InterestService$365</ID>
+    <ID>MagicNumber:InterestService.kt$InterestService$4</ID>
+    <ID>MagicNumber:InterestService.kt$InterestService$6</ID>
+    <ID>MagicNumber:KafkaInterestOutboxEventPublisher.kt$KafkaInterestOutboxEventPublisher$3000</ID>
+    <ID>MagicNumber:WithholdingRemittanceResource.kt$WithholdingRemittanceResource$201</ID>
+    <ID>MagicNumber:WithholdingRemittanceResource.kt$WithholdingRemittanceResource$404</ID>
+    <ID>MatchingDeclarationName:InterestDtos.kt$InterestAccrualResponse</ID>
+    <ID>MatchingDeclarationName:InterestOutboxPort.kt$InterestOutboxRepository : OutboxRepository</ID>
+    <ID>TooManyFunctions:InterestResource.kt$InterestResource</ID>
+    <ID>TooManyFunctions:InterestService.kt$InterestService : AccrueInterestUseCaseCapitalizeInterestUseCaseGetAccrualsUseCaseManageRateConfigUseCase</ID>
+    <ID>UnusedPrivateProperty:InterestService.kt$InterestService$@ConfigProperty(name = "openbank.interest.day-count-convention", defaultValue = "ACT_365") private val defaultDayCount: String</ID>
+  </CurrentIssues>
+</SmellBaseline>

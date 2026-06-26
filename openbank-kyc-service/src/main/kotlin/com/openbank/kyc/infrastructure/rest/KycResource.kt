@@ -1,0 +1,229 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.kyc.infrastructure.rest
+
+import com.openbank.kyc.application.InvalidApprovalReasonException
+import com.openbank.kyc.application.InvalidStateTransitionException
+import com.openbank.kyc.application.KycCaseConflictException
+import com.openbank.kyc.application.KycCaseNotFoundException
+import com.openbank.kyc.application.KycService
+import com.openbank.kyc.domain.model.CheckStatus
+import com.openbank.kyc.domain.model.CheckType
+import com.openbank.kyc.domain.model.KycCaseStatus
+import com.openbank.libs.api.error.ApiError
+import com.openbank.libs.api.error.ErrorCode
+import com.openbank.libs.authz.Authorize
+import com.openbank.libs.security.Roles
+import jakarta.annotation.security.RolesAllowed
+import jakarta.inject.Inject
+import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.GET
+import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
+import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
+import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
+import jakarta.ws.rs.core.Context
+import jakarta.ws.rs.core.MediaType
+import jakarta.ws.rs.core.Response
+import jakarta.ws.rs.core.SecurityContext
+import jakarta.ws.rs.ext.ExceptionMapper
+import jakarta.ws.rs.ext.Provider
+import org.eclipse.microprofile.openapi.annotations.Operation
+import org.eclipse.microprofile.openapi.annotations.tags.Tag
+import java.net.URI
+import java.util.UUID
+
+@Path("/api/v1/kyc")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+@Tag(name = "KYC")
+class KycResource {
+
+    @Inject lateinit var kycService: KycService
+
+    @GET
+    @Path("/cases")
+    @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN, Roles.KYC, Roles.COMPLIANCE, Roles.SERVICE)
+    @Operation(
+        summary = "List KYC cases. Optional ?status= filter for the onboarding cockpit funnel (ADR-0068).",
+    )
+    suspend fun listCases(
+        @QueryParam("page") @DefaultValue("0") page: Int,
+        @QueryParam("size") @DefaultValue("20") size: Int,
+        @QueryParam("status") statusParam: String?,
+    ): Response {
+        val status = statusParam?.uppercase()?.let { runCatching { KycCaseStatus.valueOf(it) }.getOrNull() }
+        val items = kycService.listCases(page, size.coerceIn(1, 100), status)
+        val total = kycService.countCases(status)
+        return Response.ok(
+            mapOf(
+                "items" to items,
+                "total" to total,
+                "page" to page,
+                "size" to size,
+                "statusFilter" to status?.name,
+            ),
+        ).build()
+    }
+
+    @POST
+    @Path("/cases")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    @Operation(summary = "Open a new KYC case for a party")
+    suspend fun openCase(req: OpenCaseRequest): Response {
+        val case = kycService.openCase(req.partyId)
+        return Response.created(URI.create("/api/v1/kyc/cases/${case.id}")).entity(case).build()
+    }
+
+    @GET
+    @Path("/cases/{id}")
+    @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN, Roles.KYC, Roles.COMPLIANCE, Roles.SERVICE)
+    @Operation(summary = "Get KYC case by ID")
+    suspend fun getCase(@PathParam("id") id: UUID): Response = Response.ok(kycService.getCase(id)).build()
+
+    @GET
+    @Path("/cases/party/{partyId}")
+    @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN, Roles.KYC, Roles.COMPLIANCE, Roles.SERVICE)
+    @Operation(summary = "Get latest KYC case for a party")
+    suspend fun getCaseByParty(@PathParam("partyId") partyId: UUID): Response {
+        val case = kycService.getCaseByParty(partyId)
+            ?: return Response.status(404).build()
+        return Response.ok(case).build()
+    }
+
+    @PUT
+    @Path("/cases/{id}/checks/{checkType}")
+    @RolesAllowed(Roles.ADMIN, Roles.KYC)
+    @Authorize(action = "kycCase.updateCheck", resource = "#id")
+    @Operation(summary = "Update result of a specific KYC check")
+    suspend fun updateCheck(
+        @PathParam("id") id: UUID,
+        @PathParam("checkType") checkType: String,
+        req: UpdateCheckRequest,
+    ): Response {
+        val case = kycService.updateCheckStatus(
+            id,
+            CheckType.valueOf(checkType),
+            CheckStatus.valueOf(req.status),
+            req.result,
+        )
+        return Response.ok(case).build()
+    }
+
+    /**
+     * Approve a KYC case that is in UNDER_REVIEW status.
+     *
+     * Four-eyes mandate (ADR-0068, ČNB AML/KYC): the approver identity is derived from the
+     * authenticated security context — the caller must not supply their own identity.
+     * A mandatory [KycCaseApprovalRequest.reason] of at least 10 characters is required
+     * for the audit trail (ČNB §8 KYC obligations, AML Act No. 253/2008 Coll.).
+     */
+    @POST
+    @Path("/cases/{caseId}/approve")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    @Authorize(action = "kyc.case.approve", resource = "#caseId")
+    @Operation(
+        summary = "Approve KYC case — triggers party activation (four-eyes enforced, ADR-0068).",
+        description = "Only cases in UNDER_REVIEW status may be approved. The approver identity is " +
+            "taken from the authenticated session (ČNB four-eyes mandate). A reason of at least " +
+            "10 characters is mandatory for the regulatory audit trail.",
+    )
+    suspend fun approveCase(
+        @PathParam("caseId") caseId: UUID,
+        req: KycCaseApprovalRequest,
+        @Context secCtx: SecurityContext,
+    ): Response {
+        val approver = secCtx.userPrincipal?.name
+            ?: return Response.status(Response.Status.UNAUTHORIZED).build()
+        return Response.ok(kycService.approveCase(caseId, approver, req.reason)).build()
+    }
+
+    /**
+     * Reject a KYC case that is in UNDER_REVIEW status.
+     *
+     * Four-eyes mandate (ADR-0068, ČNB AML/KYC): the rejector identity is derived from the
+     * authenticated security context. A mandatory [KycCaseApprovalRequest.reason] of at least
+     * 10 characters is required for the audit trail.
+     */
+    @POST
+    @Path("/cases/{caseId}/reject")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    @Authorize(action = "kyc.case.reject", resource = "#caseId")
+    @Operation(
+        summary = "Reject KYC case (four-eyes enforced, ADR-0068).",
+        description = "Only cases in UNDER_REVIEW status may be rejected. The rejector identity is " +
+            "taken from the authenticated session. A reason of at least 10 characters is mandatory " +
+            "for the regulatory audit trail (ČNB AML/KYC §8).",
+    )
+    suspend fun rejectCase(
+        @PathParam("caseId") caseId: UUID,
+        req: KycCaseApprovalRequest,
+        @Context secCtx: SecurityContext,
+    ): Response {
+        val rejector = secCtx.userPrincipal?.name
+            ?: return Response.status(Response.Status.UNAUTHORIZED).build()
+        return Response.ok(kycService.rejectCase(caseId, rejector, req.reason)).build()
+    }
+}
+
+data class OpenCaseRequest(val partyId: UUID)
+data class UpdateCheckRequest(val status: String, val result: String?)
+
+/**
+ * Request body for approve/reject operations.
+ *
+ * [reason] is mandatory (minimum 10 characters) to satisfy the ČNB four-eyes audit trail
+ * requirement (AML Act No. 253/2008 Coll., §8 KYC documentation obligations). The minimum
+ * length is enforced in [KycService.approveCase] and [KycService.rejectCase].
+ */
+data class KycCaseApprovalRequest(val reason: String)
+
+@Provider
+class KycNotFoundMapper : ExceptionMapper<KycCaseNotFoundException> {
+    override fun toResponse(e: KycCaseNotFoundException) = Response.status(404)
+        .entity(ApiError(UUID.randomUUID().toString(), 404, ErrorCode.NOT_FOUND.code, e.message ?: "Not found")).build()
+}
+
+@Provider
+class KycConflictMapper : ExceptionMapper<KycCaseConflictException> {
+    override fun toResponse(e: KycCaseConflictException) = Response.status(ErrorCode.CONFLICT.httpStatus)
+        .entity(
+            ApiError(
+                UUID.randomUUID().toString(),
+                ErrorCode.CONFLICT.httpStatus,
+                ErrorCode.CONFLICT.code,
+                e.message ?: "Conflict",
+            ),
+        ).build()
+}
+
+@Provider
+class KycInvalidStateTransitionMapper : ExceptionMapper<InvalidStateTransitionException> {
+    override fun toResponse(e: InvalidStateTransitionException) = Response.status(422)
+        .entity(
+            ApiError(
+                UUID.randomUUID().toString(),
+                422,
+                "INVALID_STATE_TRANSITION",
+                e.message ?: "Invalid state transition",
+            ),
+        ).build()
+}
+
+@Provider
+class KycInvalidApprovalReasonMapper : ExceptionMapper<InvalidApprovalReasonException> {
+    override fun toResponse(e: InvalidApprovalReasonException) = Response.status(422)
+        .entity(
+            ApiError(
+                UUID.randomUUID().toString(),
+                422,
+                "INVALID_APPROVAL_REASON",
+                e.message ?: "Invalid approval reason",
+            ),
+        ).build()
+}

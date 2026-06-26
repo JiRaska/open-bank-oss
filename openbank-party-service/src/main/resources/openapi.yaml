@@ -1,0 +1,369 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: Party Service API
+  version: 1.5.0
+  description: Legal entity and individual party management with document storage.
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8126
+    description: Local development
+tags:
+  - name: Parties
+
+paths:
+  /api/v1/parties:
+    get:
+      tags: [Parties]
+      summary: List parties (paginated). Optional ?status= filter for onboarding cockpit funnel views (ADR-0068).
+      operationId: listParties
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: status
+          in: query
+          description: Filter by party status. When omitted all parties are returned.
+          schema:
+            type: string
+            enum: [PENDING_KYC, ACTIVE, SUSPENDED, CLOSED]
+      responses:
+        '200':
+          description: Party list with optional statusFilter echo
+    post:
+      tags: [Parties]
+      summary: Create a party
+      operationId: createParty
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePartyRequest'
+      responses:
+        '201':
+          description: Party created
+
+  /api/v1/parties/search:
+    get:
+      tags: [Parties]
+      summary: Search parties by name (trigram), cursor-paginated
+      description: >-
+        Case-insensitive substring match over legal name / trading name (ADR-0055).
+        Blank, '*', or a term shorter than 2 characters returns an empty page (no
+        full-table enumeration from this surface — use GET /api/v1/parties to list).
+        Page size is clamped to [1,100]. Birth number is never searchable here
+        (GDPR data-minimisation; it stays encrypted in pid-service).
+      operationId: searchParties
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Name fragment (>= 2 chars after trim)
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 128
+            example: Novak
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: cursor
+          in: query
+          description: Opaque keyset cursor for the next page
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cursor-paginated search results (data-minimised party summaries)
+        '401':
+          description: Missing or invalid credentials
+        '403':
+          description: Caller lacks a permitted role
+
+  /api/v1/parties/{id}:
+    get:
+      tags: [Parties]
+      summary: Get party by ID
+      operationId: getParty
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      responses:
+        '200':
+          description: Party detail
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Parties]
+      summary: Update party
+      operationId: updateParty
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePartyRequest'
+      responses:
+        '200':
+          description: Updated
+
+  /api/v1/parties/{id}/documents:
+    post:
+      tags: [Parties]
+      summary: Add document to party
+      operationId: addDocument
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddDocumentRequest'
+      responses:
+        '201':
+          description: Document added
+    get:
+      tags: [Parties]
+      summary: List party documents
+      operationId: listDocuments
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      responses:
+        '200':
+          description: Documents
+
+  /api/v1/parties/me:
+    get:
+      summary: Get my party (mobile self-registration)
+      tags: [Parties]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Party found
+        '404':
+          description: Not yet registered
+  /api/v1/parties/self-register:
+    post:
+      summary: Self-register as a new party (mobile onboarding, idempotent)
+      tags: [Parties]
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Party created
+        '200':
+          description: Existing party returned (resumed)
+        '403':
+          description: Email not verified
+  /api/v1/parties/{id}/documents/upload:
+    post:
+      summary: Upload KYC document binary (mobile)
+      tags: [Parties]
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                type:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Document uploaded
+  /api/v1/parties/resolve:
+    post:
+      tags: [Parties]
+      summary: Resolve a party by RČ blind index (ADR-0072 dedup gate, internal only)
+      description: >-
+        Internal-only endpoint. Returns the party whose Czech RČ (rodné číslo) matches
+        the supplied value via HMAC-SHA256 blind index (ADR-0072). The RČ is never
+        echoed in the response. Returns 503 when the pepper is not configured (dedup off)
+        so callers can distinguish "not found" from "uniqueness not guaranteed".
+      operationId: resolveParty
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolvePartyRequest'
+      responses:
+        '200':
+          description: Party found — returns the same fields as GET /parties/{id} summary view
+        '404':
+          description: No party matches the supplied RČ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: RČ dedup pepper not configured; callers must not assume uniqueness
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/parties/{id}/kyc-status:
+    put:
+      tags: [Parties]
+      summary: Update KYC status
+      operationId: updateKycStatus
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KycStatusRequest'
+      responses:
+        '200':
+          description: Updated
+
+components:
+  parameters:
+    partyId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    CreatePartyRequest:
+      type: object
+      # email is mandatory: a party is uniquely keyed by email (DB unique + not-null),
+      # the duplicate check (409) and findByEmail lookup both depend on it, and GDPR
+      # erasure keeps a tombstone email to satisfy the constraint. Omitting it returns
+      # 400 VALIDATION_ERROR ("email is required") — see PartyResource.CreatePartyRequest.
+      required: [partyType, legalName, email]
+      properties:
+        partyType:
+          type: string
+          enum: [INDIVIDUAL, SOLE_TRADER, COMPANY, TRUST]
+        legalName:
+          type: string
+        tradingName:
+          type: string
+        dateOfBirth:
+          type: string
+          format: date
+        nationality:
+          type: string
+          description: ISO 3166-1 alpha-3 country code
+        taxId:
+          type: string
+        registrationNumber:
+          type: string
+        email:
+          type: string
+          format: email
+          description: Required. Unique across all parties.
+        phone:
+          type: string
+        address:
+          $ref: '#/components/schemas/AddressDto'
+
+    UpdatePartyRequest:
+      type: object
+      properties:
+        legalName:
+          type: string
+        tradingName:
+          type: string
+        address:
+          $ref: '#/components/schemas/AddressDto'
+
+    AddDocumentRequest:
+      type: object
+      required: [documentType, documentNumber, issuingCountry]
+      properties:
+        documentType:
+          type: string
+          enum: [PASSPORT, ID_CARD, DRIVING_LICENSE, COMPANY_REGISTRATION]
+        documentNumber:
+          type: string
+        issuingCountry:
+          type: string
+        expiryDate:
+          type: string
+          format: date
+
+    KycStatusRequest:
+      type: object
+      required: [kycStatus]
+      properties:
+        kycStatus:
+          type: string
+          enum: [PENDING, VERIFIED, REJECTED, EXPIRED]
+
+    AddressDto:
+      type: object
+      properties:
+        line1:
+          type: string
+        line2:
+          type: string
+        city:
+          type: string
+        postalCode:
+          type: string
+        countryCode:
+          type: string
+
+    ResolvePartyRequest:
+      type: object
+      description: ADR-0072 dedup gate — caller supplies the raw RČ; server normalises and hashes it.
+      required: [rc]
+      properties:
+        rc:
+          type: string
+          description: Czech rodné číslo (RČ) in any locally accepted format (slashes optional).
+
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string

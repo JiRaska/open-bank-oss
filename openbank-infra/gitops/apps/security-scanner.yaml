@@ -1,0 +1,38 @@
+# security-scanner domain: security-scanner-service + its single-owner CNPG Postgres
+# + outbound Kafka topics (openbank.security.scan.event + openbank.security.ict.incident).
+# The scanner probes all fleet services every 30 min and publishes findings to Kafka;
+# the admin-ui /security page reads the latest report from the bundled security-report.json
+# (baked at image build time from CI output — never triggered via UI, ADR-0029 rule #3).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: security-scanner
+  namespace: argocd
+  annotations:
+    # Server-Side Diff must run the Kyverno verify-images mutation in its dry-run, otherwise the
+    # digest-pinning annotation it injects reads as a permanent OutOfSync diff (issue #856).
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/security-scanner
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: security-scanner
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

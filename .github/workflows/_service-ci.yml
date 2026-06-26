@@ -1,0 +1,402 @@
+# Reusable per-service CI. Called by services-ci.yml once per changed Gradle module.
+#
+# Why a reusable workflow + matrix (not 29 copy-pasted jobs):
+#  - single source of truth for the build recipe -> DRY, auditable
+#  - each service gets its OWN status check (green/red per service)
+#
+# Test infrastructure (issue #578, ADR-0044):
+#  - Each @QuarkusTest IT boots its OWN PostgreSQL + Redpanda (+ Valkey where needed)
+#    per test JVM via Testcontainers (`*TestResource` QuarkusTestResourceLifecycleManager),
+#    injecting their dynamic URLs as highest-precedence config. There is therefore NO
+#    shared, fixed-name compose stack to boot, warm-reuse, or reset between jobs.
+#  - This kills the correlated full-fleet flakes the shared stack caused: a job
+#    rebooting the one openbank-postgres/kafka/valkey set, a global Valkey FLUSHALL, or
+#    the Postgres bootstrap-restart race used to take concurrent neighbours down with
+#    `endpoint with name openbank-kafka already exists` / `Connection refused`.
+#  - Services with no infra-touching @QuarkusTest (anacredit, product-catalog, …) and
+#    pure-unit modules need nothing here; their tests boot no containers at all.
+name: _service-ci
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: "Service directory, e.g. openbank-ledger-service"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ inputs.service }}
+    runs-on: openbank-build
+    timeout-minutes: 30
+    env:
+      # Pact Broker (ADR-0092). The broker has no public ingress (ADR-0056); the
+      # in-cluster ARC runner reaches it over cluster DNS. Provider verification +
+      # result publishing run in the gradle test JVM (on the runner pod, so cluster
+      # DNS resolves); consumer-pact publishing is a curl to the broker's
+      # /contracts/publish API (NOT `docker run`, whose dind network can't resolve
+      # cluster DNS). When PACT_BROKER_URL is unset (var not configured) the build
+      # passes empty -D and the @PactBroker provider tests are @EnabledIfSystemProperty
+      # -skipped, and the publish step no-ops — so this is inert until the var lands.
+      PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
+      PACT_BROKER_USERNAME: ${{ vars.PACT_BROKER_USERNAME }}
+      PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
+      # Testcontainers pulls postgres:16.3-alpine and redpandadata/redpanda through
+      # the dind daemon's `--registry-mirror` (→ the in-cluster registry-cache
+      # pull-through proxy, gitops/components/registry-cache), so each image egresses
+      # to Docker Hub at most once cluster-wide; the image coordinates live in each
+      # service's `*TestResource`, not here. (The former POSTGRES_/KAFKA_/VALKEY_IMAGE
+      # + *_PASSWORD env were consumed by the retired shared docker-compose stack.)
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"
+      # Per-service Gradle home isolation (follow-up from #578 / fleet CI flakiness).
+      #
+      # Root cause: on the persistent Mac runner pool (ADR-0040/0043), all concurrent
+      # service builds default to ~/.gradle, sharing a single daemon registry. When
+      # one job's setup-gradle post-action fires (on job completion), it sends
+      # `gradle --stop` to that shared registry — killing all daemons, including the
+      # ones of STILL-RUNNING sibling jobs. The sibling then hits "Gradle build daemon
+      # disappeared unexpectedly (it may have been killed or may have crashed)" and
+      # fails, even though the code compiled fine (as in the 1-of-28-fails pattern).
+      #
+      # Fix: each service gets its own stable, persistent Gradle home under
+      # _work/.gradle-svc/<service>. The path is derived from github.workspace
+      # (two levels up → the per-runner _work dir) so it:
+      #  - survives across runs → daemon warmth is preserved (ADR-0043 still works)
+      #  - is completely isolated per service → stop in job A can't kill job B's daemon
+      #  - works on both persistent Macs and ephemeral ARC Linux pods (ARC pods get a
+      #    fresh workspace per run anyway, so the isolation is moot there but harmless)
+      #
+      # setup-gradle honours GRADLE_USER_HOME when no gradle-home-dir input is given,
+      # so setting it here is sufficient (no action input change needed).
+      #
+      # Force a UTF-8 locale so the JVM's sun.jnu.encoding (the *filename* charset,
+      # derived from the OS locale at startup — NOT from -Dfile.encoding) is UTF-8.
+      # The ephemeral ARC runner pods (ADR-0053) default to the POSIX/C locale, so
+      # Kotlin test names with non-ASCII chars (e.g. a Czech '—' em-dash) produced an
+      # unmappable .class path -> InvalidPathException -> compileTestKotlin internal
+      # compiler error. The retired persistent runners happened to have a UTF-8 locale.
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      # Shared remote Gradle build cache (ADR-0043): the in-cluster cache server
+      # (gitops/components/gradle-build-cache, nginx WebDAV) is wired into the ARC
+      # runner pods as GRADLE_REMOTE_CACHE_URL/_PUSH/_INSECURE by Terraform
+      # (aws/envs/sandbox-platform/arc-runners.tf); settings.gradle.kts reads those
+      # env vars and configures the HttpBuildCache. We deliberately do NOT re-declare
+      # GRADLE_REMOTE_CACHE_URL here from `${{ vars.* }}`: when that repo var is unset
+      # the expression yields an EMPTY string that a job-level `env:` then layers on
+      # top of the pod-injected value, blanking it — so `isNullOrBlank()` in
+      # settings.gradle disabled the cache fleet-wide. Letting the pod env flow
+      # through untouched is what actually turns the cache on (cluster-internal URL,
+      # only reachable from ARC pods; the warm-local Macs fall back to local cache).
+    steps:
+      # harden-runner is intentionally omitted: it's an eBPF egress-audit shim for
+      # ephemeral GitHub-hosted runners. This self-hosted sandbox instance enforces
+      # egress at the infra layer (egress-only SG in an isolated VPC, ADR-0027), a
+      # stronger control, so the shim is redundant (and unsupported on this host).
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Resolve GRADLE_USER_HOME: prefer the node-local hostPath cache injected by
+      # arc-runners.tf (GRADLE_USER_HOME_NODE_CACHE=/var/cache/gradle-svc) on ARC
+      # ephemeral runners; fall back to workspace-relative path on Mac/Hetzner.
+      # NOTE: env context is NOT available in job-level env: blocks of reusable
+      # workflows (workflow_call) — GitHub rejects the expression at parse time with
+      # "Unrecognized named-value: 'env'" — so we resolve it here in a step where
+      # env IS available. See GitHub docs: contexts available in reusable workflows.
+      - name: Resolve GRADLE_USER_HOME
+        run: |
+          if [ -n "${GRADLE_USER_HOME_NODE_CACHE:-}" ]; then
+            echo "GRADLE_USER_HOME=${GRADLE_USER_HOME_NODE_CACHE}/${{ inputs.service }}" >> "$GITHUB_ENV"
+          else
+            echo "GRADLE_USER_HOME=${{ github.workspace }}/../../.gradle-svc/${{ inputs.service }}" >> "$GITHUB_ENV"
+          fi
+
+      # Normalize the Testcontainers Docker endpoint across the MIXED runner pool
+      # (ARC dind + Hetzner + Mac mini/OrbStack — all serve Docker at the unix socket:
+      # arc-runners.tf pins DOCKER_HOST=unix:///var/run/docker.sock, Hetzner uses the
+      # standard socket, OrbStack symlinks /var/run/docker.sock). The convention plugin
+      # inherits the ambient DOCKER_HOST; the retired tcp://localhost:2375 endpoint
+      # lingers in some self-hosted runner envs (the Mac mini) and makes Testcontainers
+      # fail with `DockerDesktopClientProviderStrategy: getSocketPath() null` (#873).
+      # Normalize an empty/retired value to the unix socket; leave any other deliberate
+      # ambient override untouched.
+      - name: Normalize DOCKER_HOST for Testcontainers (#873)
+        run: |
+          if [ -z "${DOCKER_HOST:-}" ] || [ "${DOCKER_HOST:-}" = "tcp://localhost:2375" ]; then
+            echo "DOCKER_HOST=unix:///var/run/docker.sock" >> "$GITHUB_ENV"
+            echo "normalized DOCKER_HOST -> unix:///var/run/docker.sock"
+          else
+            echo "DOCKER_HOST left as: ${DOCKER_HOST}"
+          fi
+
+      # Raise fs.aio-max-nr so parallel Testcontainers don't exhaust the kernel's default
+      # 65536 AIO pool. Redpanda (Seastar) reserves AIO contexts per shard and Quarkus
+      # reactive adds more; when the pool hits 0 a container dies with "Could not setup
+      # Async I/O" / exit 139 (e.g. the SctInstAccessControlIT flake on a Hetzner runner).
+      # ARC runners already get this via a privileged init container (arc-runners.tf,
+      # issue #1329); the non-ARC pool (Hetzner) has no repo-managed host bootstrap, so we
+      # raise it here. On a long-lived runner the value persists for later jobs.
+      # Linux-only (macOS has no /proc/sys/fs/aio-max-nr); `sudo -n` fails fast instead of
+      # hanging on a password prompt where NOPASSWD is absent; never fatal.
+      - name: Raise fs.aio-max-nr for Testcontainers (best-effort, Linux)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        timeout-minutes: 1
+        run: |
+          cur=$(cat /proc/sys/fs/aio-max-nr 2>/dev/null || echo 0)
+          if [ "${cur:-0}" -lt 1048576 ]; then
+            if sudo -n sysctl -w fs.aio-max-nr=1048576 >/dev/null 2>&1; then
+              echo "raised fs.aio-max-nr: ${cur} -> 1048576"
+            else
+              echo "::warning::could not raise fs.aio-max-nr (currently ${cur}); parallel Testcontainers may exhaust the AIO pool on this runner (no passwordless sudo?)"
+            fi
+          else
+            echo "fs.aio-max-nr already ${cur} (>= 1048576)"
+          fi
+
+      # FinOps: pre-warm Testcontainers images from ECR pull-through cache (PR #1393, updated).
+      #
+      # docker.io images (postgres, redpanda, valkey, apicurio) are pulled via the ECR
+      # pull-through cache rule "docker-hub/" (ecr-pull-through-cache.tf). ECR fetches
+      # from Docker Hub server-side; runner pulls from private ECR over the ecr.dkr VPC
+      # Interface endpoint — zero NAT bytes. After pulling, each image is retagged to its
+      # canonical docker.io name so Testcontainers finds it in the local docker image store
+      # without needing to pull again (Testcontainers uses the image name as cache key).
+      #
+      # Skip on non-ARC runners (Hetzner/Mac): those use OrbStack's local daemon.
+      - name: Pre-warm Testcontainers image cache via ECR
+        if: ${{ runner.environment == 'self-hosted' }}
+        continue-on-error: true
+        env:
+          ECR: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
+          AWS_DEFAULT_REGION: "eu-north-1"
+        run: |
+          aws ecr get-login-password | docker login --username AWS --password-stdin "$ECR" || {
+            echo "::warning title=TC pre-warm::ECR login failed — falling back to registry-cache"
+            # Fallback: try in-cluster registry-cache
+            if curl -sf --connect-timeout 1 \
+                http://registry-cache.registry-cache.svc.cluster.local:5000/v2/ > /dev/null 2>&1; then
+              docker pull postgres:16.3-alpine &
+              docker pull valkey/valkey:7.2-alpine &
+              docker pull redpandadata/redpanda:v24.1.2 &
+              docker pull apicurio/apicurio-registry-mem:2.6.2.Final &
+              wait
+            fi
+            exit 0
+          }
+          # Pull from ECR pull-through (zero NAT) in parallel, then retag to canonical names
+          docker pull "$ECR/docker-hub/library/postgres:16.3-alpine" &
+          docker pull "$ECR/docker-hub/valkey/valkey:7.2-alpine" &
+          docker pull "$ECR/docker-hub/redpandadata/redpanda:v24.1.2" &
+          docker pull "$ECR/docker-hub/apicurio/apicurio-registry-mem:2.6.2.Final" &
+          wait
+          docker tag "$ECR/docker-hub/library/postgres:16.3-alpine"                  postgres:16.3-alpine
+          docker tag "$ECR/docker-hub/valkey/valkey:7.2-alpine"                      valkey/valkey:7.2-alpine
+          docker tag "$ECR/docker-hub/redpandadata/redpanda:v24.1.2"                 redpandadata/redpanda:v24.1.2
+          docker tag "$ECR/docker-hub/apicurio/apicurio-registry-mem:2.6.2.Final"   apicurio/apicurio-registry-mem:2.6.2.Final
+          echo "::notice title=TC pre-warm done::Testcontainers images ready (ECR pull-through, zero NAT)"
+      # Most modules pin kotlin { jvmToolchain(25) }; a few use 21. Installing both
+      # lets Gradle's toolchain resolution pick the right one with zero Foojay
+      # downloads at build time (faster, fewer billed minutes).
+      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            25
+
+      # Probe the in-cluster Reposilite Maven mirror (issue #849).
+      # ARC runners (in-cluster) reach the ClusterIP in ~1 ms; Hetzner/Mac
+      # runners get ECONNREFUSED immediately and skip silently. When the probe
+      # succeeds, REPOSILITE_MIRROR_URL is set and settings.gradle.kts prepends
+      # the three Reposilite repos (maven-central / gradle-plugins / google)
+      # before the GCS fallback — zero NAT for in-cluster runners.
+      - name: Probe Reposilite in-cluster Maven mirror
+        run: |
+          if curl -sf --connect-timeout 2 \
+              http://reposilite.reposilite.svc.cluster.local:8080/api/status \
+              > /dev/null 2>&1; then
+            echo "REPOSILITE_MIRROR_URL=http://reposilite.reposilite.svc.cluster.local:8080" \
+              >> "$GITHUB_ENV"
+            echo "::notice title=Reposilite active::in-cluster Maven mirror responding — deps resolved from cluster (zero NAT)"
+          else
+            echo "::notice title=Reposilite unavailable::falling back to GCS mirror + CodeArtifact"
+          fi
+
+      # Wire Gradle to use AWS CodeArtifact as a Maven Central mirror (FinOps).
+      # CodeArtifact sits in-VPC; its S3 storage backend uses the S3 Gateway endpoint
+      # → dep downloads never exit the VPC, eliminating NAT charges (~$25/day).
+      # The ARC runner pod IAM role has codeartifact:GetAuthorizationToken via IRSA.
+      - name: Configure CodeArtifact Maven mirror
+        # Soft-fail: if IRSA is not yet wired the token fetch fails gracefully and
+        # Maven Central is used directly (with NAT cost). Remove once IRSA is stable.
+        continue-on-error: true
+        run: |
+          # The aws CLI is baked into the openbank-ci-runner image; this guard turns a
+          # missing CLI (stock runner image / new pool) into a VISIBLE soft-skip instead
+          # of a bare `exit 127` in the log. Fallback to public Maven Central is the
+          # emergency path only — it pays NAT and risks 429 throttling (see 2026-06-11).
+          if ! command -v aws >/dev/null 2>&1; then
+            echo "::warning title=CodeArtifact mirror skipped::aws CLI not on this runner — falling back to public Maven Central (NAT cost + 429 risk). Bake awscli into the runner image (runner-image/Dockerfile)."
+            exit 0
+          fi
+          CA_TOKEN=$(aws codeartifact get-authorization-token \
+            --domain openbank-sandbox \
+            --domain-owner 265175468565 \
+            --region eu-north-1 \
+            --query authorizationToken --output text) || {
+            echo "::warning title=CodeArtifact mirror skipped::token fetch failed (IRSA not wired on this runner?) — falling back to public Maven Central."
+            exit 0
+          }
+          CA_URL="https://openbank-sandbox-265175468565.d.codeartifact.eu-north-1.amazonaws.com/maven/maven-central-proxy/"
+          # Write a Gradle init script that redirects maven central to CodeArtifact.
+          # Placed in GRADLE_USER_HOME/init.d/ so it applies to every project.
+          mkdir -p "${GRADLE_USER_HOME}/init.d"
+          cat > "${GRADLE_USER_HOME}/init.d/codeartifact-mirror.gradle" <<GRADLE_INIT
+          allprojects {
+            repositories.all { repo ->
+              if (repo instanceof MavenArtifactRepository) {
+                def url = repo.url.toString()
+                if (url.contains("repo1.maven.org") || url.contains("repo.maven.apache.org") ||
+                    url.contains("plugins.gradle.org")) {
+                  repo.setUrl("${CA_URL}")
+                  repo.credentials {
+                    username "aws"
+                    password "${CA_TOKEN}"
+                  }
+                }
+              }
+            }
+          }
+          GRADLE_INIT
+        env:
+          AWS_DEFAULT_REGION: eu-north-1
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+
+      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          # GitHub Actions cache DISABLED for Gradle home.
+          #
+          # FinOps root-cause (2026-06-22): NAT traffic analysis showed 74 GB/day
+          # upload (OutToDestination) on a light CI day, 100% correlated with CI
+          # hours. Root cause: setup-gradle's post-action was uploading the full
+          # Gradle home (~450 MB per service × 28 services = 12+ GB per main push)
+          # to GitHub Actions cache at actions.githubusercontent.com — a GitHub-
+          # hosted S3 bucket that is NOT reachable via a VPC endpoint, so every
+          # byte exits through the NAT gateway at $0.045/GB + $0.09/GB DataTransfer.
+          # The asymmetric DataTransfer-Out charge doubled the per-GB cost vs a
+          # pure download.
+          #
+          # Why safe to disable:
+          # 1. Gradle task outputs (compiled classes, test results) are served by
+          #    the in-cluster remote build cache (nginx WebDAV, GRADLE_REMOTE_CACHE_URL
+          #    injected by arc-runners.tf) — unchanged tasks resolve in <1s with no
+          #    upstream download. This is what actually speeds up incremental builds.
+          # 2. Gradle wrapper (~150 MB) and Maven dependencies are fetched via the
+          #    CodeArtifact VPC interface endpoint (in-VPC, zero NAT), so cold-start
+          #    dep resolution does not hit the NAT gateway.
+          # 3. Persistent Mac runners retain a warm GRADLE_USER_HOME across jobs
+          #    (ADR-0043); the GitHub cache was never needed for them.
+          # 4. ARC ephemeral pods will see a slightly slower first build on a cold
+          #    cluster but the in-cluster remote build cache covers 95%+ of wall-clock
+          #    by caching the expensive compile/test tasks.
+          #
+          # Net effect: eliminates ~74 GB/day upload + corresponding download traffic
+          # ≈ $6.66/day saved ($200/month). Re-enable if cold-start build time degrades
+          # unacceptably after the remote build cache fills (typically 1-2 runs).
+          cache-enabled: false
+
+      # No --no-daemon (ADR-0043): on a persistent runner the Gradle daemon is kept
+      # warm and reused across jobs, so the JVM + 30-module configuration is not paid
+      # from cold every build. --build-cache hits the local cache and, when wired, the
+      # shared remote build-cache-node (GRADLE_REMOTE_CACHE_URL) so unchanged modules
+      # in a fleet fan-out resolve from cache instead of recompiling.
+      - name: Build + test (:${{ inputs.service }})
+        env:
+          # PR branch on PRs, "main" on the main push — used to tag the consumer
+          # pact + the provider verification result so can-i-deploy can reason per branch.
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          # Publish provider verification results only from the main push (the SHA
+          # auto-deploy will gate on). PR builds verify but don't publish results.
+          PUBLISH_RESULTS: ${{ github.ref == 'refs/heads/main' }}
+        run: |
+          # Pact Broker config (ADR-0092) is forwarded as -D system properties; the
+          # provider build.gradle.kts copies these into the forked test JVM. Empty
+          # pactbroker.url (var unset) → @PactBroker provider test skips (it is
+          # @EnabledIfSystemProperty(named=pactbroker.url, matches=.+)-gated).
+          ./gradlew :${{ inputs.service }}:build --build-cache --console=plain --stacktrace \
+            -Dpactbroker.url="${PACT_BROKER_URL:-}" \
+            -Dpactbroker.auth.username="${PACT_BROKER_USERNAME:-}" \
+            -Dpactbroker.auth.password="${PACT_BROKER_PASSWORD:-}" \
+            -Dpactbroker.enablePending=true \
+            -Dpactbroker.providerBranch="${BRANCH}" \
+            -Dpact.verifier.publishResults="${PUBLISH_RESULTS}" \
+            -Dpact.provider.version="${GITHUB_SHA}" \
+            -Dpact.provider.branch="${BRANCH}" \
+            -Dpact.provider.tag="${BRANCH}"
+
+      # Publish this service's CONSUMER pacts to the broker (ADR-0092). The consumer
+      # tests regenerate pacts/<consumer>-<provider>.json (pact.rootDir → repo /pacts);
+      # publish only the files where THIS service is the consumer, keyed by git SHA +
+      # branch via the /contracts/publish API. curl (not the pact-cli docker image):
+      # the runner pod resolves the broker's cluster DNS, a dind container would not.
+      - name: Publish consumer pacts to broker
+        if: ${{ vars.PACT_BROKER_URL != '' }}
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(pacts/${{ inputs.service }}-*.json)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "${{ inputs.service }} is not a consumer of any contract — nothing to publish."
+            exit 0
+          fi
+          # Build the /contracts/publish body: content is BASE64-encoded pact JSON.
+          contracts="$(for f in "${files[@]}"; do
+            jq -nc \
+              --arg c "$(jq -r '.consumer.name' "$f")" \
+              --arg p "$(jq -r '.provider.name' "$f")" \
+              --arg content "$(base64 < "$f" | tr -d '\n')" \
+              '{consumerName:$c, providerName:$p, specification:"pact", contentType:"application/json", content:$content}'
+          done | jq -sc '.')"
+          body="$(jq -nc \
+            --arg name "${{ inputs.service }}" \
+            --arg ver "$GITHUB_SHA" \
+            --arg branch "$BRANCH" \
+            --arg build "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --argjson contracts "$contracts" \
+            '{pacticipantName:$name, pacticipantVersionNumber:$ver, branch:$branch, tags:[$branch], buildUrl:$build, contracts:$contracts}')"
+          echo "Publishing ${#files[@]} pact(s) for ${{ inputs.service }} @ ${GITHUB_SHA::8} (branch ${BRANCH})"
+          code="$(curl -sS -o /tmp/pact-publish.json -w '%{http_code}' -X POST \
+            -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
+            -H 'Content-Type: application/json' \
+            "${PACT_BROKER_URL%/}/contracts/publish" --data-binary "$body")"
+          jq -r '.notices[]?.text // empty' /tmp/pact-publish.json 2>/dev/null || cat /tmp/pact-publish.json
+          [ "$code" -lt 300 ] || { echo "::error::pact publish failed (HTTP $code)"; exit 1; }
+
+      # Only on failure: a passing build's test reports are never looked at, but uploading
+      # them on EVERY service build (×~28 services × many runs/day) was a dominant driver of
+      # GitHub Actions artifact-storage churn — bursts during a full-fleet rebuild hit the
+      # quota and failed unrelated uploads ("Failed to CreateArtifact: Artifact storage quota
+      # has been hit"). `failure()` keeps the reports exactly when they're needed for debugging.
+      - name: Upload test reports
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-reports-${{ inputs.service }}
+          path: |
+            ${{ inputs.service }}/build/reports/tests
+            ${{ inputs.service }}/build/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+          # Per-test-JVM Testcontainers own their lifecycle (start in @QuarkusTestResource,
+          # stop() at teardown; Ryuk is disabled fleet-wide, so the resource tears them down
+          # itself). On failure their stdout/stderr is captured in the test reports uploaded
+          # above — there is no shared compose stack left running to dump or to reset.

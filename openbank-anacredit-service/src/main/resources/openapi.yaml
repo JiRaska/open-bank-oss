@@ -1,0 +1,129 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+openapi: 3.0.3
+info:
+  title: OpenBank AnaCredit Service
+  description: >-
+    Granular credit-exposure reporting (ADR-0037): the AnaCredit credit dataset
+    (Reg. (EU) 2016/867, ČNB-collected) for overdraft exposures. Derive-only — it renders the
+    return as of a monthly reference date; it moves no money and submits nothing to the ČNB
+    channel in v1. Scope is legal-entity debtors above the €25 000 per-debtor commitment threshold.
+  version: 1.0.0
+tags:
+  - name: AnaCredit
+paths:
+  /api/v1/anacredit/exposures:
+    post:
+      tags: [AnaCredit]
+      summary: Register or replace a credit exposure considered by the feed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterExposureRequest' }
+      responses:
+        '201':
+          description: Exposure stored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Exposure' }
+    get:
+      tags: [AnaCredit]
+      summary: List all known credit exposures
+      responses:
+        '200':
+          description: Exposures
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Exposure' }
+  /api/v1/anacredit/returns/{referenceDate}:
+    get:
+      tags: [AnaCredit]
+      summary: Render the AnaCredit credit dataset as of a monthly reference date
+      parameters:
+        - name: referenceDate
+          in: path
+          required: true
+          description: Reporting reference date (month end), ISO yyyy-MM-dd
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: The credit-dataset return with reportable rows and exclusion audit trail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnaCreditReturn' }
+components:
+  schemas:
+    CounterpartyType:
+      type: string
+      enum: [LEGAL_ENTITY, NATURAL_PERSON]
+    InstrumentType:
+      type: string
+      enum: [OVERDRAFT, CREDIT_CARD_CREDIT, REVOLVING_CREDIT, LOAN]
+    RegisterExposureRequest:
+      type: object
+      required: [instrumentId, debtorId, debtorType, currency, committedAmount, drawnAmount, committedAmountEur, originationDate]
+      properties:
+        instrumentId: { type: string }
+        debtorId: { type: string }
+        debtorType: { $ref: '#/components/schemas/CounterpartyType' }
+        instrumentType: { $ref: '#/components/schemas/InstrumentType' }
+        currency: { type: string, example: EUR }
+        committedAmount: { type: number }
+        drawnAmount: { type: number }
+        committedAmountEur:
+          type: number
+          description: EUR-equivalent commitment, used only for the €25 000 reporting threshold
+        arrearsAmount: { type: number }
+        defaulted: { type: boolean }
+        originationDate: { type: string, format: date }
+    Exposure:
+      type: object
+      properties:
+        instrumentId: { type: string }
+        debtorId: { type: string }
+        debtorType: { $ref: '#/components/schemas/CounterpartyType' }
+        instrumentType: { $ref: '#/components/schemas/InstrumentType' }
+        currency: { type: string }
+        committedAmount: { type: number }
+        drawnAmount: { type: number }
+        offBalanceSheetAmount:
+          type: number
+          description: Undrawn committed amount (off-balance-sheet exposure)
+    CreditRecord:
+      type: object
+      description: One row of the AnaCredit credit/financial dataset
+      properties:
+        instrumentId: { type: string }
+        debtorId: { type: string }
+        instrumentType: { $ref: '#/components/schemas/InstrumentType' }
+        currency: { type: string }
+        outstandingNominalAmount: { type: number }
+        offBalanceSheetAmount: { type: number }
+        arrearsAmount: { type: number }
+        defaultStatus: { type: string, enum: [DEFAULT, NOT_IN_DEFAULT] }
+        referenceDate: { type: string, format: date }
+    Exclusion:
+      type: object
+      description: An instrument dropped from the return, with the eligibility reason code
+      properties:
+        instrumentId: { type: string }
+        debtorId: { type: string }
+        reason:
+          type: string
+          enum: [HOUSEHOLD_OUT_OF_SCOPE, BELOW_THRESHOLD, NO_EXPOSURE]
+    AnaCreditReturn:
+      type: object
+      properties:
+        referenceDate: { type: string, format: date }
+        reportableCount: { type: integer }
+        excludedCount: { type: integer }
+        records:
+          type: array
+          items: { $ref: '#/components/schemas/CreditRecord' }
+        exclusions:
+          type: array
+          items: { $ref: '#/components/schemas/Exclusion' }

@@ -1,0 +1,65 @@
+# Single-owner Postgres for the Pact Broker, reconciled by the cluster-wide CNPG
+# operator. Sandbox runs one instance for FinOps. CNPG generates the
+# `pact-broker-db-app` secret (keys: username, password) for the `pact_broker`
+# owner and a read-write Service `pact-broker-db-rw` — both consumed by the
+# Pact Broker Deployment.
+#
+# No `backup:` block by design (ADR-0092): pact and verification data are fully
+# reproducible — every CI build republishes the consumer pacts and provider
+# verification results — so the broker DB carries no irreplaceable state and stays
+# out of the backup-coverage obligation that money-path DBs carry.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pact-broker-db
+  namespace: pact-broker
+spec:
+  # DB-layer observability: CNPG runs its built-in Prometheus exporter on :9187
+  # and creates a PodMonitor the operator owns; kube-prometheus-stack selects it
+  # cluster-wide, lighting up cnpg_* metrics with zero app changes.
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: pact_broker
+      owner: pact_broker
+
+  # WAL archiving + daily base backups to S3 (ADR-0035, #863 pattern). Credentials via EKS Pod
+  # Identity on the pact-broker-db ServiceAccount (aws/.../db-backups.tf) — barman reads the SDK chain,
+  # no secret. Sandbox S3 lifecycle expires after 35d; prod needs compliance retention.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/pact-broker-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: pact-broker-db-daily
+  namespace: pact-broker
+spec:
+  schedule: "0 19 2 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: pact-broker-db

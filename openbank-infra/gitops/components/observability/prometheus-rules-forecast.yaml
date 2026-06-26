@@ -1,0 +1,95 @@
+# Forecast / anomaly alert rules (Dynatrace-parity #6). This is the "Davis-lite"
+# layer: OSS has no ML anomaly engine that matches Dynatrace Davis, but most of
+# its day-to-day value is predictive ("this disk fills in 4h", "traffic just
+# fell off a cliff") which plain PromQL does well with predict_linear, Holt-
+# Winters and stddev bands. These are heuristics — tune the windows/thresholds
+# once you have a few weeks of baseline, and graduate the noisy ones to
+# multi-window forms. Picked up automatically (ruleSelectorNilUsesHelmValues=false).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-forecast-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.forecast.capacity
+      rules:
+        # Node root/data disks projected to hit zero within 4h on the current
+        # 6h slope. Gated on <50% free so a half-empty disk with a transient
+        # slope doesn't page.
+        - alert: NodeDiskWillFillIn4h
+          expr: |
+            predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}[6h], 4 * 3600) < 0
+            and on (instance, device, mountpoint)
+            node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}
+              / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"} < 0.5
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Disk on {{ $labels.instance }} ({{ $labels.mountpoint }}) fills within ~4h"
+            description: "Projected to reach 0 bytes within 4h on the 6h trend — extend the volume or reclaim space."
+        # PVC fill projection — covers the CNPG Postgres and Tempo/Loki data
+        # volumes, the most likely things to silently fill (ties to #0).
+        - alert: PersistentVolumeWillFillIn6h
+          expr: |
+            predict_linear(kubelet_volume_stats_available_bytes[6h], 6 * 3600) < 0
+            and on (namespace, persistentvolumeclaim)
+            kubelet_volume_stats_available_bytes
+              / kubelet_volume_stats_capacity_bytes < 0.4
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} fills within ~6h"
+            description: "Projected to fill within 6h on the 6h trend — a full Postgres/Tempo/Loki PVC wedges the workload."
+    - name: openbank.forecast.anomaly
+      rules:
+        # Latency trend anomaly: p99 span latency >3σ above its own 3h mean = a
+        # regime change the static 2s threshold would miss until it crossed the
+        # line. NOTE: Prometheus 3.x removed holt_winters (→ the experimental
+        # double_exponential_smoothing, gated behind a feature flag), so this
+        # uses a plain moving-average + stddev band instead — no feature flag,
+        # same "deviation from trend" intent, consistent with TrafficDropAnomaly.
+        # Floored at 50ms so near-idle services don't alert on µs-scale noise.
+        - alert: SpanLatencyTrendAnomaly
+          expr: |
+            (
+              histogram_quantile(0.99, sum by (service, le) (rate(traces_spanmetrics_latency_bucket[10m])))
+              >
+              avg_over_time(
+                histogram_quantile(0.99, sum by (service, le) (rate(traces_spanmetrics_latency_bucket[10m])))[3h:10m]
+              )
+              + 3 * stddev_over_time(
+                histogram_quantile(0.99, sum by (service, le) (rate(traces_spanmetrics_latency_bucket[10m])))[3h:10m]
+              )
+            )
+            and
+            histogram_quantile(0.99, sum by (service, le) (rate(traces_spanmetrics_latency_bucket[10m]))) > 0.05
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "P99 latency on {{ $labels.service }} deviating above its trend"
+            description: "Span p99 is >3σ above its 3h mean for >15m — a deviation from normal, independent of the absolute SLO threshold."
+        # Traffic-drop anomaly: request rate collapses far below the last hour's
+        # mean (3-sigma below). Catches a silent upstream outage / wedged
+        # consumer that error-rate alerts miss (no errors if no calls arrive).
+        - alert: TrafficDropAnomaly
+          expr: |
+            (
+              sum by (service) (rate(traces_spanmetrics_calls_total[10m]))
+              <
+              avg_over_time(sum by (service) (rate(traces_spanmetrics_calls_total[10m]))[1h:10m])
+                - 3 * stddev_over_time(sum by (service) (rate(traces_spanmetrics_calls_total[10m]))[1h:10m])
+            )
+            and
+            avg_over_time(sum by (service) (rate(traces_spanmetrics_calls_total[10m]))[1h:10m]) > 0.1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Traffic on {{ $labels.service }} dropped far below trend"
+            description: "Request rate is >3σ below the last hour's mean for >10m — possible silent upstream outage or wedged consumer."

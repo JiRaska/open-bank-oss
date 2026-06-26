@@ -1,0 +1,27 @@
+# OpenBank Admin UI (Next.js). App plane, own `admin-ui` namespace. Milník A:
+# the login loop against Keycloak. The OIDC client secret + NEXTAUTH_SECRET are
+# created out-of-band (kubectl), never committed — the Application syncs only the
+# namespace, Deployment, Service and Ingress.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: admin-ui
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/admin-ui
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: admin-ui
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

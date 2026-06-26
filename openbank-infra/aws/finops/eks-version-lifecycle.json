@@ -1,0 +1,22 @@
+{
+  "_meta": {
+    "service": "eks",
+    "description": "Amazon EKS Kubernetes version support lifecycle. Consumed by openbank-infra/scripts/check-version-lifecycle.py to enforce rules.yaml: finops (ADR-0054). Dates are AWS-published end-of-standard / end-of-extended support (UTC).",
+    "source": "https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions.html",
+    "pricing_note": "standard support = $0.10/cluster-hr; extended support = $0.60/cluster-hr (6x).",
+    "last_refreshed": "2026-06-01",
+    "refresh": "Manual until ADR-0054 phase 2 auto-refreshes from `aws eks describe-cluster-versions`. Add a row when AWS releases a new minor; correct approximate dates when AWS firms them up.",
+    "governs": {
+      "tofu_file": "openbank-infra/aws/envs/sandbox-substrate/variables.tf",
+      "tofu_key": "kubernetes_version"
+    }
+  },
+  "versions": {
+    "1.30": { "eks_release": "2024-05-23", "end_of_standard_support": "2025-07-23", "end_of_extended_support": "2026-07-23" },
+    "1.31": { "eks_release": "2024-09-26", "end_of_standard_support": "2025-11-26", "end_of_extended_support": "2026-11-26" },
+    "1.32": { "eks_release": "2025-01-23", "end_of_standard_support": "2026-03-23", "end_of_extended_support": "2027-03-23" },
+    "1.33": { "eks_release": "2025-05-29", "end_of_standard_support": "2026-07-29", "end_of_extended_support": "2027-07-29" },
+    "1.34": { "eks_release": "2025-10-02", "end_of_standard_support": "2026-12-02", "end_of_extended_support": "2027-12-02" },
+    "1.35": { "eks_release": "2026-01-27", "end_of_standard_support": "2027-03-27", "end_of_extended_support": "2028-03-27" }
+  }
+}

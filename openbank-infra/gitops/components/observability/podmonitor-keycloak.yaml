@@ -1,0 +1,25 @@
+# Scrape Keycloak's Micrometer metrics (ADR-0082 — Auth & SCA dashboard).
+# KC_METRICS_ENABLED=true exposes /metrics on the management port (9000); this
+# PodMonitor scrapes the keycloak pods directly so we don't have to add a 9000
+# port to the keycloak Service. Lives in observability (synced by the
+# observability-components app), selects the keycloak pods in iam cross-namespace;
+# the cluster Prometheus has empty PodMonitor selectors so it's auto-discovered.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: keycloak
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: keycloak
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - iam
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+  podMetricsEndpoints:
+    - port: management
+      path: /metrics
+      interval: 30s

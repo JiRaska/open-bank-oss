@@ -1,0 +1,33 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{json,yml,yaml,toml,md}]
+indent_size = 2
+
+[*.{kt,kts}]
+indent_size = 4
+max_line_length = 120
+# ktlint (run by the openbank.static-analysis convention plugin) reads its code style
+# from here. intellij_idea matches the conventions already encoded below (ij_kotlin_*
+# import layout, trailing commas) instead of retro-fitting ktlint_official on the fleet.
+ktlint_code_style = intellij_idea
+ij_kotlin_imports_layout = *,java.**,javax.**,kotlin.**,^
+ij_kotlin_allow_trailing_comma = true
+ij_kotlin_allow_trailing_comma_on_call_site = true
+
+[*.{ts,tsx,js,jsx}]
+indent_size = 2
+max_line_length = 120
+
+[Makefile]
+indent_style = tab
+
+[*.bat]
+end_of_line = crlf

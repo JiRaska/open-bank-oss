@@ -1,0 +1,7 @@
+FROM eclipse-temurin:21-jre-alpine
+WORKDIR /app
+RUN addgroup -S openbank && adduser -S openbank -G openbank
+USER openbank
+COPY openbank-security-scanner/build/openbank-security-scanner-0.1.0-SNAPSHOT-runner.jar /app/quarkus-run.jar
+EXPOSE 8120
+ENTRYPOINT ["java", "-Djava.util.logging.manager=org.jboss.logmanager.LogManager", "-jar", "/app/quarkus-run.jar"]

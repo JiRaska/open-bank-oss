@@ -1,0 +1,78 @@
+# FinOps managed-service version-lifecycle gate + weekly audit (ADR-0054).
+# PR gate: fail a change that pins a managed-service version in/near extended
+# support. Weekly audit: re-evaluate as the calendar slides and open/update a
+# tracking Issue (ADR-0052) on a finding. Static, stdlib-only, no cloud creds
+# (live-cost breadth is ADR-0054 phase 2, which adds a read-only AWS OIDC role).
+name: FinOps lifecycle
+
+on:
+  pull_request:
+    paths:
+      - "openbank-infra/**"
+      - "openbank-libs/governance/rules.yaml"
+      - ".github/workflows/finops-lifecycle.yml"
+  schedule:
+    # Monday 06:00 UTC — weekly drift check against version end-of-support dates.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Version lifecycle gate
+    if: github.event_name == 'pull_request'
+    runs-on: openbank-batch
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Enforce rules.yaml finops version policy
+        run: python3 openbank-infra/scripts/check-version-lifecycle.py
+      - name: Validate finops_tiers (ADR-0057, declared side — advisory)
+        # Advisory until the measured classifier lands and rules.yaml flips
+        # finops_tiers.enforced to `block`; the script always exits 0 for now.
+        run: python3 openbank-infra/scripts/check-finops-tiers.py
+
+  audit:
+    name: Weekly lifecycle audit
+    if: github.event_name != 'pull_request'
+    runs-on: openbank-batch
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Audit pinned versions and file/update tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          report="${RUNNER_TEMP:-/tmp}/finops-report.md"
+          python3 openbank-infra/scripts/check-version-lifecycle.py --report > "$report"
+          finding="$(head -1 "$report" | sed 's/FINOPS_FINDING=//')"
+          body="$(tail -n +2 "$report")"
+          title="FinOps: managed-service version lifecycle audit"
+          existing="$(gh issue list --state open --search "$title in:title" \
+            --json number --jq '.[0].number // empty')"
+          if [ "$finding" = "1" ]; then
+            if [ -n "$existing" ]; then
+              echo "Finding persists — commenting on issue #$existing"
+              gh issue comment "$existing" --body "$body"
+            else
+              echo "New finding — opening tracking issue"
+              gh issue create --title "$title" --body "$body"
+            fi
+          else
+            echo "No finding — pinned versions compliant."
+            if [ -n "$existing" ]; then
+              gh issue close "$existing" \
+                --comment "Resolved: all pinned managed-service versions are on standard support with runway."
+            fi
+          fi
+      - name: FinOps tier classifier — measured vs declared (ADR-0057, advisory)
+        # Reads in-cluster Prometheus from the batch runner pod; advisory only — the
+        # script degrades to a no-op (exit 0) if Prometheus is unreachable, so this
+        # never fails the audit. Output is the measured tier recommendation per service.
+        run: python3 openbank-infra/scripts/finops-tier-classifier.py --report || true

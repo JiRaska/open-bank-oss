@@ -1,0 +1,13 @@
+# security-scanner banking-domain namespace (ADR-0037: domain = namespace). App
+# plane. Holds security-scanner-service plus its single-owner CNPG Postgres.
+# The scanner performs periodic health + CVE probes against the fleet services
+# and publishes findings on openbank.security.scan.event (Kafka).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: security-scanner
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

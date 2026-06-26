@@ -1,0 +1,446 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-dept-executive
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/part-of: observability
+data:
+  openbank-dept-executive.json: |
+    {
+      "id": null,
+      "uid": "openbank-dept-exec",
+      "title": "OpenBank — Executive Overview",
+      "description": "Single-pane bank health for leadership: payment volume and success, customer growth, sanctions blocks, platform availability derived from traces (Tempo span-metrics), and the events-stuck signal. Links out to the per-department dashboards.",
+      "tags": ["openbank", "department", "executive"],
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "1m",
+      "time": { "from": "now-24h", "to": "now" },
+      "timepicker": {},
+      "links": [
+        {
+          "title": "Compliance & AML",
+          "type": "dashboard",
+          "tags": [],
+          "asDropdown": false,
+          "targetBlank": false,
+          "includeVars": false,
+          "keepTime": true,
+          "url": "/d/openbank-dept-compliance"
+        },
+        {
+          "title": "Onboarding & Customer Service",
+          "type": "dashboard",
+          "tags": [],
+          "asDropdown": false,
+          "targetBlank": false,
+          "includeVars": false,
+          "keepTime": true,
+          "url": "/d/openbank-dept-onboarding"
+        },
+        {
+          "title": "Finance & Treasury",
+          "type": "dashboard",
+          "tags": [],
+          "asDropdown": false,
+          "targetBlank": false,
+          "includeVars": false,
+          "keepTime": true,
+          "url": "/d/openbank-dept-finance"
+        },
+        {
+          "title": "Payments Flow (ops)",
+          "type": "dashboard",
+          "tags": [],
+          "asDropdown": false,
+          "targetBlank": false,
+          "includeVars": false,
+          "keepTime": true,
+          "url": "/d/openbank-pay"
+        },
+        {
+          "title": "SLO & Error Budget",
+          "type": "dashboard",
+          "tags": [],
+          "asDropdown": false,
+          "targetBlank": false,
+          "includeVars": false,
+          "keepTime": true,
+          "url": "/d/openbank-slo"
+        }
+      ],
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "pluginId": "prometheus",
+            "label": "Datasource",
+            "hide": 0,
+            "refresh": 1,
+            "options": [],
+            "current": {}
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Payments Submitted",
+          "type": "stat",
+          "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "area"
+          },
+          "targets": [
+            {
+              "expr": "sum(increase(openbank_payments_submitted_total{job=\"observability/openbank-services\"}[$__range]))",
+              "legendFormat": "payments",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Payment Success Rate %",
+          "type": "stat",
+          "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "decimals": 2,
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "orange", "value": 95 },
+                  { "color": "green", "value": 99 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "none"
+          },
+          "targets": [
+            {
+              "expr": "100 * (sum(increase(openbank_payments_completed_total{outcome=~\"completed|settled\",job=\"observability/openbank-services\"}[$__range])) or vector(0)) / clamp_min(sum(increase(openbank_payments_completed_total{job=\"observability/openbank-services\"}[$__range])), 1)",
+              "legendFormat": "success rate",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "New Verified Clients",
+          "type": "stat",
+          "gridPos": { "x": 12, "y": 0, "w": 4, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "area"
+          },
+          "targets": [
+            {
+              "expr": "sum(increase(openbank_parties_verified_total{job=\"observability/openbank-services\"}[$__range]))",
+              "legendFormat": "verified clients",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Sanctions Blocks",
+          "type": "stat",
+          "gridPos": { "x": 16, "y": 0, "w": 4, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": 1 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "none"
+          },
+          "targets": [
+            {
+              "expr": "sum(increase(openbank_sanctions_hits_total{severity=\"block\",job=\"observability/openbank-services\"}[$__range]))",
+              "legendFormat": "blocks",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "Events Stuck",
+          "type": "stat",
+          "gridPos": { "x": 20, "y": 0, "w": 4, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 1 },
+                  { "color": "red", "value": 100 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "none"
+          },
+          "targets": [
+            {
+              "expr": "sum(max by (service) (openbank_outbox_backlog))",
+              "legendFormat": "outbox backlog",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "title": "Platform Availability % (from traces)",
+          "type": "stat",
+          "gridPos": { "x": 0, "y": 4, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "decimals": 3,
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "orange", "value": 99 },
+                  { "color": "green", "value": 99.9 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "none"
+          },
+          "targets": [
+            {
+              "expr": "100 * (1 - (sum(rate(traces_spanmetrics_calls_total{status_code=\"STATUS_CODE_ERROR\"}[$__range])) or vector(0)) / clamp_min(sum(rate(traces_spanmetrics_calls_total[$__range])), 0.0001))",
+              "legendFormat": "availability",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "title": "Services Reporting",
+          "type": "stat",
+          "gridPos": { "x": 6, "y": 4, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "orange", "value": 10 },
+                  { "color": "green", "value": 18 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "none"
+          },
+          "targets": [
+            {
+              "expr": "count(count by (container) (http_server_requests_seconds_count{job=\"observability/openbank-services\"}))",
+              "legendFormat": "services up",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "title": "EoM Close Runs by Status",
+          "type": "bargauge",
+          "gridPos": { "x": 12, "y": 4, "w": 12, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "palette-classic" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byRegexp", "options": ".*FAIL.*" },
+                "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+              }
+            ]
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "horizontal",
+            "displayMode": "gradient",
+            "text": {}
+          },
+          "targets": [
+            {
+              "expr": "sum by (status) (openbank_statement_close_runs_total{job=\"observability/openbank-services\"})",
+              "legendFormat": "{{status}}",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "title": "Payment Volume by Rail",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": { "lineWidth": 1, "fillOpacity": 15, "stacking": { "mode": "normal" } }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] },
+            "tooltip": { "mode": "multi" }
+          },
+          "targets": [
+            {
+              "expr": "sum by (type) (increase(openbank_payments_submitted_total{job=\"observability/openbank-services\"}[1h]))",
+              "legendFormat": "{{type}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "title": "Customer Growth (verified, cumulative)",
+          "type": "timeseries",
+          "gridPos": { "x": 12, "y": 8, "w": 6, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": { "lineWidth": 2, "fillOpacity": 20 },
+              "color": { "mode": "fixed", "fixedColor": "green" }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": { "displayMode": "list", "placement": "bottom" },
+            "tooltip": { "mode": "single" }
+          },
+          "targets": [
+            {
+              "expr": "sum(openbank_parties_verified_total{job=\"observability/openbank-services\"})",
+              "legendFormat": "verified clients",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 11,
+          "title": "Platform Traffic (req/s by namespace)",
+          "type": "timeseries",
+          "gridPos": { "x": 18, "y": 8, "w": 6, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": { "lineWidth": 1, "fillOpacity": 10 }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": { "displayMode": "list", "placement": "bottom" },
+            "tooltip": { "mode": "multi" }
+          },
+          "targets": [
+            {
+              "expr": "sum by (namespace) (rate(http_server_requests_seconds_count{job=\"observability/openbank-services\", uri!~\"/q/.*\"}[5m]))",
+              "legendFormat": "{{namespace}}",
+              "refId": "A"
+            }
+          ]
+        }
+      ]
+    }

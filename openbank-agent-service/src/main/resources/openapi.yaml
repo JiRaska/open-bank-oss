@@ -1,0 +1,498 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+openapi: "3.1.0"
+
+info:
+  title: OpenBank Agent Service API (MCP)
+
+  version: "1.8.0"
+  description: |
+    Model Context Protocol (MCP) 2.0 server exposing OpenBank domain operations as AI-callable tools.
+    All requests use JSON-RPC 2.0 over HTTP POST `/mcp`.
+
+    Supported methods:
+    - `initialize` — negotiate protocol version and capability exchange
+    - `tools/list` — enumerate available tools
+    - `tools/call` — invoke a named tool with arguments
+    - `ping` — liveness check
+
+    The service also hosts the **admin-UI assistant** (ADR-0031): a server-side reasoning loop
+    behind a provider-agnostic model gateway. The model call never happens in the browser — the
+    UI posts to `/agent/chat`, the loop runs each tool through the OPA policy gate, and every
+    model completion emits an AI-attributed audit event. `/agent/models` lists the registered
+    models. The demo ships a single offline mock provider; adding a real model is a config entry,
+    not a code change.
+
+    This is an internal service — not exposed via API Gateway to external TPPs.
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+
+servers:
+  - url: http://localhost:8130
+    description: Local dev
+
+tags:
+  - name: mcp
+    description: MCP JSON-RPC 2.0 endpoint
+  - name: agent
+    description: Admin-UI assistant — governed, server-side chat (ADR-0031)
+
+paths:
+  /mcp:
+    post:
+      tags: [mcp]
+      operationId: mcpRpc
+      summary: MCP JSON-RPC 2.0 dispatcher
+      description: |
+        Single endpoint for all MCP protocol messages. The `method` field in the request body
+        determines the operation. Returns `204 No Content` for notification methods
+        (e.g. `notifications/initialized`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpRequest'
+            examples:
+              initialize:
+                summary: Protocol handshake
+                value:
+                  jsonrpc: "2.0"
+                  id: 1
+                  method: "initialize"
+                  params:
+                    protocolVersion: "2024-11-05"
+                    capabilities: {}
+                    clientInfo:
+                      name: "opencode"
+                      version: "0.1.0"
+              toolsList:
+                summary: List available tools
+                value:
+                  jsonrpc: "2.0"
+                  id: 2
+                  method: "tools/list"
+                  params: {}
+              toolsCall:
+                summary: Call get_account_balance tool
+                value:
+                  jsonrpc: "2.0"
+                  id: 3
+                  method: "tools/call"
+                  params:
+                    name: "get_account_balance"
+                    arguments:
+                      accountId: "550e8400-e29b-41d4-a716-446655440000"
+              ping:
+                summary: Ping
+                value:
+                  jsonrpc: "2.0"
+                  id: 4
+                  method: "ping"
+      responses:
+        "200":
+          description: JSON-RPC response (success or error)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpResponse'
+              examples:
+                initializeResult:
+                  summary: Successful initialize
+                  value:
+                    jsonrpc: "2.0"
+                    id: 1
+                    result:
+                      protocolVersion: "2024-11-05"
+                      capabilities:
+                        tools:
+                          listChanged: false
+                        resources:
+                          subscribe: false
+                          listChanged: false
+                      serverInfo:
+                        name: "openbank-agent"
+                        version: "1.0.0"
+                toolsListResult:
+                  summary: Tools list
+                  value:
+                    jsonrpc: "2.0"
+                    id: 2
+                    result:
+                      tools:
+                        - name: "get_account_balance"
+                          description: "Returns the current balance for a given account ID"
+                          inputSchema:
+                            type: "object"
+                            required: ["accountId"]
+                            properties:
+                              accountId:
+                                type: "string"
+                                format: "uuid"
+                errorResult:
+                  summary: Method not found error
+                  value:
+                    jsonrpc: "2.0"
+                    id: 99
+                    error:
+                      code: -32601
+                      message: "Method not found: unknown/method"
+        "204":
+          description: Notification acknowledged (no response body) — for `notifications/initialized`
+
+  /agent/chat:
+    post:
+      tags: [agent]
+      operationId: agentChat
+      summary: Run one governed assistant turn
+      description: |
+        Server-side reasoning loop for the admin-UI assistant. Accepts the conversation history and
+        an optional page context, resolves a model through the gateway, and runs a bounded tool loop.
+        Each tool invocation is checked against the OPA policy gate before it executes; denied calls
+        never reach the tool registry and surface their policy reason instead. The response includes
+        the assistant reply and a transparent record of every tool call and whether policy allowed it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+            examples:
+              balanceQuery:
+                summary: Ask for an account balance
+                value:
+                  messages:
+                    - role: "user"
+                      content: "what is the balance of 11111111-1111-1111-1111-111111111111"
+                  context: "admin page /accounts"
+      responses:
+        "200":
+          description: Assistant reply plus the policy-gated tool-call record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+              examples:
+                permittedToolCall:
+                  summary: Reply after a permitted tool call
+                  value:
+                    reply: "The account is active."
+                    model: "mock-echo"
+                    toolCalls:
+                      - tool: "get_account"
+                        allowed: true
+                        resultPreview: "{\"iban\":\"CZ65...\",\"status\":\"ACTIVE\"}"
+
+  /agent/models:
+    get:
+      tags: [agent]
+      operationId: agentModels
+      summary: List models registered in the gateway
+      description: |
+        Returns the default model id and every enabled model in the gateway registry, with its
+        provider key and sensitivity tier. Adding a model is a config entry — no code change.
+      responses:
+        "200":
+          description: The registered models and the default
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelsResponse'
+              examples:
+                mockOnly:
+                  summary: Demo registry (mock provider only)
+                  value:
+                    default: "mock-echo"
+                    models:
+                      - id: "mock-echo"
+                        provider: "mock"
+                        sensitivity: "HOSTED"
+
+  /agent/oversight/run:
+    post:
+      tags: [agent]
+      operationId: agentOversightRun
+      summary: Trigger one compliance-officer oversight sweep
+      description: |
+        Manually starts the same governed sweep the scheduler runs (ADR-0031 D9 phase 2): the
+        `compliance-officer` agent reads sanctions screenings pending review, open/escalated AML
+        cases and open disputes through the policy-gated MCP tools, and records anything needing
+        operator attention as a proposal in the HITL approval queue. The run is charter-rate-limited
+        (counts against `runs_per_day`) and emits the D5 run-level audit event with
+        `trigger=manual`. The sweep never changes state — proposals are its only output.
+      responses:
+        "200":
+          description: Sweep outcome — the agent's summary plus the policy-gated tool-call record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SweepResponse'
+              examples:
+                quietSweep:
+                  summary: Nothing needs attention
+                  value:
+                    reply: "No pending sanctions screenings, no open AML cases, no open disputes."
+                    model: "mock-echo"
+                    toolCalls:
+                      - tool: "sanctions_list_pending"
+                        allowed: true
+                        resultPreview: "[]"
+                    isProposal: false
+
+  /q/health/ready:
+    get:
+      tags: [mcp]
+      operationId: readinessProbe
+      summary: Quarkus readiness health check
+      responses:
+        "200":
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        "503":
+          description: Service not ready
+
+  /q/health/live:
+    get:
+      tags: [mcp]
+      operationId: livenessProbe
+      summary: Quarkus liveness health check
+      responses:
+        "200":
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+components:
+  schemas:
+    McpRequest:
+      type: object
+      required: [jsonrpc, method]
+      properties:
+        jsonrpc:
+          type: string
+          enum: ["2.0"]
+          description: JSON-RPC protocol version — always "2.0"
+        id:
+          description: Request ID. Omit for notifications (fire-and-forget).
+          oneOf:
+            - type: string
+            - type: integer
+            - type: "null"
+        method:
+          type: string
+          description: RPC method name
+          example: "tools/call"
+        params:
+          description: Method-specific parameters
+          nullable: true
+
+    McpResponse:
+      type: object
+      required: [jsonrpc]
+      properties:
+        jsonrpc:
+          type: string
+          enum: ["2.0"]
+        id:
+          oneOf:
+            - type: string
+            - type: integer
+            - type: "null"
+        result:
+          description: Present on success
+          nullable: true
+        error:
+          $ref: '#/components/schemas/McpError'
+
+    McpError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: integer
+          description: |
+            Standard JSON-RPC error codes:
+            - -32700: Parse error
+            - -32600: Invalid request
+            - -32601: Method not found
+            - -32602: Invalid params
+            - -32603: Internal error
+        message:
+          type: string
+        data:
+          description: Additional error context
+          nullable: true
+
+    ToolDefinition:
+      type: object
+      required: [name, description, inputSchema]
+      properties:
+        name:
+          type: string
+          description: Tool identifier used in `tools/call`
+          example: "get_account_balance"
+        description:
+          type: string
+          description: Human-readable description of what the tool does
+        inputSchema:
+          type: object
+          description: JSON Schema describing the tool's accepted arguments
+
+    ToolCallResult:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolContent'
+        isError:
+          type: boolean
+          default: false
+          description: True if the tool execution itself produced an error (distinct from RPC-level errors)
+
+    ToolContent:
+      type: object
+      required: [type, text]
+      properties:
+        type:
+          type: string
+          enum: [text]
+          description: Content type — currently only "text" is supported
+        text:
+          type: string
+          description: Tool output as plain text or JSON string
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [UP, DOWN]
+        checks:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              status:
+                type: string
+                enum: [UP, DOWN]
+              data:
+                type: object
+
+    ChatTurn:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant, tool]
+          default: user
+          description: Author of the turn. Unknown values are treated as `user`.
+        content:
+          type: string
+          description: Message text
+
+    ChatRequest:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatTurn'
+          description: Conversation history, oldest first
+        model:
+          type: string
+          nullable: true
+          description: Model id to use. Omit to use the gateway default.
+        context:
+          type: string
+          nullable: true
+          description: Page context passed by the admin UI (e.g. "admin page /accounts")
+
+    ToolCallRecord:
+      type: object
+      required: [tool, allowed, resultPreview]
+      properties:
+        tool:
+          type: string
+          description: Name of the tool the model asked to call
+        allowed:
+          type: boolean
+          description: Whether the OPA policy gate permitted the call
+        resultPreview:
+          type: string
+          description: Truncated tool output, or the policy-denial reason when `allowed` is false
+
+    ChatResponse:
+      type: object
+      required: [reply, model, toolCalls]
+      properties:
+        reply:
+          type: string
+          description: The assistant's final answer for this turn
+        model:
+          type: string
+          description: Model id that produced the reply
+        toolCalls:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolCallRecord'
+          description: Transparent record of every tool the loop attempted
+
+    ModelInfo:
+      type: object
+      required: [id, provider, sensitivity]
+      properties:
+        id:
+          type: string
+          description: Model identifier used in `/agent/chat`
+        provider:
+          type: string
+          description: Provider key selecting the adapter (e.g. "mock")
+        sensitivity:
+          type: string
+          enum: [HOSTED, SELF_HOSTED]
+          description: Routing tier — sensitive contexts pin to a SELF_HOSTED model
+
+    SweepResponse:
+      type: object
+      description: Outcome of one oversight sweep (mirrors ChatResponse, minus chat semantics)
+      required: [reply, model, toolCalls, isProposal]
+      properties:
+        reply:
+          type: string
+          description: The agent's sweep summary
+        model:
+          type: string
+          description: Model identifier that produced the sweep
+        toolCalls:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolCallRecord'
+        isProposal:
+          type: boolean
+          description: True when the sweep recorded at least a proposal-style recommendation
+
+    ModelsResponse:
+      type: object
+      required: [default, models]
+      properties:
+        default:
+          type: string
+          description: Default model id used when a request omits `model`
+        models:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelInfo'

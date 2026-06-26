@@ -1,0 +1,53 @@
+# Changelog
+
+## [0.5.0](https://github.com/JiRaska/open-bank/compare/onboarding-service-v0.4.1...onboarding-service-v0.5.0) (2026-06-25)
+
+
+### Features
+
+* **tpp-registry,statement,onboarding,agent,settlement,sdd:** inject Clock (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2138](https://github.com/JiRaska/open-bank/issues/2138)) ([baa0d03](https://github.com/JiRaska/open-bank/commit/baa0d03bcef7a1cd48cb7e115410ab625a26acde))
+
+## [0.4.1](https://github.com/JiRaska/open-bank/compare/onboarding-service-v0.4.0...onboarding-service-v0.4.1) (2026-06-23)
+
+
+### Bug Fixes
+
+* **infra:** commit swift-service-db Pod Identity association for WAL backups (ADR-0104 D4) ([#1793](https://github.com/JiRaska/open-bank/issues/1793)) ([49fc6dd](https://github.com/JiRaska/open-bank/commit/49fc6ddf988952f6281b4689f8c7eee1670a03f9))
+
+## [0.4.0](https://github.com/JiRaska/open-bank/compare/onboarding-service-v0.3.0...onboarding-service-v0.4.0) (2026-06-21)
+
+
+### Features
+
+* **c2-kover:** Kover coverage gate + anacredit oidc boot fix + AML FT interceptor fix (18 services) ([ad26ca7](https://github.com/JiRaska/open-bank/commit/ad26ca7d58e62c8822e11f66f346926acc453058))
+* **infra:** C8 observability sweep — PodMonitor namespaces + MeterRegistry on 4 services ([#1410](https://github.com/JiRaska/open-bank/issues/1410)) ([9201493](https://github.com/JiRaska/open-bank/commit/920149368ea630e0117a4a480684c16d0a5517e2))
+
+## [0.3.0](https://github.com/JiRaska/open-bank/compare/onboarding-service-v0.2.0...onboarding-service-v0.3.0) (2026-06-12)
+
+
+### Features
+
+* **account,party,onboarding:** sprint 2 — sanctions persistence, GDPR erasure, doc download, AbandonedCleaner fix ([#475](https://github.com/JiRaska/open-bank/issues/475)) ([05b20d7](https://github.com/JiRaska/open-bank/commit/05b20d764a6373d0ffd96ca84ab5a9a6ed54291f))
+* **admin-ui,onboarding:** Sprint 3 — legalName in account form, onboarding REST security (ADR-0068) ([#477](https://github.com/JiRaska/open-bank/issues/477)) ([251f2e6](https://github.com/JiRaska/open-bank/commit/251f2e6796b32063bfcde0542fab281b71ec0faa))
+* **admin-ui:** derive governance manifest from governance.yaml (ADR-0071 phase 2) ([#498](https://github.com/JiRaska/open-bank/issues/498)) ([46c85e9](https://github.com/JiRaska/open-bank/commit/46c85e98fe1e887eb82e2110efb5286fe0220d12))
+* **domestic-payment:** wire DomainMetrics counters (ADR-0077 Phase 2 sweep) ([#684](https://github.com/JiRaska/open-bank/issues/684)) ([7bc6633](https://github.com/JiRaska/open-bank/commit/7bc663347fd81e5fe0f49076e7eb64055b4baa5e))
+* **onboarding:** Dockerfile + GitOps deploy (ADR-0068) ([#478](https://github.com/JiRaska/open-bank/issues/478)) ([1226fef](https://github.com/JiRaska/open-bank/commit/1226feff23448e42cc82e21ee70ce631db9b8790))
+
+
+### Bug Fixes
+
+* **gitops:** single-owner ArgoCD apps for product-catalog and audit-oidc ([#609](https://github.com/JiRaska/open-bank/issues/609)) ([48959b1](https://github.com/JiRaska/open-bank/commit/48959b1459fe696b05f0ec983a4daec3fce24207))
+* **onboarding:** persist read-model rows — subscribe persist() Uni + create id sequence ([#528](https://github.com/JiRaska/open-bank/issues/528)) ([45b7ec0](https://github.com/JiRaska/open-bank/commit/45b7ec03f6ea3bf40c31a94b7e5ba427051ca0cc))
+* **onboarding:** read kycCaseId from KYC events so the KYC funnel advances ([#531](https://github.com/JiRaska/open-bank/issues/531)) ([a4a6333](https://github.com/JiRaska/open-bank/commit/a4a633331582b2f27dd4b4372b095324c31da52e))
+
+## [0.2.0](https://github.com/JiRaska/open-bank/compare/onboarding-service-v0.1.0...onboarding-service-v0.2.0) (2026-06-06)
+
+
+### Features
+
+* **onboarding:** add onboarding-service read-model projection (ADR-0068 Gap 3) ([#421](https://github.com/JiRaska/open-bank/issues/421)) ([3ab13b5](https://github.com/JiRaska/open-bank/commit/3ab13b53fed371ac1aa278d4a4260b17988d0b80))
+
+
+### Bug Fixes
+
+* **infra:** restore Keycloak login theme to dark blue/cyan ([#358](https://github.com/JiRaska/open-bank/issues/358)) ([2e56cbc](https://github.com/JiRaska/open-bank/commit/2e56cbc39dab44a2a7c6ed66edea533aebdca317))

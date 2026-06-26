@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openbank-shared-config
+data:
+  QUARKUS_HTTP_HOST: 0.0.0.0
+  QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+  QUARKUS_LOG_LEVEL: INFO
+  QUARKUS_SHUTDOWN_TIMEOUT: 30S
+  QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak.openbank.svc.cluster.local:8080/realms/openbank
+  QUARKUS_OIDC_CLIENT_ID: openbank-services
+  KAFKA_BOOTSTRAP_SERVERS: kafka.openbank.svc.cluster.local:9092
+  QUARKUS_SMALLRYE_REACTIVE_MESSAGING_KAFKA_BOOTSTRAP_SERVERS: kafka.openbank.svc.cluster.local:9092
+  QUARKUS_REDIS_HOSTS: redis://valkey.openbank.svc.cluster.local:6379
+  QUARKUS_MAILER_HOST: mailhog.openbank.svc.cluster.local
+  QUARKUS_MAILER_PORT: "1025"
+  QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openbank-shared-secrets
+type: Opaque
+stringData:
+  QUARKUS_DATASOURCE_USERNAME: openbank
+  QUARKUS_DATASOURCE_PASSWORD: change-me
+  QUARKUS_OIDC_CREDENTIALS_SECRET: change-me
+  QUARKUS_REDIS_PASSWORD: change-me
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openbank-cnpg-bootstrap
+type: Opaque
+stringData:
+  username: openbank
+  password: change-me

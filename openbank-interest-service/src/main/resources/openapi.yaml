@@ -1,0 +1,396 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: Interest Service API
+  version: 1.2.0
+  description: >-
+    Interest accrual, capitalization, and rate configuration. Capitalization withholds Czech
+    final tax on credit interest (§36/§38d ZDP, ADR-0033): CZK interest credited to a resident
+    individual is taxed at source (15 %) and the customer is credited net; the gross/tax/net split
+    is returned on the capitalization result. Withheld tax is remitted monthly to the finanční úřad
+    (ADR-0038): the remittance endpoints assemble the per-period *Vyúčtování daně vybírané srážkou*
+    and advance the paired records RECORDED → REMITTED.
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8119
+    description: Local development
+tags:
+  - name: Interest
+  - name: Withholding remittance
+
+paths:
+  /api/v1/interest/accrue:
+    post:
+      tags: [Interest]
+      summary: Accrue interest for a single account
+      operationId: accrueInterest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccrualRequest'
+      responses:
+        '200':
+          description: Accrual result
+
+  /api/v1/interest/accrue/all:
+    post:
+      tags: [Interest]
+      summary: Accrue interest for all accounts
+      operationId: accrueAllInterest
+      parameters:
+        - name: date
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Accrual summary
+
+  /api/v1/interest/capitalize/{accountId}:
+    post:
+      tags: [Interest]
+      summary: Capitalize accrued interest
+      operationId: capitalizeInterest
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: date
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Capitalization result (net credited, with the withholding-tax split)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Capitalization'
+
+  /api/v1/interest/accruals/{accountId}:
+    get:
+      tags: [Interest]
+      summary: Get interest accruals for account
+      operationId: getAccruals
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Accruals
+
+  /api/v1/interest/accruals/{accountId}/summary:
+    get:
+      tags: [Interest]
+      summary: Accrual summary for account
+      operationId: getAccrualSummary
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Summary
+
+  /api/v1/interest/capitalizations/{accountId}:
+    get:
+      tags: [Interest]
+      summary: Get capitalization history
+      operationId: getCapitalizations
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Capitalizations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Capitalization'
+
+  /api/v1/interest/withholding/remittances:
+    post:
+      tags: [Withholding remittance]
+      summary: Assemble (or return) the monthly withholding remittance for a tax period
+      description: >-
+        Assembles the per-period *Vyúčtování daně vybírané srážkou* (§38d ZDP, ADR-0038), folding all
+        tax actually withheld in the month into one batch, advancing the paired records
+        RECORDED → REMITTED, and emitting `interest.withholding.remitted.v1`. Idempotent: one batch
+        per `(year, month)` — re-running returns the assembled batch.
+      operationId: assembleWithholdingRemittance
+      parameters:
+        - name: year
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: month
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 12
+      responses:
+        '201':
+          description: Remittance batch (assembled or pre-existing)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WithholdingRemittance'
+    get:
+      tags: [Withholding remittance]
+      summary: List assembled withholding remittance batches
+      operationId: listWithholdingRemittances
+      responses:
+        '200':
+          description: Remittance batches
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WithholdingRemittance'
+
+  /api/v1/interest/withholding/remittances/{year}/{month}:
+    get:
+      tags: [Withholding remittance]
+      summary: Get the withholding remittance batch for a tax period
+      operationId: getWithholdingRemittance
+      parameters:
+        - name: year
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: month
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 12
+      responses:
+        '200':
+          description: Remittance batch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WithholdingRemittance'
+        '404':
+          description: No remittance assembled for this period
+
+  /api/v1/interest/rates:
+    post:
+      tags: [Interest]
+      summary: Create interest rate config
+      operationId: createRateConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InterestRateConfig'
+      responses:
+        '201':
+          description: Rate config created
+    get:
+      tags: [Interest]
+      summary: List interest rate configs
+      operationId: listRateConfigs
+      parameters:
+        - name: productId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Rate configs
+
+  /api/v1/interest/rates/{id}:
+    get:
+      tags: [Interest]
+      summary: Get rate config by ID
+      operationId: getRateConfig
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Rate config
+    delete:
+      tags: [Interest]
+      summary: Deactivate rate config
+      operationId: deactivateRateConfig
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Deactivated
+
+components:
+  schemas:
+    AccrualRequest:
+      type: object
+      required: [accountId, accrualDate]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        accrualDate:
+          type: string
+          format: date
+
+    Capitalization:
+      type: object
+      description: >-
+        A credited interest capitalization. Per ADR-0033 the customer is credited the net amount;
+        grossAmount/taxAmount/netAmount expose the withholding split. For non-CZK interest no tax is
+        withheld in v1 (deferred), so net = gross and taxAmount = 0.
+      properties:
+        id:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        productId:
+          type: string
+        periodFrom:
+          type: string
+          format: date
+        periodTo:
+          type: string
+          format: date
+        totalAccrued:
+          type: number
+          description: Sum of the period's gross daily accruals.
+        grossAmount:
+          type: number
+          description: Gross interest before withholding.
+        taxAmount:
+          type: number
+          description: Withholding tax retained at source (whole CZK; 0 when not withheld).
+        netAmount:
+          type: number
+          description: Net interest credited to the customer (= capitalizedAmount).
+        capitalizedAmount:
+          type: number
+          description: The amount actually credited (the net amount).
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+        ledgerEntryId:
+          type: string
+          format: uuid
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    WithholdingRemittance:
+      type: object
+      description: >-
+        A monthly withholding-tax remittance batch (ADR-0038) — the *Vyúčtování daně vybírané srážkou*
+        for one tax month. Aggregates all tax actually withheld (treatment WITHHELD, currency CZK) in
+        the period, owed to the finanční úřad by dueDate (§38d odst. 3 ZDP).
+      properties:
+        id:
+          type: string
+          format: uuid
+        periodYear:
+          type: integer
+        periodMonth:
+          type: integer
+          minimum: 1
+          maximum: 12
+        authority:
+          type: string
+          description: The Czech tax authority (CZ-FU) in v1.
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+        totalTaxAmount:
+          type: number
+          description: Sum of whole-CZK tax withheld in the period.
+        itemCount:
+          type: integer
+          description: Number of withholding records folded into the batch.
+        dueDate:
+          type: string
+          format: date
+          description: End of the month following the withholding month (§38d odst. 3).
+        status:
+          type: string
+          enum: [PENDING, SETTLED]
+          description: PENDING until the delegated cash leg to the tax authority is confirmed.
+        createdAt:
+          type: string
+          format: date-time
+
+    InterestRateConfig:
+      type: object
+      required: [productId, ratePercent, calculationMethod]
+      properties:
+        productId:
+          type: string
+        ratePercent:
+          type: number
+        calculationMethod:
+          type: string
+          enum: [SIMPLE, COMPOUND_DAILY, COMPOUND_MONTHLY]
+        tierMin:
+          type: number
+        tierMax:
+          type: number
+        validFrom:
+          type: string
+          format: date
+        validTo:
+          type: string
+          format: date
+          nullable: true

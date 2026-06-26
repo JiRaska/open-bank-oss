@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+#
+# Temporal workflow engine namespace (ADR-0002 domain=namespace).
+# PSS baseline — Temporal server runs as non-root (helm chart default).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: temporal
+  labels:
+    app.kubernetes.io/part-of: platform
+    openbank.io/plane: infra
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

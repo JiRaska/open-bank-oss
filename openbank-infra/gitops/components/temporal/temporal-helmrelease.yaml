@@ -1,0 +1,226 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+#
+# Temporal server — ArgoCD Application deploying the official Temporal Helm chart.
+# Backend: CNPG PostgreSQL cluster co-located in the temporal namespace.
+# ExternalSecret reads DB credentials from OpenBao (secret/data/temporal/db).
+#
+# UI is disabled — use temporal-ui separately if needed (ADR-0081 network perimeter).
+# admintools pod is enabled for break-glass namespace management.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: temporal-helm
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://go.temporal.io/helm-charts
+    chart: temporal
+    targetRevision: "1.2.0"
+    helm:
+      releaseName: temporal
+      values: |
+        server:
+          replicaCount: 1
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          config:
+            persistence:
+              defaultStore: default
+              visibilityStore: visibility
+              datastores:
+                default:
+                  sql:
+                    pluginName: postgres12
+                    connectAddr: "temporal-db-rw.temporal.svc.cluster.local:5432"
+                    connectProtocol: tcp
+                    databaseName: temporal
+                    user: temporal
+                    existingSecret: temporal-db-credentials
+                    secretKey: DB_PASSWORD
+                    maxConns: 20
+                    maxIdleConns: 20
+                    maxConnLifetime: "1h"
+                visibility:
+                  sql:
+                    pluginName: postgres12
+                    connectAddr: "temporal-db-rw.temporal.svc.cluster.local:5432"
+                    connectProtocol: tcp
+                    databaseName: temporal_visibility
+                    user: temporal
+                    existingSecret: temporal-db-credentials
+                    secretKey: DB_PASSWORD
+                    maxConns: 10
+                    maxIdleConns: 10
+                    maxConnLifetime: "1h"
+
+        frontend:
+          replicaCount: 1
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+
+        history:
+          replicaCount: 1
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+
+        matching:
+          replicaCount: 1
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+
+        worker:
+          replicaCount: 1
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+
+        admintools:
+          enabled: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+
+        web:
+          enabled: false
+
+        schema:
+          useHelmHooks: true
+
+        dynamicConfig:
+          "system.defaultNamespace": "openbank-default"
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: temporal
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+---
+# CNPG PostgreSQL cluster for Temporal.
+# Single instance (sandbox) — scale to 2+ for production.
+# S3 backups via EKS Pod Identity (no secret needed).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: temporal-db
+  namespace: temporal
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 10Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+  bootstrap:
+    initdb:
+      database: temporal
+      owner: temporal
+      postInitSQL:
+        - "ALTER USER temporal CREATEDB"
+        - "CREATE DATABASE temporal_visibility OWNER temporal"
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/temporal-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: temporal-db-daily
+  namespace: temporal
+spec:
+  schedule: "0 30 3 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: temporal-db
+---
+# ExternalSecret pulls DB credentials from OpenBao KV.
+# Path: secret/data/temporal/db
+# Keys expected: DB_HOST, DB_USER, DB_PASSWORD
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: temporal-db-credentials
+  namespace: temporal
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: vault-kv
+  target:
+    name: temporal-db-credentials
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      engineVersion: v2
+      mergePolicy: Merge
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+  data:
+    - secretKey: DB_HOST
+      remoteRef:
+        key: temporal/db
+        property: DB_HOST
+    - secretKey: DB_USER
+      remoteRef:
+        key: temporal/db
+        property: DB_USER
+    - secretKey: DB_PASSWORD
+      remoteRef:
+        key: temporal/db
+        property: DB_PASSWORD

@@ -1,0 +1,798 @@
+# ===========================================================================
+# ARC runner scale sets (ADR-0053). Per-job EPHEMERAL runners, on a dedicated
+# Karpenter Graviton-spot NodePool. Three scale sets — the build/deploy TRUST
+# split (ADR-0082) plus a build/batch CAPACITY split so the merge-required lane
+# is never starved by non-blocking work (ARC has no job preemption, so isolated
+# capacity is the only "priority" lever):
+#
+#   openbank-build  — runs PR code, merge-required: per-service compile+test,
+#                     admin-ui, manifest validation. NO cloud-write creds. dind
+#                     for the docker-compose test-infra; rootless BuildKit is the
+#                     documented hardening follow-up (ADR-0053). Keeps 1 warm
+#                     runner (arc_min_runners) off the critical path; bursts to
+#                     arc_max_runners.
+#   openbank-batch  — same trust level as build (no creds), SEPARATE low-capped
+#                     pool: non-blocking PR checks + weekly cron (security/secret
+#                     scans, finops audit, label sync). Scales to zero. A batch
+#                     burst tops out at arc_batch_max_runners and cannot touch
+#                     the build pool.
+#   openbank-deploy — post-merge ECR push + ArgoCD sync. Its pod SA carries
+#                     IRSA scoped to ECR push only; a PR job can never schedule
+#                     here (workflow routing + the ci-runner-governance lint).
+#
+# All gated behind var.arc_runner_enabled (needs the arc-github-app secret).
+# ===========================================================================
+
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+locals {
+  arc_namespace = "arc-runners"
+  # Runner pods land only on the tainted "runners" NodePool, never on the
+  # bootstrap/banking nodes. do-not-disrupt stops Karpenter evicting a node
+  # mid-job; the node is reclaimed by consolidation once the job pod exits.
+  # Pods may land on EITHER the warm (on-demand) or spot burst NodePool — both
+  # carry the openbank.io/pool=runners label and the same taint. The affinity
+  # below gives warm nodes a strong preference (weight 80) so ARC's minRunners
+  # idle pods park on the on-demand node (keeping it alive and cache-warm) while
+  # spot nodes are left free to consolidate. Burst jobs that exceed warm capacity
+  # fall through to spot nodes — same scheduling, lower preference weight.
+  runner_node_selector = { "openbank.io/pool" = "runners" }
+  runner_tolerations = [{
+    key      = "openbank.io/runner"
+    operator = "Equal"
+    value    = "true"
+    effect   = "NoSchedule"
+  }]
+  # Prefer warm on-demand nodes for idle runners; burst onto spot for overflow.
+  runner_affinity = {
+    nodeAffinity = {
+      preferredDuringSchedulingIgnoredDuringExecution = [
+        {
+          weight = 80
+          preference = {
+            matchExpressions = [{
+              key      = "openbank.io/runner-tier"
+              operator = "In"
+              values   = ["warm"]
+            }]
+          }
+        }
+      ]
+    }
+  }
+  runner_pod_annotations = { "karpenter.sh/do-not-disrupt" = "true" }
+  # Overriding template.spec.containers[runner] for resources drops the chart's
+  # default image/command (strategic-merge replaces, not merges) — so we must
+  # re-state both or the EphemeralRunner pod is rejected (image: Required value).
+  #
+  # Custom image (runner-image/Dockerfile): the stock ARC runner + the toolchain
+  # the workflows assume (docker compose, yamllint, shellcheck, trivy, gitleaks,
+  # yq) — the set the retired EC2 AMI baked in. Pinned by digest (immutable +
+  # reproducible): bump this when runner-image.yml rebuilds the image. The
+  # digest below = the runner-image/Dockerfile in this commit.
+  runner_image   = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.name}.amazonaws.com/openbank-ci-runner@sha256:ce7b1171b6cd4c95552cc1201013664ed2ab51a35d142e996dd118a4152a482f"
+  runner_command = ["/home/runner/run.sh"]
+
+  # -------------------------------------------------------------------------
+  # Manual dind sidecar (instead of the chart's containerMode.type=dind).
+  #
+  # WHY NOT containerMode=dind: the gha-runner-scale-set chart (0.9.3) hardcodes
+  # the dind container's `dockerd` args in its _helpers.tpl and exposes NO seam
+  # to add daemon flags or mount an /etc/docker/daemon.json. We need to pin
+  # dockerd's `--default-address-pool` so Docker NEVER auto-allocates a bridge on
+  # the cluster Service CIDR (172.20.0.0/16, kube-dns 172.20.0.10): Docker's
+  # built-in default pool walks 172.17→172.31/16, so the 4th auto-created network
+  # (docker0=172.17, then .18/.19/.20) lands exactly on the Service CIDR and
+  # black-holes pod DNS inside the runner pod's netns — the same failure class as
+  # the explicit openbank-net collision fixed in docker-compose.yml. Testcontainers
+  # / `docker compose` create networks dynamically, so the explicit-network fix
+  # alone is not enough; the daemon-level pool is the durable guardrail.
+  #
+  # HOW: we drop containerMode and define the runner+dind+init containers and
+  # volumes ourselves (the chart's "default mode" passes our pod spec through
+  # verbatim). This block mirrors the exact spec the chart rendered for dind mode
+  # (captured from the live AutoscalingRunnerSet) — identical but for the added
+  # --default-address-pool flag. Owning the spec also removes hidden chart drift.
+  #
+  # Pool 192.168.0.0/17 (size 24 ⇒ 128 networks) is disjoint from: the Service
+  # CIDR (172.20/16), the VPC CIDR (10.80/16), and the explicit compose
+  # openbank-net (192.168.240.0/20, which sits in the upper half 192.168.128+).
+  dind_default_address_pool = "base=192.168.0.0/17,size=24"
+
+  # Docker wiring the chart would otherwise inject into the runner container.
+  # GRADLE_REMOTE_CACHE_* wires the in-cluster Gradle Build Cache (ADR-0043).
+  # The cache server (gitops/components/gradle-build-cache) runs nginx WebDAV
+  # in the gradle-build-cache namespace; plain HTTP is fine inside the cluster.
+  runner_docker_env = [
+    { name = "DOCKER_HOST", value = "unix:///var/run/docker.sock" },
+    { name = "RUNNER_WAIT_FOR_DOCKER_IN_SECONDS", value = "120" },
+    { name = "GRADLE_REMOTE_CACHE_URL", value = "http://gradle-build-cache.gradle-build-cache.svc.cluster.local:8080/cache/" },
+    { name = "GRADLE_REMOTE_CACHE_PUSH", value = "true" },
+    { name = "GRADLE_REMOTE_CACHE_INSECURE", value = "true" },
+    # FinOps (2026-06-22): GRADLE_USER_HOME on a node-local hostPath so the
+    # Gradle wrapper distribution (~150 MB) and Maven module metadata are
+    # downloaded at most ONCE per Karpenter node lifecycle instead of once per
+    # job.  Complementary to cache-enabled: false in _service-ci.yml (which
+    # eliminated 74 GB/day of GitHub Actions cache NAT upload).
+    # Path is per-service under /var/cache/gradle-svc/<service> so concurrent
+    # jobs for different services never collide; same-service jobs are
+    # serialised by max-parallel. The init-gradle-home init container ensures
+    # the directory exists and is world-writable before the runner starts.
+    { name = "GRADLE_USER_HOME_NODE_CACHE", value = "/var/cache/gradle-svc" },
+  ]
+  runner_docker_volume_mounts = [
+    { name = "work", mountPath = "/home/runner/_work" },
+    { name = "dind-sock", mountPath = "/var/run" },
+    { name = "gradle-home-cache", mountPath = "/var/cache/gradle-svc" },
+  ]
+
+  # Copies the runner's baked-in externals into the shared volume (chart parity).
+  dind_init_container = {
+    name         = "init-dind-externals"
+    image        = local.runner_image
+    command      = ["cp"]
+    args         = ["-r", "-v", "/home/runner/externals/.", "/home/runner/tmpDir/"]
+    volumeMounts = [{ name = "dind-externals", mountPath = "/home/runner/tmpDir" }]
+  }
+
+  # Raises fs.aio-max-nr on the host before the runner pod starts. The default
+  # kernel value (65536) is exhausted by the nightly full-fleet build: each
+  # Quarkus reactive service (Vert.x epoll) claims ~10-15k AIO slots; with
+  # max-parallel=4 (services-ci.yml) running on a shared node the pool hits 0
+  # → libc++abi: Could not setup Async I/O. The privileged flag is required
+  # because fs.aio-max-nr is a non-namespaced kernel parameter (CAP_SYS_ADMIN).
+  aio_sysctl_init_container = {
+    name            = "init-aio-sysctl"
+    image           = "public.ecr.aws/docker/library/busybox:1.36"
+    command         = ["sh", "-c", "sysctl -w fs.aio-max-nr=1048576 && echo 'fs.aio-max-nr raised to 1048576'"]
+    securityContext = { privileged = true }
+  }
+
+  # Ensures the node-local Gradle home cache directory is writable by the runner
+  # user (UID 1001 in the actions-runner image). hostPath creates the dir owned
+  # by root; this init container chowns it before the runner starts.
+  # FinOps (2026-06-22): Gradle wrapper (~150 MB) and Maven module metadata are
+  # fetched once per Karpenter node lifecycle instead of once per job. Combined
+  # with cache-enabled: false in _service-ci.yml (eliminates 74 GB/day GitHub
+  # Actions cache upload) this drives CI NAT download cost toward the floor.
+  gradle_home_init_container = {
+    name            = "init-gradle-home"
+    image           = "public.ecr.aws/docker/library/busybox:1.36"
+    command         = ["sh", "-c", "mkdir -p /var/cache/gradle-svc && chmod 777 /var/cache/gradle-svc && echo 'gradle-home-cache ready'"]
+    securityContext = { privileged = true }
+    volumeMounts    = [{ name = "gradle-home-cache", mountPath = "/var/cache/gradle-svc" }]
+  }
+
+  # The dind daemon — chart-parity args PLUS the pinned default address pool.
+  # Image comes from AWS's public ECR mirror of the Docker Official Images, NOT
+  # docker.io: with 8 runners churning, anonymous Docker Hub pulls of docker:dind
+  # blow the 100-pulls/6h-per-IP limit (HTTP 429 toomanyrequests) and every runner
+  # pod wedges in ImagePullBackOff. public.ecr.aws is unauthenticated AND
+  # un-throttled, and the runner nodes can already reach it.
+  #
+  # FinOps: three in-cluster pull-through caches eliminate NAT egress for the
+  # three main public registries CI pulls from:
+  #   docker.io  → registry-cache:5000  (--registry-mirror, Docker native)
+  #   quay.io    → quay-cache:5001      (containerd certs.d, --containerd-snapshotter)
+  #   ghcr.io    → ghcr-cache:5002      (containerd certs.d, --containerd-snapshotter)
+  # The hosts.toml files are mounted from a ConfigMap so no init script is needed.
+  dind_container = {
+    name  = "dind"
+    image = "public.ecr.aws/docker/library/docker:dind"
+    args = [
+      "dockerd",
+      "--host=unix:///var/run/docker.sock",
+      "--group=$(DOCKER_GROUP_GID)",
+      "--default-address-pool=${local.dind_default_address_pool}",
+      # docker.io: native registry-mirror (Docker has built-in support for docker.io).
+      "--registry-mirror=http://registry-cache.registry-cache.svc.cluster.local:5000",
+      "--insecure-registry=registry-cache.registry-cache.svc.cluster.local:5000",
+      # quay.io / ghcr.io: containerd snapshotter mode is enabled via daemon.json
+      # (mounted as /etc/docker/daemon.json from the dind-mirror-certs ConfigMap)
+      # which sets features.containerd-snapshotter=true so dockerd reads
+      # /etc/containerd/certs.d/ for per-registry mirror selection.
+      "--insecure-registry=quay-cache.registry-cache.svc.cluster.local:5001",
+      "--insecure-registry=ghcr-cache.registry-cache.svc.cluster.local:5002",
+    ]
+    env             = [{ name = "DOCKER_GROUP_GID", value = "123" }]
+    securityContext = { privileged = true }
+    volumeMounts = [
+      { name = "work", mountPath = "/home/runner/_work" },
+      { name = "dind-sock", mountPath = "/var/run" },
+      { name = "dind-externals", mountPath = "/home/runner/externals" },
+      # docker-lib: Docker image layers stored in an explicit emptyDir so kubelet
+      # tracks the usage and evicts the pod at sizeLimit before the node root disk
+      # fills (previously layers accumulated in the container writable overlay on
+      # the root EBS, invisible to kubelet ephemeral-storage accounting).
+      { name = "docker-lib", mountPath = "/var/lib/docker" },
+      # daemon.json enables containerd-snapshotter mode; hosts.toml files wire mirrors.
+      { name = "dind-mirror-certs", mountPath = "/etc/docker/daemon.json", subPath = "daemon.json" },
+      { name = "dind-mirror-certs", mountPath = "/etc/containerd/certs.d/quay.io/hosts.toml", subPath = "quay-hosts.toml" },
+      { name = "dind-mirror-certs", mountPath = "/etc/containerd/certs.d/ghcr.io/hosts.toml", subPath = "ghcr-hosts.toml" },
+    ]
+  }
+
+  dind_volumes = [
+    { name = "dind-sock", emptyDir = {} },
+    { name = "dind-externals", emptyDir = {} },
+    { name = "work", emptyDir = {} },
+    # Docker image layer cache: 14 GiB cap per runner pod. Kubelet evicts the pod
+    # at sizeLimit before the node root disk fills. 14 GiB ≈ 18 service images ×
+    # ~800 MB each. The ec2nodeclass_runners root EBS is 30 GiB: 8 GiB OS +
+    # 14 GiB docker-lib = 22 GiB per pod, leaving 8 GiB slack for system.
+    { name = "docker-lib", emptyDir = { sizeLimit = "14Gi" } },
+    { name = "dind-mirror-certs", configMap = { name = "dind-mirror-certs" } },
+    # Node-local Gradle home cache — survives pod restarts on the same Karpenter
+    # node. Gradle wrapper (~150 MB) and Maven metadata are fetched once per node
+    # instead of once per job. DirectoryOrCreate + chmod 777 via init container.
+    { name = "gradle-home-cache", hostPath = { path = "/var/cache/gradle-svc", type = "DirectoryOrCreate" } },
+  ]
+}
+
+# ---------------------------------------------------------------------------
+# runner NodePool — TWO TIERS (FinOps 2026-06-13, ADR-0053):
+#
+# runners-warm  — 2 on-demand Graviton nodes, expireAfter: Never.
+#   Why: every cold Karpenter node pulls docker:dind (~700 MB) from
+#   public.ecr.aws over the NAT gateway ($0.045/GB). With arc_min_runners=2
+#   warm runners, the two always-alive nodes carry the dind containerd cache
+#   so a normal PR build never touches the NAT for the runner image.
+#   On-demand eliminates spot interruption mid-job for the critical build lane.
+#   Cost: 2× c6g.large on-demand = ~$3.72/day (fixed). Pays back vs. the
+#   $13 fleet-rebuild spike (NAT + cold-start Compute) in <4 events/month.
+#
+# runners       — spot burst pool. Karpenter provisions extra nodes when the
+#   queue exceeds 2 concurrent jobs. consolidateAfter extended to 30m so a
+#   node stays warm across a typical PR burst instead of being torn down
+#   after 2m (triggering another cold start 5m later for the next PR).
+#   expireAfter extended to 72h: a surviving spot node already has the dind
+#   image in its containerd cache — letting it live longer amortises that NAT
+#   pull across many builds.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Dedicated EC2NodeClass for runner nodes — 30 GiB root EBS instead of 20 GiB.
+# Non-runner nodes stay on the default EC2NodeClass (20 GiB) because they run
+# stateless workloads that don't accumulate Docker layers.
+# Runner nodes pull 400-800 MB service images per dind build; with the
+# docker-lib emptyDir capped at 14 GiB, a single pod needs up to 22 GiB
+# (8 GiB OS + 14 GiB docker-lib). 30 GiB covers one pod comfortably.
+# Cost delta: +$0.80/runner-node/month (10 GiB × $0.08 gp3).
+# ---------------------------------------------------------------------------
+resource "kubectl_manifest" "ec2nodeclass_runners" {
+  count      = var.arc_runner_enabled ? 1 : 0
+  depends_on = [helm_release.karpenter]
+
+  yaml_body = yamlencode({
+    apiVersion = "karpenter.k8s.aws/v1"
+    kind       = "EC2NodeClass"
+    metadata   = { name = "runners" }
+    spec = {
+      amiFamily        = "AL2023"
+      amiSelectorTerms = [{ alias = "al2023@latest" }]
+      role             = local.karpenter_node_role_name
+      subnetSelectorTerms        = [{ tags = { "karpenter.sh/discovery" = local.cluster_name } }]
+      securityGroupSelectorTerms = [{ id = local.node_security_group_id }]
+      tags = {
+        "karpenter.sh/discovery" = local.cluster_name
+        Project                  = "openbank"
+        ManagedBy                = "karpenter"
+        Role                     = "arc-runner"
+      }
+      blockDeviceMappings = [{
+        deviceName = "/dev/xvda"
+        ebs = {
+          volumeSize          = "30Gi"
+          volumeType          = "gp3"
+          encrypted           = true
+          deleteOnTermination = true
+        }
+      }]
+    }
+  })
+}
+
+# Warm pool: on-demand, expireAfter: Never, WhenEmpty-only disruption so
+# Karpenter never consolidates away a node that still has the dind cache hot.
+resource "kubectl_manifest" "nodepool_runners_warm" {
+  count      = var.arc_runner_enabled ? 1 : 0
+  depends_on = [helm_release.karpenter, kubectl_manifest.ec2nodeclass_runners]
+
+  yaml_body = yamlencode({
+    apiVersion = "karpenter.sh/v1"
+    kind       = "NodePool"
+    metadata   = { name = "runners-warm" }
+    spec = {
+      template = {
+        metadata = { labels = {
+          "openbank.io/pool"        = "runners"
+          "openbank.io/runner-tier" = "warm"
+        } }
+        spec = {
+          taints = [{
+            key    = "openbank.io/runner"
+            value  = "true"
+            effect = "NoSchedule"
+          }]
+          requirements = [
+            { key = "kubernetes.io/arch", operator = "In", values = ["arm64"] },
+            { key = "kubernetes.io/os", operator = "In", values = ["linux"] },
+            { key = "karpenter.sh/capacity-type", operator = "In", values = ["on-demand"] },
+            # Runner requests cpu=3/memory=6Gi → needs ≥4 vCPU node.
+            # c6g.xlarge (4 vCPU / 8 GB) and c7g.xlarge (4 vCPU / 8 GB) are the
+            # cheapest on-demand Graviton instance that fits one full runner pod.
+            # node.kubernetes.io/instance-type is the well-known label Karpenter v1
+            # allows in requirements (karpenter.k8s.aws/instance-type is restricted).
+            { key = "node.kubernetes.io/instance-type", operator = "In", values = ["c6g.xlarge", "c7g.xlarge", "m6g.xlarge"] },
+            { key = "topology.kubernetes.io/zone", operator = "In", values = ["eu-north-1a"] }
+          ]
+          nodeClassRef = {
+            group = "karpenter.k8s.aws"
+            kind  = "EC2NodeClass"
+            name  = "runners"
+          }
+          expireAfter = "Never" # warm node lives until explicitly disrupted
+        }
+      }
+      disruption = {
+        # WhenEmpty: only reclaim when NO pods are scheduled (i.e. minRunners=0
+        # and no active job). Never consolidates underutilised — a partially-used
+        # warm node keeps its dind containerd cache intact.
+        consolidationPolicy = "WhenEmpty"
+        consolidateAfter    = "5m"
+      }
+      limits = {
+        cpu = "8" # max 2 warm nodes (2× c6g.xlarge = 8 vCPU); hard cap
+      }
+    }
+  })
+}
+
+# Spot burst pool: wider instance selection, longer expiry to amortise cold starts.
+resource "kubectl_manifest" "nodepool_runners" {
+  count      = var.arc_runner_enabled ? 1 : 0
+  depends_on = [helm_release.karpenter, kubectl_manifest.ec2nodeclass_runners]
+
+  yaml_body = yamlencode({
+    apiVersion = "karpenter.sh/v1"
+    kind       = "NodePool"
+    metadata   = { name = "runners" }
+    spec = {
+      template = {
+        metadata = { labels = {
+          "openbank.io/pool"        = "runners"
+          "openbank.io/runner-tier" = "spot"
+        } }
+        spec = {
+          taints = [{
+            key    = "openbank.io/runner"
+            value  = "true"
+            effect = "NoSchedule"
+          }]
+          requirements = [
+            { key = "kubernetes.io/arch", operator = "In", values = ["arm64"] },
+            { key = "kubernetes.io/os", operator = "In", values = ["linux"] },
+            { key = "karpenter.sh/capacity-type", operator = "In", values = ["spot"] },
+            { key = "karpenter.k8s.aws/instance-category", operator = "In", values = ["c", "m", "r", "t"] },
+            { key = "karpenter.k8s.aws/instance-generation", operator = "Gt", values = ["3"] },
+            { key = "karpenter.k8s.aws/instance-cpu", operator = "In", values = ["4", "8", "16", "32"] },
+            { key = "topology.kubernetes.io/zone", operator = "In", values = ["eu-north-1a"] }
+          ]
+          nodeClassRef = {
+            group = "karpenter.k8s.aws"
+            kind  = "EC2NodeClass"
+            name  = "runners"
+          }
+          # Extended: a surviving spot node already has dind in containerd cache.
+          # Longer lifetime amortises the ~700 MB NAT pull across more builds.
+          expireAfter = "72h"
+        }
+      }
+      disruption = {
+        consolidationPolicy = "WhenEmptyOrUnderutilized"
+        # Extended from 2m: prevents a node being reclaimed between back-to-back
+        # PRs (common pattern: merge → release-please → service PRs) only to be
+        # re-provisioned 5m later with a cold dind pull.
+        consolidateAfter = "30m"
+      }
+      limits = {
+        cpu = "64"
+      }
+    }
+  })
+}
+
+# ---------------------------------------------------------------------------
+# IRSA for the deploy scale set: a pod ServiceAccount whose only AWS power is
+# pushing images to the openbank-* ECR repos. The build scale set uses the
+# default SA with no such role — PR code can never assume this.
+# ---------------------------------------------------------------------------
+data "aws_iam_policy_document" "arc_deploy_assume" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [local.s.oidc_provider_arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(local.s.oidc_provider_arn, "/^.*oidc-provider\\//", "")}:sub"
+      values   = ["system:serviceaccount:${local.arc_namespace}:openbank-deploy"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(local.s.oidc_provider_arn, "/^.*oidc-provider\\//", "")}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "arc_deploy" {
+  count              = var.arc_runner_enabled ? 1 : 0
+  name               = "openbank-arc-deploy"
+  assume_role_policy = data.aws_iam_policy_document.arc_deploy_assume.json
+  tags               = { Project = "openbank", ManagedBy = "opentofu", Adr = "0053" }
+}
+
+data "aws_iam_policy_document" "arc_deploy_ecr" {
+  statement {
+    sid       = "EcrAuth"
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+  statement {
+    sid = "EcrPush"
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:BatchGetImage",
+      "ecr:InitiateLayerUpload",
+      "ecr:UploadLayerPart",
+      "ecr:CompleteLayerUpload",
+      "ecr:PutImage"
+    ]
+    resources = [
+      "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/openbank-*"
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "arc_deploy_ecr" {
+  count  = var.arc_runner_enabled ? 1 : 0
+  name   = "ecr-push"
+  role   = aws_iam_role.arc_deploy[0].id
+  policy = data.aws_iam_policy_document.arc_deploy_ecr.json
+}
+
+# ---------------------------------------------------------------------------
+# Runner namespace + the deploy pod ServiceAccount (IRSA-annotated).
+# ---------------------------------------------------------------------------
+resource "kubernetes_namespace" "arc_runners" {
+  count = var.arc_runner_enabled ? 1 : 0
+  metadata { name = local.arc_namespace }
+}
+
+resource "kubernetes_service_account" "arc_deploy" {
+  count = var.arc_runner_enabled ? 1 : 0
+  metadata {
+    name      = "openbank-deploy"
+    namespace = kubernetes_namespace.arc_runners[0].metadata[0].name
+    annotations = {
+      "eks.amazonaws.com/role-arn" = aws_iam_role.arc_deploy[0].arn
+    }
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Per-registry containerd mirror config — hosts.toml files for quay.io and
+# ghcr.io. Mounted read-only into the dind container under
+# /etc/containerd/certs.d/<registry>/hosts.toml; dind's --containerd-snapshotter
+# flag makes dockerd read these files for per-registry mirror selection.
+# docker.io is handled separately via --registry-mirror (Docker native).
+# ---------------------------------------------------------------------------
+resource "kubernetes_config_map" "dind_mirror_certs" {
+  count = var.arc_runner_enabled ? 1 : 0
+  metadata {
+    name      = "dind-mirror-certs"
+    namespace = kubernetes_namespace.arc_runners[0].metadata[0].name
+  }
+  data = {
+    # Enables Docker containerd-snapshotter mode so dockerd reads
+    # /etc/containerd/certs.d/ for per-registry mirror selection.
+    # registry-mirrors / insecure-registries here mirror the CLI args so
+    # everything is consistent; CLI args take precedence over daemon.json for
+    # keys that appear in both.
+    "daemon.json" = jsonencode({
+      features = { "containerd-snapshotter" = true }
+    })
+    "quay-hosts.toml" = <<-TOML
+      server = "https://quay.io"
+      [host."http://quay-cache.registry-cache.svc.cluster.local:5001"]
+        capabilities = ["pull", "resolve"]
+    TOML
+    "ghcr-hosts.toml" = <<-TOML
+      server = "https://ghcr.io"
+      [host."http://ghcr-cache.registry-cache.svc.cluster.local:5002"]
+        capabilities = ["pull", "resolve"]
+    TOML
+  }
+}
+
+# ---------------------------------------------------------------------------
+# build scale set — runs-on: openbank-build
+# ---------------------------------------------------------------------------
+resource "helm_release" "arc_build" {
+  count            = var.arc_runner_enabled ? 1 : 0
+  name             = "openbank-build"
+  namespace        = kubernetes_namespace.arc_runners[0].metadata[0].name
+  create_namespace = false
+  repository       = "oci://ghcr.io/actions/actions-runner-controller-charts"
+  chart            = "gha-runner-scale-set"
+  version          = var.arc_controller_version
+  depends_on       = [helm_release.arc_controller, kubectl_manifest.nodepool_runners, kubernetes_config_map.dind_mirror_certs]
+
+  values = [yamlencode({
+    githubConfigUrl    = var.github_config_url
+    githubConfigSecret = "arc-github-app" # pre-created secret; key never in state
+    runnerScaleSetName = "openbank-build"
+    minRunners         = var.arc_min_runners # 0 => scale-to-zero
+    maxRunners         = var.arc_max_runners
+    # No containerMode: we supply the dind sidecar manually (see locals) so we
+    # can pin dockerd's --default-address-pool off the Service CIDR.
+    template = {
+      metadata = { annotations = local.runner_pod_annotations }
+      spec = {
+        serviceAccountName = var.arc_runner_enabled ? kubernetes_service_account.arc_build_runner[0].metadata[0].name : "default"
+        nodeSelector       = local.runner_node_selector
+        tolerations        = local.runner_tolerations
+        affinity           = local.runner_affinity
+        initContainers     = [local.dind_init_container, local.aio_sysctl_init_container, local.gradle_home_init_container]
+        containers = [
+          {
+            name         = "runner"
+            image        = local.runner_image
+            command      = local.runner_command
+            env          = local.runner_docker_env
+            volumeMounts = local.runner_docker_volume_mounts
+            resources = {
+              requests = { cpu = "3", memory = "6Gi" }
+              limits   = { memory = "12Gi" }
+            }
+          },
+          local.dind_container,
+        ]
+        volumes = local.dind_volumes
+      }
+    }
+  })]
+}
+
+# ---------------------------------------------------------------------------
+# batch scale set — runs-on: openbank-batch. Same trust level as build (default
+# SA, NO cloud-write creds, dind), but a SEPARATE, low-capped pool so the
+# non-blocking lane (weekly security/secret scans, finops audit, label sync, and
+# the same scans' lightweight PR runs) can never starve the merge-required
+# per-service build lane. This is the "priority" lever: ARC has no job preemption,
+# so the build lane gets dedicated capacity instead. Scales to zero (minRunners 0)
+# — idle cost $0; a batch burst tops out at arc_batch_max_runners and leaves the
+# build pool untouched. Lighter resource request than build (no heavy Gradle fan-out).
+# ---------------------------------------------------------------------------
+resource "helm_release" "arc_batch" {
+  count            = var.arc_runner_enabled ? 1 : 0
+  name             = "openbank-batch"
+  namespace        = kubernetes_namespace.arc_runners[0].metadata[0].name
+  create_namespace = false
+  repository       = "oci://ghcr.io/actions/actions-runner-controller-charts"
+  chart            = "gha-runner-scale-set"
+  version          = var.arc_controller_version
+  depends_on       = [helm_release.arc_controller, kubectl_manifest.nodepool_runners, kubernetes_config_map.dind_mirror_certs]
+
+  values = [yamlencode({
+    githubConfigUrl    = var.github_config_url
+    githubConfigSecret = "arc-github-app"
+    runnerScaleSetName = "openbank-batch"
+    minRunners         = 0 # true scale-to-zero; the batch lane is never on the critical path
+    maxRunners         = var.arc_batch_max_runners
+    containerMode      = { type = "dind" }
+    template = {
+      metadata = { annotations = local.runner_pod_annotations }
+      spec = {
+        nodeSelector = local.runner_node_selector
+        tolerations  = local.runner_tolerations
+        containers = [{
+          name    = "runner"
+          image   = local.runner_image
+          command = local.runner_command
+          resources = {
+            requests = { cpu = "2", memory = "4Gi" }
+            limits   = { memory = "8Gi" }
+          }
+        }]
+      }
+    }
+  })]
+}
+
+# ---------------------------------------------------------------------------
+# deploy scale set — runs-on: openbank-deploy (post-merge only). Pod runs as the
+# IRSA-scoped ServiceAccount; dind for build+push.
+# ---------------------------------------------------------------------------
+resource "helm_release" "arc_deploy" {
+  count            = var.arc_runner_enabled ? 1 : 0
+  name             = "openbank-deploy"
+  namespace        = kubernetes_namespace.arc_runners[0].metadata[0].name
+  create_namespace = false
+  repository       = "oci://ghcr.io/actions/actions-runner-controller-charts"
+  chart            = "gha-runner-scale-set"
+  version          = var.arc_controller_version
+  depends_on       = [helm_release.arc_controller, kubectl_manifest.nodepool_runners, kubernetes_service_account.arc_deploy]
+
+  values = [yamlencode({
+    githubConfigUrl    = var.github_config_url
+    githubConfigSecret = "arc-github-app"
+    runnerScaleSetName = "openbank-deploy"
+    minRunners         = 0
+    maxRunners         = var.arc_deploy_max_runners
+    # No containerMode: manual dind sidecar (see locals), same as the build pool.
+    template = {
+      metadata = { annotations = local.runner_pod_annotations }
+      spec = {
+        serviceAccountName = kubernetes_service_account.arc_deploy[0].metadata[0].name
+        nodeSelector       = local.runner_node_selector
+        tolerations        = local.runner_tolerations
+        initContainers     = [local.dind_init_container, local.aio_sysctl_init_container, local.gradle_home_init_container]
+        containers = [
+          {
+            name         = "runner"
+            image        = local.runner_image
+            command      = local.runner_command
+            env          = local.runner_docker_env
+            volumeMounts = local.runner_docker_volume_mounts
+            resources = {
+              requests = { cpu = "2", memory = "4Gi" }
+              limits   = { memory = "8Gi" }
+            }
+          },
+          local.dind_container,
+        ]
+        volumes = local.dind_volumes
+      }
+    }
+  })]
+}
+
+# ---------------------------------------------------------------------------
+# CodeArtifact IRSA for build runners (FinOps 2026-06-10).
+# Build runner pods get a dedicated SA with codeartifact:GetAuthorizationToken
+# so the CI workflow can mirror Maven Central through CodeArtifact in-VPC
+# (no NAT egress for Gradle dependency downloads).
+# ---------------------------------------------------------------------------
+data "aws_iam_policy_document" "arc_build_assume" {
+  count = var.arc_runner_enabled ? 1 : 0
+  # EKS Pod Identity (preferred): the cluster runs the Pod Identity agent and the
+  # IRSA injector webhook no longer reliably mutates the runner pods, so the IRSA
+  # statement below silently yields no credentials ("Could not load credentials
+  # from any providers" at auto-deploy's ECR login, and the CodeArtifact mirror
+  # soft-failing to Maven Central + NAT cost). The association (below) binds this
+  # role to the openbank-build-runner SA via the agent, independent of the webhook.
+  statement {
+    actions = ["sts:AssumeRole", "sts:TagSession"]
+    principals {
+      type        = "Service"
+      identifiers = ["pods.eks.amazonaws.com"]
+    }
+  }
+  # IRSA (legacy, retained for backward-compat with the SA's role-arn annotation).
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [local.s.oidc_provider_arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(local.s.oidc_provider_arn, "/^.*oidc-provider\\//", "")}:sub"
+      values   = ["system:serviceaccount:${local.arc_namespace}:openbank-build-runner"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(local.s.oidc_provider_arn, "/^.*oidc-provider\\//", "")}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+  }
+  # GitHub OIDC (webhook-independent): auto-deploy assumes this role directly via the GitHub
+  # Actions OIDC token (configure-aws-credentials), so a runner pod the Pod Identity / IRSA
+  # webhook failed to mutate (failurePolicy: Ignore) still authenticates to AWS. This is the
+  # durable fix for the intermittent "Could not load credentials" the comment above describes.
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/token.actions.githubusercontent.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:JiRaska/open-bank:*"]
+    }
+  }
+}
+
+resource "aws_iam_role" "arc_build_runner" {
+  count              = var.arc_runner_enabled ? 1 : 0
+  name               = "openbank-arc-build-runner"
+  assume_role_policy = data.aws_iam_policy_document.arc_build_assume[0].json
+  tags               = { Project = "openbank", ManagedBy = "opentofu", Adr = "0053" }
+}
+
+# Bind the role to the build-runner SA via EKS Pod Identity (the agent injects
+# AWS_CONTAINER_CREDENTIALS_* into the pod, no webhook involved).
+resource "aws_eks_pod_identity_association" "arc_build_runner" {
+  count           = var.arc_runner_enabled ? 1 : 0
+  cluster_name    = local.cluster_name
+  namespace       = local.arc_namespace
+  service_account = "openbank-build-runner"
+  role_arn        = aws_iam_role.arc_build_runner[0].arn
+}
+
+resource "aws_iam_role_policy" "arc_build_codeartifact" {
+  count = var.arc_runner_enabled ? 1 : 0
+  name  = "codeartifact-token"
+  role  = aws_iam_role.arc_build_runner[0].id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["codeartifact:GetAuthorizationToken", "sts:GetServiceBearerToken"]
+      Resource = "*"
+    }]
+  })
+}
+
+# ECR push for the auto-deploy pipeline (build + push runs on openbank-build).
+# Mirrors arc_deploy_ecr — the build runner bakes and pushes service images, so
+# it needs the same ECR push grant the deploy runner has.
+resource "aws_iam_role_policy" "arc_build_ecr" {
+  count  = var.arc_runner_enabled ? 1 : 0
+  name   = "ecr-push"
+  role   = aws_iam_role.arc_build_runner[0].id
+  policy = data.aws_iam_policy_document.arc_deploy_ecr.json
+}
+
+# Cosign image signing (ADR-0029/0030 supply-chain). The auto-deploy build job signs
+# every pushed image with the AWS KMS key alias/openbank-cosign-signing (cosign v2,
+# tag-based) so kyverno's verify-openbank-image-signatures Enforce policy admits the
+# Deployment. Without this grant the build runner pushes UNSIGNED images and every
+# deploy is blocked ("no signatures found"). Scoped to the single cosign key.
+data "aws_iam_policy_document" "arc_build_cosign" {
+  statement {
+    sid       = "CosignKmsSign"
+    effect    = "Allow"
+    actions   = ["kms:Sign", "kms:GetPublicKey", "kms:DescribeKey"]
+    resources = ["arn:aws:kms:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:key/939bfe08-2d9b-48ee-a44f-7bf270fb6f5e"]
+  }
+}
+
+resource "aws_iam_role_policy" "arc_build_cosign" {
+  count  = var.arc_runner_enabled ? 1 : 0
+  name   = "cosign-kms-sign"
+  role   = aws_iam_role.arc_build_runner[0].id
+  policy = data.aws_iam_policy_document.arc_build_cosign.json
+}
+
+resource "kubernetes_service_account" "arc_build_runner" {
+  count = var.arc_runner_enabled ? 1 : 0
+  metadata {
+    name      = "openbank-build-runner"
+    namespace = kubernetes_namespace.arc_runners[0].metadata[0].name
+    annotations = {
+      "eks.amazonaws.com/role-arn" = aws_iam_role.arc_build_runner[0].arn
+    }
+  }
+}

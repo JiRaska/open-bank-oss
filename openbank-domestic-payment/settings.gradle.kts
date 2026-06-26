@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+rootProject.name = "openbank-domestic-payment"
+
+plugins {
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+}
+dependencyResolutionManagement {
+    versionCatalogs { create("libs") { from(files("../openbank-libs/gradle/libs.versions.toml")) } }
+}
+includeBuild("../openbank-libs")

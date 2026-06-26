@@ -1,0 +1,25 @@
+# audit-service OIDC client secret from Vault → audit-service-oidc Secret
+# (key OIDC_CLIENT_SECRET), shared openbank-services realm client.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: audit-service-oidc
+  namespace: audit
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: audit-service-oidc
+    creationPolicy: Owner
+    template:
+      mergePolicy: Merge
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+  data:
+    - secretKey: OIDC_CLIENT_SECRET
+      remoteRef:
+        key: audit-service
+        property: OIDC_CLIENT_SECRET

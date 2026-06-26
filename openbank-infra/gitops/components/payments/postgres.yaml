@@ -1,0 +1,515 @@
+# Single-owner Postgres clusters for each payment-pipeline service, all in the
+# `payments` namespace. Each is a separate CNPG cluster so schemas stay isolated
+# and Flyway migrations run independently. One instance per cluster for sandbox
+# FinOps; prod should raise to 3 for HA (transaction + sepa-payment are money-path).
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: transaction-db
+  namespace: payments
+spec:
+  # DB-layer observability (Dynatrace-parity #0): CNPG runs its built-in
+  # Prometheus exporter on :9187 and creates a PodMonitor the operator owns.
+  # kube-prometheus-stack selects PodMonitors cluster-wide (NilUsesHelmValues
+  # =false), so this lights up cnpg_* metrics (connections, replication lag,
+  # deadlocks, xid age, WAL archiving) with zero app changes.
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_transactions
+      owner: openbank
+  # WAL archiving to S3 (ADR-0035). Credentials via EKS Pod Identity on the transaction-db
+  # ServiceAccount (aws/.../db-backups.tf) — barman reads the SDK chain, no secret. Sandbox S3
+  # lifecycle expires after 35d; prod needs compliance retention.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/transaction-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: sepa-payment-db
+  namespace: payments
+spec:
+  # DB-layer observability (Dynatrace-parity #0): CNPG runs its built-in
+  # Prometheus exporter on :9187 and creates a PodMonitor the operator owns.
+  # kube-prometheus-stack selects PodMonitors cluster-wide (NilUsesHelmValues
+  # =false), so this lights up cnpg_* metrics (connections, replication lag,
+  # deadlocks, xid age, WAL archiving) with zero app changes.
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_sepa_payment
+      owner: openbank
+  # WAL archiving to S3 (ADR-0035). Credentials via EKS Pod Identity on the sepa-payment-db
+  # ServiceAccount (aws/.../db-backups.tf) — barman reads the SDK chain, no secret. Sandbox S3
+  # lifecycle expires after 35d; prod needs compliance retention. (Base backup: sepa-payment-db-daily.)
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/sepa-payment-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: domestic-payment-db
+  namespace: payments
+spec:
+  # DB-layer observability (Dynatrace-parity #0): CNPG runs its built-in
+  # Prometheus exporter on :9187 and creates a PodMonitor the operator owns.
+  # kube-prometheus-stack selects PodMonitors cluster-wide (NilUsesHelmValues
+  # =false), so this lights up cnpg_* metrics (connections, replication lag,
+  # deadlocks, xid age, WAL archiving) with zero app changes.
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_domestic_payment
+      owner: openbank
+  # WAL archiving to S3 (ADR-0035). Credentials via EKS Pod Identity on the domestic-payment-db
+  # ServiceAccount (aws/.../db-backups.tf) — barman reads the SDK chain, no secret. Sandbox S3
+  # lifecycle expires after 35d; prod needs compliance retention.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/domestic-payment-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: sepa-instant-db
+  namespace: payments
+spec:
+  # DB-layer observability (Dynatrace-parity #0): CNPG runs its built-in
+  # Prometheus exporter on :9187 and creates a PodMonitor the operator owns.
+  # kube-prometheus-stack selects PodMonitors cluster-wide (NilUsesHelmValues
+  # =false), so this lights up cnpg_* metrics (connections, replication lag,
+  # deadlocks, xid age, WAL archiving) with zero app changes.
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_sepa_instant
+      owner: openbank
+  # WAL archiving to S3 (ADR-0035). Credentials via EKS Pod Identity on the sepa-instant-db
+  # ServiceAccount (aws/.../db-backups.tf) — barman reads the SDK chain, no secret. Sandbox S3
+  # lifecycle expires after 35d; prod needs compliance retention.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/sepa-instant-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: clearing-db
+  namespace: payments
+spec:
+  # DB-layer observability (Dynatrace-parity #0): CNPG runs its built-in
+  # Prometheus exporter on :9187 and creates a PodMonitor the operator owns.
+  # kube-prometheus-stack selects PodMonitors cluster-wide (NilUsesHelmValues
+  # =false), so this lights up cnpg_* metrics (connections, replication lag,
+  # deadlocks, xid age, WAL archiving) with zero app changes.
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_clearing
+      owner: openbank
+  # WAL archiving to S3 (ADR-0035). Credentials via EKS Pod Identity on the clearing-db
+  # ServiceAccount (aws/.../db-backups.tf) — barman reads the SDK chain, no secret. Sandbox S3
+  # lifecycle expires after 35d; prod needs compliance retention.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/clearing-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: standing-order-db
+  namespace: payments
+spec:
+  # DB-layer observability (Dynatrace-parity #0): CNPG runs its built-in
+  # Prometheus exporter on :9187 and creates a PodMonitor the operator owns.
+  # kube-prometheus-stack selects PodMonitors cluster-wide (NilUsesHelmValues
+  # =false), so this lights up cnpg_* metrics (connections, replication lag,
+  # deadlocks, xid age, WAL archiving) with zero app changes.
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_standing_orders
+      owner: openbank
+  # WAL archiving to S3 (ADR-0035). Credentials via EKS Pod Identity on the standing-order-db
+  # ServiceAccount (aws/.../db-backups.tf) — barman reads the SDK chain, no secret. Sandbox S3
+  # lifecycle expires after 35d; prod needs compliance retention.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/standing-order-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: card-issuance-db
+  namespace: payments
+spec:
+  # DB-layer observability (Dynatrace-parity #0): CNPG runs its built-in
+  # Prometheus exporter on :9187 and creates a PodMonitor the operator owns.
+  # kube-prometheus-stack selects PodMonitors cluster-wide (NilUsesHelmValues
+  # =false), so this lights up cnpg_* metrics (connections, replication lag,
+  # deadlocks, xid age, WAL archiving) with zero app changes.
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_cards
+      owner: openbank
+
+  # WAL archiving to S3 (ADR-0035, #863 pattern). Credentials via EKS Pod Identity on the
+  # card-issuance-db ServiceAccount (aws/.../db-backups.tf) — barman reads the SDK chain, no secret.
+  # Sandbox S3 lifecycle expires after 35d; prod needs compliance retention.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/card-issuance-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: sepa-payment-db-daily
+  namespace: payments
+spec:
+  schedule: "0 19 2 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: sepa-payment-db
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: settlement-service-db
+  namespace: payments
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 10Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_settlement
+      owner: openbank_settlement
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/settlement-service-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+# ADR-0104 D4: swift-service (port 8122) — CBPR+ SWIFT MT103 to ISO 20022 pacs.008 gateway.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: swift-service-db
+  namespace: payments
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_swift
+      owner: openbank
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/swift-service-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+# Daily base backups for the payments clusters (ADR-0035 / C5). WAL archiving alone is
+# not restorable — PITR needs a base backup to replay WAL onto. Schedules are staggered
+# across an off-peak 03:25–04:35 UTC window (the original fleet batches at 02:19) to spread
+# the S3/NAT egress. CNPG cron is 6-field (sec min hour dom mon dow).
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: transaction-db-daily
+  namespace: payments
+spec:
+  schedule: "0 25 3 * * *"
+  backupOwnerReference: self
+  method: barmanObjectStore
+  cluster:
+    name: transaction-db
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: sepa-instant-db-daily
+  namespace: payments
+spec:
+  schedule: "0 35 3 * * *"
+  backupOwnerReference: self
+  method: barmanObjectStore
+  cluster:
+    name: sepa-instant-db
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: domestic-payment-db-daily
+  namespace: payments
+spec:
+  schedule: "0 45 3 * * *"
+  backupOwnerReference: self
+  method: barmanObjectStore
+  cluster:
+    name: domestic-payment-db
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: clearing-db-daily
+  namespace: payments
+spec:
+  schedule: "0 55 3 * * *"
+  backupOwnerReference: self
+  method: barmanObjectStore
+  cluster:
+    name: clearing-db
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: swift-service-db-daily
+  namespace: payments
+spec:
+  schedule: "0 5 4 * * *"
+  backupOwnerReference: self
+  method: barmanObjectStore
+  cluster:
+    name: swift-service-db
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: settlement-service-db-daily
+  namespace: payments
+spec:
+  schedule: "0 15 4 * * *"
+  backupOwnerReference: self
+  method: barmanObjectStore
+  cluster:
+    name: settlement-service-db
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: standing-order-db-daily
+  namespace: payments
+spec:
+  schedule: "0 25 4 * * *"
+  backupOwnerReference: self
+  method: barmanObjectStore
+  cluster:
+    name: standing-order-db
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: card-issuance-db-daily
+  namespace: payments
+spec:
+  schedule: "0 35 4 * * *"
+  backupOwnerReference: self
+  method: barmanObjectStore
+  cluster:
+    name: card-issuance-db

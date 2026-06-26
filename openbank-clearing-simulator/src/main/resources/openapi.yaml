@@ -1,0 +1,142 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: Clearing Simulator API
+  version: 1.1.0
+  description: >-
+    NON-PRODUCTION scheme/clearing counterparty (ADR-0104 D2). Receives a real ISO 20022
+    pacs.008 credit transfer, validates it against the XSD, decides settle/reject
+    deterministically, and returns a pacs.002 status report plus, on settlement, a camt.054
+    credit notification. Holds no posting authority and contacts no real payment network.
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8139
+    description: Local development
+tags:
+  - name: Clearing simulator
+
+paths:
+  /api/v1/clearing/credit-transfers:
+    post:
+      tags: [Clearing simulator]
+      summary: Submit a pacs.008; receive a pacs.002 status report
+      operationId: submitCreditTransfer
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        description: An ISO 20022 pacs.008.001.08 FI-to-FI customer credit transfer (XML).
+        content:
+          application/xml:
+            schema:
+              type: string
+      responses:
+        '200':
+          description: ISO 20022 pacs.002.001.10 payment status report (ACSC settle / RJCT reject).
+          content:
+            application/xml:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/clearing/returns:
+    post:
+      tags: [Clearing simulator]
+      summary: Simulate a pacs.004 payment return — calls sepa-payment return handler
+      operationId: simulateReturn
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        description: Return request parameters used to generate the pacs.004 R-transaction.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReturnRequest'
+      responses:
+        '200':
+          description: pacs.004 generated and forwarded; upstream HTTP status included.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pacs004Generated:
+                    type: boolean
+                  upstreamStatus:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/clearing/notifications:
+    post:
+      tags: [Clearing simulator]
+      summary: Submit a pacs.008; receive the camt.054 credit notification if it settles
+      operationId: creditNotification
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        description: An ISO 20022 pacs.008.001.08 FI-to-FI customer credit transfer (XML).
+        content:
+          application/xml:
+            schema:
+              type: string
+      responses:
+        '200':
+          description: ISO 20022 camt.054.001.08 bank-to-customer credit notification (XML).
+          content:
+            application/xml:
+              schema:
+                type: string
+        '204':
+          description: The transfer would be rejected; no credit notification is emitted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+components:
+  schemas:
+    ReturnRequest:
+      type: object
+      required:
+        - originalEndToEndId
+        - amount
+        - currency
+      properties:
+        originalEndToEndId:
+          type: string
+        originalTransactionId:
+          type: string
+          nullable: true
+        amount:
+          type: number
+        currency:
+          type: string
+          example: EUR
+        returnReasonCode:
+          type: string
+          nullable: true
+          example: AC04
+        additionalInfo:
+          type: string
+          nullable: true
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    Unauthorized:
+      description: Missing or invalid authentication
+    Forbidden:
+      description: Insufficient permissions

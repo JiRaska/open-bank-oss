@@ -1,0 +1,18 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>MagicNumber:AuthzProducer.kt$AuthzProducer$500</ID>
+    <ID>MagicNumber:DisputeOutboxDispatcher.kt$DisputeOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:DisputeOutboxDispatcher.kt$DisputeOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:DisputeOutboxRepositoryImpl.kt$DisputeOutboxRepositoryImpl$4000</ID>
+    <ID>MagicNumber:DisputeResource.kt$DisputeResource$201</ID>
+    <ID>MagicNumber:DisputeResource.kt$DisputeResource$404</ID>
+    <ID>MatchingDeclarationName:DisputeOutboxPort.kt$DisputeOutboxRepository : OutboxRepository</ID>
+    <ID>SwallowedException:DisputeOutboxDispatcher.kt$DisputeOutboxDispatcher$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:DisputeOutboxDispatcher.kt$DisputeOutboxDispatcher$ex: Exception</ID>
+    <ID>TooManyFunctions:DisputeResource.kt$DisputeResource</ID>
+    <ID>TooManyFunctions:DisputeService.kt$DisputeService : OpenDisputeUseCaseUpdateDisputeUseCaseGetDisputeUseCase</ID>
+    <ID>UnusedPrivateProperty:DisputeService.kt$DisputeService$@ConfigProperty(name = "openbank.dispute.chargeback-window-days", defaultValue = "120") private val chargebackWindowDays: Long</ID>
+  </CurrentIssues>
+</SmellBaseline>

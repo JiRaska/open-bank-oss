@@ -1,0 +1,38 @@
+# Customer-facing edge service (ADR-0065) — sole internet→cluster path for the retail app.
+# Validates JWTs from openbank-customers realm, deny-by-default proxy.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: customer-edge
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/customer-edge
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: customer-edge
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  # Argo Rollouts (ADR-0098) sets spec.selector.rollouts-pod-template-hash on the
+  # stable and canary Services at runtime; git holds only the base selector, so
+  # without this every Rollout-backed Service reads as permanently OutOfSync.
+  # Ignore exactly that one controller-managed selector key — git-owned selector
+  # changes are still reconciled. NB: jqPathExpressions, NOT managedFieldsManagers:
+  # the latter is silently bypassed on apps with compare-options
+  # IncludeMutationWebhook (Kyverno digest-pin, #856), which left 6 apps OutOfSync
+  # (verified in-cluster). Rollback = delete this block.
+  ignoreDifferences:
+    - group: ""
+      kind: Service
+      jqPathExpressions:
+        - .spec.selector."rollouts-pod-template-hash"

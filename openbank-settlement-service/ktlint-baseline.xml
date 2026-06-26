@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="src/main/kotlin/com/openbank/settlement/application/port/in/SettlementUseCase.kt">
+        <error line="5" column="9" source="standard:package-name" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/settlement/application/usecase/SettlementService.kt">
+        <error line="53" column="77" source="standard:function-signature" />
+    </file>
+</baseline>

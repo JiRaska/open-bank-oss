@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+export const CURRENCY_META: Record<string, { flag: string; symbol: string; name: string }> = {
+  AUD: { flag: '🇦🇺', symbol: 'A$', name: 'Australian Dollar' },
+  BGN: { flag: '🇧🇬', symbol: 'лв', name: 'Bulgarian Lev' },
+  BRL: { flag: '🇧🇷', symbol: 'R$', name: 'Brazilian Real' },
+  CAD: { flag: '🇨🇦', symbol: 'C$', name: 'Canadian Dollar' },
+  CHF: { flag: '🇨🇭', symbol: 'Fr', name: 'Swiss Franc' },
+  CNY: { flag: '🇨🇳', symbol: '¥', name: 'Chinese Yuan' },
+  CZK: { flag: '🇨🇿', symbol: 'Kč', name: 'Czech Koruna' },
+  DKK: { flag: '🇩🇰', symbol: 'kr', name: 'Danish Krone' },
+  EUR: { flag: '🇪🇺', symbol: '€', name: 'Euro' },
+  GBP: { flag: '🇬🇧', symbol: '£', name: 'British Pound' },
+  HKD: { flag: '🇭🇰', symbol: 'HK$', name: 'Hong Kong Dollar' },
+  HUF: { flag: '🇭🇺', symbol: 'Ft', name: 'Hungarian Forint' },
+  IDR: { flag: '🇮🇩', symbol: 'Rp', name: 'Indonesian Rupiah' },
+  ILS: { flag: '🇮🇱', symbol: '₪', name: 'Israeli Shekel' },
+  INR: { flag: '🇮🇳', symbol: '₹', name: 'Indian Rupee' },
+  ISK: { flag: '🇮🇸', symbol: 'kr', name: 'Icelandic Króna' },
+  JPY: { flag: '🇯🇵', symbol: '¥', name: 'Japanese Yen' },
+  KRW: { flag: '🇰🇷', symbol: '₩', name: 'South Korean Won' },
+  MXN: { flag: '🇲🇽', symbol: 'MX$', name: 'Mexican Peso' },
+  MYR: { flag: '🇲🇾', symbol: 'RM', name: 'Malaysian Ringgit' },
+  NOK: { flag: '🇳🇴', symbol: 'kr', name: 'Norwegian Krone' },
+  NZD: { flag: '🇳🇿', symbol: 'NZ$', name: 'New Zealand Dollar' },
+  PHP: { flag: '🇵🇭', symbol: '₱', name: 'Philippine Peso' },
+  PLN: { flag: '🇵🇱', symbol: 'zł', name: 'Polish Złoty' },
+  RON: { flag: '🇷🇴', symbol: 'lei', name: 'Romanian Leu' },
+  SEK: { flag: '🇸🇪', symbol: 'kr', name: 'Swedish Krona' },
+  SGD: { flag: '🇸🇬', symbol: 'S$', name: 'Singapore Dollar' },
+  THB: { flag: '🇹🇭', symbol: '฿', name: 'Thai Baht' },
+  TRY: { flag: '🇹🇷', symbol: '₺', name: 'Turkish Lira' },
+  USD: { flag: '🇺🇸', symbol: '$', name: 'US Dollar' },
+  ZAR: { flag: '🇿🇦', symbol: 'R', name: 'South African Rand' },
+}

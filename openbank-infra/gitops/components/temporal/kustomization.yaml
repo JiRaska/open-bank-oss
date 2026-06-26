@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+#
+# Temporal workflow engine — Helm-based install, CNPG PostgreSQL backend,
+# NetworkPolicy baseline (ADR-0081, INERT until VPC CNI enabled).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - temporal-namespace.yaml
+  - temporal-helmrelease.yaml
+  - temporal-network-policies.yaml
+  - temporal-namespace-registration.yaml

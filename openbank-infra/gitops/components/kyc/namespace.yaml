@@ -1,0 +1,12 @@
+# kyc namespace (ADR-0037: domain = namespace). App plane.
+# Holds kyc-service plus its single-owner CNPG Postgres. Publishes KYC case
+# lifecycle events to openbank.kyc.events (consumed by onboarding-service).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kyc
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

@@ -1,0 +1,28 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+    <CurrentIssues>
+    <ID>CyclomaticComplexMethod:PanacheTransactionRepository.kt$PanacheTransactionRepository$suspend fun search(query: TransactionSearchQuery): List&lt;com.openbank.transaction.domain.model.Transaction&gt;</ID>
+    <ID>LongMethod:TransactionService.kt$TransactionService$override suspend fun initiateTransaction(command: InitiateTransactionCommand): Transaction</ID>
+    <ID>LongParameterList:BalanceCoverPort.kt$BalanceCoverPort$( accountId: UUID, amount: BigDecimal, currency: String, reason: String, referenceId: String, ttlSeconds: Long, )</ID>
+    <ID>LongParameterList:TransactionResource.kt$TransactionResource$( @QueryParam("accountId") accountId: UUID?, @QueryParam("iban") iban: String?, @QueryParam("bban") bban: String?, @QueryParam("referenceNumber") referenceNumber: String?, @QueryParam("endToEndId") endToEndId: String?, @QueryParam("counterparty") counterparty: String?, @QueryParam("status") status: String?, @QueryParam("type") type: String?, @QueryParam("dateFrom") dateFrom: String?, @QueryParam("dateTo") dateTo: String?, @QueryParam("amountMin") amountMin: BigDecimal?, @QueryParam("amountMax") amountMax: BigDecimal?, @QueryParam("channel") channel: String?, @QueryParam("limit") @DefaultValue("50") limit: Int, @QueryParam("offset") @DefaultValue("0") offset: Int )</ID>
+    <ID>MagicNumber:FxRateClient.kt$FxRateClient$404</ID>
+    <ID>MagicNumber:LedgerCallGuard.kt$LedgerCallGuard$2000</ID>
+    <ID>MagicNumber:PaymentSagaOrchestrator.kt$PaymentSagaOrchestrator$300L</ID>
+    <ID>MagicNumber:SettlementDateResolver.kt$SettlementDateResolver$16</ID>
+    <ID>MagicNumber:TransactionOutboxDispatcher.kt$TransactionOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:TransactionOutboxDispatcher.kt$TransactionOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:TransactionOutboxRepositoryImpl.kt$TransactionOutboxRepositoryImpl$4000</ID>
+    <ID>MagicNumber:TransactionResource.kt$TransactionResource$200</ID>
+    <ID>MagicNumber:TransactionService.kt$TransactionService$1000</ID>
+    <ID>MagicNumber:TransactionService.kt$TransactionService$9999</ID>
+    <ID>MatchingDeclarationName:ExceptionMappers.kt$TransactionNotFoundExceptionMapper : ExceptionMapper</ID>
+    <ID>MatchingDeclarationName:TransactionOutboxPort.kt$TransactionOutboxRepository : OutboxRepository</ID>
+    <ID>NewLineAtEndOfFile:TransactionServiceTest.kt$com.openbank.transaction.application.usecase.TransactionServiceTest.kt</ID>
+    <ID>NewLineAtEndOfFile:TransactionTest.kt$com.openbank.transaction.domain.model.TransactionTest.kt</ID>
+    <ID>SpreadOperator:PanacheTransactionRepository.kt$PanacheTransactionRepository$(where, *params.toTypedArray())</ID>
+    <ID>SwallowedException:TransactionOutboxDispatcher.kt$TransactionOutboxDispatcher$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:PaymentSagaOrchestrator.kt$PaymentSagaOrchestrator$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:TransactionOutboxDispatcher.kt$TransactionOutboxDispatcher$ex: Exception</ID>
+  </CurrentIssues>
+</SmellBaseline>

@@ -1,0 +1,26 @@
+# customer-edge upstream OIDC client secret from OpenBao →
+# customer-edge-upstream-oidc Secret (key client-secret), from the
+# openbank/customer-edge-upstream KV path.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: customer-edge-upstream-oidc
+  namespace: customer-edge
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: customer-edge-upstream-oidc
+    creationPolicy: Owner
+    template:
+      mergePolicy: Merge
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+  data:
+    - secretKey: client-secret
+      remoteRef:
+        key: customer-edge-upstream
+        property: client-secret

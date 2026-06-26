@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+#
+# Fleet-wide detekt configuration (overlay — buildUponDefaultConfig=true is set by the
+# openbank.static-analysis convention plugin, so everything not mentioned here keeps the
+# detekt default). Posture:
+#   * correctness-focused, banking-grade: swallowed exceptions, generic catches and
+#     coroutine misuse are gated;
+#   * formatting is NOT detekt's job — ktlint owns it via .editorconfig, so the
+#     style rules that duplicate ktlint are disabled;
+#   * ratchet: existing findings live in per-module detekt-baseline.xml files; new
+#     code must be clean (build.maxIssues = 0).
+
+build:
+  maxIssues: 0
+
+# --- correctness: keep strict ------------------------------------------------------
+
+exceptions:
+  SwallowedException:
+    active: true
+  TooGenericExceptionCaught:
+    active: true
+  TooGenericExceptionThrown:
+    active: true
+  PrintStackTrace:
+    active: true
+  ReturnFromFinally:
+    active: true
+  ThrowingExceptionsWithoutMessageOrCause:
+    active: true
+  InstanceOfCheckForException:
+    active: true
+  ObjectExtendsThrowable:
+    active: true
+
+coroutines:
+  GlobalCoroutineUsage:
+    active: true
+  SuspendFunSwallowedCancellation:
+    active: true
+  SleepInsteadOfDelay:
+    active: true
+
+potential-bugs:
+  CastToNullableType:
+    active: true
+  DontDowncastCollectionTypes:
+    active: true
+  ExitOutsideMain:
+    active: true
+
+# --- pragmatics: reduce noise that the baselines would otherwise absorb forever -----
+
+complexity:
+  LongParameterList:
+    # Kotlin data classes / hexagonal command objects legitimately carry many
+    # constructor parameters; defaulted ones don't add call-site complexity.
+    # Threshold raised to 8: ADR-0100 clock injection adds Clock to CDI
+    # constructors that cannot be split (framework-injected, hexagonal boundary).
+    constructorThreshold: 9
+    functionThreshold: 9
+    ignoreDefaultParameters: true
+
+style:
+  # ktlint owns formatting/style via .editorconfig — don't double-report.
+  MaxLineLength:
+    active: false
+  WildcardImport:
+    active: false
+  # TODO/FIXME comments are tracked as issues (ADR-0052), not build failures.
+  ForbiddenComment:
+    active: false
+  # Early-return is the idiomatic style in this codebase.
+  ReturnCount:
+    active: false

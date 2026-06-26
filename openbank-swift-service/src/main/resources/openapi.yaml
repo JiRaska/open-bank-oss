@@ -1,0 +1,457 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+openapi: "3.1.0"
+
+info:
+  title: OpenBank SWIFT Service API
+  version: "1.0.0"
+  description: |
+    SWIFT MT/MX message dispatch, acknowledgement, and status tracking.
+    Supports MT103 (customer credit transfer), MT202 (bank transfer), MT900/910/940/950 (confirmations/statements).
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+
+servers:
+  - url: http://localhost:8122
+    description: Local dev
+
+tags:
+  - name: swift
+    description: SWIFT message lifecycle
+
+paths:
+  /api/v1/swift:
+    post:
+      tags: [swift]
+      operationId: sendSwiftMessage
+      summary: Send a SWIFT message
+      description: |
+        Submits a new SWIFT message for dispatch. Idempotent — repeated calls with the same
+        `idempotencyKey` return the existing message without re-sending.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendSwiftCommand'
+            examples:
+              mt103:
+                summary: MT103 customer credit transfer
+                value:
+                  idempotencyKey: "pay-2024-001"
+                  messageType: "MT103"
+                  senderBic: "KOMBCZPP"
+                  receiverBic: "DEUTDEDB"
+                  transactionReference: "TXN20240101001"
+                  relatedReference: null
+                  valueDate: "20240101"
+                  currency: "EUR"
+                  amountMinorUnits: 150000
+                  orderingCustomerAccount: "CZ6508000000192000145399"
+                  orderingCustomerName: "Jan Novák"
+                  beneficiaryAccount: "DE89370400440532013000"
+                  beneficiaryName: "Hans Müller"
+                  remittanceInfo: "Invoice INV-2024-001"
+                  chargeCode: "SHA"
+                  priority: "NORMAL"
+      responses:
+        "201":
+          description: Message accepted and queued for dispatch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwiftMessage'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "409":
+          description: Duplicate idempotency key with conflicting payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "422":
+          description: BIC validation failed or business rule violation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+  /api/v1/swift/{id}:
+    get:
+      tags: [swift]
+      operationId: getSwiftMessage
+      summary: Get SWIFT message by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: SWIFT message found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwiftMessage'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/swift/status/{status}:
+    get:
+      tags: [swift]
+      operationId: listSwiftByStatus
+      summary: List SWIFT messages by status
+      parameters:
+        - name: status
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/SwiftStatus'
+      responses:
+        "200":
+          description: List of matching SWIFT messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SwiftMessage'
+
+  /api/v1/swift/{id}/ack:
+    post:
+      tags: [swift]
+      operationId: acknowledgeSwiftMessage
+      summary: Mark message as acknowledged
+      description: Records receipt of ACK from the receiving bank. Transitions status to ACKNOWLEDGED.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ackRef]
+              properties:
+                ackRef:
+                  type: string
+                  description: ACK reference from the receiving institution
+                  example: "ACKREF20240101001"
+      responses:
+        "200":
+          description: Message acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwiftMessage'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          description: Message is not in a state that can be acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/swift/{id}/reject:
+    post:
+      tags: [swift]
+      operationId: rejectSwiftMessage
+      summary: Mark message as rejected
+      description: Records a rejection from the receiving bank. Transitions status to REJECTED.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  description: Rejection reason from the receiving institution
+                  example: "Beneficiary account closed"
+      responses:
+        "200":
+          description: Message rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwiftMessage'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          description: Message is not in a state that can be rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    SendSwiftCommand:
+      type: object
+      required:
+        - idempotencyKey
+        - messageType
+        - senderBic
+        - receiverBic
+        - transactionReference
+        - valueDate
+        - currency
+        - amountMinorUnits
+        - beneficiaryAccount
+        - beneficiaryName
+      properties:
+        idempotencyKey:
+          type: string
+          description: Client-generated idempotency key (UUID or correlation ID)
+          example: "pay-2024-001"
+        messageType:
+          $ref: '#/components/schemas/SwiftMessageType'
+        senderBic:
+          type: string
+          minLength: 8
+          maxLength: 11
+          pattern: '^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$'
+          description: BIC of the sending bank
+          example: "KOMBCZPP"
+        receiverBic:
+          type: string
+          minLength: 8
+          maxLength: 11
+          pattern: '^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$'
+          description: BIC of the receiving bank
+          example: "DEUTDEDB"
+        transactionReference:
+          type: string
+          maxLength: 16
+          description: Unique transaction reference (field 20)
+          example: "TXN20240101001"
+        relatedReference:
+          type: string
+          maxLength: 16
+          nullable: true
+          description: Related transaction reference (field 21), for responses/queries
+        valueDate:
+          type: string
+          pattern: '^\d{8}$'
+          description: Value date in YYYYMMDD format
+          example: "20240101"
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          pattern: '^[A-Z]{3}$'
+          description: ISO 4217 currency code
+          example: "EUR"
+        amountMinorUnits:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Amount in minor currency units (e.g. cents)
+          example: 150000
+        orderingCustomerAccount:
+          type: string
+          nullable: true
+          description: IBAN or account number of the ordering customer
+          example: "CZ6508000000192000145399"
+        orderingCustomerName:
+          type: string
+          nullable: true
+          description: Name of the ordering customer
+          example: "Jan Novák"
+        beneficiaryAccount:
+          type: string
+          description: IBAN or account number of the beneficiary
+          example: "DE89370400440532013000"
+        beneficiaryName:
+          type: string
+          description: Name of the beneficiary
+          example: "Hans Müller"
+        remittanceInfo:
+          type: string
+          nullable: true
+          maxLength: 140
+          description: Remittance information (field 70)
+          example: "Invoice INV-2024-001"
+        chargeCode:
+          type: string
+          enum: [OUR, SHA, BEN]
+          default: SHA
+          description: |
+            Charge code (field 71A):
+            - OUR — sender pays all charges
+            - SHA — charges shared
+            - BEN — beneficiary pays all charges
+        priority:
+          $ref: '#/components/schemas/SwiftPriority'
+
+    SwiftMessage:
+      type: object
+      required:
+        - id
+        - idempotencyKey
+        - messageType
+        - senderBic
+        - receiverBic
+        - transactionReference
+        - valueDate
+        - currency
+        - amountMinorUnits
+        - beneficiaryAccount
+        - beneficiaryName
+        - chargeCode
+        - priority
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        idempotencyKey:
+          type: string
+        messageType:
+          $ref: '#/components/schemas/SwiftMessageType'
+        senderBic:
+          type: string
+        receiverBic:
+          type: string
+        transactionReference:
+          type: string
+        relatedReference:
+          type: string
+          nullable: true
+        valueDate:
+          type: string
+          description: YYYYMMDD
+        currency:
+          type: string
+        amountMinorUnits:
+          type: integer
+          format: int64
+        orderingCustomerAccount:
+          type: string
+          nullable: true
+        orderingCustomerName:
+          type: string
+          nullable: true
+        beneficiaryAccount:
+          type: string
+        beneficiaryName:
+          type: string
+        remittanceInfo:
+          type: string
+          nullable: true
+        chargeCode:
+          type: string
+          enum: [OUR, SHA, BEN]
+        priority:
+          $ref: '#/components/schemas/SwiftPriority'
+        status:
+          $ref: '#/components/schemas/SwiftStatus'
+        rawMt:
+          type: string
+          nullable: true
+          description: Raw SWIFT MT message text (populated after dispatch)
+        ackReceivedAt:
+          type: string
+          format: date-time
+          nullable: true
+        rejectionReason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SwiftMessageType:
+      type: string
+      enum: [MT103, MT202, MT900, MT910, MT940, MT950, MT199]
+      description: |
+        - MT103: Single customer credit transfer
+        - MT202: General financial institution transfer
+        - MT900: Confirmation of debit
+        - MT910: Confirmation of credit
+        - MT940: Customer statement message
+        - MT950: Statement message
+        - MT199: Free format message
+
+    SwiftStatus:
+      type: string
+      enum: [PENDING, VALIDATED, SENT, ACKNOWLEDGED, REJECTED, FAILED]
+      description: |
+        - PENDING: Received, awaiting validation
+        - VALIDATED: Passed BIC/format checks, queued for dispatch
+        - SENT: Dispatched to SWIFT network
+        - ACKNOWLEDGED: ACK received from receiving bank
+        - REJECTED: Rejected by receiving bank
+        - FAILED: Internal processing failure
+
+    SwiftPriority:
+      type: string
+      enum: [NORMAL, URGENT, SYSTEM]
+      default: NORMAL
+
+    ErrorResponse:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        traceId:
+          type: string
+
+    ValidationError:
+      type: object
+      required: [error, violations]
+      properties:
+        error:
+          type: string
+          example: "Validation failed"
+        violations:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+
+  responses:
+    BadRequest:
+      description: Invalid request body
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'

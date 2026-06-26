@@ -1,0 +1,64 @@
+# Fleet PodMonitor (ADR-0082): scrape /q/metrics (Quarkus Micrometer) on the management
+# port of every openbank service pod, across all service namespaces. This was a hand-
+# applied (kubectl) resource that drifted — and its namespace list was missing audit,
+# dispute, interest, notifications, customer-edge, security-scanner, platform, so those
+# services' metrics (incl. openbank_outbox_backlog) never reached Prometheus. Codified
+# here under the observability-components Application with the COMPLETE service-namespace
+# list so a new service is scraped just by carrying the app.kubernetes.io/name label.
+#
+# C8 sweep (prod-readiness collector): added fraud, pid, psd2 — previously absent from
+# the list, so fraud-service, pid-service and psd2-service metrics never reached Prometheus.
+# agent-service and copilot-service are covered via the existing `platform` entry;
+# sdd-service, transaction-service, clearing-service, swift-service via `payments`;
+# onboarding-service via `onboarding`; lending-service via `lending`.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: openbank-services
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  selector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: Exists
+  namespaceSelector:
+    matchNames:
+      - accounts
+      - aml
+      - audit
+      - balances
+      - consent
+      - customer-edge
+      - dispute
+      - fraud
+      - fx
+      - interest
+      - kyc
+      - ledger
+      - lending
+      - notifications
+      - onboarding
+      - party
+      - payments
+      - pid
+      - platform
+      - psd2
+      - sanctions
+      - sca
+      - security-scanner
+      - statements
+  podMetricsEndpoints:
+    - port: management
+      path: /q/metrics
+      interval: 30s
+      honorLabels: true
+      # Propagate the Argo Rollouts canary pod label onto scraped time series so
+      # ClusterAnalysisTemplate openbank-money-path-canary can filter by canary
+      # replica set in its Prometheus queries. Without this relabeling the label
+      # is absent and every query returns len(result)==0 → auto-success (no-op).
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_label_rollouts_pod_template_hash]
+          targetLabel: rollouts_pod_template_hash
+          action: replace

@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+package com.openbank.copilot.application
+
+import com.fasterxml.jackson.databind.JsonNode
+import com.openbank.copilot.domain.ActionProposal
+
+/** Outcome of building a proposal: either a validated [proposal] or a customer-facing [error]. */
+data class ProposalResult(val proposal: ActionProposal? = null, val error: String? = null)
+
+/**
+ * A money-path ACTION exposed to the model (ADR-0089 D2). By construction it can ONLY *propose*:
+ * [propose] validates the arguments and returns a structured [ActionProposal] — there is no execute
+ * path on this interface. Execution happens later in the existing customer-edge payment + SCA flow,
+ * after the customer confirms the exact amount and payee in a non-AI-controlled card. The policy gate
+ * authorises the [capability]; HITL + SCA are enforced downstream, never here.
+ */
+interface ActionProposalTool {
+    val name: String
+    val description: String
+    val capability: String
+    val inputSchema: Map<String, Any>
+
+    fun propose(arguments: JsonNode): ProposalResult
+}

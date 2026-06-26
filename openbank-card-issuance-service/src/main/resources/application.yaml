@@ -1,0 +1,127 @@
+quarkus:
+  application:
+    name: openbank-card-issuance-service
+    version: 0.1.0
+  http:
+    port: 8118
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+      headers: Content-Type,Authorization,Idempotency-Key
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: postgresql://localhost:5432/openbank_cards
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_cards
+  flyway:
+    migrate-at-start: true
+    validate-on-migrate: false
+    connect-retries: 10
+    connect-retries-interval: 2S
+  hibernate-orm:
+    database:
+      generation: none
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  redis:
+    hosts: redis://localhost:6379
+  smallrye-reactive-messaging:
+    kafka:
+      bootstrap-servers: localhost:29092
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+    console:
+      json: true
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-card-issuance-service
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+mp:
+  messaging:
+    outgoing:
+      # ADR-0050 transactional-outbox egress. The dispatcher sets the Kafka key (= aggregate id, N2)
+      # and ce-id/idempotency-key/ce-type headers (N3) via OutgoingKafkaRecordMetadata, so both a key
+      # and a value serializer are required here.
+      card-events-out:
+        connector: smallrye-kafka
+        client.id: cardissuance-${quarkus.uuid}
+        topic: openbank.cards.events
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+    oidc:
+      enabled: false
+"%test":
+  quarkus:
+    # Dedicated IT Postgres on the warm CI stack (ADR-0043); CI auto-creates any openbank_*_it
+    # database referenced here. Dev Services stay OFF — tests hit localhost:5432 exactly as on a
+    # workstation.
+    datasource:
+      username: openbank
+      password: openbank_secret
+      reactive:
+        url: postgresql://localhost:5432/openbank_cards_it
+      jdbc:
+        url: jdbc:postgresql://localhost:5432/openbank_cards_it
+    devservices:
+      enabled: false
+    management:
+      enabled: false
+    oidc:
+      enabled: false
+    # ADR-0050: disable the @Scheduled outbox tick under test so the integration test drives
+    # dispatchScheduledBatch() explicitly and never races the assertions.
+    scheduler:
+      enabled: false
+openbank:
+  outbox:
+    dispatch-enabled: true
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 200

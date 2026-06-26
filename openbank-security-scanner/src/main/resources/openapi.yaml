@@ -1,0 +1,87 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: Security Scanner Service API
+  version: 1.0.0
+  description: Internal security vulnerability scanner — trigger scans, retrieve reports per service.
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8124
+    description: Local development
+tags:
+  - name: Security Scanner
+
+paths:
+  /api/v1/security/scan:
+    post:
+      tags: [Security Scanner]
+      summary: Trigger full security scan
+      operationId: triggerScan
+      responses:
+        '200':
+          description: Scan results for all services
+
+  /api/v1/security/report:
+    get:
+      tags: [Security Scanner]
+      summary: Get latest security report
+      operationId: getReport
+      responses:
+        '200':
+          description: Security report
+
+  /api/v1/security/services:
+    get:
+      tags: [Security Scanner]
+      summary: Get scan results for all services
+      operationId: getAllServiceResults
+      responses:
+        '200':
+          description: All service results
+
+  /api/v1/security/services/{name}:
+    get:
+      tags: [Security Scanner]
+      summary: Get scan result for a specific service
+      operationId: getServiceResult
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Service scan result
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/security/info:
+    get:
+      tags: [Security Scanner]
+      summary: Service info and scan schedule
+      operationId: getSecurityScannerInfo
+      responses:
+        '200':
+          description: Info
+
+components:
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string

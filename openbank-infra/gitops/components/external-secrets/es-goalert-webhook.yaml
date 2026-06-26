@@ -1,0 +1,26 @@
+# GoAlert outbound webhook URL from OpenBao → goalert-webhook-url Secret
+# (ADR-0088 on-call; ntfy/Slack notification channel). From the openbank/goalert
+# KV path (property `url`, alongside data-encryption-key).
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: goalert-webhook-url
+  namespace: observability
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: goalert-webhook-url
+    creationPolicy: Owner
+    template:
+      mergePolicy: Merge
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+  data:
+    - secretKey: url
+      remoteRef:
+        key: goalert
+        property: url

@@ -1,0 +1,228 @@
+# pid-service: identity golden record — party identification data, RČ blind-index
+# dedup and identity resolution (ADR-0072), the EUDI-native identity hub (ADR-0094).
+# Identity-critical; non-money-path; 1 replica sandbox.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pid-service
+  namespace: pid
+  labels:
+    app.kubernetes.io/name: pid-service
+    app.kubernetes.io/part-of: pid
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pid-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pid-service
+        app.kubernetes.io/part-of: pid
+      annotations:
+        # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-pid-opa-bundle.sh (do not hand-edit).
+        openbank.tech/policy-checksum: "43543e5bf5ab29ed"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: pid-service
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pid-service:sandbox-56da40ea
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8105
+            - name: management
+              containerPort: 8085
+          env:
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://pid-db-rw.pid.svc:5432/openbank_pid
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://pid-db-rw.pid.svc:5432/openbank_pid
+            - name: QUARKUS_DATASOURCE_USERNAME
+              value: openbank
+            - name: QUARKUS_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pid-db-app
+                  key: password
+            - name: QUARKUS_HTTP_PORT
+              value: "8105"
+            # OPA sidecar is deployed (ADR-0034). AUTHZ_ENFORCE=true enables the
+            # @Authorize HTTP interceptor to enforce decisions from data.openbank.rest.allow.
+            # RBAC via @RolesAllowed remains the outer gate; OPA is the fine-grained PEP.
+            - name: AUTHZ_ENFORCE
+              value: "true"
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: QUARKUS_OIDC_CREDENTIALS_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: pid-service-oidc
+                  key: QUARKUS_OIDC_CREDENTIALS_SECRET
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+            # Kafka broker for the outbox dispatcher (party-events-out → topic party.events,
+            # pid-events-out → topic openbank.pid.events). Strimzi bootstrap, same as party-service.
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+            # birth-number-pepper (ADR-0072 tier-1 RČ blind index), from OpenBao via the
+            # pid-service-pepper ExternalSecret. Activates the deterministic RČ dedup tier
+            # (HMAC-SHA256(pepper, RČ)); without it tier-1 is skipped with a WARN.
+            - name: OPENBANK_PID_BIRTH_NUMBER_PEPPER
+              valueFrom:
+                secretKeyRef:
+                  name: pid-service-pepper
+                  key: OPENBANK_PID_BIRTH_NUMBER_PEPPER
+            # EUDI issuer (eIDAS 2.0, ADR-0094) — the bank as a PID/(Q)EAA issuer. The EC P-256 PRIVATE
+            # signing JWK from OpenBao via the pid-service-eudi-issuer ExternalSecret turns issuance +
+            # revocation publication ON; absent ⇒ fail-closed (issuance disabled). issuer-id is the
+            # credential `iss` and the status-list URI host; trusted-issuers is the sandbox trust
+            # allow-list (public JWKS) the relying-party side verifies presentations against — it MUST
+            # include our own issuer so a credential we issued can be re-presented and revocation-checked.
+            - name: OPENBANK_PID_EUDI_ISSUER_SIGNING_KEY_JWK
+              valueFrom:
+                secretKeyRef:
+                  name: pid-service-eudi-issuer
+                  key: OPENBANK_PID_EUDI_ISSUER_SIGNING_KEY_JWK
+            - name: OPENBANK_PID_EUDI_ISSUER_ID
+              value: "https://pid.open-bank.tech"
+            - name: OPENBANK_PID_EUDI_TRUSTED_ISSUERS
+              value: '[{"iss":"https://pid.open-bank.tech","jwks":{"keys":[{"kty":"EC","crv":"P-256","kid":"sandbox-eudi-1","x":"KRKSYwfaxO5zBm8WRXcvmTfANKBHyaIqIPvThg3oN5I","y":"742yaWV4fxzMhJEK0S9zdtFUvNzTchdbszFqTFcUR7Q"}]}}]'
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+        # OPA policy-decision sidecar (ADR-0034). Serves data.openbank.rest.allow for
+        # all @Authorize-annotated endpoints in pid-service (identity.*, pid.resolve,
+        # party.changeStatus). Bundle mounted from pid-opa-bundle ConfigMap.
+        - name: opa
+          image: openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            # Bind on the pod network (not 127.0.0.1) so kubelet httpGet probes reach
+            # /health. The image is scratch (no shell), so an exec probe isn't possible.
+            # Reachability is fenced by the NetworkPolicy; OPA serves only policy decisions.
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/pid_rest_ext.rego
+              subPath: pid_rest_ext.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            # OPA writes temp files during bundle load — required with readOnlyRootFilesystem.
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: pid-opa-bundle
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pid-service
+  namespace: pid
+  labels:
+    app.kubernetes.io/name: pid-service
+spec:
+  selector:
+    app.kubernetes.io/name: pid-service
+  ports:
+    - name: http
+      port: 8105
+      targetPort: http

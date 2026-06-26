@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: MPL-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: platform
+primaryDatastore: "none (stateless)"
+schemaName: "n/a"
+dataLineageRole: internal
+dataClassification: internal
+retentionPolicy: "7 years"
+evidenceExported: false
+lineage:
+  upstream:
+    - serviceName: prometheus
+      relationType: api
+      description: reads cost and infrastructure metrics
+    - serviceName: alertmanager
+      relationType: api
+      description: receives finops anomaly alerts
+  downstream:
+    - serviceName: admin-ui
+      relationType: api
+      description: exposes anomaly list and HITL approval queue
+schemaLineage:
+  ownedSchemas: []
+  dependentSchemas: []

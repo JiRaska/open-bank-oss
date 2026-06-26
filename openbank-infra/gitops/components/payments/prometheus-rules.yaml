@@ -1,0 +1,131 @@
+# SPDX-License-Identifier: MPL-2.0
+# Per-service PrometheusRule alerts for the payments namespace (money-path, ADR-0077/0079).
+# Covers: transaction-service, clearing-service, swift-service, sepa-payment, sepa-instant,
+# domestic-payment, sdd-service. Complements the fleet-wide tier-1 rules with payment-rail
+# specific saga and settlement observability.
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-transaction-alerts
+  namespace: payments
+  labels:
+    app.kubernetes.io/part-of: openbank
+    app.kubernetes.io/name: transaction-service
+spec:
+  groups:
+    - name: openbank.transaction.health
+      rules:
+        - alert: TransactionServiceDown
+          expr: up{job="observability/openbank-services", namespace="payments", container="transaction-service"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            service: transaction
+          annotations:
+            summary: "transaction-service is unreachable"
+            description: "transaction-service (payment saga orchestrator) has been unreachable for >2m — all payment rails are blocked."
+        - alert: TransactionOutboxBacklogStuck
+          expr: openbank_outbox_backlog{service="transaction"} > 100
+          for: 15m
+          labels:
+            severity: critical
+            service: transaction
+          annotations:
+            summary: "transaction outbox backlog stuck"
+            description: "transaction-service outbox has >100 unrelayed rows for >15m — payment events are not being dispatched."
+        - alert: TransactionSagaStuck
+          # A saga stuck >5m = payment is in a terminal-unknown state.
+          expr: openbank_transaction_sagas_stuck_total > 0
+          for: 5m
+          labels:
+            severity: critical
+            service: transaction
+          annotations:
+            summary: "Payment sagas are stuck in transaction-service"
+            description: "{{ $value }} payment saga(s) have been in an incomplete state for >5m — manual triage required."
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-clearing-alerts
+  namespace: payments
+  labels:
+    app.kubernetes.io/part-of: openbank
+    app.kubernetes.io/name: clearing-service
+spec:
+  groups:
+    - name: openbank.clearing.health
+      rules:
+        - alert: ClearingServiceDown
+          expr: up{job="observability/openbank-services", namespace="payments", container="clearing-service"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            service: clearing
+          annotations:
+            summary: "clearing-service is unreachable"
+            description: "clearing-service has been unreachable for >2m — end-of-day settlement batch is at risk."
+        - alert: ClearingOutboxBacklogStuck
+          expr: openbank_outbox_backlog{service="clearing"} > 100
+          for: 15m
+          labels:
+            severity: critical
+            service: clearing
+          annotations:
+            summary: "clearing outbox backlog stuck"
+            description: "clearing-service outbox has >100 unrelayed rows for >15m — settlement confirmations may be delayed."
+        - alert: ClearingSettlementWindowMissed
+          expr: |
+            increase(openbank_clearing_settlements_completed_total[1h]) == 0
+            and on() hour() >= 6 and on() hour() <= 18
+          for: 30m
+          labels:
+            severity: warning
+            service: clearing
+          annotations:
+            summary: "No settlements completed in 1h (business hours)"
+            description: "clearing-service has not completed any settlement cycles in 1h during business hours."
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-swift-alerts
+  namespace: payments
+  labels:
+    app.kubernetes.io/part-of: openbank
+    app.kubernetes.io/name: swift-service
+spec:
+  groups:
+    - name: openbank.swift.health
+      rules:
+        - alert: SwiftServiceDown
+          expr: up{job="observability/openbank-services", namespace="payments", container="swift-service"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            service: swift
+          annotations:
+            summary: "swift-service is unreachable"
+            description: "swift-service has been unreachable for >2m — cross-border SWIFT MT/MX payments cannot be processed."
+        - alert: SwiftOutboxBacklogStuck
+          expr: openbank_outbox_backlog{service="swift"} > 50
+          for: 15m
+          labels:
+            severity: critical
+            service: swift
+          annotations:
+            summary: "swift outbox backlog stuck"
+            description: "swift-service outbox has >50 unrelayed rows for >15m — SWIFT confirmations are not being dispatched."
+        - alert: SwiftMtMessageProcessingStalled
+          # SWIFT MT messages must be acknowledged within SWIFT cut-off times.
+          expr: |
+            increase(openbank_swift_messages_processed_total[1h]) == 0
+            and on() hour() >= 7 and on() hour() <= 17
+          for: 30m
+          labels:
+            severity: warning
+            service: swift
+          annotations:
+            summary: "No SWIFT messages processed in 1h (business hours)"
+            description: "swift-service has not processed any MT/MX messages in 1h during business hours."

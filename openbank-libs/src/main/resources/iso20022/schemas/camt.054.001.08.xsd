@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ISO 20022 camt.054.001.08 — BankToCustomerDebitCreditNotification
+
+  PROVENANCE / STATUS (ADR-0104, D1 / D2)
+  =======================================
+  Structurally-faithful WORKING SUBSET of the official ISO 20022 camt.054.001.08 schema,
+  vendored so the scheme simulator's beneficiary-side credit notification can be built and
+  XSD-validated with zero external dependencies (JDK JAXP only).
+
+  Not the full official schema. Models the message tree, namespace and constrained types for
+  the single-entry notification the simulator emits on settlement (booked credit/debit entry
+  with amount, account IBAN and the original end-to-end reference for reconciliation). See
+  pacs.008.001.08.xsd for the swap-in TODO that applies identically here.
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns="urn:iso:std:iso:20022:tech:xsd:camt.054.001.08"
+           targetNamespace="urn:iso:std:iso:20022:tech:xsd:camt.054.001.08"
+           elementFormDefault="qualified">
+
+  <xs:element name="Document" type="Document"/>
+
+  <xs:complexType name="Document">
+    <xs:sequence>
+      <xs:element name="BkToCstmrDbtCdtNtfctn" type="BankToCustomerDebitCreditNotificationV08"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="BankToCustomerDebitCreditNotificationV08">
+    <xs:sequence>
+      <xs:element name="GrpHdr" type="GroupHeader81"/>
+      <xs:element name="Ntfctn" type="AccountNotification17" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="GroupHeader81">
+    <xs:sequence>
+      <xs:element name="MsgId" type="Max35Text"/>
+      <xs:element name="CreDtTm" type="ISODateTime"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="AccountNotification17">
+    <xs:sequence>
+      <xs:element name="Id" type="Max35Text"/>
+      <xs:element name="Acct" type="CashAccount39"/>
+      <xs:element name="Ntry" type="ReportEntry10" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="CashAccount39">
+    <xs:sequence>
+      <xs:element name="Id" type="AccountIdentification4Choice"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="AccountIdentification4Choice">
+    <xs:sequence>
+      <xs:element name="IBAN" type="IBAN2007Identifier"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="ReportEntry10">
+    <xs:sequence>
+      <xs:element name="NtryRef" type="Max35Text" minOccurs="0"/>
+      <xs:element name="Amt" type="ActiveOrHistoricCurrencyAndAmount"/>
+      <xs:element name="CdtDbtInd" type="CreditDebitCode"/>
+      <xs:element name="Sts" type="EntryStatus1Choice"/>
+      <xs:element name="BookgDt" type="DateAndDateTime2Choice"/>
+      <xs:element name="NtryDtls" type="EntryDetails9" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="EntryStatus1Choice">
+    <xs:sequence>
+      <xs:element name="Cd" type="ExternalEntryStatus1Code"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="DateAndDateTime2Choice">
+    <xs:sequence>
+      <xs:element name="Dt" type="ISODate"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="EntryDetails9">
+    <xs:sequence>
+      <xs:element name="TxDtls" type="EntryTransaction10"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="EntryTransaction10">
+    <xs:sequence>
+      <xs:element name="Refs" type="TransactionReferences6"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="TransactionReferences6">
+    <xs:sequence>
+      <xs:element name="EndToEndId" type="Max35Text"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="ActiveOrHistoricCurrencyAndAmount">
+    <xs:simpleContent>
+      <xs:extension base="ActiveOrHistoricCurrencyAndAmount_SimpleType">
+        <xs:attribute name="Ccy" type="ActiveOrHistoricCurrencyCode" use="required"/>
+      </xs:extension>
+    </xs:simpleContent>
+  </xs:complexType>
+
+  <xs:simpleType name="ActiveOrHistoricCurrencyAndAmount_SimpleType">
+    <xs:restriction base="xs:decimal">
+      <xs:fractionDigits value="5"/>
+      <xs:totalDigits value="18"/>
+      <xs:minInclusive value="0"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="Max35Text">
+    <xs:restriction base="xs:string">
+      <xs:minLength value="1"/>
+      <xs:maxLength value="35"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="ISODateTime">
+    <xs:restriction base="xs:dateTime"/>
+  </xs:simpleType>
+
+  <xs:simpleType name="ISODate">
+    <xs:restriction base="xs:date"/>
+  </xs:simpleType>
+
+  <xs:simpleType name="ActiveOrHistoricCurrencyCode">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[A-Z]{3,3}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="IBAN2007Identifier">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[A-Z]{2,2}[0-9]{2,2}[a-zA-Z0-9]{1,30}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="CreditDebitCode">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="CRDT"/>
+      <xs:enumeration value="DBIT"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="ExternalEntryStatus1Code">
+    <xs:restriction base="xs:string">
+      <xs:minLength value="1"/>
+      <xs:maxLength value="4"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+</xs:schema>

@@ -1,0 +1,44 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:ProductCatalogService.kt$ProductRequest$fun applyTo(existing: Product)</ID>
+    <ID>LargeClass:ProductCatalogService.kt$ProductCatalogService</ID>
+    <ID>LongMethod:ProductCatalogService.kt$ProductCatalogService$private fun seed()</ID>
+    <ID>MagicNumber:ProductCatalogResource.kt$ProductCatalogResource$201</ID>
+    <ID>MagicNumber:ProductCatalogResource.kt$ProductCatalogResource$404</ID>
+    <ID>MagicNumber:ProductCatalogResource.kt$ProductCatalogResource$409</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$0.020</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$0.025</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$0.028</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$0.038</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$0.042</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$0.048</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$0.055</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$10</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$100_000.0</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$10_000.0</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$11</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$12</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$14</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$15</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$19</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$20</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$2024</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$2025</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$250_000.0</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$3</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$30</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$31</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$4</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$5</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$500_000.0</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$6</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$7</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$8</ID>
+    <ID>MagicNumber:ProductCatalogService.kt$ProductCatalogService$9</ID>
+    <ID>NewLineAtEndOfFile:ProductCatalogResource.kt$com.openbank.productcatalog.infrastructure.rest.ProductCatalogResource.kt</ID>
+    <ID>NewLineAtEndOfFile:ProductCatalogResourceTest.kt$com.openbank.productcatalog.ProductCatalogResourceTest.kt</ID>
+    <ID>UseRequire:ProductCatalogService.kt$ProductCatalogService$throw IllegalArgumentException("Product with code '${req.code}' already exists")</ID>
+  </CurrentIssues>
+</SmellBaseline>

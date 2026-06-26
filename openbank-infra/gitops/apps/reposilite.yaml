@@ -1,0 +1,45 @@
+# In-cluster Maven/Gradle dependency mirror (Reposilite — issue #849).
+#
+# Problem: fleet-wide parallel Gradle builds share one NAT egress IP →
+# Maven Central 429-throttles the runner pool during sweep PRs. GCS mirror
+# (settings.gradle.kts) is a public egress hop. AWS CodeArtifact requires
+# IRSA and is unreachable from Hetzner + Mac mini runners.
+#
+# Fix: Reposilite lightweight JVM proxy (~120 Mi RAM) proxies Maven Central,
+# Google Maven, and Gradle Plugin Portal from inside the cluster — zero NAT
+# for ARC runners (in-cluster). Hetzner/Mac runners probe the ClusterIP
+# endpoint at build start; on failure they fall back to GCS transparently.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: reposilite
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/reposilite
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: reposilite
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    managedNamespaceMetadata:
+      labels:
+        openbank.io/plane: platform
+        pod-security.kubernetes.io/audit: restricted
+        pod-security.kubernetes.io/warn: restricted
+    retry:
+      limit: 5
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 3m

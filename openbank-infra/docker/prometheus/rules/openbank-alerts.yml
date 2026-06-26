@@ -1,0 +1,106 @@
+groups:
+  - name: openbank.service.health
+    interval: 30s
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is DOWN"
+          description: "{{ $labels.job }} has been unreachable for more than 1 minute."
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_server_requests_seconds_count{outcome="SERVER_ERROR"}[5m])) by (job)
+          /
+          sum(rate(http_server_requests_seconds_count[5m])) by (job)
+          > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate on {{ $labels.job }}"
+          description: "Error rate > 5% for 2 minutes on {{ $labels.job }}."
+
+      - alert: HighLatencyP99
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_server_requests_seconds_bucket[5m])) by (job, le)
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High P99 latency on {{ $labels.job }}"
+          description: "P99 latency > 2s for 5 minutes on {{ $labels.job }}."
+
+  - name: openbank.jvm
+    interval: 60s
+    rules:
+      - alert: HighHeapUsage
+        expr: |
+          jvm_memory_used_bytes{area="heap"}
+          / jvm_memory_max_bytes{area="heap"}
+          > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High JVM heap usage on {{ $labels.job }}"
+          description: "Heap usage > 85% for 5 minutes on {{ $labels.job }}."
+
+      - alert: HighGCPause
+        expr: |
+          rate(jvm_gc_pause_seconds_sum[5m])
+          / rate(jvm_gc_pause_seconds_count[5m])
+          > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High GC pause on {{ $labels.job }}"
+          description: "Average GC pause > 500ms on {{ $labels.job }}."
+
+  - name: openbank.payments
+    interval: 30s
+    rules:
+      - alert: PaymentServiceDown
+        expr: up{job=~"sepa-payment-service|domestic-payment-service|swift-service|standing-order-service"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Payment service {{ $labels.job }} is DOWN"
+          description: "Critical payment service {{ $labels.job }} is unreachable."
+
+  - name: openbank.compliance
+    interval: 30s
+    rules:
+      - alert: AMLServiceDown
+        expr: up{job="aml-service"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "AML service is DOWN"
+          description: "AML screening service is unreachable — compliance risk."
+
+      - alert: SanctionsServiceDown
+        expr: up{job="sanctions-service"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Sanctions screening service is DOWN"
+          description: "Sanctions service is unreachable — regulatory risk."
+
+      - alert: SecurityScannerDown
+        expr: up{job="security-scanner"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "OWASP Security Scanner is DOWN"
+          description: "Security scanner service is unreachable."

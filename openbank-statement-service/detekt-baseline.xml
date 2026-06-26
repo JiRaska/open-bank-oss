@@ -1,0 +1,27 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ComplexCondition:CloseOrchestrator.kt$CloseOrchestrator$n.contains("ClientWebApplicationException") || n.contains("ConnectException") || n.contains("WebApplicationException") || n.contains("TimeoutException")</ID>
+    <ID>LongParameterList:CloseOrchestrator.kt$CloseOrchestrator$( accountId: UUID, currency: String, from: LocalDate, to: LocalDate, reason: CloseFailureReason, e: Throwable, )</ID>
+    <ID>LongParameterList:CloseOrchestrator.kt$CloseOrchestrator$( private val accountRegistry: AccountRegistry, private val accountInfo: AccountInfoPort, private val periods: StatementPeriodRepository, private val closePocket: ClosePocketUseCase, private val runs: CloseRunRepository, private val outbox: StatementOutbox, private val metrics: CloseMetricsPort, )</ID>
+    <ID>LongParameterList:CloseOrchestrator.kt$CloseOrchestrator$( runId: UUID, accountId: UUID, currency: String, from: LocalDate, to: LocalDate, reason: CloseFailureReason, e: Throwable, )</ID>
+    <ID>LongParameterList:CloseOrchestrator.kt$CloseOrchestrator$( runId: UUID, accountId: UUID, currency: String, throughMonthEnd: LocalDate, closed: AtomicInteger, failed: AtomicInteger, skipped: AtomicInteger, )</ID>
+    <ID>LongParameterList:CloseOrchestrator.kt$CloseOrchestrator$( runId: UUID, accountId: UUID, throughMonthEnd: LocalDate, closed: AtomicInteger, failed: AtomicInteger, skipped: AtomicInteger, )</ID>
+    <ID>LongParameterList:StatementService.kt$StatementService$( account: PocketAccountInfo, currency: String, from: LocalDate, to: LocalDate, entries: List&lt;StatementEntry&gt;, opening: BigDecimal, closing: BigDecimal, )</ID>
+    <ID>EmptyFunctionBlock:StatementOutboxDispatchIT.kt$StatementOutboxDispatchIT.DispatchEnabledResource$override fun stop()</ID>
+    <ID>MagicNumber:AccountRegistryConsumer.kt$AccountRegistryConsumer$200</ID>
+    <ID>MagicNumber:CloseOrchestrator.kt$CloseOrchestrator$16</ID>
+    <ID>MagicNumber:CloseOrchestrator.kt$CloseOrchestrator$2000</ID>
+    <ID>MagicNumber:CloseOrchestrator.kt$CloseOrchestrator$500</ID>
+    <ID>MagicNumber:CloseRunRepositoryImpl.kt$CloseRunRepositoryImpl$200</ID>
+    <ID>MagicNumber:Mt940Renderer.kt$Mt940Renderer$16</ID>
+    <ID>MagicNumber:Mt940Renderer.kt$Mt940Renderer$65</ID>
+    <ID>MagicNumber:StatementOutboxDispatcher.kt$StatementOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:StatementOutboxDispatcher.kt$StatementOutboxDispatcher$30000</ID>
+    <ID>MatchingDeclarationName:CloseRunPorts.kt$CloseRunRepository</ID>
+    <ID>TooGenericExceptionCaught:AccountRegistryConsumer.kt$AccountRegistryConsumer$e: Exception</ID>
+    <ID>TooManyFunctions:CloseOrchestrator.kt$CloseOrchestrator : RunCloseUseCaseCloseRunQueryUseCase</ID>
+    <ID>TooManyFunctions:StatementService.kt$StatementService : ClosePeriodUseCaseClosePocketUseCaseRenderStatementUseCaseListStatementsUseCaseAdHocExportUseCase</ID>
+  </CurrentIssues>
+</SmellBaseline>

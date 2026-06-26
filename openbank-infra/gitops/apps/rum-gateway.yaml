@@ -1,0 +1,237 @@
+# Mobile RUM — hardened public OTLP ingest gateway (ADR-0088 D4b).
+# Threat model: docs/threat-models/rum-ingest-gateway.md (the gate for this build).
+#
+# This is a DEDICATED opentelemetry-collector-contrib instance, deliberately
+# SEPARATE from the internal `otel-collector` (TB-2 isolation, threat E2/D1): the
+# public attack surface never touches the in-VPC collector. It terminates
+# OTLP/HTTP from customer devices and, before anything leaves TB-2, enforces:
+#   • OIDC auth on the receiver  (S1: reject anonymous; verify openbank-customers
+#     JWT, aud=openbank-app, exp)                                  [control: OIDC auth]
+#   • redaction allow-list       (I1/T1: keep only the ADR-0070 allowlist keys,
+#     drop everything else incl. amounts/IBAN/URL params/unknown attrs) [control: PII redaction + schema]
+#   • value masking by regex     (I1: mask PAN/IBAN-shaped values even in kept keys)
+#   • probabilistic sampling     (battery/data budget)
+#   • forward in-VPC to Tempo    (TB-3)
+# Pod is PSS-restricted; egress is locked down by networkpolicy-rum-gateway.yaml.
+#
+# Inert until the mobile side (ADR-0088 D4a/D4c, openbank-app #55) + the
+# TELEMETRY_RUM consent scope (threat-model O4, pre-GA blocker) are wired and the
+# app-side flag (off by default) is enabled. The endpoint is OIDC-gated from day
+# one, so it accepts nothing anonymous in the meantime.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rum-gateway
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
+    chart: opentelemetry-collector
+    targetRevision: 0.158.0
+    helm:
+      valuesObject:
+        fullnameOverride: rum-gateway
+        mode: deployment
+        replicaCount: 1
+        # Resolve the public issuer host to the in-cluster ingress-nginx controller.
+        # The oidc extension does a BLOCKING discovery fetch of issuer_url's
+        # /.well-known/openid-configuration at startup; resolving kc.open-bank.tech
+        # publicly hairpins pod→NAT→NLB→back, which is slow and blocked by this pod's
+        # egress NetworkPolicy (it only admits ingress-nginx:443 + iam:8080, not the
+        # external NLB IP) → discovery times out → the collector hard-fails to boot
+        # → CrashLoopBackOff (was 769 restarts). Pinning the host to the ingress
+        # ClusterIP keeps the public issuer (so it still equals the token `iss`) but
+        # routes the fetch in-cluster over the NP-allowed ingress-nginx:443 path
+        # (verified HTTP 200 in ~17ms vs a 5s public-hairpin timeout). TLS SNI stays
+        # kc.open-bank.tech so the Let's Encrypt cert still validates.
+        hostAliases:
+          - ip: "172.20.172.180"   # ingress-nginx-controller ClusterIP (stable)
+            hostnames:
+              - kc.open-bank.tech
+        image:
+          repository: otel/opentelemetry-collector-contrib
+        # PSS restricted (threat E2): non-root, read-only rootfs, no caps.
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 10001
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          seccompProfile:
+            type: RuntimeDefault
+        podSecurityContext:
+          runAsNonRoot: true
+          runAsUser: 10001
+          fsGroup: 10001
+        # Public ingress (TB-1→TB-2). nginx + cert-manager letsencrypt-prod,
+        # mirroring customer-edge: per-IP rate-limit (D1), body-size cap (D3),
+        # path allow-list to the OTLP endpoints only, security headers.
+        ingress:
+          enabled: true
+          ingressClassName: nginx
+          annotations:
+            cert-manager.io/cluster-issuer: letsencrypt-prod
+            nginx.ingress.kubernetes.io/limit-rps: "20"
+            nginx.ingress.kubernetes.io/limit-burst-multiplier: "3"
+            nginx.ingress.kubernetes.io/proxy-body-size: "512k"
+            nginx.ingress.kubernetes.io/configuration-snippet: |
+              more_set_headers "X-Content-Type-Options: nosniff";
+              more_set_headers "Strict-Transport-Security: max-age=63072000; includeSubDomains";
+          hosts:
+            - host: rum.open-bank.tech
+              paths:
+                - path: /v1/traces
+                  pathType: Prefix
+                  port: 4318
+                - path: /v1/metrics
+                  pathType: Prefix
+                  port: 4318
+          tls:
+            - hosts:
+                - rum.open-bank.tech
+              secretName: rum-gateway-tls
+        # OTLP-HTTP is exposed (mobile SDKs export OTLP/HTTP); gRPC is disabled.
+        ports:
+          otlp:
+            enabled: false
+          otlp-http:
+            enabled: true
+            containerPort: 4318
+            servicePort: 4318
+            protocol: TCP
+          jaeger-compact: { enabled: false }
+          jaeger-thrift: { enabled: false }
+          jaeger-grpc: { enabled: false }
+          zipkin: { enabled: false }
+        config:
+          extensions:
+            # Required by the chart (drives the liveness/readiness probes); a
+            # custom `extensions:` block overrides the chart default, so re-add it.
+            health_check:
+              endpoint: 0.0.0.0:13133
+            # S1: bearer-token auth on the receiver. Verifies the customer JWT's
+            # signature against the openbank-customers JWKS, requires
+            # aud=openbank-rum (O4: only present when the user has consented to
+            # telemetry:rum scope — Keycloak audience mapper fires only then), and
+            # a valid exp; rejects anonymous/expired/unconsented tokens.
+            # issuer_url must equal the token `iss`; the gateway needs egress to
+            # Keycloak to fetch the JWKS (see networkpolicy-rum-gateway.yaml).
+            # O6: username_claim=party_id extracts the party_id JWT claim as the
+            # OIDC "username" in the auth context — non-spoofable because the JWT
+            # is Keycloak-signed. A transform processor renames it to a resource
+            # attribute so it flows through to Tempo for per-customer attribution.
+            oidc:
+              issuer_url: https://kc.open-bank.tech/realms/openbank-customers
+              audience: openbank-rum
+              username_claim: party_id
+          receivers:
+            otlp:
+              protocols:
+                http:
+                  endpoint: 0.0.0.0:4318
+                  auth:
+                    authenticator: oidc
+                  # D3: cap decoded message size.
+                  max_request_body_size: 524288
+          processors:
+            # Shed load rather than OOM (D1).
+            memory_limiter:
+              check_interval: 1s
+              limit_percentage: 80
+              spike_limit_percentage: 25
+            # I1/T1: keep ONLY the ADR-0070/0075 allowlist; allow_all_keys=false
+            # drops every other attribute (amounts, IBAN, tokens, URL params,
+            # unknown device-supplied keys). blocked_values masks PAN/IBAN-shaped
+            # strings even inside kept keys. This is the storage-facing guarantee.
+            redaction:
+              allow_all_keys: false
+              allowed_keys:
+                # party_id is now server-side bound (O6): the transform processor
+                # below copies it from the OIDC auth-context value set by
+                # username_claim=party_id; the Keycloak-signed JWT is the source
+                # of truth, so a client-supplied party_id in spans is still
+                # dropped by redaction — only the collector-injected value survives.
+                - party_id
+                - x-correlation-id
+                - service.name
+                - app.version
+                - os.type
+                - os.version
+                - device.model
+                - http.route
+                - screen.name
+                - http.response.status_code
+              blocked_values:
+                - "\\b\\d{13,19}\\b"                 # PAN-shaped
+                - "\\bCZ\\d{2}[ ]?\\d{4}[ ]?\\d{6,}\\b"  # IBAN-shaped
+              # info (not debug): the summary logs redacted KEY NAMES; keep them
+              # out of debug-level log aggregation.
+              summary: info
+            # Bound free-text length so an allowed key can't smuggle a large blob.
+            # O6: copy the OIDC auth-context username (set by username_claim=party_id
+            # in the oidc extension) to a resource attribute. The collector sets the
+            # client.id resource attribute from the auth context; we rename it to
+            # party_id so downstream queries are consistent with the rest of the fleet.
+            transform:
+              error_mode: ignore
+              trace_statements:
+                - context: resource
+                  statements:
+                    - set(attributes["party_id"], attributes["client.id"]) where attributes["client.id"] != ""
+                    - delete_key(attributes, "client.id")
+                - context: span
+                  statements:
+                    - truncate_all(attributes, 256)
+            # Battery/data + cardinality budget.
+            probabilistic_sampler:
+              sampling_percentage: 25
+            batch:
+              send_batch_size: 512
+              timeout: 5s
+          exporters:
+            # TB-3: in-VPC hop to Tempo. The redacted, validated spans join the
+            # same backend → one trace from the user's tap to the ledger write.
+            otlp/tempo:
+              endpoint: tempo.observability.svc:4317
+              tls:
+                insecure: true
+              sending_queue:
+                enabled: true
+                queue_size: 2048
+              retry_on_failure:
+                enabled: true
+          service:
+            extensions: [health_check, oidc]
+            pipelines:
+              traces:
+                receivers: [otlp]
+                processors: [memory_limiter, redaction, transform, probabilistic_sampler, batch]
+                exporters: [otlp/tempo]
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: "1"
+            memory: 512Mi
+        nodeSelector:
+          workload: observability
+        tolerations:
+          - key: workload
+            operator: Equal
+            value: observability
+            effect: NoSchedule
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

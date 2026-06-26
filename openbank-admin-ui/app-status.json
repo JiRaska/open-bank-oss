@@ -1,0 +1,281 @@
+{
+  "schema": "openbank.appstatus/v1",
+  "app": {
+    "name": "openbank-app",
+    "displayName": {
+      "cs": "Zákaznická aplikace",
+      "en": "Customer App"
+    },
+    "owner": "customer-app team",
+    "repo": "JiRaska/openbank-app"
+  },
+  "asOf": "2026-06-08",
+  "appRepo": "JiRaska/openbank-app",
+  "derived": {
+    "version": "0.2.0",
+    "useFakeData": false,
+    "edgeBaseUrl": "https://customer.open-bank.tech",
+    "keycloakIssuer": "https://kc.open-bank.tech/realms/openbank-customers",
+    "oauthClientId": "openbank-app",
+    "oauthScopes": [
+      "openid",
+      "profile"
+    ],
+    "certPinningConfigured": true,
+    "certPinningActive": true,
+    "sourceAvailable": true
+  },
+  "capabilities": [
+    {
+      "id": "ui-stack",
+      "title": {
+        "cs": "KMP + Compose Multiplatform",
+        "en": "KMP + Compose Multiplatform"
+      },
+      "lens": [
+        "technology"
+      ],
+      "status": "live",
+      "adr": [
+        "ADR-0064"
+      ],
+      "gap": {
+        "cs": "Jeden Kotlin codebase pro iOS i Android běží na zařízení. Desktop a Web (Wasm) jsou z téhož kódu dosažitelné, ale zatím nejsou cílené.",
+        "en": "One Kotlin codebase runs on iOS and Android on device. Desktop and Web (Wasm) are reachable from the same code but not yet targeted."
+      }
+    },
+    {
+      "id": "shared-domain",
+      "title": {
+        "cs": "Sdílená doména a API klienti",
+        "en": "Shared domain & API clients"
+      },
+      "lens": [
+        "technology"
+      ],
+      "status": "live",
+      "adr": [
+        "ADR-0064",
+        "ADR-0065"
+      ],
+      "gap": {
+        "cs": "Doménové modely (Money, Account) a Ktor klienti pro customer edge jsou ve sdíleném modulu, včetně platebních (domestic/SEPA), SCA a výpisových API.",
+        "en": "Domain models (Money, Account) and Ktor clients for the customer edge live in the shared module, including the payment (domestic/SEPA), SCA and statement APIs."
+      }
+    },
+    {
+      "id": "customer-edge",
+      "title": {
+        "cs": "Napojení na customer edge",
+        "en": "Customer edge integration"
+      },
+      "lens": [
+        "technology",
+        "governance"
+      ],
+      "status": "live",
+      "adr": [
+        "ADR-0065"
+      ],
+      "gap": {
+        "cs": "Domovské účty/zůstatky, historie transakcí, feed notifikací a profil zákazníka se čtou z živého edge (useFakeData=false).",
+        "en": "Home accounts/balances, transaction history, the notification feed and the customer profile read from the live edge (useFakeData=false)."
+      }
+    },
+    {
+      "id": "payment-initiation",
+      "title": {
+        "cs": "Iniciace plateb",
+        "en": "Payment initiation"
+      },
+      "lens": [
+        "technology",
+        "security"
+      ],
+      "status": "live",
+      "adr": [
+        "ADR-0021"
+      ],
+      "gap": {
+        "cs": "Celý řetězec je zapojen: SendScreen → createDomesticPayment (edge /domestic-payments) → initiateChallenge (edge /sca/challenges) → biometrické schválení podepsané device klíčem (dynamic linking, RTS Art. 5). Biometrické potvrzení se ověřuje na fyzickém zařízení.",
+        "en": "The full chain is wired: SendScreen → createDomesticPayment (edge /domestic-payments) → initiateChallenge (edge /sca/challenges) → biometric approval signed by the device key (dynamic linking, RTS Art. 5). The biometric confirmation is verified on a physical device."
+      }
+    },
+    {
+      "id": "keycloak-realm",
+      "title": {
+        "cs": "Keycloak realm openbank-customers",
+        "en": "Keycloak realm openbank-customers"
+      },
+      "lens": [
+        "security",
+        "governance"
+      ],
+      "status": "live",
+      "adr": [
+        "ADR-0065"
+      ],
+      "gap": {
+        "cs": "Dedikovaný zákaznický realm je nakonfigurován (AppConfig.KEYCLOAK_ISSUER), oddělený od operátorského realmu, a login flow přes něj běží — LoginScreen spouští OAuth2 PKCE proti /realms/openbank-customers.",
+        "en": "The dedicated customer realm is configured (AppConfig.KEYCLOAK_ISSUER), separate from the operator realm, and the login flow runs through it — LoginScreen drives OAuth2 PKCE against /realms/openbank-customers."
+      }
+    },
+    {
+      "id": "auth-pkce",
+      "title": {
+        "cs": "OAuth2 PKCE login",
+        "en": "OAuth2 PKCE login"
+      },
+      "lens": [
+        "security"
+      ],
+      "status": "live",
+      "adr": [
+        "ADR-0066"
+      ],
+      "gap": {
+        "cs": "Kompletní Authorization Code + PKCE flow ve sdíleném AuthService (commonMain, unit-testováno): S256 challenge, state proti CSRF, OIDC nonce, výměna kódu, persistnce tokenů s expirací, proaktivní refresh (refresh_token) a RP-initiated logout. Platformy dodávají jen systémový prohlížeč (ASWebAuthenticationSession / Custom Tabs + redirect Activity). Zbývá: ověření na fyzickém zařízení (deeplink round-trip).",
+        "en": "Complete Authorization Code + PKCE flow in the shared AuthService (commonMain, unit-tested): S256 challenge, CSRF state, OIDC nonce, code exchange, token persistence with expiry, proactive refresh (refresh_token) and RP-initiated logout. Platforms contribute only the system browser (ASWebAuthenticationSession / Custom Tabs + redirect Activity). Remaining: on-device verification of the deeplink round-trip."
+      }
+    },
+    {
+      "id": "credential-storage",
+      "title": {
+        "cs": "Bezpečné úložiště přihlašovacích údajů",
+        "en": "Secure credential storage"
+      },
+      "lens": [
+        "security"
+      ],
+      "status": "live",
+      "adr": [
+        "ADR-0073"
+      ],
+      "gap": {
+        "cs": "Android: tokeny šifrované AES-256-GCM klíčem v AndroidKeyStore (StrongBox fallback) — už ne in-memory. iOS: tokeny v Keychain (WhenUnlockedThisDeviceOnly). Zbývající mezera: iOS PIN může degradovat na nešifrovaný NSUserDefaults, když selže Keychain bridge (zpevnění ADR-0073).",
+        "en": "Android: tokens encrypted with an AES-256-GCM key in AndroidKeyStore (StrongBox fallback) — no longer in-memory. iOS: tokens in the Keychain (WhenUnlockedThisDeviceOnly). Residual gap: the iOS PIN can degrade to unencrypted NSUserDefaults if the Keychain bridge fails (hardening tracked by ADR-0073)."
+      }
+    },
+    {
+      "id": "sca-device-key",
+      "title": {
+        "cs": "SCA klíč na zařízení",
+        "en": "On-device SCA key"
+      },
+      "lens": [
+        "security"
+      ],
+      "status": "live",
+      "adr": [
+        "ADR-0021"
+      ],
+      "gap": {
+        "cs": "iOS: Secure Enclave (P-256, gated biometrikou). Android: P-256 v AndroidKeyStore (StrongBox/TEE), ECDSA podpis, export X.509 SPKI — už ne stub. Zbývá: per-signature biometrika (zatím per-key-creation, F2).",
+        "en": "iOS: Secure Enclave (P-256, biometric-gated). Android: P-256 in AndroidKeyStore (StrongBox/TEE), ECDSA signing, X.509 SPKI export — no longer a stub. Remaining: per-signature biometrics (currently per-key-creation, F2)."
+      }
+    },
+    {
+      "id": "tls-pinning",
+      "title": {
+        "cs": "TLS pinning",
+        "en": "TLS pinning"
+      },
+      "lens": [
+        "security"
+      ],
+      "status": "partial",
+      "adr": [
+        "ADR-0066"
+      ],
+      "gap": {
+        "cs": "SPKI pinning je implementován, ale produkční hashe nejsou nastaveny (PINNED_SPKI_HASHES je prázdné), takže pinning je v sandboxu vypnutý (ADR-0066-S3).",
+        "en": "SPKI pinning is implemented but production hashes are not set (PINNED_SPKI_HASHES is empty), so pinning is disabled in sandbox (ADR-0066-S3)."
+      }
+    },
+    {
+      "id": "diagnostics",
+      "title": {
+        "cs": "In-app diagnostika",
+        "en": "In-app diagnostics"
+      },
+      "lens": [
+        "security",
+        "governance"
+      ],
+      "status": "partial",
+      "adr": [
+        "ADR-0070"
+      ],
+      "gap": {
+        "cs": "Vrstva je postavená pro debug buildy (7-tap logo → DebugMenu, čte živé /api/v1/info bez PII). Zbývá: build-time split místo runtime gate (cíl ADR-0070) a F2 integrace — feature flags, network tracing, session claims, SCA historie.",
+        "en": "The surface is built for debug builds (7-tap logo → DebugMenu, reads the live /api/v1/info with no PII). Remaining: a build-time split instead of a runtime gate (the ADR-0070 target) and the F2 integrations — feature flags, network tracing, session claims, SCA history."
+      }
+    },
+    {
+      "id": "crash-monitoring",
+      "title": {
+        "cs": "Monitoring pádů a chyb",
+        "en": "Crash & error monitoring"
+      },
+      "lens": [
+        "technology",
+        "security"
+      ],
+      "status": "partial",
+      "adr": [
+        "ADR-0075"
+      ],
+      "gap": {
+        "cs": "Sentry Kotlin Multiplatform SDK (MIT) je zapojen pro iOS i Android s cílem na self-hosted GlitchTip — zachytává pády, ANR a chyby před API voláním, které backend (ADR-0008) nevidí. Vypnuto by-default (zrcadlí ADR-0067 flag): nic neopouští zařízení, dokud není flag zapnut a nastaven DSN. PII se stripuje on-device přes beforeSend (allowlist z ADR-0070); jediná identita je pseudonymní party_id. Zbývá: provisionovat GlitchTip sink (open-bank gitops/apps/glitchtip.yaml), nastavit DSN a překlopit flag; CI upload mapping/dSYM pro symbolikaci.",
+        "en": "The Sentry Kotlin Multiplatform SDK (MIT) is wired for iOS and Android targeting self-hosted GlitchTip — capturing crashes, ANRs and pre-API errors the backend (ADR-0008) cannot see. Off by default (mirrors the ADR-0067 flag): nothing leaves a device until the flag is on and a DSN is set. PII is stripped on-device via beforeSend (the ADR-0070 allowlist); the only identity is the pseudonymous party_id. Remaining: provision the GlitchTip sink (open-bank gitops/apps/glitchtip.yaml), set the DSN and flip the flag; CI upload of mapping/dSYM for symbolication."
+      }
+    },
+    {
+      "id": "qrless-pay",
+      "title": {
+        "cs": "QRlessPay — platba poblíž bez QR (BLE)",
+        "en": "QRlessPay — QR-less proximity pay (BLE)"
+      },
+      "lens": [
+        "technology",
+        "security"
+      ],
+      "status": "planned",
+      "adr": [
+        "ADR-0095"
+      ],
+      "gap": {
+        "cs": "Otevřený BLE profil pro platbu telefon-telefon bez skenování: příjemce vysílá křestní jméno + session-id, plátce stáhne přes GATT podepsaný SPAYD (Ed25519) a otevře předvyplněný návrh platby na existujícím IBAN/okamžitém railu. Banka-agnostické, backend volitelný; cíl je otevřený standard (pitch ČBA/EPC). Zatím jen návrh — ADR-0095 + wire spec + threat-model napsané, BEZ implementace. Identita stojí na potvrzení plátce; VOP (jméno↔IBAN) a bank-atestace jsou volitelné a pro CZ domácí platby zatím nedostupné (TODO/watch). Bezpečnostně ~ na úrovni skenování QR, ale soukromější (IBAN není ve vzduchu) a UX bez kamery.",
+        "en": "Open BLE phone-to-phone profile for scan-less pay: the payee advertises a first name + session-id, the payer pulls a signed SPAYD (Ed25519) over GATT and opens a pre-filled proposal on the existing IBAN/instant rail. Bank-agnostic, backend-optional; aims to be an open standard (ČBA/EPC pitch). Design only so far — ADR-0095 + wire spec + threat model written, NO implementation. Identity rests on payer confirmation; VOP (name↔IBAN) and bank attestation are optional and not yet available for CZ domestic (TODO/watch). Security ≈ a QR scan, but more private (no IBAN on air) and camera-free UX."
+      }
+    },
+    {
+      "id": "dossier",
+      "title": {
+        "cs": "Living dossier (plán vs realita)",
+        "en": "Living dossier (plan vs reality)"
+      },
+      "lens": [
+        "governance"
+      ],
+      "status": "live",
+      "adr": [
+        "ADR-0074"
+      ],
+      "gap": {
+        "cs": "Tato stránka. Derivovaná fakta jdou z kódu, kurátorská vrstva z tohoto souboru; mezery bez rozhodnutí jsou explicitně označené.",
+        "en": "This page. Derived facts come from code, the curatorial layer from this file; decision-missing gaps are flagged explicitly."
+      }
+    }
+  ],
+  "summary": {
+    "total": 13,
+    "byStatus": {
+      "live": 9,
+      "partial": 3,
+      "planned": 1
+    },
+    "decisionMissing": []
+  },
+  "gaps": []
+}

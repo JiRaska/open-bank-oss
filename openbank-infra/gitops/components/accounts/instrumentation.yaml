@@ -1,0 +1,31 @@
+# Instrumentation CR for the OTel auto-instrumentation pilot (Dynatrace-parity
+# #3). Referenced by the `instrumentation.opentelemetry.io/inject-java: openbank`
+# annotation on the product-catalog pod. The injected Java agent exports through
+# the otel-collector (same path the fleet uses for batching/redaction), at the
+# same 10% sampling as the service's own Quarkus OTel — so if both emit, the
+# duplicate is obvious in Tempo and we know to disable one side before any
+# fleet-wide rollout.
+apiVersion: opentelemetry.io/v1alpha1
+kind: Instrumentation
+metadata:
+  name: openbank
+  namespace: accounts
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  exporter:
+    # OTel Java agent ≥2.x defaults to http/protobuf (HttpExporter), not gRPC.
+    # Port 4317 is gRPC-only → connection reset loop; 4318 = otlp-http.
+    endpoint: http://otel-collector.observability.svc:4318
+  propagators:
+    - tracecontext
+    - baggage
+  sampler:
+    type: parentbased_traceidratio
+    argument: "0.1"
+  java:
+    env:
+      # Surface the depth the Quarkus SDK doesn't give for free: JDBC statement
+      # spans + connection-pool internals.
+      - name: OTEL_INSTRUMENTATION_JDBC_ENABLED
+        value: "true"

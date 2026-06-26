@@ -1,0 +1,341 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.party.infrastructure.rest
+
+import com.openbank.party.application.port.`in`.*
+import com.openbank.party.application.usecase.PartyAlreadyExistsException
+import com.openbank.party.application.usecase.PartyNotFoundException
+import com.openbank.party.domain.model.*
+import com.openbank.libs.api.error.ApiError
+import com.openbank.libs.authz.Authorize
+import com.openbank.libs.flags.FeatureClient
+import com.openbank.libs.flags.FeatureFlag
+import io.quarkus.security.Authenticated
+import jakarta.annotation.security.RolesAllowed
+import jakarta.inject.Inject
+import jakarta.ws.rs.*
+import jakarta.ws.rs.core.MediaType
+import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.jwt.JsonWebToken
+import org.eclipse.microprofile.openapi.annotations.Operation
+import org.eclipse.microprofile.openapi.annotations.tags.Tag
+import org.jboss.resteasy.reactive.MultipartForm
+import org.jboss.resteasy.reactive.PartType
+import java.net.URI
+import java.util.UUID
+
+@Path("/api/v1/parties")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+@Tag(name = "Parties")
+class PartyResource {
+
+    @Inject lateinit var partyUseCase: PartyUseCase
+
+    @Inject lateinit var flags: FeatureClient
+
+    @Inject @io.quarkus.arc.Unremovable lateinit var jwt: JsonWebToken
+
+    @GET
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_SERVICE")
+    @Operation(summary = "List parties (paginated). Optional ?status= filter for onboarding cockpit funnel views (ADR-0068).")
+    suspend fun listParties(
+        @QueryParam("page") @DefaultValue("0") page: Int,
+        @QueryParam("size") @DefaultValue("20") size: Int,
+        @QueryParam("status") statusParam: String?
+    ): Response {
+        val status = statusParam?.uppercase()?.let { runCatching { PartyStatus.valueOf(it) }.getOrNull() }
+        // ADR-0067 pilot: first live feature-flag evaluation in the fleet. Cosmetic, fail-static —
+        // surfaces the resolved variant in a response header so the flip is observable via curl,
+        // without changing the response body or any business logic. Flag-as-code: party-list-enriched.
+        val listMode = if (flags.enabled("party-list-enriched")) "enriched" else "standard"
+        return Response.ok(partyUseCase.listParties(page, size.coerceIn(1, 100), status))
+            .header("X-Party-List-Mode", listMode)
+            .build()
+    }
+
+    @GET
+    @Path("/search")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_SERVICE")
+    @FeatureFlag(flag = "party-search")
+    @Operation(summary = "Search parties by name (trigram), cursor-paginated (ADR-0055). Gated by feature flag party-search.")
+    suspend fun searchParties(
+        @QueryParam("q") q: String?,
+        @QueryParam("limit") @DefaultValue("20") limit: Int,
+        @QueryParam("cursor") cursor: String?
+    ): Response {
+        val page = partyUseCase.searchParties(SearchPartiesQuery(q, limit, cursor))
+        return Response.ok(
+            mapOf("data" to page.data.map { it.toSimpleResponse() }, "pagination" to page.pagination)
+        ).build()
+    }
+
+    @POST
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC")
+    @Operation(summary = "Create a new party (customer or company)")
+    suspend fun createParty(req: CreatePartyRequest, @HeaderParam("Idempotency-Key") idempotencyKey: String): Response {
+        val party = partyUseCase.createParty(req.toCommand(idempotencyKey))
+        return Response.created(URI.create("/api/v1/parties/${party.id}")).entity(party.toResponse()).build()
+    }
+
+    @GET
+    @Path("/{id}")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_SERVICE")
+    @Operation(summary = "Get party by ID")
+    suspend fun getParty(@PathParam("id") id: UUID): Response {
+        return Response.ok(partyUseCase.getParty(id).toResponse()).build()
+    }
+
+    @PATCH
+    @Path("/{id}")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "party.update", resource = "#id")
+    @Operation(summary = "Update party contact details")
+    suspend fun updateParty(@PathParam("id") id: UUID, req: UpdatePartyRequest): Response {
+        val party = partyUseCase.updateParty(UpdatePartyCommand(id, req.email, req.phone, req.address?.toDomain(), req.tradingName))
+        return Response.ok(party.toResponse()).build()
+    }
+
+    @POST
+    @Path("/{id}/documents")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC")
+    @Operation(summary = "Add identity document to party")
+    suspend fun addDocument(@PathParam("id") id: UUID, req: AddDocumentRequest): Response {
+        val doc = partyUseCase.addDocument(AddDocumentCommand(id, DocumentType.valueOf(req.documentType), req.documentNumber, req.issuingCountry, req.expiryDate))
+        return Response.status(201).entity(doc).build()
+    }
+
+    @GET
+    @Path("/{id}/documents")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_SERVICE")
+    @Operation(summary = "List party documents")
+    suspend fun listDocuments(@PathParam("id") id: UUID): Response {
+        return Response.ok(partyUseCase.listDocuments(id)).build()
+    }
+
+    @PUT
+    @Path("/{id}/kyc-status")
+    @RolesAllowed("ROLE_ADMIN", "ROLE_KYC")
+    @Operation(summary = "Update KYC status (called by kyc-service)")
+    suspend fun updateKycStatus(@PathParam("id") id: UUID, req: KycStatusRequest): Response {
+        val party = partyUseCase.updateKycStatus(id, KycStatus.valueOf(req.kycStatus))
+        return Response.ok(party.toResponse()).build()
+    }
+
+    @DELETE
+    @Path("/{id}")
+    @RolesAllowed("ROLE_ADMIN")
+    @Operation(summary = "Erase party — GDPR Art. 17 Right to Erasure (anonymizes all PII)")
+    suspend fun eraseParty(@PathParam("id") id: UUID): Response {
+        partyUseCase.eraseParty(ErasePartyCommand(id))
+        return Response.noContent().build()
+    }
+
+    // ─── Mobile self-registration endpoints ───────────────────────────────────────
+
+    @GET
+    @Path("/me")
+    @Authenticated
+    @Operation(summary = "Get my party (mobile: returns party for the calling Keycloak sub)")
+    suspend fun getMyParty(): Response {
+        val sub = jwt.subject ?: return Response.status(401).build()
+        val party = partyUseCase.getMyParty(sub)
+            ?: return Response.status(404).entity(mapOf("code" to "NOT_REGISTERED")).build()
+        return Response.ok(party.toResponse()).build()
+    }
+
+    @POST
+    @Path("/self-register")
+    @Authenticated
+    @Operation(summary = "Self-register as a new party (mobile onboarding). Idempotent by Keycloak sub.")
+    suspend fun selfRegister(req: SelfRegisterRequest): Response {
+        val sub = jwt.subject ?: return Response.status(401).build()
+        val emailVerified = jwt.getClaim<Boolean>("email_verified") ?: false
+        if (!emailVerified) {
+            return Response.status(403)
+                .entity(mapOf("code" to "EMAIL_NOT_VERIFIED", "message" to "Verify your email before registering"))
+                .build()
+        }
+        val (party, isNew) = partyUseCase.selfRegisterParty(
+            SelfRegisterPartyCommand(
+                keycloakSub = sub,
+                emailVerified = emailVerified,
+                partyType = PartyType.valueOf(req.partyType),
+                legalName = req.legalName,
+                email = jwt.getClaim("email") ?: req.email,
+                phone = req.phone,
+                dateOfBirth = req.dateOfBirth,
+                nationality = req.nationality,
+                address = req.address?.toDomain()
+            )
+        )
+        return if (isNew) {
+            Response.created(URI.create("/api/v1/parties/${party.id}")).entity(party.toResponse()).build()
+        } else {
+            Response.ok(party.toResponse()).header("X-Resumed", "true").build()
+        }
+    }
+
+    @POST
+    @Path("/{id}/documents/upload")
+    @Authenticated
+    @Consumes(MediaType.MULTIPART_FORM_DATA)
+    @Operation(summary = "Upload KYC document image (mobile). Stores binary content server-side.")
+    suspend fun uploadDocument(@PathParam("id") id: UUID, @MultipartForm form: DocumentUploadForm): Response {
+        val sub = jwt.subject ?: return Response.status(401).build()
+        // Verify caller owns this party
+        val party = partyUseCase.getMyParty(sub)
+        if (party == null || party.id != id) return Response.status(403).build()
+        // Guard against oversized uploads (Sprint 1: bytea storage; 10 MB hard limit)
+        val maxBytes = 10 * 1024 * 1024 // 10 MB
+        if (form.content.size > maxBytes) {
+            return Response.status(413)
+                .entity(mapOf("code" to "FILE_TOO_LARGE", "maxBytes" to maxBytes))
+                .build()
+        }
+        val file = partyUseCase.uploadDocument(
+            UploadDocumentCommand(
+                partyId = id,
+                documentType = DocumentType.valueOf(form.documentType.uppercase()),
+                fileName = form.fileName,
+                mimeType = form.mimeType ?: "application/octet-stream",
+                content = form.content
+            )
+        )
+        return Response.status(201).entity(mapOf(
+            "id" to file.id, "partyId" to file.partyId,
+            "documentType" to file.documentType, "fileName" to file.fileName,
+            "mimeType" to file.mimeType, "uploadedAt" to file.uploadedAt
+        )).build()
+    }
+
+    @GET
+    @Path("/{id}/documents/{fileId}/content")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC")
+    @Produces(MediaType.APPLICATION_OCTET_STREAM)
+    @Operation(summary = "Download KYC document content (operators only)")
+    suspend fun getDocumentContent(@PathParam("id") id: UUID, @PathParam("fileId") fileId: UUID): Response {
+        val file = partyUseCase.getDocumentContent(partyId = id, fileId = fileId)
+            ?: return Response.status(404)
+                .entity(mapOf("code" to "FILE_NOT_FOUND"))
+                .type(MediaType.APPLICATION_JSON)
+                .build()
+        return Response.ok(file.content)
+            .type(file.mimeType)
+            .header("Content-Disposition", "attachment; filename=\"${file.fileName ?: fileId}\"")
+            .header("X-Document-Type", file.documentType.name)
+            .build()
+    }
+
+    /**
+     * ADR-0072: blind-index dedup gate. Resolves a party by Czech RČ without exposing the RČ
+     * to the response. Returns 200 + party summary when found, 404 when no match, 503 when
+     * pepper is unconfigured (dedup is off and callers must not assume uniqueness).
+     *
+     * Internal-only endpoint — requires ROLE_SERVICE so only trusted back-end callers
+     * (customer-edge, onboarding service) can use it during the self-registration flow.
+     */
+    @POST
+    @Path("/resolve")
+    @RolesAllowed("ROLE_SERVICE", "ROLE_ADMIN")
+    @Authorize(action = "party:resolve")
+    @Operation(summary = "Resolve a party by RČ blind index (ADR-0072 dedup gate, internal only)")
+    suspend fun resolveParty(req: ResolvePartyRequest): Response {
+        val party = partyUseCase.resolvePartyByRc(ResolvePartyByRcCommand(req.rc))
+            ?: return if (!partyUseCase.isDedupAvailable()) {
+                Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity(
+                        ApiError(
+                            UUID.randomUUID().toString(),
+                            Response.Status.SERVICE_UNAVAILABLE.statusCode,
+                            "DEDUP_UNAVAILABLE",
+                            "RČ dedup pepper not configured; uniqueness not enforced"
+                        )
+                    ).build()
+            } else {
+                Response.status(Response.Status.NOT_FOUND)
+                    .entity(
+                        ApiError(
+                            UUID.randomUUID().toString(),
+                            Response.Status.NOT_FOUND.statusCode,
+                            "PARTY_NOT_FOUND",
+                            "No party matches the supplied RČ"
+                        )
+                    ).build()
+            }
+        return Response.ok(party.toSimpleResponse()).build()
+    }
+}
+
+/** ADR-0072: RČ supplied by an internal caller; never echoed back in the response. */
+data class ResolvePartyRequest(val rc: String)
+
+data class SelfRegisterRequest(
+    val partyType: String = "INDIVIDUAL",
+    val legalName: String,
+    val email: String,    // fallback pokud není v JWT
+    val phone: String?,
+    val dateOfBirth: String?,
+    val nationality: String?,
+    val address: AddressRequest?
+)
+
+class DocumentUploadForm {
+    @FormParam("type")
+    @PartType(MediaType.TEXT_PLAIN)
+    lateinit var documentType: String
+
+    @FormParam("file")
+    @PartType(MediaType.APPLICATION_OCTET_STREAM)
+    lateinit var content: ByteArray
+
+    @FormParam("filename")
+    @PartType(MediaType.TEXT_PLAIN)
+    var fileName: String? = null
+
+    @FormParam("mimeType")
+    @PartType(MediaType.TEXT_PLAIN)
+    var mimeType: String? = null
+}
+
+data class CreatePartyRequest(
+    val partyType: String, val legalName: String, val tradingName: String?,
+    val dateOfBirth: String?, val nationality: String?, val taxId: String?,
+    // email is required by the contract (openapi.yaml: required[...email]) and downstream
+    // (Party/PartyEntity NOT NULL + unique). It is declared nullable here ONLY so a request
+    // that omits it deserialises cleanly and fails our own explicit check below — a non-null
+    // Kotlin field would make Jackson hard-fail first and return a silent, body-less 400.
+    val registrationNumber: String?, val email: String?, val phone: String?,
+    val address: AddressRequest?,
+    // Caller-supplied party id (ADR-0069 §B1): the customer edge passes the Keycloak `sub`
+    // here so party id == sub and the principal binding holds without a KC admin client.
+    // The endpoint is operator-realm-only, so customers cannot mint arbitrary ids.
+    val id: String? = null
+) {
+    fun toCommand(key: String): CreatePartyCommand {
+        require(!email.isNullOrBlank()) { "email is required" }
+        return CreatePartyCommand(key, PartyType.valueOf(partyType), legalName, tradingName,
+            dateOfBirth, nationality, taxId, registrationNumber, email, phone, address?.toDomain(),
+            id?.takeIf { it.isNotBlank() }?.let { UUID.fromString(it) })
+    }
+}
+
+data class UpdatePartyRequest(val email: String?, val phone: String?, val tradingName: String?, val address: AddressRequest?)
+data class AddDocumentRequest(val documentType: String, val documentNumber: String, val issuingCountry: String, val expiryDate: String?)
+data class KycStatusRequest(val kycStatus: String)
+data class AddressRequest(val line1: String, val line2: String?, val city: String, val postalCode: String, val countryCode: String) {
+    fun toDomain() = Address(line1, line2, city, postalCode, countryCode)
+}
+
+fun Party.toSimpleResponse() = mapOf(
+    "id" to id, "partyType" to partyType, "status" to status, "legalName" to legalName,
+    "tradingName" to tradingName, "email" to email, "kycStatus" to kycStatus, "createdAt" to createdAt
+)
+
+fun Party.toResponse() = mapOf(
+    "id" to id, "partyType" to partyType, "status" to status, "legalName" to legalName,
+    "tradingName" to tradingName, "email" to email, "phone" to phone,
+    "kycStatus" to kycStatus, "address" to address, "createdAt" to createdAt, "updatedAt" to updatedAt
+)

@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.fraud.application.port.out
+
+import com.openbank.fraud.domain.model.VelocityAggregate
+import com.openbank.fraud.domain.model.VelocityWindow
+import java.math.BigDecimal
+import java.util.UUID
+
+/** Stores and queries per-account rolling velocity aggregates (ADR-0084 §2). */
+interface VelocityAggregateRepository {
+    /**
+     * Records a new transaction signal for [accountId]. Upserts all three windows (H1/H24/D7)
+     * in a single call — incrementing the count and sum within each window's time bucket.
+     */
+    suspend fun recordTransaction(accountId: UUID, amount: BigDecimal, currency: String)
+
+    /**
+     * Returns the current aggregate for [accountId] in [window] for [currency], or null.
+     * Currency is part of the bucket key — amounts in different currencies never mix.
+     */
+    suspend fun findAggregate(accountId: UUID, window: VelocityWindow, currency: String): VelocityAggregate?
+}

@@ -1,0 +1,102 @@
+# Apicurio Registry on SQL storage (the -sql image, not -mem). Datasource URL
+# is static (CNPG's stable -rw Service); credentials are injected from the
+# CNPG-generated app secret, so no password is ever written into git or state.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apicurio-registry
+  namespace: messaging
+  labels:
+    app.kubernetes.io/name: apicurio-registry
+    app.kubernetes.io/part-of: messaging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: apicurio-registry
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: apicurio-registry
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: registry
+          image: apicurio/apicurio-registry-sql:2.6.2.Final
+          ports:
+            - name: http
+              containerPort: 8080
+          # Apicurio 2.x (-sql image) reads REGISTRY_DATASOURCE_*; the SQL
+          # storage kind is implied by the image variant. (The APICURIO_* /
+          # APICURIO_STORAGE_KIND names are 3.x only.)
+          env:
+            - name: REGISTRY_DATASOURCE_URL
+              value: jdbc:postgresql://apicurio-db-rw.messaging.svc:5432/registrydb
+            - name: REGISTRY_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: apicurio-db-app
+                  key: username
+            - name: REGISTRY_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: apicurio-db-app
+                  key: password
+            - name: QUARKUS_HTTP_PORT
+              value: "8080"
+            # OIDC SSO via Keycloak (realm openbank) — same pattern as Grafana.
+            # Anonymous READ stays open so schema consumers (e.g. analytics-sink)
+            # keep working without a token; UI + writes require an SSO login.
+            # The `apicurio-registry` client is public+PKCE (SPA flow), so no secret.
+            - name: AUTH_ENABLED
+              value: "true"
+            - name: QUARKUS_OIDC_TENANT_ENABLED
+              value: "true"
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: https://kc.open-bank.tech/realms/openbank
+            - name: QUARKUS_OIDC_CLIENT_ID
+              value: apicurio-registry
+            - name: REGISTRY_AUTH_ANONYMOUS_READ_ACCESS_ENABLED
+              value: "true"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apicurio-registry
+  namespace: messaging
+  labels:
+    app.kubernetes.io/name: apicurio-registry
+spec:
+  selector:
+    app.kubernetes.io/name: apicurio-registry
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

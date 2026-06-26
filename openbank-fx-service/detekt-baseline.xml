@@ -1,0 +1,29 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+    <CurrentIssues>
+    <ID>LongParameterList:FxService.kt$FxService$( cmd: ConvertCommand, rate: FxRate, toAmountMinorUnits: Long, feeMinorUnits: Long, conversionId: UUID, detail: String?, matchedEntity: String? )</ID>
+    <ID>LongParameterList:FxService.kt$FxService$( cmd: ConvertCommand, rate: FxRate, toAmountMinorUnits: Long, feeMinorUnits: Long, conversionId: UUID, riskLevel: AmlCaseRiskLevel, alertCode: String, detail: String?, matchedEntity: String? )</ID>
+    <ID>LongParameterList:FxService.kt$FxService$( cmd: ConvertCommand, rate: FxRate, toAmountMinorUnits: Long, feeMinorUnits: Long, conversionId: UUID, status: FxConversionStatus, createdAt: Instant, settledAt: Instant? )</ID>
+    <ID>LoopWithTooManyJumpStatements:CnbRateIngestionService.kt$CnbRateIngestionService$for</ID>
+    <ID>MagicNumber:AmlCaseAdapter.kt$AmlCaseAdapter$5_000</ID>
+    <ID>MagicNumber:CnbFixing.kt$CnbFixingRate$8</ID>
+    <ID>MagicNumber:CnbFixingParser.kt$CnbFixingParser$3</ID>
+    <ID>MagicNumber:CnbFixingParser.kt$CnbFixingParser$4</ID>
+    <ID>MagicNumber:CnbFixingParser.kt$CnbFixingParser$5</ID>
+    <ID>MagicNumber:CnbRateProviderAdapter.kt$CnbRateProviderAdapter$8_000</ID>
+    <ID>MagicNumber:CnbResource.kt$CnbResource$404</ID>
+    <ID>MagicNumber:FxOutboxDispatcher.kt$FxOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:FxOutboxDispatcher.kt$FxOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:FxOutboxRepositoryImpl.kt$FxOutboxRepositoryImpl$4000</ID>
+    <ID>MagicNumber:FxResource.kt$FxResource$404</ID>
+    <ID>MagicNumber:SanctionsScreeningAdapter.kt$SanctionsScreeningAdapter$5_000</ID>
+    <ID>MatchingDeclarationName:FxOutboxPort.kt$FxOutboxRepository : OutboxRepository</ID>
+    <ID>SwallowedException:FxOutboxDispatcher.kt$FxOutboxDispatcher$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:CnbRateIngestionScheduler.kt$CnbRateIngestionScheduler$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:FxOutboxDispatcher.kt$FxOutboxDispatcher$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:FxService.kt$FxService$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:SanctionsScreeningAdapter.kt$SanctionsScreeningAdapter$ex: Exception</ID>
+    <ID>TooManyFunctions:FxService.kt$FxService : FxUseCase</ID>
+  </CurrentIssues>
+</SmellBaseline>

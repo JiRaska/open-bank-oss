@@ -1,0 +1,85 @@
+# Mobile RUM dashboard (ADR-0088 §D4). Visualises the Real-User-Monitoring spans
+# the KMP app now emits (Android android-agent + iOS Ktor OTLP exporter) via the
+# hardened ingest gateway → Tempo. RED panels are driven by the Tempo metrics-
+# generator span-metrics (traces_spanmetrics_*, service="openbank-app") — same
+# zero-extra-instrumentation source as the backend RED board (ADR-0082). The raw
+# traces panel uses TraceQL on Tempo so you can open a device span and follow it
+# straight into the backend trace (one trace id, tap→ledger). Crash-free health
+# lives on the companion "Mobile Crashes" board (GlitchTip).
+#
+# Populates once a device with a debug build logs in and navigates (RUM is off by
+# default / OIDC-gated; spans carry only the pseudonymous party_id, dropped at the
+# gateway until O6). If panels are empty, drive some screens on the phone first.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-rum
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  openbank-rum.json: |
+    {
+      "id": null,
+      "uid": "openbank-rum",
+      "title": "OpenBank — Mobile RUM (Real-User Monitoring)",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": { "from": "now-6h", "to": "now" },
+      "templating": {
+        "list": [
+          { "name": "datasource", "type": "datasource", "pluginId": "prometheus", "label": "Metrics", "current": {} },
+          { "name": "app", "type": "constant", "label": "RUM service", "query": "openbank-app", "hide": 2 }
+        ]
+      },
+      "panels": [
+        {
+          "title": "How to read this board",
+          "type": "text",
+          "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+          "options": { "mode": "markdown", "content": "**Mobile RUM** — device-side spans from the KMP app (Android + iOS) through the hardened ingest gateway → Tempo.\n\n- **R/E/D** below come from Tempo span-metrics (`service=openbank-app`), no extra instrumentation.\n- **Screen views** = `screen.<name>` spans emitted per navigation; the active screen span's W3C context flows onto the next API call, so a RUM trace continues **tap → ledger** (open it in the *RUM traces* panel).\n- **Off by default / OIDC-gated**: only debug builds with a logged-in session emit. Only the pseudonymous `party_id` identifies a session (dropped at the gateway until O6). Crash-free health → *Mobile Crashes* board." }
+        },
+        {
+          "title": "Screen-view rate (per screen)",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+          "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "legendFormat": "{{span_name}}", "expr": "sum by (span_name) (rate(traces_spanmetrics_calls_total{service=~\"$app.*\"}[5m]))" } ]
+        },
+        {
+          "title": "App span p95 / p99 latency (D)",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+          "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 10 } } },
+          "targets": [
+            { "refId": "A", "legendFormat": "p95", "expr": "histogram_quantile(0.95, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=~\"$app.*\"}[5m])))" },
+            { "refId": "B", "legendFormat": "p99", "expr": "histogram_quantile(0.99, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=~\"$app.*\"}[5m])))" }
+          ]
+        },
+        {
+          "title": "RUM span error rate (E)",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 7, "w": 12, "x": 0, "y": 12 },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "custom": { "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "legendFormat": "error ratio", "expr": "sum(rate(traces_spanmetrics_calls_total{service=~\"$app.*\",status_code=\"STATUS_CODE_ERROR\"}[5m])) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=~\"$app.*\"}[5m])), 0.001)" } ]
+        },
+        {
+          "title": "Top screens (5m)",
+          "type": "table",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 7, "w": 12, "x": 12, "y": 12 },
+          "targets": [ { "refId": "A", "format": "table", "instant": true, "expr": "topk(15, sum by (span_name) (rate(traces_spanmetrics_calls_total{service=~\"$app.*\"}[5m])))" } ]
+        },
+        {
+          "title": "RUM traces (open one → follow tap → ledger)",
+          "type": "table",
+          "datasource": { "type": "tempo", "uid": "tempo" },
+          "gridPos": { "h": 9, "w": 24, "x": 0, "y": 19 },
+          "targets": [ { "refId": "A", "datasource": { "type": "tempo", "uid": "tempo" }, "queryType": "traceql", "query": "{ resource.service.name=\"openbank-app\" }", "limit": 50, "tableType": "traces" } ]
+        }
+      ]
+    }

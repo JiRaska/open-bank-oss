@@ -1,0 +1,79 @@
+name: Bug report
+description: Report a defect in OpenBank
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do NOT use this for security issues.** Use the Security tab or see SECURITY.md.
+
+  - type: input
+    id: service
+    attributes:
+      label: Affected service / module
+      placeholder: openbank-ledger-service
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      placeholder: main @ abc1234
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear and concise description.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / stack traces
+      description: REDACT all PII, tokens, account numbers, IBAN, PAN before pasting.
+      render: shell
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - "S1 — outage / data loss / financial impact"
+        - "S2 — degraded service, no workaround"
+        - "S3 — degraded service with workaround"
+        - "S4 — minor / cosmetic"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have searched existing issues and this is not a duplicate.
+          required: true
+        - label: I have removed all secrets, PII, and confidential data from this report.
+          required: true

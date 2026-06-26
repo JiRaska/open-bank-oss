@@ -1,0 +1,376 @@
+# Customer-facing edge service (ADR-0065). Sole internet→cluster path for the retail
+# customer app. Validates JWTs from the openbank-customers Keycloak realm, enforces
+# ownership, proxies an allow-listed route set. Deny-by-default.
+# Progressive delivery via Argo Rollout (ADR-0098 Phase 4): canary 10 %→30 % with
+# Prometheus error-rate / p95-latency analysis before full promotion.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: customer-edge
+  namespace: customer-edge
+  labels:
+    app.kubernetes.io/name: customer-edge
+    app.kubernetes.io/part-of: customer-edge
+    openbank.tech/service: "true"
+spec:
+  progressDeadlineSeconds: 600
+  progressDeadlineAbort: true
+  replicas: 1
+  strategy:
+    canary:
+      stableService: customer-edge
+      canaryService: customer-edge-canary
+      analysis:
+        templates:
+          - clusterScope: true
+            templateName: openbank-money-path-canary
+        startingStep: 1
+        args:
+          - name: namespace
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Canary
+      steps:
+        - setWeight: 10
+        - pause:
+            duration: 5m
+        - setWeight: 30
+        - pause:
+            duration: 5m
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: customer-edge
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: customer-edge
+        app.kubernetes.io/part-of: customer-edge
+      annotations:
+        # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-customer-edge-opa-bundle.sh (do not hand-edit).
+        openbank.tech/policy-checksum: "2d28b895db2fe15a"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: customer-edge
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-a6ab925e5
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8128
+            - name: management
+              containerPort: 8085
+          env:
+            # Customer audit trail -> Strimzi bus (EdgeAuditPublisher, best-effort).
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank-customers
+            - name: OIDC_CLIENT_ID
+              value: openbank-edge
+            - name: ACCOUNT_SERVICE_URL
+              value: http://account-service.accounts.svc:8100
+            # ADR-0104 P2 currency pockets: the edge queries product-catalog (accounts ns,
+            # :8104) for which currencies a product permits ("Spravovat měny"). The service
+            # has a baked-in default (CustomerEdgeResource.productCatalogUrl), but that default
+            # is invisible to gen-network-policies.py, which derives the NetworkPolicy allow-list
+            # ONLY from Deployment env URLs — so the edge must be declared here or the ingress
+            # allow is dropped and the call connect-times-out (cf. #1778/#1788). Name is the
+            # canonical SmallRye mapping of openbank.edge.product-catalog-url (no short alias in
+            # application.yaml), so it genuinely overrides the property as well as declaring the edge.
+            - name: OPENBANK_EDGE_PRODUCT_CATALOG_URL
+              value: http://product-catalog.accounts.svc:8104
+            - name: BALANCE_SERVICE_URL
+              value: http://balance-service.balances.svc:8103
+            - name: TRANSACTION_SERVICE_URL
+              value: http://transaction-service.payments.svc:8102
+            - name: DOMESTIC_PAYMENT_SERVICE_URL
+              value: http://domestic-payment.payments.svc:8116
+            - name: SEPA_PAYMENT_SERVICE_URL
+              value: http://sepa-payment.payments.svc:8115
+            - name: SCA_SERVICE_URL
+              value: http://sca-service.sca.svc:8110
+            # Bind management interface to all interfaces so kubelet probes (from node IP)
+            # can reach /q/health/* — default 127.0.0.1 binding blocks external probes.
+            - name: PARTY_SERVICE_URL
+              value: http://party-service.party.svc:8111
+            # ADR-0072/0094 identity unification. The edge resolves applicants against the pid
+            # golden record before party creation; tier-1 RČ dedup is live (pepper seeded, pid
+            # populated by register-at-onboarding dual-write, #1294/#1295/#1296). Flag ON enables
+            # the resolve+dual-write+re-link path (fail-open if pid is unreachable).
+            - name: PID_SERVICE_URL
+              value: http://pid-service.pid.svc:8105
+            - name: IDENTITY_RESOLUTION_ENABLED
+              value: "true"
+            # Onboarding auto-resume (ADR-0072): replay a paused onboarding when pid decides its
+            # four-eyes case (OnboardingResumeService consumes party.events). Redis-backed pending store.
+            - name: IDENTITY_RESUME_ENABLED
+              value: "true"
+            - name: NOTIFICATION_SERVICE_URL
+              value: http://notification-service.notifications.svc:8112
+            - name: STATEMENT_SERVICE_URL
+              value: http://statement-service.statements.svc:8136
+            - name: STANDING_ORDER_SERVICE_URL
+              value: http://standing-order-service.payments.svc:8121
+            # FX, cards, disputes (nearby-pay is in-edge, no upstream URL).
+            - name: FX_SERVICE_URL
+              value: http://fx-service.fx.svc:8119
+            - name: CARD_ISSUANCE_SERVICE_URL
+              value: http://card-issuance-service.payments.svc:8118
+            - name: DISPUTE_SERVICE_URL
+              value: http://dispute-service.dispute.svc:8135
+            - name: QUARKUS_MANAGEMENT_HOST
+              value: "0.0.0.0"
+            # Redis: nearby-pay payment sessions (ADR-0087) + WebAuthn RP challenge/
+            # credential store (ADR-0066 F2). In-namespace ephemeral Redis (redis.yaml).
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://redis.customer-edge.svc:6379
+            # M2M service-account credentials (openbank realm, client_credentials).
+            # Rotate before production; client must have ROLE_OPERATOR in openbank realm.
+            # Name MUST be OPENBANK_UPSTREAM_CLIENT_SECRET so Quarkus maps it to the
+            # dotted property openbank.upstream.client-secret that UpstreamClient reads.
+            # (A name in arbitrary ENV_VAR form is not resolved as a config property.)
+            - name: OPENBANK_UPSTREAM_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: customer-edge-upstream-oidc
+                  key: client-secret
+            # Keycloak Admin client secret (issue #1270 PR3): customer-edge-admin service account
+            # in openbank-customers realm. Name MUST be OPENBANK_EDGE_KEYCLOAK_ADMIN_CLIENT_SECRET
+            # so Quarkus maps it to openbank.edge.keycloak-admin-client-secret.
+            - name: OPENBANK_EDGE_KEYCLOAK_ADMIN_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: customer-edge-admin-oidc
+                  key: client-secret
+            # ADR-0066 F2 (B1) native passkey RP. Names MUST be these ENV forms so Quarkus
+            # maps them to openbank.webauthn.kc-client-secret / .enrollment-ticket-secret.
+            - name: OPENBANK_WEBAUTHN_KC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: customer-edge-webauthn
+                  key: kc-client-secret
+            - name: OPENBANK_WEBAUTHN_ENROLLMENT_TICKET_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: customer-edge-webauthn
+                  key: enrollment-ticket-secret
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: management
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 192Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+        # OPA policy-decision sidecar (ADR-0034 D5). Serves data.openbank.rest.allow on
+        # localhost:8181 — the default opa.url AuthorizeInterceptor queries for every
+        # @Authorize CustomerEdgeResource endpoint. Without it, authz.enforce=true fails
+        # closed (503 on /accounts etc.). Bundle mounted from customer-edge-opa-bundle.
+        - name: opa
+          image: openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            # Bind on the pod network (not 127.0.0.1) so kubelet httpGet probes reach
+            # /health. The image is scratch (no shell), so an exec probe isn't possible;
+            # reachability is fenced by the customer-edge NetworkPolicy. OPA serves only
+            # policy decisions (data.openbank.rest.allow), no secrets.
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            # OPA writes temp files during bundle load — required with readOnlyRootFilesystem.
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: customer-edge-opa-bundle
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: customer-edge
+  namespace: customer-edge
+  labels:
+    app.kubernetes.io/name: customer-edge
+spec:
+  selector:
+    app.kubernetes.io/name: customer-edge
+  ports:
+    - name: http
+      port: 8128
+      targetPort: http
+---
+# Canary service for Argo Rollout progressive delivery (ADR-0098 Phase 4).
+# The Rollout controller rewrites the selector to route only to canary pods;
+# the stable service above continues to serve all non-canary traffic.
+apiVersion: v1
+kind: Service
+metadata:
+  name: customer-edge-canary
+  namespace: customer-edge
+  labels:
+    app.kubernetes.io/name: customer-edge
+spec:
+  selector:
+    app.kubernetes.io/name: customer-edge
+  ports:
+    - name: http
+      port: 8128
+      targetPort: http
+---
+# Public ingress for the customer app. Separate subdomain (customer.open-bank.tech)
+# so TLS cert, rate-limit zones, and WAF rules are independent of the admin/API plane.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: customer-edge
+  namespace: customer-edge
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Mobile TLS pinning (ADR-0066 S3): the app pins this host's SPKI hash, so the
+    # private key MUST survive certificate renewals. cert-manager >=1.18 defaults
+    # rotationPolicy to Always — pin it to Never explicitly; rotating the key requires
+    # a coordinated app-pin update first.
+    cert-manager.io/private-key-rotation-policy: "Never"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Rate-limit: 20 req/s per IP — mobile app in foreground does < 5 req/s normally.
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "3"
+    # NOTE: no `configuration-snippet` here. ingress-nginx classifies snippet
+    # annotations as Critical risk; with the cluster's `annotations-risk-level`
+    # below Critical the controller REJECTS the whole Ingress (no server block,
+    # empty status, so external-dns never publishes the A record → the host does
+    # not resolve). HSTS is already enforced cluster-wide via the controller
+    # ConfigMap default (hsts: true), so it is not lost. X-Robots-Tag is dropped:
+    # this is an auth-gated JSON API, not crawlable content. Re-adding arbitrary
+    # response headers must go through an allowed mechanism (global add-headers
+    # ConfigMap), never a per-Ingress snippet.
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - customer.open-bank.tech
+      secretName: customer-edge-tls
+  rules:
+    - host: customer.open-bank.tech
+      http:
+        paths:
+          - path: /customer/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: customer-edge
+                port:
+                  number: 8128
+---
+# Keycloak Admin client secret for customer-edge to call the Admin REST API
+# (set party_id user attribute after registration — issue #1270 PR3).
+# client: customer-edge-admin in openbank-customers realm, serviceAccountsEnabled=true,
+# manage-users role assigned. Vault path: openbank/customer-edge-admin.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: customer-edge-admin-oidc
+  namespace: customer-edge
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: vault-kv
+  target:
+    name: customer-edge-admin-oidc
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      engineVersion: v2
+      mergePolicy: Merge
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+  data:
+    - secretKey: client-secret
+      remoteRef:
+        key: customer-edge-admin
+        property: client-secret

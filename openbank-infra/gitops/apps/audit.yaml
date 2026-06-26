@@ -1,0 +1,35 @@
+# Audit service: append-only audit log, GDPR-compliant 10-year retention.
+# Consumes domain events from all major Kafka topics and exposes a read API.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: audit
+  namespace: argocd
+  annotations:
+    # Server-Side Diff must run the Kyverno verify-images mutation in its dry-run, otherwise the
+    # digest-pinning annotation it injects reads as a permanent OutOfSync diff (issue #856).
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/audit
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: audit
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

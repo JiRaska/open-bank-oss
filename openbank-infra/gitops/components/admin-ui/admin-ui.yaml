@@ -1,0 +1,679 @@
+# OpenBank Admin UI (Next.js standalone). Milník A: the only thing it does live
+# is the Keycloak login loop. OIDC config is split front/back-channel:
+#   KEYCLOAK_PUBLIC_URL  → issuer + browser redirects (public https sslip host)
+#   KEYCLOAK_URL         → in-cluster discovery/token/refresh (plain http Service)
+# so the Next.js server never calls the self-signed https endpoint — only the
+# browser does. Client secret + NEXTAUTH_SECRET come from the out-of-band
+# `admin-ui-oidc` secret (never in git/state).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin-ui
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: admin-ui
+    app.kubernetes.io/part-of: app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: admin-ui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: admin-ui
+    spec:
+      # Read-only Kubernetes discovery (ADR-0051): the BFF lists Deployments in the
+      # OpenBank domain namespaces to build the System Health / inventory dynamically.
+      serviceAccountName: admin-ui
+      securityContext:
+        runAsNonRoot: true
+        # Image's `openbank` user is UID 100 / GID 101 (alpine adduser -S). The
+        # kubelet can't verify a non-numeric USER against runAsNonRoot, so pin
+        # the numeric ids explicitly.
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: admin-ui
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui:sandbox-3374c102b
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "3000"
+            - name: NEXTAUTH_URL
+              value: https://admin.open-bank.tech
+            - name: KEYCLOAK_PUBLIC_URL
+              value: https://kc.open-bank.tech
+            - name: NEXT_PUBLIC_KEYCLOAK_URL
+              value: https://kc.open-bank.tech
+            - name: KEYCLOAK_URL
+              value: http://keycloak.iam.svc:8080
+            - name: KEYCLOAK_REALM
+              value: openbank
+            - name: KEYCLOAK_CLIENT_ID
+              value: openbank-admin-ui
+            - name: KEYCLOAK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: admin-ui-oidc
+                  key: client-secret
+            - name: NEXTAUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: admin-ui-oidc
+                  key: nextauth-secret
+            # ADR-0051: domain namespaces the discovery route enumerates. Adding a
+            # new domain namespace requires THREE steps (new namespace checklist):
+            #   1. Add it here. 2. Add NS_GROUP entry in src/lib/discovery.ts.
+            #   3. Add a RoleBinding for admin-ui-discovery below.
+            # Adding a service *inside* an existing namespace is fully automatic.
+            - name: OPENBANK_NAMESPACES
+              value: accounts,payments,compliance,identity,open-banking,platform,ledger,balances,audit,sanctions,security-scanner,onboarding,party,sca,statements,customer-edge,kyc,notifications,aml,consent,dispute,fraud,fx,interest,pid,psd2
+            # agent-service (MCP) is NOT reached via the discovery proxy: the
+            # /api/agent/mcp and /api/agent/chat routes resolve it from this env
+            # directly. Unset, they fall back to localhost:8109 (the admin-ui pod
+            # itself) → connection refused → "Agent-service not deployed". Point it
+            # at the in-cluster Service (agent-service lives in the platform ns).
+            - name: AGENT_SERVICE_URL
+              value: http://agent-service.platform.svc:8109/mcp
+            # Fees vertical (ADR-0051): the BFF /api/product-catalog/fees route
+            # proxies the bank-wide fee schedule from product-catalog's in-cluster
+            # Service rather than a hardcoded web-tier list. product-catalog is
+            # co-located in the accounts namespace.
+            - name: PRODUCT_CATALOG_URL
+              value: http://product-catalog.accounts.svc:8104
+            # FinOps live cost (ADR-0054 phase 2): point the costs route at the
+            # admin-ui-cost-report ConfigMap the cost-collector CronJob refreshes
+            # daily (mounted below), so the panel is at most ~1 day stale instead
+            # of frozen at image-build time. Falls back to the baked snapshot if
+            # the file is absent (before the first CronJob run).
+            - name: OPENBANK_COST_REPORT_LIVE
+              value: /config/cost/cost-report.json
+            # Infra CVE scan: point the lifecycle route at the live ConfigMap written
+            # daily by the infra-vuln-scanner CronJob (infra-vuln-scanner.yaml).
+            # Falls back to the baked infra-vulns.json snapshot if the file is absent
+            # (before the first scan run — BFF degrades to "not yet scanned").
+            - name: OPENBANK_INFRA_VULNS
+              value: /config/infra-vulns/infra-vulns.json
+            - name: SECURITY_SCANNER_URL
+              value: http://security-scanner-service.security-scanner.svc:8120
+            # Trace Explorer (/observability/traces): the BFF /api/tempo proxy
+            # reaches Grafana Tempo's query API in-cluster. Absent → the page
+            # degrades calmly to "Tempo unreachable" (graceful-state rule).
+            - name: TEMPO_URL
+              value: http://tempo.observability.svc:3100
+            # Business Observability + DORA/FinOps pages query Prometheus via the
+            # /api/prometheus proxy, which resolves PROMETHEUS_URL (else falls back
+            # to localhost:9090 → "Prometheus Unreachable", every metric reads N/A).
+            - name: PROMETHEUS_URL
+              value: http://kube-prometheus-stack-prometheus.observability.svc:9090
+          # Probes are TCP-only on purpose: every HTTP health route in this app
+          # fans out to backend services that don't exist yet in Milník A, so an
+          # httpGet probe would fail readiness. TCP confirms the standalone Next
+          # server has bound the port.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: next-cache
+              mountPath: /app/.next/cache
+            - name: cost-report
+              mountPath: /config/cost
+              readOnly: true
+            - name: infra-vulns
+              mountPath: /config/infra-vulns
+              readOnly: true
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: next-cache
+          emptyDir: {}
+        # Daily AWS Cost Explorer snapshot written by the cost-collector CronJob
+        # (cost-collector.yaml). optional: tolerate its absence before the first run.
+        - name: cost-report
+          configMap:
+            name: admin-ui-cost-report
+            optional: true
+        # Daily Grype CVE scan written by the infra-vuln-scanner CronJob
+        # (infra-vuln-scanner.yaml). optional=true so the pod starts before the
+        # first scan; BFF degrades to "not yet scanned" gracefully.
+        - name: infra-vulns
+          configMap:
+            name: infra-vulns
+            optional: true
+---
+# Least-privilege identity for the BFF's Kubernetes discovery (ADR-0051).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: admin-ui
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: admin-ui
+---
+# Read-only role definition: list Deployments/Services/Endpoints so the System
+# Health + inventory screens reflect live state. No secrets, no writes, no exec.
+# Defined as a ClusterRole only so it can be reused by the per-namespace
+# RoleBindings below — it is NEVER granted via a ClusterRoleBinding, so it confers
+# no access until a RoleBinding scopes it to a specific namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: admin-ui-discovery
+  labels:
+    app.kubernetes.io/name: admin-ui
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["rollouts"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+---
+# Namespace-scoped read access (ADR-0051, least-privilege). The discovery
+# ClusterRole is *bound* only inside the six OpenBank domain namespaces via
+# per-namespace RoleBindings — deliberately NOT a single ClusterRoleBinding. A
+# ClusterRoleBinding would grant list/get/watch on Deployments/Services/Endpoints
+# in EVERY namespace in the cluster; binding per namespace makes the RBAC layer
+# (not just the OPENBANK_NAMESPACES app filter) the authoritative boundary, so a
+# compromised admin-ui SA cannot enumerate workloads outside its domain. Adding a
+# domain namespace is therefore a reviewed two-line change: a new RoleBinding here
+# AND a bump to OPENBANK_NAMESPACES above.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: accounts
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: compliance
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: identity
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: open-banking
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: ledger
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: balances
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: audit
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: sanctions
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: security-scanner
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: onboarding
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: party
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: sca
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: statements
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: customer-edge
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: kyc
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: notifications
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: aml
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: consent
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: dispute
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: fraud
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: fx
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: interest
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: pid
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: psd2
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: admin-ui
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: admin-ui
+spec:
+  selector:
+    app.kubernetes.io/name: admin-ui
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: admin-ui
+  namespace: admin-ui
+  annotations:
+    # Browser-trusted Let's Encrypt via DNS-01; external-dns publishes this
+    # host's A/ALIAS record. On letsencrypt-prod: open-bank.tech resolves and the
+    # staging cert proved the DNS-01 flow, so this serves a browser-trusted leaf.
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Security headers applied at the nginx edge (belt-and-suspenders on top of
+    # Next.js headers()). HSTS with preload readies the domain for the preload list.
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "Strict-Transport-Security: max-age=63072000; includeSubDomains; preload";
+      more_set_headers "X-Frame-Options: SAMEORIGIN";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - admin.open-bank.tech
+      secretName: admin-ui-tls
+  rules:
+    - host: admin.open-bank.tech
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: admin-ui
+                port:
+                  number: 3000

@@ -1,0 +1,132 @@
+{
+  "title": "OpenBank — Service Detail",
+  "uid": "openbank-service-detail",
+  "tags": ["openbank"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "refresh": "15s",
+  "time": { "from": "now-30m", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "type": "query",
+        "label": "Service",
+        "datasource": "Prometheus",
+        "query": "label_values(up, job)",
+        "current": {},
+        "refresh": 2,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Status",
+      "gridPos": {"h":4,"w":3,"x":0,"y":0},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"},
+      "fieldConfig": {"defaults": {"mappings": [{"type":"value","options":{"1":{"text":"UP","color":"green"},"0":{"text":"DOWN","color":"red"}}}]}},
+      "targets": [{"expr": "up{job='$service'}", "datasource": "Prometheus"}]
+    },
+    {
+      "id": 2, "type": "stat", "title": "RPS",
+      "gridPos": {"h":4,"w":3,"x":3,"y":0},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value", "graphMode": "area"},
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "targets": [{"expr": "sum(rate(http_server_requests_seconds_count{job='$service'}[1m]))", "datasource": "Prometheus"}]
+    },
+    {
+      "id": 3, "type": "stat", "title": "P99 Latency",
+      "gridPos": {"h":4,"w":3,"x":6,"y":0},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"},
+      "fieldConfig": {"defaults": {"unit": "s", "thresholds": {"steps": [{"color":"green","value":0},{"color":"yellow","value":0.5},{"color":"red","value":2}]}}},
+      "targets": [{"expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{job='$service'}[5m])) by (le))", "datasource": "Prometheus"}]
+    },
+    {
+      "id": 4, "type": "stat", "title": "Error Rate",
+      "gridPos": {"h":4,"w":3,"x":9,"y":0},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"},
+      "fieldConfig": {"defaults": {"unit": "percentunit", "thresholds": {"steps": [{"color":"green","value":0},{"color":"yellow","value":0.01},{"color":"red","value":0.05}]}}},
+      "targets": [{"expr": "sum(rate(http_server_requests_seconds_count{job='$service',outcome='SERVER_ERROR'}[5m])) / sum(rate(http_server_requests_seconds_count{job='$service'}[5m]))", "datasource": "Prometheus"}]
+    },
+    {
+      "id": 5, "type": "stat", "title": "Heap Used",
+      "gridPos": {"h":4,"w":3,"x":12,"y":0},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"},
+      "fieldConfig": {"defaults": {"unit": "bytes", "thresholds": {"steps": [{"color":"green","value":0},{"color":"yellow","value":134217728},{"color":"red","value":167772160}]}}},
+      "targets": [{"expr": "jvm_memory_used_bytes{job='$service',area='heap'}", "datasource": "Prometheus"}]
+    },
+    {
+      "id": 6, "type": "stat", "title": "Threads",
+      "gridPos": {"h":4,"w":3,"x":15,"y":0},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value"},
+      "fieldConfig": {"defaults": {"unit": "short"}},
+      "targets": [{"expr": "jvm_threads_live_threads{job='$service'}", "datasource": "Prometheus"}]
+    },
+    {
+      "id": 7, "type": "stat", "title": "DB Pool Active",
+      "gridPos": {"h":4,"w":3,"x":18,"y":0},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value"},
+      "fieldConfig": {"defaults": {"unit": "short"}},
+      "targets": [{"expr": "agroal_active_count{job='$service'}", "datasource": "Prometheus"}]
+    },
+    {
+      "id": 8, "type": "stat", "title": "GC Pause (avg)",
+      "gridPos": {"h":4,"w":3,"x":21,"y":0},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"},
+      "fieldConfig": {"defaults": {"unit": "ms", "thresholds": {"steps": [{"color":"green","value":0},{"color":"yellow","value":100},{"color":"red","value":500}]}}},
+      "targets": [{"expr": "rate(jvm_gc_pause_seconds_sum{job='$service'}[5m]) / rate(jvm_gc_pause_seconds_count{job='$service'}[5m]) * 1000", "datasource": "Prometheus"}]
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "Request Rate by Endpoint",
+      "gridPos": {"h":7,"w":12,"x":0,"y":4},
+      "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "table", "placement": "right", "calcs": ["lastNotNull","mean"]}},
+      "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"lineWidth": 1}}},
+      "targets": [
+        {"expr": "sum(rate(http_server_requests_seconds_count{job='$service'}[1m])) by (uri, method)", "legendFormat": "{{method}} {{uri}}", "datasource": "Prometheus"}
+      ]
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "Latency Percentiles",
+      "gridPos": {"h":7,"w":12,"x":12,"y":4},
+      "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "list", "placement": "bottom"}},
+      "fieldConfig": {"defaults": {"unit": "s", "custom": {"lineWidth": 2}}},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum(rate(http_server_requests_seconds_bucket{job='$service'}[5m])) by (le))", "legendFormat": "p50", "datasource": "Prometheus"},
+        {"expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job='$service'}[5m])) by (le))", "legendFormat": "p95", "datasource": "Prometheus"},
+        {"expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{job='$service'}[5m])) by (le))", "legendFormat": "p99", "datasource": "Prometheus"}
+      ]
+    },
+    {
+      "id": 20, "type": "timeseries", "title": "JVM Heap",
+      "gridPos": {"h":6,"w":8,"x":0,"y":11},
+      "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "list", "placement": "bottom"}},
+      "fieldConfig": {"defaults": {"unit": "bytes", "custom": {"lineWidth": 1}}},
+      "targets": [
+        {"expr": "jvm_memory_used_bytes{job='$service',area='heap'}", "legendFormat": "Used", "datasource": "Prometheus"},
+        {"expr": "jvm_memory_committed_bytes{job='$service',area='heap'}", "legendFormat": "Committed", "datasource": "Prometheus"},
+        {"expr": "jvm_memory_max_bytes{job='$service',area='heap'}", "legendFormat": "Max", "datasource": "Prometheus"}
+      ]
+    },
+    {
+      "id": 21, "type": "timeseries", "title": "JVM GC",
+      "gridPos": {"h":6,"w":8,"x":8,"y":11},
+      "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "list", "placement": "bottom"}},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"lineWidth": 1}}},
+      "targets": [
+        {"expr": "rate(jvm_gc_pause_seconds_count{job='$service'}[1m])", "legendFormat": "GC/s", "datasource": "Prometheus"}
+      ]
+    },
+    {
+      "id": 22, "type": "timeseries", "title": "DB Connection Pool",
+      "gridPos": {"h":6,"w":8,"x":16,"y":11},
+      "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "list", "placement": "bottom"}},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"lineWidth": 1}}},
+      "targets": [
+        {"expr": "agroal_active_count{job='$service'}", "legendFormat": "Active", "datasource": "Prometheus"},
+        {"expr": "agroal_available_count{job='$service'}", "legendFormat": "Available", "datasource": "Prometheus"},
+        {"expr": "agroal_max_used_count{job='$service'}", "legendFormat": "Max Used", "datasource": "Prometheus"}
+      ]
+    }
+  ]
+}

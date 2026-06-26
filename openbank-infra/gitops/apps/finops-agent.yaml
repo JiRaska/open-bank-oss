@@ -1,0 +1,29 @@
+# finops-agent: FinOps cost analysis and anomaly detection Temporal workflow service (ADR-0112 P3). Namespace: finops-agent.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: finops-agent
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/finops-agent
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: finops-agent
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false

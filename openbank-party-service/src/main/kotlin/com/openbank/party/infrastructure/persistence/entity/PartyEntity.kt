@@ -1,0 +1,132 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.party.infrastructure.persistence.entity
+
+import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntity
+import jakarta.persistence.*
+import java.time.Instant
+import java.util.UUID
+
+@Entity
+@Table(name = "parties")
+class PartyEntity : PanacheEntity() {
+    @Column(name = "party_id", nullable = false, unique = true)
+    lateinit var partyId: UUID
+
+    @Column(name = "party_type", nullable = false)
+    lateinit var partyType: String
+
+    @Column(name = "status", nullable = false)
+    lateinit var status: String
+
+    @Column(name = "legal_name", nullable = false)
+    lateinit var legalName: String
+
+    @Column(name = "trading_name")
+    var tradingName: String? = null
+
+    @Column(name = "date_of_birth")
+    var dateOfBirth: String? = null
+
+    @Column(name = "nationality")
+    var nationality: String? = null
+
+    @Column(name = "tax_id")
+    var taxId: String? = null
+
+    @Column(name = "registration_number")
+    var registrationNumber: String? = null
+
+    @Column(name = "email", nullable = false, unique = true)
+    lateinit var email: String
+
+    @Column(name = "phone")
+    var phone: String? = null
+
+    @Column(name = "address_line1")
+    var addressLine1: String? = null
+
+    @Column(name = "address_line2")
+    var addressLine2: String? = null
+
+    @Column(name = "address_city")
+    var addressCity: String? = null
+
+    @Column(name = "address_postal_code")
+    var addressPostalCode: String? = null
+
+    @Column(name = "address_country_code")
+    var addressCountryCode: String? = null
+
+    @Column(name = "kyc_status", nullable = false)
+    lateinit var kycStatus: String
+
+    @Column(name = "aml_status", nullable = false)
+    lateinit var amlStatus: String
+
+    @Column(name = "created_at", nullable = false)
+    lateinit var createdAt: Instant
+
+    @Column(name = "updated_at", nullable = false)
+    lateinit var updatedAt: Instant
+
+    @Column(name = "keycloak_sub", unique = true)
+    var keycloakSub: String? = null
+
+    /** ADR-0072: HMAC-SHA256(pepper, canonical_rc) — null for non-Czech or no RČ. */
+    @Column(name = "rc_blind_index", unique = true, length = 64)
+    var rcBlindIndex: String? = null
+
+    /** Which pepper key version produced [rcBlindIndex]; used during pepper rotation. */
+    @Column(name = "rc_index_key_version")
+    var rcIndexKeyVersion: Int? = null
+}
+
+@Entity
+@Table(name = "party_documents")
+class PartyDocumentEntity : PanacheEntity() {
+    @Column(name = "document_id", nullable = false, unique = true)
+    lateinit var documentId: UUID
+
+    @Column(name = "party_id", nullable = false)
+    lateinit var partyId: UUID
+
+    @Column(name = "document_type", nullable = false)
+    lateinit var documentType: String
+
+    @Column(name = "document_number", nullable = false)
+    lateinit var documentNumber: String
+
+    @Column(name = "issuing_country", nullable = false)
+    lateinit var issuingCountry: String
+
+    @Column(name = "expiry_date")
+    var expiryDate: String? = null
+
+    @Column(name = "verified_at")
+    var verifiedAt: Instant? = null
+
+    @Column(name = "created_at", nullable = false)
+    lateinit var createdAt: Instant
+}
+
+@Entity
+@Table(name = "party_document_files")
+class PartyDocumentFileEntity {
+    @Id
+    lateinit var id: UUID
+    @Column(name = "party_id", nullable = false)
+    lateinit var partyId: UUID
+    @Column(name = "document_type", nullable = false)
+    lateinit var documentType: String
+    @Column(name = "file_name")
+    var fileName: String? = null
+    @Column(name = "mime_type", nullable = false)
+    lateinit var mimeType: String
+    @Column(name = "content", nullable = false, columnDefinition = "BYTEA")
+    lateinit var content: ByteArray
+    @Column(name = "uploaded_at", nullable = false)
+    lateinit var uploadedAt: java.time.Instant
+}

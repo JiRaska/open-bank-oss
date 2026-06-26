@@ -1,0 +1,290 @@
+# Keycloak (identity provider) for Milník A — the login loop. Runs in `iam`
+# (ADR-0037: identity domain = namespace), backed by the single-owner CNPG
+# `keycloak-db`. DB credentials come from the CNPG-generated `keycloak-db-app`
+# secret; the bootstrap admin and the realm-import JSON come from the
+# out-of-band `keycloak-bootstrap` secret (created by hand, never in git/state).
+#
+# Hostname split (the key to TLS-without-trust-pain): KC_HOSTNAME pins the
+# public front-channel URL (issuer + browser redirects) to the sslip host;
+# KC_HOSTNAME_BACKCHANNEL_DYNAMIC lets in-cluster callers (admin-ui server)
+# discover back-channel endpoints at the internal http Service URL. So the only
+# leg that ever touches the self-signed cert is the browser — admin-ui's server
+# talks plain http in-cluster. KC_PROXY_HEADERS=xforwarded because ingress-nginx
+# terminates TLS and forwards over http.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: iam
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: iam
+spec:
+  replicas: 1
+  # Single replica, but surge on rollout so the running pod keeps serving the
+  # login loop until the new one is Ready (maxUnavailable: 0) — no 503 window on
+  # image/config rolls. True HA (2 replicas) is a separate, costlier change.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: keycloak
+      annotations:
+        # Bumped by gen-theme-configmap.sh so a theme/PNG change rolls the pod
+        # (subPath ConfigMap mounts don't hot-update).
+        openbank.dev/theme-checksum: "a3f57e76dc8d7abb"
+        # Single-replica IdP: forbid Karpenter from voluntarily evicting this pod
+        # for consolidation ("Evicted pod: Underutilized"). Even with the optimized
+        # image (~10s start) a consolidation still lands a cold pod on a possibly
+        # new node, so keep Karpenter from draining it for bin-packing/expiry;
+        # involuntary disruption (hardware, manual drain) can still move it. Real
+        # HA (2 replicas + clustered Infinispan) is the proper fix, out of scope here.
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: keycloak
+          # Pre-optimized image (openbank-infra/docker/keycloak/Dockerfile): kc.sh
+          # build is baked in, so `start --optimized` skips the ~43s on-start
+          # augmentation — cold start ~10s instead of ~70s. Build-time options
+          # (KC_DB, KC_HEALTH_ENABLED, KC_METRICS_ENABLED, KC_CACHE, KC_FEATURES)
+          # live in the Dockerfile now and MUST NOT be re-set as env below, or
+          # `--optimized` aborts on a build-option mismatch. Bump = rebuild via
+          # openbank-infra/scripts/build-push-keycloak.sh, then bump this tag.
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-keycloak:26.6.3-optimized
+          args: ["start", "--optimized", "--import-realm"]
+          env:
+            # --- front/back-channel hostname split ---
+            - name: KC_HOSTNAME
+              value: https://kc.open-bank.tech
+            - name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC
+              value: "true"
+            - name: KC_PROXY_HEADERS
+              value: xforwarded
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            # --- datasource (CNPG keycloak-db); KC_DB driver is baked (build-time) ---
+            - name: KC_DB_URL
+              value: jdbc:postgresql://keycloak-db-rw.iam.svc:5432/keycloak
+            - name: KC_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-db-app
+                  key: username
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-db-app
+                  key: password
+            # --- bootstrap admin (out-of-band secret) ---
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-bootstrap
+                  key: admin-username
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-bootstrap
+                  key: admin-password
+            # KC_HEALTH_ENABLED, KC_CACHE=local, KC_METRICS_ENABLED and KC_FEATURES
+            # (token-exchange, admin-fine-grained-authz:v1 — mobile/SCA, ADR-0021/0065)
+            # are BUILD-TIME options, now baked into the optimized image
+            # (openbank-infra/docker/keycloak/Dockerfile) — see its header for the
+            # full rationale. Local cache: single-node sandbox (distributed
+            # Infinispan would keep /health/ready DOWN at 0/1). Metrics stay on :9000
+            # for the Auth & SCA dashboard (ADR-0082). They are intentionally NOT env
+            # here: under --optimized, re-declaring a differing build option aborts
+            # startup. KC_FEATURES had drifted out of gitops on the live pod; baking
+            # it re-declares the feature set as code.
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: management
+              containerPort: 9000
+          volumeMounts:
+            # Realm import dir: Keycloak reads every *.json here on --import-realm.
+            - name: realm-import
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+            # Custom "openbank" login theme (vault image + "OpenBank Framework",
+            # no Keycloak branding). Packed in the keycloak-theme-openbank
+            # ConfigMap; mounted file-by-file via subPath so the rest of
+            # /opt/keycloak/themes (stock themes) stays intact. loginTheme is set
+            # on the realm (see realm-template.json).
+            - name: theme-openbank
+              mountPath: /opt/keycloak/themes/openbank/login/theme.properties
+              subPath: theme.properties
+              readOnly: true
+            - name: theme-openbank
+              mountPath: /opt/keycloak/themes/openbank/login/resources/css/openbank.css
+              subPath: openbank.css
+              readOnly: true
+            - name: theme-openbank
+              mountPath: /opt/keycloak/themes/openbank/login/messages/messages_en.properties
+              subPath: messages_en.properties
+              readOnly: true
+            - name: theme-openbank
+              mountPath: /opt/keycloak/themes/openbank/login/resources/img/openbank-vault.png
+              subPath: openbank-vault.png
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: management
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: management
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        # projected: combine both realm JSONs into one /opt/keycloak/data/import dir so
+        # Keycloak's --import-realm picks up both *.json files on cold start (ADR-0065).
+        - name: realm-import
+          projected:
+            sources:
+              - secret:
+                  name: keycloak-realm-import
+              - secret:
+                  name: keycloak-customers-realm-import
+        - name: theme-openbank
+          configMap:
+            name: keycloak-theme-openbank
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: iam
+  labels:
+    app.kubernetes.io/name: keycloak
+spec:
+  selector:
+    app.kubernetes.io/name: keycloak
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+# Public edge for the browser leg only. cert-manager mints a browser-trusted
+# Let's Encrypt leaf via DNS-01; external-dns publishes the A/ALIAS record for
+# this host from the rule below. On letsencrypt-prod: open-bank.tech resolves and
+# the staging cert proved the DNS-01 flow, so this serves a browser-trusted leaf.
+# ssl-redirect on: all Keycloak traffic is https at the edge.
+#
+# Admin REST API blocking: /admin/* is blocked at the nginx edge (403). The
+# Keycloak admin REST API (/admin/realms/, /admin/serverinfo, etc.) has no
+# business being reachable from the internet — it is used only by CI/CD terraform
+# provisioning and one-off ops, both of which run via kubectl port-forward in-cluster.
+# The admin web console (/admin/master/console/) is also blocked; use port-forward:
+#   kubectl -n iam port-forward svc/keycloak 8080:8080
+# then open http://localhost:8080/admin/ in the browser.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keycloak
+  namespace: iam
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Security headers: HSTS with preload (2-year max-age per preload list requirement),
+    # Permissions-Policy, and hide server tokens.
+    # Mobile TLS pinning (ADR-0066 S3): the app pins this host's SPKI hash, so the
+    # private key MUST survive certificate renewals. cert-manager >=1.18 defaults
+    # rotationPolicy to Always — pin it to Never explicitly; rotating the key requires
+    # a coordinated app-pin update first.
+    cert-manager.io/private-key-rotation-policy: "Never"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "Strict-Transport-Security: max-age=63072000; includeSubDomains; preload";
+      more_set_headers "Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()";
+      more_set_headers "X-Robots-Tag: noindex, nofollow";
+    # Block the Keycloak Admin REST API and admin console from the public internet.
+    # All admin operations must go through kubectl port-forward (see comment above).
+    nginx.ingress.kubernetes.io/server-snippet: |
+      location ~* ^/admin {
+        return 403 '{"error":"Forbidden"}';
+        add_header Content-Type application/json;
+      }
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - kc.open-bank.tech
+      secretName: keycloak-tls
+  rules:
+    - host: kc.open-bank.tech
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: 8080
+---
+# Block Keycloak admin paths from the public internet.
+# /auth/admin and /realms/master are operator-only surfaces; return 403
+# to any request reaching the public ingress on these prefixes.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keycloak-admin-block
+  namespace: iam
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/server-snippet: |
+      location ~* ^/(auth/admin|realms/master) {
+        deny all;
+        return 403;
+      }
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - kc.open-bank.tech
+      secretName: keycloak-tls
+  rules:
+    - host: kc.open-bank.tech
+      http:
+        paths:
+          - path: /auth/admin
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: 8080
+          - path: /realms/master
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: 8080

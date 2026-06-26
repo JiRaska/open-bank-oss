@@ -1,0 +1,1 @@
+ALTER TABLE swift_messages ADD COLUMN version BIGINT NOT NULL DEFAULT 0;

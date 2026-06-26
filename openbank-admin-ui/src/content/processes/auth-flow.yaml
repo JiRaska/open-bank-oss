@@ -1,0 +1,198 @@
+# Auth Flow — the flagship "one process, three lenses" manifest (ADR-0019/0029).
+# Authored once here; rendered by ProcessView via the ProcessSchema contract.
+# REALITY vs TARGET: dev-sandbox truth next to the production-compliant target.
+# `why` lines frame gaps as maturity/roadmap — never exploitable specifics.
+title: "Authentication Flow"
+subtitle: "Jeden proces, tři čočky: příběh, tokeny, technologie · realita dev sandboxu vs. produkčně-compliant cíl"
+icon: "ShieldCheck"
+
+# --- Lens 1: Story ---------------------------------------------------------
+story:
+  - text: "Klikneš „Přihlásit\" v OpenBank konzoli."
+    status: live
+  - text: "Přesměrování na bankovní login (Keycloak, brandovaný theme)."
+    status: live
+  - text: "Zadáš jméno a heslo."
+    status: live
+  - text: "Potvrdíš druhý faktor (mobil / bezpečnostní klíč)."
+    status: planned
+  - text: "U platby ještě podepíšeš „1 500 Kč → Jan Novák\" (dynamické svázání)."
+    status: planned
+  - text: "Jsi uvnitř — konzole tě po dobu relace bezpečně pamatuje."
+    status: live
+
+# --- Lens 2: Token (Mermaid sequence diagrams + JWT anatomy) ---------------
+token:
+  reality: |
+    sequenceDiagram
+        autonumber
+        participant U as Browser
+        participant N as admin-ui (NextAuth BFF)
+        participant K as Keycloak (realm openbank)
+        participant S as Backend (Quarkus OIDC)
+        U->>N: GET /login
+        N->>K: Authorization Code + PKCE
+        U->>K: username + password
+        K-->>N: code, then token exchange
+        Note over N,K: access (5 min) + refresh + id token
+        N->>N: store in encrypted JWE cookie
+        U->>N: GET /api/svc/account-service/...
+        N->>S: forward + Bearer access_token
+        S->>K: validate signature via JWKS
+        S-->>U: data
+  target: |
+    sequenceDiagram
+        autonumber
+        participant U as Browser
+        participant N as admin-ui (NextAuth BFF)
+        participant K as Keycloak
+        participant M as Second factor
+        participant S as Backend
+        U->>N: GET /login
+        N->>K: Authorization Code + PKCE
+        U->>K: username + password
+        K->>M: require second factor (planned)
+        M-->>K: verified (planned)
+        Note over K: payment: dynamic linking, amount + payee bound (planned)
+        K-->>N: access (5 min) + refresh + id token
+        N->>N: JWE cookie, TTL aligned with Keycloak
+        U->>N: GET /api/svc/...
+        N->>S: forward + Bearer
+        S->>K: JWKS validation
+        Note over S: OPA authz, enforce mode (planned)
+        S-->>U: data + audit event
+  claims:
+    - claim: "sub"
+      desc: "subjekt (operátor / uživatel)"
+    - claim: "realm_access.roles"
+      desc: "role; UI čte jen ROLE_*"
+    - claim: "exp"
+      desc: "platnost +300 s (5 min)"
+    - claim: "aud / azp"
+      desc: "pro koho je token vydán"
+
+# --- Lens 3: Technology (component overlay) --------------------------------
+tech:
+  - title: "Browser / Edge"
+    accent: "#0ea5e9"
+    nodes:
+      - id: browser
+        name: "Browser"
+        status: live
+        desc: "Operátorský prohlížeč. Mluví výhradně se same-origin admin-ui; nikdy přímo s backendem."
+      - id: ingress
+        name: "Ingress + TLS termination"
+        status: planned
+        desc: "Veřejný HTTPS vstup s TLS terminací (ALB/ingress + ACM). Roadmapa infra vrstvy; dev sandbox běží in-cluster."
+  - title: "Identita"
+    accent: "#7c3aed"
+    nodes:
+      - id: keycloak
+        name: "Keycloak (realm openbank)"
+        status: live
+        desc: "OIDC poskytovatel identity. Brandovaný login theme. Authorization Code + PKCE, confidential client, brute-force ochrana."
+      - id: mfa
+        name: "Druhý faktor (OTP / WebAuthn)"
+        status: planned
+        desc: "Silná autentizace — možnostní/inherenční faktor. Roadmapa PSU rolloutu (PSD2 SCA)."
+      - id: vault
+        name: "OpenBao + ESO"
+        status: live
+        desc: "Správa secrets a rotace klíčů. OpenBao (LF/MPL fork Vaultu) + External Secrets Operator nasazeny, KMS auto-unseal (ADR-0027, runbook 0005)."
+      - id: kcdb
+        name: "Keycloak DB"
+        status: live
+        desc: "Server-side session store Keycloaku (CloudNativePG)."
+  - title: "BFF / Aplikace"
+    accent: "#2563eb"
+    nodes:
+      - id: nextauth
+        name: "admin-ui / NextAuth"
+        status: live
+        desc: "Backend-for-frontend. Session = šifrovaná JWE cookie. Server-side refresh proti Keycloaku, když access token vyprší."
+      - id: proxy
+        name: "/api/svc proxy"
+        status: live
+        desc: "Same-origin proxy: přiloží operátorův Bearer a forwardne in-cluster. Drží backendy interní a OIDC-enforced."
+  - title: "Backend / Authz"
+    accent: "#059669"
+    nodes:
+      - id: opa
+        name: "OPA sidecar (enforce)"
+        status: partial
+        desc: "Jednotná autorizace MCP+REST (ADR-0034). Dnes advisory; cíl enforce."
+      - id: services
+        name: "Backend services (Quarkus OIDC)"
+        status: live
+        desc: "Validují JWT proti realmu přes JWKS. account-service nasazen end-to-end."
+      - id: audit
+        name: "Audit trail (tamper-evident)"
+        status: partial
+        desc: "audit-service existuje; prokazatelné napojení auth událostí (login/refresh/consent) je v roadmapě."
+      - id: valkey
+        name: "Valkey / Redis"
+        status: live
+        desc: "Pozn.: NENÍ auth/session store. Je to downstream cache backendů (idempotency, rate-limit)."
+
+# --- Compliance scorecard (weighted production-target maturity) -------------
+controls:
+  - name: "Silná autentizace (SCA)"
+    regulation: "PSD2 RTS Art. 4–9"
+    pct: 15
+    weight: 15
+    status: planned
+    why: "Dev sandbox používá heslo + brute-force ochranu; druhý faktor (OTP/WebAuthn) je na roadmapě PSU rolloutu."
+  - name: "Dynamické svázání platby"
+    regulation: "PSD2 RTS Art. 5"
+    pct: 0
+    weight: 10
+    status: planned
+    why: "Podpis transakce (svázání částky a příjemce s autentizací) je plánován spolu s platební SCA."
+  - name: "Token & session management"
+    regulation: "EBA ICT GL, RTS Art. 22"
+    pct: 60
+    weight: 12
+    status: partial
+    why: "5min access token a confidential client jsou live; sladění TTL a revokace při odhlášení dořešit."
+  - name: "Transport security / TLS"
+    regulation: "EBA GL, eIDAS QWAC"
+    pct: 10
+    weight: 12
+    status: planned
+    why: "TLS terminace na edge (ingress + ACM) je roadmapa infra vrstvy; dev sandbox je záměrně mimo prod scope."
+  - name: "Správa secrets"
+    regulation: "DORA, EBA"
+    pct: 20
+    weight: 8
+    status: planned
+    why: "OpenBao + External Secrets Operator (LF/MPL fork Vaultu) jsou nasazené (ADR-0027, runbook 0005)."
+  - name: "Audit auth událostí"
+    regulation: "EBA GL, GDPR, AML"
+    pct: 40
+    weight: 10
+    status: partial
+    why: "audit-service je live; tamper-evident napojení login/refresh/consent událostí dořešit."
+  - name: "IdP hardening (produkční mód)"
+    regulation: "DORA Art. 11–12"
+    pct: 15
+    weight: 8
+    status: partial
+    why: "Keycloak je live; produkční mód (prod cache, strict hostname, HTTPS) je roadmapa infra vrstvy."
+  - name: "Consent & TPP (PSD2)"
+    regulation: "PSD2 RTS, consent-service"
+    pct: 30
+    weight: 10
+    status: partial
+    why: "consent-service je scaffold; scope-based consent a 90denní expirace v roadmapě."
+  - name: "Segregace přístupu / least-privilege"
+    regulation: "EBA GL, ADR-0034"
+    pct: 50
+    weight: 8
+    status: partial
+    why: "RBAC (ROLE_*) je live; OPA přechází z advisory na enforce."
+  - name: "Brute-force / anomálie"
+    regulation: "EBA GL"
+    pct: 50
+    weight: 7
+    status: partial
+    why: "Brute-force ochrana je live; adaptivní/geo detekce v roadmapě."

@@ -1,0 +1,44 @@
+# Public edge for the Pact Broker (ADR-0092). The CI runner pool (openbank-build)
+# is MIXED — in-cluster ARC pods AND external runners (Hetzner VMs, Mac mini) — so
+# the broker cannot be reached over cluster DNS alone; it needs a stable URL every
+# runner can hit for publish / provider-verify / can-i-deploy. cert-manager mints a
+# browser-trusted Let's Encrypt leaf; external-dns publishes the record from the
+# rule below.
+#
+# Security posture: this is a deliberate, documented exception to ADR-0056's
+# "no public pre-auth surface" default (ADR-0092). It is acceptable because the
+# broker is gated by its own HTTP Basic auth (PACT_BROKER_BASIC_AUTH_*, synced from
+# OpenBao) on every path except the DB-less /diagnostic/status/heartbeat, the
+# payload is API contracts (not customer data), and it is a machine/CI endpoint.
+# ssl-redirect forces https at the edge; KC-style security headers are set too.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pact-broker
+  namespace: pact-broker
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "Strict-Transport-Security: max-age=63072000; includeSubDomains; preload";
+      more_set_headers "X-Frame-Options: SAMEORIGIN";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+      more_set_headers "X-Robots-Tag: noindex, nofollow";
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - pact.open-bank.tech
+      secretName: pact-broker-tls
+  rules:
+    - host: pact.open-bank.tech
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pact-broker
+                port:
+                  number: 9292

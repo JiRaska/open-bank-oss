@@ -1,0 +1,11 @@
+# Admin console (Next.js) — app plane. Own namespace per ADR-0037. PSS
+# restricted: the image already runs as the non-root `openbank` user.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: admin-ui
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

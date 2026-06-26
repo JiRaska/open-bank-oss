@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="src/main/kotlin/com/openbank/audit/application/AuditConsumer.kt">
+        <error line="14" column="1" source="standard:no-unused-imports" />
+        <error line="23" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="49" column="43" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/audit/application/port/out/AuditOutboxPort.kt">
+        <error line="22" column="43" source="standard:trailing-comma-on-declaration-site" />
+        <error line="36" column="27" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/audit/domain/model/AuditEntry.kt">
+        <error line="21" column="28" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/audit/infrastructure/kafka/KafkaAuditOutboxEventPublisher.kt">
+        <error line="15" column="86" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/audit/infrastructure/outbox/AuditOutboxDispatcher.kt">
+        <error line="19" column="58" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/audit/infrastructure/persistence/AuditRepository.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="14" column="1" source="standard:no-wildcard-imports" />
+        <error line="21" column="64" source="standard:annotation" />
+        <error line="22" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="22" column="51" source="standard:annotation" />
+        <error line="23" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="23" column="55" source="standard:annotation" />
+        <error line="24" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="24" column="53" source="standard:annotation" />
+        <error line="25" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="25" column="31" source="standard:annotation" />
+        <error line="26" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="26" column="33" source="standard:annotation" />
+        <error line="27" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="27" column="75" source="standard:annotation" />
+        <error line="28" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="28" column="55" source="standard:annotation" />
+        <error line="29" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="29" column="37" source="standard:annotation" />
+        <error line="30" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="30" column="52" source="standard:annotation" />
+        <error line="31" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="31" column="52" source="standard:annotation" />
+        <error line="34" column="32" source="standard:annotation" />
+        <error line="35" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="35" column="34" source="standard:annotation" />
+        <error line="54" column="39" source="standard:statement-wrapping" />
+        <error line="55" column="56" source="standard:statement-wrapping" />
+        <error line="56" column="44" source="standard:statement-wrapping" />
+        <error line="57" column="44" source="standard:statement-wrapping" />
+        <error line="59" column="50" source="standard:statement-wrapping" />
+        <error line="83" column="45" source="standard:statement-wrapping" />
+        <error line="83" column="57" source="standard:statement-wrapping" />
+        <error line="83" column="67" source="standard:statement-wrapping" />
+        <error line="86" column="46" source="standard:argument-list-wrapping" />
+        <error line="86" column="62" source="standard:argument-list-wrapping" />
+        <error line="86" column="81" source="standard:argument-list-wrapping" />
+        <error line="86" column="104" source="standard:argument-list-wrapping" />
+        <error line="86" column="121" source="standard:max-line-length" />
+        <error line="86" column="134" source="standard:argument-list-wrapping" />
+        <error line="96" column="93" source="standard:function-signature" />
+        <error line="103" column="70" source="standard:trailing-comma-on-call-site" />
+        <error line="127" column="52" source="standard:function-signature" />
+        <error line="140" column="34" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/audit/infrastructure/persistence/repository/AuditOutboxRepositoryImpl.kt">
+        <error line="6" column="1" source="standard:import-ordering" />
+        <error line="19" column="35" source="standard:class-signature" />
+        <error line="19" column="58" source="standard:class-signature" />
+        <error line="21" column="60" source="standard:function-signature" />
+        <error line="24" column="79" source="standard:function-signature" />
+        <error line="29" column="46" source="standard:trailing-comma-on-call-site" />
+        <error line="33" column="52" source="standard:function-signature" />
+        <error line="38" column="46" source="standard:trailing-comma-on-call-site" />
+        <error line="90" column="30" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/audit/infrastructure/rest/AuditResource.kt">
+        <error line="10" column="1" source="standard:no-wildcard-imports" />
+        <error line="33" column="61" source="standard:trailing-comma-on-declaration-site" />
+        <error line="34" column="17" source="standard:function-expression-body" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/audit/application/AuditConsumerTest.kt">
+        <error line="50" column="23" source="standard:wrapping" />
+        <error line="59" column="13" source="standard:wrapping" />
+        <error line="71" column="1" source="standard:final-newline" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/audit/infrastructure/persistence/AuditChainHashTest.kt">
+        <error line="44" column="20" source="standard:argument-list-wrapping" />
+        <error line="44" column="46" source="standard:argument-list-wrapping" />
+        <error line="44" column="55" source="standard:argument-list-wrapping" />
+        <error line="44" column="61" source="standard:argument-list-wrapping" />
+        <error line="44" column="96" source="standard:argument-list-wrapping" />
+        <error line="44" column="97" source="standard:argument-list-wrapping" />
+        <error line="44" column="98" source="standard:argument-list-wrapping" />
+        <error line="44" column="113" source="standard:argument-list-wrapping" />
+        <error line="44" column="121" source="standard:argument-list-wrapping" />
+        <error line="44" column="121" source="standard:max-line-length" />
+        <error line="45" column="20" source="standard:argument-list-wrapping" />
+        <error line="45" column="46" source="standard:argument-list-wrapping" />
+        <error line="45" column="55" source="standard:argument-list-wrapping" />
+        <error line="45" column="61" source="standard:argument-list-wrapping" />
+        <error line="45" column="99" source="standard:argument-list-wrapping" />
+        <error line="45" column="100" source="standard:argument-list-wrapping" />
+        <error line="45" column="101" source="standard:argument-list-wrapping" />
+        <error line="45" column="116" source="standard:argument-list-wrapping" />
+        <error line="45" column="121" source="standard:max-line-length" />
+        <error line="45" column="124" source="standard:argument-list-wrapping" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/audit/infrastructure/rest/AuditResourceSecurityTest.kt">
+        <error line="41" column="29" source="standard:argument-list-wrapping" />
+        <error line="41" column="43" source="standard:argument-list-wrapping" />
+        <error line="41" column="60" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/governance/HibernateSequenceGuardTest.kt">
+        <error line="54" column="33" source="standard:trailing-comma-on-call-site" />
+        <error line="68" column="36" source="standard:trailing-comma-on-call-site" />
+    </file>
+</baseline>

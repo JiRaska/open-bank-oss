@@ -1,0 +1,12 @@
+# `external-dns` — platform plane. Watches Ingress hosts cluster-wide and
+# reconciles Route53 records for open-bank.tech. Runs non-root with no elevated
+# capabilities, so Pod Security `restricted` applies cleanly.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: external-dns
+  labels:
+    openbank.io/plane: platform
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

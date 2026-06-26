@@ -1,0 +1,66 @@
+# Single-owner Postgres for statement-service, reconciled by the cluster-wide CNPG
+# operator. CNPG generates the `statements-db-app` secret (username/password for the
+# `openbank` owner) and a `statements-db-rw` Service — both consumed by the
+# statement-service Deployment for the reactive datasource and Flyway migrations.
+# One instance for sandbox FinOps; prod should raise to 3 for HA.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: statements-db
+  namespace: statements
+spec:
+  # DB-layer observability (Dynatrace-parity #0): CNPG runs its built-in
+  # Prometheus exporter on :9187 and creates a PodMonitor the operator owns.
+  # kube-prometheus-stack selects PodMonitors cluster-wide (NilUsesHelmValues
+  # =false), so this lights up cnpg_* metrics (connections, replication lag,
+  # deadlocks, xid age, WAL archiving) with zero app changes.
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_statement
+      owner: openbank
+  # WAL archiving + base backups to S3 (ADR-0035 retention: the StatementPeriod
+  # rows ARE the legal statement record — losing this DB loses it). Credentials
+  # come from EKS Pod Identity on the statements-db ServiceAccount
+  # (aws/envs/sandbox-platform/db-backups.tf); barman-cloud reads the SDK chain,
+  # no secret needed. In-tree barmanObjectStore is deprecated in favour of the
+  # CNPG-I barman plugin — migrate when the operator drops in-tree support.
+  # Sandbox S3 lifecycle expires after 35d; prod needs compliance retention.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/statements-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+# Daily base backup at 03:10 (after the 02:30 monthly close window on the 1st).
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: statements-db-daily
+  namespace: statements
+spec:
+  schedule: "0 10 3 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: statements-db

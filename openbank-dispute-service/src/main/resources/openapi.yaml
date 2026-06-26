@@ -1,0 +1,479 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: Dispute Service API
+  version: 1.1.0
+  description: >-
+    Payment dispute management — open, evidence, escalate, withdraw, timeline — plus
+    regulatory complaints handling with a statutory deadline clock (ADR-0085).
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8113
+    description: Local development
+tags:
+  - name: Disputes
+  - name: Complaints
+
+paths:
+  /api/v1/disputes:
+    post:
+      tags: [Disputes]
+      summary: Open a new dispute
+      operationId: openDispute
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenDisputeRequest'
+      responses:
+        '201':
+          description: Dispute opened
+    get:
+      tags: [Disputes]
+      summary: List disputes by status
+      operationId: listDisputes
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of disputes
+
+  /api/v1/disputes/{id}:
+    get:
+      tags: [Disputes]
+      summary: Get dispute by ID
+      operationId: getDispute
+      parameters:
+        - $ref: '#/components/parameters/disputeId'
+      responses:
+        '200':
+          description: Dispute detail
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Disputes]
+      summary: Update dispute status/resolution
+      operationId: updateDispute
+      parameters:
+        - $ref: '#/components/parameters/disputeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDisputeRequest'
+      responses:
+        '200':
+          description: Updated
+
+  /api/v1/disputes/reference/{ref}:
+    get:
+      tags: [Disputes]
+      summary: Get dispute by reference
+      operationId: getDisputeByRef
+      parameters:
+        - name: ref
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Dispute
+
+  /api/v1/disputes/account/{accountId}:
+    get:
+      tags: [Disputes]
+      summary: List disputes for an account
+      operationId: listDisputesByAccount
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Disputes
+
+  /api/v1/disputes/{id}/evidence:
+    post:
+      tags: [Disputes]
+      summary: Add evidence to a dispute
+      operationId: addEvidence
+      parameters:
+        - $ref: '#/components/parameters/disputeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DisputeEvidence'
+      responses:
+        '201':
+          description: Evidence added
+    get:
+      tags: [Disputes]
+      summary: Get dispute evidence
+      operationId: getEvidence
+      parameters:
+        - $ref: '#/components/parameters/disputeId'
+      responses:
+        '200':
+          description: Evidence list
+
+  /api/v1/disputes/{id}/withdraw:
+    post:
+      tags: [Disputes]
+      summary: Withdraw a dispute
+      operationId: withdrawDispute
+      parameters:
+        - $ref: '#/components/parameters/disputeId'
+        - name: actor
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Withdrawn
+
+  /api/v1/disputes/{id}/escalate:
+    post:
+      tags: [Disputes]
+      summary: Escalate a dispute
+      operationId: escalateDispute
+      parameters:
+        - $ref: '#/components/parameters/disputeId'
+        - name: actor
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Escalated
+
+  /api/v1/disputes/{id}/timeline:
+    get:
+      tags: [Disputes]
+      summary: Get dispute timeline
+      operationId: getDisputeTimeline
+      parameters:
+        - $ref: '#/components/parameters/disputeId'
+      responses:
+        '200':
+          description: Timeline events
+
+  /api/v1/complaints:
+    post:
+      tags: [Complaints]
+      summary: File a new complaint
+      operationId: fileComplaint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FileComplaintRequest'
+      responses:
+        '201':
+          description: Complaint filed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Complaint'
+    get:
+      tags: [Complaints]
+      summary: List complaints, optionally filtered by status
+      operationId: listComplaints
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [RECEIVED, RESOLVED, CLOSED]
+      responses:
+        '200':
+          description: List of complaints
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Complaint'
+
+  /api/v1/complaints/{id}:
+    get:
+      tags: [Complaints]
+      summary: Get complaint by ID
+      operationId: getComplaint
+      parameters:
+        - $ref: '#/components/parameters/disputeId'
+      responses:
+        '200':
+          description: Complaint
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Complaint'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/complaints/{id}/interim-reply:
+    post:
+      tags: [Complaints]
+      summary: Record an interim reply (extends the statutory deadline to 35 business days)
+      operationId: complaintInterimReply
+      parameters:
+        - $ref: '#/components/parameters/disputeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InterimReplyRequest'
+      responses:
+        '200':
+          description: Updated complaint with extended due date
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Complaint'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/complaints/{id}/resolve:
+    post:
+      tags: [Complaints]
+      summary: Resolve a complaint (records an outcome + optional redress flag)
+      operationId: resolveComplaint
+      parameters:
+        - $ref: '#/components/parameters/disputeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveComplaintRequest'
+      responses:
+        '200':
+          description: Resolved complaint
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Complaint'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/complaints/{id}/close:
+    post:
+      tags: [Complaints]
+      summary: Close a complaint (records outcome + root-cause code + optional redress flag)
+      operationId: closeComplaint
+      parameters:
+        - $ref: '#/components/parameters/disputeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloseComplaintRequest'
+      responses:
+        '200':
+          description: Closed complaint
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Complaint'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    disputeId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    OpenDisputeRequest:
+      type: object
+      required: [accountId, transactionId, reason, claimAmount]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        transactionId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          enum: [UNAUTHORIZED, DUPLICATE, WRONG_AMOUNT, NOT_RECEIVED, QUALITY]
+        claimAmount:
+          type: number
+        description:
+          type: string
+
+    UpdateDisputeRequest:
+      type: object
+      properties:
+        status:
+          type: string
+        resolution:
+          type: string
+        notes:
+          type: string
+
+    DisputeEvidence:
+      type: object
+      required: [type, content]
+      properties:
+        type:
+          type: string
+          enum: [DOCUMENT, SCREENSHOT, STATEMENT, OTHER]
+        content:
+          type: string
+        mimeType:
+          type: string
+
+    FileComplaintRequest:
+      type: object
+      required: [category, channel, description]
+      properties:
+        category:
+          type: string
+          enum: [PAYMENT_SERVICE, FEES, ACCOUNT_SERVICE, LENDING, CONDUCT, DATA_PROTECTION, OTHER]
+        channel:
+          type: string
+          enum: [APP, BRANCH, EMAIL, ARBITER]
+        description:
+          type: string
+        accountId:
+          type: string
+          format: uuid
+          nullable: true
+        transactionId:
+          type: string
+          format: uuid
+          nullable: true
+        disputeId:
+          type: string
+          format: uuid
+          nullable: true
+
+    InterimReplyRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+
+    ResolveComplaintRequest:
+      type: object
+      required: [outcome]
+      properties:
+        outcome:
+          type: string
+        redressGranted:
+          type: boolean
+          nullable: true
+
+    CloseComplaintRequest:
+      type: object
+      required: [outcome, rootCauseCode]
+      properties:
+        outcome:
+          type: string
+        rootCauseCode:
+          type: string
+        redressGranted:
+          type: boolean
+          nullable: true
+
+    Complaint:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        reference:
+          type: string
+        category:
+          type: string
+          enum: [PAYMENT_SERVICE, FEES, ACCOUNT_SERVICE, LENDING, CONDUCT, DATA_PROTECTION, OTHER]
+        channel:
+          type: string
+          enum: [APP, BRANCH, EMAIL, ARBITER]
+        description:
+          type: string
+        status:
+          type: string
+          enum: [RECEIVED, RESOLVED, CLOSED]
+        accountId:
+          type: string
+          format: uuid
+          nullable: true
+        transactionId:
+          type: string
+          format: uuid
+          nullable: true
+        disputeId:
+          type: string
+          format: uuid
+          nullable: true
+        receivedDate:
+          type: string
+          format: date
+        dueDate:
+          type: string
+          format: date
+          description: Statutory deadline (PSD2 15 business days; 35 after an interim reply).
+        breached:
+          type: boolean
+          description: Derived — today is past dueDate and the complaint is not RESOLVED/CLOSED.
+        interimReplyReason:
+          type: string
+          nullable: true
+        outcome:
+          type: string
+          nullable: true
+        redressGranted:
+          type: boolean
+          nullable: true
+        rootCauseCode:
+          type: string
+          nullable: true
+
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string

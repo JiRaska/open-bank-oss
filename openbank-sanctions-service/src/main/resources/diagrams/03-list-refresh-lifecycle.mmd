@@ -1,0 +1,26 @@
+%% title: Sanctions List Refresh Lifecycle
+stateDiagram-v2
+  [*] --> REGISTERED : POST /sanctions/lists<br/>{source, url}
+  REGISTERED --> FETCHING : POST /lists/{id}/refresh<br/>(or cron 06:00 UTC)
+  FETCHING --> VALIDATING : payload downloaded
+  FETCHING --> FAILED : network / 4xx-5xx
+  VALIDATING --> ACTIVE : schema OK, signed if required
+  VALIDATING --> FAILED : signature mismatch
+  FAILED --> FETCHING : retry (exp backoff)
+
+  ACTIVE --> FETCHING : next cron / manual refresh
+  ACTIVE --> DISABLED : DELETE /lists/{id}<br/>(ops kill-switch)
+  DISABLED --> ACTIVE : POST /lists/{id}/enable
+
+  ACTIVE --> [*] : list permanently removed
+
+  note right of ACTIVE
+    Only ACTIVE lists are
+    consulted by /screen
+  end note
+
+  note right of FAILED
+    Stale entries kept in
+    cache; alert fired to
+    compliance ops
+  end note

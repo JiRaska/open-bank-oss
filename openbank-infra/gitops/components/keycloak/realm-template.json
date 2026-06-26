@@ -1,0 +1,304 @@
+{
+  "id": "openbank",
+  "realm": "openbank",
+  "displayName": "OpenBank",
+  "displayNameHtml": "OpenBank Framework",
+  "loginTheme": "openbank",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 5,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+  "roles": {
+    "realm": [
+      {
+        "name": "ROLE_ADMIN",
+        "description": "Bank administrator"
+      },
+      {
+        "name": "ROLE_OPERATOR",
+        "description": "Bank operator"
+      },
+      {
+        "name": "ROLE_VIEWER",
+        "description": "Read-only access"
+      },
+      {
+        "name": "ROLE_API",
+        "description": "Machine-to-machine API access"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "openbank-admin-ui",
+      "name": "OpenBank Admin UI",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "https://__ADMIN_HOST__/*"
+      ],
+      "webOrigins": [
+        "https://__ADMIN_HOST__"
+      ],
+      "attributes": {},
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ],
+      "secret": "__ADMINUI_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-services",
+      "name": "OpenBank Backend Services",
+      "description": "Confidential client used by backend services (e.g. account-service) as an OIDC resource server validating bearer tokens.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ],
+      "secret": "__SERVICES_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-edge",
+      "name": "OpenBank Customer Edge",
+      "description": "M2M service-account client for the customer-facing edge proxy (ADR-0065). The edge validates customer JWTs from openbank-customers realm and uses this client (client_credentials) to call upstream backend services with an operator-realm token.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "roles"
+      ],
+      "secret": "__EDGE_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-grafana",
+      "name": "Grafana (observability single pane)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "rootUrl": "http://localhost:3000",
+      "redirectUris": [
+        "http://localhost:3000/login/generic_oauth"
+      ],
+      "webOrigins": [
+        "http://localhost:3000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ],
+      "protocolMappers": [
+        {
+          "name": "realm-roles-userinfo",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "openbank-glitchtip",
+      "name": "GlitchTip (mobile crash sink SSO)",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "secret": "__GLITCHTIP_CLIENT_SECRET__",
+      "rootUrl": "https://glitchtip.open-bank.tech",
+      "redirectUris": [
+        "http://localhost:8000/*",
+        "https://glitchtip.open-bank.tech/*"
+      ],
+      "webOrigins": [
+        "http://localhost:8000",
+        "https://glitchtip.open-bank.tech"
+      ],
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ]
+    },
+    {
+      "clientId": "argocd",
+      "name": "ArgoCD (SSO)",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "secret": "__ARGOCD_CLIENT_SECRET__",
+      "redirectUris": ["https://localhost:8080/auth/callback", "http://localhost:8080/auth/callback"],
+      "webOrigins": ["https://localhost:8080", "http://localhost:8080"],
+      "defaultClientScopes": ["openid", "profile", "email", "roles"],
+      "protocolMappers": [
+        {
+          "name": "realm-roles-groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "claim.name": "groups",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "goalert",
+      "name": "GoAlert (SSO)",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "secret": "__GOALERT_CLIENT_SECRET__",
+      "redirectUris": ["http://localhost:8081/v1/identity/providers/oidc/callback"],
+      "webOrigins": ["http://localhost:8081"],
+      "defaultClientScopes": ["openid", "profile", "email", "roles"]
+    },
+    {
+      "clientId": "apicurio-registry",
+      "name": "Apicurio Registry (SSO)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": ["http://localhost:8082/*"],
+      "webOrigins": ["http://localhost:8082"],
+      "attributes": { "pkce.code.challenge.method": "S256" },
+      "defaultClientScopes": ["openid", "profile", "email", "roles"]
+    },
+    {
+      "clientId": "openbao",
+      "name": "OpenBao (SSO)",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "secret": "__OPENBAO_CLIENT_SECRET__",
+      "redirectUris": ["http://localhost:8200/ui/vault/auth/oidc/oidc/callback", "http://localhost:8250/oidc/callback"],
+      "webOrigins": ["http://localhost:8200"],
+      "defaultClientScopes": ["openid", "profile", "email", "roles"]
+    }
+  ],
+  "clientScopeMappings": {
+    "openbank-edge": [
+      {
+        "client": "openbank-edge",
+        "roles": [
+          "ROLE_OPERATOR"
+        ]
+      }
+    ]
+  },
+  "users": [
+    {
+      "username": "admin@openbank.local",
+      "email": "admin@openbank.local",
+      "firstName": "Admin",
+      "lastName": "OpenBank",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "__ADMIN_USER_PASSWORD__",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "ROLE_ADMIN",
+        "ROLE_OPERATOR",
+        "ROLE_VIEWER"
+      ]
+    },
+    {
+      "username": "demo@openbank.local",
+      "email": "demo@openbank.local",
+      "firstName": "Demo",
+      "lastName": "OpenBank",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "__DEMO_USER_PASSWORD__",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "ROLE_VIEWER"
+      ]
+    },
+    {
+      "username": "service-account-openbank-edge",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-edge",
+      "realmRoles": [
+        "ROLE_OPERATOR"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,93 @@
+# Valkey (Redis) cache dashboard. Visualises the redis_exporter sidecar metrics
+# added in the DB-layer sweep (#0) for the payments idempotency cache — collected
+# but not surfaced on any board until now. Hit ratio + evictions tell you whether
+# the cache is effective; memory + clients watch saturation. Metric names verified
+# live against the running exporter.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-valkey
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  openbank-valkey.json: |
+    {
+      "id": null,
+      "uid": "openbank-valkey",
+      "title": "OpenBank — Valkey Cache (payments)",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": { "from": "now-6h", "to": "now" },
+      "templating": { "list": [ { "name": "datasource", "type": "datasource", "pluginId": "prometheus", "label": "Metrics", "current": {} } ] },
+      "panels": [
+        {
+          "title": "Up",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 4, "w": 5, "x": 0, "y": 0 },
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+          "targets": [ { "refId": "A", "expr": "redis_up" } ]
+        },
+        {
+          "title": "Connected clients",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 4, "w": 5, "x": 5, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "short" } },
+          "targets": [ { "refId": "A", "expr": "redis_connected_clients" } ]
+        },
+        {
+          "title": "Keys (all dbs)",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 4, "w": 4, "x": 10, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "short" } },
+          "targets": [ { "refId": "A", "expr": "sum(redis_db_keys)" } ]
+        },
+        {
+          "title": "Hit ratio (5m)",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 4, "w": 5, "x": 14, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "yellow", "value": 0.8 }, { "color": "green", "value": 0.95 } ] } } },
+          "targets": [ { "refId": "A", "expr": "rate(redis_keyspace_hits_total[5m]) / clamp_min(rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m]), 1)" } ]
+        },
+        {
+          "title": "Evicted keys (rate)",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 4, "w": 5, "x": 19, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 0.01 } ] } } },
+          "targets": [ { "refId": "A", "expr": "sum(rate(redis_evicted_keys_total[5m]))" } ]
+        },
+        {
+          "title": "Ops / sec",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+          "fieldConfig": { "defaults": { "unit": "ops", "custom": { "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "legendFormat": "commands/s", "expr": "rate(redis_commands_processed_total[5m])" } ]
+        },
+        {
+          "title": "Keyspace hits vs misses (rate)",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+          "fieldConfig": { "defaults": { "unit": "ops", "custom": { "fillOpacity": 10 } } },
+          "targets": [
+            { "refId": "A", "legendFormat": "hits", "expr": "rate(redis_keyspace_hits_total[5m])" },
+            { "refId": "B", "legendFormat": "misses", "expr": "rate(redis_keyspace_misses_total[5m])" }
+          ]
+        },
+        {
+          "title": "Memory used",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 7, "w": 24, "x": 0, "y": 12 },
+          "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "legendFormat": "used", "expr": "redis_memory_used_bytes" } ]
+        }
+      ]
+    }

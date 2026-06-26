@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: MPL-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: platform
+primaryDatastore: PostgreSQL
+schemaName: copilot_schema
+dataLineageRole: internal
+dataClassification: confidential
+retentionPolicy: 1 year
+evidenceExported: false
+lineage:
+  downstream:
+    - serviceName: balance-service
+      relationType: api
+      description: READ tool (own balance)
+    - serviceName: transaction-service
+      relationType: api
+      description: READ tool (own transactions)
+    - serviceName: ledger-service
+      relationType: api
+      description: READ tool (statements)
+    - serviceName: fx-service
+      relationType: api
+      description: READ tool (FX rates)
+    - serviceName: domestic-payment
+      relationType: api
+      description: ACTION tool (payment proposal → HITL + SCA)
+    - serviceName: card-issuance-service
+      relationType: api
+      description: ACTION tool (card freeze proposal → HITL + SCA)
+    - serviceName: dispute-service
+      relationType: api
+      description: ACTION tool (dispute proposal → HITL + SCA)
+schemaLineage:
+  ownedSchemas:
+    - copilot_schema

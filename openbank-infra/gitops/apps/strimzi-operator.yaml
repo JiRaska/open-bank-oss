@@ -1,0 +1,62 @@
+# Strimzi Kafka operator — the event-bus broker control plane (ADR-0027:
+# stateful/messaging as in-cluster operator-managed OSS; Strimzi chosen over
+# Redpanda for Debezium/ADR-0013 compatibility). Installed into `messaging`
+# alongside Apicurio; with watchAnyNamespace=false it reconciles Kafka CRs in
+# its own namespace. ServerSideApply because the Kafka CRD exceeds the
+# client-side apply annotation size limit.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: strimzi-operator
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://strimzi.io/charts/
+    chart: strimzi-kafka-operator
+    targetRevision: 1.0.0
+    helm:
+      valuesObject:
+        watchAnyNamespace: false
+        replicas: 1
+        # Make every operand pod (Kafka brokers, entity-operator, etc.) emit a
+        # PSS `restricted`-compliant securityContext. Without this the operator
+        # defaults to the `baseline` provider and the broker pod is rejected by
+        # the restricted-enforced `messaging` namespace.
+        extraEnvs:
+          - name: STRIMZI_POD_SECURITY_PROVIDER_CLASS
+            value: restricted
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: "1"
+            memory: 384Mi
+        # The `messaging` namespace enforces PSS `restricted`, but the chart's
+        # operator pod template ships no securityContext. Inject the
+        # restricted-compliant context (pod + container) rather than relaxing
+        # the namespace, so the broker control plane stays within the same
+        # security baseline as every other workload.
+        podSecurityContext:
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          capabilities:
+            drop:
+              - ALL
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: messaging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

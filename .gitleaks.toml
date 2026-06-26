@@ -1,0 +1,139 @@
+# gitleaks config — OpenBank
+# https://github.com/gitleaks/gitleaks
+
+title = "OpenBank secret scan"
+
+[extend]
+useDefault = true
+
+# --- Custom rules in addition to defaults ---
+
+[[rules]]
+id = "openbank-dev-creds"
+description = "Known development credentials must never appear outside docker-compose example"
+regex = '''(openbank[_-]?(secret|vault[_-]?root[_-]?token|services[_-]?secret|cache[_-]?secret)|admin_secret)'''
+keywords = ["openbank_secret", "admin_secret", "openbank-vault-root-token", "openbank-services-secret", "openbank_cache_secret"]
+  # Scoped exception: the dev-default datasource/cache creds (openbank_secret /
+  # openbank_cache_secret) live in the canonical local-dev config for local↔CI
+  # parity (docker-compose + each service's application.yaml + the reusable CI
+  # workflow). This per-RULE allowlist permits ONLY this rule's own dev-default
+  # match in exactly those files — unlike a whole-file path allowlist, every
+  # OTHER rule (default AWS/GCP/private-key detectors, iban/pan/rod-cislo) still
+  # scans these files, so a real secret accidentally added to an application.yaml
+  # is still caught. prod overrides the value via env (QUARKUS_DATASOURCE_PASSWORD).
+  [rules.allowlist]
+  description = "Dev-default creds permitted only in the canonical local-dev config; flagged everywhere else."
+  paths = [
+    '''(^|/)openbank-[a-z0-9-]+-service/src/main/resources/application\.yaml$''',
+    '''(^|/)\.github/workflows/_service-ci\.yml$''',
+    '''(^|/)openbank-infra/docker-compose\.yml$''',
+  ]
+
+[[rules]]
+id = "iban-real"
+description = "Possible real IBAN (CZ format)"
+regex = '''\bCZ\d{2}[ ]?\d{4}[ ]?\d{6}[ ]?\d{10}\b'''
+
+[[rules]]
+id = "pan-card-number"
+description = "Possible payment card PAN (13–19 digits passing Luhn)"
+regex = '''\b(?:4\d{12}(?:\d{3})?|5[1-5]\d{14}|3[47]\d{13}|6(?:011|5\d{2})\d{12})\b'''
+
+[[rules]]
+id = "rod-cislo"
+description = "Possible Czech birth number (rodné číslo)"
+regex = '''\b\d{6}/?\d{3,4}\b'''
+
+# --- Allowlist ---
+
+[allowlist]
+description = "Test vectors, examples, documentation, build artifacts"
+paths = [
+  '''\.example$''',
+  '''\.template$''',
+  '''docs/.*''',
+  '''.*test.*''',
+  '''\.gitleaks\.toml$''',
+  # Build/cache directories — these are gitignored, but `--no-git` scans the FS directly.
+  # Skipping them prevents thousands of false positives from minified JS / compiled artifacts.
+  '''(^|/)node_modules/''',
+  '''(^|/)\.next/''',
+  '''(^|/)\.gradle/''',
+  '''(^|/)build/''',
+  '''(^|/)dist/''',
+  '''(^|/)target/''',
+  '''(^|/)coverage/''',
+  '''(^|/)\.kotlin/''',
+  '''(^|/)\.idea/''',
+  '''(^|/)\.sisyphus/''',
+  # Binary assets
+  '''\.(png|jpg|jpeg|gif|webp|ico|pdf|woff2?|ttf|otf|eot)$''',
+  # PSD2 sandbox / stub services intentionally contain fixed demo IBANs (RTS Art. 30 §1 requires a working sandbox).
+  '''(^|/)openbank-psd2-service/src/main/kotlin/com/openbank/psd2/(infrastructure|application)/.*\.kt$''',
+  '''(^|/)openbank-agent-service/src/main/kotlin/com/openbank/agent/application/McpToolRegistry\.kt$''',
+  # Grafana dashboards: thresholds in bytes (e.g. 134217728 = 128 MiB) match the rod-cislo numeric pattern.
+  '''(^|/)openbank-infra/docker/grafana/dashboards/.*\.json$''',
+  # Vendored Redoc OpenAPI renderer (pinned, no-runtime-CDN posture, ADR-0092): a minified JS
+  # bundle whose bit-shift constants (67108864, 134217728, …) match the rod-cislo numeric pattern.
+  '''(^|/)openbank-developer-portal/site/api/redoc\.standalone\.js$''',
+  # Reusable per-service CI mirrors the docker-compose dev defaults
+  # (POSTGRES_PASSWORD / VALKEY_PASSWORD) so the test infra boots with the exact
+  # passwords baked into each service's src/test/resources/application.properties
+  # (local↔CI parity). Those identical literals are already allowlisted via the
+  # .*test.* rule above — these are public dev defaults, not production secrets.
+  '''(^|/)\.github/workflows/_service-ci\.yml$''',
+  # The openbank_secret datasource/cache dev default lives in the canonical
+  # local-dev config (docker-compose + each service's application.yaml) for
+  # local↔CI parity; prod overrides it via env (QUARKUS_DATASOURCE_PASSWORD).
+  # Same rationale as the _service-ci.yml entry above — public dev defaults, not
+  # production secrets. openbank-dev-creds still guards every other path.
+  # NOTE: the per-service application.yaml files are deliberately NOT whole-file
+  # allowlisted here — their single dev-default cred is permitted via the SCOPED
+  # per-rule allowlist on `openbank-dev-creds` above, so every other rule (default
+  # AWS/GCP/key detectors, iban/pan/rod-cislo) still scans them for real secrets.
+  '''(^|/)openbank-infra/docker-compose\.yml$''',
+  # PiiMasking holds card-/birth-number REGEXES by design (it masks them), so the
+  # pan-card-number and rod-cislo rules match its own pattern literals.
+  '''(^|/)openbank-libs/src/main/kotlin/com/openbank/libs/security/PiiMasking\.kt$''',
+  # CzechAccountNumber implements the ČNB mod-11 BBAN check; its doc/test literals
+  # (e.g. the comment "rejects 0000000000") are example digit strings that match
+  # the rod-cislo numeric heuristic — account-number validation logic, not a secret.
+  '''(^|/)openbank-libs/src/main/kotlin/com/openbank/libs/domain/account/CzechAccountNumber\.kt$''',
+  # GitOps manifests carry numeric infra config (Kafka retention.ms, JDBC ports)
+  # that trips the numeric rod-cislo / generic-api-key heuristics. Real secrets
+  # are delivered via Vault/SealedSecrets, never inlined in these manifests.
+  '''(^|/)openbank-infra/gitops/components/kafka/kafka\.yaml$''',
+  '''(^|/)openbank-infra/gitops/components/keycloak/keycloak\.yaml$''',
+  # Per-topic manifests set retention.ms / *.bytes to large integers (e.g.
+  # 604800000 = 7d) that match the rod-cislo numeric heuristic. Covers every
+  # component's kafka-topic.yaml, not just the one that happens to exist today.
+  # The optional hyphen also matches the historical `kafkatopic.yaml` filename
+  # (renamed in #228) — gitleaks scans full history, so the old path still appears.
+  '''(^|/)openbank-infra/gitops/components/.*/kafka-?topics?\.yaml$''',
+  # Admin-UI payments demo screen embeds a placeholder rodné číslo for layout.
+  '''(^|/)openbank-admin-ui/src/app/payments/page\.tsx$''',
+  # Observability PrometheusRules + dashboard ConfigMaps embed large integer
+  # thresholds (e.g. Postgres xid-age wraparound 300000000 / 1000000000, byte
+  # sizes, predict_linear windows) that trip the rod-cislo numeric heuristic.
+  # No secrets live here — alert exprs and Grafana dashboard JSON only; real
+  # config is delivered via Vault/ExternalSecrets, never inlined.
+  '''(^|/)openbank-infra/gitops/components/observability/prometheus-rules-.*\.yaml$''',
+  '''(^|/)openbank-infra/gitops/components/observability/dashboard-.*\.yaml$''',
+]
+
+# Test IBAN explicitly safelisted (commonly used in CZ banking demos, not a real customer account).
+# Format-example BBAN strings used as input placeholders also safelisted.
+regexes = [
+  '''4111[ -]?1111[ -]?1111[ -]?1111''',
+  '''5555[ -]?5555[ -]?5555[ -]?4444''',
+  '''4242[ -]?4242[ -]?4242[ -]?4242''',
+  '''CZ6508000000192000145\d{3}''',
+  '''CZ0{20,22}''',
+  '''123456-1234567890/0800''',
+  # Sequential digit placeholder in UI demos (not a real rodné číslo)
+  '''1234567890''',
+  # IBAN-fragment example in account-service OpenAPI spec (bank code 0800 +
+  # placeholder account digits) — a public API-contract example, not a secret;
+  # the 10-digit string trips the rod-cislo numeric heuristic.
+  '''0800000019''',
+]

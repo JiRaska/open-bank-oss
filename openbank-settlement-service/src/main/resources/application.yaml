@@ -1,0 +1,61 @@
+quarkus:
+  application:
+    name: openbank-settlement-service
+  http:
+    port: 8138
+  datasource:
+    db-kind: postgresql
+    reactive:
+      url: "${QUARKUS_DATASOURCE_REACTIVE_URL:vertx-reactive:postgresql://localhost:5432/settlement}"
+    username: "${QUARKUS_DATASOURCE_USERNAME:openbank_settlement}"
+    password: "${QUARKUS_DATASOURCE_PASSWORD:settlement}"
+  flyway:
+    migrate-at-start: true
+    locations: classpath:db/migration
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  log:
+    level: INFO
+    category:
+      "com.openbank":
+        level: DEBUG
+  rest-client:
+    balance-api:
+      url: "${BALANCE_SERVICE_URL:http://openbank-balance-service:8080}"
+      scope: jakarta.inject.Singleton
+    ledger-api:
+      url: "${LEDGER_SERVICE_URL:http://openbank-ledger-service:8080}"
+      scope: jakarta.inject.Singleton
+
+openbank:
+  temporal:
+    enabled: false
+    task-queue: openbank-settlement
+  api:
+    version: "1"
+  build:
+    time: "${BUILD_TIME:unknown}"
+  settlement:
+    gl:
+      debit-account-id: "${SETTLEMENT_GL_DEBIT_ACCOUNT_ID:a0000000-0000-0000-0000-000000000002}"
+      credit-account-id: "${SETTLEMENT_GL_CREDIT_ACCOUNT_ID:a0000000-0000-0000-0000-000000000002}"
+
+"%test":
+  quarkus:
+    oidc:
+      enabled: false
+    management:
+      enabled: false
+    rest-client:
+      balance-api:
+        url: http://localhost:${quarkus.http.port}
+      ledger-api:
+        url: http://localhost:${quarkus.http.port}
+  openbank:
+    settlement:
+      gl:
+        debit-account-id: "a0000000-0000-0000-0000-000000000002"
+        credit-account-id: "a0000000-0000-0000-0000-000000000002"

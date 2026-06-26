@@ -1,0 +1,18 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+    <CurrentIssues>
+    <ID>MagicNumber:AuthzProducer.kt$AuthzProducer$500</ID>
+    <ID>MagicNumber:SwiftMessage.kt$SwiftMessage$11</ID>
+    <ID>MagicNumber:SwiftMessage.kt$SwiftMessage$8</ID>
+    <ID>MagicNumber:SwiftOutboxDispatcher.kt$SwiftOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:SwiftOutboxDispatcher.kt$SwiftOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:SwiftOutboxRepositoryImpl.kt$SwiftOutboxRepositoryImpl$4000</ID>
+    <ID>MagicNumber:SwiftResource.kt$SwiftResource$201</ID>
+    <ID>MatchingDeclarationName:SwiftDtos.kt$SwiftMessageResponse</ID>
+    <ID>MatchingDeclarationName:SwiftOutboxPort.kt$SwiftOutboxRepository : OutboxRepository</ID>
+    <ID>MatchingDeclarationName:SwiftPorts.kt$SwiftRepository</ID>
+    <ID>SwallowedException:SwiftOutboxDispatcher.kt$SwiftOutboxDispatcher$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:SwiftOutboxDispatcher.kt$SwiftOutboxDispatcher$ex: Exception</ID>
+  </CurrentIssues>
+</SmellBaseline>

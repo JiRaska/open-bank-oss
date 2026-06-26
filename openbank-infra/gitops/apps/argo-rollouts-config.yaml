@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors.
+#
+# Argo Rollouts cluster-scoped configuration (ADR-0098 Phase 1).
+#
+# Deploys the shared ClusterAnalysisTemplate and NetworkPolicies that
+# the Helm chart (argo-rollouts.yaml) does not manage:
+#   - ClusterAnalysisTemplate openbank-money-path-canary: reusable Prometheus
+#     analysis gate referenced by all money-path Rollout objects (Phase 2+).
+#   - NetworkPolicies for the argo-rollouts namespace (ADR-0081).
+#
+# Depends on argo-rollouts.yaml: CRDs must be installed before this app
+# can sync ClusterAnalysisTemplate objects. ArgoCD respects the dependency
+# automatically if both apps are in the same project and sync-waves are set,
+# but the Helm chart's CRD installation (installCRDs: true) completes during
+# the first argo-rollouts sync — this app will retry until CRDs exist.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argo-rollouts-config
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/argo-rollouts
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argo-rollouts
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m

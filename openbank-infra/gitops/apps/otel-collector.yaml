@@ -1,0 +1,90 @@
+# OpenTelemetry Collector (deployment mode): the single OTLP ingestion point
+# for the service fleet. Services export OTLP → collector → Tempo. Keeping a
+# collector in the path (rather than services writing straight to Tempo) gives
+# one place to add sampling, batching and redaction before traces land in the
+# backend. Scraped by Prometheus via the chart's ServiceMonitor for its own
+# pipeline metrics.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: otel-collector
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
+    chart: opentelemetry-collector
+    targetRevision: 0.158.0
+    helm:
+      valuesObject:
+        fullnameOverride: otel-collector
+        mode: deployment
+        replicaCount: 1
+        image:
+          repository: otel/opentelemetry-collector-contrib
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            # Raised from 500m/256Mi: under the aml/sanctions span volume the single
+            # collector couldn't ack within the services' 10s OTLP deadline → exports
+            # timed out and Tempo logged "context canceled". More CPU for serialisation
+            # plus the sending_queue below decouple client-ack from Tempo backpressure.
+            cpu: "1"
+            memory: 512Mi
+        presets:
+          kubernetesAttributes:
+            enabled: true
+        config:
+          receivers:
+            otlp:
+              protocols:
+                grpc:
+                  endpoint: 0.0.0.0:4317
+                http:
+                  endpoint: 0.0.0.0:4318
+          processors:
+            # memory_limiter must be FIRST: cap heap and shed load (clients retry)
+            # rather than OOM the single collector pod.
+            memory_limiter:
+              check_interval: 1s
+              limit_percentage: 80
+              spike_limit_percentage: 25
+            batch:
+              send_batch_size: 1024
+              send_batch_max_size: 2048
+              timeout: 5s
+          exporters:
+            otlp/tempo:
+              endpoint: tempo.observability.svc:4317
+              tls:
+                insecure: true
+              # Absorb Tempo backpressure here so the receiver can ack the services
+              # immediately instead of blocking past their 10s OTLP deadline. The
+              # queue buffers spikes; retry rides out brief Tempo slowness.
+              sending_queue:
+                enabled: true
+                queue_size: 5000
+              retry_on_failure:
+                enabled: true
+                initial_interval: 1s
+                max_interval: 10s
+          service:
+            pipelines:
+              traces:
+                receivers: [otlp]
+                processors: [memory_limiter, batch]
+                exporters: [otlp/tempo]
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

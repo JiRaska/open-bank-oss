@@ -1,0 +1,22 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+    <CurrentIssues>
+    <ID>MagicNumber:AuthzProducer.kt$AuthzProducer$500</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$EbaSyncUnavailableMapper$503</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$TppAlreadyExistsMapper$409</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$TppNotFoundMapper$404</ID>
+    <ID>MagicNumber:TppOutboxDispatcher.kt$TppOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:TppOutboxDispatcher.kt$TppOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:TppOutboxRepositoryImpl.kt$TppOutboxRepositoryImpl$4000</ID>
+    <ID>MagicNumber:TppRegistryResource.kt$TppRegistryResource$200</ID>
+    <ID>MagicNumber:TppRegistryResource.kt$TppRegistryResource$201</ID>
+    <ID>MagicNumber:TppRegistryResource.kt$TppRegistryResource$300</ID>
+    <ID>MagicNumber:TppRegistryResource.kt$TppRegistryResource$403</ID>
+    <ID>MagicNumber:TppRegistryService.kt$TppRegistryService$3000</ID>
+    <ID>MatchingDeclarationName:TppOutboxPort.kt$TppOutboxRepository : OutboxRepository</ID>
+    <ID>SwallowedException:TppOutboxDispatcher.kt$TppOutboxDispatcher$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:TppOutboxDispatcher.kt$TppOutboxDispatcher$ex: Exception</ID>
+    <ID>UseCheckOrError:TppRepositoryImpl.kt$TppRepositoryImpl$throw IllegalStateException("TPP ${entry.tppId} not found for update")</ID>
+  </CurrentIssues>
+</SmellBaseline>

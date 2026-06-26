@@ -1,0 +1,197 @@
+quarkus:
+  application:
+    name: openbank-balance-service
+    version: 0.1.0
+
+  http:
+    port: 8103
+    idle-timeout: 60S
+    read-timeout: 30S
+    limits:
+      max-body-size: 10M
+
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: postgresql://localhost:5432/openbank_balances
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_balances
+
+  flyway:
+    migrate-at-start: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+
+  hibernate-orm:
+    database:
+      generation: none
+
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+
+  oidc-client:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+
+  rest-client:
+    ledger-service:
+      url: ${LEDGER_SERVICE_URL:http://localhost:8101}
+      scope: jakarta.inject.Singleton
+    account-service:
+      url: ${ACCOUNT_SERVICE_URL:http://localhost:8102}
+      scope: jakarta.inject.Singleton
+
+  smallrye-reactive-messaging:
+    kafka:
+      bootstrap-servers: localhost:29092
+
+  shutdown:
+    timeout: 30S
+
+  smallrye-health:
+    root-path: /q/health
+
+  log:
+    level: INFO
+    console:
+      json: true
+
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-balance-service
+
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+mp:
+  messaging:
+    outgoing:
+      balance-events-out:
+        connector: smallrye-kafka
+        client.id: balance-service-${quarkus.uuid}
+        topic: openbank.balance.events
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+      balance-outbox-out:
+        connector: smallrye-kafka
+        client.id: balance-outbox-service-${quarkus.uuid}
+        topic: openbank.balance.events
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+    incoming:
+      # ADR-0039 Phase D: ledger journal stream (all journal events on one topic; the consumer
+      # filters by eventType and only projects AccountBookedChanged). Gated OFF by
+      # openbank.balance.projection.enabled until the Phase D-2 cutover removes the saga debit.
+      ledger-events-in:
+        connector: smallrye-kafka
+        topic: openbank.ledger.journal.posted
+        group.id: openbank-balance-service
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto.offset.reset: earliest
+      # ADR-0073: create a zero balance row when an account is created (event-driven init,
+      # so onboarding accounts opened from a Kafka consumer get a balance without the
+      # synchronous authenticated REST call). initializeBalance is idempotent.
+      balance-init-in:
+        connector: smallrye-kafka
+        topic: openbank.accounts.account.created
+        group.id: openbank-balance-service
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto.offset.reset: earliest
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+        format: "%d{HH:mm:ss} %-5p [%c{2.}] %s%e%n"
+    oidc:
+      enabled: false
+
+"%test":
+  quarkus:
+    datasource:
+      username: openbank
+      password: openbank_secret
+      reactive:
+        url: vertx-reactive:postgresql://localhost:5432/openbank_balances_it
+      jdbc:
+        url: jdbc:postgresql://localhost:5432/openbank_balances_it
+    management:
+      enabled: false
+    oidc:
+      enabled: false
+    devservices:
+      enabled: false
+    # The daily reconciliation tick (BalanceReconciliationScheduler) calls the ledger REST client;
+    # ITs must never reach a downstream service, so the scheduler is off in test (ledger does the same).
+    scheduler:
+      enabled: false
+
+openbank:
+  balance:
+    projection:
+      # ADR-0039 Phase D-2 (cutover, 2026-06-17): the balance is now a projection of the ledger — it
+      # consumes AccountBookedChanged and is the SOLE booked-mover. Flipped ON in lock-step with the
+      # transaction saga dropping its direct balanceCoverPort.debit/credit; the projection also releases
+      # the cover hold as the booked delta lands (referenceId == transactionId). Deploy together: with
+      # the saga debit still live this double-counts the booked movement.
+      enabled: true
+  outbox:
+    dispatch-enabled: true
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 200
+  api:
+    version: "1"
+  build:
+    time: "${BUILD_TIME:unknown}"
+  git:
+    commit: "${GIT_COMMIT:unknown}"
+
+# OPA sidecar (ADR-0034). Defaults match the per-service deployment manifest.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+
+# Fleet rollout ships in ADVISORY mode (ADR-0034 D5): @Authorize denies are
+# logged at WARN, the request still proceeds. Flip to enforce is Phase 5.
+authz:
+  enforce: "${AUTHZ_ENFORCE:false}"

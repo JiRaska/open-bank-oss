@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="../../OpenBank/openbank-transaction-service/settings.gradle.kts">
+        <error line="21" column="1" source="standard:no-consecutive-blank-lines" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/transaction/application/port/in/TransactionPorts.kt">
+        <error line="5" column="9" source="standard:package-name" />
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="27" column="37" source="standard:trailing-comma-on-declaration-site" />
+        <error line="32" column="5" source="standard:class-signature" />
+        <error line="33" column="5" source="standard:class-signature" />
+        <error line="34" column="5" source="standard:class-signature" />
+        <error line="34" column="36" source="standard:class-signature" />
+        <error line="34" column="36" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/transaction/application/port/out/FxRatePort.kt">
+        <error line="14" column="28" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/transaction/application/usecase/TransactionService.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="7" column="1" source="standard:no-wildcard-imports" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/transaction/domain/event/TransactionEvents.kt">
+        <error line="24" column="37" source="standard:trailing-comma-on-declaration-site" />
+        <error line="33" column="32" source="standard:trailing-comma-on-declaration-site" />
+        <error line="43" column="23" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/transaction/domain/model/Transaction.kt">
+        <error line="42" column="41" source="standard:trailing-comma-on-declaration-site" />
+        <error line="69" column="15" source="standard:trailing-comma-on-declaration-site" />
+        <error line="77" column="13" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/transaction/domain/saga/PaymentSaga.kt">
+        <error line="29" column="22" source="standard:trailing-comma-on-declaration-site" />
+        <error line="44" column="37" source="standard:function-signature" />
+        <error line="62" column="29" source="standard:trailing-comma-on-call-site" />
+        <error line="73" column="47" source="standard:argument-list-wrapping" />
+        <error line="73" column="73" source="standard:argument-list-wrapping" />
+        <error line="73" column="97" source="standard:argument-list-wrapping" />
+        <error line="73" column="113" source="standard:trailing-comma-on-call-site" />
+        <error line="77" column="47" source="standard:argument-list-wrapping" />
+        <error line="77" column="68" source="standard:argument-list-wrapping" />
+        <error line="77" column="92" source="standard:argument-list-wrapping" />
+        <error line="77" column="108" source="standard:trailing-comma-on-call-site" />
+        <error line="83" column="47" source="standard:trailing-comma-on-call-site" />
+        <error line="84" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="89" column="73" source="standard:function-signature" />
+        <error line="103" column="11" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/transaction/domain/settlement/SettlementDateResolver.kt">
+        <error line="43" column="43" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/transaction/infrastructure/client/FxRateClient.kt">
+        <error line="36" column="9" source="standard:function-signature" />
+        <error line="37" column="9" source="standard:function-signature" />
+        <error line="37" column="42" source="standard:function-signature" />
+        <error line="37" column="42" source="standard:trailing-comma-on-declaration-site" />
+        <error line="45" column="28" source="standard:trailing-comma-on-declaration-site" />
+        <error line="50" column="5" source="standard:class-signature" />
+        <error line="50" column="56" source="standard:class-signature" />
+        <error line="50" column="56" source="standard:trailing-comma-on-declaration-site" />
+        <error line="53" column="93" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/transaction/infrastructure/client/LedgerCallGuard.kt">
+        <error line="21" column="73" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/transaction/infrastructure/client/LedgerRestClient.kt">
+        <error line="9" column="1" source="standard:no-wildcard-imports" />
+        <error line="14" column="1" source="standard:no-unused-imports" />
+        <error line="30" column="9" source="standard:function-signature" />
+        <error line="31" column="9" source="standard:function-signature" />
+        <error line="31" column="39" source="standard:function-signature" />
+        <error line="31" column="39" source="standard:trailing-comma-on-declaration-site" />
+        <error line="42" column="24" source="standard:trailing-comma-on-declaration-site" />
+        <error line="56" column="35" source="standard:trailing-comma-on-declaration-site" />
+        <error line="60" column="5" source="standard:class-signature" />
+        <error line="61" column="5" source="standard:class-signature" />
+        <error line="61" column="25" source="standard:class-signature" />
+        <error line="61" column="25" source="standard:trailing-comma-on-declaration-site" />
+        <error line="65" column="5" source="standard:class-signature" />
+        <error line="66" column="5" source="standard:class-signature" />
+        <error line="67" column="5" source="standard:class-signature" />
+        <error line="67" column="23" source="standard:class-signature" />
+        <error line="67" column="23" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/transaction/infrastructure/outbox/TransactionOutboxBacklogGauge.kt">
+        <error line="6" column="1" source="standard:import-ordering" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/transaction/infrastructure/persistence/entity/PaymentSagaEntity.kt">
+        <error line="8" column="1" source="standard:no-wildcard-imports" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/transaction/infrastructure/persistence/entity/TransactionEntity.kt">
+        <error line="8" column="1" source="standard:no-wildcard-imports" />
+        <error line="168" column="5" source="standard:class-signature" />
+        <error line="169" column="5" source="standard:class-signature" />
+        <error line="169" column="49" source="standard:class-signature" />
+        <error line="169" column="49" source="standard:trailing-comma-on-declaration-site" />
+        <error line="170" column="5" source="standard:class-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/transaction/infrastructure/persistence/repository/PanachePaymentSagaRepository.kt">
+        <error line="18" column="38" source="standard:class-signature" />
+        <error line="18" column="61" source="standard:class-signature" />
+        <error line="20" column="64" source="standard:function-signature" />
+        <error line="26" column="64" source="standard:function-signature" />
+        <error line="31" column="82" source="standard:function-signature" />
+        <error line="36" column="86" source="standard:function-signature" />
+        <error line="41" column="66" source="standard:function-signature" />
+        <error line="74" column="26" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/transaction/infrastructure/persistence/repository/PanacheTransactionRepository.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="9" column="1" source="standard:no-wildcard-imports" />
+        <error line="13" column="1" source="standard:no-unused-imports" />
+        <error line="25" column="5" source="standard:class-signature" />
+        <error line="25" column="66" source="standard:class-signature" />
+        <error line="25" column="66" source="standard:trailing-comma-on-declaration-site" />
+        <error line="26" column="28" source="standard:class-signature" />
+        <error line="28" column="98" source="standard:function-signature" />
+        <error line="38" column="42" source="standard:function-signature" />
+        <error line="38" column="59" source="standard:function-signature" />
+        <error line="38" column="71" source="standard:function-signature" />
+        <error line="38" column="85" source="standard:function-signature" />
+        <error line="38" column="120" source="standard:max-line-length" />
+        <error line="38" column="145" source="standard:function-signature" />
+        <error line="48" column="59" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/transaction/infrastructure/rest/ExceptionMappers.kt">
+        <error line="1" column="1" source="standard:filename" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/transaction/infrastructure/rest/TransactionResource.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/transaction/domain/model/TransactionTest.kt">
+        <error line="33" column="21" source="standard:trailing-comma-on-call-site" />
+        <error line="52" column="1" source="standard:final-newline" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/transaction/domain/settlement/SettlementDateResolverTest.kt">
+        <error line="31" column="43" source="standard:trailing-comma-on-call-site" />
+        <error line="43" column="43" source="standard:trailing-comma-on-call-site" />
+        <error line="54" column="43" source="standard:trailing-comma-on-call-site" />
+        <error line="66" column="43" source="standard:trailing-comma-on-call-site" />
+        <error line="81" column="43" source="standard:trailing-comma-on-call-site" />
+        <error line="96" column="63" source="standard:trailing-comma-on-call-site" />
+        <error line="107" column="62" source="standard:trailing-comma-on-call-site" />
+        <error line="119" column="63" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/transaction/infrastructure/outbox/TransactionOutboxBacklogGaugeTest.kt">
+        <error line="6" column="1" source="standard:import-ordering" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/transaction/infrastructure/rest/TransactionSecurityContractTest.kt">
+        <error line="28" column="28" source="standard:property-wrapping" />
+        <error line="28" column="36" source="standard:argument-list-wrapping" />
+        <error line="28" column="53" source="standard:argument-list-wrapping" />
+        <error line="28" column="71" source="standard:argument-list-wrapping" />
+        <error line="28" column="88" source="standard:argument-list-wrapping" />
+        <error line="28" column="108" source="standard:argument-list-wrapping" />
+        <error line="28" column="120" source="standard:max-line-length" />
+        <error line="28" column="125" source="standard:argument-list-wrapping" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/transaction/integration/TransactionApiIT.kt">
+        <error line="143" column="21" source="standard:wrapping" />
+        <error line="147" column="34" source="standard:wrapping" />
+        <error line="211" column="20" source="standard:wrapping" />
+        <error line="214" column="72" source="standard:wrapping" />
+        <error line="216" column="20" source="standard:wrapping" />
+        <error line="219" column="72" source="standard:wrapping" />
+    </file>
+</baseline>

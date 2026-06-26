@@ -1,0 +1,241 @@
+name: Release Please
+
+# Per-service RELEASE-axis automation (ADR-0029 Layer B, refined by ADR-0048).
+# On every push to main, release-please reads merged Conventional Commits, opens/maintains
+# one Release PR per changed component, and — when a Release PR is merged — bumps version.txt,
+# writes the per-service CHANGELOG, and cuts the tagged GitHub Release <component>-v<version>.
+#
+# Scope: the RELEASE axis only (version.txt == quarkus.application.version == git tag). The API
+# contract version (openapi.yaml:info.version) is a SEPARATE axis governed by ADR-0048 / oasdiff
+# and is intentionally NOT touched here. Rules: openbank-libs/governance/rules.yaml (versioning)
+# and openbank-libs/governance/RELEASE.md.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: [self-hosted, openbank-sandbox]
+    timeout-minutes: 10
+    outputs:
+      releases_created: ${{ steps.rp.outputs.releases_created }}
+      paths_released: ${{ steps.rp.outputs.paths_released }}
+      # All per-path outputs (incl. `<path>--tag_name`/`--version`) as JSON — the
+      # AUTHORITATIVE tag release-please actually cut. The evidence job must use this,
+      # never re-read .release-please-manifest.json: when several release PRs merge
+      # close together the run's checked-out manifest can lag the version just tagged
+      # (caused kyc-service-v0.4.0 to be mis-tagged v0.3.1 → upload to a missing release).
+      rp_outputs: ${{ toJSON(steps.rp.outputs) }}
+    steps:
+      - id: rp
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          # GITOPS_PR_TOKEN (fine-grained PAT), not GITHUB_TOKEN: a release-PR merge made under
+          # GITHUB_TOKEN does NOT trigger another workflow (recursion guard), so the merge would
+          # never trigger the run that cuts the release. The PAT lets the merge re-trigger
+          # release-please (cut the tag + run the evidence job) and rebase the remaining separate
+          # release PRs — so auto-merge below actually drains the queue. Falls back to GITHUB_TOKEN.
+          token: ${{ secrets.GITOPS_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # Auto-merge every open release PR (ADR-0029 Layer B hygiene): the ruleset requires 0
+      # approvals, so GitHub merges each as soon as its required checks pass. With separate PRs
+      # they share .release-please-manifest.json and conflict, so they drain sequentially — each
+      # merge re-triggers release-please (via the PAT) which rebases the rest, cascading until the
+      # queue is empty. Idempotent: re-enabling on an already-armed PR is a no-op.
+      - name: Enable auto-merge on open release PRs
+        # Never let an arming hiccup (API blip on pulls.list) fail the release-please job —
+        # that would skip the evidence job (needs: release-please). Draining is best-effort.
+        continue-on-error: true
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ secrets.GITOPS_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 100,
+            });
+            const releasePrs = prs.filter(p =>
+              p.labels.some(l => l.name === 'autorelease: pending') ||
+              p.title.startsWith('chore(main): release'));
+            const mutation = `mutation($id: ID!) {
+              enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) {
+                pullRequest { number }
+              }
+            }`;
+            for (const pr of releasePrs) {
+              try {
+                await github.graphql(mutation, { id: pr.node_id });
+                core.info(`auto-merge enabled on #${pr.number} (${pr.title})`);
+              } catch (e) {
+                core.info(`#${pr.number}: ${e.message}`);  // already merging / mergeable-unknown / checks pending
+              }
+            }
+            core.info(`processed ${releasePrs.length} open release PR(s)`);
+
+  # ---------------------------------------------------------------------------
+  # Release evidence bundle (ADR-0029 D2 / ADR-0030 D4).
+  # ---------------------------------------------------------------------------
+  # Realises rules.yaml: provenance.evidence_bundle. When a Release PR merge cuts
+  # one or more tags, for EACH released component build + KMS-cosign-sign and attach
+  # to the GitHub Release: the CycloneDX SBOM, a SLSA v1.0 provenance statement, an
+  # OpenVEX vuln inventory, and the evidence manifest tying them together (version,
+  # commit, digests, changelog, AI attribution, scan/coverage/test refs). Assembly:
+  # .github/scripts/build-release-evidence.sh. The SBOM/docs are *attached to the
+  # release, not orphaned* — the model rules.yaml requires.
+  #
+  # NON-BLOCKING in v1 (continue-on-error): the release + tag are already cut by the
+  # job above, so an evidence hiccup must never red the release train. Promote to the
+  # enforced rules.yaml: provenance.gate once proven on real releases. Still planned:
+  # native GitHub attestation (private-repo GHAS gate), embedded coverage/test, and
+  # OpenVEX human triage (RELEASE.md "wired vs planned").
+  release-evidence:
+    name: Release evidence (SBOM + SLSA + VEX bundle)
+    needs: release-please
+    if: needs.release-please.outputs.releases_created == 'true'
+    runs-on: openbank-batch
+    timeout-minutes: 30
+    continue-on-error: true
+    permissions:
+      contents: write       # upload release assets
+      id-token: write       # GitHub OIDC → assume the build-runner role for KMS cosign
+      attestations: write   # native GitHub artifact attestation (activates when repo is public)
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PATHS_RELEASED: ${{ needs.release-please.outputs.paths_released }}
+      RP_OUTPUTS: ${{ needs.release-please.outputs.rp_outputs }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+        with:
+          distribution: temurin
+          java-version: "25"
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b # v5.0.0
+        with:
+          role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
+          aws-region: eu-north-1   # KMS cosign key + ECR live in eu-north-1 (matches auto-deploy)
+
+      - name: Map released components → tags
+        id: map
+        run: |
+          # paths_released is a JSON array of package dirs (e.g. ["openbank-pid-service"]).
+          # Use the AUTHORITATIVE per-path action outputs for the tag/version that
+          # release-please actually cut (`<path>--tag_name`, `<path>--version`) — NOT the
+          # checked-out manifest, which can lag when several release PRs merge together.
+          python3 - "$PATHS_RELEASED" "$RP_OUTPUTS" > released.tsv <<'PY'
+          import json, sys
+          paths = json.loads(sys.argv[1] or "[]")
+          outs = json.loads(sys.argv[2] or "{}")
+          cfg = json.load(open("release-please-config.json"))["packages"]
+          for p in paths:
+              comp = (cfg.get(p) or {}).get("component")
+              tag = outs.get(f"{p}--tag_name")
+              ver = outs.get(f"{p}--version")
+              # upload_url is the API endpoint for attaching assets — used instead of the
+              # `gh` CLI, which is not present on every runner in the openbank-batch pool.
+              upurl = (outs.get(f"{p}--upload_url") or "").split("{")[0]
+              if not tag and comp and ver:
+                  tag = f"{comp}-v{ver}"           # last-resort fallback
+              if comp and tag:
+                  ver = ver or tag.rsplit("-v", 1)[-1]
+                  print("\t".join([p, comp, ver, tag, upurl]))
+          PY
+          echo "Released components:"; cut -f1-4 released.tsv
+          # Gradle task list for components that carry the cyclonedx plugin.
+          tasks=""
+          while IFS=$'\t' read -r p comp ver tag upurl; do
+            [ -n "$p" ] && tasks="$tasks :$p:cyclonedxBom"
+          done < released.tsv
+          echo "tasks=$tasks" >> "$GITHUB_OUTPUT"
+
+      - name: Generate per-component SBOMs
+        if: steps.map.outputs.tasks != ''
+        run: ./gradlew ${{ steps.map.outputs.tasks }} --console=plain --no-daemon || true
+
+      - name: Build, sign and attach the release evidence bundle
+        run: |
+          set -uo pipefail
+          # Evidence bundle per released component (ADR-0029 D2 / ADR-0030 D4):
+          # CycloneDX SBOM + SLSA provenance + OpenVEX + the bundle manifest, each
+          # signed with the AWS KMS cosign key and attached to the GitHub Release.
+          COSIGN_KEY="awskms:///alias/openbank-cosign-signing"
+          COSIGN_VERSION="v2.4.3"
+          arch="$(uname -m)"; case "$arch" in aarch64) arch=arm64 ;; x86_64) arch=amd64 ;; esac
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"; case "$os" in darwin) os=darwin ;; *) os=linux ;; esac
+          bin="$(command -v cosign || true)"
+          if ! { [ -n "$bin" ] && cosign version 2>/dev/null | grep -Eq 'GitVersion:[[:space:]]*v2\.'; }; then
+            bin="${RUNNER_TEMP}/cosign2"
+            curl -fsSL -o "$bin" "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-${os}-${arch}"
+            chmod +x "$bin"
+          fi
+          sign() { COSIGN_YES=true "$bin" sign-blob --key "$COSIGN_KEY" --output-signature "${1}.sig" "$1"; }
+          # Upload one asset via the REST API (gh CLI is absent on part of the runner pool).
+          upload_asset() {
+            local upbase="$1" file="$2" code
+            code="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$file" \
+              "${upbase}?name=$(basename "$file")")"
+            case "$code" in
+              201) echo "  uploaded $file" ;;
+              422) echo "::notice::$file already present (HTTP 422) — skipping" ;;
+              *)   echo "::warning::upload of $file failed (HTTP $code)"; return 1 ;;
+            esac
+          }
+
+          while IFS=$'\t' read -r p comp ver tag upurl; do
+            [ -n "$p" ] || continue
+            sbom_out="${tag}.cdx.json"
+            bom="$p/build/reports/bom.json"
+            if [ -f "$bom" ]; then
+              cp "$bom" "$sbom_out"
+            elif command -v trivy >/dev/null 2>&1 && trivy fs --format cyclonedx --output "$sbom_out" "$p" 2>/dev/null && [ -s "$sbom_out" ]; then
+              # Non-Gradle module (e.g. admin-ui / Next.js): no cyclonedx plugin, so derive the
+              # SBOM from the source tree (package-lock.json etc.) with trivy fs.
+              echo "::notice::$p has no gradle SBOM — generated via trivy fs"
+            else
+              echo "::warning::no SBOM for $p (no gradle plugin and trivy fs produced none) — skipping $tag"
+              continue
+            fi
+            sign "$sbom_out" || { echo "::warning::cosign sign-blob failed for $sbom_out"; continue; }
+
+            # Assemble SLSA provenance + OpenVEX + evidence manifest (references the signed SBOM).
+            bash .github/scripts/build-release-evidence.sh "$comp" "$ver" "$tag" "$p" "$sbom_out" \
+              || echo "::warning::evidence assembly failed for $tag"
+
+            assets="$sbom_out ${sbom_out}.sig"
+            for doc in "${tag}.slsa.json" "${tag}.vex.json" "${tag}.evidence.json"; do
+              [ -f "$doc" ] || continue
+              sign "$doc" && assets="$assets $doc ${doc}.sig" \
+                || echo "::warning::cosign sign-blob failed for $doc"
+            done
+
+            if [ -z "$upurl" ]; then
+              echo "::warning::no upload_url for $tag — cannot attach assets"; continue
+            fi
+            for f in $assets; do upload_asset "$upurl" "$f" || true; done
+            echo "Attached signed evidence bundle to release $tag: $assets"
+          done < released.tsv
+
+      # Native GitHub artifact attestation (Sigstore-backed SLSA provenance, verifiable
+      # with `gh attestation verify`). Artifact attestations are free for public repos but
+      # gated on a paid plane while this repo is PRIVATE — same gate as CodeQL/SARIF in
+      # security.yml. So this auto-activates the moment the repo goes public; until then it
+      # is skipped (the cosign-signed *.slsa.json above is the provenance that works today).
+      - name: Attest SBOMs (native, public repos only)
+        if: ${{ !github.event.repository.private && hashFiles('*.cdx.json') != '' }}
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: "*.cdx.json"

@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.fx.application.port.`in`
+
+import com.openbank.fx.domain.model.FxRate
+import java.time.LocalDate
+
+/** Ingest the ČNB fixing for [date] (or the latest published one when `null`). */
+data class IngestCnbFixingCommand(val date: LocalDate? = null)
+
+/**
+ * Outcome of a ČNB ingestion run: the fixing [date] and publication [sequence] parsed from the
+ * feed, how many configured-currency rates were newly [ingested] vs. [skipped] (already present,
+ * idempotent), and the [currencies] that were stored.
+ */
+data class CnbIngestionResult(
+    val date: LocalDate,
+    val sequence: Int?,
+    val ingested: Int,
+    val skipped: Int,
+    val currencies: List<String>
+)
+
+/** Inbound port for ingesting and reading the ČNB central-bank fixing as `source = CNB` FxRates. */
+interface CnbRateIngestionUseCase {
+
+    suspend fun ingest(cmd: IngestCnbFixingCommand): CnbIngestionResult
+
+    /** Latest still-valid ČNB fixing for `base`/CZK (`source = CNB`), or `null` if none ingested. */
+    suspend fun getCnbRate(base: String, quote: String): FxRate?
+}

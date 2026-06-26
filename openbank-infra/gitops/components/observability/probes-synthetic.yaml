@@ -1,0 +1,78 @@
+# Synthetic Probe targets (Dynatrace-parity #2). Prometheus-operator Probe CRs
+# that drive the blackbox-exporter against the public ingress hosts. Picked up
+# cluster-wide (probeSelectorNilUsesHelmValues=false). Each produces
+# probe_success / probe_http_status_code / probe_ssl_earliest_cert_expiry /
+# probe_duration_seconds labelled by instance (the target URL). Alerts in
+# prometheus-rules-synthetic.yaml.
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: synthetic-public-pages
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  jobName: synthetic-public-pages
+  interval: 60s
+  scrapeTimeout: 12s
+  # Strict 2xx — admin-ui serves a real 200 at "/", so a non-2xx here is a
+  # genuine regression worth paging on.
+  module: http_2xx
+  prober:
+    url: blackbox-exporter:9115
+  targets:
+    staticConfig:
+      static:
+        - https://admin.open-bank.tech
+      labels:
+        tier: edge
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: synthetic-edge-reachability
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  jobName: synthetic-edge-reachability
+  interval: 60s
+  scrapeTimeout: 12s
+  # These hosts answer 401/403/404 at "/" by design (Keycloak has no welcome
+  # page; customer/glitchtip serve their app under a sub-path). The lenient
+  # http_app module treats "got an HTTP response" as up — proving ingress + TLS.
+  module: http_app
+  prober:
+    url: blackbox-exporter:9115
+  targets:
+    staticConfig:
+      static:
+        - https://customer.open-bank.tech
+        - https://glitchtip.open-bank.tech
+        - https://kc.open-bank.tech
+      labels:
+        tier: edge
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: synthetic-api
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  jobName: synthetic-api
+  interval: 60s
+  scrapeTimeout: 12s
+  # Probe the API gateway apex for reachability + TLS. (The gateway returns 404
+  # at "/api/v1/info" — that path isn't routed at the edge — so the previous
+  # target produced a false down; the apex 404 still proves ingress + cert.)
+  module: http_app
+  prober:
+    url: blackbox-exporter:9115
+  targets:
+    staticConfig:
+      static:
+        - https://api.open-bank.tech
+      labels:
+        tier: api

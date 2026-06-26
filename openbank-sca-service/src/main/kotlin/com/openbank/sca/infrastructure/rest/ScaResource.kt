@@ -1,0 +1,348 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.sca.infrastructure.rest
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.sca.application.port.`in`.*
+import com.openbank.sca.domain.model.*
+import com.openbank.libs.api.error.ApiError
+import com.openbank.libs.api.error.ErrorCode
+import com.openbank.libs.authz.Authorize
+import com.openbank.sca.application.usecase.*
+import com.openbank.libs.idempotency.IdempotencyStore
+import io.quarkus.security.identity.SecurityIdentity
+import jakarta.annotation.security.RolesAllowed
+import jakarta.inject.Inject
+import jakarta.ws.rs.*
+import jakarta.ws.rs.core.MediaType
+import jakarta.ws.rs.core.Response
+import jakarta.ws.rs.ext.ExceptionMapper
+import jakarta.ws.rs.ext.Provider
+import java.util.UUID
+
+data class InitiateScaRequest(
+    val partyId: UUID,
+    val purpose: ScaPurpose,
+    val preferredMethod: ScaMethod?,
+    val dynamicLinkingData: DynamicLinkingData?,
+    val redirectUrl: String?
+)
+
+data class VerifyScaRequest(
+    val partyId: UUID,
+    val otp: String?
+)
+
+data class EnrollDeviceRequest(
+    val credentialId: String,
+    /** Base64 X.509 SubjectPublicKeyInfo of the device public key. */
+    val publicKey: String,
+    val algorithm: SignatureAlgorithm
+)
+
+data class EnrolledDeviceResponse(
+    val id: UUID,
+    val partyId: UUID,
+    val credentialId: String,
+    val algorithm: SignatureAlgorithm,
+    val enrolledAt: String,
+) {
+    companion object {
+        fun from(d: EnrolledDevice) =
+            EnrolledDeviceResponse(d.id, d.partyId, d.credentialId, d.algorithm, d.createdAt.toString())
+    }
+}
+
+data class RecordDecisionRequest(
+    val credentialId: String,
+    val decision: DeviceDecisionType,
+    /** Base64 signature over the challenge's dynamic-linking payload. */
+    val signature: String
+)
+
+data class ScaChallengeResponse(
+    val id: UUID,
+    val partyId: UUID,
+    val purpose: ScaPurpose,
+    val method: ScaMethod,
+    val status: ScaStatus,
+    val expiresAt: String,
+    val completedAt: String?,
+    val consumedAt: String?,
+    val attemptCount: Int,
+    val maxAttempts: Int
+) {
+    companion object {
+        fun from(c: ScaChallenge) = ScaChallengeResponse(
+            id = c.id,
+            partyId = c.partyId,
+            purpose = c.purpose,
+            method = c.method,
+            status = c.status,
+            expiresAt = c.expiresAt.toString(),
+            completedAt = c.completedAt?.toString(),
+            consumedAt = c.consumedAt?.toString(),
+            attemptCount = c.attemptCount,
+            maxAttempts = c.maxAttempts
+        )
+    }
+}
+
+/**
+ * Compare-and-consume body (settlement gate): the caller states the operation it is about
+ * to execute; the challenge is spent only when the device-signed dynamic-linking data
+ * authorises exactly that operation. `creditor` is the creditor IBAN (SEPA) or the Czech
+ * "number/bankcode" account (domestic) — whatever the device displayed and signed.
+ */
+data class ConsumeScaRequest(
+    val partyId: UUID,
+    val amount: String? = null,
+    val currency: String? = null,
+    val creditor: String? = null
+)
+
+@Path("/api/v1/sca")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+@Suppress("LongParameterList") // one use-case port per operation (hexagonal), wired by Arc
+class ScaResource(
+    private val initiateSca: InitiateScaUseCase,
+    private val verifySca: VerifyScaUseCase,
+    private val getSca: GetScaUseCase,
+    private val enrollDevice: EnrollDeviceUseCase,
+    private val listDevices: ListDevicesUseCase,
+    private val recordDecision: RecordDeviceDecisionUseCase,
+    private val consumeSca: ConsumeScaUseCase,
+    private val idempotencyStore: IdempotencyStore,
+    private val objectMapper: ObjectMapper
+) {
+    // SecurityIdentity carries the authenticated principal across coroutine dispatch
+    // (smallrye-context-propagation). Used for ownership enforcement on device enrollment.
+    @Inject
+    lateinit var identity: SecurityIdentity
+    @POST
+    @Path("/challenges")
+    suspend fun initiate(
+        request: InitiateScaRequest,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam("X-Request-ID") xRequestId: String?
+    ): Response {
+        val requestKey = idempotencyKey?.takeIf { it.isNotBlank() } ?: xRequestId?.takeIf { it.isNotBlank() }
+        requestKey?.let { key ->
+            idempotencyStore.get(scaCreateKey(request.partyId, key))?.let { cached ->
+                return Response.status(cached.statusCode)
+                    .entity(cached.responseBody)
+                    .type(MediaType.APPLICATION_JSON)
+                    .header("X-Idempotency-Replayed", "true")
+                    .build()
+            }
+        }
+
+        val challenge = initiateSca.initiate(
+            InitiateScaCommand(
+                partyId = request.partyId,
+                purpose = request.purpose,
+                preferredMethod = request.preferredMethod,
+                dynamicLinkingData = request.dynamicLinkingData,
+                redirectUrl = request.redirectUrl
+            )
+        )
+        val responseBody = ScaChallengeResponse.from(challenge)
+        requestKey?.let { key ->
+            idempotencyStore.save(
+                scaCreateKey(request.partyId, key),
+                201,
+                objectMapper.writeValueAsString(responseBody),
+                300
+            )
+        }
+        return Response.status(201).entity(responseBody).build()
+    }
+
+    @POST
+    @Path("/challenges/{id}/verify")
+    @Authorize(action = "scaChallenge.verify", resource = "#id")
+    suspend fun verify(@PathParam("id") id: UUID, request: VerifyScaRequest): ScaChallengeResponse {
+        val challenge = verifySca.verify(VerifyScaCommand(id, request.partyId, request.otp))
+        return ScaChallengeResponse.from(challenge)
+    }
+
+    @GET
+    @Path("/challenges/{id}")
+    suspend fun get(@PathParam("id") id: UUID): ScaChallengeResponse =
+        ScaChallengeResponse.from(getSca.getChallenge(id))
+
+    /** List device credentials enrolled to a party (ADR-0021, ADR-0068 onboarding cockpit). */
+    @GET
+    @Path("/parties/{partyId}/devices")
+    @Authorize(action = "device.list", resource = "#partyId")
+    suspend fun listDevices(@PathParam("partyId") partyId: UUID): List<EnrolledDeviceResponse> {
+        val principalName = identity.principal?.name
+        if (principalName != null && !identity.hasRole("ROLE_OPERATOR") && !identity.hasRole("ROLE_ADMIN")) {
+            runCatching { UUID.fromString(principalName) }.getOrNull()?.let { principalPartyId ->
+                if (principalPartyId != partyId) throw ForbiddenException("Cannot list devices for another party")
+            }
+        }
+        return listDevices.listDevices(ListDevicesQuery(partyId)).map { EnrolledDeviceResponse.from(it) }
+    }
+
+    /** Enrol a device credential to a party (ADR-0021). */
+    @POST
+    @Path("/parties/{partyId}/devices")
+    @Authorize(action = "device.enroll", resource = "#partyId")
+    suspend fun enroll(@PathParam("partyId") partyId: UUID, request: EnrollDeviceRequest): Response {
+        // P1 ownership enforcement (defense-in-depth over OPA advisory mode, ADR-0021 security review):
+        // the authenticated principal may only enroll devices for their OWN partyId.
+        // When the customer realm (ADR-0065) issues JWTs, the 'sub' claim carries the partyId;
+        // in the operator realm 'sub' is the operator user id — operators with ROLE_OPERATOR
+        // may enroll on behalf of a party (service-desk credential reset path, future scope).
+        // For now: reject if sub == UUID && sub != partyId (i.e. the caller is a party, not an operator).
+        val principalName = identity.principal?.name
+        if (principalName != null && !identity.hasRole("ROLE_OPERATOR") && !identity.hasRole("ROLE_ADMIN")) {
+            runCatching { UUID.fromString(principalName) }.getOrNull()?.let { principalPartyId ->
+                if (principalPartyId != partyId) throw ForbiddenException("Cannot enroll device for another party")
+            }
+        }
+        val device = enrollDevice.enroll(
+            EnrollDeviceCommand(
+                partyId = partyId,
+                credentialId = request.credentialId,
+                publicKeySpkiB64 = request.publicKey,
+                algorithm = request.algorithm
+            )
+        )
+        return Response.status(201).entity(EnrolledDeviceResponse.from(device)).build()
+    }
+
+    /**
+     * Record an out-of-band approval/denial from the enrolled device. Authenticated as the
+     * device/party (a different principal from the verify caller). The signed assertion is
+     * verified against the challenge's dynamic-linking data before it is stored.
+     */
+    @POST
+    @Path("/challenges/{id}/decision")
+    @Authorize(action = "scaChallenge.decide", resource = "#id")
+    suspend fun decide(@PathParam("id") id: UUID, request: RecordDecisionRequest): ScaChallengeResponse {
+        val challenge = recordDecision.recordDecision(
+            RecordDeviceDecisionCommand(
+                challengeId = id,
+                credentialId = request.credentialId,
+                decision = request.decision,
+                signatureB64 = request.signature
+            )
+        )
+        return ScaChallengeResponse.from(challenge)
+    }
+
+    /**
+     * Spend an approved challenge on the operation it authorised (ADR-0021 settlement gate;
+     * single-use per RTS Art. 5). Called by the customer edge — an M2M, operator-realm
+     * principal — immediately BEFORE forwarding a payment to the money path, so a payment can
+     * only ever execute behind a device-signed, amount+payee-bound, unconsumed approval.
+     */
+    @POST
+    @Path("/challenges/{id}/consume")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_SERVICE", "ROLE_ADMIN")
+    @Authorize(action = "scaChallenge.consume", resource = "#id")
+    suspend fun consume(@PathParam("id") id: UUID, request: ConsumeScaRequest): ScaChallengeResponse {
+        val challenge = consumeSca.consume(
+            ConsumeScaCommand(
+                challengeId = id,
+                expectedPartyId = request.partyId,
+                amount = request.amount,
+                currency = request.currency,
+                creditor = request.creditor
+            )
+        )
+        return ScaChallengeResponse.from(challenge)
+    }
+
+    private fun scaCreateKey(partyId: UUID, requestKey: String) = "sca:initiate:$partyId:$requestKey"
+}
+
+private fun err(code: ErrorCode, msg: String) =
+    ApiError(traceId = UUID.randomUUID().toString(), status = code.httpStatus, code = code.code, message = msg)
+
+@Provider
+class ScaNotFoundMapper : ExceptionMapper<ScaChallengeNotFoundException> {
+    override fun toResponse(e: ScaChallengeNotFoundException): Response =
+        Response.status(404).entity(err(ErrorCode.NOT_FOUND, e.message ?: "Not found")).build()
+}
+
+@Provider
+class ScaExpiredMapper : ExceptionMapper<ScaChallengeExpiredException> {
+    override fun toResponse(e: ScaChallengeExpiredException): Response =
+        Response.status(422).entity(err(ErrorCode.VALIDATION_ERROR, e.message ?: "Expired")).build()
+}
+
+@Provider
+class ScaMaxAttemptsMapper : ExceptionMapper<ScaChallengeMaxAttemptsException> {
+    override fun toResponse(e: ScaChallengeMaxAttemptsException): Response =
+        Response.status(429).entity(err(ErrorCode.VALIDATION_ERROR, e.message ?: "Too many attempts")).build()
+}
+
+@Provider
+class ScaVerificationFailedMapper : ExceptionMapper<ScaVerificationFailedException> {
+    override fun toResponse(e: ScaVerificationFailedException): Response =
+        Response.status(401).entity(err(ErrorCode.UNAUTHORIZED, e.message ?: "Verification failed")).build()
+}
+
+@Provider
+class ScaNotAwaitingMapper : ExceptionMapper<ScaChallengeNotAwaitingException> {
+    override fun toResponse(e: ScaChallengeNotAwaitingException): Response =
+        Response.status(409).entity(err(ErrorCode.VALIDATION_ERROR, e.message ?: "Not awaiting decision")).build()
+}
+
+@Provider
+class DeviceNotEnrolledMapper : ExceptionMapper<DeviceNotEnrolledException> {
+    override fun toResponse(e: DeviceNotEnrolledException): Response =
+        Response.status(404).entity(err(ErrorCode.NOT_FOUND, e.message ?: "Device not enrolled")).build()
+}
+
+// Handles both the pre-check conflict and the TOCTOU unique-constraint race (23505 → 409 Conflict).
+@Provider
+class DeviceCredentialConflictMapper : ExceptionMapper<CredentialAlreadyEnrolledException> {
+    override fun toResponse(e: CredentialAlreadyEnrolledException): Response = Response.status(Response.Status.CONFLICT)
+        .entity(err(ErrorCode.VALIDATION_ERROR, e.message ?: "Credential conflict")).build()
+}
+
+@Provider
+class DeviceOwnershipMismatchMapper : ExceptionMapper<DeviceOwnershipMismatchException> {
+    override fun toResponse(e: DeviceOwnershipMismatchException): Response =
+        Response.status(403).entity(err(ErrorCode.FORBIDDEN, e.message ?: "Device ownership mismatch")).build()
+}
+
+@Provider
+class InvalidDeviceAssertionMapper : ExceptionMapper<InvalidDeviceAssertionException> {
+    override fun toResponse(e: InvalidDeviceAssertionException): Response =
+        Response.status(401).entity(err(ErrorCode.UNAUTHORIZED, e.message ?: "Invalid device assertion")).build()
+}
+
+@Provider
+class ScaNotApprovedMapper : ExceptionMapper<ScaChallengeNotApprovedException> {
+    override fun toResponse(e: ScaChallengeNotApprovedException): Response =
+        Response.status(ErrorCode.VALIDATION_ERROR.httpStatus)
+            .entity(err(ErrorCode.VALIDATION_ERROR, e.message ?: "Challenge not approved")).build()
+}
+
+@Provider
+class ScaAlreadyConsumedMapper : ExceptionMapper<ScaChallengeAlreadyConsumedException> {
+    override fun toResponse(e: ScaChallengeAlreadyConsumedException): Response =
+        Response.status(Response.Status.CONFLICT)
+            .entity(err(ErrorCode.VALIDATION_ERROR, e.message ?: "Challenge already consumed")).build()
+}
+
+@Provider
+class ScaPartyMismatchMapper : ExceptionMapper<ScaChallengePartyMismatchException> {
+    override fun toResponse(e: ScaChallengePartyMismatchException): Response =
+        Response.status(Response.Status.FORBIDDEN)
+            .entity(err(ErrorCode.FORBIDDEN, e.message ?: "Challenge party mismatch")).build()
+}
+
+@Provider
+class ScaDynamicLinkingMismatchMapper : ExceptionMapper<ScaDynamicLinkingMismatchException> {
+    override fun toResponse(e: ScaDynamicLinkingMismatchException): Response = Response.status(Response.Status.CONFLICT)
+        .entity(err(ErrorCode.VALIDATION_ERROR, e.message ?: "Dynamic linking mismatch")).build()
+}

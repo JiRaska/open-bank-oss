@@ -1,0 +1,350 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-dept-compliance
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/part-of: observability
+data:
+  openbank-dept-compliance.json: |
+    {
+      "id": null,
+      "uid": "openbank-dept-compliance",
+      "title": "OpenBank — Compliance & AML",
+      "description": "Department view for the compliance office: sanctions screening volume and hits, KYC verdict quality, and the health of the compliance event pipeline. Domain metrics per ADR-0077/0079.",
+      "tags": ["openbank", "department", "compliance"],
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": { "from": "now-24h", "to": "now" },
+      "timepicker": {},
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "pluginId": "prometheus",
+            "label": "Datasource",
+            "hide": 0,
+            "refresh": 1,
+            "options": [],
+            "current": {}
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Sanctions Screenings",
+          "type": "stat",
+          "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "area"
+          },
+          "targets": [
+            {
+              "expr": "sum(increase(openbank_sanctions_screenings_total{job=\"observability/openbank-services\"}[$__range]))",
+              "legendFormat": "screenings",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Sanctions Hits",
+          "type": "stat",
+          "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 1 },
+                  { "color": "red", "value": 10 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "area"
+          },
+          "targets": [
+            {
+              "expr": "sum(increase(openbank_sanctions_hits_total{job=\"observability/openbank-services\"}[$__range]))",
+              "legendFormat": "hits",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Block Rate %",
+          "type": "stat",
+          "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "decimals": 2,
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 1 },
+                  { "color": "red", "value": 5 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "none"
+          },
+          "targets": [
+            {
+              "expr": "100 * (sum(increase(openbank_sanctions_hits_total{severity=\"block\",job=\"observability/openbank-services\"}[$__range])) or vector(0)) / clamp_min(sum(increase(openbank_sanctions_screenings_total{job=\"observability/openbank-services\"}[$__range])), 1)",
+              "legendFormat": "block rate",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "KYC Approval Rate %",
+          "type": "stat",
+          "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "decimals": 1,
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "orange", "value": 50 },
+                  { "color": "green", "value": 80 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "none"
+          },
+          "targets": [
+            {
+              "expr": "100 * (sum(increase(openbank_kyc_verdicts_total{outcome=\"approved\",job=\"observability/openbank-services\"}[$__range])) or vector(0)) / clamp_min(sum(increase(openbank_kyc_verdicts_total{job=\"observability/openbank-services\"}[$__range])), 1)",
+              "legendFormat": "approval rate",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "Screening Rate by Role",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": { "lineWidth": 1, "fillOpacity": 10 }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean"] },
+            "tooltip": { "mode": "multi" }
+          },
+          "targets": [
+            {
+              "expr": "sum by (role) (rate(openbank_sanctions_screenings_total{job=\"observability/openbank-services\"}[5m]))",
+              "legendFormat": "role={{role}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "title": "Sanctions Hits by Severity",
+          "type": "timeseries",
+          "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": { "lineWidth": 1, "fillOpacity": 20 }
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "severity=block" },
+                "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+              },
+              {
+                "matcher": { "id": "byName", "options": "severity=review" },
+                "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }]
+              }
+            ]
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
+            "tooltip": { "mode": "multi" }
+          },
+          "targets": [
+            {
+              "expr": "sum by (severity) (rate(openbank_sanctions_hits_total{job=\"observability/openbank-services\"}[5m]))",
+              "legendFormat": "severity={{severity}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "title": "Hit Ratio % (1h window)",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 12, "w": 8, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "custom": { "lineWidth": 2, "fillOpacity": 10 },
+              "color": { "mode": "fixed", "fixedColor": "red" }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": { "displayMode": "list", "placement": "bottom" },
+            "tooltip": { "mode": "single" }
+          },
+          "targets": [
+            {
+              "expr": "100 * (sum(rate(openbank_sanctions_hits_total{job=\"observability/openbank-services\"}[1h])) or vector(0)) / clamp_min(sum(rate(openbank_sanctions_screenings_total{job=\"observability/openbank-services\"}[1h])), 0.0001)",
+              "legendFormat": "hit ratio",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "title": "KYC Verdicts by Outcome",
+          "type": "bargauge",
+          "gridPos": { "x": 8, "y": 12, "w": 8, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "palette-classic" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "horizontal",
+            "displayMode": "gradient",
+            "text": {}
+          },
+          "targets": [
+            {
+              "expr": "sum by (outcome) (increase(openbank_kyc_verdicts_total{job=\"observability/openbank-services\"}[$__range]))",
+              "legendFormat": "{{outcome}}",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "title": "Compliance Pipeline Backlog (outbox)",
+          "type": "timeseries",
+          "gridPos": { "x": 16, "y": 12, "w": 8, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": { "lineWidth": 1, "fillOpacity": 20 },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": 100 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
+            "tooltip": { "mode": "multi" }
+          },
+          "targets": [
+            {
+              "expr": "max by (service) (openbank_outbox_backlog{service=~\"sanctions|aml|kyc\"})",
+              "legendFormat": "{{service}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "title": "Compliance Services — Warnings & Errors",
+          "type": "logs",
+          "gridPos": { "x": 0, "y": 20, "w": 24, "h": 9 },
+          "datasource": { "type": "loki", "uid": "loki" },
+          "options": {
+            "showTime": true,
+            "showLabels": false,
+            "showCommonLabels": false,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": false,
+            "enableLogDetails": true,
+            "dedupStrategy": "none",
+            "sortOrder": "Descending"
+          },
+          "targets": [
+            {
+              "expr": "{namespace=~\"sanctions|aml|kyc\", level=~\"(?i)(warn|warning|error)\"}",
+              "refId": "A"
+            }
+          ]
+        }
+      ]
+    }

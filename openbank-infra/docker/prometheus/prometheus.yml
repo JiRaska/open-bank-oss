@@ -1,0 +1,145 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: openbank-local
+    environment: development
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # ── Core Banking ──────────────────────────────────────────────────────────
+  - job_name: account-service
+    static_configs:
+      - targets: ['openbank-account-service:8100']
+    metrics_path: /q/metrics
+
+  - job_name: ledger-service
+    static_configs:
+      - targets: ['openbank-ledger-service:8101']
+    metrics_path: /q/metrics
+
+  - job_name: transaction-service
+    static_configs:
+      - targets: ['openbank-transaction-service:8102']
+    metrics_path: /q/metrics
+
+
+  # ── Identity & Compliance ─────────────────────────────────────────────────
+  - job_name: pid-service
+    static_configs:
+      - targets: ['openbank-pid-service:8105']
+    metrics_path: /q/metrics
+
+  - job_name: consent-service
+    static_configs:
+      - targets: ['openbank-consent-service:8106']
+    metrics_path: /q/metrics
+
+  - job_name: psd2-service
+    static_configs:
+      - targets: ['openbank-psd2-service:8107']
+    metrics_path: /q/metrics
+
+
+  - job_name: agent-service
+    static_configs:
+      - targets: ['openbank-agent-service:8109']
+    metrics_path: /q/metrics
+
+  - job_name: sca-service
+    static_configs:
+      - targets: ['openbank-sca-service:8110']
+    metrics_path: /q/metrics
+
+  - job_name: party-service
+    static_configs:
+      - targets: ['openbank-party-service:8111']
+    metrics_path: /q/metrics
+
+  - job_name: notification-service
+    static_configs:
+      - targets: ['openbank-notification-service:8112']
+    metrics_path: /q/metrics
+
+  - job_name: audit-service
+    static_configs:
+      - targets: ['openbank-audit-service:8113']
+    metrics_path: /q/metrics
+
+  - job_name: kyc-service
+    static_configs:
+      - targets: ['openbank-kyc-service:8114']
+    metrics_path: /q/metrics
+
+  # ── Payments ──────────────────────────────────────────────────────────────
+  - job_name: sepa-payment-service
+    static_configs:
+      - targets: ['openbank-sepa-payment:8115']
+    metrics_path: /q/metrics
+
+  - job_name: domestic-payment-service
+    static_configs:
+      - targets: ['openbank-domestic-payment:8116']
+    metrics_path: /q/metrics
+
+  - job_name: aml-service
+    static_configs:
+      - targets: ['openbank-aml-service:8117']
+    metrics_path: /q/metrics
+
+  # ── New Services ──────────────────────────────────────────────────────────
+  - job_name: card-issuance-service
+    static_configs:
+      - targets: ['openbank-card-issuance-service:8118']
+    metrics_path: /q/metrics
+
+  - job_name: fx-service
+    static_configs:
+      - targets: ['openbank-fx-service:8119']
+    metrics_path: /q/metrics
+
+  - job_name: security-scanner
+    static_configs:
+      - targets: ['openbank-security-scanner:8120']
+    metrics_path: /q/metrics
+
+  - job_name: standing-order-service
+    static_configs:
+      - targets: ['openbank-standing-order-service:8121']
+    metrics_path: /q/metrics
+
+  - job_name: swift-service
+    static_configs:
+      - targets: ['openbank-swift-service:8122']
+    metrics_path: /q/metrics
+
+  - job_name: sanctions-service
+    static_configs:
+      - targets: ['openbank-sanctions-service:8123']
+    metrics_path: /q/metrics
+
+  - job_name: clearing-service
+    static_configs:
+      - targets: ['openbank-clearing-service:8124']
+    metrics_path: /q/metrics
+
+  - job_name: interest-service
+    static_configs:
+      - targets: ['openbank-interest-service:8125']
+    metrics_path: /q/metrics
+
+  - job_name: dispute-service
+    static_configs:
+      - targets: ['openbank-dispute-service:8135']
+    metrics_path: /q/metrics
+
+  - job_name: sepa-instant-service
+    static_configs:
+      - targets: ['openbank-sepa-instant-service:8127']
+    metrics_path: /q/metrics

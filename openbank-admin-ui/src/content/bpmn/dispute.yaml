@@ -1,0 +1,137 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# BPMN process diagram (ADR-0019/0029). Authored as data; validated by
+# src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
+
+name: Dispute / Chargeback
+desc: Řešení reklamace transakce a chargeback proces
+regulation: Mastercard/Visa Chargeback Rules
+services:
+  - dispute-service
+  - card-issuance-service
+  - ledger-service
+  - notification-service
+steps:
+  - id: start
+    type: start
+    x: 60
+    y: 100
+    label: Reklamace
+  - id: verify
+    type: task
+    x: 180
+    y: 100
+    label: Ověření transakce
+    lane: core
+    apis:
+      - GET /api/v1/transactions/{id}
+    relatedServices:
+      - dispute-service
+  - id: gw1
+    type: gateway
+    x: 300
+    y: 100
+    label: Validní?
+  - id: reject1
+    type: end-err
+    x: 300
+    y: 220
+    label: Zamítnuto
+  - id: credit
+    type: task
+    x: 440
+    y: 100
+    label: Provisional Credit
+    lane: core
+    apis:
+      - POST /api/v1/ledger/post
+    relatedServices:
+      - ledger-service
+  - id: cb
+    type: task
+    x: 580
+    y: 100
+    label: Chargeback Init
+    lane: cards
+    apis:
+      - POST /api/v1/cards/chargeback
+    relatedServices:
+      - card-issuance-service
+  - id: gw2
+    type: gateway
+    x: 720
+    y: 100
+    label: Vyřešeno?
+  - id: reverse
+    type: task
+    x: 720
+    y: 220
+    label: Debit Reversal
+    lane: core
+    apis:
+      - POST /api/v1/ledger/post
+    relatedServices:
+      - ledger-service
+  - id: confirm
+    type: task
+    x: 860
+    y: 100
+    label: Potvrzení kreditu
+    lane: core
+    apis:
+      - PUT /api/v1/disputes/{id}/close
+    relatedServices:
+      - dispute-service
+  - id: notify
+    type: task
+    x: 980
+    y: 100
+    label: Notifikace
+    lane: platform
+    apis:
+      - POST /api/v1/notifications
+    relatedServices:
+      - notification-service
+    consumes:
+      - openbank.notification.requests
+  - id: end
+    type: end
+    x: 1080
+    y: 100
+    label: Uzavřeno
+  - id: end-rev
+    type: end-err
+    x: 860
+    y: 220
+    label: Zrušeno
+flows:
+  - from: start
+    to: verify
+  - from: verify
+    to: gw1
+  - from: gw1
+    to: reject1
+    label: Ne
+  - from: gw1
+    to: credit
+    label: Ano
+  - from: credit
+    to: cb
+  - from: cb
+    to: gw2
+  - from: gw2
+    to: reverse
+    label: Prohra
+  - from: gw2
+    to: confirm
+    label: Výhra
+  - from: confirm
+    to: notify
+    kind: async
+    topic: openbank.notification.requests
+  - from: reverse
+    to: notify
+    kind: async
+    topic: openbank.notification.requests
+  - from: notify
+    to: end

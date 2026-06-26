@@ -1,0 +1,286 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.party.application.usecase
+
+import com.openbank.libs.api.pagination.CursorEncoder
+import com.openbank.libs.api.pagination.CursorPage
+import com.openbank.libs.api.pagination.PageInfo
+import com.openbank.libs.api.search.SearchRequest
+import com.openbank.libs.identity.BlindIndex
+import com.openbank.libs.identity.RodneCislo
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.party.application.port.`in`.*
+import com.openbank.party.application.port.out.*
+import com.openbank.party.domain.model.*
+import com.openbank.party.domain.model.PartyDocumentFile
+import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
+import java.time.Clock
+import java.time.Instant
+import java.util.Optional
+import java.util.UUID
+
+private const val RC_KEY_VERSION = 1
+
+class PartyNotFoundException(id: UUID) : RuntimeException("Party not found: $id")
+class PartyAlreadyExistsException(email: String) : RuntimeException("Party with email already exists: $email")
+class PartyKeycloakSubAlreadyBoundException(sub: String) : RuntimeException("Keycloak sub already registered: $sub")
+
+@ApplicationScoped
+class PartyService : PartyUseCase {
+
+    @Inject lateinit var partyRepo: PartyRepository
+    @Inject lateinit var documentRepo: PartyDocumentRepository
+    @Inject lateinit var documentFileRepo: PartyDocumentFileRepository
+    @Inject lateinit var eventPublisher: PartyEventPublisher
+    @Inject lateinit var metrics: DomainMetrics
+    @Inject lateinit var clock: Clock
+
+    /** ADR-0072: pepper for RČ blind index. Optional — dedup is silently skipped when absent. */
+    @org.eclipse.microprofile.config.inject.ConfigProperty(name = "openbank.identity.rc-pepper")
+    lateinit var rcPepper: Optional<String>
+
+    override suspend fun createParty(cmd: CreatePartyCommand): Party {
+        partyRepo.findByEmail(cmd.email)?.let {
+            throw PartyAlreadyExistsException(cmd.email)
+        }
+        // Explicit id (ADR-0069 §B1): self-service onboarding binds party id == Keycloak sub.
+        // A repeated create with the same id must not blow up with a PK violation — return the
+        // existing record instead (the email check above already catches most retries).
+        cmd.id?.let { requested ->
+            partyRepo.findById(requested)?.let { return it }
+        }
+        val (rcIndex, rcKeyVer) = computeRcBlindIndex(cmd.taxId)
+        val party = Party(
+            id = cmd.id ?: UUID.randomUUID(),
+            // B1 invariant for self-service onboarding: id == Keycloak sub. Mirror it into
+            // keycloakSub so sub-keyed lookups (getMyParty, legacy mobile path) agree.
+            keycloakSub = cmd.id?.toString(),
+            partyType = cmd.partyType,
+            status = PartyStatus.PENDING_KYC,
+            legalName = cmd.legalName,
+            tradingName = cmd.tradingName,
+            dateOfBirth = cmd.dateOfBirth,
+            nationality = cmd.nationality,
+            taxId = cmd.taxId,
+            registrationNumber = cmd.registrationNumber,
+            email = cmd.email,
+            phone = cmd.phone,
+            address = cmd.address,
+            kycStatus = KycStatus.NOT_STARTED,
+            createdAt = Instant.now(clock),
+            updatedAt = Instant.now(clock),
+            rcBlindIndex = rcIndex,
+            rcIndexKeyVersion = rcKeyVer,
+        )
+        val saved = partyRepo.save(party)
+        eventPublisher.publishPartyCreated(saved)
+        metrics.partyCreated(saved.partyType.name)
+        return saved
+    }
+
+    /** Computes the RČ blind index when the pepper is configured and [taxId] is a valid Czech RČ. */
+    private fun computeRcBlindIndex(taxId: String?): Pair<String?, Int?> {
+        if (taxId == null) return null to null
+        val pepper = rcPepper.filter { it.isNotBlank() }.orElse(null) ?: return null to null
+        val rc = RodneCislo.parse(taxId)
+        if (rc !is RodneCislo.Parsed) return null to null
+        return BlindIndex.compute(pepper.toByteArray(Charsets.UTF_8), rc.canonical) to RC_KEY_VERSION
+    }
+
+    override fun isDedupAvailable(): Boolean = rcPepper.filter { it.isNotBlank() }.isPresent
+
+    override suspend fun resolvePartyByRc(cmd: ResolvePartyByRcCommand): Party? {
+        val pepper = rcPepper.filter { it.isNotBlank() }.orElse(null) ?: return null
+        val rc = RodneCislo.parse(cmd.rawRc)
+        if (rc !is RodneCislo.Parsed) return null
+        val index = BlindIndex.compute(pepper.toByteArray(Charsets.UTF_8), rc.canonical)
+        return partyRepo.findByRcBlindIndex(index)
+    }
+
+    override suspend fun getParty(id: UUID): Party =
+        partyRepo.findById(id) ?: throw PartyNotFoundException(id)
+
+    override suspend fun updateParty(cmd: UpdatePartyCommand): Party {
+        val party = partyRepo.findById(cmd.id) ?: throw PartyNotFoundException(cmd.id)
+        val updated = party.copy(
+            email = cmd.email ?: party.email,
+            phone = cmd.phone ?: party.phone,
+            address = cmd.address ?: party.address,
+            tradingName = cmd.tradingName ?: party.tradingName,
+            updatedAt = Instant.now(clock)
+        )
+        val saved = partyRepo.update(updated)
+        eventPublisher.publishPartyUpdated(saved)
+        return saved
+    }
+
+    override suspend fun addDocument(cmd: AddDocumentCommand): PartyDocument {
+        partyRepo.findById(cmd.partyId) ?: throw PartyNotFoundException(cmd.partyId)
+        val doc = PartyDocument(
+            id = UUID.randomUUID(),
+            partyId = cmd.partyId,
+            documentType = cmd.documentType,
+            documentNumber = cmd.documentNumber,
+            issuingCountry = cmd.issuingCountry,
+            expiryDate = cmd.expiryDate,
+            verifiedAt = null,
+            createdAt = Instant.now(clock)
+        )
+        return documentRepo.save(doc)
+    }
+
+    override suspend fun listDocuments(partyId: UUID): List<PartyDocument> {
+        partyRepo.findById(partyId) ?: throw PartyNotFoundException(partyId)
+        return documentRepo.findByPartyId(partyId)
+    }
+
+    override suspend fun listParties(page: Int, size: Int, status: PartyStatus?): Map<String, Any> {
+        val items = if (status != null) partyRepo.listByStatus(status, page, size) else partyRepo.listAll(page, size)
+        val total = if (status != null) partyRepo.countByStatus(status) else partyRepo.countAll()
+        val result = mutableMapOf<String, Any>(
+            "items" to items.map { p -> mapOf(
+                "id" to p.id, "partyType" to p.partyType, "status" to p.status,
+                "legalName" to p.legalName, "tradingName" to p.tradingName,
+                "email" to p.email, "kycStatus" to p.kycStatus, "createdAt" to p.createdAt,
+            )},
+            "total" to total, "page" to page, "size" to size,
+        )
+        // Present the applied filter so callers don't have to echo it back
+        status?.name?.let { result["statusFilter"] = it }
+        return result
+    }
+
+    // ADR-0055: bounded name search. The shared SearchRequest contract owns the DB-safety
+    // guardrails (page-size clamp, min-term length, LIKE-escaping); this service owns the SQL
+    // (legal_name / trading_name) and the keyset cursor. A blank/`*`/sub-2-char term has no
+    // fulltext predicate — we return an empty page rather than enumerate the whole table from
+    // the /search surface (use GET /parties to list). Data-minimised response via toSimpleResponse.
+    override suspend fun searchParties(query: SearchPartiesQuery): CursorPage<Party> {
+        val req = SearchRequest.of(query.q, query.limit, query.cursor)
+        if (!req.hasTerm) {
+            return CursorPage(data = emptyList(), pagination = PageInfo(limit = req.limit, hasNextPage = false))
+        }
+        val afterId = req.cursor?.let { runCatching { UUID.fromString(CursorEncoder.decode(it)) }.getOrNull() }
+        // Fetch limit+1 to detect a next page without a second count query.
+        val rows = partyRepo.searchByName(req.term!!, req.limit + 1, afterId)
+        val hasNext = rows.size > req.limit
+        val pageRows = if (hasNext) rows.dropLast(1) else rows
+        val nextCursor = if (hasNext && pageRows.isNotEmpty()) CursorEncoder.encode(pageRows.last().id.toString()) else null
+        return CursorPage(
+            data = pageRows,
+            pagination = PageInfo(limit = req.limit, hasNextPage = hasNext, nextCursor = nextCursor),
+        )
+    }
+
+    override suspend fun updateKycStatus(partyId: UUID, status: KycStatus): Party {
+        val party = partyRepo.findById(partyId) ?: throw PartyNotFoundException(partyId)
+        val updated = party.copy(
+            kycStatus = status,
+            status = deriveStatus(status, party.amlStatus, party.status),
+            updatedAt = Instant.now(clock),
+        )
+        val saved = partyRepo.update(updated)
+        eventPublisher.publishKycStatusChanged(saved)
+        countIfVerifyingTransition(party.status, saved)
+        return saved
+    }
+
+    override suspend fun updateAmlStatus(partyId: UUID, amlStatus: AmlStatus): Party {
+        val party = partyRepo.findById(partyId) ?: throw PartyNotFoundException(partyId)
+        val updated = party.copy(
+            amlStatus = amlStatus,
+            status = deriveStatus(party.kycStatus, amlStatus, party.status),
+            updatedAt = Instant.now(clock),
+        )
+        val saved = partyRepo.update(updated)
+        // Emits the party's current status (incl. ACTIVE) to downstream consumers
+        // (account-service activation, onboarding cockpit) on the party events topic.
+        eventPublisher.publishKycStatusChanged(saved)
+        countIfVerifyingTransition(party.status, saved)
+        return saved
+    }
+
+    /**
+     * Counts `openbank.parties.verified` once, on the transition INTO the verified (ACTIVE) state
+     * (ADR-0077 / ADR-0079). ACTIVE is the two-key terminal of [deriveStatus] (KYC APPROVED + AML
+     * CLEARED). Guards on the edge `previous != ACTIVE && current == ACTIVE` so it fires exactly
+     * once on the verifying step — never on a rejection (→ SUSPENDED) and never on a status update
+     * that leaves an already-ACTIVE party ACTIVE.
+     */
+    private fun countIfVerifyingTransition(previousStatus: PartyStatus, saved: Party) {
+        if (previousStatus != PartyStatus.ACTIVE && saved.status == PartyStatus.ACTIVE) {
+            metrics.partyVerified(saved.partyType.name)
+        }
+    }
+
+    /**
+     * Two-key activation gate (ADR-0073): a party becomes ACTIVE only when KYC is APPROVED
+     * AND AML is CLEARED. Any hard negative (KYC REJECTED or AML BLOCKED) suspends.
+     * Fail-closed: absent either positive signal the party stays PENDING_KYC; a CLOSED party
+     * is never re-opened.
+     */
+    private fun deriveStatus(kyc: KycStatus, aml: AmlStatus, current: PartyStatus): PartyStatus = when {
+        current == PartyStatus.CLOSED -> PartyStatus.CLOSED
+        kyc == KycStatus.REJECTED || aml == AmlStatus.BLOCKED -> PartyStatus.SUSPENDED
+        kyc == KycStatus.APPROVED && aml == AmlStatus.CLEARED -> PartyStatus.ACTIVE
+        else -> PartyStatus.PENDING_KYC
+    }
+
+    override suspend fun eraseParty(cmd: ErasePartyCommand) {
+        partyRepo.findById(cmd.id) ?: throw PartyNotFoundException(cmd.id)
+        // GDPR Art. 17: delete binary document files before anonymizing the party row.
+        // Order matters: files first (they carry biometric PII), then anonymize identity.
+        documentFileRepo.deleteByPartyId(cmd.id)
+        partyRepo.anonymize(cmd.id)
+        eventPublisher.publishPartyErased(cmd.id)
+    }
+
+    override suspend fun selfRegisterParty(cmd: SelfRegisterPartyCommand): Pair<Party, Boolean> {
+        // Idempotent: return existing party for this Keycloak sub
+        partyRepo.findByKeycloakSub(cmd.keycloakSub)?.let { return Pair(it, false) }
+        val party = Party(
+            id = UUID.randomUUID(),
+            partyType = cmd.partyType,
+            status = PartyStatus.PENDING_KYC,
+            legalName = cmd.legalName,
+            tradingName = null,
+            dateOfBirth = cmd.dateOfBirth,
+            nationality = cmd.nationality,
+            taxId = null,
+            registrationNumber = null,
+            email = cmd.email,
+            phone = cmd.phone,
+            address = cmd.address,
+            kycStatus = KycStatus.NOT_STARTED,
+            keycloakSub = cmd.keycloakSub,
+            createdAt = Instant.now(clock),
+            updatedAt = Instant.now(clock)
+        )
+        val saved = partyRepo.save(party)
+        eventPublisher.publishPartyCreated(saved)
+        return Pair(saved, true)
+    }
+
+    override suspend fun getMyParty(keycloakSub: String): Party? =
+        partyRepo.findByKeycloakSub(keycloakSub)
+
+    override suspend fun uploadDocument(cmd: UploadDocumentCommand): PartyDocumentFile {
+        partyRepo.findById(cmd.partyId) ?: throw PartyNotFoundException(cmd.partyId)
+        val file = PartyDocumentFile(
+            id = UUID.randomUUID(),
+            partyId = cmd.partyId,
+            documentType = cmd.documentType,
+            fileName = cmd.fileName,
+            mimeType = cmd.mimeType,
+            content = cmd.content,
+            uploadedAt = Instant.now(clock)
+        )
+        return documentFileRepo.save(file)
+    }
+
+    override suspend fun getDocumentContent(partyId: UUID, fileId: UUID): PartyDocumentFile? =
+        documentFileRepo.findByIdAndPartyId(fileId, partyId)
+}

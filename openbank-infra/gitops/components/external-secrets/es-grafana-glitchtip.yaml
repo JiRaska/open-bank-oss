@@ -1,0 +1,30 @@
+# Grafana <- GlitchTip API token (ADR-0082 §mobile). Projects the read token the
+# grafana-sentry-datasource uses to query GlitchTip into the `grafana-glitchtip`
+# Secret that kube-prometheus-stack's grafana reads (envValueFrom GLITCHTIP_API_TOKEN,
+# optional:true so Grafana stays healthy until the token exists).
+#
+# Runbook (out-of-band, once): mint a GlitchTip org auth token (read scope) and:
+#   vault kv put openbank/glitchtip ... GRAFANA_API_TOKEN="<token>"
+# (merges with the existing SECRET_KEY under the same `glitchtip` KV path).
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: grafana-glitchtip
+  namespace: observability
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: grafana-glitchtip
+    creationPolicy: Owner
+    template:
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+  data:
+    - secretKey: token
+      remoteRef:
+        key: glitchtip
+        property: GRAFANA_API_TOKEN

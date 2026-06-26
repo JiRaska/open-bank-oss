@@ -1,0 +1,430 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MPL-2.0
+"""
+Production Readiness collector (vrstva 1 — derived signals).
+
+Per-service maturity scoring across 9 technicko-provozních dimenzí (C1–C9).
+Derives what it can from the repo; reads manual attestations (M-dimenze) from
+openbank-libs/governance/attestations.yaml with TTL-based decay so a stale
+attestation degrades instead of staying green forever.
+
+Score scale per cell: 0 Absent · 1 Declared · 2 Verified · 3 Bank-grade.
+
+Emits prod-readiness.json (machine, for the admin-UI tab) and, with --table,
+a human-readable scorecard. This is the ONLY source of truth for the matrix —
+never hand-edit the JSON (rule #7: derived data is never hand-edited).
+
+Usage:
+    prod-readiness-collector.py ledger            # one service, with table
+    prod-readiness-collector.py --all --json out  # whole fleet -> JSON
+"""
+from __future__ import annotations
+import argparse
+import json
+import os
+import re
+import sys
+from datetime import date
+from dataclasses import dataclass, asdict, field
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+GITOPS = REPO / "openbank-infra" / "gitops"
+THREAT_MODELS = REPO / "docs" / "threat-models"
+RUNBOOKS = REPO / "docs" / "runbooks"
+ATTESTATIONS = REPO / "openbank-libs" / "governance" / "attestations.yaml"
+RELEASE_EVIDENCE = REPO / ".github" / "workflows" / "release-please.yml"
+VEX_DIR = REPO / "openbank-libs" / "governance" / "vex"
+
+# Money-path services (mirror of rules.yaml: money_path_services). Kept short
+# here; the real collector would parse rules.yaml. These get a stricter gate.
+MONEY_PATH = {
+    "ledger", "transaction", "account", "balance", "sepa-payment",
+    "sepa-instant", "domestic-payment", "clearing", "swift", "fx",
+    "lending", "sca", "consent", "fraud",
+}
+
+DIMENSIONS = [
+    ("C1", "Kód"),
+    ("C2", "Testy"),
+    ("C3", "API"),
+    ("C4", "Data"),
+    ("C5", "Zálohy"),
+    ("C6", "DR/BCP"),
+    ("C7", "Security"),
+    ("C8", "Observab."),
+    ("C9", "Provoz"),
+]
+
+
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+def svc_dir(short: str) -> Path:
+    return REPO / f"openbank-{short}-service"
+
+
+def exists_dir(short: str) -> bool:
+    return svc_dir(short).is_dir()
+
+
+def read(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+
+
+def grep_any(root: Path, needles: list[str], globs=("*.kt", "*.kts")) -> bool:
+    """True if any file under root matches any needle (cheap, bounded)."""
+    if not root.is_dir():
+        return False
+    for g in globs:
+        for f in root.rglob(g):
+            text = read(f)
+            if any(n in text for n in needles):
+                return True
+    return False
+
+
+def gitops_files_for(short: str, kind: str) -> list[Path]:
+    """gitops manifests that mention the service AND declare the given kind."""
+    comp = GITOPS / "components" / short
+    hits = []
+    search_roots = [comp] if comp.is_dir() else [GITOPS]
+    for root in search_roots:
+        if not root.is_dir():
+            continue
+        for f in root.rglob("*.yaml"):
+            text = read(f)
+            if f"kind: {kind}" in text and (comp.is_dir() or short in text):
+                hits.append(f)
+    return hits
+
+
+# ---------------------------------------------------------------------------
+# attestations (M-dimensions) with TTL decay
+# ---------------------------------------------------------------------------
+def load_attestations(today: str) -> dict:
+    """
+    Minimal YAML reader for attestations (avoids a pyyaml dep for the demo).
+    Schema per service:
+        ledger:
+          dr_drill:  { date: 2026-01-10, ttl_days: 180 }
+          pentest:   { date: 2025-09-01, ttl_days: 365 }
+    An attestation present + within TTL = bank-grade (+1); expired = decays.
+    """
+    if not ATTESTATIONS.exists():
+        return {}
+    # Intentionally tiny: real version uses pyyaml. Demo parses key: date pairs.
+    data: dict = {}
+    cur_svc = None
+    cur_key = None
+    for raw in read(ATTESTATIONS).splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        line = raw.strip()
+        if indent == 0 and line.endswith(":"):
+            cur_svc = line[:-1]
+            data[cur_svc] = {}
+        elif indent == 2 and line.endswith(":"):
+            cur_key = line[:-1]
+            data.setdefault(cur_svc, {})[cur_key] = {}
+        elif indent == 2 and "{" in line:
+            k, _, rest = line.partition(":")
+            m = re.findall(r"(\w+):\s*([^\s,}]+)", rest)
+            data.setdefault(cur_svc, {})[k.strip()] = dict(m)
+    return data
+
+
+def attest_fresh(att: dict, svc: str, key: str, today: str) -> bool:
+    rec = att.get(svc, {}).get(key)
+    if not rec or "date" not in rec:
+        return False
+    try:
+        ttl = int(rec.get("ttl_days", "365"))
+    except ValueError:
+        ttl = 365
+    # crude date diff (YYYY-MM-DD) — good enough for decay flag
+    d = [int(x) for x in rec["date"].split("-")]
+    t = [int(x) for x in today.split("-")]
+    days = (t[0] - d[0]) * 365 + (t[1] - d[1]) * 30 + (t[2] - d[2])
+    return 0 <= days <= ttl
+
+
+# ---------------------------------------------------------------------------
+# per-dimension scoring (each returns (score 0-3, evidence str))
+# ---------------------------------------------------------------------------
+def score_c1_code(short: str, att, today) -> tuple[int, str]:
+    d = svc_dir(short)
+    main = d / "src" / "main"
+    if not main.is_dir():
+        return 0, "no src/main"
+    kt = list(main.rglob("*.kt"))
+    has_ports = (main / "kotlin").rglob("*Port*") and any(main.rglob("*Port*.kt"))
+    gov = (d / "governance.yaml").exists()
+    # skeleton heuristic: very little code
+    if len(kt) < 8:
+        return 1, f"skeleton ({len(kt)} kt files)"
+    base = 2 if (has_ports and gov) else 1
+    if attest_fresh(att, short, "code_complete", today):
+        base = 3
+    return base, f"{len(kt)} kt, ports={'y' if has_ports else 'n'}, gov={'y' if gov else 'n'}"
+
+
+def score_c2_tests(short: str, att, today) -> tuple[int, str]:
+    d = svc_dir(short)
+    test = d / "src" / "test"
+    if not test.is_dir():
+        return 0, "no src/test"
+    kt = list(test.rglob("*.kt"))
+    it = [f for f in kt if f.name.endswith("IT.kt")]
+    unit = [f for f in kt if not f.name.endswith("IT.kt")]
+    kover = "kover {" in read(d / "build.gradle.kts")
+    if not kt:
+        return 0, "empty test dir"
+    s = 1
+    if kover and kt:
+        s = 2  # ratchet-gated coverage = verified
+    # bank-grade needs explicit coverage floor attestation for money-path
+    if attest_fresh(att, short, "coverage_floor", today):
+        s = 3
+    return s, f"{len(unit)} unit, {len(it)} IT, kover={'y' if kover else 'n'}"
+
+
+def score_c3_api(short: str, att, today) -> tuple[int, str]:
+    d = svc_dir(short)
+    openapi = (d / "src" / "main" / "resources" / "openapi.yaml").exists()
+    contract = grep_any(d / "src" / "test", ["Pact", "ContractTest", "contract"])
+    diff_gate = any(n in read(d / "build.gradle.kts") for n in ("oasdiff", "spectral"))
+    if not openapi:
+        return 0, "no openapi.yaml"
+    s = 1
+    if contract:
+        s = 2
+    if contract and diff_gate:
+        s = 2  # cap; bank-grade (3) needs external consumer-verified pacts
+    if attest_fresh(att, short, "contract_verified", today):
+        s = 3
+    return s, f"openapi=y, contract={'y' if contract else 'n'}, diffgate={'y' if diff_gate else 'n'}"
+
+
+def score_c4_data(short: str, att, today) -> tuple[int, str]:
+    d = svc_dir(short)
+    migs = list((d).rglob("db/migration/V*.sql"))
+    if not migs:
+        return 1, "no flyway (stateless?)"
+    # rollback note: a paired comment or docs/rollback reference
+    rollback = any("rollback" in read(m).lower() for m in migs) or \
+        grep_any(d, ["rollback"], globs=("*.md",))
+    s = 2 if rollback else 1
+    return s, f"{len(migs)} migrations, rollback_note={'y' if rollback else 'n'}"
+
+
+def score_c5_backup(short: str, att, today) -> tuple[int, str]:
+    clusters = gitops_files_for(short, "Cluster")
+    cnpg = [f for f in clusters if "postgres" in f.name or "cnpg" in read(f).lower()]
+    if not cnpg:
+        return 0, "no CNPG cluster"
+    has_backup = any("barmanObjectStore" in read(f) for f in cnpg)
+    if not has_backup:
+        return 1, "cluster present, NO backup"
+    s = 2  # backup configured = verified
+    if attest_fresh(att, short, "restore_drill", today):
+        s = 3
+    return s, "backup configured" + (" + drill" if s == 3 else "")
+
+
+def score_c6_dr(short: str, att, today) -> tuple[int, str]:
+    # 0 none · 1 generic infra runbooks only · 2 a service-specific DR procedure is
+    # DOCUMENTED (per-service runbook carries a "Disaster recovery" section: RPO/RTO
+    # + restore steps) · 3 a drill has been EXERCISED + attested (TTL). The 2/3 split
+    # is the honesty line: a written, reviewed DR plan is Verified; only a real
+    # rehearsal is Bank-grade.
+    if attest_fresh(att, short, "dr_drill", today):
+        return 3, "DR drill exercised"
+    rb = RUNBOOKS / f"svc-{short}.md"
+    if rb.exists() and re.search(r"^#+\s*Disaster recovery", read(rb), re.M | re.I):
+        return 2, "service DR procedure documented"
+    has_runbooks = RUNBOOKS.is_dir() and any(RUNBOOKS.glob("*.md"))
+    return (1, "generic runbooks only") if has_runbooks else (0, "no DR")
+
+
+def has_signed_provenance(short: str) -> bool:
+    """Repo-derivable supply-chain signal: a released component (has version.txt) is covered
+    by the signed evidence-bundle pipeline (release-please.yml's release-evidence job:
+    SBOM+SLSA+VEX+manifest, KMS-cosign-signed, attached to each release; ADR-0030 D4). No
+    network — mirrors the collector's repo-only design."""
+    pipeline = RELEASE_EVIDENCE.exists() and "release-evidence" in read(RELEASE_EVIDENCE)
+    released = (svc_dir(short) / "version.txt").exists()
+    return pipeline and released
+
+
+def has_vex_triage(short: str) -> bool:
+    """Stronger, per-service signal: a human-reviewed OpenVEX triage store exists."""
+    return any((VEX_DIR / f"{n}.openvex.json").exists() for n in (f"{short}-service", short))
+
+
+def score_c7_security(short: str, att, today) -> tuple[int, str]:
+    tm = (THREAT_MODELS / f"openbank-{short}-service.md").exists()
+    netpol = bool(gitops_files_for(short, "NetworkPolicy"))
+    sectest = grep_any(svc_dir(short) / "src" / "test",
+                       ["Security", "schemathesis", "Authz"])
+    prov = has_signed_provenance(short)
+    bits = sum([tm, netpol, sectest, prov])
+    if bits == 0:
+        return 0, "no threat-model/netpol/sectest/provenance"
+    s = 1 if bits == 1 else 2
+    # Bank-grade C7 still requires an external pentest attestation (TTL). Supply-chain
+    # provenance is a complementary control, not a substitute for adversarial testing.
+    if attest_fresh(att, short, "pentest", today):
+        s = 3
+    ev = []
+    if tm: ev.append("threat-model")
+    if netpol: ev.append("netpol")
+    if sectest: ev.append("sec-test")
+    if prov: ev.append("signed-provenance")
+    if has_vex_triage(short): ev.append("vex-triage")
+    return s, ", ".join(ev)
+
+
+def score_c8_observability(short: str, att, today) -> tuple[int, str]:
+    # fleet podmonitor covers by namespaceSelector; per-service alerts are richer
+    podmon = GITOPS / "components" / "observability" / "podmonitor-openbank-services.yaml"
+    monitored = short in read(podmon)
+    alerts = bool(gitops_files_for(short, "PrometheusRule"))
+    metrics = grep_any(svc_dir(short) / "src" / "main",
+                       ["MeterRegistry", "DomainMetrics", "@Counted", "@Timed"])
+    if not monitored and not metrics:
+        return 0, "not scraped"
+    s = 1
+    if monitored and metrics:
+        s = 2
+    if monitored and metrics and alerts:
+        s = 2  # bank-grade (3) needs defined SLO + burn-rate alerts (attestation)
+    if attest_fresh(att, short, "slo_defined", today):
+        s = 3
+    ev = []
+    if monitored: ev.append("scraped")
+    if metrics: ev.append("metrics")
+    if alerts: ev.append("alerts")
+    return s, ", ".join(ev) or "none"
+
+
+def score_c9_ops(short: str, att, today) -> tuple[int, str]:
+    # 1 no per-service runbook · 2 a service runbook exists (docs/runbooks/svc-<x>.md)
+    # · 3 on-call rotation + break-glass audited (attested, TTL). Match the runbook
+    # by its exact conventional name so an unrelated file merely containing the short
+    # name cannot inflate the score.
+    if attest_fresh(att, short, "oncall", today):
+        return 3, "on-call + break-glass audited"
+    return (2, "service runbook") if (RUNBOOKS / f"svc-{short}.md").exists() else \
+        (1, "no per-service runbook")
+
+
+SCORERS = [
+    score_c1_code, score_c2_tests, score_c3_api, score_c4_data,
+    score_c5_backup, score_c6_dr, score_c7_security,
+    score_c8_observability, score_c9_ops,
+]
+
+
+# ---------------------------------------------------------------------------
+@dataclass
+class ServiceReadiness:
+    service: str
+    money_path: bool
+    scores: dict = field(default_factory=dict)
+    evidence: dict = field(default_factory=dict)
+    gate: str = ""
+
+    def compute_gate(self):
+        # money-path: all >= 2, critical (C1/C5/C7) >= 3 ; else all >= 2
+        critical = {"C1", "C5", "C7"}
+        ok = True
+        for code, _ in DIMENSIONS:
+            s = self.scores[code]
+            need = 3 if (self.money_path and code in critical) else 2
+            if s < need:
+                ok = False
+        self.gate = "GO" if ok else "NO-GO"
+
+
+def collect(short: str, att, today: str) -> ServiceReadiness:
+    r = ServiceReadiness(service=short, money_path=short in MONEY_PATH)
+    for (code, _), scorer in zip(DIMENSIONS, SCORERS):
+        s, ev = scorer(short, att, today)
+        r.scores[code] = s
+        r.evidence[code] = ev
+    r.compute_gate()
+    return r
+
+
+def all_services() -> list[str]:
+    out = []
+    for d in sorted(REPO.glob("openbank-*-service")):
+        m = re.match(r"openbank-(.+)-service", d.name)
+        if m:
+            out.append(m.group(1))
+    return out
+
+
+# ---------------------------------------------------------------------------
+def render_table(results: list[ServiceReadiness]):
+    glyph = {0: "·", 1: "○", 2: "◐", 3: "●"}
+    head = "SLUŽBA".ljust(18) + " ".join(c for c, _ in DIMENSIONS) + "  │ GATE"
+    print(head)
+    print("─" * len(head))
+    for r in results:
+        tag = " ★" if r.money_path else "  "
+        row = (r.service + tag).ljust(18) + " ".join(glyph[r.scores[c]] + " " for c, _ in DIMENSIONS)
+        print(f"{row} │ {r.gate}")
+    print()
+    print("legenda: · Absent(0)  ○ Declared(1)  ◐ Verified(2)  ● Bank-grade(3)   ★ money-path")
+    # per-service evidence for the demo (one service)
+    if len(results) == 1:
+        r = results[0]
+        print(f"\nEvidence — {r.service}:")
+        for code, name in DIMENSIONS:
+            print(f"  {code} {name:<10} {r.scores[code]} {glyph[r.scores[code]]}  {r.evidence[code]}")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("services", nargs="*", help="service short names (e.g. ledger)")
+    ap.add_argument("--all", action="store_true", help="score the whole fleet")
+    # Default to the real current date so the baked `generated_for` and the TTL
+    # decay arithmetic stay live across builds; READINESS_TODAY pins it for tests.
+    ap.add_argument("--today", default=os.environ.get("READINESS_TODAY") or date.today().isoformat())
+    ap.add_argument("--json", help="write prod-readiness.json to this path")
+    ap.add_argument("--table", action="store_true", default=True)
+    args = ap.parse_args()
+
+    att = load_attestations(args.today)
+    targets = all_services() if args.all else args.services
+    if not targets:
+        ap.error("give a service name or --all")
+
+    results = []
+    for short in targets:
+        if not exists_dir(short):
+            print(f"skip: openbank-{short}-service not found", file=sys.stderr)
+            continue
+        results.append(collect(short, att, args.today))
+
+    if args.table:
+        render_table(results)
+
+    if args.json:
+        payload = {
+            "generated_for": args.today,
+            "dimensions": [{"code": c, "name": n} for c, n in DIMENSIONS],
+            "services": [asdict(r) for r in results],
+        }
+        Path(args.json).write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+        print(f"\nwrote {args.json}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

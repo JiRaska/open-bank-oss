@@ -1,0 +1,50 @@
+# Balances banking domain: balance-service + its single-owner CNPG Postgres.
+# balance-service is the authoritative operational-money store (ADR-0024). The
+# Deployment references an out-of-band OIDC client secret (balance-service-oidc,
+# created by hand, sharing the openbank-services realm client); CNPG generates
+# the DB secret. account-service seeds pocket balances here on account open.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: balances
+  namespace: argocd
+  annotations:
+    # Server-Side Diff must run the Kyverno verify-images mutation in its dry-run, otherwise the
+    # digest-pinning annotation it injects reads as a permanent OutOfSync diff (issue #856).
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/balances
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: balances
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
+  # Argo Rollouts (ADR-0098) sets spec.selector.rollouts-pod-template-hash on the
+  # stable and canary Services at runtime; git holds only the base selector, so
+  # without this every Rollout-backed Service reads as permanently OutOfSync.
+  # Ignore exactly that one controller-managed selector key — git-owned selector
+  # changes are still reconciled. NB: jqPathExpressions, NOT managedFieldsManagers:
+  # the latter is silently bypassed on apps with compare-options
+  # IncludeMutationWebhook (Kyverno digest-pin, #856), which left 6 apps OutOfSync
+  # (verified in-cluster). Rollback = delete this block.
+  ignoreDifferences:
+    - group: ""
+      kind: Service
+      jqPathExpressions:
+        - .spec.selector."rollouts-pod-template-hash"

@@ -1,0 +1,27 @@
+# Apicurio schema registry (SQL storage on CNPG). Per ADR-0037 R1 the registry
+# is infra backing the event bus, so it lives in the `messaging` namespace
+# alongside Kafka; its single-owner Postgres (CNPG Cluster) is co-located there
+# (R4). This satisfies the ADR-0027 "Apicurio SQL storage" go-live condition —
+# replacing the in-memory registry that loses every schema on restart.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: apicurio
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/apicurio
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: messaging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

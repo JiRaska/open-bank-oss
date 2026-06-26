@@ -1,0 +1,92 @@
+# psd2-service onboarded to the cluster (ADR-0090, ADR-0037 domain=namespace). Berlin Group
+# NextGenPSD2 XS2A (consent/AIS + PIS) + ČOBS Czech profile. Reactive Postgres + Flyway
+# (PSD2 transactional outbox), Redis idempotency, Kafka outbox, OIDC bearer via in-cluster
+# Keycloak. SANDBOX: eIDAS QSEAL enforcement is OFF (OPENBANK_PSD2_QSEAL_ENFORCE=false) — no
+# real TPP certificates here; the QsealSignatureFilter stays advisory (verifies a cert if a TPP
+# presents one, never rejects). Flip to true once eIDAS QSEAL certs/truststore are provisioned.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: psd2-service
+  namespace: psd2
+  labels: {app.kubernetes.io/name: psd2-service, app.kubernetes.io/part-of: psd2}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app.kubernetes.io/name: psd2-service}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: psd2-service, app.kubernetes.io/part-of: psd2}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: psd2-service
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-psd2-service:sandbox-6967ebd3
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: http, containerPort: 8107}
+            - {name: management, containerPort: 8085}
+          env:
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://psd2-db-rw.psd2.svc:5432/openbank_psd2
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://psd2-db-rw.psd2.svc:5432/openbank_psd2
+            - name: QUARKUS_DATASOURCE_USERNAME
+              valueFrom: {secretKeyRef: {name: psd2-db-app, key: username}}
+            - name: QUARKUS_DATASOURCE_REACTIVE_USERNAME
+              valueFrom: {secretKeyRef: {name: psd2-db-app, key: username}}
+            - name: QUARKUS_DATASOURCE_PASSWORD
+              valueFrom: {secretKeyRef: {name: psd2-db-app, key: password}}
+            - name: QUARKUS_DATASOURCE_REACTIVE_PASSWORD
+              valueFrom: {secretKeyRef: {name: psd2-db-app, key: password}}
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://redis.psd2.svc:6379
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: psd2-service-oidc
+                  key: OIDC_CLIENT_SECRET
+                  optional: true
+            # eIDAS QSEAL message signing stays advisory in the sandbox (no TPP certs / truststore).
+            - name: OPENBANK_PSD2_QSEAL_ENFORCE
+              value: "false"
+            # TPP registry lookup (eIDAS role/status). Not yet deployed → calls 503 until it lands;
+            # the rest-client is lazy so this does not block boot or the consent/AIS/PIS endpoints.
+            - name: TPP_REGISTRY_SERVICE_URL
+              value: http://tpp-registry-service.tpp.svc:8108
+            - name: QUARKUS_FLYWAY_MIGRATE_AT_START
+              value: "true"
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+          startupProbe: {tcpSocket: {port: management}, initialDelaySeconds: 10, periodSeconds: 5, failureThreshold: 30}
+          readinessProbe: {tcpSocket: {port: http}, periodSeconds: 10, failureThreshold: 3}
+          livenessProbe: {httpGet: {path: /q/health/live, port: management}, periodSeconds: 15, failureThreshold: 3}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+          resources:
+            requests: {cpu: 250m, memory: 430Mi}
+            limits: {cpu: "1", memory: 1536Mi}
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: psd2-service
+  namespace: psd2
+  labels: {app.kubernetes.io/name: psd2-service}
+spec:
+  selector: {app.kubernetes.io/name: psd2-service}
+  ports: [{name: http, port: 8107, targetPort: http}]

@@ -1,0 +1,30 @@
+# Observability components (ADR-0082): dashboards, Tier-1/SLO PrometheusRules, the Loki
+# Grafana datasource (logs→trace derivedFields) and the on-demand NodePool. These used to
+# be `kubectl apply`-ed by hand — so every commit silently drifted (a dashboard/rule/
+# datasource change in git never reached the cluster until someone re-applied it). Wrap
+# them in their own Application so the root app-of-apps auto-syncs the whole directory.
+#
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: observability-components
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/observability
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

@@ -1,0 +1,188 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Gradle HTTP Build Cache (ADR-0043)
+# ─────────────────────────────────────────────────────────────────────────────
+# FinOps: without a remote build cache every CI runner downloads and compiles
+# the full 30-module monorepo from scratch on every build, generating 5-15 GB
+# of NAT Gateway traffic per job (Gradle deps + compilation artifacts). The
+# in-cluster cache lets runners share task outputs: if the source hasn't changed
+# the compiled artifact is served from here over the pod network — zero NAT.
+#
+# Implementation: nginx:alpine with the http_dav_module, which supports the
+# Gradle HttpBuildCache wire protocol (GET/{key} → 200|404, PUT/{key} → 201).
+# Storage: 50Gi gp3 PVC in eu-north-1a (co-located with the runner pool and the
+# NAT Gateway so neither PVC AZ-binding nor cache-traffic crosses an AZ).
+#
+# Wiring: runners set GRADLE_REMOTE_CACHE_URL=http://gradle-build-cache.gradle-build-cache.svc.cluster.local:8080/cache/
+# GRADLE_REMOTE_CACHE_PUSH=true, GRADLE_REMOTE_CACHE_INSECURE=true (plain HTTP
+# inside the cluster is fine — no creds to leak, no public exposure).
+# settings.gradle.kts already reads these vars and wires the HttpBuildCache.
+#
+# Cost: one nginx pod (~64Mi), 50Gi gp3 PVC (~$4.80/mo). Estimated saving:
+# ~$1,000-1,400/month in NatGateway-Bytes (ADR-0043 phase 2).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gradle-build-cache
+  labels:
+    app.kubernetes.io/part-of: platform
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: gradle-build-cache
+data:
+  nginx.conf: |
+    user  nginx;
+    worker_processes  1;
+    error_log  /dev/stderr warn;
+    pid        /tmp/nginx.pid;
+
+    events { worker_connections 256; }
+
+    http {
+      access_log /dev/stdout combined;
+      client_max_body_size 512m;
+      client_body_temp_path /tmp/nginx-client-body;
+
+      server {
+        listen 8080;
+
+        # Gradle HttpBuildCache sends:
+        #   GET  /cache/{key} → 200 (hit) or 404 (miss)
+        #   PUT  /cache/{key} → 201 (stored)
+        # The dav_module maps directly to these semantics.
+        location /cache/ {
+          alias /data/cache/;
+          dav_methods PUT DELETE;
+          dav_access user:rw group:rw all:rw;
+          create_full_put_path on;
+          # Gradle retries on 5xx — return 204 instead of 404 for missing dirs
+          # is not needed; 404 on GET is the correct "cache miss" signal.
+        }
+
+        # Health probe for readiness/liveness.
+        location /healthz {
+          return 200 "ok\n";
+          add_header Content-Type text/plain;
+        }
+      }
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gradle-build-cache-data
+  namespace: gradle-build-cache
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gradle-build-cache
+  namespace: gradle-build-cache
+  labels:
+    app.kubernetes.io/name: gradle-build-cache
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gradle-build-cache
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gradle-build-cache
+    spec:
+      # Co-locate with the runner pool AZ (eu-north-1a) so the gp3 PVC binds
+      # there and cache traffic never crosses an AZ ($0.01/GB cross-AZ charge).
+      nodeSelector:
+        topology.kubernetes.io/zone: eu-north-1a
+      securityContext:
+        runAsUser: 101
+        runAsGroup: 101
+        runAsNonRoot: true
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+            - name: data
+              mountPath: /data/cache
+            - name: tmp
+              mountPath: /tmp
+            # nginx creates its default temp dirs (proxy_temp, fastcgi_temp,
+            # client_temp, …) under /var/cache/nginx at startup regardless of
+            # config. Running as non-root (runAsUser 101) it cannot mkdir there
+            # on the image's root-owned /var/cache/nginx → crashloop. Give it a
+            # writable emptyDir (fsGroup 101 makes it group-writable).
+            - name: cache
+              mountPath: /var/cache/nginx
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 30
+      volumes:
+        - name: config
+          configMap:
+            name: nginx-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: gradle-build-cache-data
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gradle-build-cache
+  namespace: gradle-build-cache
+  labels:
+    app.kubernetes.io/name: gradle-build-cache
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: gradle-build-cache
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

@@ -1,0 +1,115 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# BPMN process diagram (ADR-0019/0029). Authored as data; validated by
+# src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
+
+name: Account Closure
+desc: Zrušení účtu včetně vyrovnání zůstatku
+regulation: General Banking Terms
+services:
+  - account-service
+  - ledger-service
+  - balance-service
+  - notification-service
+  - sepa-payment
+steps:
+  - id: start
+    type: start
+    x: 60
+    y: 100
+    label: Žádost
+  - id: balance
+    type: task
+    x: 180
+    y: 100
+    label: Kontrola zůstatku
+    lane: core
+    apis:
+      - GET /api/v1/accounts/{id}/balance
+    relatedServices:
+      - balance-service
+  - id: gw1
+    type: gateway
+    x: 320
+    y: 100
+    label: Zůstatek=0?
+  - id: transfer
+    type: task
+    x: 320
+    y: 220
+    label: Převod zůstatku
+    lane: payment
+    apis:
+      - POST /api/v1/sepa/outward
+    relatedServices:
+      - sepa-payment
+  - id: freeze
+    type: task
+    x: 460
+    y: 100
+    label: Zmrazení účtu
+    lane: core
+    apis:
+      - PUT /api/v1/accounts/{id}/freeze
+    relatedServices:
+      - account-service
+  - id: ledger
+    type: task
+    x: 600
+    y: 100
+    label: Uzavření Ledgeru
+    lane: core
+    apis:
+      - POST /api/v1/ledger/close
+    relatedServices:
+      - ledger-service
+  - id: notify
+    type: task
+    x: 740
+    y: 100
+    label: Notifikace
+    lane: platform
+    apis:
+      - POST /api/v1/notifications
+    relatedServices:
+      - notification-service
+    consumes:
+      - openbank.notification.requests
+  - id: archive
+    type: task
+    x: 880
+    y: 100
+    label: Archivace
+    lane: core
+    apis:
+      - PUT /api/v1/accounts/{id}/archive
+    relatedServices:
+      - account-service
+  - id: end
+    type: end
+    x: 980
+    y: 100
+    label: Uzavřeno
+flows:
+  - from: start
+    to: balance
+  - from: balance
+    to: gw1
+  - from: gw1
+    to: transfer
+    label: Ne
+  - from: gw1
+    to: freeze
+    label: Ano
+  - from: transfer
+    to: freeze
+  - from: freeze
+    to: ledger
+  - from: ledger
+    to: notify
+    kind: async
+    topic: openbank.notification.requests
+  - from: notify
+    to: archive
+  - from: archive
+    to: end

@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+#
+# Argo Rollouts cluster-scoped configuration (ADR-0098 Phase 1).
+# Deployed via argo-rollouts-config ArgoCD Application (apps/argo-rollouts-config.yaml).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - analysis-template.yaml
+  - network-policies.yaml

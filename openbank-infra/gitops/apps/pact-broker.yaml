@@ -1,0 +1,33 @@
+# Pact Broker (ADR-0092) — contract-testing registry + can-i-deploy pipeline, on
+# the infra plane. Syncs the namespace, single-owner CNPG `pact-broker-db`,
+# Deployment and Service from components/pact-broker. The basic-auth ExternalSecret
+# lives under components/external-secrets (synced by that app); its values are
+# seeded out-of-band into OpenBao (scripts/seed-vault-gaps.sh), never in git.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pact-broker
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/pact-broker
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: pact-broker
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false

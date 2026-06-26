@@ -1,0 +1,43 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+    <CurrentIssues>
+    <ID>MagicNumber:ApnsPushSender.kt$ApnsPushSender$1000L</ID>
+    <ID>MagicNumber:ApnsPushSender.kt$ApnsPushSender$200</ID>
+    <ID>MagicNumber:ApnsPushSender.kt$ApnsPushSender$299</ID>
+    <ID>MagicNumber:ApnsPushSender.kt$ApnsPushSender$410</ID>
+    <ID>MagicNumber:DeviceResource.kt$DeviceResource$201</ID>
+    <ID>MagicNumber:DeviceResource.kt$DeviceResource$400</ID>
+    <ID>MagicNumber:DispatchControlResource.kt$DispatchControlResource$20</ID>
+    <ID>MagicNumber:FcmPushSender.kt$FcmPushSender$1000L</ID>
+    <ID>MagicNumber:FcmPushSender.kt$FcmPushSender$200</ID>
+    <ID>MagicNumber:FcmPushSender.kt$FcmPushSender$299</ID>
+    <ID>MagicNumber:FcmPushSender.kt$FcmPushSender$3600</ID>
+    <ID>MagicNumber:FcmPushSender.kt$FcmPushSender$3600L</ID>
+    <ID>MagicNumber:FcmPushSender.kt$FcmPushSender$400</ID>
+    <ID>MagicNumber:FcmPushSender.kt$FcmPushSender$404</ID>
+    <ID>MagicNumber:NotificationOutboxDispatcher.kt$NotificationOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:NotificationOutboxDispatcher.kt$NotificationOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:NotificationOutboxRepositoryImpl.kt$NotificationOutboxRepositoryImpl$4000</ID>
+    <ID>MagicNumber:NotificationResource.kt$NotificationResource$100</ID>
+    <ID>MagicNumber:NotificationResource.kt$NotificationResource$404</ID>
+    <ID>MagicNumber:OversightWebhook.kt$OversightWebhook$30</ID>
+    <ID>MagicNumber:OversightWebhook.kt$OversightWebhook$4</ID>
+    <ID>MagicNumber:PushCrypto.kt$PushCrypto$0x30</ID>
+    <ID>MagicNumber:PushCrypto.kt$PushCrypto$0x7f</ID>
+    <ID>MagicNumber:PushCrypto.kt$PushCrypto$0x80</ID>
+    <ID>MagicNumber:PushCrypto.kt$PushCrypto$0xff</ID>
+    <ID>MagicNumber:PushCrypto.kt$PushCrypto$32</ID>
+    <ID>MagicNumber:PushCrypto.kt$PushCrypto$8</ID>
+    <ID>MagicNumber:SlackOversightWebhookPublisher.kt$SlackOversightWebhookPublisher$200</ID>
+    <ID>MagicNumber:SlackOversightWebhookPublisher.kt$SlackOversightWebhookPublisher$299</ID>
+    <ID>MagicNumber:SlackOversightWebhookPublisher.kt$SlackOversightWebhookPublisher$3</ID>
+    <ID>MagicNumber:SlackOversightWebhookPublisher.kt$SlackOversightWebhookPublisher$4</ID>
+    <ID>MatchingDeclarationName:NotificationOutboxPort.kt$NotificationOutboxRepository : OutboxRepository</ID>
+    <ID>SwallowedException:NotificationOutboxDispatcher.kt$NotificationOutboxDispatcher$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:ApnsPushSender.kt$ApnsPushSender$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:FcmPushSender.kt$FcmPushSender$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:NotificationConsumer.kt$NotificationConsumer$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:NotificationOutboxDispatcher.kt$NotificationOutboxDispatcher$ex: Exception</ID>
+  </CurrentIssues>
+</SmellBaseline>

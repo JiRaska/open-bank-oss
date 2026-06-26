@@ -1,0 +1,10 @@
+FROM eclipse-temurin:21-jre-alpine
+WORKDIR /app
+RUN addgroup -S openbank && adduser -S openbank -G openbank
+USER openbank
+COPY build/quarkus-app/lib/ /app/lib/
+COPY build/quarkus-app/*.jar /app/
+COPY build/quarkus-app/app/ /app/app/
+COPY build/quarkus-app/quarkus/ /app/quarkus/
+EXPOSE 8120
+ENTRYPOINT ["java", "-Djava.util.logging.manager=org.jboss.logmanager.LogManager", "-jar", "/app/quarkus-run.jar"]

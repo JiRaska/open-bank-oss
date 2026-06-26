@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="src/main/kotlin/com/openbank/notification/application/DispatchControlService.kt">
+        <error line="33" column="5" source="standard:class-signature" />
+        <error line="34" column="5" source="standard:class-signature" />
+        <error line="34" column="43" source="standard:class-signature" />
+        <error line="34" column="43" source="standard:trailing-comma-on-declaration-site" />
+        <error line="36" column="54" source="standard:function-signature" />
+        <error line="44" column="43" source="standard:trailing-comma-on-call-site" />
+        <error line="70" column="39" source="standard:trailing-comma-on-call-site" />
+        <error line="89" column="37" source="standard:argument-list-wrapping" />
+        <error line="89" column="42" source="standard:argument-list-wrapping" />
+        <error line="89" column="65" source="standard:argument-list-wrapping" />
+        <error line="89" column="83" source="standard:argument-list-wrapping" />
+        <error line="89" column="107" source="standard:argument-list-wrapping" />
+        <error line="89" column="116" source="standard:argument-list-wrapping" />
+        <error line="89" column="121" source="standard:max-line-length" />
+        <error line="89" column="131" source="standard:argument-list-wrapping" />
+        <error line="89" column="136" source="standard:argument-list-wrapping" />
+        <error line="115" column="52" source="standard:trailing-comma-on-call-site" />
+        <error line="116" column="14" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/notification/application/NotificationConsumer.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="7" column="1" source="standard:no-wildcard-imports" />
+        <error line="30" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="31" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="32" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="33" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="34" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="118" column="49" source="standard:no-multi-spaces" />
+        <error line="126" column="35" source="standard:trailing-comma-on-declaration-site" />
+        <error line="127" column="19" source="standard:function-signature" />
+        <error line="132" column="47" source="standard:statement-wrapping" />
+        <error line="132" column="66" source="standard:statement-wrapping" />
+        <error line="132" column="93" source="standard:statement-wrapping" />
+        <error line="159" column="35" source="standard:trailing-comma-on-declaration-site" />
+        <error line="182" column="42" source="standard:argument-list-wrapping" />
+        <error line="182" column="56" source="standard:argument-list-wrapping" />
+        <error line="182" column="70" source="standard:argument-list-wrapping" />
+        <error line="182" column="81" source="standard:argument-list-wrapping" />
+        <error line="204" column="84" source="standard:function-signature" />
+        <error line="214" column="113" source="standard:function-expression-body" />
+        <error line="216" column="50" source="standard:wrapping" />
+        <error line="218" column="57" source="standard:wrapping" />
+        <error line="220" column="48" source="standard:wrapping" />
+        <error line="222" column="48" source="standard:wrapping" />
+        <error line="224" column="44" source="standard:wrapping" />
+        <error line="226" column="43" source="standard:wrapping" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/notification/application/OversightWebhook.kt">
+        <error line="22" column="40" source="standard:parameter-list-spacing" />
+        <error line="22" column="41" source="standard:no-multi-spaces" />
+        <error line="43" column="57" source="standard:no-multi-spaces" />
+        <error line="44" column="43" source="standard:no-multi-spaces" />
+        <error line="44" column="57" source="standard:no-multi-spaces" />
+        <error line="45" column="45" source="standard:no-multi-spaces" />
+        <error line="45" column="57" source="standard:no-multi-spaces" />
+        <error line="46" column="46" source="standard:no-multi-spaces" />
+        <error line="46" column="57" source="standard:no-multi-spaces" />
+        <error line="47" column="14" source="standard:no-multi-spaces" />
+        <error line="47" column="57" source="standard:no-multi-spaces" />
+        <error line="79" column="42" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/notification/application/port/out/NotificationOutboxPort.kt">
+        <error line="22" column="43" source="standard:trailing-comma-on-declaration-site" />
+        <error line="36" column="27" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/notification/domain/model/Notification.kt">
+        <error line="13" column="21" source="standard:enum-wrapping" />
+        <error line="13" column="37" source="standard:enum-wrapping" />
+        <error line="14" column="28" source="standard:enum-wrapping" />
+        <error line="15" column="19" source="standard:enum-wrapping" />
+        <error line="15" column="33" source="standard:enum-wrapping" />
+        <error line="16" column="22" source="standard:enum-wrapping" />
+        <error line="17" column="15" source="standard:enum-wrapping" />
+        <error line="17" column="31" source="standard:enum-wrapping" />
+        <error line="31" column="27" source="standard:trailing-comma-on-declaration-site" />
+        <error line="39" column="39" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/notification/domain/ops/DispatchControl.kt">
+        <error line="25" column="40" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/notification/infrastructure/kafka/KafkaNotificationOutboxEventPublisher.kt">
+        <error line="15" column="93" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/notification/infrastructure/outbox/NotificationOutboxBacklogGauge.kt">
+        <error line="6" column="1" source="standard:import-ordering" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/notification/infrastructure/outbox/NotificationOutboxDispatcher.kt">
+        <error line="21" column="56" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/notification/infrastructure/persistence/entity/NotificationEntity.kt">
+        <error line="8" column="1" source="standard:no-wildcard-imports" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/notification/infrastructure/persistence/repository/DeviceTokenRepository.kt">
+        <error line="39" column="71" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/notification/infrastructure/persistence/repository/DispatchControlStoreImpl.kt">
+        <error line="22" column="5" source="standard:class-signature" />
+        <error line="22" column="60" source="standard:class-signature" />
+        <error line="22" column="60" source="standard:trailing-comma-on-declaration-site" />
+        <error line="23" column="27" source="standard:class-signature" />
+        <error line="25" column="81" source="standard:function-signature" />
+        <error line="36" column="98" source="standard:function-signature" />
+        <error line="55" column="77" source="standard:function-signature" />
+        <error line="67" column="56" source="standard:trailing-comma-on-call-site" />
+        <error line="103" column="32" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/notification/infrastructure/persistence/repository/NotificationOutboxRepositoryImpl.kt">
+        <error line="6" column="1" source="standard:import-ordering" />
+        <error line="19" column="42" source="standard:class-signature" />
+        <error line="19" column="72" source="standard:class-signature" />
+        <error line="21" column="67" source="standard:function-signature" />
+        <error line="24" column="86" source="standard:function-signature" />
+        <error line="29" column="53" source="standard:trailing-comma-on-call-site" />
+        <error line="33" column="52" source="standard:function-signature" />
+        <error line="38" column="53" source="standard:trailing-comma-on-call-site" />
+        <error line="90" column="30" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/notification/infrastructure/persistence/repository/NotificationRepository.kt">
+        <error line="20" column="35" source="standard:function-signature" />
+        <error line="35" column="86" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/notification/infrastructure/push/ApnsPushSender.kt">
+        <error line="73" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="98" column="26" source="standard:function-literal" />
+        <error line="98" column="40" source="standard:argument-list-wrapping" />
+        <error line="98" column="59" source="standard:argument-list-wrapping" />
+        <error line="98" column="85" source="standard:argument-list-wrapping" />
+        <error line="98" column="94" source="standard:argument-list-wrapping" />
+        <error line="98" column="103" source="standard:argument-list-wrapping" />
+        <error line="98" column="107" source="standard:argument-list-wrapping" />
+        <error line="98" column="110" source="standard:argument-list-wrapping" />
+        <error line="98" column="121" source="standard:argument-list-wrapping" />
+        <error line="98" column="121" source="standard:max-line-length" />
+        <error line="98" column="123" source="standard:function-literal" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/notification/infrastructure/push/FcmPushSender.kt">
+        <error line="72" column="1" source="standard:spacing-between-declarations-with-annotations" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/notification/infrastructure/push/PushCrypto.kt">
+        <error line="35" column="43" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/notification/infrastructure/push/PushSenderRouter.kt">
+        <error line="20" column="5" source="standard:class-signature" />
+        <error line="21" column="5" source="standard:class-signature" />
+        <error line="21" column="38" source="standard:class-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/notification/infrastructure/rest/DispatchControlResource.kt">
+        <error line="35" column="5" source="standard:class-signature" />
+        <error line="36" column="5" source="standard:class-signature" />
+        <error line="36" column="43" source="standard:class-signature" />
+        <error line="36" column="43" source="standard:trailing-comma-on-declaration-site" />
+        <error line="50" column="68" source="standard:trailing-comma-on-call-site" />
+        <error line="51" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="100" column="59" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/notification/infrastructure/rest/NotificationResource.kt">
+        <error line="10" column="1" source="standard:no-wildcard-imports" />
+        <error line="31" column="46" source="standard:trailing-comma-on-declaration-site" />
+        <error line="34" column="13" source="standard:multiline-if-else" />
+        <error line="36" column="13" source="standard:multiline-if-else" />
+        <error line="37" column="28" source="standard:wrapping" />
+        <error line="38" column="39" source="standard:function-literal" />
+        <error line="38" column="39" source="standard:wrapping" />
+        <error line="38" column="41" source="standard:statement-wrapping" />
+        <error line="47" column="43" source="standard:trailing-comma-on-call-site" />
+        <error line="48" column="13" source="standard:wrapping" />
+        <error line="48" column="14" source="standard:curly-spacing" />
+        <error line="48" column="14" source="standard:statement-wrapping" />
+        <error line="48" column="14" source="standard:function-literal" />
+        <error line="51" column="27" source="standard:trailing-comma-on-call-site" />
+        <error line="52" column="9" source="standard:wrapping" />
+        <error line="61" column="28" source="standard:wrapping" />
+        <error line="71" column="39" source="standard:trailing-comma-on-call-site" />
+        <error line="72" column="9" source="standard:wrapping" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/notification/infrastructure/webhook/SlackOversightWebhookPublisher.kt">
+        <error line="72" column="43" source="standard:argument-list-wrapping" />
+        <error line="72" column="63" source="standard:argument-list-wrapping" />
+        <error line="73" column="55" source="standard:argument-list-wrapping" />
+        <error line="79" column="27" source="standard:wrapping" />
+        <error line="79" column="27" source="standard:argument-list-wrapping" />
+        <error line="80" column="43" source="standard:argument-list-wrapping" />
+        <error line="80" column="51" source="standard:wrapping" />
+        <error line="80" column="52" source="standard:argument-list-wrapping" />
+        <error line="80" column="52" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/governance/HibernateSequenceGuardTest.kt">
+        <error line="54" column="33" source="standard:trailing-comma-on-call-site" />
+        <error line="68" column="36" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/notification/domain/model/NotificationModelTest.kt">
+        <error line="17" column="40" source="standard:argument-list-wrapping" />
+        <error line="18" column="39" source="standard:argument-list-wrapping" />
+        <error line="18" column="65" source="standard:trailing-comma-on-call-site" />
+        <error line="25" column="41" source="standard:argument-list-wrapping" />
+        <error line="26" column="40" source="standard:argument-list-wrapping" />
+        <error line="26" column="66" source="standard:trailing-comma-on-call-site" />
+        <error line="36" column="41" source="standard:trailing-comma-on-call-site" />
+        <error line="55" column="28" source="standard:trailing-comma-on-call-site" />
+        <error line="70" column="50" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/notification/infrastructure/outbox/NotificationOutboxBacklogGaugeTest.kt">
+        <error line="6" column="1" source="standard:import-ordering" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/notification/integration/NotificationConsumerIT.kt">
+        <error line="70" column="48" source="standard:function-signature" />
+        <error line="75" column="52" source="standard:function-signature" />
+        <error line="88" column="49" source="standard:trailing-comma-on-call-site" />
+        <error line="105" column="14" source="standard:trailing-comma-on-call-site" />
+    </file>
+</baseline>

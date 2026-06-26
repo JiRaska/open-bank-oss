@@ -1,0 +1,128 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+plugins {
+    id("openbank.quarkus-service")
+    // Inline version (not the shared catalog) so enabling mutation testing stays path-scoped to
+    // this service and does not trigger a fleet-wide rebuild. 1.19.0 supports Gradle 9.
+    id("info.solidsoft.pitest") version "1.19.0"
+}
+
+dependencies {
+    implementation(enforcedPlatform(libs.quarkus.bom))
+
+    implementation(libs.quarkus.kotlin)
+    implementation(libs.quarkus.resteasy.reactive)
+    implementation(libs.quarkus.resteasy.reactive.jackson)
+    implementation(libs.quarkus.hibernate.reactive.panache)
+    implementation(libs.quarkus.hibernate.reactive.panache.base)
+    implementation(libs.quarkus.reactive.pg.client)
+    implementation(libs.quarkus.flyway)
+    implementation(libs.quarkus.jdbc.postgresql)
+    implementation(libs.quarkus.smallrye.kafka)
+    implementation(libs.quarkus.smallrye.health)
+    implementation(libs.quarkus.micrometer.registry.prometheus)
+    implementation(libs.quarkus.opentelemetry)
+    implementation(libs.quarkus.oidc)
+    implementation(libs.quarkus.oidc.client.reactive.filter)
+    implementation(libs.quarkus.rest.client.reactive)
+    implementation(libs.quarkus.rest.client.reactive.jackson)
+    implementation(libs.quarkus.config.yaml)
+    implementation(libs.quarkus.smallrye.openapi)
+
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.coroutines.reactive)
+    implementation(libs.jackson.module.kotlin)
+    implementation(libs.jackson.datatype.jsr310)
+    implementation(libs.quarkus.smallrye.fault.tolerance)
+    implementation(libs.quarkus.scheduler)
+
+    implementation(project(":openbank-libs"))
+
+    testImplementation(libs.quarkus.junit5)
+    testImplementation(libs.quarkus.test.security)
+    testImplementation(libs.assertj)
+    testImplementation(libs.mockk)
+    // Property-based testing of double-entry invariants (ADR-0011 L1 — Kotest property).
+    // Declared inline (not in the shared version catalog) so this test-only dependency does not
+    // trigger a fleet-wide rebuild; only this service recompiles (path-scoped CI).
+    testImplementation("io.kotest:kotest-property:5.9.1")
+    testImplementation(libs.rest.assured.kotlin)
+    testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    // Provider-side Pact verification (ADR-0063)
+    testImplementation(libs.pact.provider)
+    // CI infra sweep (#578): isolated PostgreSQL (+ Redpanda for non-in-memory ITs) per JVM.
+    testImplementation(libs.testcontainers)
+    testImplementation(libs.testcontainers.junit)
+    testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.testcontainers.redpanda)
+}
+
+kover {
+    reports {
+        filters {
+            excludes {
+                // REST adapters are thin and covered by *ApiIT integration tests; reflection
+                // DTOs are trivial data holders. We do NOT exclude @ApplicationScoped: that is
+                // the application/use-case layer (LedgerService etc.) — the money logic that
+                // MUST count toward the floor. Excluding it measured coverage over domain
+                // models/DTOs only and let the floor pass while the orchestration went uncounted.
+                annotatedBy("jakarta.ws.rs.Path")
+                annotatedBy("io.quarkus.runtime.annotations.RegisterForReflection")
+            }
+        }
+        verify {
+            rule {
+                bound {
+                    minValue = 65
+                    coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
+                }
+            }
+        }
+    }
+}
+
+tasks.named("koverVerify") {
+    enabled = true
+}
+
+tasks.named("check") {
+    dependsOn(tasks.named("koverVerify"))
+}
+
+// Pact: provider verification reads pact files from the shared pacts/ dir (git-pact, ADR-0063).
+System.setProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
+
+// Pact Broker verification (ADR-0092): forward the broker config CI passes with `-D` into the
+// (forked) test JVM. When `pactbroker.url` is unset (local `./gradlew build`) the @PactBroker
+// provider test is @EnabledIfSystemProperty-skipped and git-pact above stays the fallback;
+// publishResults + provider.version/branch tag the verification result for can-i-deploy.
+tasks.withType<Test> {
+    listOf(
+        "pactbroker.url",
+        "pactbroker.auth.username",
+        "pactbroker.auth.password",
+        "pactbroker.enablePending",
+        "pactbroker.providerBranch",
+        "pact.verifier.publishResults",
+        "pact.provider.version",
+        "pact.provider.branch",
+        "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
+}
+
+// Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3). Weekly + manual via
+// pitest.yml, advisory — never a per-PR gate. info.solidsoft.pitest 1.19.0 supports Gradle 9.
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf("com.openbank.ledger.domain.*")
+    targetTests = setOf("com.openbank.ledger.domain.*", "com.openbank.ledger.application.usecase.*")
+    // Advisory for now (ADR-0063): the pitest.yml job reports the score and warns below 70%; the
+    // Gradle task itself must not fail the run, so the threshold is 0. Raise to block later.
+    mutationThreshold = 0
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
+    excludedClasses = setOf("com.openbank.ledger.domain.*Kt")
+}

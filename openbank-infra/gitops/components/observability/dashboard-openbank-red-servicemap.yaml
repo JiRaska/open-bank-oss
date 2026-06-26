@@ -1,0 +1,105 @@
+# RED + service map dashboard (ADR-0082). Every panel is driven by the Tempo
+# metrics-generator output (traces_spanmetrics_* / traces_service_graph_*) — so
+# the whole fleet gets rate/error/duration and a dependency graph with ZERO
+# service instrumentation. Provisioned via the grafana_dashboard sidecar label.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-red-servicemap
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  openbank-red-servicemap.json: |
+    {
+      "id": null,
+      "uid": "openbank-red",
+      "title": "OpenBank — Service Map & RED (from traces)",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": { "from": "now-1h", "to": "now" },
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "pluginId": "prometheus",
+            "label": "Metrics",
+            "current": {}
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Service dependency graph",
+          "type": "nodeGraph",
+          "gridPos": { "x": 0, "y": 0, "w": 24, "h": 9 },
+          "datasource": { "type": "tempo", "uid": "tempo" },
+          "targets": [
+            { "queryType": "serviceMap", "refId": "A", "datasource": { "type": "tempo", "uid": "tempo" } }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Request rate by service (R)",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 9, "w": 8, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 10 } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean"] }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "expr": "sum by (service) (rate(traces_spanmetrics_calls_total[5m]))", "legendFormat": "{{service}}", "refId": "A" }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Error rate % by service (E)",
+          "type": "timeseries",
+          "gridPos": { "x": 8, "y": 9, "w": 8, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "custom": { "fillOpacity": 10 }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.05 } ] } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "expr": "sum by (service) (rate(traces_spanmetrics_calls_total{status_code=\"STATUS_CODE_ERROR\"}[5m])) / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total[5m])), 0.001)", "legendFormat": "{{service}}", "refId": "A" }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Latency P99 by service (D)",
+          "type": "timeseries",
+          "gridPos": { "x": 16, "y": 9, "w": 8, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 10 } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "expr": "histogram_quantile(0.99, sum by (service, le) (rate(traces_spanmetrics_latency_bucket[5m])))", "legendFormat": "p99 {{service}}", "refId": "A" }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "Inter-service call rate (client → server)",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 17, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 10 } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean"] }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "expr": "sum by (client, server) (rate(traces_service_graph_request_total[5m]))", "legendFormat": "{{client}} → {{server}}", "refId": "A" }
+          ]
+        },
+        {
+          "id": 6,
+          "title": "Failed inter-service calls (client → server)",
+          "type": "timeseries",
+          "gridPos": { "x": 12, "y": 17, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "unit": "reqps", "color": { "mode": "palette-classic" }, "custom": { "fillOpacity": 20 } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "expr": "sum by (client, server) (rate(traces_service_graph_request_failed_total[5m]))", "legendFormat": "{{client}} → {{server}}", "refId": "A" }
+          ]
+        }
+      ]
+    }

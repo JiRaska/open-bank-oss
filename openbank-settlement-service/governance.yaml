@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: MPL-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: payments
+primaryDatastore: PostgreSQL
+schemaName: settlement_schema
+dataLineageRole: both
+dataClassification: confidential
+retentionPolicy: 7 years
+evidenceExported: true
+lineage:
+  upstream:
+    - serviceName: ledger-service
+      relationType: api
+      description: queries GL entries for settlement batches
+    - serviceName: sepa-payment
+      relationType: topic
+      description: consumes payment events for settlement
+  downstream:
+    - serviceName: transaction-service
+      relationType: api
+      description: creates settlement transactions
+    - serviceName: audit-service
+      relationType: topic
+      description: emits settlement audit events
+schemaLineage:
+  ownedSchemas:
+    - settlement_schema
+  dependentSchemas:
+    - ledger_schema
+    - transactions_schema

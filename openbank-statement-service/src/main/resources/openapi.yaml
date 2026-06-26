@@ -1,0 +1,220 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: Statement Service API
+  version: 1.0.0
+  description: >-
+    Account statements for the multi-currency current account (ADR-0035). The unit is the per-pocket
+    (IBAN + currency) statement: each pocket has its own camt.053.001.08 / MT940 with an independent
+    legal sequence. We persist only the period-close record (sequence + balance anchors); the camt.053,
+    MT940 and PDF formats are deterministic, byte-identical projections rendered ON DEMAND from that
+    record + booked entries replayed from transaction-service — no rendered files are stored (PSD2
+    Art. 58(2) "made available"). A closing balance that disagrees with balance-service fails the
+    close (fail-closed reconciliation).
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8136
+    description: Local development
+tags:
+  - name: Statements
+  - name: Statement close runs
+
+paths:
+  /api/v1/statements/{accountId}/close:
+    post:
+      tags: [Statements]
+      summary: Close a month for every pocket of an account
+      description: >-
+        Assigns the next legal/electronic sequence per pocket, snapshots opening/closing balances and
+        runs the fail-closed reconciliation. Idempotent on (accountId, pocketCurrency, period). Returns
+        409 if reconciliation against balance-service fails.
+      operationId: closeStatementPeriod
+      parameters:
+        - { name: accountId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Closed period records (one per pocket)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StatementPeriod'
+        '409':
+          description: Fail-closed reconciliation mismatch — no statement issued
+
+  /api/v1/statements/{accountId}:
+    get:
+      tags: [Statements]
+      summary: List the retained period-close records for an account
+      operationId: listStatements
+      parameters:
+        - { name: accountId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Period-close records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StatementPeriod'
+
+  /api/v1/statements/{accountId}/{currency}/{legalSequence}:
+    get:
+      tags: [Statements]
+      summary: Render a closed statement on demand (camt.053 / MT940 / PDF)
+      description: Nothing is stored; the response is rendered deterministically from the closed period.
+      operationId: renderStatement
+      parameters:
+        - { name: accountId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: currency, in: path, required: true, schema: { type: string, minLength: 3, maxLength: 3 } }
+        - { name: legalSequence, in: path, required: true, schema: { type: integer, format: int64 } }
+        - name: format
+          in: query
+          schema: { type: string, enum: [CAMT_053, MT940, PDF], default: PDF }
+      responses:
+        '200':
+          description: Rendered statement (application/xml for camt.053, text/plain for MT940/PDF)
+        '404':
+          description: No closed statement with that sequence
+
+  /api/v1/statements/{accountId}/{currency}/export:
+    get:
+      tags: [Statements]
+      summary: Ad-hoc, non-sequenced informational export for an arbitrary date range
+      operationId: exportStatement
+      parameters:
+        - { name: accountId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: currency, in: path, required: true, schema: { type: string, minLength: 3, maxLength: 3 } }
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - name: format
+          in: query
+          schema: { type: string, enum: [CAMT_053, MT940, PDF], default: PDF }
+      responses:
+        '200':
+          description: Rendered informational export (carries no legal sequence)
+
+  /api/v1/statements/close-runs:
+    get:
+      tags: [Statement close runs]
+      summary: Recent scheduled/manual close runs (newest first)
+      description: Operational telemetry for the monthly close cadence (ADR-0069 D3).
+      operationId: listCloseRuns
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: Recent close runs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CloseRun'
+    post:
+      tags: [Statement close runs]
+      summary: Trigger a manual catch-up close pass now (operator retry)
+      description: >-
+        Runs a full self-healing close pass immediately. Each pocket closes every month still owed
+        through the prior month; failures are isolated, recorded and emitted as period.close_failed.
+      operationId: triggerCloseRun
+      responses:
+        '202':
+          description: The close run that was executed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloseRun'
+
+  /api/v1/statements/close-runs/latest:
+    get:
+      tags: [Statement close runs]
+      summary: The most recent close run
+      operationId: latestCloseRun
+      responses:
+        '200':
+          description: The latest close run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloseRun'
+        '204':
+          description: The cadence has never run
+
+  /api/v1/statements/close-runs/{runId}/failures:
+    get:
+      tags: [Statement close runs]
+      summary: Per-pocket failures recorded within a close run
+      operationId: closeRunFailures
+      parameters:
+        - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Failures for the run
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CloseFailure'
+
+components:
+  schemas:
+    StatementPeriod:
+      type: object
+      description: >-
+        The retained period-close record (ADR-0035 §F). The only persisted statement artefact — no
+        rendered bytes are stored.
+      properties:
+        id: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        pocketCurrency: { type: string, minLength: 3, maxLength: 3 }
+        periodFrom: { type: string, format: date }
+        periodTo: { type: string, format: date }
+        legalSequenceNumber: { type: integer, format: int64 }
+        electronicSequenceNumber: { type: integer, format: int64 }
+        openingBalance: { type: number }
+        closingBalance: { type: number }
+        entryCount: { type: integer }
+        status: { type: string, enum: [CLOSED, SUPERSEDED] }
+        supersedesSequence: { type: integer, format: int64, nullable: true }
+        closedAt: { type: string, format: date-time }
+
+    CloseRun:
+      type: object
+      description: >-
+        Operational outcome of one scheduled/manual close pass (ADR-0069 D3). Not statement content —
+        an audit that the cadence ran and converged.
+      properties:
+        id: { type: string, format: uuid }
+        trigger: { type: string, enum: [SCHEDULED, MANUAL] }
+        status: { type: string, enum: [RUNNING, COMPLETED, COMPLETED_WITH_FAILURES] }
+        periodFrom: { type: string, format: date, nullable: true }
+        periodTo: { type: string, format: date, nullable: true }
+        accountsEnumerated: { type: integer }
+        pocketsClosed: { type: integer }
+        pocketsFailed: { type: integer }
+        pocketsSkipped: { type: integer }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time, nullable: true }
+
+    CloseFailure:
+      type: object
+      description: A single per-pocket failure captured within a CloseRun (ADR-0069 D3).
+      properties:
+        id: { type: string, format: uuid }
+        runId: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        pocketCurrency: { type: string, minLength: 3, maxLength: 3 }
+        periodFrom: { type: string, format: date }
+        periodTo: { type: string, format: date }
+        reason: { type: string, enum: [RECONCILIATION, UPSTREAM, UNKNOWN] }
+        detail: { type: string, nullable: true }
+        failedAt: { type: string, format: date-time }

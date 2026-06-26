@@ -1,0 +1,15 @@
+# Payments banking domain (ADR-0037: domain = namespace). App plane.
+# Co-locates the full payment execution pipeline: transaction-service (saga
+# orchestrator), sepa-payment, domestic-payment, sepa-instant (instruction
+# processors), and clearing-service (settlement). All services publish/consume
+# on the Strimzi Kafka bus; each has its own CNPG Postgres.
+# agent-service references transaction-service at transaction-service.payments.svc:8102
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: payments
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

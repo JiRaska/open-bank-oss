@@ -1,0 +1,13 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:OnboardingEventConsumer.kt$OnboardingEventConsumer$private fun parseKycEvent(node: JsonNode): OnboardingEvent?</ID>
+    <ID>CyclomaticComplexMethod:OnboardingProjectionService.kt$OnboardingProjectionService$suspend fun applyEvent(event: OnboardingEvent)</ID>
+    <ID>LongMethod:OnboardingProjectionService.kt$OnboardingProjectionService$suspend fun applyEvent(event: OnboardingEvent)</ID>
+    <ID>MagicNumber:OnboardingResource.kt$OnboardingResource$100</ID>
+    <ID>MatchingDeclarationName:OnboardingQueries.kt$OnboardingUseCase</ID>
+    <ID>TooGenericExceptionCaught:AbandonedRegistrationCleaner.kt$AbandonedRegistrationCleaner$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:OnboardingEventConsumer.kt$OnboardingEventConsumer$e: Exception</ID>
+  </CurrentIssues>
+</SmellBaseline>

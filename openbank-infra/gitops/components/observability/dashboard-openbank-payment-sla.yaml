@@ -1,0 +1,384 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-payment-sla
+  namespace: observability
+  labels:
+    grafana_dashboard: '1'
+    app.kubernetes.io/part-of: observability
+data:
+  openbank-payment-sla.json: |
+    {
+      "id": null,
+      "uid": "openbank-sla",
+      "title": "OpenBank — Payment SLA & Settlement",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "browser",
+      "templating": {
+        "list": [
+          {
+            "current": {
+              "selected": false,
+              "text": "Prometheus",
+              "value": "prometheus"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "name": "datasource",
+            "options": [],
+            "query": "prometheus",
+            "refresh": 1,
+            "type": "datasource",
+            "label": "Datasource"
+          }
+        ]
+      },
+      "annotations": {
+        "list": []
+      },
+      "links": [],
+      "panels": [
+        {
+          "id": 1,
+          "type": "timeseries",
+          "title": "Processing Duration P50 / P95 / P99",
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 14,
+            "h": 8
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(openbank_payment_processing_duration_seconds_bucket{job=\"observability/openbank-services\"}[5m])))",
+              "legendFormat": "P50",
+              "refId": "A"
+            },
+            {
+              "datasource": "${datasource}",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(openbank_payment_processing_duration_seconds_bucket{job=\"observability/openbank-services\"}[5m])))",
+              "legendFormat": "P95",
+              "refId": "B"
+            },
+            {
+              "datasource": "${datasource}",
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(openbank_payment_processing_duration_seconds_bucket{job=\"observability/openbank-services\"}[5m])))",
+              "legendFormat": "P99",
+              "refId": "C"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 2,
+          "type": "gauge",
+          "title": "SEPA Instant < 10s SLA",
+          "gridPos": {
+            "x": 14,
+            "y": 0,
+            "w": 5,
+            "h": 4
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "100 * (histogram_quantile(0.95, sum by (le) (rate(openbank_payment_processing_duration_seconds_bucket{type=\"sepa_instant\",job=\"observability/openbank-services\"}[5m]))) < bool 10)",
+              "legendFormat": "",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "showThresholdLabels": false,
+            "showThresholdMarkers": true
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 95
+                  },
+                  {
+                    "color": "green",
+                    "value": 99
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 3,
+          "type": "gauge",
+          "title": "Domestic < 60s SLA",
+          "gridPos": {
+            "x": 19,
+            "y": 0,
+            "w": 5,
+            "h": 4
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "100 * (histogram_quantile(0.95, sum by (le) (rate(openbank_payment_processing_duration_seconds_bucket{type=\"domestic\",job=\"observability/openbank-services\"}[5m]))) < bool 60)",
+              "legendFormat": "",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "showThresholdLabels": false,
+            "showThresholdMarkers": true
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 95
+                  },
+                  {
+                    "color": "green",
+                    "value": 99
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 4,
+          "type": "timeseries",
+          "title": "Payment Completion Rate by Type",
+          "gridPos": {
+            "x": 0,
+            "y": 8,
+            "w": 14,
+            "h": 7
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "sum by (type, outcome) (rate(openbank_payments_completed_total{job=\"observability/openbank-services\"}[5m]))",
+              "legendFormat": "{{type}}/{{outcome}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 5,
+          "type": "bargauge",
+          "title": "Outcome Breakdown (all time)",
+          "gridPos": {
+            "x": 14,
+            "y": 4,
+            "w": 10,
+            "h": 11
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "sum by (outcome) (openbank_payments_completed_total{job=\"observability/openbank-services\"})",
+              "legendFormat": "{{outcome}}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "orientation": "horizontal",
+            "displayMode": "lcd"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "Payment Success Rate %",
+          "gridPos": {
+            "x": 0,
+            "y": 15,
+            "w": 12,
+            "h": 6
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "100 * (sum(rate(openbank_payments_completed_total{outcome=~\"completed|settled\",job=\"observability/openbank-services\"}[5m])) or vector(0)) / clamp_min(sum(rate(openbank_payments_submitted_total{job=\"observability/openbank-services\"}[5m])), 0.0001)",
+              "legendFormat": "Success Rate %",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 7,
+          "type": "piechart",
+          "title": "Volume by Currency",
+          "gridPos": {
+            "x": 12,
+            "y": 15,
+            "w": 12,
+            "h": 6
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "sum by (currency) (increase(openbank_payments_submitted_total{job=\"observability/openbank-services\"}[24h]))",
+              "legendFormat": "{{currency}}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "pieType": "pie",
+            "displayLabels": [
+              "name",
+              "percent"
+            ],
+            "legend": {
+              "displayMode": "list",
+              "placement": "right"
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          }
+        }
+      ],
+      "tags": [
+        "openbank"
+      ]
+    }

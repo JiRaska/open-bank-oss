@@ -1,0 +1,392 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: Account Service API
+  # Kept in lockstep with version.txt / quarkus.application.version
+  # (ADR-0029 D2 single-source invariant).
+  version: 1.0.0
+  description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
+  contact:
+    name: OpenBank Platform
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8100
+    description: Local development
+tags:
+  - name: Accounts
+    description: Account management
+
+paths:
+  /api/v1/accounts:
+    post:
+      tags: [Accounts]
+      summary: Open a new account
+      operationId: openAccount
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenAccountRequest'
+      responses:
+        '201':
+          description: Account created
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        '409':
+          description: Idempotency-Key already used (replayed)
+          headers:
+            X-Idempotency-Replayed:
+              schema:
+                type: string
+                enum: ['true']
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    get:
+      tags: [Accounts]
+      summary: List accounts for a party
+      operationId: listAccounts
+      parameters:
+        - name: partyId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of accounts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountPage'
+
+  /api/v1/accounts/search:
+    get:
+      tags: [Accounts]
+      summary: Search accounts by IBAN fragment (trigram), cursor-paginated
+      description: >
+        Fuzzy substring match over the account IBAN. The fragment is normalized
+        (spaces stripped, upper-cased); fragments shorter than 2 characters return
+        an empty page. Page size is capped at 50 to bound the enumeration surface.
+      operationId: searchAccounts
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: IBAN fragment (>= 2 chars after normalization)
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 64
+            example: '0800000019'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 50
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of matching accounts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountPage'
+        '400':
+          description: q query parameter is required
+
+  /api/v1/accounts/{accountId}:
+    get:
+      tags: [Accounts]
+      summary: Get account by ID
+      operationId: getAccount
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      responses:
+        '200':
+          description: Account detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/accounts/iban/{iban}:
+    get:
+      tags: [Accounts]
+      summary: Get account by IBAN
+      operationId: getAccountByIban
+      parameters:
+        - name: iban
+          in: path
+          required: true
+          schema:
+            type: string
+            example: CZ6550510000001234567890
+      responses:
+        '200':
+          description: Account detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/accounts/{accountId}/balance:
+    get:
+      tags: [Accounts]
+      summary: Get account balance
+      operationId: getAccountBalance
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      responses:
+        '200':
+          description: Balance detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountBalanceResponse'
+
+  /api/v1/accounts/{accountId}/close:
+    post:
+      tags: [Accounts]
+      summary: Close an account
+      operationId: closeAccount
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloseAccountRequest'
+      responses:
+        '200':
+          description: Account closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+
+  /api/v1/accounts/{accountId}/freeze:
+    post:
+      tags: [Accounts]
+      summary: Freeze an account
+      operationId: freezeAccount
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FreezeAccountRequest'
+      responses:
+        '200':
+          description: Account frozen
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+
+  /api/v1/accounts/{accountId}/unfreeze:
+    post:
+      tags: [Accounts]
+      summary: Unfreeze an account
+      operationId: unfreezeAccount
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FreezeAccountRequest'
+      responses:
+        '200':
+          description: Account unfrozen
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    accountId:
+      name: accountId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    UnprocessableEntity:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    OpenAccountRequest:
+      type: object
+      required: [partyId, productId, accountType, currencyCode, legalName]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        productId:
+          type: string
+        accountType:
+          type: string
+          enum: [CURRENT, SAVINGS, LOAN, ESCROW]
+        currencyCode:
+          type: string
+          example: CZK
+        legalName:
+          type: string
+          description: Legal name of the account holder for sanctions screening (ADR-0032 §C).
+
+    CloseAccountRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+
+    FreezeAccountRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+
+    AccountResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        accountNumber:
+          type: string
+        accountType:
+          type: string
+        partyId:
+          type: string
+          format: uuid
+        productId:
+          type: string
+        currencyCode:
+          type: string
+        status:
+          type: string
+          enum: [ACTIVE, FROZEN, CLOSED, PENDING]
+        openedAt:
+          type: string
+          format: date-time
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    AccountBalanceResponse:
+      type: object
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        availableBalance:
+          type: number
+        currentBalance:
+          type: number
+        reservedBalance:
+          type: number
+        pendingBalance:
+          type: number
+        currencyCode:
+          type: string
+        lastUpdatedAt:
+          type: string
+          format: date-time
+
+    AccountPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccountResponse'
+        pagination:
+          $ref: '#/components/schemas/CursorPagination'
+
+    CursorPagination:
+      type: object
+      properties:
+        nextCursor:
+          type: string
+          nullable: true
+        hasMore:
+          type: boolean
+
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        traceId:
+          type: string

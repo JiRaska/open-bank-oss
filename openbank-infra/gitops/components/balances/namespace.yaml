@@ -1,0 +1,13 @@
+# Balances banking domain (ADR-0037: domain = namespace). App plane. Holds
+# balance-service plus its single-owner CNPG Postgres. balance-service is the
+# authoritative store of operational money (ADR-0024 N3); account_balance in
+# accounts is a denormalized cache reconstructable from balance events.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: balances
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

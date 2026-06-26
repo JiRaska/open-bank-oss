@@ -1,0 +1,82 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# BPMN process diagram (ADR-0019/0029). Authored as data; validated by
+# src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
+
+name: Card Issuance
+desc: Proces vydání nové platební karty (fyzické či virtuální)
+regulation: PCI-DSS + PSD2
+services:
+  - product-catalog
+  - card-issuance-service
+  - notification-service
+steps:
+  - id: start
+    type: start
+    x: 60
+    y: 100
+    label: Žádost
+  - id: catalog
+    type: task
+    x: 180
+    y: 100
+    label: Katalog produktů
+    lane: core
+    apis:
+      - GET /api/v1/products/{id}
+    relatedServices:
+      - product-catalog
+  - id: gw1
+    type: gateway
+    x: 320
+    y: 100
+    label: Dostupné?
+  - id: reject
+    type: end-err
+    x: 320
+    y: 220
+    label: Zamítnuto
+  - id: issue
+    type: task
+    x: 460
+    y: 100
+    label: Vytvoření karty
+    lane: cards
+    apis:
+      - POST /api/v1/cards
+    relatedServices:
+      - card-issuance-service
+  - id: notify
+    type: task
+    x: 600
+    y: 100
+    label: Notifikace PINu
+    lane: platform
+    apis:
+      - POST /api/v1/notifications
+    relatedServices:
+      - notification-service
+    consumes:
+      - openbank.notification.requests
+  - id: end
+    type: end
+    x: 740
+    y: 100
+    label: Vydáno
+flows:
+  - from: start
+    to: catalog
+  - from: catalog
+    to: gw1
+  - from: gw1
+    to: reject
+    label: Ne
+  - from: gw1
+    to: issue
+    label: Ano
+  - from: issue
+    to: notify
+    kind: async
+    topic: openbank.notification.requests
+  - from: notify
+    to: end

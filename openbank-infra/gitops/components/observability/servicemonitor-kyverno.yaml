@@ -1,0 +1,26 @@
+# Scrape Kyverno's Prometheus metrics (ADR-0082 single-pane / security observability).
+# Kyverno already exposes metrics on the per-controller `*-metrics` Services
+# (port `metrics-port`:8000) but nothing scraped them — so the SOC dashboard's
+# policy-result / admission panels were dark. Lives in `observability` (synced by
+# the observability-components app) and selects the kyverno Services cross-namespace;
+# the cluster Prometheus has empty SM selectors, so it picks this up automatically.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kyverno
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: kyverno
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - kyverno
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: kyverno
+  endpoints:
+    - port: metrics-port
+      interval: 30s
+      path: /metrics
+      honorLabels: true

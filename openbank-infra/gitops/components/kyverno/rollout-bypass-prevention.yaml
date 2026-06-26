@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+#
+# Kyverno ClusterPolicy: block Deployment creation if an Argo Rollout with the
+# same name already exists in the same namespace (ADR-0098).
+#
+# Money-path services use kind:Rollout (not Deployment) for progressive delivery
+# with continuous Prometheus-gate canary analysis. A plain Deployment with the
+# same name bypasses the Rollout controller entirely — traffic would skip the
+# 10 % → 30 % canary steps and the error-rate / p95-latency analysis gates.
+#
+# This policy fires ONLY when a Rollout already exists; it does not prevent
+# Deployments for infra workloads (redis, product-catalog) or for services not
+# yet migrated to Rollout. The apiCall queries the live cluster state at
+# admission time — if the name resolves to an existing Rollout, the Deployment
+# is rejected.
+#
+# background: false — evaluate only at admission, not against existing resources.
+# The scoped namespace list limits the webhook overhead to money-path namespaces.
+#
+# operations: [CREATE, UPDATE] — DELETE is intentionally excluded. Blocking
+# DELETE would prevent the Deployment→Rollout migration sequence (ArgoCD creates
+# the Rollout before pruning the old Deployment) and would make removal of
+# mistakenly created Deployments impossible. The security goal is to prevent
+# traffic bypassing the Rollout controller, not to restrict housekeeping.
+#
+# apiCall uses LIST (not GET) — a GET on a non-existent resource returns HTTP 404
+# which Kyverno 3.2.x treats as a context-loading error and blocks the request
+# even in Audit mode. A LIST endpoint always returns HTTP 200 with an empty
+# items array when nothing matches; jmesPath items[0].metadata.name || '' then
+# safely resolves to '' without an error.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: block-deployment-if-rollout-exists
+  labels:
+    app.kubernetes.io/part-of: kyverno-policies
+    openbank.io/plane: platform
+  annotations:
+    policies.kyverno.io/title: Block Deployment if Rollout exists (ADR-0098)
+    policies.kyverno.io/category: Progressive Delivery
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Prevents bypassing Argo Rollouts canary analysis by rejecting any
+      Deployment whose name matches an existing Rollout in the same namespace.
+      Enforcement is limited to money-path namespaces where Rollouts are the
+      canonical delivery mechanism. DELETE is excluded to allow the
+      Deployment→Rollout migration sequence.
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: block-if-rollout-exists
+      match:
+        any:
+          - resources:
+              kinds:
+                - Deployment
+              namespaces:
+                - accounts
+                - balances
+                - ledger
+                - payments
+                - fraud
+                - fx
+                - sca
+                - consent
+                - customer-edge
+                - onboarding
+                - kyc
+                - party
+                - sanctions
+              operations:
+                - CREATE
+                - UPDATE
+      context:
+        - name: existingRolloutName
+          apiCall:
+            urlPath: >-
+              /apis/argoproj.io/v1alpha1/namespaces/{{ request.object.metadata.namespace }}/rollouts?fieldSelector=metadata.name%3D{{ request.object.metadata.name }}
+            jmesPath: "items[0].metadata.name || ''"
+      validate:
+        message: >-
+          Deployment '{{ request.object.metadata.name }}' is blocked: an Argo
+          Rollout with the same name exists in namespace
+          '{{ request.object.metadata.namespace }}'. This service uses
+          progressive delivery (ADR-0098) — use kind:Rollout to ensure canary
+          analysis gates run before traffic reaches 100 %.
+        deny:
+          conditions:
+            any:
+              - key: "{{ existingRolloutName }}"
+                operator: NotEquals
+                value: ""

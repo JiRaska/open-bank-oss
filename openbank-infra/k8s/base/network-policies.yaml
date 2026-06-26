@@ -1,0 +1,206 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+#
+# K8s NetworkPolicy default-deny + explicit allow-list for the openbank namespace.
+# Addresses K4 from the 2026-05-28 audit (nula NetworkPolicy = plochá síť mezi
+# službami). NIS2 čl. 21 / DORA Art. 9 (network segmentation).
+#
+# Model: deny-all baseline, then narrow allows for the legitimate paths:
+#   - DNS to kube-system (every pod)
+#   - Inbound from openbank-gateway (api gateway, the only edge-facing ingress)
+#   - Inbound from openbank pods on the service port (service-to-service mesh)
+#   - Outbound to data plane (postgres cnpg, kafka, redis, vault, keycloak)
+#   - Outbound to OTEL collector for traces/metrics
+#
+# Cilium-friendly: the policy uses only standard NetworkPolicy fields (no
+# CiliumNetworkPolicy custom resource), so it works on any CNI that supports
+# NetworkPolicy v1 (Calico, Cilium, Antrea, kube-router…).
+
+# 1) Default deny — every pod in `openbank` is implicitly isolated unless an
+#    explicit policy below allows the traffic.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: openbank
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# 2) DNS egress to kube-system — required by every pod that ever resolves
+#    a hostname (kafka, cnpg-rw, openbank-shared-secrets refs, etc.).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: openbank
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# 3) Service-to-service mesh — openbank pods call each other on port 8080.
+#    Management port 8085 is loopback-only (quarkus.management.host=127.0.0.1)
+#    so it is intentionally absent; Prometheus scrapes via policy 3b below.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-east-west
+  namespace: openbank
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: service
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: openbank
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openbank
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# 3b) Prometheus scrape — only the monitoring namespace may reach port 8085.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: openbank
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: service
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8085
+---
+# 4) Ingress from the api-gateway pod (north-south). The gateway is the only
+#    pod that should receive cluster-external traffic.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway-ingress
+  namespace: openbank
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: api-gateway
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: istio-system
+---
+# 5) Egress to data plane — postgres (CloudNativePG), kafka, redis, vault,
+#    keycloak, otel collector. Without this every service would fail at startup.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-data-plane-egress
+  namespace: openbank
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: service
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: openbank-cnpg
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/name: openbank-kafka-kafka
+      ports:
+        - protocol: TCP
+          port: 9092
+        - protocol: TCP
+          port: 9093
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vault
+      ports:
+        - protocol: TCP
+          port: 8200
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: keycloak
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8443
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opentelemetry-collector
+      ports:
+        - protocol: TCP
+          port: 4317
+        - protocol: TCP
+          port: 4318
+---
+# 6) Egress to internet — opt-in per service via label
+#    `openbank.io/allow-internet-egress=true`. Default services have NO egress
+#    to the internet; FX rate fetchers / external sanctions list importers
+#    add the label to opt in.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-internet-egress-opt-in
+  namespace: openbank
+spec:
+  podSelector:
+    matchLabels:
+      openbank.io/allow-internet-egress: "true"
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80

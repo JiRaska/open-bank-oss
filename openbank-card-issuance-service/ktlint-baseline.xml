@@ -1,0 +1,369 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="src/main/kotlin/com/openbank/cardissuance/application/port/in/CardPorts.kt">
+        <error line="5" column="9" source="standard:package-name" />
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="7" column="1" source="standard:no-wildcard-imports" />
+        <error line="8" column="1" source="standard:no-unused-imports" />
+        <error line="8" column="28" source="standard:statement-wrapping" />
+        <error line="10" column="29" source="standard:parameter-list-wrapping" />
+        <error line="10" column="29" source="standard:wrapping" />
+        <error line="10" column="29" source="standard:class-signature" />
+        <error line="10" column="57" source="standard:parameter-list-wrapping" />
+        <error line="10" column="57" source="standard:class-signature" />
+        <error line="10" column="76" source="standard:parameter-list-wrapping" />
+        <error line="10" column="76" source="standard:class-signature" />
+        <error line="11" column="30" source="standard:parameter-list-wrapping" />
+        <error line="11" column="30" source="standard:class-signature" />
+        <error line="11" column="54" source="standard:parameter-list-wrapping" />
+        <error line="11" column="54" source="standard:class-signature" />
+        <error line="12" column="33" source="standard:parameter-list-wrapping" />
+        <error line="12" column="33" source="standard:class-signature" />
+        <error line="12" column="59" source="standard:parameter-list-wrapping" />
+        <error line="12" column="59" source="standard:class-signature" />
+        <error line="13" column="37" source="standard:parameter-list-wrapping" />
+        <error line="13" column="37" source="standard:class-signature" />
+        <error line="13" column="71" source="standard:parameter-list-wrapping" />
+        <error line="13" column="71" source="standard:class-signature" />
+        <error line="13" column="98" source="standard:wrapping" />
+        <error line="13" column="99" source="standard:parameter-list-wrapping" />
+        <error line="13" column="99" source="standard:class-signature" />
+        <error line="13" column="99" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/cardissuance/application/port/out/CardOutboxPort.kt">
+        <error line="28" column="43" source="standard:trailing-comma-on-declaration-site" />
+        <error line="42" column="27" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/cardissuance/application/port/out/CardPorts.kt">
+        <error line="1" column="1" source="standard:filename" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/cardissuance/application/usecase/CardService.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="8" column="1" source="standard:no-wildcard-imports" />
+        <error line="9" column="1" source="standard:no-wildcard-imports" />
+        <error line="10" column="1" source="standard:no-wildcard-imports" />
+        <error line="11" column="1" source="standard:no-wildcard-imports" />
+        <error line="13" column="26" source="standard:statement-wrapping" />
+        <error line="13" column="54" source="standard:statement-wrapping" />
+        <error line="17" column="5" source="standard:class-signature" />
+        <error line="18" column="5" source="standard:class-signature" />
+        <error line="18" column="37" source="standard:class-signature" />
+        <error line="18" column="37" source="standard:trailing-comma-on-declaration-site" />
+        <error line="36" column="45" source="standard:trailing-comma-on-call-site" />
+        <error line="41" column="27" source="standard:argument-list-wrapping" />
+        <error line="41" column="36" source="standard:argument-list-wrapping" />
+        <error line="41" column="55" source="standard:argument-list-wrapping" />
+        <error line="41" column="66" source="standard:argument-list-wrapping" />
+        <error line="41" column="75" source="standard:argument-list-wrapping" />
+        <error line="41" column="89" source="standard:argument-list-wrapping" />
+        <error line="41" column="105" source="standard:argument-list-wrapping" />
+        <error line="41" column="120" source="standard:argument-list-wrapping" />
+        <error line="41" column="121" source="standard:max-line-length" />
+        <error line="41" column="134" source="standard:argument-list-wrapping" />
+        <error line="41" column="150" source="standard:argument-list-wrapping" />
+        <error line="41" column="153" source="standard:argument-list-wrapping" />
+        <error line="41" column="154" source="standard:argument-list-wrapping" />
+        <error line="41" column="155" source="standard:trailing-comma-on-call-site" />
+        <error line="61" column="20" source="standard:property-wrapping" />
+        <error line="61" column="39" source="standard:argument-list-wrapping" />
+        <error line="61" column="51" source="standard:argument-list-wrapping" />
+        <error line="61" column="64" source="standard:argument-list-wrapping" />
+        <error line="61" column="80" source="standard:argument-list-wrapping" />
+        <error line="61" column="92" source="standard:argument-list-wrapping" />
+        <error line="61" column="107" source="standard:argument-list-wrapping" />
+        <error line="61" column="121" source="standard:max-line-length" />
+        <error line="61" column="124" source="standard:argument-list-wrapping" />
+        <error line="75" column="55" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/cardissuance/domain/event/CardEvents.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="7" column="1" source="standard:no-wildcard-imports" />
+        <error line="8" column="26" source="standard:statement-wrapping" />
+        <error line="10" column="26" source="standard:statement-wrapping" />
+        <error line="10" column="52" source="standard:statement-wrapping" />
+        <error line="10" column="86" source="standard:statement-wrapping" />
+        <error line="11" column="23" source="standard:parameter-list-wrapping" />
+        <error line="11" column="23" source="standard:wrapping" />
+        <error line="11" column="23" source="standard:class-signature" />
+        <error line="11" column="50" source="standard:parameter-list-wrapping" />
+        <error line="11" column="50" source="standard:class-signature" />
+        <error line="11" column="69" source="standard:parameter-list-wrapping" />
+        <error line="11" column="69" source="standard:class-signature" />
+        <error line="12" column="29" source="standard:parameter-list-wrapping" />
+        <error line="12" column="29" source="standard:class-signature" />
+        <error line="12" column="55" source="standard:parameter-list-wrapping" />
+        <error line="12" column="55" source="standard:class-signature" />
+        <error line="13" column="52" source="standard:wrapping" />
+        <error line="13" column="53" source="standard:parameter-list-wrapping" />
+        <error line="13" column="53" source="standard:class-signature" />
+        <error line="13" column="53" source="standard:trailing-comma-on-declaration-site" />
+        <error line="14" column="30" source="standard:parameter-list-wrapping" />
+        <error line="14" column="30" source="standard:wrapping" />
+        <error line="14" column="30" source="standard:class-signature" />
+        <error line="14" column="57" source="standard:parameter-list-wrapping" />
+        <error line="14" column="57" source="standard:class-signature" />
+        <error line="15" column="32" source="standard:parameter-list-wrapping" />
+        <error line="15" column="32" source="standard:class-signature" />
+        <error line="15" column="53" source="standard:parameter-list-wrapping" />
+        <error line="15" column="53" source="standard:class-signature" />
+        <error line="16" column="52" source="standard:wrapping" />
+        <error line="16" column="53" source="standard:parameter-list-wrapping" />
+        <error line="16" column="53" source="standard:class-signature" />
+        <error line="16" column="53" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/cardissuance/domain/model/Card.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="7" column="26" source="standard:statement-wrapping" />
+        <error line="7" column="54" source="standard:statement-wrapping" />
+        <error line="10" column="21" source="standard:no-multi-spaces" />
+        <error line="10" column="23" source="standard:class-signature" />
+        <error line="11" column="23" source="standard:curly-spacing" />
+        <error line="11" column="23" source="standard:class-signature" />
+        <error line="14" column="19" source="standard:parameter-list-wrapping" />
+        <error line="14" column="19" source="standard:class-signature" />
+        <error line="15" column="24" source="standard:parameter-list-wrapping" />
+        <error line="15" column="24" source="standard:class-signature" />
+        <error line="16" column="30" source="standard:parameter-list-wrapping" />
+        <error line="16" column="30" source="standard:class-signature" />
+        <error line="16" column="54" source="standard:parameter-list-wrapping" />
+        <error line="16" column="54" source="standard:class-signature" />
+        <error line="17" column="28" source="standard:parameter-list-wrapping" />
+        <error line="17" column="28" source="standard:class-signature" />
+        <error line="17" column="56" source="standard:parameter-list-wrapping" />
+        <error line="17" column="56" source="standard:class-signature" />
+        <error line="18" column="32" source="standard:parameter-list-wrapping" />
+        <error line="18" column="32" source="standard:class-signature" />
+        <error line="19" column="37" source="standard:parameter-list-wrapping" />
+        <error line="19" column="37" source="standard:class-signature" />
+        <error line="19" column="71" source="standard:parameter-list-wrapping" />
+        <error line="19" column="71" source="standard:class-signature" />
+        <error line="21" column="32" source="standard:parameter-list-wrapping" />
+        <error line="21" column="32" source="standard:class-signature" />
+        <error line="21" column="57" source="standard:parameter-list-wrapping" />
+        <error line="21" column="57" source="standard:class-signature" />
+        <error line="22" column="29" source="standard:parameter-list-wrapping" />
+        <error line="22" column="29" source="standard:class-signature" />
+        <error line="22" column="51" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/cardissuance/infrastructure/kafka/KafkaCardOutboxEventPublisher.kt">
+        <error line="35" column="5" source="standard:class-signature" />
+        <error line="35" column="76" source="standard:class-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/cardissuance/infrastructure/outbox/CardOutboxBacklogGauge.kt">
+        <error line="46" column="31" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/cardissuance/infrastructure/outbox/CardOutboxDispatcher.kt">
+        <error line="38" column="65" source="standard:trailing-comma-on-call-site" />
+        <error line="40" column="46" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/cardissuance/infrastructure/persistence/entity/CardEntity.kt">
+        <error line="7" column="1" source="standard:no-consecutive-blank-lines" />
+        <error line="8" column="1" source="standard:import-ordering" />
+        <error line="8" column="1" source="standard:no-wildcard-imports" />
+        <error line="9" column="26" source="standard:statement-wrapping" />
+        <error line="9" column="54" source="standard:statement-wrapping" />
+        <error line="11" column="8" source="standard:annotation" />
+        <error line="13" column="8" source="standard:annotation" />
+        <error line="13" column="29" source="standard:annotation" />
+        <error line="14" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="14" column="71" source="standard:annotation" />
+        <error line="15" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="15" column="49" source="standard:annotation" />
+        <error line="16" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="16" column="51" source="standard:annotation" />
+        <error line="17" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="17" column="53" source="standard:annotation" />
+        <error line="18" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="18" column="50" source="standard:annotation" />
+        <error line="19" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="19" column="48" source="standard:annotation" />
+        <error line="20" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="20" column="51" source="standard:annotation" />
+        <error line="21" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="21" column="56" source="standard:annotation" />
+        <error line="22" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="22" column="54" source="standard:annotation" />
+        <error line="23" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="23" column="52" source="standard:annotation" />
+        <error line="24" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="24" column="47" source="standard:annotation" />
+        <error line="25" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="25" column="64" source="standard:annotation" />
+        <error line="26" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="26" column="66" source="standard:annotation" />
+        <error line="27" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="27" column="49" source="standard:annotation" />
+        <error line="28" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="28" column="39" source="standard:annotation" />
+        <error line="29" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="29" column="35" source="standard:annotation" />
+        <error line="30" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="30" column="33" source="standard:annotation" />
+        <error line="31" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="31" column="37" source="standard:annotation" />
+        <error line="32" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="32" column="51" source="standard:annotation" />
+        <error line="33" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="33" column="51" source="standard:annotation" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/cardissuance/infrastructure/persistence/mapper/CardMapper.kt">
+        <error line="7" column="1" source="standard:no-wildcard-imports" />
+        <error line="18" column="49" source="standard:trailing-comma-on-call-site" />
+        <error line="22" column="15" source="standard:statement-wrapping" />
+        <error line="22" column="50" source="standard:statement-wrapping" />
+        <error line="22" column="71" source="standard:statement-wrapping" />
+        <error line="23" column="33" source="standard:statement-wrapping" />
+        <error line="23" column="61" source="standard:statement-wrapping" />
+        <error line="24" column="29" source="standard:statement-wrapping" />
+        <error line="24" column="64" source="standard:statement-wrapping" />
+        <error line="25" column="31" source="standard:statement-wrapping" />
+        <error line="26" column="51" source="standard:statement-wrapping" />
+        <error line="27" column="27" source="standard:statement-wrapping" />
+        <error line="28" column="33" source="standard:statement-wrapping" />
+        <error line="28" column="58" source="standard:statement-wrapping" />
+        <error line="29" column="29" source="standard:statement-wrapping" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/cardissuance/infrastructure/persistence/repository/CardOutboxRepositoryImpl.kt">
+        <error line="6" column="1" source="standard:import-ordering" />
+        <error line="21" column="34" source="standard:class-signature" />
+        <error line="21" column="56" source="standard:class-signature" />
+        <error line="23" column="59" source="standard:function-signature" />
+        <error line="26" column="78" source="standard:function-signature" />
+        <error line="31" column="45" source="standard:trailing-comma-on-call-site" />
+        <error line="35" column="52" source="standard:function-signature" />
+        <error line="81" column="30" source="standard:trailing-comma-on-call-site" />
+        <error line="84" column="69" source="standard:function-signature" />
+        <error line="89" column="45" source="standard:trailing-comma-on-call-site" />
+        <error line="98" column="43" source="standard:function-signature" />
+        <error line="103" column="45" source="standard:trailing-comma-on-call-site" />
+        <error line="107" column="48" source="standard:function-signature" />
+        <error line="120" column="65" source="standard:function-signature" />
+        <error line="140" column="28" source="standard:argument-list-wrapping" />
+        <error line="140" column="43" source="standard:argument-list-wrapping" />
+        <error line="140" column="56" source="standard:argument-list-wrapping" />
+        <error line="140" column="72" source="standard:argument-list-wrapping" />
+        <error line="140" column="83" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/cardissuance/infrastructure/persistence/repository/CardRepositoryImpl.kt">
+        <error line="21" column="5" source="standard:class-signature" />
+        <error line="21" column="59" source="standard:class-signature" />
+        <error line="21" column="59" source="standard:trailing-comma-on-declaration-site" />
+        <error line="22" column="21" source="standard:class-signature" />
+        <error line="29" column="76" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/cardissuance/infrastructure/rest/CardResource.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="9" column="1" source="standard:no-wildcard-imports" />
+        <error line="11" column="1" source="standard:no-wildcard-imports" />
+        <error line="12" column="37" source="standard:statement-wrapping" />
+        <error line="15" column="21" source="standard:statement-wrapping" />
+        <error line="35" column="37" source="standard:function-expression-body" />
+        <error line="39" column="9" source="standard:annotation" />
+        <error line="46" column="9" source="standard:annotation" />
+        <error line="49" column="82" source="standard:function-expression-body" />
+        <error line="53" column="9" source="standard:annotation" />
+        <error line="56" column="76" source="standard:function-expression-body" />
+        <error line="60" column="10" source="standard:annotation" />
+        <error line="63" column="113" source="standard:function-expression-body" />
+        <error line="67" column="10" source="standard:annotation" />
+        <error line="70" column="23" source="standard:parameter-list-wrapping" />
+        <error line="70" column="23" source="standard:function-signature" />
+        <error line="70" column="34" source="standard:argument-list-wrapping" />
+        <error line="70" column="38" source="standard:argument-list-wrapping" />
+        <error line="70" column="50" source="standard:parameter-list-wrapping" />
+        <error line="70" column="50" source="standard:function-signature" />
+        <error line="70" column="74" source="standard:parameter-list-wrapping" />
+        <error line="70" column="74" source="standard:function-signature" />
+        <error line="70" column="87" source="standard:argument-list-wrapping" />
+        <error line="70" column="102" source="standard:argument-list-wrapping" />
+        <error line="70" column="121" source="standard:max-line-length" />
+        <error line="70" column="122" source="standard:parameter-list-wrapping" />
+        <error line="70" column="122" source="standard:function-signature" />
+        <error line="70" column="134" source="standard:function-expression-body" />
+        <error line="74" column="10" source="standard:annotation" />
+        <error line="77" column="112" source="standard:function-expression-body" />
+        <error line="81" column="10" source="standard:annotation" />
+        <error line="84" column="111" source="standard:function-expression-body" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/cardissuance/infrastructure/rest/dto/CardDtos.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="7" column="1" source="standard:no-wildcard-imports" />
+        <error line="8" column="1" source="standard:no-wildcard-imports" />
+        <error line="9" column="26" source="standard:statement-wrapping" />
+        <error line="9" column="54" source="standard:statement-wrapping" />
+        <error line="12" column="24" source="standard:parameter-list-wrapping" />
+        <error line="12" column="24" source="standard:class-signature" />
+        <error line="12" column="45" source="standard:parameter-list-wrapping" />
+        <error line="12" column="45" source="standard:class-signature" />
+        <error line="13" column="29" source="standard:parameter-list-wrapping" />
+        <error line="13" column="29" source="standard:class-signature" />
+        <error line="14" column="33" source="standard:parameter-list-wrapping" />
+        <error line="14" column="33" source="standard:class-signature" />
+        <error line="14" column="59" source="standard:parameter-list-wrapping" />
+        <error line="14" column="59" source="standard:class-signature" />
+        <error line="17" column="40" source="standard:trailing-comma-on-declaration-site" />
+        <error line="21" column="110" source="standard:trailing-comma-on-call-site" />
+        <error line="28" column="19" source="standard:parameter-list-wrapping" />
+        <error line="28" column="19" source="standard:class-signature" />
+        <error line="28" column="38" source="standard:parameter-list-wrapping" />
+        <error line="28" column="38" source="standard:class-signature" />
+        <error line="29" column="30" source="standard:parameter-list-wrapping" />
+        <error line="29" column="30" source="standard:class-signature" />
+        <error line="29" column="54" source="standard:parameter-list-wrapping" />
+        <error line="29" column="54" source="standard:class-signature" />
+        <error line="30" column="28" source="standard:parameter-list-wrapping" />
+        <error line="30" column="28" source="standard:class-signature" />
+        <error line="30" column="56" source="standard:parameter-list-wrapping" />
+        <error line="30" column="56" source="standard:class-signature" />
+        <error line="31" column="32" source="standard:parameter-list-wrapping" />
+        <error line="31" column="32" source="standard:class-signature" />
+        <error line="32" column="37" source="standard:parameter-list-wrapping" />
+        <error line="32" column="37" source="standard:class-signature" />
+        <error line="32" column="71" source="standard:parameter-list-wrapping" />
+        <error line="32" column="71" source="standard:class-signature" />
+        <error line="34" column="32" source="standard:parameter-list-wrapping" />
+        <error line="34" column="32" source="standard:class-signature" />
+        <error line="34" column="57" source="standard:parameter-list-wrapping" />
+        <error line="34" column="57" source="standard:class-signature" />
+        <error line="35" column="29" source="standard:parameter-list-wrapping" />
+        <error line="35" column="29" source="standard:class-signature" />
+        <error line="35" column="51" source="standard:trailing-comma-on-declaration-site" />
+        <error line="42" column="64" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/cardissuance/application/usecase/CardServiceTest.kt">
+        <error line="34" column="31" source="standard:statement-wrapping" />
+        <error line="34" column="46" source="standard:statement-wrapping" />
+        <error line="34" column="83" source="standard:statement-wrapping" />
+        <error line="63" column="18" source="standard:trailing-comma-on-call-site" />
+        <error line="87" column="18" source="standard:trailing-comma-on-call-site" />
+        <error line="119" column="40" source="standard:trailing-comma-on-call-site" />
+        <error line="143" column="58" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/cardissuance/domain/model/CardTest.kt">
+        <error line="119" column="58" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/cardissuance/infrastructure/outbox/CardOutboxDispatchTest.kt">
+        <error line="61" column="35" source="standard:function-signature" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/cardissuance/integration/CardOutboxDispatchIT.kt">
+        <error line="69" column="32" source="standard:parameter-list-wrapping" />
+        <error line="69" column="32" source="standard:function-signature" />
+        <error line="69" column="47" source="standard:parameter-list-wrapping" />
+        <error line="69" column="47" source="standard:function-signature" />
+        <error line="69" column="66" source="standard:parameter-list-wrapping" />
+        <error line="69" column="66" source="standard:function-signature" />
+        <error line="69" column="85" source="standard:parameter-list-wrapping" />
+        <error line="69" column="85" source="standard:function-signature" />
+        <error line="69" column="102" source="standard:parameter-list-wrapping" />
+        <error line="69" column="102" source="standard:function-signature" />
+        <error line="69" column="120" source="standard:parameter-list-wrapping" />
+        <error line="69" column="120" source="standard:function-signature" />
+        <error line="69" column="121" source="standard:max-line-length" />
+        <error line="87" column="62" source="standard:function-signature" />
+        <error line="114" column="1" source="standard:spacing-between-declarations-with-annotations" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/governance/HibernateSequenceGuardTest.kt">
+        <error line="54" column="33" source="standard:trailing-comma-on-call-site" />
+        <error line="68" column="36" source="standard:trailing-comma-on-call-site" />
+    </file>
+</baseline>

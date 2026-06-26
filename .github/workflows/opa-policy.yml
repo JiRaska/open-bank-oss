@@ -1,0 +1,72 @@
+# OPA agent-policy bundle CI (ADR-0031 D2). Runs on any change to the policy source
+# or the generated artifacts: builds + validates the bundle (opa check + the decision
+# assertions in build-bundle.sh) and verifies the committed agent-opa-bundle ConfigMap
+# is in sync with the policy source (no drift — the ConfigMap is generated, never
+# hand-edited). A broken policy or a stale ConfigMap fails the gate before it can ship.
+name: OPA policy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - openbank-infra/opa/**
+      - openbank-libs/governance/agents.yaml
+      - openbank-infra/gitops/components/agent/gen-opa-bundle-configmap.sh
+      - openbank-infra/gitops/components/agent/agent-opa-bundle.yaml
+      - .github/workflows/opa-policy.yml
+  pull_request:
+    paths:
+      - openbank-infra/opa/**
+      - openbank-libs/governance/agents.yaml
+      - openbank-infra/gitops/components/agent/gen-opa-bundle-configmap.sh
+      - openbank-infra/gitops/components/agent/agent-opa-bundle.yaml
+      - .github/workflows/opa-policy.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: opa-policy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: build + verify bundle, check ConfigMap sync
+    runs-on: openbank-build
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install OPA
+        run: |
+          # Self-hosted runner lacks sudo — install to $HOME/bin (always writable).
+          # Detect OS + arch: the runner may be macOS (darwin) or Linux.
+          mkdir -p "$HOME/bin"
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')   # darwin | linux
+          ARCH=$(uname -m)                               # x86_64 | arm64 | aarch64
+          case "${OS}_${ARCH}" in
+            darwin_arm64)   SUFFIX="darwin_arm64_static" ;;
+            darwin_x86_64)  SUFFIX="darwin_amd64" ;;
+            linux_aarch64)  SUFFIX="linux_arm64_static" ;;
+            linux_arm64)    SUFFIX="linux_arm64_static" ;;
+            *)              SUFFIX="linux_amd64" ;;
+          esac
+          curl -fsSL -o "$HOME/bin/opa" \
+            "https://openpolicyagent.org/downloads/v1.17.0/opa_${SUFFIX}"
+          chmod +x "$HOME/bin/opa"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          "$HOME/bin/opa" version
+
+      - name: Build + validate the policy bundle (opa check + decision assertions)
+        run: ./openbank-infra/opa/build-bundle.sh
+
+      - name: Verify agent-opa-bundle ConfigMap is in sync with the policy source
+        run: |
+          cd openbank-infra/gitops/components/agent
+          cp agent-opa-bundle.yaml /tmp/committed.yaml
+          ./gen-opa-bundle-configmap.sh
+          if ! diff -u /tmp/committed.yaml agent-opa-bundle.yaml; then
+            echo "::error::agent-opa-bundle.yaml is stale — re-run gen-opa-bundle-configmap.sh and commit."
+            exit 1
+          fi
+          echo "ConfigMap is in sync with agents.rego + agents.yaml + bundle.manifest."

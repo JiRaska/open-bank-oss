@@ -1,0 +1,29 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ImplicitDefaultLocale:ScaAdapters.kt$SecureOtpGenerator$String.format("%06d", random.nextInt(1_000_000))</ID>
+    <ID>LongParameterList:ScaService.kt$ScaService$( private val repository: ScaChallengeRepository, private val otpGenerator: OtpGenerator, private val otpStore: OtpStore, private val notificationDispatchGuard: NotificationDispatchGuard, private val idempotencyStore: ScaIdempotencyStore, private val enrolledDeviceRepository: EnrolledDeviceRepository, private val decisionStore: ScaDecisionStore, private val assertionVerifier: DeviceAssertionVerifier, private val outboxRepository: ScaOutboxRepository, private val objectMapper: ObjectMapper, private val metrics: DomainMetrics, @ConfigProperty(name = "openbank.sca.idempotency-ttl-seconds", defaultValue = "300") private val idempotencyTtlSeconds: Long, private val clock: Clock, )</ID>
+    <ID>MagicNumber:AuthzProducer.kt$AuthzProducer$500</ID>
+    <ID>MagicNumber:NotificationDispatchGuard.kt$NotificationDispatchGuard$2000</ID>
+    <ID>MagicNumber:ScaAdapters.kt$SecureOtpGenerator$1_000_000</ID>
+    <ID>MagicNumber:ScaChallengeEntity.kt$ScaChallengeEntity$3</ID>
+    <ID>MagicNumber:ScaOutboxDispatcher.kt$ScaOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:ScaOutboxDispatcher.kt$ScaOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:ScaOutboxRepositoryImpl.kt$ScaOutboxRepositoryImpl$4000</ID>
+    <ID>MagicNumber:ScaResource.kt$DeviceNotEnrolledMapper$404</ID>
+    <ID>MagicNumber:ScaResource.kt$DeviceOwnershipMismatchMapper$403</ID>
+    <ID>MagicNumber:ScaResource.kt$InvalidDeviceAssertionMapper$401</ID>
+    <ID>MagicNumber:ScaResource.kt$ScaExpiredMapper$422</ID>
+    <ID>MagicNumber:ScaResource.kt$ScaMaxAttemptsMapper$429</ID>
+    <ID>MagicNumber:ScaResource.kt$ScaNotAwaitingMapper$409</ID>
+    <ID>MagicNumber:ScaResource.kt$ScaNotFoundMapper$404</ID>
+    <ID>MagicNumber:ScaResource.kt$ScaResource$201</ID>
+    <ID>MagicNumber:ScaResource.kt$ScaResource$300</ID>
+    <ID>MagicNumber:ScaResource.kt$ScaVerificationFailedMapper$401</ID>
+    <ID>MagicNumber:ScaService.kt$ScaService$300L</ID>
+    <ID>SwallowedException:DeviceApprovalAdapters.kt$JcaDeviceAssertionVerifier$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:DeviceApprovalAdapters.kt$JcaDeviceAssertionVerifier$e: Exception</ID>
+    <ID>UnusedPrivateProperty:ScaServiceTest.kt$ScaServiceTest$val savedChallenge = challenge(partyId = partyId, method = ScaMethod.PUSH_NOTIFICATION)</ID>
+  </CurrentIssues>
+</SmellBaseline>

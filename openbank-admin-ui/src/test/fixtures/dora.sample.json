@@ -1,0 +1,4 @@
+{ "available": true, "source": "git-first-parent", "windowDays": 30, "collectedAt": "2026-06-03T05:00:00Z",
+  "deploymentCount": 220, "deploymentFrequencyPerDay": 7.33, "leadTimeHours": null,
+  "leadTimeReason": "trunk is squash-merged; needs deploy-event correlation (ADR-0061 phase 2)",
+  "recentDeployments": [{"date":"2026-06-03T04:59:45Z","service":"infra","sha":"bc104fd"}] }

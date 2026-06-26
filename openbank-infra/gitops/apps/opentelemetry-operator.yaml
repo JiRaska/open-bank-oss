@@ -1,0 +1,63 @@
+# OpenTelemetry Operator (Dynatrace-parity #3, PILOT). Enables zero-code deep
+# instrumentation: annotate a pod and the operator injects the OTel Java agent
+# as an init-container, no image rebuild — the OSS analogue of a Dynatrace
+# OneAgent. The fleet is already OTel-native via Quarkus, so this is rolled out
+# as a PILOT on a single non-money-path service (product-catalog) first, to
+# confirm the injected agent does NOT double-instrument or clash with Quarkus's
+# built-in OTel SDK before any fleet-wide annotation. Self-generated webhook
+# cert (autoGenerateCert) so it has no cert-manager Issuer dependency.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: opentelemetry-operator
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
+    chart: opentelemetry-operator
+    targetRevision: 0.115.0
+    helm:
+      valuesObject:
+        manager:
+          # The default collector image the operator stamps into injected
+          # workloads; pin to the contrib agent line used elsewhere in the stack.
+          collectorImage:
+            repository: otel/opentelemetry-collector-contrib
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+        # Use cert-manager for the webhook cert. autoGenerateCert produced a CA
+        # whose bundle the API server wouldn't trust ("certificate signed by
+        # unknown authority opentelemetry-operator-operator-ca"), so the
+        # Instrumentation mutating webhook rejected every admission — which broke
+        # the accounts app sync. cert-manager (present, with cainjector running)
+        # issues the cert and injects the correct caBundle into the webhook configs.
+        admissionWebhooks:
+          certManager:
+            enabled: true
+          autoGenerateCert:
+            enabled: false
+        nodeSelector:
+          workload: observability
+        tolerations:
+          - key: workload
+            operator: Equal
+            value: observability
+            effect: NoSchedule
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

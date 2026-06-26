@@ -1,0 +1,83 @@
+<!--
+SPDX-License-Identifier: MPL-2.0
+Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+-->
+# Threat model — sca-service
+
+- **Date:** 2026-05-30
+- **Status:** Lightweight STRIDE/DFD (ADR-0030 D2). **PSD2 SCA trust boundary — security-critical.**
+- **Service ADR:** see `docs/adr/`; platform controls per ADR-0029/0030/0034. PSD2 RTS Art. 97/98.
+
+## 1. Scope & purpose
+
+Strong Customer Authentication: initiate and verify challenges (OTP, TOTP, biometric). This service
+is the **authentication assurance gate** for payments and consent — defeating it defeats SCA bank-wide.
+
+## 2. Data flow (DFD)
+
+```
+[Payment/Consent services] --> (POST /api/v1/sca/challenges) --> [sca-service] --> [(Postgres: sca challenges)]
+[Customer channel] --------> (challenges/{id}/verify) ----------^                       |
+                                                                                        +--> [(sca_outbox)] --> [Kafka sca events]
+```
+
+- **External entities:** payment/consent services (request challenge), customer channel (verify).
+- **Trust boundaries:** customer edge (OTP delivery); service↔Postgres/Kafka.
+- **Assets:** challenge secrets/OTP, verification state, attempt counters, biometric assertions.
+
+## 3. Authn/Authz
+
+- Challenge issuance is service-to-service (mTLS). Verify is bound to the challenge id + customer
+  session. OPA enforce.
+
+## 4. STRIDE
+
+| Threat | Vector | Mitigation |
+|---|---|---|
+| **S**poofing | Attacker verifies on victim's behalf | Bind challenge to transaction + party + channel session |
+| **T**ampering | Replay a captured verify | One-time challenge; short TTL; nonce; state→consumed |
+| **R**epudiation | Customer denies authenticating | AuditEvent with challenge id + outcome (SCA evidence retained) |
+| **I**nfo disclosure | OTP leakage / enumeration | Never log OTP; constant-time compare; opaque challenge ids |
+| **I**nfo disclosure | Domain metrics leak PII / enable per-customer inference via high-cardinality labels | `DomainMetrics` low-cardinality contract (ADR-0077): `openbank.sca.challenges` tagged only by `method` (closed `ScaMethod` enum) and `openbank.sca.completions` adds an `outcome` from a **closed set** (`completed`/`failed`/`expired`/`cancelled`) derived from the terminal `ScaStatus` — never a challenge id, party id, OTP, or device credential; outbox-backlog gauge tagged only by `service`. Counters increment only after the terminal state is committed (a retryable failed attempt that stays `PENDING` is not counted). `/q/metrics` is cluster-internal |
+| **D**oS | Challenge flooding / OTP cost abuse | Rate limit issuance per party; backoff |
+| **E**oP | **Brute-force / bypass of verify** | Strict attempt cap → lock; short TTL; fail-closed; deny-by-default |
+| **E**oP | **SCA bypass via push/biometric (audit K2)** | **FIXED (ADR-0021):** push/biometric `verify` no longer auto-approves; it consults a signature-verified, dynamic-linked decision recorded out-of-band by the enrolled device. No decision ⇒ challenge stays `PENDING` (never auto-completes). |
+| **S**poofing | Forge a device approval | Decision must carry a signature over the challenge's dynamic-linking payload, verified against the party's enrolled public key; device must belong to the challenge party (ownership check) |
+| **T**ampering | Replay an approval for a different amount/payee or flip DENIED→APPROVED | Signed payload binds challenge id + decision + amount + currency + creditor (RTS Art. 5); a captured signature is invalid for any other payload |
+
+## 5. Residual risks / assumptions
+
+- **Brute-force resistance** (attempt cap + TTL) is the dominant control — must fail closed.
+- OTP delivery channel integrity is out of scope (assumed secure transport).
+- **Dynamic linking is now enforced** for decoupled approval (ADR-0021): the device signs the
+  exact amount+payee bound to the challenge. Full WebAuthn/FIDO2 *attestation* (CBOR/COSE
+  attestation statement, device-integrity attestation) is a follow-up — the current verifier
+  checks the *assertion* signature, not the attestation chain.
+- Enrollment trust: a credential is bound at enrol time; enrollment must itself be SCA-gated /
+  attested in production (sandbox: enrollment is open, behind the customer-edge auth of ADR-0065).
+
+## 6. Change log
+
+- **2026-06-11** — Domain metrics + outbox-backlog gauge (ADR-0077 / ADR-0079). New `DomainMetrics`
+  call sites: `scaChallengeIssued(method)` after a challenge is persisted in `initiate`, and
+  `scaChallengeResolved(method, outcome)` once a challenge reaches a terminal `ScaStatus`
+  (`COMPLETED`/`FAILED`/`EXPIRED`/`CANCELLED`) in the `verify` paths; plus a `@Startup`
+  `ScaOutboxBacklogGauge` publishing the PENDING+FAILED outbox count as `openbank.outbox.backlog`
+  tagged `service="sca"`. Touches the **I — information disclosure** row: the only labels are the
+  closed `ScaMethod` enum + a closed outcome set + the static service name — no challenge id, party
+  id, OTP, or device credential ever becomes a label. **No new endpoint, data flow, or trust
+  boundary** (metrics are scraped cluster-internally on `/q/metrics`). Risk class = **confidentiality
+  / observability**. Mitigated by `ScaServiceTest` (issued + resolved tag/outcome assertions,
+  including no-emit on a retryable failure) and `ScaOutboxBacklogGaugeTest`. Rollback: revert the
+  commit (no DB or schema change).
+- **2026-06-05** — ADR-0021 decoupled device approval. Closes audit **K2** (push/biometric SCA
+  bypass): `verify` consults a signature-verified, dynamic-linked decision instead of returning
+  `true`. New surface: `POST /api/v1/sca/parties/{partyId}/devices` (enrol) and
+  `POST /api/v1/sca/challenges/{id}/decision` (record), both `@Authorize`-gated. New table
+  `sca_enrolled_devices` (durable public keys); decisions held transiently (Redis, TTL=challenge).
+  Risk class = **EoP/spoofing** — primary control is signature verification + dynamic-linking +
+  ownership check; fail-closed on any malformed assertion. Rollback: `DROP TABLE sca_enrolled_devices`
+  (forces re-enrollment, never a silent bypass).
+- **2026-05-30** — Added `sca_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/surface/
+  boundary, no change to challenge/verify logic. Risk class = **availability**, mitigated by
+  `HibernateSequenceGuardTest`. Rollback: `DROP SEQUENCE`.

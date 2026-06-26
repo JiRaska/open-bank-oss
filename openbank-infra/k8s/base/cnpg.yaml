@@ -1,0 +1,41 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: openbank-cnpg
+spec:
+  instances: 3
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.4
+  primaryUpdateStrategy: unsupervised
+  storage:
+    size: 20Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  monitoring:
+    enablePodMonitor: false
+  bootstrap:
+    initdb:
+      database: openbank_bootstrap
+      owner: openbank
+      secret:
+        name: openbank-cnpg-bootstrap
+      postInitSQL:
+        - CREATE DATABASE openbank_accounts;
+        - CREATE DATABASE openbank_ledger;
+        - CREATE DATABASE openbank_transactions;
+        - CREATE DATABASE openbank_balances;
+        - CREATE DATABASE openbank_consents;
+        - CREATE DATABASE openbank_sca;
+        - CREATE DATABASE openbank_tpp_registry;
+        - CREATE DATABASE openbank_parties;
+        - CREATE DATABASE openbank_notifications;
+        - CREATE DATABASE openbank_audit;
+        - CREATE DATABASE openbank_kyc;
+        - CREATE DATABASE openbank_sepa_payments;
+        - CREATE DATABASE openbank_domestic_payments;
+        - CREATE DATABASE openbank_aml;
+        - CREATE DATABASE openbank_keycloak;

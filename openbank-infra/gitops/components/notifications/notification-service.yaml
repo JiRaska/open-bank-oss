@@ -1,0 +1,156 @@
+# notification-service: async Kafka consumer that renders + dispatches
+# notifications (email/SMS/push stubs), backed by a single-owner CNPG Postgres
+# (notifications + outbox + dispatch-control tables, Flyway-migrated at start).
+#
+# FinOps tier T2 (ADR-0057): this Deployment declares NO static replica count —
+# the KEDA ScaledObject (scaledobject.yaml) owns the replica count and scales it
+# from 0 (idle) to N on measured Kafka consumer-group lag. So the steady state is
+# zero resident pods; a record on openbank.notification.requests wakes it, it
+# drains, and KEDA returns it to zero after the cooldown.
+#
+# OIDC is disabled for the pilot: the consumer/outbox path needs no bearer tokens
+# and the REST surface is ClusterIP-only (not exposed via ingress), so we avoid an
+# out-of-band client-secret. The mailer runs in mock mode (no SMTP in the sandbox).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+  namespace: notifications
+  labels:
+    app.kubernetes.io/name: notification-service
+    app.kubernetes.io/part-of: notifications
+    openbank.io/finops-tier: T2
+spec:
+  # No `replicas:` — KEDA's ScaledObject is the sole owner of the replica count
+  # (setting it here would fight the HPA on every reconcile).
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notification-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notification-service
+        app.kubernetes.io/part-of: notifications
+        # Oversight webhook egress (ADR-0059). Permits (does not force) internet
+        # egress on 443 for the Slack/Teams call. Harmless while the feature is
+        # off (SLACK_WEBHOOK_ENABLED=false); required the moment it is enabled.
+        openbank.io/allow-internet-egress: "true"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: notification-service
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-notification-service:sandbox-1e4d24c4
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8112
+            - name: management
+              containerPort: 8085
+          env:
+            # JDBC leg: Hibernate ORM + Flyway (blocking) onto the CNPG primary.
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://notifications-db-rw.notifications.svc:5432/openbank_notifications
+            # Reactive leg: reactive Panache repositories onto the same primary.
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://notifications-db-rw.notifications.svc:5432/openbank_notifications
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: notifications-db-app
+                  key: password
+            # Kafka consumer → Strimzi bootstrap (internal plaintext). The SmallRye
+            # connector reads the global kafka.bootstrap.servers (env
+            # KAFKA_BOOTSTRAP_SERVERS); any other key leaves it on localhost:9092.
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+            # OIDC on: the customer-edge now proxies authenticated reads to the REST
+            # list endpoint (@RolesAllowed), so bearer tokens must be validated here.
+            # Resource-server JWT validation uses the realm JWKS (auth-server-url) — the
+            # client secret in application.yaml stays a placeholder and is unused for it.
+            # Pointed at the in-cluster Keycloak http leg (default was localhost → the
+            # endpoint 500'd with "OIDC server not available" once first called).
+            - name: QUARKUS_OIDC_ENABLED
+              value: "true"
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            # No SMTP in the sandbox — mock the mailer so dispatch logs instead of
+            # opening a dead localhost:1025 connection.
+            - name: QUARKUS_MAILER_MOCK
+              value: "true"
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+            # Oversight webhook (ADR-0059). ENABLED — the Slack incoming-webhook URL
+            # is in OpenBao (openbank/notification-service SLACK_WEBHOOK_URL) and
+            # projected via the ExternalSecret (webhook-externalsecret.yaml). Only
+            # anonymized, allow-listed oversight signals ever egress — see
+            # OversightWebhook.kt.
+            - name: SLACK_WEBHOOK_ENABLED
+              value: "true"
+            - name: SLACK_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: notification-webhook
+                  key: SLACK_WEBHOOK_URL
+                  optional: true
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          # Readiness is TCP on http (not /q/health/ready): the Kafka consumer's
+          # health check can sit KO on an idle topic, which would deadlock readiness.
+          # Flyway-at-start guarantees DB connectivity before the port opens.
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-service
+  namespace: notifications
+  labels:
+    app.kubernetes.io/name: notification-service
+spec:
+  selector:
+    app.kubernetes.io/name: notification-service
+  ports:
+    - name: http
+      port: 8112
+      targetPort: http

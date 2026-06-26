@@ -1,0 +1,264 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: Lending Service API
+  version: 1.0.0
+  description: >-
+    Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
+    cash events to ledger-service and never owns balances. Credit decisions are four-eyes
+    (maker-checker), enforced server-side from the authenticated JWT subject.
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8126
+tags:
+  - name: Lending
+    description: Loan origination, servicing, collateral and IFRS 9 provisioning
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/lending/applications:
+    post:
+      tags: [Lending]
+      operationId: applyForLoan
+      summary: Submit a loan application (maker)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoanApplicationRequest'
+      responses:
+        '201':
+          description: Application accepted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    get:
+      tags: [Lending]
+      operationId: listApplications
+      summary: List a party's loan applications
+      parameters:
+        - name: partyId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Applications for the party
+  /api/v1/lending/applications/{id}:
+    get:
+      tags: [Lending]
+      operationId: getApplication
+      summary: Get a loan application
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: The application }
+        '404': { description: Not found }
+  /api/v1/lending/applications/{id}/decision:
+    post:
+      tags: [Lending]
+      operationId: decideApplication
+      summary: Approve or reject an application (checker; must differ from maker)
+      description: Requires ROLE_CREDIT_RISK or ROLE_ADMIN. The checker identity is the JWT subject.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecisionRequest'
+      responses:
+        '200': { description: Decision applied }
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/lending/applications/{id}/disburse:
+    post:
+      tags: [Lending]
+      operationId: disburseLoan
+      summary: Disburse an approved application, booking the loan and its schedule
+      description: Requires ROLE_LENDING_OFFICER or ROLE_ADMIN.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '201': { description: Loan disbursed and booked }
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/lending/loans:
+    get:
+      tags: [Lending]
+      operationId: listLoans
+      summary: List a party's loans
+      parameters:
+        - name: partyId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Loans for the party }
+  /api/v1/lending/loans/{id}:
+    get:
+      tags: [Lending]
+      operationId: getLoan
+      summary: Get a loan
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: The loan }
+        '404': { description: Not found }
+  /api/v1/lending/loans/{id}/schedule:
+    get:
+      tags: [Lending]
+      operationId: getSchedule
+      summary: Get a loan's repayment schedule
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: The repayment schedule }
+  /api/v1/lending/loans/{id}/installments/{installmentId}/repay:
+    post:
+      tags: [Lending]
+      operationId: recordRepayment
+      summary: Record a repayment against an installment
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - name: installmentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Repayment recorded }
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/lending/loans/{id}/writeoff:
+    post:
+      tags: [Lending]
+      operationId: writeOffLoan
+      summary: Write off an uncollectible loan's remaining exposure
+      description: Requires ROLE_CREDIT_RISK, ROLE_COMPLIANCE or ROLE_ADMIN.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WriteOffRequest'
+      responses:
+        '200': { description: Loan written off }
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/lending/loans/{id}/collateral:
+    post:
+      tags: [Lending]
+      operationId: registerCollateral
+      summary: Register collateral against a loan
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CollateralRequest'
+      responses:
+        '201': { description: Collateral registered }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    get:
+      tags: [Lending]
+      operationId: listCollateral
+      summary: List collateral registered against a loan
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: Collateral for the loan }
+  /api/v1/lending/loans/{id}/provisioning:
+    get:
+      tags: [Lending]
+      operationId: provisioning
+      summary: IFRS 9 staging + ECL snapshot for a loan
+      description: Requires ROLE_CREDIT_RISK, ROLE_COMPLIANCE or ROLE_ADMIN.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - name: asOf
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        '200': { description: IFRS 9 snapshot }
+        '404': { description: Not found }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Conflict:
+      description: State conflict (e.g. four-eyes violation, illegal loan state transition)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+  schemas:
+    ApiError:
+      type: object
+      properties:
+        error: { type: string }
+    Money:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount: { type: number }
+        currency: { type: string, description: ISO-4217 currency code }
+    LoanApplicationRequest:
+      type: object
+      required: [partyId, requestedAmount, nominalAnnualRate, termPeriods, firstDueDate]
+      properties:
+        partyId: { type: string, format: uuid }
+        requestedAmount: { $ref: '#/components/schemas/Money' }
+        nominalAnnualRate: { type: number }
+        termPeriods: { type: integer }
+        periodsPerYear: { type: integer, default: 12 }
+        method:
+          type: string
+          enum: [ANNUITY, EQUAL_PRINCIPAL, BULLET]
+          default: ANNUITY
+        firstDueDate: { type: string, format: date }
+    DecisionRequest:
+      type: object
+      required: [approve]
+      properties:
+        approve: { type: boolean }
+        reason: { type: string, nullable: true }
+    CollateralRequest:
+      type: object
+      required: [type, marketValue]
+      properties:
+        type: { type: string }
+        description: { type: string, nullable: true }
+        marketValue: { $ref: '#/components/schemas/Money' }
+        haircut: { type: number, default: 0 }
+    WriteOffRequest:
+      type: object
+      description: >-
+        The acting principal is the authenticated JWT subject (server-side), never a client-supplied
+        field, so only the audit reason is carried in the body.
+      properties:
+        reason: { type: string, nullable: true }

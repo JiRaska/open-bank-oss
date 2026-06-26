@@ -1,0 +1,63 @@
+# HTTPScaledObject — ADR-0083 T1 (HTTP → 0) pilot for product-catalog.
+#
+# product-catalog is the nominated T1 pilot: it is a stateless, non-money-path,
+# read-only HTTP service with near-zero CPU utilisation at rest (~0.004 cores
+# per the ADR-0057 tier classifier). It has no synchronous inbound callers from
+# other services at runtime — the only callers are the admin-UI and the fees
+# vertical (ADR-0051), both of which can tolerate a first-request cold-start
+# latency rather than a 5xx.
+#
+# How it works:
+#   1. This object registers product-catalog with the KEDA HTTP add-on.
+#   2. Inbound traffic must be routed through the interceptor Service
+#      (keda-add-ons-http-interceptor.keda.svc:8080) — see the Ingress annotation
+#      in product-catalog.yaml. The interceptor holds the first request while
+#      KEDA scales the Deployment 0 → 1; subsequent requests are forwarded
+#      directly once a pod is Ready.
+#   3. After `scaledownPeriod` seconds of inactivity the interceptor signals
+#      KEDA to scale back to zero, and Karpenter consolidates the idle node.
+#
+# minReplicas: 0 — the T1 goal; safe because:
+#   - product-catalog is NOT on the money path (rules.yaml money_path_services).
+#   - The interceptor parks the first request (no 5xx on cold start).
+#   - Native image cold-start is targeted at ≤ 300 ms p95 (ADR-0083 SLO gate);
+#     until that SLO is measured and confirmed, minReplicas can be raised to 1
+#     as a conservative fallback without any manifest change to this file.
+#
+# maxReplicas: 3 — generous cap for a read-only seed store; revise once live
+#   traffic data is available.
+#
+# scaledownPeriod: 300 s (5 min) — gives a short-lived admin-UI browsing session
+#   time to complete before the pod is torn down. Tune after ADR-0083 §5 measurement.
+#
+# targetPendingRequests: 100 — the interceptor scales 1 replica per 100 in-flight
+#   requests. At product-catalog's expected fan-out this means a single warm pod
+#   handles normal load; a burst (e.g. fee-schedule rebuild) gets a second pod.
+apiVersion: http.keda.sh/v1alpha1
+kind: HTTPScaledObject
+metadata:
+  name: product-catalog-http
+  namespace: accounts
+  labels:
+    app.kubernetes.io/name: product-catalog
+    app.kubernetes.io/part-of: accounts
+    openbank.io/finops-tier: T1
+    openbank.io/adr: "0083"
+spec:
+  hosts:
+    - product-catalog.accounts.svc.cluster.local
+    - product-catalog.accounts.svc
+  pathPrefixes:
+    - /api/v1/products
+    - /api/v1/fees
+  scaleTargetRef:
+    service: product-catalog
+    name: product-catalog
+    kind: Deployment
+    apiVersion: apps/v1
+    port: 8104
+  replicas:
+    min: 0
+    max: 3
+  scaledownPeriod: 300
+  targetPendingRequests: 100

@@ -1,0 +1,421 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: PSD2 Open Banking API
+  version: 2.4.0
+  description: |
+    PSD2-compliant open banking — Account Information Service (AIS) and
+    Payment Initiation Service (PIS) for Third Party Providers.
+
+    Target standard (ADR-0090): **Berlin Group NextGenPSD2 XS2A 1.3.12** base,
+    served under `/v1/...`, with a Czech **ČOBS v7.0** profile layered on top.
+    The legacy bespoke `/open-banking/v2/...` surface is **deprecated** and will
+    be removed once no sandbox client depends on it. P1 shipped the Berlin AIS +
+    consent endpoints; P2 added Berlin PIS (SEPA products); P3 layers the Czech
+    ČOBS payment products (domestic-cz with VS/SS/KS, sipo) on the same `/v1`
+    path; P4 adds eIDAS **QSEAL** message-signature verification (`Digest` + `Signature` +
+    `TPP-Signature-Certificate`, advisory by default) and marks `/open-banking/v2` deprecated
+    (RFC 8594 `Deprecation`/`Sunset` headers).
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: https://api.open-bank.tech/psd2
+    description: OpenBank PSD2 XS2A — Berlin Group base (sandbox)
+tags:
+  - name: AIS
+    description: Account Information Service
+  - name: PIS
+    description: Payment Initiation Service
+  - name: Berlin-XS2A
+    description: Berlin Group NextGenPSD2 XS2A 1.3.12 surface (ADR-0090) — base for EU + ČOBS profile
+
+paths:
+  # ─── Berlin Group NextGenPSD2 XS2A 1.3.12 (ADR-0090 P1) ───────────────────────
+  # Common headers: X-Request-ID (required), Consent-ID (AIS data calls),
+  # PSU-IP-Address, TPP-Redirect-URI. TPP auth = eIDAS QWAC + X-TPP-ID (EidasMtlsFilter).
+  /v1/consents:
+    post:
+      tags: [Berlin-XS2A]
+      summary: Create an AIS consent (Berlin XS2A)
+      operationId: berlinCreateConsent
+      parameters:
+        - { name: X-Request-ID, in: header, required: true, schema: { type: string, format: uuid } }
+        - { name: TPP-Redirect-URI, in: header, required: false, schema: { type: string } }
+        - { name: PSU-IP-Address, in: header, required: false, schema: { type: string } }
+      responses:
+        '201': { description: Consent created — consentStatus, consentId, _links }
+        '400': { description: Missing X-Request-ID / format error }
+        '401': { description: Missing or invalid TPP credentials }
+  /v1/consents/{consentId}:
+    get:
+      tags: [Berlin-XS2A]
+      summary: Get consent information
+      operationId: berlinGetConsent
+      parameters:
+        - { name: consentId, in: path, required: true, schema: { type: string } }
+        - { name: X-Request-ID, in: header, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Consent information (access, recurringIndicator, validUntil, consentStatus) }
+        '401': { description: Missing or invalid TPP credentials }
+    delete:
+      tags: [Berlin-XS2A]
+      summary: Delete (revoke) a consent
+      operationId: berlinDeleteConsent
+      parameters:
+        - { name: consentId, in: path, required: true, schema: { type: string } }
+        - { name: X-Request-ID, in: header, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Consent revoked }
+        '401': { description: Missing or invalid TPP credentials }
+  /v1/consents/{consentId}/status:
+    get:
+      tags: [Berlin-XS2A]
+      summary: Get consent status
+      operationId: berlinGetConsentStatus
+      parameters:
+        - { name: consentId, in: path, required: true, schema: { type: string } }
+        - { name: X-Request-ID, in: header, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: '{ consentStatus }' }
+  /v1/accounts:
+    get:
+      tags: [Berlin-XS2A]
+      summary: Get accessible accounts (Berlin AIS)
+      operationId: berlinGetAccounts
+      parameters:
+        - { name: Consent-ID, in: header, required: true, schema: { type: string } }
+        - { name: X-Request-ID, in: header, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Account list with per-account balances/transactions _links }
+        '401': { description: Missing TPP credentials or Consent-ID }
+  /v1/accounts/{accountId}/balances:
+    get:
+      tags: [Berlin-XS2A]
+      summary: Get account balances (Berlin AIS)
+      operationId: berlinGetBalances
+      parameters:
+        - { name: accountId, in: path, required: true, schema: { type: string } }
+        - { name: Consent-ID, in: header, required: true, schema: { type: string } }
+        - { name: X-Request-ID, in: header, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: 'Balances — balanceAmount.amount is a string per spec' }
+        '401': { description: Missing TPP credentials or Consent-ID }
+  /v1/accounts/{accountId}/transactions:
+    get:
+      tags: [Berlin-XS2A]
+      summary: Get account transactions (Berlin AIS)
+      operationId: berlinGetTransactions
+      parameters:
+        - { name: accountId, in: path, required: true, schema: { type: string } }
+        - { name: Consent-ID, in: header, required: true, schema: { type: string } }
+        - { name: X-Request-ID, in: header, required: true, schema: { type: string, format: uuid } }
+        - { name: dateFrom, in: query, required: false, schema: { type: string, format: date } }
+        - { name: dateTo, in: query, required: false, schema: { type: string, format: date } }
+        - { name: bookingStatus, in: query, required: false, schema: { type: string, enum: [booked, pending, both] } }
+        - { name: limit, in: query, required: false, schema: { type: integer } }
+        - { name: afterCursor, in: query, required: false, schema: { type: string } }
+      responses:
+        '200': { description: 'transactions.booked/pending + _links (next, account)' }
+        '401': { description: Missing TPP credentials or Consent-ID }
+
+  # ─── Berlin Group PIS (ADR-0090 P2) — money-path; PISP role via EidasMtlsFilter ──────────────
+  /v1/payments/{paymentProduct}:
+    post:
+      tags: [Berlin-XS2A]
+      summary: Initiate a payment (Berlin PIS)
+      operationId: berlinInitiatePayment
+      parameters:
+        - { name: paymentProduct, in: path, required: true, schema: { type: string, enum: [sepa-credit-transfers, instant-sepa-credit-transfers, domestic-cz, sipo] } }
+        - { name: Consent-ID, in: header, required: true, schema: { type: string } }
+        - { name: X-Request-ID, in: header, required: true, schema: { type: string, format: uuid } }
+        - { name: Digest, in: header, required: false, schema: { type: string }, description: 'QSEAL — SHA-256=base64(sha256(body)); verified when signing is enforced' }
+        - { name: Signature, in: header, required: false, schema: { type: string }, description: 'QSEAL — Berlin HTTP message signature (keyId/algorithm/headers/signature)' }
+        - { name: TPP-Signature-Certificate, in: header, required: false, schema: { type: string }, description: 'QSEAL — TPP signing X.509 certificate (PEM)' }
+      requestBody:
+        required: true
+        description: 'SEPA products use PisPaymentRequest; domestic-cz / sipo use PisCzechPaymentRequest (ČOBS).'
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/PisPaymentRequest'
+                - $ref: '#/components/schemas/PisCzechPaymentRequest'
+      responses:
+        '201': { description: 'Payment initiated — transactionStatus (ISO 20022), paymentId, _links (self, status, scaRedirect)' }
+        '400': { description: Missing X-Request-ID / body does not match the payment product }
+        '401': { description: Missing TPP credentials or Consent-ID }
+        '404': { description: Unknown payment product }
+  /v1/payments/{paymentProduct}/{paymentId}/status:
+    get:
+      tags: [Berlin-XS2A]
+      summary: Get payment status (Berlin PIS)
+      operationId: berlinGetPaymentStatus
+      parameters:
+        - { name: paymentProduct, in: path, required: true, schema: { type: string } }
+        - { name: paymentId, in: path, required: true, schema: { type: string } }
+        - { name: X-Request-ID, in: header, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: '{ transactionStatus } — ISO 20022 code (RCVD/ACTC/ACSC/RJCT/CANC)' }
+        '401': { description: Missing TPP credentials }
+        '404': { description: Unknown payment product }
+
+
+  /open-banking/v2/accounts:
+    get:
+      tags: [AIS]
+      summary: Get accessible accounts (AIS)
+      operationId: aisGetAccounts
+      parameters:
+        - name: X-Consent-Id
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-TPP-ID
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Account list
+        '401':
+          description: Missing or invalid TPP credentials
+
+  /open-banking/v2/accounts/{accountId}/balances:
+    get:
+      tags: [AIS]
+      summary: Get account balances (AIS)
+      operationId: aisGetBalances
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: X-Consent-Id
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-TPP-ID
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Balance data
+
+  /open-banking/v2/accounts/{accountId}/transactions:
+    get:
+      tags: [AIS]
+      summary: Get account transactions (AIS)
+      operationId: aisGetTransactions
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: X-Consent-Id
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-TPP-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: dateFrom
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: dateTo
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Transaction list
+
+  /open-banking/v2/payments/sepa-credit-transfers:
+    post:
+      tags: [PIS]
+      summary: Initiate SEPA Credit Transfer (PIS)
+      operationId: pisInitiateSepa
+      parameters:
+        - name: X-TPP-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PisPaymentRequest'
+      responses:
+        '201':
+          description: Payment initiated
+
+  /open-banking/v2/payments/instant-sepa-credit-transfers:
+    post:
+      tags: [PIS]
+      summary: Initiate Instant SEPA Credit Transfer (PIS)
+      operationId: pisInitiateInstantSepa
+      parameters:
+        - name: X-TPP-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PisPaymentRequest'
+      responses:
+        '201':
+          description: Payment initiated
+
+  /open-banking/v2/payments/domestic-cz:
+    post:
+      tags: [PIS]
+      summary: Initiate Czech domestic payment (PIS)
+      operationId: pisInitiateDomesticCz
+      parameters:
+        - name: X-TPP-ID
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PisPaymentRequest'
+      responses:
+        '201':
+          description: Payment initiated
+
+  /open-banking/v2/payments/sipo:
+    post:
+      tags: [PIS]
+      summary: Initiate SIPO payment (PIS)
+      operationId: pisInitiateSipo
+      parameters:
+        - name: X-TPP-ID
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PisPaymentRequest'
+      responses:
+        '201':
+          description: Payment initiated
+
+  /open-banking/v2/payments/{product}/{paymentId}/status:
+    get:
+      tags: [PIS]
+      summary: Get payment status (PIS)
+      operationId: pisGetPaymentStatus
+      parameters:
+        - name: product
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [sepa-credit-transfers, instant-sepa-credit-transfers, domestic-cz, sipo]
+        - name: paymentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: X-TPP-ID
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payment status
+
+components:
+  schemas:
+    PisPaymentRequest:
+      type: object
+      required: [debtorAccount, creditorAccount, creditorName, amount]
+      properties:
+        debtorAccount:
+          type: object
+          properties:
+            iban:
+              type: string
+        creditorAccount:
+          type: object
+          properties:
+            iban:
+              type: string
+            bban:
+              type: string
+        creditorName:
+          type: string
+        amount:
+          type: object
+          properties:
+            amount:
+              type: string
+            currency:
+              type: string
+        remittanceInformationUnstructured:
+          type: string
+    PisCzechPaymentRequest:
+      description: ČOBS Czech payment products. domestic-cz carries VS/SS/KS symbols; sipo carries sipoNumber.
+      type: object
+      required: [debtorAccount]
+      properties:
+        debtorAccount:
+          type: object
+          properties:
+            iban: { type: string }
+        creditorAccount:
+          type: object
+          properties:
+            iban: { type: string }
+            bban: { type: string }
+        creditorName: { type: string }
+        instructedAmount:
+          type: object
+          properties:
+            amount: { type: string }
+            currency: { type: string }
+        variableSymbol: { type: string, description: 'ČOBS VS — max 10 digits' }
+        specificSymbol: { type: string, description: 'ČOBS SS — max 10 digits' }
+        constantSymbol: { type: string, description: 'ČOBS KS — max 4 digits' }
+        sipoNumber: { type: string, description: 'SIPO spojovací číslo (sipo product only)' }
+        remittanceInformationUnstructured: { type: string }
+        requestedExecutionDate: { type: string, format: date }

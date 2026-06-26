@@ -1,0 +1,30 @@
+# admin-ui secrets from OpenBao → admin-ui-oidc Secret. client-secret (OIDC
+# confidential client) + nextauth-secret (NextAuth session signing key), both
+# from the openbank/admin-ui KV path.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: admin-ui-oidc
+  namespace: admin-ui
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: admin-ui-oidc
+    creationPolicy: Owner
+    template:
+      mergePolicy: Merge
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+  data:
+    - secretKey: client-secret
+      remoteRef:
+        key: admin-ui
+        property: client-secret
+    - secretKey: nextauth-secret
+      remoteRef:
+        key: admin-ui
+        property: nextauth-secret

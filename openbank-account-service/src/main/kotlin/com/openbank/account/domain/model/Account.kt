@@ -1,0 +1,80 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.account.domain.model
+
+import com.openbank.libs.domain.account.Iban
+import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.domain.money.Money
+import java.time.Clock
+import java.time.Instant
+import java.util.UUID
+
+data class Account(
+    val id: UUID,
+    val accountNumber: Iban,
+    val accountType: AccountType,
+    val partyId: UUID,
+    val productId: UUID,
+    val currency: CurrencyCode,
+    val status: AccountStatus,
+    val signingRule: SigningRule = SigningRule.SINGLE,
+    val openedAt: Instant,
+    val closedAt: Instant?,
+    val version: Long,
+    /** Timestamp of the sanctions screen performed at account opening (ADR-0032 §C). Null for pre-Sprint-1 accounts. */
+    val sanctionsScreenedAt: Instant? = null,
+    /** Result of the sanctions screen: CLEAR | HIT | REVIEW. Null for pre-Sprint-1 accounts. */
+    val sanctionsStatus: String? = null,
+) {
+    fun canDebit(amount: Money): Boolean {
+        require(amount.currency == currency) { "Currency mismatch" }
+        return status == AccountStatus.ACTIVE
+    }
+
+    fun canCredit(): Boolean = status == AccountStatus.ACTIVE || status == AccountStatus.DORMANT
+
+    fun isActive(): Boolean = status == AccountStatus.ACTIVE
+
+    fun close(clock: Clock): Account {
+        check(status == AccountStatus.ACTIVE || status == AccountStatus.DORMANT) {
+            "Cannot close account in status $status"
+        }
+        return copy(status = AccountStatus.CLOSED, closedAt = Instant.now(clock))
+    }
+
+    fun freeze(): Account {
+        check(status == AccountStatus.ACTIVE) { "Cannot freeze account in status $status" }
+        return copy(status = AccountStatus.FROZEN)
+    }
+
+    fun unfreeze(): Account {
+        check(status == AccountStatus.FROZEN) { "Cannot unfreeze account in status $status" }
+        return copy(status = AccountStatus.ACTIVE)
+    }
+
+    /** Activate an onboarding account once its party has cleared KYC + AML (ADR-0073). */
+    fun activate(): Account {
+        check(status == AccountStatus.PENDING_ACTIVATION) { "Cannot activate account in status $status" }
+        return copy(status = AccountStatus.ACTIVE)
+    }
+}
+
+enum class AccountType {
+    CURRENT,
+    SAVINGS,
+    NOSTRO,
+    GL_ASSET,
+    GL_LIABILITY,
+    GL_INCOME,
+    GL_EXPENSE,
+}
+
+enum class AccountStatus {
+    PENDING_ACTIVATION,
+    ACTIVE,
+    DORMANT,
+    FROZEN,
+    CLOSED,
+}

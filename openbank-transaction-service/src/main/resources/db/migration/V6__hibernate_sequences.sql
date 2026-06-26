@@ -1,0 +1,1 @@
+CREATE SEQUENCE IF NOT EXISTS transaction_outbox_seq INCREMENT BY 50;

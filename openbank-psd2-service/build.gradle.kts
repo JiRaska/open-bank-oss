@@ -1,0 +1,74 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+plugins {
+    id("openbank.quarkus-service")
+}
+
+dependencies {
+    implementation(enforcedPlatform(libs.quarkus.bom))
+
+    implementation(libs.quarkus.kotlin)
+    implementation(libs.quarkus.resteasy.reactive)
+    implementation(libs.quarkus.resteasy.reactive.jackson)
+    implementation(libs.quarkus.smallrye.health)
+    implementation(libs.quarkus.micrometer.registry.prometheus)
+    implementation(libs.quarkus.opentelemetry)
+    implementation(libs.quarkus.oidc)
+    implementation(libs.quarkus.rest.client.reactive)
+    implementation(libs.quarkus.rest.client.reactive.jackson)
+    implementation(libs.quarkus.config.yaml)
+    implementation(libs.quarkus.smallrye.openapi)
+    implementation(libs.quarkus.smallrye.kafka)
+    implementation(libs.quarkus.redis.client)
+    implementation("io.quarkus:quarkus-scheduler")
+    implementation("io.quarkus:quarkus-hibernate-reactive-panache-kotlin")
+    // Hibernate Reactive needs the Vert.x reactive Postgres driver at runtime; Flyway (over the
+    // blocking JDBC driver) runs the V1/V2 migrations on boot. Without these the service has Panache
+    // entities + migrations but no SQL client — it builds and unit-tests green (no boot-time DB) but
+    // CrashLoops in-cluster with "No reactive SQL client implementation". Mirrors dispute-service.
+    implementation(libs.quarkus.reactive.pg.client)
+    implementation(libs.quarkus.flyway)
+    implementation(libs.quarkus.jdbc.postgresql)
+
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.coroutines.reactive)
+    implementation(libs.jackson.module.kotlin)
+    implementation(libs.jackson.datatype.jsr310)
+
+    implementation(libs.quarkus.smallrye.fault.tolerance)
+    implementation(project(":openbank-libs"))
+
+    testImplementation(libs.quarkus.junit5)
+    testImplementation(libs.assertj)
+    testImplementation(libs.mockk)
+    testImplementation(libs.rest.assured.kotlin)
+    // Boot smoke-test (Psd2BootSmokeIT): per-job Testcontainers Postgres + Valkey and the
+    // in-memory Kafka connector, so a real Quarkus boot + Flyway runs in CI (issue #578).
+    testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    testImplementation(libs.testcontainers)
+    testImplementation(libs.testcontainers.junit)
+    testImplementation(libs.testcontainers.postgresql)
+}
+
+kover {
+    reports {
+        verify {
+            rule {
+                bound {
+                    minValue = 0
+                    coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
+                }
+            }
+        }
+    }
+}
+
+tasks.named("koverVerify") {
+    enabled = true
+}
+
+tasks.named("check") {
+    dependsOn(tasks.named("koverVerify"))
+}

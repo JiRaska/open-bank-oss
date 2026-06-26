@@ -1,0 +1,207 @@
+# account-service: the accounts banking-domain API. Reactive Postgres datasource
+# + Flyway JDBC migrations against the single-owner CNPG cluster, Redis for
+# Idempotency-Key dedup, and an app-level outbox dispatcher that publishes
+# `openbank.accounts.account.created` to the Strimzi Kafka bus. OIDC bearer-token
+# validation points at Keycloak over the in-cluster http leg (the hostname split
+# returns the public issuer, so user tokens minted via the browser still
+# validate without ever touching the self-signed edge cert). Stays in CrashLoop
+# until the DB, Kafka and the realm client are all reachable.
+#
+# Progressive delivery: Deployment→Rollout (ADR-0098 Phase 2). Canary strategy
+# — 10% 5 min → 30% 5 min → 100%. ClusterAnalysisTemplate openbank-money-path-canary
+# runs continuous background analysis from step 1 (error rate <1%, p95 <500ms).
+# Dual Services: account-service (stable) + account-service-canary. DNS unchanged.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: account-service
+  namespace: accounts
+  labels:
+    app.kubernetes.io/name: account-service
+    app.kubernetes.io/part-of: accounts
+spec:
+  # Abort and roll back automatically if pods haven't become healthy within
+  # 10 minutes (ADR-0098). Prevents a crashlooping canary from blocking at
+  # 10% indefinitely with no signal.
+  progressDeadlineSeconds: 600
+  progressDeadlineAbort: true
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: account-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: account-service
+        app.kubernetes.io/part-of: accounts
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: account-service
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-account-service:sandbox-9476ee95
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8100
+            - name: management
+              containerPort: 8085
+          env:
+            # AML/sanctions screening gate for account opening (ADR-0073). The
+            # service lives in the `sanctions` namespace on :8123; without this the
+            # app falls back to a non-resolving default and account opening fails
+            # closed (AccountScreeningUnavailableException) — blocking onboarding.
+            - name: SANCTIONS_SERVICE_URL
+              value: http://sanctions-service.sanctions.svc:8123
+            # The default datasource exposes BOTH a JDBC leg (Hibernate ORM +
+            # Flyway, blocking) and a reactive leg (reactive repositories) onto
+            # the same CNPG primary; username is the `openbank` owner, password
+            # from the CNPG-generated app secret.
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://accounts-db-rw.accounts.svc:5432/openbank_accounts
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://accounts-db-rw.accounts.svc:5432/openbank_accounts
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: accounts-db-app
+                  key: password
+            # Redis idempotency cache (in-namespace).
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://redis.accounts.svc:6379
+            # Kafka outbox sink → Strimzi bootstrap (internal plaintext). Must be
+            # the global `kafka.bootstrap.servers` (env KAFKA_BOOTSTRAP_SERVERS):
+            # the SmallRye connector ignores
+            # quarkus.smallrye-reactive-messaging.kafka.bootstrap-servers, so any
+            # other key leaves the producer on its localhost:9092 default.
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+            # OIDC resource-server: validate bearer tokens over the internal
+            # http leg; discovery returns the public issuer so browser-minted
+            # user tokens validate here without the edge cert.
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: account-service-oidc
+                  key: OIDC_CLIENT_SECRET
+            # Balance-service in-cluster URL (default is localhost:8103 which fails in k8s).
+            - name: BALANCE_SERVICE_URL
+              value: http://balance-service.balances.svc:8103
+            # Welcome bonus (sandbox only): on account activation, account-service initiates a
+            # 100k CZK incoming credit via transaction-service (M2M openbank-services token).
+            - name: TRANSACTION_SERVICE_URL
+              value: http://transaction-service.payments.svc:8102
+            - name: OPENBANK_WELCOME_BONUS_ENABLED
+              value: "true"
+            # isn't flooded with connection-refused retries.
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          # Readiness is TCP on the http port, not /q/health/ready: the Kafka
+          # producer's readiness check sits KO until the first event is sent
+          # (lazy connect), which with an idle outbox would never flip — a
+          # serve-before-traffic deadlock. Flyway-at-start already guarantees DB
+          # connectivity before the port opens, so an accepting socket means a
+          # working datasource. Liveness uses the http health (no producer dep).
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+  strategy:
+    canary:
+      stableService: account-service
+      canaryService: account-service-canary
+      analysis:
+        templates:
+          - clusterScope: true
+            templateName: openbank-money-path-canary
+        startingStep: 1
+        args:
+          - name: namespace
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Canary
+      steps:
+        - setWeight: 10
+        - pause:
+            duration: 5m
+        - setWeight: 30
+        - pause:
+            duration: 5m
+        - setWeight: 100
+---
+# Stable service — original DNS name preserved; Rollouts controller adds
+# rollouts-pod-template-hash selector to pin to stable replica set.
+apiVersion: v1
+kind: Service
+metadata:
+  name: account-service
+  namespace: accounts
+  labels:
+    app.kubernetes.io/name: account-service
+spec:
+  selector:
+    app.kubernetes.io/name: account-service
+  ports:
+    - name: http
+      port: 8100
+      targetPort: http
+---
+# Canary service — Rollouts controller updates selector to canary replica set.
+apiVersion: v1
+kind: Service
+metadata:
+  name: account-service-canary
+  namespace: accounts
+  labels:
+    app.kubernetes.io/name: account-service
+spec:
+  selector:
+    app.kubernetes.io/name: account-service
+  ports:
+    - name: http
+      port: 8100
+      targetPort: http

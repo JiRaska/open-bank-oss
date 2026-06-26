@@ -1,0 +1,121 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# BPMN process diagram (ADR-0019/0029). Authored as data; validated by
+# src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
+
+name: SEPA Credit Transfer
+desc: Zpracování SEPA platby od iniciace po settlement
+regulation: PSD2 RTS + SEPA CT Rulebook + EBA Guidelines
+services:
+  - sca-service
+  - consent-service
+  - aml-service
+  - account-service
+  - sepa-payment
+  - audit-service
+steps:
+  - id: start
+    type: start
+    x: 60
+    y: 100
+    label: Iniciace
+  - id: sca
+    type: task
+    x: 180
+    y: 100
+    label: SCA (PSD2)
+    lane: psd2
+    apis:
+      - POST /api/v1/sca/challenge
+    relatedServices:
+      - sca-service
+  - id: consent
+    type: task
+    x: 320
+    y: 100
+    label: Ověření Consent
+    lane: psd2
+    apis:
+      - GET /api/v1/consents/{id}/verify
+    relatedServices:
+      - consent-service
+  - id: aml
+    type: task
+    x: 460
+    y: 100
+    label: AML Screening
+    lane: compliance
+    apis:
+      - POST /api/v1/aml/transaction-screen
+    relatedServices:
+      - aml-service
+  - id: gw1
+    type: gateway
+    x: 580
+    y: 100
+    label: Prošlo?
+  - id: reject
+    type: end-err
+    x: 580
+    y: 220
+    label: Odmítnuto
+  - id: debit
+    type: task
+    x: 700
+    y: 100
+    label: Debit účtu
+    lane: core
+    apis:
+      - POST /api/v1/accounts/{id}/debit
+    relatedServices:
+      - account-service
+  - id: submit
+    type: task
+    x: 820
+    y: 100
+    label: Submit do SEPA
+    lane: payment
+    apis:
+      - POST /api/v1/sepa/outward
+    relatedServices:
+      - sepa-payment
+  - id: audit
+    type: task
+    x: 820
+    y: 220
+    label: Audit záznam
+    lane: compliance
+    apis:
+      - POST /api/v1/audit/log
+    relatedServices:
+      - audit-service
+    consumes:
+      - openbank.transactions.transaction.initiated
+  - id: end
+    type: end
+    x: 940
+    y: 100
+    label: Settled
+flows:
+  - from: start
+    to: sca
+  - from: sca
+    to: consent
+  - from: consent
+    to: aml
+  - from: aml
+    to: gw1
+  - from: gw1
+    to: reject
+    label: Ne
+  - from: gw1
+    to: debit
+    label: Ano
+  - from: debit
+    to: submit
+  - from: submit
+    to: audit
+    kind: async
+    topic: openbank.transactions.transaction.initiated
+  - from: submit
+    to: end

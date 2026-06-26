@@ -1,0 +1,15 @@
+# SCA challenge events topic — published by sca-service when a challenge is
+# issued and resolved. Consumed by payment services awaiting SCA completion.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.sca.challenge.event
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

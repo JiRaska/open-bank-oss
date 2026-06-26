@@ -1,0 +1,236 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: Consent Service API
+  version: 1.0.0
+  description: Data sharing consent lifecycle — create, activate, reject, revoke, validate.
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8110
+    description: Local development
+tags:
+  - name: Consents
+
+paths:
+  /api/v1/consents:
+    post:
+      tags: [Consents]
+      summary: Create a consent
+      operationId: createConsent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConsentRequest'
+      responses:
+        '201':
+          description: Consent created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsentResponse'
+
+  /api/v1/consents/{id}:
+    get:
+      tags: [Consents]
+      summary: Get consent by ID
+      operationId: getConsent
+      parameters:
+        - $ref: '#/components/parameters/consentId'
+      responses:
+        '200':
+          description: Consent detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsentResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Consents]
+      summary: Revoke a consent
+      operationId: revokeConsent
+      parameters:
+        - $ref: '#/components/parameters/consentId'
+      responses:
+        '204':
+          description: Consent revoked
+
+  /api/v1/consents/party/{partyId}:
+    get:
+      tags: [Consents]
+      summary: List consents for a party
+      operationId: listConsentsByParty
+      parameters:
+        - name: partyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Consents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ConsentResponse'
+
+  /api/v1/consents/grantee/{granteeId}:
+    get:
+      tags: [Consents]
+      summary: List consents by grantee (TPP ID)
+      operationId: listConsentsByGrantee
+      parameters:
+        - name: granteeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Consents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ConsentResponse'
+
+  /api/v1/consents/{id}/activate:
+    post:
+      tags: [Consents]
+      summary: Activate a consent
+      operationId: activateConsent
+      parameters:
+        - $ref: '#/components/parameters/consentId'
+      responses:
+        '200':
+          description: Activated
+
+  /api/v1/consents/{id}/reject:
+    post:
+      tags: [Consents]
+      summary: Reject a consent
+      operationId: rejectConsent
+      parameters:
+        - $ref: '#/components/parameters/consentId'
+      responses:
+        '200':
+          description: Rejected
+
+  /api/v1/consents/{id}/validate:
+    post:
+      tags: [Consents]
+      summary: Validate an active consent
+      operationId: validateConsent
+      parameters:
+        - $ref: '#/components/parameters/consentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scopes:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    consentId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    CreateConsentRequest:
+      type: object
+      required: [partyId, granteeId, scopes, expiresAt]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        granteeId:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+          example: [accounts:read, transactions:read]
+        expiresAt:
+          type: string
+          format: date-time
+        accountIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    ConsentResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        partyId:
+          type: string
+          format: uuid
+        granteeId:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum: [PENDING, ACTIVE, REJECTED, REVOKED, EXPIRED]
+        expiresAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string

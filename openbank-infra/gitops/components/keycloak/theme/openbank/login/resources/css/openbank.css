@@ -1,0 +1,170 @@
+/* OpenBank Framework login theme — dark blue/cyan edition */
+
+:root {
+  --ob-bg:         #0a0e1a;
+  --ob-accent:     #00d4ff;
+  --ob-accent2:    #0088cc;
+  --ob-glow:       rgba(0, 212, 255, 0.35);
+  --ob-text:       #e0f0ff;
+  --ob-muted:      #6a8aaa;
+  --ob-card:       rgba(10, 20, 40, 0.90);
+  --ob-border:     rgba(0, 212, 255, 0.22);
+}
+
+.login-pf {
+  background: var(--ob-bg);
+}
+
+.login-pf body {
+  background:
+    radial-gradient(ellipse 900px 500px at 50% -5%, rgba(0, 100, 200, 0.28), transparent 60%),
+    radial-gradient(ellipse 600px 400px at 50% 100%, rgba(0, 50, 120, 0.15), transparent 70%),
+    var(--ob-bg);
+  min-height: 100vh;
+}
+
+/* Kill the stock Keycloak logo/branding entirely */
+#kc-logo,
+#kc-logo-wrapper,
+.kc-logo-text,
+div.kc-logo-text {
+  display: none !important;
+  background-image: none !important;
+}
+
+/* Header — vault image + framework name */
+#kc-header,
+#kc-header-wrapper {
+  width: 100%;
+  padding: 0;
+  margin: 0 auto;
+  text-align: center;
+  color: var(--ob-text);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.2;
+  white-space: normal;
+  text-shadow: 0 0 20px var(--ob-accent), 0 0 40px rgba(0, 212, 255, 0.4);
+}
+
+#kc-header-wrapper::before {
+  content: "";
+  display: block;
+  width: 180px;
+  height: 180px;
+  margin: 0 auto 20px;
+  background: url("../img/openbank-vault.png") no-repeat center center;
+  background-size: contain;
+  filter:
+    drop-shadow(0 0 18px rgba(0, 212, 255, 0.80))
+    drop-shadow(0 0 40px rgba(0, 150, 255, 0.50))
+    drop-shadow(0 8px 24px rgba(0, 0, 0, 0.60));
+  animation: ob-pulse 3s ease-in-out infinite;
+}
+
+@keyframes ob-pulse {
+  0%, 100% {
+    filter:
+      drop-shadow(0 0 18px rgba(0, 212, 255, 0.80))
+      drop-shadow(0 0 40px rgba(0, 150, 255, 0.50))
+      drop-shadow(0 8px 24px rgba(0, 0, 0, 0.60));
+  }
+  50% {
+    filter:
+      drop-shadow(0 0 28px rgba(0, 212, 255, 1.00))
+      drop-shadow(0 0 60px rgba(0, 180, 255, 0.70))
+      drop-shadow(0 8px 24px rgba(0, 0, 0, 0.60));
+  }
+}
+
+/* Login card */
+.card-pf {
+  background: var(--ob-card);
+  border: 1px solid var(--ob-border);
+  border-radius: 16px;
+  box-shadow:
+    0 0 0 1px rgba(0, 212, 255, 0.08),
+    0 20px 60px rgba(0, 0, 0, 0.70),
+    0 0 80px rgba(0, 100, 200, 0.12);
+  color: var(--ob-text);
+  backdrop-filter: blur(12px);
+}
+
+#kc-page-title,
+.card-pf label,
+#kc-form-options,
+#kc-registration,
+.login-pf-page .login-pf-signup,
+#kc-info,
+#kc-info-wrapper {
+  color: var(--ob-text);
+}
+
+input[type="text"],
+input[type="email"],
+input[type="password"],
+.pf-c-form-control {
+  background: rgba(0, 20, 50, 0.70);
+  border: 1px solid rgba(0, 212, 255, 0.20);
+  color: var(--ob-text);
+  border-radius: 8px;
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+.pf-c-form-control:focus {
+  border-color: var(--ob-accent);
+  box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.20);
+  background: rgba(0, 30, 60, 0.80);
+  outline: none;
+}
+
+input[type="text"]::placeholder,
+input[type="email"]::placeholder,
+input[type="password"]::placeholder {
+  color: var(--ob-muted);
+}
+
+.btn-primary,
+.pf-c-button.pf-m-primary {
+  background: linear-gradient(135deg, #0099dd, #00ccff);
+  border: 1px solid var(--ob-accent);
+  color: #ffffff;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  border-radius: 8px;
+  box-shadow: 0 0 16px rgba(0, 212, 255, 0.40);
+  transition: all 0.2s ease;
+}
+
+.btn-primary:hover,
+.pf-c-button.pf-m-primary:hover {
+  background: linear-gradient(135deg, #00aaee, #33ddff);
+  box-shadow: 0 0 24px rgba(0, 212, 255, 0.65);
+}
+
+a {
+  color: var(--ob-accent);
+}
+
+a:hover {
+  color: #66e8ff;
+}
+
+.pf-c-button.pf-m-plain,
+button[aria-label*="password"] {
+  color: var(--ob-muted);
+}
+
+.alert-error,
+.pf-c-alert.pf-m-danger {
+  background: rgba(220, 50, 50, 0.15);
+  border-color: rgba(220, 50, 50, 0.40);
+  color: #ff9999;
+}

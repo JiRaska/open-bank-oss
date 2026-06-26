@@ -1,0 +1,49 @@
+# Kubernetes metrics-server (resource metrics API). Powers `kubectl top`,
+# resource-based HPA, and right-sizing decisions (e.g. ADR-0008 capacity work —
+# the Tempo OOM right-sizing had to guess because this was absent).
+#
+# It was missing entirely from the sandbox: no pod, no v1beta1.metrics.k8s.io
+# APIService, not in GitOps. Codified here so the resource-metrics API exists and
+# is reproducible (ADR-0027). The kube-prometheus-stack scrapes its OWN metrics
+# independently; metrics-server is the in-tree Resource Metrics API the core
+# tooling (top/HPA) needs.
+#
+# --kubelet-insecure-tls: EKS kubelet serving certs are not signed by the cluster
+# CA that metrics-server trusts, so without this it fails every scrape with an
+# x509 error. Standard for EKS sandboxes; tighten with a proper kubelet serving
+# cert (RotateKubeletServerCertificate) before relying on it for prod autoscaling.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: metrics-server
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://kubernetes-sigs.github.io/metrics-server/
+    chart: metrics-server
+    targetRevision: 3.12.2
+    helm:
+      valuesObject:
+        args:
+          - --kubelet-insecure-tls
+          - --kubelet-preferred-address-types=InternalIP,Hostname,ExternalIP
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 192Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

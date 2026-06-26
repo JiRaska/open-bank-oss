@@ -1,0 +1,34 @@
+# Alertmanager -> Slack webhook (ADR-0077 Phase 4). Projects the incoming-webhook URL
+# into the `alertmanager-slack` Secret. To ACTIVATE paging (currently receiver 'null'):
+#   1. vault kv put openbank/alertmanager SLACK_WEBHOOK="https://hooks.slack.com/services/..."
+#   2. in apps/kube-prometheus-stack.yaml add under alertmanager.alertmanagerSpec:
+#        secrets: ["alertmanager-slack"]   # mounts at /etc/alertmanager/secrets/alertmanager-slack
+#      and a receiver:
+#        - name: slack-critical
+#          slack_configs:
+#            - channel: '#openbank-alerts'
+#              api_url_file: /etc/alertmanager/secrets/alertmanager-slack/SLACK_WEBHOOK
+#      route the severity=critical match to slack-critical instead of 'null'.
+# Kept decoupled so Alertmanager never CrashLoops on a missing secret mount.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: alertmanager-slack
+  namespace: observability
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: alertmanager-slack
+    creationPolicy: Owner
+    template:
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+  data:
+    - secretKey: SLACK_WEBHOOK
+      remoteRef:
+        key: alertmanager
+        property: SLACK_WEBHOOK

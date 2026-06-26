@@ -1,0 +1,373 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-dept-finance
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/part-of: observability
+data:
+  openbank-dept-finance.json: |
+    {
+      "id": null,
+      "uid": "openbank-dept-finance",
+      "title": "OpenBank — Finance & Treasury",
+      "description": "Department view for finance/back-office: ledger posting activity, reversal quality, end-of-month close runs (ADR-0069/0078), FX desk activity, and the money-path outbox backlog (events stuck = money stuck).",
+      "tags": ["openbank", "department", "finance"],
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "1m",
+      "time": { "from": "now-7d", "to": "now" },
+      "timepicker": {},
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "pluginId": "prometheus",
+            "label": "Datasource",
+            "hide": 0,
+            "refresh": 1,
+            "options": [],
+            "current": {}
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Ledger Postings",
+          "type": "stat",
+          "gridPos": { "x": 0, "y": 0, "w": 5, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "area"
+          },
+          "targets": [
+            {
+              "expr": "sum(increase(openbank_ledger_postings_total{type=\"posting\",job=\"observability/openbank-services\"}[$__range]))",
+              "legendFormat": "postings",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Reversal Ratio %",
+          "type": "stat",
+          "gridPos": { "x": 5, "y": 0, "w": 5, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "decimals": 2,
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 1 },
+                  { "color": "red", "value": 5 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "none"
+          },
+          "targets": [
+            {
+              "expr": "100 * (sum(increase(openbank_ledger_postings_total{type=\"reversal\",job=\"observability/openbank-services\"}[$__range])) or vector(0)) / clamp_min(sum(increase(openbank_ledger_postings_total{job=\"observability/openbank-services\"}[$__range])), 1)",
+              "legendFormat": "reversal ratio",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "EoM Pockets Closed",
+          "type": "stat",
+          "gridPos": { "x": 10, "y": 0, "w": 5, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "area"
+          },
+          "targets": [
+            {
+              "expr": "sum(increase(openbank_statement_close_pockets_total{job=\"observability/openbank-services\"}[$__range]))",
+              "legendFormat": "pockets closed",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "EoM Close Failures",
+          "type": "stat",
+          "gridPos": { "x": 15, "y": 0, "w": 5, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": 1 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "none"
+          },
+          "targets": [
+            {
+              "expr": "sum(increase(openbank_statement_close_failures_total{job=\"observability/openbank-services\"}[$__range]))",
+              "legendFormat": "close failures",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "Events Stuck (money-path outbox)",
+          "type": "stat",
+          "gridPos": { "x": 20, "y": 0, "w": 4, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 1 },
+                  { "color": "red", "value": 100 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "none"
+          },
+          "targets": [
+            {
+              "expr": "sum(max by (service) (openbank_outbox_backlog{service=~\"ledger|balance|sepa-payment|sepa-instant|domestic|fx|clearing|swift|interest\"}))",
+              "legendFormat": "stuck events",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "title": "Ledger Postings Rate by Currency",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": { "lineWidth": 1, "fillOpacity": 10 }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean"] },
+            "tooltip": { "mode": "multi" }
+          },
+          "targets": [
+            {
+              "expr": "sum by (currency) (increase(openbank_ledger_postings_total{job=\"observability/openbank-services\"}[1h]))",
+              "legendFormat": "{{currency}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "title": "EoM Close Runs by Status",
+          "type": "bargauge",
+          "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "palette-classic" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byRegexp", "options": ".*FAIL.*" },
+                "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+              }
+            ]
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "horizontal",
+            "displayMode": "gradient",
+            "text": {}
+          },
+          "targets": [
+            {
+              "expr": "sum by (status) (openbank_statement_close_runs_total{job=\"observability/openbank-services\"})",
+              "legendFormat": "{{status}}",
+              "refId": "A",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "title": "FX Desk — Deals by Currency Pair",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 12, "w": 8, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": { "lineWidth": 1, "fillOpacity": 10 }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] },
+            "tooltip": { "mode": "multi" }
+          },
+          "targets": [
+            {
+              "expr": "sum by (currency) (increase(openbank_payments_submitted_total{type=\"fx\",job=\"observability/openbank-services\"}[1h]))",
+              "legendFormat": "{{currency}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "title": "FX Processing Duration P95",
+          "type": "timeseries",
+          "gridPos": { "x": 8, "y": 12, "w": 8, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": { "lineWidth": 2, "fillOpacity": 10 }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": { "displayMode": "list", "placement": "bottom" },
+            "tooltip": { "mode": "single" }
+          },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(openbank_payment_processing_duration_seconds_bucket{type=\"fx\",job=\"observability/openbank-services\"}[5m])))",
+              "legendFormat": "fx p95",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "title": "Money-Path Outbox Backlog by Service",
+          "type": "timeseries",
+          "gridPos": { "x": 16, "y": 12, "w": 8, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": { "lineWidth": 1, "fillOpacity": 20 },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": 100 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
+            "tooltip": { "mode": "multi" }
+          },
+          "targets": [
+            {
+              "expr": "max by (service) (openbank_outbox_backlog{service=~\"ledger|balance|sepa-payment|sepa-instant|domestic|fx|clearing|swift|interest\"})",
+              "legendFormat": "{{service}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 11,
+          "title": "Ledger & Close Services — Warnings & Errors",
+          "type": "logs",
+          "gridPos": { "x": 0, "y": 20, "w": 24, "h": 9 },
+          "datasource": { "type": "loki", "uid": "loki" },
+          "options": {
+            "showTime": true,
+            "showLabels": false,
+            "showCommonLabels": false,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": false,
+            "enableLogDetails": true,
+            "dedupStrategy": "none",
+            "sortOrder": "Descending"
+          },
+          "targets": [
+            {
+              "expr": "{namespace=~\"ledger|statements|fx|balances\", level=~\"(?i)(warn|warning|error)\"}",
+              "refId": "A"
+            }
+          ]
+        }
+      ]
+    }

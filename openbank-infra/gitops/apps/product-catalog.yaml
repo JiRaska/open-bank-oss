@@ -1,0 +1,42 @@
+# product-catalog (ADR-0051 fees vertical). Deployed as its OWN Application,
+# isolated from the `accounts` Application on purpose: it syncs ONLY
+# product-catalog.yaml and the ADR-0083 HTTPScaledObject out of components/accounts
+# (directory.include), so it can track `main` without dragging in the rest of the
+# accounts component or disturbing the running account-service.
+# Stateless in-memory in this phase — no DB/Kafka/OIDC — co-located in the
+# `accounts` namespace so the admin-ui Kubernetes discovery lists it automatically.
+# ADR-0083 T1 pilot: product-catalog-http-scaledobject.yaml adds the HTTPScaledObject
+# that enables scale-to-zero on HTTP (minReplicas: 0) via the KEDA HTTP add-on
+# interceptor. The KEDA HTTP add-on must be installed first (tofu/sandbox-platform).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: product-catalog
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/accounts
+    directory:
+      include: '{product-catalog.yaml,product-catalog-http-scaledobject.yaml}'
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: accounts
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: product-catalog
+      namespace: accounts
+      jqPathExpressions:
+        - .spec.replicas

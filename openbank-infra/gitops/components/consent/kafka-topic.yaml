@@ -1,0 +1,15 @@
+# Consent lifecycle events — published by consent-service on grant/revoke/expiry.
+# Consumed by TPP-registry and payment services for real-time consent validation.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.consent.events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

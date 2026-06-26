@@ -1,0 +1,104 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+#
+# openbank-clearing-simulator (ADR-0104 D2) — a NON-PRODUCTION scheme/clearing counterparty.
+# It receives a pacs.008, validates it against the real XSD, and returns a realistic pacs.002
+# (ACSC ack / RJCT reject) plus a camt.054 notification. It holds NO posting authority, touches
+# NO real network, and persists nothing (stateless) — so there is no datasource or Flyway here.
+quarkus:
+  application:
+    name: openbank-clearing-simulator
+    version: 0.1.0
+  http:
+    port: 8139
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  # Outbound service-to-service token: the rest-client (sepa-payment-service) mints an
+  # openbank-services M2M token via this oidc-client for the pacs.004 return forwarding path.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+  rest-client:
+    sepa-payment-service:
+      url: ${SEPA_PAYMENT_SERVICE_URL:http://localhost:8108}
+      scope: jakarta.inject.Singleton
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+    console:
+      json: true
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-clearing-simulator
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  management:
+    enabled: true
+    port: 8087
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+    oidc:
+      enabled: false
+
+"%test":
+  quarkus:
+    management:
+      enabled: false
+    oidc:
+      enabled: false
+
+openbank:
+  api:
+    version: "1"
+  build:
+    time: "${BUILD_TIME:unknown}"
+  git:
+    commit: "${GIT_COMMIT:unknown}"
+  # Deterministic clearing-simulator behaviour (ADR-0100): a transfer settles (ACSC) unless its
+  # minor-unit remainder matches a configured reject trigger. Pure function of the message, so
+  # every scenario is reproducible in tests and demos. Non-production only.
+  clearing-simulator:
+    settlement-lag-seconds: 0
+
+# OPA sidecar (ADR-0034). Advisory by default.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:false}"

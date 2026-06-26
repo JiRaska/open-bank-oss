@@ -1,0 +1,96 @@
+quarkus:
+  application:
+    name: openbank-copilot-service
+    version: 0.1.0
+
+  http:
+    port: 8131
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,OPTIONS
+      headers: Content-Type,Authorization,X-Session-Id
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  # Customer session JWT arrives via the customer edge (ADR-0065).
+  redis:
+    hosts: ${REDIS_URL:redis://localhost:6379}
+    timeout: 2s
+
+  oidc:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://keycloak.iam.svc:8080/realms/openbank-customers}
+    client-id: ${QUARKUS_OIDC_CLIENT_ID:openbank-edge}
+    application-type: service
+    token:
+      # Pin the public issuer (as in the JWT iss claim). The inbound bearer arrives from the
+      # openbank-customers realm; keycloak.iam.svc is the in-cluster URL but tokens carry the
+      # public issuer (kc.open-bank.tech). Must match the customer-edge pattern (ADR-0065).
+      issuer: ${QUARKUS_OIDC_TOKEN_ISSUER:https://kc.open-bank.tech/realms/openbank-customers}
+    tls:
+      verification: ${OIDC_TLS_VERIFICATION:none}
+
+  # READ tools call the customer edge (ADR-0065) AS the customer — the inbound bearer is propagated
+  # (ADR-0089 D5); the edge is ROLE_CUSTOMER and enforces ownership, so the assistant only ever reaches
+  # the caller's own data. (Calling internal domain services directly would 403 — they want SERVICE roles.)
+  rest-client:
+    customer-edge:
+      url: ${CUSTOMER_EDGE_URL:http://localhost:8128}
+
+# Customer copilot configuration (ADR-0089).
+copilot:
+  token-store: redis
+  # Feature flag is the runtime gate (ADR-0067); off by default everywhere.
+  enabled: ${COPILOT_ENABLED:false}
+  guardrail:
+    # block (default) stops the turn on a prompt-injection hit; advisory only audits (ADR-0089 D3).
+    mode: ${COPILOT_GUARDRAIL_MODE:block}
+  # The ModelGateway seam is constant; only the backend changes per environment (ADR-0089 D6).
+  #   sandbox    -> public free / mock provider (synthetic data only)
+  #   production -> in-cluster vLLM or EU zero-retention (deferred, FinOps ADR-0027)
+  model-gateway:
+    default-model: ${COPILOT_DEFAULT_MODEL:mock-echo}
+    models:
+      - id: mock-echo
+        provider: mock
+        sensitivity: hosted
+      # OpenAI-compatible backend (NVIDIA NIM, Groq, vLLM, …). id is sent verbatim as the upstream
+      # model name and is env-driven (COPILOT_MODEL_ID) so the served model can be swapped without an
+      # image rebuild — set COPILOT_MODEL_ID and COPILOT_DEFAULT_MODEL to the SAME value.
+      # Endpoint is also env-driven (COPILOT_MODEL_ENDPOINT) so the backend can be swapped without a
+      # rebuild — e.g. switch between NVIDIA NIM and Groq by updating GitOps env vars only.
+      # HOSTED (off-cluster) — sandbox/synthetic data only; production must pin to in-cluster/EU (D6).
+      - id: ${COPILOT_MODEL_ID:mistralai/mistral-nemotron}
+        provider: openai-compat
+        endpoint: ${COPILOT_MODEL_ENDPOINT:https://integrate.api.nvidia.com/v1}
+        sensitivity: hosted
+      # Production (deferred): register a self-hosted/EU model and flip COPILOT_DEFAULT_MODEL to it.
+      # - id: vllm-cs
+      #   provider: openai-compat
+      #   endpoint: http://vllm.copilot.svc:8000
+      #   sensitivity: self-hosted
+  model:
+    # Backend API key for the openai-compat provider. Empty in dev; ESO/OpenBao in deploy.
+    # Shared across backends — update OpenBao copilot-service/MODEL_API_KEY when switching providers.
+    api-key: ${COPILOT_MODEL_API_KEY:}
+
+# OPA sidecar (ADR-0034). Advisory mode by default.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:true}"

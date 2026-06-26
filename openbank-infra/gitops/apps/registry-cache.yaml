@@ -1,0 +1,31 @@
+# In-cluster Docker Hub pull-through cache for the CI runner pool (FinOps:
+# keeps repeated base-image pulls off the NAT Gateway). See the component
+# manifests for the full rationale.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: registry-cache
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/registry-cache
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: registry-cache
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false

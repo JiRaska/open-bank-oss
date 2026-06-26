@@ -1,0 +1,9 @@
+-- Hibernate Reactive + PanacheEntity allocate ids from a sequence named "<table>_seq"
+-- (allocationSize 50). The CREATE TABLE migrations used BIGSERIAL (only "<table>_id_seq")
+-- and the schema is generation:none, so every INSERT would fail at runtime with
+-- relation "<table>_seq" does not exist. Same defect fixed for party (V6) and
+-- notification (V4/V5). Repo convention: unquoted, lowercase, INCREMENT BY 50.
+-- Rollback: DROP SEQUENCE domestic_payments_seq,domestic_payment_outbox_seq;
+
+CREATE SEQUENCE IF NOT EXISTS domestic_payments_seq INCREMENT BY 50;
+CREATE SEQUENCE IF NOT EXISTS domestic_payment_outbox_seq INCREMENT BY 50;

@@ -1,0 +1,187 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "simple",
+  "separate-pull-requests": true,
+  "include-component-in-tag": true,
+  "last-release-sha": "af9c9cbbc02ba0a8fc5f655f5871ea00d4a66b7f",
+  "changelog-sections": [
+    {
+      "type": "feat",
+      "section": "Features"
+    },
+    {
+      "type": "fix",
+      "section": "Bug Fixes"
+    },
+    {
+      "type": "perf",
+      "section": "Performance"
+    },
+    {
+      "type": "security",
+      "section": "Security"
+    },
+    {
+      "type": "refactor",
+      "section": "Refactoring",
+      "hidden": true
+    },
+    {
+      "type": "docs",
+      "section": "Documentation",
+      "hidden": true
+    },
+    {
+      "type": "test",
+      "section": "Tests",
+      "hidden": true
+    },
+    {
+      "type": "build",
+      "section": "Build System",
+      "hidden": true
+    },
+    {
+      "type": "ci",
+      "section": "CI",
+      "hidden": true
+    },
+    {
+      "type": "chore",
+      "section": "Chores",
+      "hidden": true
+    }
+  ],
+  "packages": {
+    "openbank-account-service": {
+      "component": "account-service"
+    },
+    "openbank-admin-ui": {
+      "component": "admin-ui",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "openbank-admin-ui/package.json",
+          "jsonpath": "$.version"
+        }
+      ]
+    },
+    "openbank-agent-service": {
+      "component": "agent-service"
+    },
+    "openbank-aml-service": {
+      "component": "aml-service"
+    },
+    "openbank-anacredit-service": {
+      "component": "anacredit-service"
+    },
+    "openbank-audit-service": {
+      "component": "audit-service"
+    },
+    "openbank-balance-service": {
+      "component": "balance-service"
+    },
+    "openbank-card-issuance-service": {
+      "component": "card-issuance-service"
+    },
+    "openbank-clearing-service": {
+      "component": "clearing-service"
+    },
+    "openbank-clearing-simulator": {
+      "component": "clearing-simulator"
+    },
+    "openbank-consent-service": {
+      "component": "consent-service"
+    },
+    "openbank-copilot-service": {
+      "component": "copilot-service"
+    },
+    "openbank-customer-edge": {
+      "component": "customer-edge"
+    },
+    "openbank-dispute-service": {
+      "component": "dispute-service"
+    },
+    "openbank-domestic-payment": {
+      "component": "domestic-payment"
+    },
+    "openbank-finops-agent": {
+      "component": "finops-agent"
+    },
+    "openbank-finrep-service": {
+      "component": "finrep-service"
+    },
+    "openbank-fraud-service": {
+      "component": "fraud-service"
+    },
+    "openbank-fx-service": {
+      "component": "fx-service"
+    },
+    "openbank-interest-service": {
+      "component": "interest-service"
+    },
+    "openbank-kyc-service": {
+      "component": "kyc-service"
+    },
+    "openbank-ledger-service": {
+      "component": "ledger-service"
+    },
+    "openbank-lending-service": {
+      "component": "lending-service"
+    },
+    "openbank-notification-service": {
+      "component": "notification-service"
+    },
+    "openbank-onboarding-service": {
+      "component": "onboarding-service"
+    },
+    "openbank-party-service": {
+      "component": "party-service"
+    },
+    "openbank-pid-service": {
+      "component": "pid-service"
+    },
+    "openbank-product-catalog": {
+      "component": "product-catalog"
+    },
+    "openbank-psd2-service": {
+      "component": "psd2-service"
+    },
+    "openbank-sanctions-service": {
+      "component": "sanctions-service"
+    },
+    "openbank-sca-service": {
+      "component": "sca-service"
+    },
+    "openbank-sdd-service": {
+      "component": "sdd-service"
+    },
+    "openbank-security-scanner": {
+      "component": "security-scanner"
+    },
+    "openbank-sepa-instant": {
+      "component": "sepa-instant"
+    },
+    "openbank-sepa-payment": {
+      "component": "sepa-payment"
+    },
+    "openbank-settlement-service": {
+      "component": "settlement-service"
+    },
+    "openbank-standing-order-service": {
+      "component": "standing-order-service"
+    },
+    "openbank-statement-service": {
+      "component": "statement-service"
+    },
+    "openbank-swift-service": {
+      "component": "swift-service"
+    },
+    "openbank-tpp-registry-service": {
+      "component": "tpp-registry-service"
+    },
+    "openbank-transaction-service": {
+      "component": "transaction-service"
+    }
+  }
+}

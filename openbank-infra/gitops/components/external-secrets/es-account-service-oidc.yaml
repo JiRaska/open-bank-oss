@@ -1,0 +1,29 @@
+# account-service OIDC client secret, sourced from Vault. Targets the SAME
+# Secret name/key the Deployment already reads (account-service-oidc /
+# OIDC_CLIENT_SECRET) so no app change is needed. creationPolicy: Owner — ESO
+# creates and owns the Secret and re-creates it if anything deletes it. The
+# IgnoreExtraneous annotation stops ArgoCD's prune from removing this ESO-owned
+# Secret (it is not tracked in git).
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: account-service-oidc
+  namespace: accounts
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: account-service-oidc
+    creationPolicy: Owner
+    template:
+      mergePolicy: Merge
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+  data:
+    - secretKey: OIDC_CLIENT_SECRET
+      remoteRef:
+        key: account-service
+        property: OIDC_CLIENT_SECRET

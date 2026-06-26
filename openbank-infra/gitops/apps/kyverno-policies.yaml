@@ -1,0 +1,37 @@
+# Kyverno ClusterPolicies (ADR-0029/0030 D4). Separate from the `kyverno` app
+# (the Helm chart / engine) so the policy manifests under gitops/components/
+# kyverno/ are GitOps-owned instead of applied out-of-band with kubectl. Holds
+# the `verify-openbank-image-signatures` policy that verifies every openbank-*
+# image against the Cosign KMS public key at admission.
+#
+# Namespace is nominal (ClusterPolicy is cluster-scoped); the kyverno ns already
+# exists from the `kyverno` app. The retry backoff rides out the brief window
+# where the ClusterPolicy CRD may not yet be registered after a fresh install.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno-policies
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/kyverno
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyverno
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false

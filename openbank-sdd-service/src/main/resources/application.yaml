@@ -1,0 +1,137 @@
+quarkus:
+  application:
+    name: openbank-sdd-service
+    version: 0.1.1
+  http:
+    port: 8129
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+      headers: Content-Type,Authorization,Idempotency-Key
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: postgresql://localhost:5432/openbank_sdd
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_sdd
+  flyway:
+    migrate-at-start: true
+    validate-on-migrate: false
+    connect-retries: 10
+    connect-retries-interval: 2S
+  hibernate-orm:
+    database:
+      generation: none
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+    console:
+      json: true
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-sdd-service
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  scheduler:
+    enabled: true
+  management:
+    enabled: true
+    port: 8086
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+    oidc:
+      enabled: false
+"%test":
+  quarkus:
+    # Dedicated IT Postgres on the warm CI stack (ADR-0043); CI auto-creates any
+    # openbank_*_it database referenced here. Dev Services stay OFF — tests hit
+    # localhost:5432 exactly as on a workstation.
+    datasource:
+      username: openbank
+      password: openbank_secret
+      reactive:
+        url: vertx-reactive:postgresql://localhost:5432/openbank_sdd_it
+      jdbc:
+        url: jdbc:postgresql://localhost:5432/openbank_sdd_it
+    management:
+      enabled: false
+    devservices:
+      enabled: false
+    oidc:
+      enabled: false
+    # ADR-0050: disable the @Scheduled outbox tick under test so the integration test
+    # drives dispatcher.dispatch() explicitly and never races the assertions.
+    scheduler:
+      enabled: false
+  openbank:
+    outbox:
+      # Enable dispatch in tests so SddOutboxDispatchIT can drive dispatcher.dispatch() directly.
+      dispatch-enabled: true
+
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:true}"
+
+openbank:
+  sdd:
+    expiry-cron: "0 15 3 * * ?"
+    expiry:
+      enabled: false
+  outbox:
+    dispatch-enabled: true
+    poll-interval: 5s
+    initial-delay: 5s
+
+mp:
+  messaging:
+    outgoing:
+      sdd-events-out:
+        connector: smallrye-kafka
+        client.id: sdd-service-${quarkus.uuid}
+        topic: openbank.sdd.event
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer

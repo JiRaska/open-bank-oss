@@ -1,0 +1,134 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# BPMN process diagram (ADR-0019/0029). Authored as data; validated by
+# src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
+
+name: AML Transaction Screening
+desc: Automatické AML screenování transakcí dle 5AMLD/6AMLD
+regulation: 5AMLD Art. 18 + 6AMLD + FATF R.10-12 + EBA AML Guidelines
+services:
+  - aml-service
+  - audit-service
+  - notification-service
+  - sanctions-service
+steps:
+  - id: start
+    type: start
+    x: 60
+    y: 100
+    label: Transakce
+  - id: rules
+    type: task
+    x: 180
+    y: 100
+    label: Rules Engine
+    lane: aml
+    apis:
+      - POST /api/v1/aml/rules/evaluate
+    relatedServices:
+      - aml-service
+  - id: sanction
+    type: task
+    x: 320
+    y: 100
+    label: Sanctions Check
+    lane: compliance
+    apis:
+      - POST /api/v1/sanctions/screen
+    relatedServices:
+      - sanctions-service
+  - id: gw1
+    type: gateway
+    x: 440
+    y: 100
+    label: Hit?
+  - id: fp
+    type: task
+    x: 440
+    y: 220
+    label: False Positive?
+    lane: aml
+    apis:
+      - GET /api/v1/aml/cases/{id}
+    relatedServices:
+      - aml-service
+  - id: gw-fp
+    type: gateway
+    x: 560
+    y: 220
+    label: FP?
+  - id: block
+    type: task
+    x: 680
+    y: 220
+    label: Blokace + SAR
+    lane: aml
+    apis:
+      - POST /api/v1/aml/sar
+    relatedServices:
+      - aml-service
+    emits:
+      - openbank.aml.events
+  - id: clear
+    type: task
+    x: 560
+    y: 100
+    label: Cleared
+    lane: aml
+    apis:
+      - PUT /api/v1/aml/cases/{id}/clear
+    relatedServices:
+      - aml-service
+    emits:
+      - openbank.aml.events
+  - id: mlro
+    type: task
+    x: 800
+    y: 220
+    label: MLRO Eskalace
+    lane: compliance
+    apis:
+      - POST /api/v1/notifications/mlro
+    relatedServices:
+      - notification-service
+    consumes:
+      - openbank.notification.requests
+  - id: end-ok
+    type: end
+    x: 680
+    y: 100
+    label: Schváleno
+  - id: end-sar
+    type: end-err
+    x: 920
+    y: 220
+    label: SAR Filed
+flows:
+  - from: start
+    to: rules
+  - from: rules
+    to: sanction
+  - from: sanction
+    to: gw1
+  - from: gw1
+    to: fp
+    label: Hit
+  - from: gw1
+    to: clear
+    label: Clear
+  - from: clear
+    to: end-ok
+  - from: fp
+    to: gw-fp
+  - from: gw-fp
+    to: clear
+    label: Ano
+  - from: gw-fp
+    to: block
+    label: Ne
+  - from: block
+    to: mlro
+    kind: async
+    topic: openbank.notification.requests
+  - from: mlro
+    to: end-sar

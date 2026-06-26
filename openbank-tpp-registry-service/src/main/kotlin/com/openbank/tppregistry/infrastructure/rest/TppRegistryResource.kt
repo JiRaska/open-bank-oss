@@ -1,0 +1,135 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+package com.openbank.tppregistry.infrastructure.rest
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.tppregistry.application.port.`in`.*
+import com.openbank.tppregistry.domain.model.*
+import com.openbank.libs.authz.Authorize
+import com.openbank.libs.idempotency.IdempotencyStore
+import jakarta.ws.rs.*
+import jakarta.ws.rs.core.MediaType
+import jakarta.ws.rs.core.Response
+
+@Path("/api/v1/tpp-registry")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+class TppRegistryResource(
+    private val svc: TppRegistryUseCase,
+    private val idempotencyStore: IdempotencyStore,
+    private val objectMapper: ObjectMapper
+) {
+    @GET
+    @Path("/check")
+    suspend fun checkAuthorization(
+        @QueryParam("tppId") tppId: String,
+        @QueryParam("role") role: String
+    ): Response {
+        val result = svc.checkAuthorization(
+            CheckTppAuthorizationQuery(tppId, TppRole.valueOf(role.uppercase()))
+        )
+        return if (result.authorized) Response.ok(result).build()
+        else Response.status(403).entity(result).build()
+    }
+
+    @POST
+    suspend fun registerTpp(
+        cmd: RegisterTppCommand,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?
+    ): Response {
+        val cacheKey = idempotencyKey?.takeIf { it.isNotBlank() }?.let { registerKey(cmd.tppId, it) }
+        cacheKey?.let { key ->
+            idempotencyStore.get(key)?.let { cached ->
+                return Response.status(cached.statusCode)
+                    .entity(cached.responseBody)
+                    .type(MediaType.APPLICATION_JSON)
+                    .header("X-Idempotency-Replayed", "true")
+                    .build()
+            }
+        }
+
+        val entry = svc.registerTpp(cmd)
+        cacheKey?.let { key -> idempotencyStore.save(key, 201, objectMapper.writeValueAsString(entry)) }
+        return Response.status(201).entity(entry).build()
+    }
+
+    @GET
+    suspend fun listTpps(
+        @QueryParam("countryCode") countryCode: String?,
+        @QueryParam("role") role: String?,
+        @QueryParam("status") status: String?,
+        @QueryParam("limit") limit: Int?,
+        @QueryParam("afterCursor") afterCursor: String?
+    ): Response {
+        val entries = svc.listTpps(
+            ListTppsQuery(
+                countryCode = countryCode,
+                role = role?.let { TppRole.valueOf(it.uppercase()) },
+                status = status?.let { TppStatus.valueOf(it.uppercase()) },
+                limit = limit ?: 50,
+                afterCursor = afterCursor
+            )
+        )
+        return Response.ok(mapOf("tpps" to entries, "count" to entries.size)).build()
+    }
+
+    @GET
+    @Path("/{tppId}")
+    suspend fun getTpp(@PathParam("tppId") tppId: String): Response =
+        Response.ok(svc.getTpp(GetTppQuery(tppId))).build()
+
+    @POST
+    @Path("/{tppId}/blacklist")
+    @Authorize(action = "tppRegistry.blacklist", resource = "#tppId")
+    suspend fun blacklistTpp(
+        @PathParam("tppId") tppId: String,
+        body: Map<String, String>,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?
+    ): Response {
+        val reason = body["reason"] ?: "No reason provided"
+        val cacheKey = idempotencyKey?.takeIf { it.isNotBlank() }?.let { blacklistKey(tppId, it) }
+        cacheKey?.let { key ->
+            idempotencyStore.get(key)?.let { cached ->
+                return Response.status(cached.statusCode)
+                    .entity(cached.responseBody)
+                    .type(MediaType.APPLICATION_JSON)
+                    .header("X-Idempotency-Replayed", "true")
+                    .build()
+            }
+        }
+
+        val result = svc.blacklistTpp(BlacklistTppCommand(tppId, reason))
+        cacheKey?.let { key -> idempotencyStore.save(key, 200, objectMapper.writeValueAsString(result)) }
+        return Response.ok(result).build()
+    }
+
+    @POST
+    @Path("/sync/eba")
+    suspend fun triggerEbaSync(@HeaderParam("Idempotency-Key") idempotencyKey: String?): Response {
+        val cacheKey = idempotencyKey?.takeIf { it.isNotBlank() }?.let(::syncKey)
+        cacheKey?.let { key ->
+            idempotencyStore.get(key)?.let { cached ->
+                return Response.status(cached.statusCode)
+                    .entity(cached.responseBody)
+                    .type(MediaType.APPLICATION_JSON)
+                    .header("X-Idempotency-Replayed", "true")
+                    .build()
+            }
+        }
+
+        val result = svc.triggerEbaSync()
+        cacheKey?.let { key -> idempotencyStore.save(key, 200, objectMapper.writeValueAsString(result), 300) }
+        return Response.ok(result).build()
+    }
+
+    @GET
+    @Path("/sync/state")
+    suspend fun getSyncState(): Response =
+        Response.ok(svc.getSyncState()).build()
+
+    private fun registerKey(tppId: String, idempotencyKey: String) = "tpp:register:$tppId:$idempotencyKey"
+    private fun blacklistKey(tppId: String, idempotencyKey: String) = "tpp:blacklist:$tppId:$idempotencyKey"
+    private fun syncKey(idempotencyKey: String) = "tpp:sync:$idempotencyKey"
+}

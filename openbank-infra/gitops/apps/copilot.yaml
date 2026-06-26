@@ -1,0 +1,34 @@
+# ArgoCD app for copilot-service (customer-facing AI assistant, ADR-0089). Deploys the
+# platform-ns Deployment+Service from components/copilot. Tracks main (same as the other
+# component apps). The OIDC_CLIENT_SECRET Secret is delivered by ESO (es-copilot-service).
+# The capability is OFF by default (COPILOT_ENABLED=false) — money-path, four-eyes to flip.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: copilot
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/copilot
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: platform
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false

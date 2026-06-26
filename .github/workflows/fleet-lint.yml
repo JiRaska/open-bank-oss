@@ -1,0 +1,196 @@
+# Fast full-fleet lint + compile gate.
+#
+# WHY THIS EXISTS (the gap it closes):
+#  Per-service CI (services-ci.yml) is path-scoped — a PR builds only the modules it
+#  touches. So a change to openbank-libs (or a detekt/ktlint ruleset bump) can leave the
+#  REST of the fleet silently non-compliant with the current ruleset until something
+#  forces a full rebuild. The defect class:
+#    - a libs constructor change breaks a downstream service's *test* compile,
+#    - a ruleset tightening leaves pre-existing detekt/ktlint violations in untouched
+#      modules (cf. "latent wildcard imports"),
+#  all invisible on the touching PR and dumped, en masse, on the next libs PR's
+#  full-fleet rebuild (which then blocks every libs PR — #1689 chain).
+#
+#  services-ci.yml already runs a NIGHTLY full `:build` per module, but that is heavy
+#  (Testcontainers, ~28 services, max-parallel 4) and shares the integration-test flake
+#  surface, so a red nightly is easy to dismiss. This gate is the COMPLEMENT: it runs
+#  ONLY compile + static analysis (detekt + ktlintCheck + testClasses) across the whole
+#  fleet in one Gradle invocation — no Docker, no Testcontainers, deterministic — so the
+#  compile/lint drift class is caught:
+#    - CONTINUOUSLY (every push to main, in minutes — not up to 24h later), and
+#    - with a CLEAN signal nobody can write off as "just a flaky container".
+#
+#  It does NOT run tests (that stays with the nightly `:build`); coverage/IT drift is the
+#  nightly's job. This gate is purely "does the whole fleet still compile and lint?".
+name: Fleet lint
+
+on:
+  # Continuous: the moment a libs/ruleset change lands on main, re-lint the whole fleet.
+  # Skip the bulk of main churn that cannot change a Gradle compile/detekt/ktlint result —
+  # gitops deploy commits (openbank-infra/**, the dominant main-push volume), the JS admin-ui
+  # (not a Gradle module), docs and markdown. The daily `schedule` below is the belt-and-braces
+  # full sweep, so a code path missed by this filter is still caught within ~12h. This stops
+  # every sandbox-deploy chore commit from spinning up (then cancelling, via the concurrency
+  # group) a full-fleet run and contending for the shared runner pool.
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'openbank-infra/**'
+      - 'openbank-admin-ui/**'
+      - 'docs/**'
+      - '**/*.md'
+  # Belt-and-braces daily sweep, offset 12h from the 03:00 nightly `:build` so the fleet
+  # gets a compile/lint signal twice a day at different times.
+  schedule:
+    - cron: "0 15 * * *" # 15:00 UTC daily
+  workflow_dispatch: {}
+
+# Deliberately NOT on pull_request: a per-PR full-fleet lint would defeat the path-scoped
+# minutes governance that services-ci.yml is built around. This gate is the post-merge /
+# scheduled safety net for what path-scoping cannot see.
+
+permissions:
+  contents: read
+
+concurrency:
+  # One fleet-lint per ref; a newer main push supersedes an in-flight one.
+  group: fleet-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fleet-lint:
+    name: fleet lint + compile
+    runs-on: openbank-build
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      issues: write
+    env:
+      # UTF-8 locale so the JVM's sun.jnu.encoding (filename charset) is UTF-8. Without it,
+      # on a C/POSIX-locale runner the Gradle remote build cache fails to decode .class entries
+      # whose names contain non-ASCII chars (Kotlin backtick test names with em-dashes, e.g.
+      # "...$screen checks aliases — hit via alias search wins$1$1.class") → "Malformed input or
+      # input contains unmappable characters" → fatal cache-load failure across the fleet compile.
+      # -Dsun.jnu.encoding also forces a fresh daemon (distinct jvmargs) so a stale C-locale daemon
+      # on a persistent runner isn't reused. file.encoding=UTF-8 alone does NOT fix filename decoding.
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Most modules pin kotlin { jvmToolchain(25) }; a few use 21. Install both so
+      # Gradle's toolchain resolution picks the right one with zero Foojay downloads.
+      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            25
+
+      # Probe the in-cluster Reposilite Maven mirror (issue #849): zero NAT for
+      # in-cluster ARC runners; Hetzner/Mac runners ECONNREFUSED fast and skip.
+      - name: Probe Reposilite in-cluster Maven mirror
+        run: |
+          if curl -sf --connect-timeout 2 \
+              http://reposilite.reposilite.svc.cluster.local:8080/api/status \
+              > /dev/null 2>&1; then
+            echo "REPOSILITE_MIRROR_URL=http://reposilite.reposilite.svc.cluster.local:8080" \
+              >> "$GITHUB_ENV"
+            echo "::notice title=Reposilite active::in-cluster Maven mirror responding (zero NAT)"
+          else
+            echo "::notice title=Reposilite unavailable::falling back to GCS mirror + CodeArtifact"
+          fi
+
+      # CodeArtifact Maven mirror (FinOps): in-VPC, S3-gateway backed → dep downloads
+      # never exit the VPC. Soft-fail to public Maven Central if IRSA/aws CLI absent.
+      - name: Configure CodeArtifact Maven mirror
+        continue-on-error: true
+        env:
+          AWS_DEFAULT_REGION: eu-north-1
+        run: |
+          if ! command -v aws >/dev/null 2>&1; then
+            echo "::warning title=CodeArtifact mirror skipped::aws CLI not on this runner — falling back to public Maven Central."
+            exit 0
+          fi
+          CA_TOKEN=$(aws codeartifact get-authorization-token \
+            --domain openbank-sandbox \
+            --domain-owner 265175468565 \
+            --region eu-north-1 \
+            --query authorizationToken --output text) || {
+            echo "::warning title=CodeArtifact mirror skipped::token fetch failed — falling back to public Maven Central."
+            exit 0
+          }
+          CA_URL="https://openbank-sandbox-265175468565.d.codeartifact.eu-north-1.amazonaws.com/maven/maven-central-proxy/"
+          mkdir -p "${GRADLE_USER_HOME}/init.d"
+          cat > "${GRADLE_USER_HOME}/init.d/codeartifact-mirror.gradle" <<GRADLE_INIT
+          allprojects {
+            repositories.all { repo ->
+              if (repo instanceof MavenArtifactRepository) {
+                def url = repo.url.toString()
+                if (url.contains("repo1.maven.org") || url.contains("repo.maven.apache.org") ||
+                    url.contains("plugins.gradle.org")) {
+                  repo.setUrl("${CA_URL}")
+                  repo.credentials {
+                    username "aws"
+                    password "${CA_TOKEN}"
+                  }
+                }
+              }
+            }
+          }
+          GRADLE_INIT
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+
+      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          # Only main saves the Actions cache; scheduled/dispatch restore read-only.
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      # The whole point: compile main + test AND run static analysis for EVERY module in
+      # one invocation, with NO test execution (no Testcontainers, no Docker).
+      #  - testClasses  → compiles main + test sources fleet-wide (catches the
+      #                   libs-constructor-breaks-a-downstream-test compile drift class).
+      #  - detekt       → static analysis with type resolution (depends on compile).
+      #  - ktlintCheck  → formatting/import drift (the latent-wildcard class).
+      # --continue: don't stop at the first red module — report ALL drift in one run so a
+      # fleet-wide ruleset bump surfaces the full list, not one-module-at-a-time.
+      - name: Fleet compile + detekt + ktlint
+        run: |
+          ./gradlew testClasses detekt ktlintCheck \
+            --continue --build-cache --console=plain --stacktrace
+
+      # Same lesson as the nightly build alert: a scheduled/push failure that only shows
+      # as a red check in the Actions tab goes unwatched. Turn it into the SAME
+      # deduplicated fleet-health issue so a rotting fleet is impossible to miss.
+      # github-script (not `gh`): the self-hosted runners have no gh binary.
+      - name: Alert on fleet-lint failure
+        if: failure()
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const detected = new Date().toISOString();
+            const trigger = context.eventName; // push | schedule | workflow_dispatch
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', labels: 'fleet-health',
+            });
+            const note = `The fast fleet-lint gate (compile + detekt + ktlint, no tests) failed on \`${trigger}\` — a module no longer compiles or violates the current detekt/ktlint ruleset, even though path-scoped PR CI was green. See the run for the full per-module list.\n\nRun: ${runUrl}\nDetected: ${detected}`;
+            if (open.length > 0) {
+              const n = open[0].number;
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: n, body: note,
+              });
+              core.info(`Commented on existing fleet-health issue #${n}.`);
+            } else {
+              const { data: created } = await github.rest.issues.create({
+                owner, repo,
+                title: 'Full-fleet lint gate is failing',
+                labels: ['fleet-health', 'bug'],
+                body: note,
+              });
+              core.info(`Opened a new fleet-health issue #${created.number}.`);
+            }

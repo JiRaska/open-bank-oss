@@ -1,0 +1,132 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+
+openapi: "3.1.0"
+
+info:
+  title: OpenBank Copilot Service API
+  version: "1.0.0"
+  description: |
+    Customer-facing AI assistant (mobile copilot), per ADR-0089.
+
+    The conversation runs **server-side** behind a provider-agnostic model gateway (ADR-0031) —
+    the model is never called from the device. The reasoning loop runs each tool through the OPA
+    policy gate (ADR-0034, deny-by-default), operates strictly within the authenticated customer's
+    scope (on-behalf-of token, ADR-0089 D5), and emits an AI-attributed audit event per turn
+    (ADR-0031 D5).
+
+    Core principle: **the model proposes, the bank disposes.** Every figure shown comes from a tool
+    result, never model generation; money never moves on the model's word — action tools emit a
+    proposal gated by human-in-the-loop confirmation and SCA with dynamic linking (ADR-0021/0073).
+
+    **Phase-1 skeleton:** the chat surface exists; tools and the real model are not yet wired, and
+    the capability is gated by the `copilot-assistant` feature flag (off by default, ADR-0067).
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+
+servers:
+  - url: /api/v1
+
+paths:
+  /copilot/chat:
+    post:
+      operationId: chat
+      summary: Send a turn to the customer assistant (full response, buffered)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+      responses:
+        "200":
+          description: Assistant reply
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatReply"
+        "501":
+          description: Capability not yet enabled (feature flag off)
+
+  /copilot/chat/stream:
+    post:
+      operationId: chatStream
+      summary: Send a turn and receive the reply as Server-Sent Events
+      description: |
+        Same governed reasoning loop as `/copilot/chat` — identical prompt-injection guard,
+        OPA policy gate, and tool whitelist — but text tokens are forwarded as SSE events as
+        they arrive from the model backend instead of being buffered until the full reply is
+        ready. Tool-call rounds are handled server-side and transparent to the client; only
+        the final text response is streamed. First token arrives within ~500 ms.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+      responses:
+        "200":
+          description: Stream of text token events (text/event-stream)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: >
+                  Newline-delimited SSE events. Each `data:` line contains a raw text chunk.
+                  No JSON wrapper — clients concatenate chunks to build the full reply.
+        "501":
+          description: Capability not yet enabled (feature flag off)
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ChatRequest:
+      type: object
+      required: [message]
+      properties:
+        conversationId:
+          type: string
+          description: Opaque id correlating turns of one conversation.
+        message:
+          type: string
+          description: The customer's message (treated as untrusted input — ADR-0089 D3).
+    ChatReply:
+      type: object
+      required: [conversationId, reply]
+      properties:
+        conversationId:
+          type: string
+        reply:
+          type: string
+          description: Narrated reply; any figures are rendered from tool results, not generated.
+        proposal:
+          $ref: "#/components/schemas/ActionProposal"
+          description: |
+            Present when the turn produced a money-path action. A structured, validated proposal the
+            app renders as a non-AI-controlled card and routes into the existing edge payment + SCA
+            (dynamic-linking) flow. The assistant NEVER executes it (ADR-0089 D2).
+    ActionProposal:
+      type: object
+      required: [kind, summary, fields]
+      properties:
+        kind:
+          type: string
+          enum: [PAYMENT, CARD_FREEZE, DISPUTE]
+        summary:
+          type: string
+          description: Human-readable one-liner of the proposed action.
+        fields:
+          type: object
+          additionalProperties:
+            type: string
+          description: Validated parameters (fromAccountId, payeeIban, amount, currency, …) — authoritative.

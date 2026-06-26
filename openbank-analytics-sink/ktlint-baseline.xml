@@ -1,0 +1,514 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="build.gradle.kts">
+        <error line="14" column="24" source="standard:statement-wrapping" />
+        <error line="53" column="8" source="standard:function-literal" />
+        <error line="53" column="9" source="standard:wrapping" />
+        <error line="53" column="10" source="standard:statement-wrapping" />
+        <error line="53" column="23" source="standard:argument-list-wrapping" />
+        <error line="53" column="25" source="standard:argument-list-wrapping" />
+        <error line="53" column="27" source="standard:statement-wrapping" />
+        <error line="53" column="44" source="standard:function-literal" />
+        <error line="53" column="45" source="standard:wrapping" />
+        <error line="53" column="70" source="standard:argument-list-wrapping" />
+        <error line="53" column="89" source="standard:argument-list-wrapping" />
+        <error line="53" column="121" source="standard:max-line-length" />
+        <error line="53" column="133" source="standard:argument-list-wrapping" />
+        <error line="53" column="135" source="standard:function-literal" />
+        <error line="53" column="137" source="standard:statement-wrapping" />
+        <error line="53" column="137" source="standard:function-literal" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/application/AnalyticsConsumer.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="13" column="1" source="standard:no-unused-imports" />
+        <error line="40" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="41" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="42" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="43" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="54" column="52" source="standard:binary-expression-wrapping" />
+        <error line="54" column="78" source="standard:argument-list-wrapping" />
+        <error line="54" column="98" source="standard:argument-list-wrapping" />
+        <error line="54" column="120" source="standard:argument-list-wrapping" />
+        <error line="54" column="121" source="standard:max-line-length" />
+        <error line="60" column="49" source="standard:trailing-comma-on-call-site" />
+        <error line="61" column="22" source="standard:trailing-comma-on-call-site" />
+        <error line="75" column="45" source="standard:trailing-comma-on-call-site" />
+        <error line="76" column="18" source="standard:trailing-comma-on-call-site" />
+        <error line="112" column="71" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/application/BackfillService.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="38" column="23" source="standard:trailing-comma-on-declaration-site" />
+        <error line="56" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="57" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="58" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="59" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="108" column="33" source="standard:trailing-comma-on-call-site" />
+        <error line="113" column="22" source="standard:argument-list-wrapping" />
+        <error line="113" column="37" source="standard:argument-list-wrapping" />
+        <error line="113" column="53" source="standard:argument-list-wrapping" />
+        <error line="113" column="63" source="standard:argument-list-wrapping" />
+        <error line="113" column="72" source="standard:argument-list-wrapping" />
+        <error line="113" column="93" source="standard:argument-list-wrapping" />
+        <error line="113" column="107" source="standard:trailing-comma-on-call-site" />
+        <error line="129" column="41" source="standard:trailing-comma-on-call-site" />
+        <error line="130" column="14" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/application/ErasureService.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="31" column="26" source="standard:trailing-comma-on-declaration-site" />
+        <error line="54" column="23" source="standard:wrapping" />
+        <error line="54" column="23" source="standard:argument-list-wrapping" />
+        <error line="55" column="32" source="standard:argument-list-wrapping" />
+        <error line="55" column="45" source="standard:argument-list-wrapping" />
+        <error line="55" column="55" source="standard:argument-list-wrapping" />
+        <error line="55" column="69" source="standard:argument-list-wrapping" />
+        <error line="55" column="79" source="standard:wrapping" />
+        <error line="55" column="80" source="standard:argument-list-wrapping" />
+        <error line="55" column="80" source="standard:trailing-comma-on-call-site" />
+        <error line="57" column="48" source="standard:argument-list-wrapping" />
+        <error line="58" column="33" source="standard:argument-list-wrapping" />
+        <error line="63" column="34" source="standard:argument-list-wrapping" />
+        <error line="63" column="57" source="standard:trailing-comma-on-call-site" />
+        <error line="68" column="19" source="standard:wrapping" />
+        <error line="68" column="19" source="standard:argument-list-wrapping" />
+        <error line="69" column="28" source="standard:argument-list-wrapping" />
+        <error line="69" column="41" source="standard:argument-list-wrapping" />
+        <error line="69" column="51" source="standard:argument-list-wrapping" />
+        <error line="69" column="57" source="standard:argument-list-wrapping" />
+        <error line="69" column="67" source="standard:wrapping" />
+        <error line="69" column="68" source="standard:argument-list-wrapping" />
+        <error line="69" column="68" source="standard:trailing-comma-on-call-site" />
+        <error line="71" column="44" source="standard:argument-list-wrapping" />
+        <error line="72" column="28" source="standard:argument-list-wrapping" />
+        <error line="75" column="30" source="standard:argument-list-wrapping" />
+        <error line="75" column="53" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/application/IngestFreshness.kt">
+        <error line="32" column="5" source="standard:spacing-between-declarations-with-comments" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/application/PayloadMasker.kt">
+        <error line="47" column="42" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/application/SchemaGovernance.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/application/SensitiveReloadService.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="33" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="42" column="39" source="standard:trailing-comma-on-call-site" />
+        <error line="45" column="19" source="standard:wrapping" />
+        <error line="45" column="19" source="standard:argument-list-wrapping" />
+        <error line="46" column="26" source="standard:argument-list-wrapping" />
+        <error line="46" column="42" source="standard:argument-list-wrapping" />
+        <error line="46" column="63" source="standard:argument-list-wrapping" />
+        <error line="46" column="76" source="standard:wrapping" />
+        <error line="46" column="77" source="standard:argument-list-wrapping" />
+        <error line="46" column="77" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/application/port/out/DeadLetterSink.kt">
+        <error line="19" column="5" source="standard:class-signature" />
+        <error line="20" column="5" source="standard:class-signature" />
+        <error line="21" column="5" source="standard:class-signature" />
+        <error line="22" column="5" source="standard:class-signature" />
+        <error line="22" column="26" source="standard:class-signature" />
+        <error line="22" column="26" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/application/port/out/ErasurePort.kt">
+        <error line="1" column="1" source="standard:filename" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/application/port/out/WormArchive.kt">
+        <error line="26" column="26" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/infrastructure/DataResidencyValidator.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/infrastructure/clickhouse/ClickHouseClient.kt">
+        <error line="71" column="102" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/infrastructure/erasure/NoOpCryptoErasure.kt">
+        <error line="26" column="32" source="standard:argument-list-wrapping" />
+        <error line="26" column="47" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/infrastructure/erasure/VaultCryptoErasure.kt">
+        <error line="82" column="40" source="standard:statement-wrapping" />
+        <error line="82" column="106" source="standard:statement-wrapping" />
+        <error line="82" column="109" source="standard:statement-wrapping" />
+        <error line="94" column="22" source="standard:parameter-list-wrapping" />
+        <error line="94" column="31" source="standard:parameter-list-wrapping" />
+        <error line="94" column="35" source="standard:function-signature" />
+        <error line="94" column="53" source="standard:function-literal" />
+        <error line="94" column="82" source="standard:binary-expression-wrapping" />
+        <error line="94" column="108" source="standard:function-literal" />
+        <error line="94" column="121" source="standard:max-line-length" />
+        <error line="94" column="123" source="standard:argument-list-wrapping" />
+        <error line="94" column="125" source="standard:argument-list-wrapping" />
+        <error line="103" column="35" source="standard:multiline-if-else" />
+        <error line="104" column="22" source="standard:multiline-if-else" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/infrastructure/proposal/ClickHouseProposalStore.kt">
+        <error line="56" column="33" source="standard:argument-list-wrapping" />
+        <error line="56" column="36" source="standard:argument-list-wrapping" />
+        <error line="56" column="65" source="standard:function-literal" />
+        <error line="56" column="83" source="standard:function-literal" />
+        <error line="56" column="90" source="standard:function-literal" />
+        <error line="56" column="101" source="standard:argument-list-wrapping" />
+        <error line="56" column="117" source="standard:argument-list-wrapping" />
+        <error line="56" column="119" source="standard:argument-list-wrapping" />
+        <error line="56" column="120" source="standard:argument-list-wrapping" />
+        <error line="56" column="121" source="standard:max-line-length" />
+        <error line="56" column="122" source="standard:function-literal" />
+        <error line="84" column="49" source="standard:trailing-comma-on-call-site" />
+        <error line="98" column="57" source="standard:trailing-comma-on-call-site" />
+        <error line="109" column="74" source="standard:trailing-comma-on-call-site" />
+        <error line="113" column="62" source="standard:function-signature" />
+        <error line="116" column="49" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/infrastructure/reconcile/ClickHouseWarehouseStateReader.kt">
+        <error line="40" column="64" source="standard:function-signature" />
+        <error line="47" column="71" source="standard:function-signature" />
+        <error line="49" column="32" source="standard:multiline-if-else" />
+        <error line="50" column="18" source="standard:multiline-if-else" />
+        <error line="54" column="63" source="standard:function-signature" />
+        <error line="60" column="87" source="standard:function-signature" />
+        <error line="84" column="121" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/infrastructure/reconcile/HttpReconciliationSource.kt">
+        <error line="78" column="70" source="standard:function-signature" />
+        <error line="91" column="52" source="standard:function-signature" />
+        <error line="129" column="108" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/infrastructure/reconcile/NoOpBackfillSource.kt">
+        <error line="29" column="26" source="standard:argument-list-wrapping" />
+        <error line="29" column="37" source="standard:argument-list-wrapping" />
+        <error line="29" column="51" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/infrastructure/reconcile/ReconciliationJob.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="41" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="42" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="75" column="45" source="standard:trailing-comma-on-call-site" />
+        <error line="76" column="18" source="standard:trailing-comma-on-call-site" />
+        <error line="92" column="110" source="standard:trailing-comma-on-call-site" />
+        <error line="99" column="73" source="standard:trailing-comma-on-call-site" />
+        <error line="125" column="23" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/infrastructure/rest/BackfillResource.kt">
+        <error line="36" column="23" source="standard:trailing-comma-on-declaration-site" />
+        <error line="56" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="70" column="32" source="standard:argument-list-wrapping" />
+        <error line="70" column="45" source="standard:argument-list-wrapping" />
+        <error line="71" column="52" source="standard:argument-list-wrapping" />
+        <error line="72" column="38" source="standard:argument-list-wrapping" />
+        <error line="72" column="65" source="standard:trailing-comma-on-call-site" />
+        <error line="73" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="81" column="25" source="standard:parameter-list-wrapping" />
+        <error line="81" column="25" source="standard:function-signature" />
+        <error line="81" column="56" source="standard:parameter-list-wrapping" />
+        <error line="81" column="56" source="standard:function-signature" />
+        <error line="81" column="67" source="standard:argument-list-wrapping" />
+        <error line="81" column="71" source="standard:argument-list-wrapping" />
+        <error line="81" column="85" source="standard:parameter-list-wrapping" />
+        <error line="81" column="85" source="standard:function-signature" />
+        <error line="81" column="101" source="standard:parameter-list-wrapping" />
+        <error line="81" column="101" source="standard:function-signature" />
+        <error line="81" column="121" source="standard:max-line-length" />
+        <error line="81" column="131" source="standard:function-signature" />
+        <error line="88" column="24" source="standard:parameter-list-wrapping" />
+        <error line="88" column="24" source="standard:function-signature" />
+        <error line="88" column="55" source="standard:parameter-list-wrapping" />
+        <error line="88" column="55" source="standard:function-signature" />
+        <error line="88" column="66" source="standard:argument-list-wrapping" />
+        <error line="88" column="70" source="standard:argument-list-wrapping" />
+        <error line="88" column="84" source="standard:parameter-list-wrapping" />
+        <error line="88" column="84" source="standard:function-signature" />
+        <error line="88" column="100" source="standard:parameter-list-wrapping" />
+        <error line="88" column="100" source="standard:function-signature" />
+        <error line="88" column="121" source="standard:max-line-length" />
+        <error line="88" column="130" source="standard:function-signature" />
+        <error line="105" column="61" source="standard:function-signature" />
+        <error line="113" column="27" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/infrastructure/rest/MakerCheckerExceptionMapper.kt">
+        <error line="20" column="74" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/infrastructure/rest/ReconciliationResource.kt">
+        <error line="41" column="27" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/infrastructure/schema/ApicurioSchemaCatalogSource.kt">
+        <error line="64" column="25" source="standard:argument-list-wrapping" />
+        <error line="64" column="88" source="standard:argument-list-wrapping" />
+        <error line="64" column="92" source="standard:argument-list-wrapping" />
+        <error line="64" column="114" source="standard:argument-list-wrapping" />
+        <error line="64" column="121" source="standard:max-line-length" />
+        <error line="64" column="136" source="standard:argument-list-wrapping" />
+        <error line="64" column="137" source="standard:trailing-comma-on-call-site" />
+        <error line="68" column="19" source="standard:argument-list-wrapping" />
+        <error line="68" column="88" source="standard:argument-list-wrapping" />
+        <error line="68" column="95" source="standard:argument-list-wrapping" />
+        <error line="68" column="113" source="standard:argument-list-wrapping" />
+        <error line="68" column="121" source="standard:max-line-length" />
+        <error line="68" column="122" source="standard:argument-list-wrapping" />
+        <error line="77" column="25" source="standard:argument-list-wrapping" />
+        <error line="77" column="29" source="standard:argument-list-wrapping" />
+        <error line="77" column="36" source="standard:argument-list-wrapping" />
+        <error line="77" column="47" source="standard:argument-list-wrapping" />
+        <error line="77" column="60" source="standard:function-literal" />
+        <error line="77" column="70" source="standard:argument-list-wrapping" />
+        <error line="77" column="74" source="standard:argument-list-wrapping" />
+        <error line="77" column="83" source="standard:argument-list-wrapping" />
+        <error line="77" column="87" source="standard:argument-list-wrapping" />
+        <error line="77" column="103" source="standard:function-literal" />
+        <error line="77" column="121" source="standard:function-literal" />
+        <error line="77" column="121" source="standard:max-line-length" />
+        <error line="77" column="123" source="standard:function-literal" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/infrastructure/schema/ConfigSchemaCatalogSource.kt">
+        <error line="27" column="55" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/infrastructure/sink/ClickHouseAnalyticsSink.kt">
+        <error line="114" column="64" source="standard:trailing-comma-on-call-site" />
+        <error line="136" column="103" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/infrastructure/sink/LoggingAnalyticsSink.kt">
+        <error line="47" column="36" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/infrastructure/sink/LoggingDeadLetterSink.kt">
+        <error line="30" column="40" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/infrastructure/worm/ClickHouseWormArchive.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="56" column="69" source="standard:trailing-comma-on-call-site" />
+        <error line="64" column="54" source="standard:function-signature" />
+        <error line="75" column="54" source="standard:trailing-comma-on-call-site" />
+        <error line="92" column="37" source="standard:trailing-comma-on-call-site" />
+        <error line="96" column="49" source="standard:function-signature" />
+        <error line="106" column="9" source="standard:spacing-between-declarations-with-comments" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/infrastructure/worm/LoggingWormArchive.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="33" column="82" source="standard:trailing-comma-on-call-site" />
+        <error line="41" column="30" source="standard:argument-list-wrapping" />
+        <error line="41" column="49" source="standard:argument-list-wrapping" />
+        <error line="42" column="33" source="standard:argument-list-wrapping" />
+        <error line="42" column="46" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/analytics/infrastructure/worm/S3WormArchive.kt">
+        <error line="60" column="21" source="standard:argument-list-wrapping" />
+        <error line="60" column="67" source="standard:argument-list-wrapping" />
+        <error line="60" column="120" source="standard:max-line-length" />
+        <error line="60" column="121" source="standard:argument-list-wrapping" />
+        <error line="92" column="65" source="standard:trailing-comma-on-call-site" />
+        <error line="104" column="20" source="standard:argument-list-wrapping" />
+        <error line="104" column="32" source="standard:argument-list-wrapping" />
+        <error line="104" column="44" source="standard:argument-list-wrapping" />
+        <error line="104" column="64" source="standard:argument-list-wrapping" />
+        <error line="104" column="83" source="standard:argument-list-wrapping" />
+        <error line="104" column="109" source="standard:argument-list-wrapping" />
+        <error line="104" column="112" source="standard:argument-list-wrapping" />
+        <error line="104" column="121" source="standard:max-line-length" />
+        <error line="104" column="124" source="standard:argument-list-wrapping" />
+        <error line="104" column="128" source="standard:trailing-comma-on-call-site" />
+        <error line="129" column="54" source="standard:trailing-comma-on-call-site" />
+        <error line="140" column="41" source="standard:argument-list-wrapping" />
+        <error line="140" column="61" source="standard:argument-list-wrapping" />
+        <error line="140" column="67" source="standard:function-literal" />
+        <error line="140" column="85" source="standard:binary-expression-wrapping" />
+        <error line="140" column="121" source="standard:max-line-length" />
+        <error line="140" column="126" source="standard:function-literal" />
+        <error line="143" column="66" source="standard:trailing-comma-on-call-site" />
+        <error line="169" column="31" source="standard:trailing-comma-on-declaration-site" />
+        <error line="176" column="71" source="standard:argument-list-wrapping" />
+        <error line="176" column="74" source="standard:argument-list-wrapping" />
+        <error line="176" column="76" source="standard:function-literal" />
+        <error line="176" column="77" source="standard:wrapping" />
+        <error line="176" column="91" source="standard:argument-list-wrapping" />
+        <error line="176" column="99" source="standard:argument-list-wrapping" />
+        <error line="176" column="103" source="standard:argument-list-wrapping" />
+        <error line="176" column="118" source="standard:argument-list-wrapping" />
+        <error line="176" column="121" source="standard:max-line-length" />
+        <error line="176" column="128" source="standard:argument-list-wrapping" />
+        <error line="176" column="132" source="standard:argument-list-wrapping" />
+        <error line="176" column="136" source="standard:function-literal" />
+        <error line="178" column="21" source="standard:argument-list-wrapping" />
+        <error line="178" column="35" source="standard:argument-list-wrapping" />
+        <error line="178" column="51" source="standard:argument-list-wrapping" />
+        <error line="178" column="69" source="standard:argument-list-wrapping" />
+        <error line="178" column="84" source="standard:argument-list-wrapping" />
+        <error line="178" column="95" source="standard:trailing-comma-on-call-site" />
+        <error line="182" column="33" source="standard:argument-list-wrapping" />
+        <error line="182" column="42" source="standard:argument-list-wrapping" />
+        <error line="182" column="49" source="standard:argument-list-wrapping" />
+        <error line="182" column="104" source="standard:trailing-comma-on-call-site" />
+        <error line="195" column="55" source="standard:function-signature" />
+        <error line="198" column="64" source="standard:function-signature" />
+        <error line="211" column="121" source="standard:max-line-length" />
+        <error line="211" column="123" source="standard:argument-list-wrapping" />
+        <error line="211" column="124" source="standard:argument-list-wrapping" />
+        <error line="226" column="25" source="standard:trailing-comma-on-declaration-site" />
+        <error line="238" column="48" source="standard:multiline-if-else" />
+        <error line="238" column="56" source="standard:multiline-if-else" />
+        <error line="245" column="29" source="standard:parameter-list-wrapping" />
+        <error line="245" column="29" source="standard:function-signature" />
+        <error line="245" column="45" source="standard:parameter-list-wrapping" />
+        <error line="245" column="45" source="standard:function-signature" />
+        <error line="245" column="58" source="standard:parameter-list-wrapping" />
+        <error line="245" column="58" source="standard:function-signature" />
+        <error line="245" column="88" source="standard:parameter-list-wrapping" />
+        <error line="245" column="88" source="standard:function-signature" />
+        <error line="245" column="104" source="standard:parameter-list-wrapping" />
+        <error line="245" column="104" source="standard:function-signature" />
+        <error line="245" column="121" source="standard:max-line-length" />
+        <error line="246" column="36" source="standard:binary-expression-wrapping" />
+        <error line="246" column="121" source="standard:max-line-length" />
+        <error line="246" column="123" source="standard:argument-list-wrapping" />
+        <error line="246" column="127" source="standard:argument-list-wrapping" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/analytics/application/AnalyticsConsumerTest.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="41" column="29" source="standard:trailing-comma-on-call-site" />
+        <error line="91" column="29" source="standard:trailing-comma-on-call-site" />
+        <error line="113" column="29" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/analytics/application/RecoveryFlowsTest.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="36" column="67" source="standard:statement-wrapping" />
+        <error line="36" column="87" source="standard:statement-wrapping" />
+        <error line="41" column="69" source="standard:statement-wrapping" />
+        <error line="41" column="87" source="standard:statement-wrapping" />
+        <error line="50" column="62" source="standard:statement-wrapping" />
+        <error line="50" column="80" source="standard:statement-wrapping" />
+        <error line="58" column="52" source="standard:statement-wrapping" />
+        <error line="58" column="69" source="standard:statement-wrapping" />
+        <error line="58" column="93" source="standard:statement-wrapping" />
+        <error line="58" column="116" source="standard:statement-wrapping" />
+        <error line="71" column="52" source="standard:statement-wrapping" />
+        <error line="71" column="75" source="standard:statement-wrapping" />
+        <error line="71" column="94" source="standard:statement-wrapping" />
+        <error line="71" column="117" source="standard:statement-wrapping" />
+        <error line="83" column="45" source="standard:function-signature" />
+        <error line="103" column="51" source="standard:argument-list-wrapping" />
+        <error line="103" column="72" source="standard:trailing-comma-on-call-site" />
+        <error line="104" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="144" column="42" source="standard:argument-list-wrapping" />
+        <error line="144" column="63" source="standard:trailing-comma-on-call-site" />
+        <error line="145" column="14" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/analytics/infrastructure/clickhouse/ClickHouseAdaptersTest.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="161" column="34" source="standard:trailing-comma-on-call-site" />
+        <error line="171" column="43" source="standard:trailing-comma-on-call-site" />
+        <error line="204" column="34" source="standard:trailing-comma-on-call-site" />
+        <error line="206" column="23" source="standard:property-wrapping" />
+        <error line="206" column="33" source="standard:argument-list-wrapping" />
+        <error line="206" column="44" source="standard:argument-list-wrapping" />
+        <error line="206" column="62" source="standard:argument-list-wrapping" />
+        <error line="206" column="84" source="standard:argument-list-wrapping" />
+        <error line="206" column="111" source="standard:argument-list-wrapping" />
+        <error line="206" column="121" source="standard:max-line-length" />
+        <error line="206" column="133" source="standard:argument-list-wrapping" />
+        <error line="206" column="134" source="standard:argument-list-wrapping" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/analytics/infrastructure/erasure/VaultCryptoErasureIT.kt">
+        <error line="54" column="67" source="standard:trailing-comma-on-call-site" />
+        <error line="83" column="43" source="standard:multiline-if-else" />
+        <error line="84" column="14" source="standard:multiline-if-else" />
+        <error line="94" column="25" source="standard:statement-wrapping" />
+        <error line="94" column="45" source="standard:statement-wrapping" />
+        <error line="94" column="64" source="standard:statement-wrapping" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/analytics/infrastructure/erasure/VaultCryptoErasureTest.kt">
+        <error line="51" column="77" source="standard:trailing-comma-on-call-site" />
+        <error line="52" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="60" column="58" source="standard:trailing-comma-on-call-site" />
+        <error line="67" column="94" source="standard:trailing-comma-on-call-site" />
+        <error line="80" column="89" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/analytics/infrastructure/reconcile/HttpReconciliationSourceTest.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="27" column="9" source="standard:class-signature" />
+        <error line="28" column="9" source="standard:class-signature" />
+        <error line="28" column="48" source="standard:class-signature" />
+        <error line="28" column="48" source="standard:trailing-comma-on-declaration-site" />
+        <error line="51" column="83" source="standard:trailing-comma-on-call-site" />
+        <error line="73" column="89" source="standard:trailing-comma-on-call-site" />
+        <error line="74" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="81" column="52" source="standard:trailing-comma-on-call-site" />
+        <error line="82" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="85" column="76" source="standard:trailing-comma-on-call-site" />
+        <error line="97" column="19" source="standard:wrapping" />
+        <error line="97" column="20" source="standard:statement-wrapping" />
+        <error line="97" column="85" source="standard:statement-wrapping" />
+        <error line="97" column="94" source="standard:binary-expression-wrapping" />
+        <error line="97" column="121" source="standard:max-line-length" />
+        <error line="97" column="136" source="standard:statement-wrapping" />
+        <error line="116" column="86" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/analytics/infrastructure/schema/ApicurioSchemaCatalogSourceIT.kt">
+        <error line="57" column="67" source="standard:trailing-comma-on-call-site" />
+        <error line="65" column="18" source="standard:wrapping" />
+        <error line="65" column="18" source="standard:argument-list-wrapping" />
+        <error line="65" column="26" source="standard:argument-list-wrapping" />
+        <error line="65" column="71" source="standard:argument-list-wrapping" />
+        <error line="66" column="96" source="standard:wrapping" />
+        <error line="66" column="97" source="standard:argument-list-wrapping" />
+        <error line="66" column="97" source="standard:trailing-comma-on-call-site" />
+        <error line="69" column="18" source="standard:wrapping" />
+        <error line="69" column="18" source="standard:argument-list-wrapping" />
+        <error line="69" column="26" source="standard:argument-list-wrapping" />
+        <error line="69" column="91" source="standard:argument-list-wrapping" />
+        <error line="70" column="58" source="standard:wrapping" />
+        <error line="70" column="59" source="standard:argument-list-wrapping" />
+        <error line="70" column="59" source="standard:trailing-comma-on-call-site" />
+        <error line="78" column="53" source="standard:trailing-comma-on-call-site" />
+        <error line="95" column="25" source="standard:statement-wrapping" />
+        <error line="95" column="40" source="standard:statement-wrapping" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/analytics/infrastructure/schema/ApicurioSchemaCatalogSourceTest.kt">
+        <error line="23" column="9" source="standard:class-signature" />
+        <error line="24" column="9" source="standard:class-signature" />
+        <error line="24" column="51" source="standard:class-signature" />
+        <error line="24" column="51" source="standard:trailing-comma-on-declaration-site" />
+        <error line="25" column="9" source="standard:class-signature" />
+        <error line="66" column="60" source="standard:trailing-comma-on-call-site" />
+        <error line="67" column="14" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/analytics/infrastructure/sink/ClickHouseAnalyticsSinkIT.kt">
+        <error line="55" column="67" source="standard:trailing-comma-on-call-site" />
+        <error line="68" column="40" source="standard:statement-wrapping" />
+        <error line="68" column="56" source="standard:statement-wrapping" />
+        <error line="68" column="71" source="standard:statement-wrapping" />
+        <error line="68" column="88" source="standard:statement-wrapping" />
+        <error line="68" column="109" source="standard:statement-wrapping" />
+        <error line="90" column="25" source="standard:statement-wrapping" />
+        <error line="90" column="40" source="standard:statement-wrapping" />
+        <error line="90" column="57" source="standard:statement-wrapping" />
+        <error line="90" column="78" source="standard:statement-wrapping" />
+        <error line="90" column="87" source="standard:binary-expression-wrapping" />
+        <error line="90" column="121" source="standard:max-line-length" />
+        <error line="107" column="75" source="standard:trailing-comma-on-call-site" />
+        <error line="114" column="95" source="standard:trailing-comma-on-call-site" />
+        <error line="136" column="30" source="standard:trailing-comma-on-call-site" />
+        <error line="145" column="112" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/analytics/infrastructure/sink/ClickHouseAnalyticsSinkTest.kt">
+        <error line="7" column="1" source="standard:import-ordering" />
+        <error line="48" column="48" source="standard:trailing-comma-on-declaration-site" />
+        <error line="63" column="26" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/openbank/analytics/infrastructure/worm/S3WormArchiveTest.kt">
+        <error line="28" column="82" source="standard:trailing-comma-on-declaration-site" />
+        <error line="43" column="27" source="standard:function-signature" />
+        <error line="43" column="43" source="standard:function-signature" />
+        <error line="43" column="56" source="standard:function-signature" />
+        <error line="43" column="86" source="standard:function-signature" />
+        <error line="43" column="102" source="standard:function-signature" />
+        <error line="43" column="120" source="standard:max-line-length" />
+        <error line="67" column="32" source="standard:trailing-comma-on-call-site" />
+        <error line="75" column="93" source="standard:trailing-comma-on-call-site" />
+        <error line="121" column="39" source="standard:wrapping" />
+        <error line="122" column="116" source="standard:wrapping" />
+        <error line="169" column="66" source="standard:trailing-comma-on-declaration-site" />
+        <error line="176" column="28" source="standard:trailing-comma-on-call-site" />
+    </file>
+</baseline>

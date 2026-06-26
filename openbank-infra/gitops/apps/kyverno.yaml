@@ -1,0 +1,113 @@
+# Kyverno — Kubernetes policy engine (ADR-0030 D4, admission control). Deployed
+# first as the enforcement point for image-signature verification; the actual
+# verify-images ClusterPolicy (gitops/components/kyverno/) starts in AUDIT mode
+# so it surfaces unsigned images without blocking any deploy. It flips to Enforce
+# only once a Cosign trust root is chosen (keyless/KMS) and images are signed.
+#
+# Codified into GitOps (ADR-0027). Applied via kubectl until the app-of-apps is
+# wired (same as tempo/metrics-server/loki).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://kyverno.github.io/kyverno/
+    chart: kyverno
+    targetRevision: 3.2.6
+    helm:
+      valuesObject:
+        # Sandbox FinOps: single replica per component (raise + add PDBs for prod,
+        # where the admission webhook must be HA or it can block all admissions).
+        admissionController:
+          replicas: 1
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+        backgroundController:
+          replicas: 1
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+        reportsController:
+          replicas: 1
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+        cleanupController:
+          replicas: 1
+        # The chart default bitnami/kubectl:1.28.5 was REMOVED from Docker Hub
+        # (Aug 2025 Bitnami catalogue retirement) → ImagePullBackOff on all five
+        # cleanupJobs + both Helm hooks (policyReportsCleanup/webhooksCleanup),
+        # cleanup stops, reports pile up, the post-upgrade hook even blocks ArgoCD
+        # sync. We first tried registry.k8s.io/kubectl, but that is DISTROLESS — no
+        # shell — and these jobs run `/bin/bash -c <script>` (count reports, delete
+        # conditionally), so it StartErrors (exit 128). The right drop-in is the
+        # SAME bitnami image, just relocated to the `bitnamilegacy` archive org: it
+        # has bash and runs as the baked-in nonroot UID 1001, so it satisfies the
+        # chart's securityContext.runAsNonRoot + readOnlyRootFilesystem with no
+        # runAsUser override (verified on-cluster). All seven are TOP-LEVEL chart
+        # values — nesting cleanupJobs under cleanupController silently no-ops it.
+        # Follow-up: bitnamilegacy is a frozen archive; move to a self-hosted
+        # kubectl+shell image in ECR for a maintained long-term base.
+        cleanupJobs:
+          admissionReports:
+            image:
+              repository: bitnamilegacy/kubectl
+              tag: 1.28.5
+          clusterAdmissionReports:
+            image:
+              repository: bitnamilegacy/kubectl
+              tag: 1.28.5
+          ephemeralReports:
+            image:
+              repository: bitnamilegacy/kubectl
+              tag: 1.28.5
+          clusterEphemeralReports:
+            image:
+              repository: bitnamilegacy/kubectl
+              tag: 1.28.5
+          updateRequests:
+            image:
+              repository: bitnamilegacy/kubectl
+              tag: 1.28.5
+        policyReportsCleanup:
+          image:
+            repository: bitnamilegacy/kubectl
+            tag: 1.28.5
+        webhooksCleanup:
+          image:
+            repository: bitnamilegacy/kubectl
+            tag: 1.28.5
+        # Never let the policy webhook take down the cluster: if Kyverno is down,
+        # fail OPEN (admit) rather than block every pod. Tighten to Fail for the
+        # money-path once Kyverno itself is HA.
+        config:
+          webhooks:
+            - failurePolicy: Ignore
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyverno
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

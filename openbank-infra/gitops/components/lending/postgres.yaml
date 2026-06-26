@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: MPL-2.0
+# CNPG Postgres cluster for openbank-lending-service (money-path, ADR-0030).
+# Namespace: lending — isolated from the payments namespace so credit-risk schema
+# migrations run independently and cannot be blocked by payment-rail migrations.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lending
+  labels:
+    app.kubernetes.io/part-of: openbank
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: lending-db
+  namespace: lending
+spec:
+  # DB-layer observability: CNPG built-in Prometheus exporter on :9187 creates a
+  # PodMonitor; kube-prometheus-stack selects PodMonitors cluster-wide, lighting
+  # up cnpg_* metrics (connections, replication lag, deadlocks, xid age, WAL archiving).
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_lending
+      owner: openbank
+  # WAL archiving + daily base backups to S3 (ADR-0035, #863 pattern).
+  # Credentials via EKS Pod Identity on the lending-db ServiceAccount
+  # (aws/.../db-backups.tf) — barman reads the SDK chain, no explicit secret.
+  # Sandbox S3 lifecycle expires after 35d; prod needs compliance retention (7y
+  # for credit records under CRD IV Article 20).
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/lending-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: lending-db-daily
+  namespace: lending
+spec:
+  schedule: "0 17 2 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: lending-db

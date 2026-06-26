@@ -1,0 +1,7 @@
+# OpenBank vulnerability disclosure — https://open-bank.tech
+# RFC 9116 (https://www.rfc-editor.org/rfc/rfc9116). Refresh before the Expires date below.
+
+Contact: mailto:security@open-bank.tech
+Expires: 2027-06-11T00:00:00.000Z
+Preferred-Languages: cs, en
+Canonical: https://open-bank.tech/.well-known/security.txt

@@ -1,0 +1,96 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+#
+# Shared ClusterAnalysisTemplate for all money-path canary deployments (ADR-0098).
+#
+# Usage (Phase 2+ Rollout spec):
+#   analysis:
+#     templates:
+#       - clusterScope: true
+#         templateName: openbank-money-path-canary
+#     args:
+#       - name: namespace
+#         valueFrom:
+#           fieldRef:
+#             fieldPath: metadata.namespace
+#       - name: canary-hash
+#         valueFrom:
+#           podTemplateHashValue: Canary
+#
+# Gate: both metrics must pass for the analysis to succeed. If either fails the
+# Rollout is automatically aborted and traffic is sent back to the stable replica set.
+#
+# Prometheus label note: kube-prometheus-stack PodMonitor relabeling propagates
+# the rollouts-pod-template-hash pod label onto the scraped time series so the
+# Prometheus queries can filter to canary pods only.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ClusterAnalysisTemplate
+metadata:
+  name: openbank-money-path-canary
+  labels:
+    app.kubernetes.io/part-of: argo-rollouts
+    openbank.io/plane: platform
+spec:
+  args:
+    - name: namespace
+    - name: canary-hash
+  metrics:
+    - name: error-rate
+      # Wait 2 minutes after analysis start before the first measurement. This
+      # gives canary pods time to warm up (JVM/Quarkus lazy init, JDBC pool
+      # stabilisation) and lets at least some real traffic accumulate so the
+      # rate() window is non-empty. Without this the first measurement window
+      # often returns NaN → auto-success, hiding real early failures.
+      initialDelay: 2m
+      interval: 30s
+      # Require at least 2 consecutive successes before promoting.
+      successCondition: "len(result) == 0 || isNaN(result[0]) || result[0] < 0.01"
+      failureCondition: "len(result) > 0 && !isNaN(result[0]) && result[0] >= 0.05"
+      count: 5
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: http://kube-prometheus-stack-prometheus.observability.svc:9090
+          query: |
+            sum(
+              rate(
+                http_server_requests_seconds_count{
+                  namespace="{{ args.namespace }}",
+                  rollouts_pod_template_hash="{{ args.canary-hash }}",
+                  status=~"5.."
+                }[2m]
+              )
+            )
+            /
+            sum(
+              rate(
+                http_server_requests_seconds_count{
+                  namespace="{{ args.namespace }}",
+                  rollouts_pod_template_hash="{{ args.canary-hash }}"
+                }[2m]
+              )
+            )
+    - name: p95-latency
+      initialDelay: 2m
+      interval: 30s
+      # 500 ms p95 gate — money-path SLO (ADR-0061).
+      successCondition: "len(result) == 0 || isNaN(result[0]) || result[0] < 0.5"
+      failureCondition: "len(result) > 0 && !isNaN(result[0]) && result[0] >= 1.0"
+      count: 5
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: http://kube-prometheus-stack-prometheus.observability.svc:9090
+          query: |
+            histogram_quantile(
+              0.95,
+              sum(
+                rate(
+                  http_server_requests_seconds_bucket{
+                    namespace="{{ args.namespace }}",
+                    rollouts_pod_template_hash="{{ args.canary-hash }}"
+                  }[2m]
+                )
+              ) by (le)
+            )

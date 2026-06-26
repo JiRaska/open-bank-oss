@@ -1,0 +1,128 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:RodneCislo.kt$RodneCislo$fun parse(raw: String): Result</ID>
+    <ID>FunctionOnlyReturningConstant:ApiVersionResponseFilter.kt$ApiVersionResponseFilter$private fun isDeprecatedPath(path: String): Boolean</ID>
+    <ID>FunctionOnlyReturningConstant:FeatureFlagInterceptorTest.kt$FeatureFlagInterceptorTest.Sample$@FeatureFlag(flag = "new-router") fun gated(): String</ID>
+    <ID>FunctionOnlyReturningConstant:FeatureFlagInterceptorTest.kt$FeatureFlagInterceptorTest.Sample$@FeatureFlag(flag = "split-flag", targetingKey = "#partyId") fun targeted(partyId: String): String</ID>
+    <ID>FunctionOnlyReturningConstant:FeatureFlagInterceptorTest.kt$FeatureFlagInterceptorTest.Sample$fun ungated(): String</ID>
+    <ID>LongParameterList:PartitionManager.kt$PartitionManager$( today: LocalDate, prefix: String, parentTable: String, retentionYears: Int, dropEnabled: Boolean, existingYears: Set&lt;Int&gt; )</ID>
+    <ID>LongParameterList:ServiceConfigResource.kt$ServiceConfigResource$( @ConfigProperty(name = "quarkus.application.name", defaultValue = "openbank-service") private val serviceName: String, // ── Rate Limit ── @ConfigProperty(name = "openbank.rate-limit.enabled", defaultValue = "true") private val rateLimitEnabled: Boolean, @ConfigProperty(name = "openbank.rate-limit.max-concurrent-requests", defaultValue = "200") private val rateLimitMaxConcurrent: Int, // ── Circuit Breaker ── @ConfigProperty(name = "openbank.resilience.circuit-breaker.enabled", defaultValue = "false") private val cbEnabled: Boolean, @ConfigProperty(name = "openbank.resilience.circuit-breaker.request-volume-threshold", defaultValue = "20") private val cbRequestVolumeThreshold: Int, @ConfigProperty(name = "openbank.resilience.circuit-breaker.failure-ratio", defaultValue = "0.5") private val cbFailureRatio: Double, @ConfigProperty(name = "openbank.resilience.circuit-breaker.success-threshold", defaultValue = "5") private val cbSuccessThreshold: Int, @ConfigProperty(name = "openbank.resilience.circuit-breaker.delay-ms", defaultValue = "5000") private val cbDelayMs: Long, // ── Retry ── @ConfigProperty(name = "openbank.resilience.retry.enabled", defaultValue = "false") private val retryEnabled: Boolean, @ConfigProperty(name = "openbank.resilience.retry.max-retries", defaultValue = "3") private val retryMaxRetries: Int, @ConfigProperty(name = "openbank.resilience.retry.delay-ms", defaultValue = "200") private val retryDelayMs: Long, @ConfigProperty(name = "openbank.resilience.retry.jitter-ms", defaultValue = "100") private val retryJitterMs: Long, // ── Timeout ── @ConfigProperty(name = "openbank.resilience.timeout.enabled", defaultValue = "false") private val timeoutEnabled: Boolean, @ConfigProperty(name = "openbank.resilience.timeout.value-ms", defaultValue = "10000") private val timeoutValueMs: Long )</ID>
+    <ID>LoopWithTooManyJumpStatements:ClasspathMarkdownLoader.kt$ClasspathMarkdownLoader$while</ID>
+    <ID>LoopWithTooManyJumpStatements:CzechAccountNumber.kt$CzechAccountNumber$while</ID>
+    <ID>MagicNumber:Amortization.kt$Amortization$12</ID>
+    <ID>MagicNumber:Amortization.kt$Amortization$12L</ID>
+    <ID>MagicNumber:Amortization.kt$Amortization$3</ID>
+    <ID>MagicNumber:Amortization.kt$Amortization$4</ID>
+    <ID>MagicNumber:Amortization.kt$Amortization$6</ID>
+    <ID>MagicNumber:AnalyticsEnvelope.kt$AnalyticsRetention$10</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.ACCOUNT_ALREADY_EXISTS$409</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.ACCOUNT_CLOSED$422</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.ACCOUNT_FROZEN$422</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.ACCOUNT_NOT_FOUND$404</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.CONFLICT$409</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.DUPLICATE_REQUEST$409</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.FORBIDDEN$403</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.INSUFFICIENT_FUNDS$422</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.INTERNAL_ERROR$500</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.INVALID_AMOUNT$400</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.INVALID_CURRENCY$400</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.INVALID_IBAN$400</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.NOT_FOUND$404</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.UNAUTHORIZED$401</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.VALIDATION_ERROR$400</ID>
+    <ID>MagicNumber:AuthorizeInterceptor.kt$AuthorizeInterceptor$100</ID>
+    <ID>MagicNumber:BlindIndex.kt$BlindIndex$0xFF</ID>
+    <ID>MagicNumber:BuildInfo.kt$BuildInfo$1024</ID>
+    <ID>MagicNumber:CommonExceptionMappers.kt$GenericExceptionMapper$500</ID>
+    <ID>MagicNumber:CommonExceptionMappers.kt$IllegalArgumentExceptionMapper$400</ID>
+    <ID>MagicNumber:CommonExceptionMappers.kt$IllegalStateExceptionMapper$422</ID>
+    <ID>MagicNumber:CommonExceptionMappers.kt$NoSuchElementExceptionMapper$404</ID>
+    <ID>MagicNumber:CommonExceptionMappers.kt$WebApplicationExceptionMapper$401</ID>
+    <ID>MagicNumber:CommonExceptionMappers.kt$WebApplicationExceptionMapper$403</ID>
+    <ID>MagicNumber:CommonExceptionMappers.kt$WebApplicationExceptionMapper$404</ID>
+    <ID>MagicNumber:CommonExceptionMappers.kt$WebApplicationExceptionMapper$409</ID>
+    <ID>MagicNumber:CommonExceptionMappers.kt$WebApplicationExceptionMapper$500</ID>
+    <ID>MagicNumber:CurrencyCode.kt$CurrencyCode$3</ID>
+    <ID>MagicNumber:CzechAccountNumber.kt$CzechAccountNumber$10</ID>
+    <ID>MagicNumber:CzechAccountNumber.kt$CzechAccountNumber$11</ID>
+    <ID>MagicNumber:CzechAccountNumber.kt$CzechAccountNumber$3</ID>
+    <ID>MagicNumber:CzechAccountNumber.kt$CzechAccountNumber$4</ID>
+    <ID>MagicNumber:CzechAccountNumber.kt$CzechAccountNumber$5</ID>
+    <ID>MagicNumber:CzechAccountNumber.kt$CzechAccountNumber$6</ID>
+    <ID>MagicNumber:CzechAccountNumber.kt$CzechAccountNumber$7</ID>
+    <ID>MagicNumber:CzechAccountNumber.kt$CzechAccountNumber$8</ID>
+    <ID>MagicNumber:CzechAccountNumber.kt$CzechAccountNumber$9</ID>
+    <ID>MagicNumber:Delinquency.kt$Delinquency$30</ID>
+    <ID>MagicNumber:Delinquency.kt$Delinquency$60</ID>
+    <ID>MagicNumber:Delinquency.kt$Delinquency$90</ID>
+    <ID>MagicNumber:DomainMetrics.kt$DomainMetrics$0.5</ID>
+    <ID>MagicNumber:DomainMetrics.kt$DomainMetrics$0.95</ID>
+    <ID>MagicNumber:DomainMetrics.kt$DomainMetrics$0.99</ID>
+    <ID>MagicNumber:Easter.kt$Easter$100</ID>
+    <ID>MagicNumber:Easter.kt$Easter$11</ID>
+    <ID>MagicNumber:Easter.kt$Easter$114</ID>
+    <ID>MagicNumber:Easter.kt$Easter$15</ID>
+    <ID>MagicNumber:Easter.kt$Easter$19</ID>
+    <ID>MagicNumber:Easter.kt$Easter$22</ID>
+    <ID>MagicNumber:Easter.kt$Easter$25</ID>
+    <ID>MagicNumber:Easter.kt$Easter$3</ID>
+    <ID>MagicNumber:Easter.kt$Easter$30</ID>
+    <ID>MagicNumber:Easter.kt$Easter$31</ID>
+    <ID>MagicNumber:Easter.kt$Easter$32</ID>
+    <ID>MagicNumber:Easter.kt$Easter$4</ID>
+    <ID>MagicNumber:Easter.kt$Easter$451</ID>
+    <ID>MagicNumber:Easter.kt$Easter$7</ID>
+    <ID>MagicNumber:Easter.kt$Easter$8</ID>
+    <ID>MagicNumber:FeatureFlagInterceptor.kt$FeatureFlagInterceptor$110</ID>
+    <ID>MagicNumber:FlagdProvider.kt$FlagdProvider$200</ID>
+    <ID>MagicNumber:FlagdProvider.kt$FlagdProvider$299</ID>
+    <ID>MagicNumber:FlagdProvider.kt$FlagdProvider$404</ID>
+    <ID>MagicNumber:Iban.kt$Iban$4</ID>
+    <ID>MagicNumber:Iban.kt$Iban.Companion$10</ID>
+    <ID>MagicNumber:Iban.kt$Iban.Companion$15</ID>
+    <ID>MagicNumber:Iban.kt$Iban.Companion$34</ID>
+    <ID>MagicNumber:Iban.kt$Iban.Companion$4</ID>
+    <ID>MagicNumber:Integrity.kt$AnalyticsIntegrity$0xFF</ID>
+    <ID>MagicNumber:Integrity.kt$AnalyticsIntegrity$4</ID>
+    <ID>MagicNumber:OpaSidecarPolicyDecisionPoint.kt$OpaSidecarPolicyDecisionPoint$200</ID>
+    <ID>MagicNumber:OpaSidecarPolicyDecisionPoint.kt$OpaSidecarPolicyDecisionPoint$299</ID>
+    <ID>MagicNumber:PiiMasking.kt$PiiMask$4</ID>
+    <ID>MagicNumber:PiiMasking.kt$PiiMask$6</ID>
+    <ID>MagicNumber:PiiMasking.kt$PiiMask$8</ID>
+    <ID>MagicNumber:RateLimitFilter.kt$RateLimitFilter$429</ID>
+    <ID>MagicNumber:RedisIdempotencyStore.kt$RedisIdempotencyStore$3</ID>
+    <ID>MagicNumber:RetentionPolicy.kt$RetentionPolicies$13</ID>
+    <ID>MagicNumber:RetentionPolicy.kt$RetentionPolicies$3</ID>
+    <ID>MagicNumber:RodneCislo.kt$RodneCislo$10</ID>
+    <ID>MagicNumber:RodneCislo.kt$RodneCislo$11</ID>
+    <ID>MagicNumber:RodneCislo.kt$RodneCislo$12</ID>
+    <ID>MagicNumber:RodneCislo.kt$RodneCislo$1900</ID>
+    <ID>MagicNumber:RodneCislo.kt$RodneCislo$20</ID>
+    <ID>MagicNumber:RodneCislo.kt$RodneCislo$2000</ID>
+    <ID>MagicNumber:RodneCislo.kt$RodneCislo$21</ID>
+    <ID>MagicNumber:RodneCislo.kt$RodneCislo$32</ID>
+    <ID>MagicNumber:RodneCislo.kt$RodneCislo$4</ID>
+    <ID>MagicNumber:RodneCislo.kt$RodneCislo$50</ID>
+    <ID>MagicNumber:RodneCislo.kt$RodneCislo$51</ID>
+    <ID>MagicNumber:RodneCislo.kt$RodneCislo$54</ID>
+    <ID>MagicNumber:RodneCislo.kt$RodneCislo$6</ID>
+    <ID>MagicNumber:RodneCislo.kt$RodneCislo$62</ID>
+    <ID>MagicNumber:RodneCislo.kt$RodneCislo$70</ID>
+    <ID>MagicNumber:RodneCislo.kt$RodneCislo$71</ID>
+    <ID>MagicNumber:RodneCislo.kt$RodneCislo$82</ID>
+    <ID>MagicNumber:RodneCislo.kt$RodneCislo$9</ID>
+    <ID>MatchingDeclarationName:Integrity.kt$AnalyticsIntegrity</ID>
+    <ID>NewLineAtEndOfFile:CurrencyCodeTest.kt$com.openbank.libs.domain.money.CurrencyCodeTest.kt</ID>
+    <ID>NewLineAtEndOfFile:CursorEncoderTest.kt$com.openbank.libs.api.pagination.CursorEncoderTest.kt</ID>
+    <ID>NewLineAtEndOfFile:IbanTest.kt$com.openbank.libs.domain.account.IbanTest.kt</ID>
+    <ID>NewLineAtEndOfFile:MoneyTest.kt$com.openbank.libs.domain.money.MoneyTest.kt</ID>
+    <ID>ThrowsCount:AuthorizeInterceptor.kt$AuthorizeInterceptor$@AroundInvoke fun authorize(ctx: InvocationContext): Any?</ID>
+    <ID>TooGenericExceptionCaught:OutboxDispatch.kt$OutboxDispatch$ex: Exception</ID>
+    <ID>TooManyFunctions:DomainMetrics.kt$DomainMetrics</ID>
+    <ID>TooManyFunctions:Money.kt$Money</ID>
+    <ID>UnusedParameter:ApiVersionResponseFilter.kt$ApiVersionResponseFilter$path: String</ID>
+    <ID>UnusedParameter:DocsResourceSchemaGuardTest.kt$DocsResourceSchemaGuardTest$lang: String = "en"</ID>
+  </CurrentIssues>
+</SmellBaseline>

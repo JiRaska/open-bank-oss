@@ -1,0 +1,48 @@
+# Changelog
+
+## [0.4.1](https://github.com/JiRaska/open-bank/compare/fraud-service-v0.4.0...fraud-service-v0.4.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **fraud:** repair toEntity clock scope + ktlint class-signature (ADR-0100, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2088](https://github.com/JiRaska/open-bank/issues/2088)) ([e13ed1c](https://github.com/JiRaska/open-bank/commit/e13ed1c6c9420928075a528bea34717b2353ca1d))
+
+## [0.4.0](https://github.com/JiRaska/open-bank/compare/fraud-service-v0.3.0...fraud-service-v0.4.0) (2026-06-25)
+
+
+### Features
+
+* **fraud,swift:** add Pact consumer contracts for transaction + SWIFT events (ADR-0092, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2024](https://github.com/JiRaska/open-bank/issues/2024)) ([2cb470b](https://github.com/JiRaska/open-bank/commit/2cb470bb18db463d9707ca85ed3913ef9c03712e))
+
+
+### Bug Fixes
+
+* **balance,sepa-payment,fraud:** @Dependent scope on ClockProducer + inject Clock into fraud persistence (ADR-0100) ([#2081](https://github.com/JiRaska/open-bank/issues/2081)) ([fc1a129](https://github.com/JiRaska/open-bank/commit/fc1a129cbfee4b5db41dbf4334f3dbe9d5e621c8))
+
+## [0.3.0](https://github.com/JiRaska/open-bank/compare/fraud-service-v0.2.0...fraud-service-v0.3.0) (2026-06-25)
+
+
+### Features
+
+* **fraud:** ADR-0084 §2 velocity counters + Kafka transaction signal consumer ([#1876](https://github.com/JiRaska/open-bank/issues/1876)) ([ffea993](https://github.com/JiRaska/open-bank/commit/ffea993b87144a935cf18ac9121657b714298ff4))
+* **libs:** add Ids.newId() — UUIDv7 helper (ADR-0106 Tier 1) ([#1945](https://github.com/JiRaska/open-bank/issues/1945)) ([da77a9b](https://github.com/JiRaska/open-bank/commit/da77a9b526e3b4ffc0106863cca174c7ed59ebb7))
+
+
+### Bug Fixes
+
+* **lint:** resolve fleet-wide ktlint/compile violations (Refs [#1968](https://github.com/JiRaska/open-bank/issues/1968)) ([#1971](https://github.com/JiRaska/open-bank/issues/1971)) ([92dc2d6](https://github.com/JiRaska/open-bank/commit/92dc2d636d857b526c8276e2647de440c540577b))
+
+## [0.2.0](https://github.com/JiRaska/open-bank/compare/fraud-service-v0.1.0...fraud-service-v0.2.0) (2026-06-15)
+
+
+### Features
+
+* **domestic-payment:** wire DomainMetrics counters (ADR-0077 Phase 2 sweep) ([#684](https://github.com/JiRaska/open-bank/issues/684)) ([7bc6633](https://github.com/JiRaska/open-bank/commit/7bc663347fd81e5fe0f49076e7eb64055b4baa5e))
+* **fraud:** stand up openbank-fraud-service skeleton (ADR-0084 Phase 1) ([#999](https://github.com/JiRaska/open-bank/issues/999)) ([0af9fbe](https://github.com/JiRaska/open-bank/commit/0af9fbef06c8a5370f08a4cd847a37a73ddad560)), closes [#850](https://github.com/JiRaska/open-bank/issues/850)
+* **fraud:** verdict-tagged scoring metric (ADR-0084 §1) ([#1101](https://github.com/JiRaska/open-bank/issues/1101)) ([307c919](https://github.com/JiRaska/open-bank/commit/307c919f9ae7c572bb70bdb02dc1b866ff18bed7)), closes [#850](https://github.com/JiRaska/open-bank/issues/850)
+
+
+### Bug Fixes
+
+* **fraud:** assign unique HTTP port 8133 (resolve collision with sepa-payment) ([#1032](https://github.com/JiRaska/open-bank/issues/1032)) ([4f32d87](https://github.com/JiRaska/open-bank/commit/4f32d8762fd437c293b095228756274dbc5b06d3))
+* **gitops:** single-owner ArgoCD apps for product-catalog and audit-oidc ([#609](https://github.com/JiRaska/open-bank/issues/609)) ([48959b1](https://github.com/JiRaska/open-bank/commit/48959b1459fe696b05f0ec983a4daec3fce24207))

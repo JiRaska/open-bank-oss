@@ -1,0 +1,1263 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+openapi: 3.1.0
+info:
+  title: PID Service API (Party Identity)
+  version: 1.11.0
+  description: Party identity data management — create, update, KYC linking, BankID/ROB sync, identity resolution and four-eyes verification cases (ADR-0072).
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/MPL/2.0/
+servers:
+  - url: http://localhost:8128
+    description: Local development
+tags:
+  - name: Parties
+  - name: Identity verification cases
+  - name: EUDI identity
+
+paths:
+  /api/v1/parties/resolve:
+    post:
+      tags: [Parties]
+      summary: Resolve applicant identity before party creation (ADR-0072, issue #699)
+      description: |
+        Three-tier identity resolution. Must be called before POST /api/v1/parties.
+        Only a NO_MATCH decision permits creating a new party.
+
+        - Tier 1 (Czech RČ): if birthNumberRaw is supplied and valid, an HMAC-SHA256 blind
+          index is computed and looked up against party_external_ids(BIRTH_NUMBER). Returns
+          MATCH_EXISTING or NEEDS_MANUAL_VERIFICATION(RN_COLLISION) if found, NO_MATCH if not.
+        - Tier 2 (normalized match key): for no-RČ applicants, searches the (familyName,
+          birthdate) index. Returns NEEDS_MANUAL_VERIFICATION(NAMESAKE_CANDIDATE) on hit.
+
+        The plaintext RČ (birthNumberRaw) is never stored or logged; it is reduced to a
+        blind index within this request. NEEDS_MANUAL_VERIFICATION candidates must not be
+        forwarded to the customer channel — they are cockpit-only.
+      operationId: resolvePartyIdentity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolvePartyRequest'
+      responses:
+        '200':
+          description: Resolution decision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolvePartyResponse'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden (insufficient role)
+      security:
+        - bearerAuth: []
+
+  /api/v1/parties/pid/resolve:
+    get:
+      tags: [Parties]
+      summary: Resolve partyId from a pre-computed RČ blind index (ADR-0072, internal M2M)
+      description: |
+        Direct lookup of a party by a pre-computed HMAC-SHA256 blind index of the canonical Czech
+        RČ.  Returns the matched partyId or 404.  No attribute cross-checks are performed — those
+        belong to the full POST /api/v1/parties/resolve flow.
+
+        Caller must compute the index via `BlindIndex.compute(pepper, rodneCislo.canonical)` using
+        the same pepper as is configured in pid-service (OPENBANK_PID_BIRTH_NUMBER_PEPPER).  A
+        pepper mismatch produces a 404 that is operationally indistinguishable from a genuine
+        no-match.
+
+        Access: M2M only (openbank-service role).
+      operationId: resolveByBlindIndex
+      parameters:
+        - name: index
+          in: query
+          required: true
+          description: Pre-computed HMAC-SHA256 hex blind index of the canonical Czech RČ (64 chars).
+          schema:
+            type: string
+            minLength: 64
+            maxLength: 64
+            pattern: '^[0-9a-f]{64}$'
+      responses:
+        '200':
+          description: Party found — returns the partyId.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlindIndexResolveResponse'
+        '400':
+          description: Missing or malformed index parameter.
+        '401':
+          description: Unauthenticated.
+        '403':
+          description: Forbidden — caller does not have the openbank-service role.
+        '404':
+          description: No party found for the given blind index.
+      security:
+        - bearerAuth: []
+
+  /api/v1/parties/eudi/verify-presentation:
+    post:
+      tags: [EUDI identity]
+      summary: Verify an EUDI wallet PID presentation and resolve the identity (ADR-0094 tier-0)
+      description: |
+        pid acts as an OpenID4VP Relying Party (eIDAS 2.0). The verifiable presentation (an SD-JWT VC)
+        is cryptographically verified — issuer signature against a trusted key (algorithm allow-list
+        pinned), issuer trust, temporal validity, disclosure-hash binding, and (when a nonce/audience is
+        supplied) holder key-binding — BEFORE any claim is trusted. The verified PID subject identifier
+        is the tier-0 deterministic dedup key (strongest, above RČ), blind-indexed and never stored raw.
+        The OpenID4VP redirect/QR dance is out of scope; this endpoint accepts a directly-submitted VP
+        over the trusted M2M leg. A failed verification returns 422.
+      operationId: verifyEudiPresentation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyPresentationRequest'
+      responses:
+        '200':
+          description: Presentation verified — resolution decision + verified (masked) PID claims.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifyPresentationResponse'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden (insufficient role)
+        '422':
+          description: Presentation verification failed (bad signature, untrusted issuer, expired, etc.).
+      security:
+        - bearerAuth: []
+
+  /api/v1/parties/eudi/verify-mdoc:
+    post:
+      tags: [EUDI identity]
+      summary: Verify an ISO 18013-5 mdoc PID (CBOR/COSE) and resolve the identity (ADR-0094 tier-0)
+      description: |
+        The mdoc-format sibling of verify-presentation. Accepts a base64url `IssuerSigned` CBOR map and
+        verifies it fail-closed: the `issuerAuth` COSE_Sign1 (ES256) signature against a trusted issuer
+        key (the same trust store as SD-JWT, incl. the eIDAS Trusted List — mdoc carries no `iss`, so any
+        trusted key that verifies establishes trust), the MSO validity, and each disclosed element's
+        SHA-256 digest against the MSO valueDigests. The verified PID feeds the same tier-0 resolve. A
+        failed verification returns 422.
+      operationId: verifyEudiMdoc
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mdoc]
+              properties:
+                mdoc:
+                  type: string
+                  description: base64url-encoded ISO 18013-5 IssuerSigned CBOR.
+      responses:
+        '200':
+          description: mdoc verified — resolution decision + verified (masked) PID claims.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifyPresentationResponse'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden (insufficient role)
+        '422':
+          description: mdoc verification failed (bad signature, untrusted issuer, expired, tampered, etc.).
+      security:
+        - bearerAuth: []
+
+  /api/v1/parties/eudi/presentation-requests:
+    post:
+      tags: [EUDI identity]
+      summary: Start an OpenID4VP presentation exchange (ADR-0094 cross-device direct_post)
+      description: |
+        Verifier-initiated OpenID4VP flow. Mints a single-use nonce + transaction id and returns an
+        `openid4vp://` authorization request URI (response_mode=direct_post) to render as a QR / deep
+        link. The wallet POSTs its presentation to the public response endpoint; collect the resolved
+        result via the poll endpoint. Called by trusted internal services (M2M).
+      operationId: createEudiPresentationRequest
+      responses:
+        '200':
+          description: Exchange created — authorization request URI + transaction id + expiry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatePresentationRequestResponse'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden (insufficient role)
+      security:
+        - bearerAuth: []
+
+  /api/v1/parties/eudi/presentation-requests/{id}:
+    get:
+      tags: [EUDI identity]
+      summary: Poll an OpenID4VP exchange for the wallet's resolved presentation result (ADR-0094)
+      description: |
+        Returns the exchange status (PENDING | COMPLETED | EXPIRED) and, once the wallet has submitted
+        a valid presentation, the resolution decision + verified (masked) PID claims. Called by the
+        trusted internal service that initiated the exchange (M2M).
+      operationId: getEudiPresentationExchange
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Exchange state (and result when COMPLETED).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresentationExchangeStatusResponse'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden (insufficient role)
+        '404':
+          description: Unknown transaction id.
+      security:
+        - bearerAuth: []
+
+  /api/v1/parties/eudi/request-objects/{id}:
+    get:
+      tags: [EUDI identity]
+      summary: Signed Request Object (JAR) a wallet dereferences via request_uri (ADR-0094)
+      description: |
+        PUBLIC. When an issuer signing key is configured, the OpenID4VP authorization request is
+        delivered as a signed Request Object (JAR / RFC 9101) — a JWT (typ=oauth-authz-req+jwt)
+        carrying the full request (client_id, response_mode=direct_post, response_uri, nonce, state,
+        presentation_definition) that the wallet verifies against the issuer JWKS. Only a still-pending
+        transaction resolves; 404 otherwise (or when no issuer key is configured).
+      operationId: getEudiRequestObject
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The signed Request Object JWT.
+          content:
+            application/oauth-authz-req+jwt:
+              schema:
+                type: string
+        '404':
+          description: Unknown/expired transaction, or signed requests unavailable.
+
+  /api/v1/parties/eudi/presentation-responses:
+    post:
+      tags: [EUDI identity]
+      summary: OpenID4VP direct_post callback — a wallet submits its PID presentation (ADR-0094)
+      description: |
+        PUBLIC, anonymous by necessity (the wallet holds no RP credentials). Admitted only for a
+        still-pending, unexpired transaction the RP itself minted; the presentation is cryptographically
+        verified — including holder key-binding against the exchange's single-use nonce — and the nonce
+        is spent atomically (a replay loses the race). The response is neutral and never reveals the
+        resolution decision (no identity-existence oracle); the result is collected out-of-band via the
+        authenticated poll endpoint. Abuse defence is the ingress per-IP rate limit.
+      operationId: submitEudiPresentationResponse
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [vp_token, state]
+              properties:
+                vp_token:
+                  type: string
+                  description: The SD-JWT VC verifiable presentation (issuer-JWS~disclosures~KB-JWT).
+                state:
+                  type: string
+                  description: The transaction id echoed from the authorization request.
+                presentation_submission:
+                  type: string
+                  description: DIF presentation submission descriptor (accepted, not required).
+      responses:
+        '200':
+          description: Presentation received (neutral — no decision is revealed to the wallet).
+        '400':
+          description: |
+            Invalid request — collapses every failure mode to one neutral response so the public
+            endpoint is not an oracle: unknown / expired / already-consumed transaction, missing
+            fields, OR a cryptographic verification failure (bad signature, untrusted issuer,
+            key-binding mismatch, etc.). The reason is logged server-side only.
+
+  /api/v1/parties/eudi/credential-offers:
+    post:
+      tags: [EUDI identity]
+      summary: Create an OpenID4VCI credential offer for a verified identity (ADR-0094)
+      description: |
+        The bank as a PID / (Q)EAA issuer (eIDAS 2.0, pre-authorized-code flow). A trusted back-end
+        (M2M) creates an offer carrying the verified identity claims; returns an OpenID4VCI
+        credential_offer (with a single-use pre-authorized_code) + an openid-credential-offer:// URI to
+        render as a QR / deep-link. The wallet then redeems the code at the token endpoint and fetches
+        the credential with a proof-of-possession. Fail-closed: 503 when no issuer signing key is set.
+      operationId: createEudiCredentialOffer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subjectId, givenName, familyName, birthdate]
+              properties:
+                subjectId: { type: string }
+                givenName: { type: string }
+                familyName: { type: string }
+                birthdate: { type: string, format: date }
+                issuingCountry: { type: string, default: CZ }
+      responses:
+        '200':
+          description: Offer created — the credential_offer object + an openid-credential-offer:// URI.
+        '400':
+          description: Missing required claim or invalid JSON.
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden (insufficient role)
+        '503':
+          description: Issuance disabled (no issuer signing key configured).
+      security:
+        - bearerAuth: []
+
+  /.well-known/openid-credential-issuer:
+    get:
+      tags: [EUDI identity]
+      summary: OpenID4VCI issuer metadata (ADR-0094)
+      description: Public issuer metadata — credential/token endpoints, issuer JWKS, supported credential configurations.
+      operationId: getEudiIssuerMetadata
+      responses:
+        '200':
+          description: Issuer metadata document.
+
+  /api/v1/parties/eudi/token:
+    post:
+      tags: [EUDI identity]
+      summary: OpenID4VCI token endpoint — redeem a pre-authorized code (ADR-0094)
+      description: |
+        PUBLIC. Exchanges a single-use pre-authorized_code (grant_type
+        urn:ietf:params:oauth:grant-type:pre-authorized_code) for an access_token + c_nonce. The code
+        is redeemable exactly once.
+      operationId: eudiToken
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type, pre-authorized_code]
+              properties:
+                grant_type: { type: string }
+                pre-authorized_code: { type: string }
+      responses:
+        '200':
+          description: Access token + c_nonce.
+        '400':
+          description: Unsupported grant, missing or already-redeemed/expired code.
+
+  /api/v1/parties/eudi/credential:
+    post:
+      tags: [EUDI identity]
+      summary: OpenID4VCI credential endpoint — mint a holder-bound PID SD-JWT VC (ADR-0094)
+      description: |
+        PUBLIC, Bearer access_token. The wallet supplies a proof-of-possession JWT (header `jwk` =
+        holder key, payload binds the c_nonce + issuer aud); the issuer verifies it and mints an
+        SD-JWT VC bound to that holder key (`cnf.jwk`), signed by the issuer. The credential is minted
+        exactly once per access token (replay rejected).
+      operationId: eudiCredential
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [format, proof]
+              properties:
+                format: { type: string, example: vc+sd-jwt }
+                vct: { type: string }
+                proof:
+                  type: object
+                  properties:
+                    proof_type: { type: string, example: jwt }
+                    jwt: { type: string }
+      responses:
+        '200':
+          description: The issued SD-JWT VC under `credential`.
+        '400':
+          description: Invalid token, proof, or already-issued (replay).
+        '503':
+          description: Issuance disabled (no issuer signing key configured).
+
+  /api/v1/parties/eudi/credentials/{index}/revoke:
+    post:
+      tags: [EUDI identity]
+      summary: Revoke a previously-issued credential by its status-list index (ADR-0094)
+      description: |
+        Flips the credential's bit in the Token Status List to revoked (M2M). The credential's
+        signature stays valid, but the relying-party verifier rejects it once it consults the status
+        list. Fail-closed: 503 when no issuer signing key is configured.
+      operationId: revokeEudiCredential
+      parameters:
+        - name: index
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Credential revoked.
+        '400':
+          description: Unknown status index (never issued).
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden (insufficient role)
+        '503':
+          description: Issuance/revocation disabled (no issuer signing key).
+      security:
+        - bearerAuth: []
+
+  /api/v1/parties/eudi/status-lists/{id}:
+    get:
+      tags: [EUDI identity]
+      summary: Token Status List token — a relying party fetches it to check revocation (ADR-0094)
+      description: |
+        PUBLIC. Returns the signed IETF Token Status List (a JWS, typ=statuslist+jwt) whose
+        `status_list.lst` is the DEFLATE-compressed, base64url-encoded bit array (1 bit per credential;
+        0=valid, 1=revoked). A verifier decompresses it and checks the bit at the credential's `idx`.
+      operationId: getEudiStatusList
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The signed status list token.
+          content:
+            application/statuslist+jwt:
+              schema:
+                type: string
+        '404':
+          description: Unknown status list (or issuance disabled).
+
+  /api/v1/parties/register-identity:
+    post:
+      tags: [Parties]
+      summary: Register an onboarded identity into the pid resolver index (issue #1294)
+      description: |
+        Indexes a party's identity attributes (RČ blind index, Keycloak sub, EUDI PID sub) after
+        party creation. Must be called by trusted internal services only. The plaintext RČ and raw
+        EUDI PID sub are never stored — both are reduced to keyed blind indexes using the same pepper.
+      operationId: registerIdentity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterIdentityRequest'
+      responses:
+        '200':
+          description: Identity registered — returns the updated party.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartyResponse'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden — caller does not have the required service/operator/admin role.
+        '409':
+          description: EUDI PID sub is already bound to a different party.
+      security:
+        - bearerAuth: []
+
+  /api/v1/parties/cases:
+    get:
+      tags: [Identity verification cases]
+      summary: List active four-eyes identity-verification cases (ADR-0072 §1 / ADR-0030)
+      description: |
+        Returns OPEN and AWAITING_SECOND_APPROVAL cases opened by /resolve when an applicant could not
+        be auto-decided. Operator cockpit surface; never exposed to the customer channel.
+      operationId: listVerificationCases
+      responses:
+        '200':
+          description: Active cases, newest-first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/VerificationCaseResponse'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden (insufficient role)
+      security:
+        - bearerAuth: []
+
+  /api/v1/parties/cases/{id}:
+    get:
+      tags: [Identity verification cases]
+      summary: Get a single identity-verification case
+      operationId: getVerificationCase
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The case.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationCaseResponse'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: No case with that id.
+      security:
+        - bearerAuth: []
+
+  /api/v1/parties/cases/{id}/decision:
+    post:
+      tags: [Identity verification cases]
+      summary: Record an approver's verdict (two distinct approvers must concur to decide, ADR-0030)
+      description: |
+        The first vote moves the case to AWAITING_SECOND_APPROVAL; a distinct approver casting the
+        same verdict DECIDES it. The acting approver is the authenticated principal, never supplied in
+        the body, so one user cannot satisfy both votes. A 409 is returned if the same user votes twice
+        or the second approver disagrees (reopen to re-adjudicate).
+      operationId: decideVerificationCase
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseDecisionRequest'
+      responses:
+        '200':
+          description: Updated case (AWAITING_SECOND_APPROVAL after a first vote, DECIDED after concurrence).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationCaseResponse'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: No case with that id.
+        '409':
+          description: Illegal transition (same approver twice, disagreement, or already decided).
+      security:
+        - bearerAuth: []
+
+  /api/v1/parties/cases/{id}/reopen:
+    post:
+      tags: [Identity verification cases]
+      summary: Withdraw an awaiting first proposal, returning the case to OPEN
+      operationId: reopenVerificationCase
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The reopened case (status OPEN).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationCaseResponse'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: No case with that id.
+        '409':
+          description: The case is not in AWAITING_SECOND_APPROVAL.
+      security:
+        - bearerAuth: []
+
+  /api/v1/parties:
+    post:
+      tags: [Parties]
+      summary: Create a party
+      operationId: createParty
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePartyRequest'
+      responses:
+        '201':
+          description: Party created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartyResponse'
+    get:
+      tags: [Parties]
+      summary: Search parties
+      operationId: searchParties
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: List of matching parties
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PartyResponse'
+
+  /api/v1/parties/{id}:
+    get:
+      tags: [Parties]
+      summary: Get party by ID
+      operationId: getPartyById
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      responses:
+        '200':
+          description: Party detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartyResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/parties/by-external-id:
+    get:
+      tags: [Parties]
+      summary: Get party by external ID
+      operationId: getByExternalId
+      parameters:
+        - name: externalId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: source
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Party detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartyResponse'
+
+  /api/v1/parties/{id}/contact:
+    patch:
+      tags: [Parties]
+      summary: Update contact information
+      operationId: updateContact
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateContactRequest'
+      responses:
+        '200':
+          description: Updated party
+
+  /api/v1/parties/{id}/kyc:
+    put:
+      tags: [Parties]
+      summary: Update KYC status
+      operationId: updateKyc
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateKycRequest'
+      responses:
+        '200':
+          description: Updated
+
+  /api/v1/parties/{id}/status:
+    patch:
+      tags: [Parties]
+      summary: Change party status
+      operationId: changeStatus
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeStatusRequest'
+      responses:
+        '200':
+          description: Updated
+
+  /api/v1/parties/{id}/sync/bankid:
+    post:
+      tags: [Parties]
+      summary: Sync party data from BankID
+      operationId: syncFromBankId
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      responses:
+        '200':
+          description: Synced party
+
+  /api/v1/parties/{id}/sync/rob:
+    post:
+      tags: [Parties]
+      summary: Sync party data from ROB (Czech business registry)
+      operationId: syncFromRob
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      responses:
+        '200':
+          description: Synced party
+
+  /api/v1/parties/{id}/relationships:
+    post:
+      tags: [Parties]
+      summary: Add a party relationship
+      operationId: addRelationship
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddRelationshipRequest'
+      responses:
+        '201':
+          description: Relationship created
+
+  /api/v1/parties/{id}/relationships/{relationshipId}:
+    delete:
+      tags: [Parties]
+      summary: Terminate a party relationship
+      operationId: terminateRelationship
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+        - name: relationshipId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Terminated
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    partyId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    CreatePartyRequest:
+      type: object
+      required: [partyType, legalName]
+      properties:
+        partyType:
+          type: string
+          enum: [INDIVIDUAL, LEGAL_ENTITY, SOLE_TRADER]
+        legalName:
+          type: string
+        tradingName:
+          type: string
+        taxId:
+          type: string
+        dateOfBirth:
+          type: string
+          format: date
+        nationality:
+          type: string
+
+    UpdateContactRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        address:
+          $ref: '#/components/schemas/AddressDto'
+
+    UpdateKycRequest:
+      type: object
+      required: [kycStatus]
+      properties:
+        kycStatus:
+          type: string
+          enum: [PENDING, VERIFIED, REJECTED, EXPIRED]
+        verifiedAt:
+          type: string
+          format: date-time
+
+    ChangeStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ACTIVE, SUSPENDED, CLOSED]
+        reason:
+          type: string
+
+    AddRelationshipRequest:
+      type: object
+      required: [relatedPartyId, relationshipType]
+      properties:
+        relatedPartyId:
+          type: string
+          format: uuid
+        relationshipType:
+          type: string
+          enum: [BENEFICIAL_OWNER, AUTHORIZED_SIGNATORY, DIRECTOR, GUARANTOR]
+
+    AddressDto:
+      type: object
+      properties:
+        street:
+          type: string
+        houseNumber:
+          type: string
+        city:
+          type: string
+        postalCode:
+          type: string
+        countryCode:
+          type: string
+        ruianCode:
+          type: string
+
+    PartyResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        partyType:
+          type: string
+        legalName:
+          type: string
+        tradingName:
+          type: string
+          nullable: true
+        status:
+          type: string
+        kycStatus:
+          type: string
+        contact:
+          type: object
+        address:
+          $ref: '#/components/schemas/AddressDto'
+        relationships:
+          type: array
+          items:
+            type: object
+        createdAt:
+          type: string
+          format: date-time
+
+    BlindIndexResolveResponse:
+      type: object
+      required: [partyId]
+      description: Returned by GET /api/v1/parties/pid/resolve when a party is found.
+      properties:
+        partyId:
+          type: string
+          format: uuid
+          description: The internal UUID of the matching party.
+
+    ResolvePartyRequest:
+      type: object
+      required: [givenName, familyName, birthdate]
+      properties:
+        givenName:
+          type: string
+        familyName:
+          type: string
+        birthdate:
+          type: string
+          format: date
+        birthplace:
+          type: string
+          nullable: true
+        birthNumberRaw:
+          type: string
+          nullable: true
+          description: |
+            Plaintext Czech RČ (rodné číslo). Never stored or logged; reduced to a keyed
+            blind index within this request. Omit for foreign nationals.
+        nationalities:
+          type: array
+          items:
+            type: string
+
+    ResolvePartyResponse:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [MATCH_EXISTING, NO_MATCH, NEEDS_MANUAL_VERIFICATION]
+        partyId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Set only when decision=MATCH_EXISTING.
+        caseId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Set when decision=NEEDS_MANUAL_VERIFICATION and four-eyes wiring is active (PR4).
+        candidates:
+          type: array
+          nullable: true
+          description: Masked candidate list — cockpit surface only, never forward to customer channel.
+          items:
+            $ref: '#/components/schemas/CandidateSummaryResponse'
+
+    CandidateSummaryResponse:
+      type: object
+      required: [partyId, nameMasked, birthYear]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        nameMasked:
+          type: string
+          description: PII-minimised initials, e.g. "N. J."
+        birthYear:
+          type: integer
+
+    CaseApplicantResponse:
+      type: object
+      required: [givenName, familyName, birthdate, nationalities]
+      description: Applicant attributes for the operator to adjudicate. The plaintext RČ is never included.
+      properties:
+        givenName:
+          type: string
+        familyName:
+          type: string
+        birthdate:
+          type: string
+          format: date
+        birthplace:
+          type: string
+          nullable: true
+        nationalities:
+          type: array
+          items:
+            type: string
+
+    VerificationCaseResponse:
+      type: object
+      required: [id, trigger, status, applicant, candidatePartyIds, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        trigger:
+          type: string
+          enum: [RN_COLLISION, NAMESAKE_CANDIDATE, PROBABILISTIC_CANDIDATE]
+        status:
+          type: string
+          enum: [OPEN, AWAITING_SECOND_APPROVAL, DECIDED]
+        applicant:
+          $ref: '#/components/schemas/CaseApplicantResponse'
+        candidatePartyIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        firstApprover:
+          type: string
+          nullable: true
+        firstVerdict:
+          type: string
+          enum: [LINK_TO_EXISTING, DISTINCT_NEW, REJECT]
+          nullable: true
+        firstLinkPartyId:
+          type: string
+          format: uuid
+          nullable: true
+        firstNotes:
+          type: string
+          nullable: true
+        firstAt:
+          type: string
+          format: date-time
+          nullable: true
+        secondApprover:
+          type: string
+          nullable: true
+        secondAt:
+          type: string
+          format: date-time
+          nullable: true
+        finalVerdict:
+          type: string
+          enum: [LINK_TO_EXISTING, DISTINCT_NEW, REJECT]
+          nullable: true
+        finalLinkPartyId:
+          type: string
+          format: uuid
+          nullable: true
+        decidedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CaseDecisionRequest:
+      type: object
+      required: [verdict]
+      properties:
+        verdict:
+          type: string
+          enum: [LINK_TO_EXISTING, DISTINCT_NEW, REJECT]
+        linkPartyId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Required when verdict=LINK_TO_EXISTING — the candidate party the applicant maps to.
+        notes:
+          type: string
+          nullable: true
+
+    VerifyPresentationRequest:
+      type: object
+      required: [vpToken]
+      properties:
+        vpToken:
+          type: string
+          description: The wallet verifiable presentation — an SD-JWT VC (issuer-JWS~disclosures~[KB-JWT]).
+        nonce:
+          type: string
+          nullable: true
+          description: Anti-replay nonce; when set, a holder key-binding JWT is required and checked.
+        audience:
+          type: string
+          nullable: true
+          description: Expected audience (this RP); enforced against the key-binding JWT when set.
+
+    PidClaimsResponse:
+      type: object
+      required: [subjectIdMasked, givenName, familyName, birthDate, nationalities, issuingCountry, issuer, levelOfAssurance]
+      description: Verified PID attributes. The government subject identifier is masked.
+      properties:
+        subjectIdMasked:
+          type: string
+        givenName:
+          type: string
+        familyName:
+          type: string
+        birthDate:
+          type: string
+          format: date
+        birthPlace:
+          type: string
+          nullable: true
+        nationalities:
+          type: array
+          items:
+            type: string
+        issuingCountry:
+          type: string
+        issuer:
+          type: string
+        levelOfAssurance:
+          type: string
+
+    VerifyPresentationResponse:
+      type: object
+      required: [decision, verifiedClaims, loa]
+      properties:
+        decision:
+          type: string
+          enum: [MATCH_EXISTING, NO_MATCH, NEEDS_MANUAL_VERIFICATION]
+        partyId:
+          type: string
+          format: uuid
+          nullable: true
+        caseId:
+          type: string
+          format: uuid
+          nullable: true
+        verifiedClaims:
+          $ref: '#/components/schemas/PidClaimsResponse'
+        loa:
+          type: string
+
+    CreatePresentationRequestResponse:
+      type: object
+      required: [transactionId, authorizationRequestUri, expiresAt]
+      properties:
+        transactionId:
+          type: string
+          description: Opaque transaction id; also the OpenID4VP `state`. Poll this for the result.
+        authorizationRequestUri:
+          type: string
+          description: The `openid4vp://` authorization request URI to render as a QR / deep-link.
+        expiresAt:
+          type: string
+          format: date-time
+          description: When the exchange (and its single-use nonce) expires.
+
+    PresentationExchangeStatusResponse:
+      type: object
+      required: [transactionId, status]
+      properties:
+        transactionId:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, COMPLETED, EXPIRED]
+        decision:
+          type: string
+          enum: [MATCH_EXISTING, NO_MATCH, NEEDS_MANUAL_VERIFICATION]
+          nullable: true
+        partyId:
+          type: string
+          format: uuid
+          nullable: true
+        caseId:
+          type: string
+          format: uuid
+          nullable: true
+        verifiedClaims:
+          $ref: '#/components/schemas/PidClaimsResponse'
+          nullable: true
+        loa:
+          type: string
+          nullable: true
+
+    RegisterIdentityRequest:
+      type: object
+      required: [partyId, givenName, familyName, birthdate]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+          description: UUID of the party being indexed.
+        partyType:
+          type: string
+          enum: [NATURAL_PERSON, LEGAL_ENTITY]
+          default: NATURAL_PERSON
+        givenName:
+          type: string
+        familyName:
+          type: string
+        birthdate:
+          type: string
+          format: date
+        birthplace:
+          type: string
+          nullable: true
+        birthNumberRaw:
+          type: string
+          nullable: true
+          description: |
+            Plaintext Czech RČ (rodné číslo). Never stored or logged; reduced to a keyed
+            blind index within this request. Omit for foreign nationals.
+        keycloakSub:
+          type: string
+          nullable: true
+          description: Keycloak subject identifier (external ID for SSO correlation).
+        nationalities:
+          type: array
+          items:
+            type: string
+        eudiPidSub:
+          type: string
+          nullable: true
+          description: |
+            Verified EUDI PID subject identifier (ADR-0094). Set only after cryptographic
+            verification by EudiVerifyPresentationService — never the raw, unverified value.
+            Blind-indexed with the same pepper as RČ; raw value is never stored.
+
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string

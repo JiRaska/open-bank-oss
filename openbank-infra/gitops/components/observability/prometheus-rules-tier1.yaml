@@ -1,0 +1,150 @@
+# Tier-1 alert rules (ADR-0077 Phase 4 / ADR-0082). Picked up by the Prometheus
+# operator (ruleSelectorNilUsesHelmValues=false → any PrometheusRule is loaded).
+# Error/latency are derived from the Tempo metrics-generator span-metrics, so they
+# cover the whole fleet without per-service instrumentation. The SLO burn-rate
+# group is the multi-window/multi-burn pattern (Google SRE workbook) for the
+# payment rails at a 99.9% target (error budget = 0.1%).
+#
+# Applied with `kubectl apply -f` like the other observability components.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-tier1-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.tier1.health
+      rules:
+        - alert: PaymentServiceDown
+          # The payment microservices are scraped by the fleet PodMonitor under the
+          # job `observability/openbank-services` (the service name is the `container`
+          # label), NOT under a `*payment*` job. The old `up{job=~".*payment.*|.*fx.*"}`
+          # therefore NEVER matched a real service — it only matched the auxiliary
+          # `payments/*-db` Postgres exporters and `payments/redis-metrics`, so the
+          # alert was doubly wrong: blind to an actual service outage, yet paging a
+          # critical whenever a cache/db exporter scrape failed. Scope to the fleet
+          # job in the payment namespaces: this covers every payment-rail service
+          # (sepa/domestic/instant/fx/settlement/clearing/standing-order/transaction/
+          # card-issuance) and auto-includes new ones, while the db/redis exporters
+          # (different jobs) only ever raise TargetDown (warning), not a payment page.
+          expr: up{job="observability/openbank-services", namespace=~"payments|fx"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Payment service {{ $labels.container }} is down"
+            description: "{{ $labels.container }} ({{ $labels.namespace }}) has been unreachable for >2m."
+        - alert: HighErrorRate
+          # The ratio alone is meaningless at trivial throughput: a service doing
+          # 0.2 req/s with a couple of expected error spans (e.g. the security
+          # scanner probing endpoints) trips >10% and pages a critical → which
+          # also fires a HolmesGPT LLM investigation, burning the Groq daily token
+          # budget. Gate on an absolute floor (>0.5 erroring spans/s) so only a
+          # real, sustained error volume — not a low-traffic blip — can fire.
+          expr: |
+            (
+              sum by (service) (rate(traces_spanmetrics_calls_total{status_code="STATUS_CODE_ERROR"}[5m]))
+                / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total[5m])), 0.001) > 0.10
+            )
+            and
+            (
+              sum by (service) (rate(traces_spanmetrics_calls_total{status_code="STATUS_CODE_ERROR"}[5m])) > 0.5
+            )
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "High error rate on {{ $labels.service }}"
+            description: ">10% of spans on {{ $labels.service }} are erroring at >0.5 err/s (5m window)."
+        - alert: HighLatencyP99
+          expr: |
+            histogram_quantile(0.99, sum by (service, le) (rate(traces_spanmetrics_latency_bucket[5m]))) > 2
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "P99 latency >2s on {{ $labels.service }}"
+            description: "{{ $labels.service }} p99 span latency above 2s for >10m."
+        - alert: OutboxBacklogStuck
+          expr: openbank_outbox_backlog > 100
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Outbox backlog stuck on {{ $labels.service }}"
+            description: "{{ $labels.service }} has >100 unrelayed outbox rows for >15m — money/events may be stuck."
+    - name: openbank.tier1.progressive_delivery
+      rules:
+        # Fires when a Rollout's canary analysis aborts (Prometheus analysis gate
+        # failed: error-rate ≥5% or p95 latency ≥1s). Rollout auto-reverts to
+        # stable, but operators need to know so they can investigate the root
+        # cause before the next deploy attempt (ADR-0098).
+        - alert: RolloutAnalysisAborted
+          expr: |
+            rollout_phase{phase="Aborted"} == 1
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Rollout {{ $labels.rollout }} aborted in {{ $labels.namespace }}"
+            description: >-
+              Canary analysis failed for {{ $labels.rollout }} (namespace {{ $labels.namespace }}).
+              Traffic has been reverted to stable. Check AnalysisRun for failing metric
+              (error-rate or p95-latency). Next deploy will restart the canary cycle.
+        # Fires when a Rollout is stuck degraded — pod failed to become healthy
+        # within progressDeadlineSeconds (600s) and progressDeadlineAbort rolled
+        # it back. Separate from AnalysisAborted (deadline = infra issue, analysis
+        # abort = code/regression issue).
+        - alert: RolloutProgressDeadlineExceeded
+          expr: |
+            rollout_phase{phase="Degraded"} == 1
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Rollout {{ $labels.rollout }} degraded in {{ $labels.namespace }}"
+            description: >-
+              Rollout {{ $labels.rollout }} (namespace {{ $labels.namespace }}) exceeded
+              the 10-minute progress deadline — canary pods did not become healthy.
+              Likely cause: OOMKilled, CrashLoopBackOff, missing secret/configmap, or
+              image pull error. Traffic reverted to stable.
+    - name: openbank.tier1.slo_burn
+      rules:
+        # Fast burn: budget exhausted in ~2 days → page.
+        - alert: PaymentSLOFastBurn
+          expr: |
+            (
+              sum by (service) (rate(traces_spanmetrics_calls_total{service=~"openbank-(sepa-payment|domestic-payment|sepa-instant|fx).*",status_code="STATUS_CODE_ERROR"}[1h]))
+                / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~"openbank-(sepa-payment|domestic-payment|sepa-instant|fx).*"}[1h])), 0.001)
+            ) / 0.001 > 14.4
+            and
+            (
+              sum by (service) (rate(traces_spanmetrics_calls_total{service=~"openbank-(sepa-payment|domestic-payment|sepa-instant|fx).*",status_code="STATUS_CODE_ERROR"}[5m]))
+                / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~"openbank-(sepa-payment|domestic-payment|sepa-instant|fx).*"}[5m])), 0.001)
+            ) / 0.001 > 14.4
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Fast SLO burn on {{ $labels.service }}"
+            description: "{{ $labels.service }} is burning its 99.9% error budget >14.4x (1h & 5m) — budget gone in ~2 days."
+        # Slow burn: budget exhausted in ~5 days → ticket.
+        - alert: PaymentSLOSlowBurn
+          expr: |
+            (
+              sum by (service) (rate(traces_spanmetrics_calls_total{service=~"openbank-(sepa-payment|domestic-payment|sepa-instant|fx).*",status_code="STATUS_CODE_ERROR"}[6h]))
+                / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~"openbank-(sepa-payment|domestic-payment|sepa-instant|fx).*"}[6h])), 0.001)
+            ) / 0.001 > 6
+            and
+            (
+              sum by (service) (rate(traces_spanmetrics_calls_total{service=~"openbank-(sepa-payment|domestic-payment|sepa-instant|fx).*",status_code="STATUS_CODE_ERROR"}[30m]))
+                / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~"openbank-(sepa-payment|domestic-payment|sepa-instant|fx).*"}[30m])), 0.001)
+            ) / 0.001 > 6
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Slow SLO burn on {{ $labels.service }}"
+            description: "{{ $labels.service }} is burning its 99.9% error budget >6x (6h & 30m)."

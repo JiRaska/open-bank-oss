@@ -1,0 +1,41 @@
+# Keycloak realm-import JSON from Vault → existing keycloak-realm-import Secret.
+# The Deployment mounts this Secret as a volume at /opt/keycloak/data/import, so
+# the Secret KEY becomes the filename — it must stay `openbank-realm.json` (a
+# .json file is what Keycloak's import scans for). The whole realm JSON is held
+# as a single Vault KV property of the same name. creationPolicy Owner: ESO owns
+# and re-creates the Secret (see es-account-service-oidc).
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: keycloak-realm-import
+  namespace: iam
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: keycloak-realm-import
+    creationPolicy: Owner
+    template:
+      engineVersion: v2
+      mergePolicy: Merge
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+      data:
+        # Inject the login theme + display name into the realm JSON pulled from
+        # Vault. The Vault copy predates the `openbank` theme, so without this a
+        # cold-start `--import-realm` would recreate the realm unbranded. Keeping
+        # the override here lands the theme decision in gitops, next to the theme
+        # assets, instead of having to rewrite the Vault blob (the live realm is
+        # already themed via kcadm; this only matters on a fresh DB import).
+        openbank-realm.json: >-
+          {{ index . "openbank-realm.json" | mustFromJson
+             | merge (dict "loginTheme" "openbank" "displayNameHtml" "OpenBank Framework")
+             | mustToJson }}
+  data:
+    - secretKey: openbank-realm.json
+      remoteRef:
+        key: keycloak-realm-import
+        property: openbank-realm.json

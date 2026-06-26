@@ -1,0 +1,191 @@
+quarkus:
+  application:
+    name: openbank-analytics-sink
+    version: 0.1.0
+  http:
+    port: 8134
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,OPTIONS
+      headers: Content-Type,Authorization
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  # NOTE: no datasource / flyway / hibernate blocks. This service owns no OLTP database
+  # (ADR-0022). Its store of record is the analytics warehouse, written through the
+  # AnalyticsSink port. The default LoggingAnalyticsSink needs no external system, so the
+  # service boots and is testable with zero infra.
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  smallrye-reactive-messaging:
+    kafka:
+      bootstrap-servers: localhost:29092
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+    console:
+      json: true
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-analytics-sink
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  management:
+    enabled: true
+    port: 8086
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+mp:
+  messaging:
+    incoming:
+      analytics-events-in:
+        connector: smallrye-kafka
+        client.id: analytics-sink-${quarkus.uuid}
+        group.id: analytics-sink
+        # Same domain-event topics the audit service ingests. The analytics layer is fed
+        # from the existing outbox stream (ADR-0003) — it is NOT a second extraction path
+        # (no Debezium/WAL CDC), so it adds no read load on the operational databases.
+        topics: openbank.account.events,openbank.transaction.events,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto.offset.reset: earliest
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+    oidc:
+      enabled: false
+"%test":
+  quarkus:
+    oidc:
+      enabled: false
+
+openbank:
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 200
+  api:
+    version: "1"
+  build:
+    time: "${BUILD_TIME:unknown}"
+  git:
+    commit: "${GIT_COMMIT:unknown}"
+  analytics:
+    # Selects the AnalyticsSink binding at BUILD time. Default (unset) keeps the offline,
+    # zero-infra LoggingAnalyticsSink (@Default). Set to "clickhouse" to activate the durable
+    # ClickHouseAnalyticsSink (@Alternative @Priority(100)), which writes bronze over the
+    # ClickHouse HTTP interface using the config below.
+    sink:
+      type: ${ANALYTICS_SINK_TYPE:}
+    # ClickHouse target for the bronze layer. Consumed by ClickHouseAnalyticsSink when
+    # openbank.analytics.sink.type=clickhouse. The default LoggingAnalyticsSink ignores these.
+    clickhouse:
+      url: ${CLICKHOUSE_URL:http://localhost:8123}
+      database: ${CLICKHOUSE_DB:openbank_analytics}
+      username: ${CLICKHOUSE_USER:analytics}
+      password: ${CLICKHOUSE_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    # The bronze layer is the log of record; it MUST be retained at least this long
+    # (mirrors AnalyticsRetention.BRONZE_MINIMUM). The ClickHouse TTL is set to match.
+    bronze-retention-years: 10
+    reconcile:
+      # Periodic OLTP-vs-warehouse drift check. Cron, not fixed-rate, so it runs off-peak and
+      # never competes with customer traffic. Compares per-aggregate max(version) on both sides.
+      cron: ${ANALYTICS_RECONCILE_CRON:0 30 2 * * ?}
+      source:
+        # Selects the OLTP source-side reader at BUILD time (ADR-0026). Default (unset) keeps the
+        # offline @Default NoOpReconciliationSource, so reconciliation runs warehouse-only with zero
+        # infra (no regression). Set to "http" to activate HttpReconciliationSource, which fans out to
+        # each service's role-gated /api/v1/analytics/reconciliation-summary endpoint over the JDK
+        # HttpClient (no new dependency). Phase 0 leaves this unset.
+        backend: ${ANALYTICS_RECONCILE_SOURCE_BACKEND:}
+        # Comma-separated service=baseUrl pairs the http source fans out to (used only when
+        # source.backend=http). Add a service as it implements the contract (phased rollout, ADR-0026
+        # §D6). Example: account=http://openbank-account-service:8081,balance=http://openbank-balance-service:8082
+        endpoints: ${ANALYTICS_RECONCILE_SOURCE_ENDPOINTS:}
+    backfill:
+      # Window size a (possibly multi-year) reload is split into, so each chunk is restartable and
+      # each warehouse insert is a sane size. ISO-8601 duration.
+      chunk: ${ANALYTICS_BACKFILL_CHUNK:PT24H}
+    schema:
+      # Selects the SchemaCatalogSource at BUILD time. Default (unset) = the config catalogue below.
+      # Set to "apicurio" to load the catalogue from the Apicurio registry (ApicurioSchemaCatalogSource).
+      backend: ${ANALYTICS_SCHEMA_BACKEND:}
+      # Schema governance (F7). Comma-separated eventType:maxVersion the sink accepts. Empty = gate
+      # open (accept all, backwards-compatible). Used by the default (config) catalogue source.
+      known: ${ANALYTICS_SCHEMA_KNOWN:}
+      # When true, an unknown/newer-than-known schema is quarantined to the DLQ instead of written.
+      strict: ${ANALYTICS_SCHEMA_STRICT:false}
+      # Apicurio registry coordinates (used only when schema.backend=apicurio). Provisioned in
+      # openbank-infra as service schema-registry:8081. group is the Apicurio artifact group.
+      apicurio:
+        url: ${ANALYTICS_SCHEMA_APICURIO_URL:http://localhost:8081}
+        group: ${ANALYTICS_SCHEMA_APICURIO_GROUP:default}
+    erasure:
+      # Selects the CryptoErasure backend at BUILD time. Default (unset) = NoOpCryptoErasure (logs).
+      # Set to "vault" to crypto-shred via Vault Transit key destruction (VaultCryptoErasure, F6).
+      backend: ${ANALYTICS_ERASURE_BACKEND:}
+    vault:
+      # Vault coordinates for crypto-shredding (used only when erasure.backend=vault). Provisioned in
+      # openbank-infra as service vault:8200 (dev). The Transit engine must be enabled (see
+      # docker/vault/init/init.sh) and the token must allow transit key config + delete.
+      url: ${ANALYTICS_VAULT_URL:http://localhost:8200}
+      token: ${ANALYTICS_VAULT_TOKEN:}
+      transit-mount: ${ANALYTICS_VAULT_TRANSIT_MOUNT:transit}
+      key-prefix: ${ANALYTICS_VAULT_KEY_PREFIX:analytics}
+    worm:
+      # Selects the authoritative WormArchive backend at BUILD time (F2). Default (unset) keeps the
+      # operator-mutable ClickHouse mirror (when sink.type=clickhouse) or LoggingWormArchive. Set to
+      # "s3" to seal integrity anchors into an S3 Object Lock (COMPLIANCE) bucket — immutable even to
+      # root until retention expires. Targets the S3 API standard (AWS S3 in prod); deliberately NOT
+      # MinIO (community edition archived/abandoned in 2026) and not a local emulator (none faithfully
+      # enforce Object Lock), so this gate is left unset in dev.
+      backend: ${ANALYTICS_WORM_BACKEND:}
+      s3:
+        # Path-style S3 endpoint, region and Object-Lock-enabled bucket. Credentials should be a
+        # narrowly-scoped key that may PutObject (with retention) but NOT bypass governance retention.
+        endpoint: ${ANALYTICS_WORM_S3_ENDPOINT:https://s3.eu-central-1.amazonaws.com}
+        region: ${ANALYTICS_WORM_S3_REGION:eu-central-1}
+        bucket: ${ANALYTICS_WORM_S3_BUCKET:openbank-analytics-worm}
+        access-key: ${ANALYTICS_WORM_S3_ACCESS_KEY:}
+        secret-key: ${ANALYTICS_WORM_S3_SECRET_KEY:}
+        # Retention applied per sealed anchor; must be >= the bronze minimum (10y) it protects.
+        retention-years: ${ANALYTICS_WORM_S3_RETENTION_YEARS:10}
+    health:
+      # Readiness goes DOWN above these thresholds (F8 / DORA RPO). Lag = now - event.occurredAt.
+      max-lag-seconds: ${ANALYTICS_MAX_LAG_SECONDS:900}
+      max-dead-letters: ${ANALYTICS_MAX_DEAD_LETTERS:100}
+    residency:
+      # Data residency guard checked at startup (F9 / GDPR Art. 44). Boot aborts if region not allowed.
+      region: ${ANALYTICS_RESIDENCY_REGION:eu-central-1}
+      allowed: ${ANALYTICS_RESIDENCY_ALLOWED:eu-central-1,eu-west-1}
+      enforce: ${ANALYTICS_RESIDENCY_ENFORCE:true}

@@ -1,0 +1,55 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>LongMethod:Psd2Services.kt$PaymentInitiationService$override suspend fun initiatePayment(command: InitiatePaymentCommand): PaymentInitiationResponse</ID>
+    <ID>LongParameterList:AisResource.kt$AisResource$( @PathParam("accountId") accountId: String, @HeaderParam("Consent-ID") consentId: String, @QueryParam("dateFrom") dateFrom: String?, @QueryParam("dateTo") dateTo: String?, @QueryParam("bookingStatus") bookingStatus: String?, @QueryParam("limit") limit: Int?, @QueryParam("afterCursor") afterCursor: String?, @Context ctx: ContainerRequestContext )</ID>
+    <ID>LongParameterList:Psd2Ports.kt$AccountServiceClient$( accountId: String, dateFrom: LocalDate?, dateTo: LocalDate?, bookingStatus: BookingStatus, limit: Int, afterCursor: String? )</ID>
+    <ID>LongParameterList:Psd2Ports.kt$ConsentServiceClient$( partyId: String, granteeId: String, granteeName: String, scopes: Set&lt;String&gt;, accountIbans: List&lt;String&gt;?, validUntil: LocalDate, redirectUri: String?, tppTransactionId: String?, ipAddress: String? )</ID>
+    <ID>LongParameterList:Psd2Ports.kt$TransactionServiceClient$( debtorIban: String, creditorIban: String, creditorName: String, amount: BigDecimal, currency: String, endToEndId: String?, remittanceInfo: String?, idempotencyKey: String )</ID>
+    <ID>LongParameterList:ResilientClients.kt$ResilientAccountServiceClient$( accountId: String, dateFrom: LocalDate?, dateTo: LocalDate?, bookingStatus: BookingStatus, limit: Int, afterCursor: String?, )</ID>
+    <ID>MagicNumber:AisResource.kt$AisResource$401</ID>
+    <ID>MagicNumber:EidasMtlsFilter.kt$EidasMtlsFilter$401</ID>
+    <ID>MagicNumber:EidasMtlsFilter.kt$EidasMtlsFilter$503</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$ConsentNotFoundMapper$404</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$ConsentUnauthorizedMapper$401</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$InvalidPaymentProductMapper$400</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$Psd2IllegalArgMapper$400</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$TppNotAuthorizedMapper$401</ID>
+    <ID>MagicNumber:ObConsentResource.kt$ConsentResource$201</ID>
+    <ID>MagicNumber:ObConsentResource.kt$ConsentResource$401</ID>
+    <ID>MagicNumber:PisResource.kt$PisResource$201</ID>
+    <ID>MagicNumber:PisResource.kt$PisResource$401</ID>
+    <ID>MagicNumber:PisResource.kt$PisResource$404</ID>
+    <ID>MagicNumber:Psd2OutboxDispatcher.kt$Psd2OutboxDispatcher$3000</ID>
+    <ID>MagicNumber:Psd2OutboxDispatcher.kt$Psd2OutboxDispatcher$30000</ID>
+    <ID>MagicNumber:Psd2OutboxRepositoryImpl.kt$Psd2OutboxRepositoryImpl$4000</ID>
+    <ID>MagicNumber:Psd2Services.kt$ConsentManagementService$90</ID>
+    <ID>MagicNumber:ResilientClients.kt$ResilientAccountServiceClient$10</ID>
+    <ID>MagicNumber:ResilientClients.kt$ResilientAccountServiceClient$3000</ID>
+    <ID>MagicNumber:ResilientClients.kt$ResilientAccountServiceClient$5000</ID>
+    <ID>MagicNumber:ResilientClients.kt$ResilientConsentServiceClient$10</ID>
+    <ID>MagicNumber:ResilientClients.kt$ResilientConsentServiceClient$2000</ID>
+    <ID>MagicNumber:ResilientClients.kt$ResilientConsentServiceClient$3000</ID>
+    <ID>MagicNumber:ResilientClients.kt$ResilientTransactionServiceClient$10</ID>
+    <ID>MagicNumber:ResilientClients.kt$ResilientTransactionServiceClient$10000</ID>
+    <ID>MagicNumber:ResilientClients.kt$ResilientTransactionServiceClient$3000</ID>
+    <ID>MagicNumber:SandboxResource.kt$SandboxResource$201</ID>
+    <ID>MagicNumber:StubClients.kt$StubTransactionServiceClient$4</ID>
+    <ID>MagicNumber:TppRegistryClient.kt$TppAuthorizationGuard$2000</ID>
+    <ID>MatchingDeclarationName:ObConsentResource.kt$ConsentResource</ID>
+    <ID>MatchingDeclarationName:Psd2OutboxPort.kt$Psd2OutboxRepository : OutboxRepository</ID>
+    <ID>SwallowedException:EidasMtlsFilter.kt$EidasMtlsFilter$e: CircuitBreakerOpenException</ID>
+    <ID>TooGenericExceptionCaught:EidasMtlsFilter.kt$EidasMtlsFilter$e: Exception</ID>
+    <ID>UnusedParameter:ResilientClients.kt$ResilientAccountServiceClient$afterCursor: String?</ID>
+    <ID>UnusedParameter:ResilientClients.kt$ResilientAccountServiceClient$bookingStatus: BookingStatus</ID>
+    <ID>UnusedParameter:ResilientClients.kt$ResilientAccountServiceClient$dateFrom: LocalDate?</ID>
+    <ID>UnusedParameter:ResilientClients.kt$ResilientAccountServiceClient$dateTo: LocalDate?</ID>
+    <ID>UnusedParameter:ResilientClients.kt$ResilientAccountServiceClient$limit: Int</ID>
+    <ID>UnusedParameter:ResilientClients.kt$ResilientConsentServiceClient$granteeId: String</ID>
+    <ID>UnusedParameter:ResilientClients.kt$ResilientConsentServiceClient$iban: String?</ID>
+    <ID>UnusedParameter:SandboxResource.kt$SandboxResource$@HeaderParam("Consent-ID") consentId: String?</ID>
+    <ID>UnusedParameter:SandboxResource.kt$SandboxResource$@HeaderParam("Idempotency-Key") idempotencyKey: String?</ID>
+    <ID>UnusedParameter:SandboxResource.kt$SandboxResource$@PathParam("accountId") accountId: String</ID>
+  </CurrentIssues>
+</SmellBaseline>

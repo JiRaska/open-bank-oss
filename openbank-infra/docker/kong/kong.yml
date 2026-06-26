@@ -1,0 +1,410 @@
+_format_version: "3.0"
+_transform: true
+
+services:
+  - name: account-service
+    protocol: http
+    host: account-service
+    port: 8100
+    path: /
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: account-route
+        paths:
+          - /api/v1/accounts
+        strip_path: false
+  - name: account-health-service
+    protocol: http
+    host: account-service
+    port: 8100
+    path: /q/health
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: account-health-route
+        paths:
+          - /health/account
+        strip_path: true
+
+  - name: ledger-service
+    protocol: http
+    host: ledger-service
+    port: 8101
+    path: /
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: ledger-route
+        paths:
+          - /api/v1/ledger
+        strip_path: false
+  - name: ledger-health-service
+    protocol: http
+    host: ledger-service
+    port: 8101
+    path: /q/health
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: ledger-health-route
+        paths:
+          - /health/ledger
+        strip_path: true
+
+  - name: transaction-service
+    protocol: http
+    host: transaction-service
+    port: 8102
+    path: /
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: transaction-route
+        paths:
+          - /api/v1/transactions
+        strip_path: false
+  - name: transaction-health-service
+    protocol: http
+    host: transaction-service
+    port: 8102
+    path: /q/health
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: transaction-health-route
+        paths:
+          - /health/transaction
+        strip_path: true
+
+  - name: balance-service
+    protocol: http
+    host: balance-service
+    port: 8103
+    path: /
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: balance-route
+        paths:
+          - /api/v1/balances
+        strip_path: false
+  - name: balance-health-service
+    protocol: http
+    host: balance-service
+    port: 8103
+    path: /q/health
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: balance-health-route
+        paths:
+          - /health/balance
+        strip_path: true
+
+  - name: consent-service
+    protocol: http
+    host: consent-service
+    port: 8106
+    path: /
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: consent-route
+        paths:
+          - /api/v1/consents
+        strip_path: false
+  - name: consent-health-service
+    protocol: http
+    host: consent-service
+    port: 8106
+    path: /q/health
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: consent-health-route
+        paths:
+          - /health/consent
+        strip_path: true
+
+  - name: psd2-service
+    protocol: http
+    host: psd2-service
+    port: 8107
+    path: /
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: psd2-route
+        paths:
+          - /api/v1/psd2
+        strip_path: false
+  - name: psd2-health-service
+    protocol: http
+    host: psd2-service
+    port: 8107
+    path: /q/health
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: psd2-health-route
+        paths:
+          - /health/psd2
+        strip_path: true
+
+  - name: sepa-service
+    protocol: http
+    host: sepa-payment
+    port: 8115
+    path: /
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: sepa-route
+        paths:
+          - /api/v1/sepa
+        strip_path: false
+  - name: sepa-health-service
+    protocol: http
+    host: sepa-payment
+    port: 8115
+    path: /q/health
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: sepa-health-route
+        paths:
+          - /health/sepa
+        strip_path: true
+
+  - name: domestic-service
+    protocol: http
+    host: domestic-payment
+    port: 8116
+    path: /
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: domestic-route
+        paths:
+          - /api/v1/domestic
+        strip_path: false
+  - name: domestic-health-service
+    protocol: http
+    host: domestic-payment
+    port: 8116
+    path: /q/health
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: domestic-health-route
+        paths:
+          - /health/domestic
+        strip_path: true
+
+  - name: aml-service
+    protocol: http
+    host: aml-service
+    port: 8117
+    path: /
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: aml-route
+        paths:
+          - /api/v1/aml
+        strip_path: false
+  - name: aml-health-service
+    protocol: http
+    host: aml-service
+    port: 8117
+    path: /q/health
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: aml-health-route
+        paths:
+          - /health/aml
+        strip_path: true
+
+  - name: party-service
+    protocol: http
+    host: party-service
+    port: 8111
+    path: /
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: party-route
+        paths:
+          - /api/v1/parties
+        strip_path: false
+  - name: party-health-service
+    protocol: http
+    host: party-service
+    port: 8111
+    path: /q/health
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: party-health-route
+        paths:
+          - /health/party
+        strip_path: true
+
+  - name: kyc-service
+    protocol: http
+    host: kyc-service
+    port: 8114
+    path: /
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: kyc-route
+        paths:
+          - /api/v1/kyc
+        strip_path: false
+  - name: kyc-health-service
+    protocol: http
+    host: kyc-service
+    port: 8114
+    path: /q/health
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: kyc-health-route
+        paths:
+          - /health/kyc
+        strip_path: true
+
+  - name: audit-service
+    protocol: http
+    host: audit-service
+    port: 8113
+    path: /
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: audit-route
+        paths:
+          - /api/v1/audit
+        strip_path: false
+  - name: audit-health-service
+    protocol: http
+    host: audit-service
+    port: 8113
+    path: /q/health
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: audit-health-route
+        paths:
+          - /health/audit
+        strip_path: true
+
+  - name: notification-service
+    protocol: http
+    host: notification-service
+    port: 8112
+    path: /
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: notification-route
+        paths:
+          - /api/v1/notifications
+        strip_path: false
+  - name: notification-health-service
+    protocol: http
+    host: notification-service
+    port: 8112
+    path: /q/health
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: notification-health-route
+        paths:
+          - /health/notification
+        strip_path: true
+
+  - name: agent-service
+    protocol: http
+    host: agent-service
+    port: 8109
+    path: /
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: agent-route
+        paths:
+          - /api/v1/agent
+          - /api/v1/agents
+        strip_path: false
+  - name: agent-health-service
+    protocol: http
+    host: agent-service
+    port: 8109
+    path: /q/health
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: agent-health-route
+        paths:
+          - /health/agent
+        strip_path: true

@@ -1,0 +1,168 @@
+# ---------------------------------------------------------------------------
+# FinOps cost-collector — daily AWS Cost Explorer snapshot (ADR-0054 phase 2).
+#
+# A CronJob snapshots `aws ce get-cost-and-usage` into the admin-ui-cost-report
+# ConfigMap, which the admin-ui Deployment mounts read-only at
+# /app/cost-data/cost-report.json (OPENBANK_COST_REPORT_LIVE). The operator
+# console stays a READ-ONLY consumer (rule #3) — it never holds billing IAM; only
+# this short-lived collector gets a read-only Cost Explorer grant, via EKS Pod
+# Identity (IAM role openbank-sandbox-cost-collector, bound by Terraform in
+# envs/sandbox-platform/cost-collector.tf to the cost-collector SA below).
+#
+# Until that role is applied the `aws ce` call is denied → the collector writes
+# an available:false snapshot and the panel falls back to the image-baked
+# snapshot (never a fabricated number).
+#
+# The ConfigMap is collector-owned (created/updated by the CronJob, NOT declared
+# in git) so ArgoCD selfHeal never reverts the daily data. The admin-ui mount is
+# optional:true, so the pod starts fine before the first run (route falls back to
+# the image-baked snapshot until live data lands).
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cost-collector
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: cost-collector
+    app.kubernetes.io/part-of: admin-ui
+---
+# Least-privilege RBAC: the collector may only read/write the one named ConfigMap.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cost-collector
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: cost-collector
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["admin-ui-cost-report"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    # create needs cluster/ns-wide verb (resourceNames can't gate create); the
+    # apply path uses get+patch on the existing seed, create is a belt-and-braces.
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cost-collector
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: cost-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cost-collector
+subjects:
+  - kind: ServiceAccount
+    name: cost-collector
+    namespace: admin-ui
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cost-collector
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: cost-collector
+    app.kubernetes.io/part-of: admin-ui
+spec:
+  # 23:50 local (Prague) so the snapshot is fresh for the next working day.
+  # spec.timeZone is GA in Kubernetes 1.27+ (cluster runs 1.34).
+  schedule: "50 23 * * *"
+  timeZone: "Europe/Prague"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: cost-collector
+        spec:
+          serviceAccountName: cost-collector
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          # Single container — alpine/k8s bundles aws-cli + kubectl + a shell and
+          # is multi-arch (incl. arm64/Graviton). It fetches + shapes the snapshot
+          # via Pod Identity creds (aws `--query` builds the services array; the
+          # wrapper fields are written with shell — amounts stay strings / total
+          # omitted, the admin-ui route normalises) and publishes it to the
+          # ConfigMap. NOTE: distroless kubectl/aws-cli images have no /bin/sh, so
+          # the piped `kubectl apply` needs a shell-bearing image like this one.
+          containers:
+            - name: collect-publish
+              image: alpine/k8s:1.34.1
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                # aws-cli + kubectl write config/cache under $HOME; with a
+                # read-only root fs they must point at the writable /tmp emptyDir.
+                - name: HOME
+                  value: /tmp
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  END=$(date -u +%Y-%m-%d)
+                  START=$(date -u -d "@$(( $(date -u +%s) - 2592000 ))" +%Y-%m-%d)
+                  NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                  # FIX: aggregate ALL ResultsByTime periods. ResultsByTime[0]
+                  # only picks the first MONTHLY bucket; a window spanning two
+                  # months (e.g. May+June) would give just the few-day June total
+                  # ($0.17). Write the aggregator to a temp file so the Python code
+                  # stays outside the YAML block scalar (no indentation conflict).
+                  printf '%s\n' \
+                    'import json,os' \
+                    'd=json.load(open("/tmp/_ce_raw.json"))' \
+                    'T={}' \
+                    'for p in d.get("ResultsByTime",[]):' \
+                    '  for g in p.get("Groups",[]):' \
+                    '    n=g["Keys"][0];a=float(g["Metrics"]["UnblendedCost"]["Amount"])' \
+                    '    T[n]=T.get(n,0.0)+a' \
+                    'S=sorted([{"name":k,"amount":round(v,2)} for k,v in T.items() if v>0.001],key=lambda x:-x["amount"])' \
+                    'import sys' \
+                    'out={"available":bool(S),"currency":"USD","periodStart":os.environ["CE_START"],"periodEnd":os.environ["CE_END"],"services":S,"collectedAt":os.environ["CE_NOW"],"source":"aws-cost-explorer-cronjob"}' \
+                    'json.dump(out,open("/tmp/cost-report.json","w"))' \
+                    'print("ok",len(S),round(sum(s["amount"] for s in S),2))' \
+                    > /tmp/agg.py
+                  if aws ce get-cost-and-usage \
+                       --time-period Start=$START,End=$END \
+                       --granularity MONTHLY --metrics UnblendedCost \
+                       --group-by Type=DIMENSION,Key=SERVICE \
+                       --region us-east-1 --output json > /tmp/_ce_raw.json 2>/dev/null; then
+                    CE_START="$START" CE_END="$END" CE_NOW="$NOW" \
+                    python3 /tmp/agg.py
+                  else
+                    printf '{"available":false,"reason":"cost explorer query failed","currency":"USD","periodStart":"%s","periodEnd":"%s","total":0,"services":[],"collectedAt":"%s","source":"aws-cost-explorer-cronjob"}\n' \
+                      "$START" "$END" "$NOW" > /tmp/cost-report.json
+                  fi
+                  echo "collected:"; cat /tmp/cost-report.json
+                  kubectl create configmap admin-ui-cost-report \
+                    --namespace admin-ui \
+                    --from-file=cost-report.json=/tmp/cost-report.json \
+                    --dry-run=client -o yaml | kubectl apply -f -
+                  echo "published admin-ui-cost-report"
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}

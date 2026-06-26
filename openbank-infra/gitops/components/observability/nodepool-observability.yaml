@@ -1,0 +1,52 @@
+# Dedicated ON-DEMAND node pool for stateful observability (ADR-0082 / ADR-0027).
+# The `default` pool allows spot, and spot reclamation was killing Prometheus/Tempo
+# every ~15-30 min (node dies mid-WAL-replay → stuck EBS volume → Multi-Attach). A
+# bank's monitoring plane must not ride spot. On-demand + a taint so ONLY tolerating
+# observability stateful pods land here; consolidation is conservative (WhenEmpty)
+# so a busy Prometheus node is never disrupted for bin-packing.
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: observability
+spec:
+  template:
+    metadata:
+      labels:
+        workload: observability
+    spec:
+      taints:
+        - key: workload
+          value: observability
+          effect: NoSchedule
+      expireAfter: 720h
+      requirements:
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["arm64"]
+        - key: kubernetes.io/os
+          operator: In
+          values: ["linux"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+        - key: karpenter.k8s.aws/instance-category
+          operator: In
+          values: ["m", "r"]
+        # >= ~8 GiB: the whole observability stack (Prometheus 1.5Gi + Tempo +
+        # Loki + Pyroscope + Alertmanager) must fit with headroom. c6g.medium
+        # (2 GiB) was node-OOMing under Prometheus -> kubelet death -> NotReady.
+        - key: karpenter.k8s.aws/instance-memory
+          operator: Gt
+          values: ["7500"]
+        - key: karpenter.k8s.aws/instance-generation
+          operator: Gt
+          values: ["3"]
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: default
+  limits:
+    cpu: "16"
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 1h

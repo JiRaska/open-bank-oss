@@ -1,0 +1,24 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>MagicNumber:AmlCaseAdapter.kt$AmlCaseAdapter$5_000</ID>
+    <ID>MagicNumber:AuthzProducer.kt$AuthzProducer$500</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$InvalidSepaPaymentStateTransitionMapper$409</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$SepaPaymentNotFoundMapper$404</ID>
+    <ID>MagicNumber:SanctionsScreeningAdapter.kt$SanctionsScreeningAdapter$5_000</ID>
+    <ID>MagicNumber:SepaPaymentOutboxDispatcher.kt$SepaPaymentOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:SepaPaymentOutboxDispatcher.kt$SepaPaymentOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:SepaPaymentOutboxRepositoryImpl.kt$SepaPaymentOutboxRepositoryImpl$4000</ID>
+    <ID>MagicNumber:SepaPaymentResource.kt$SepaPaymentResource$201</ID>
+    <ID>MagicNumber:SepaPaymentService.kt$SepaPaymentService$1000</ID>
+    <ID>MagicNumber:SepaPaymentService.kt$SepaPaymentService$200</ID>
+    <ID>MagicNumber:SepaPaymentService.kt$SepaPaymentService$9999</ID>
+    <ID>NewLineAtEndOfFile:SepaPaymentTest.kt$com.openbank.sepa.domain.model.SepaPaymentTest.kt</ID>
+    <ID>SwallowedException:SepaPaymentOutboxDispatcher.kt$SepaPaymentOutboxDispatcher$ex: Exception</ID>
+    <ID>SwallowedException:SepaPaymentService.kt$SepaPaymentService$ex: IllegalArgumentException</ID>
+    <ID>TooGenericExceptionCaught:SanctionsScreeningAdapter.kt$SanctionsScreeningAdapter$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:SepaPaymentOutboxDispatcher.kt$SepaPaymentOutboxDispatcher$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:SepaPaymentService.kt$SepaPaymentService$ex: Exception</ID>
+  </CurrentIssues>
+</SmellBaseline>

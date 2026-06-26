@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="src/main/kotlin/com/openbank/fraud/application/port/in/ScoreFraudUseCase.kt">
+        <error line="5" column="9" source="standard:package-name" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/fraud/application/usecase/FraudScoringService.kt">
+        <error line="31" column="5" source="standard:class-signature" />
+        <error line="31" column="50" source="standard:class-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/fraud/domain/model/FraudModel.kt">
+        <error line="46" column="5" source="standard:class-signature" />
+        <error line="47" column="5" source="standard:class-signature" />
+        <error line="48" column="5" source="standard:class-signature" />
+        <error line="49" column="5" source="standard:class-signature" />
+        <error line="49" column="29" source="standard:class-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/fraud/infrastructure/authz/AuthzProducer.kt">
+        <error line="26" column="53" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/fraud/infrastructure/persistence/FraudScoreRepositoryImpl.kt">
+        <error line="82" column="94" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/fraud/infrastructure/rest/FraudResource.kt">
+        <error line="56" column="5" source="standard:class-signature" />
+        <error line="57" column="5" source="standard:class-signature" />
+        <error line="58" column="5" source="standard:class-signature" />
+        <error line="59" column="5" source="standard:class-signature" />
+        <error line="59" column="29" source="standard:class-signature" />
+    </file>
+</baseline>

@@ -1,0 +1,44 @@
+# Pact Broker basic-auth (ADR-0092). Projects the broker's write + read-only
+# credentials from OpenBao (KV openbank/pact-broker) into the `pact-broker-basic-auth`
+# Secret the Pact Broker Deployment reads. CI uses the write creds to publish pacts /
+# verification results and to run can-i-deploy; the read-only creds let humans browse
+# the matrix UI (port-forward) without write power.
+#
+# Runbook (out-of-band, once — GATE 2, values never in git): seeded by
+# openbank-infra/scripts/seed-vault-gaps.sh, which generates random creds and writes:
+#   vault kv put openbank/pact-broker username=ci password=<rand> \
+#     read-only-username=viewer read-only-password=<rand>
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: pact-broker-basic-auth
+  namespace: pact-broker
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: pact-broker-basic-auth
+    creationPolicy: Owner
+    template:
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+  data:
+    - secretKey: username
+      remoteRef:
+        key: pact-broker
+        property: username
+    - secretKey: password
+      remoteRef:
+        key: pact-broker
+        property: password
+    - secretKey: read-only-username
+      remoteRef:
+        key: pact-broker
+        property: read-only-username
+    - secretKey: read-only-password
+      remoteRef:
+        key: pact-broker
+        property: read-only-password

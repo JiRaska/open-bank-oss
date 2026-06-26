@@ -1,0 +1,27 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+    <CurrentIssues>
+    <ID>MagicNumber:AuthzProducer.kt$AuthzProducer$500</ID>
+    <ID>MagicNumber:KycOutboxDispatcher.kt$KycOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:KycOutboxDispatcher.kt$KycOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:KycOutboxRepositoryImpl.kt$KycOutboxRepositoryImpl$4000</ID>
+    <ID>MagicNumber:KycResource.kt$KycInvalidApprovalReasonMapper$422</ID>
+    <ID>MagicNumber:KycResource.kt$KycInvalidStateTransitionMapper$422</ID>
+    <ID>MagicNumber:KycResource.kt$KycNotFoundMapper$404</ID>
+    <ID>MagicNumber:KycResource.kt$KycResource$100</ID>
+    <ID>MagicNumber:KycResource.kt$KycResource$404</ID>
+    <ID>TooManyFunctions:KycResource.kt$KycResource</ID>
+    <ID>MagicNumber:KycService.kt$KycService$24</ID>
+    <ID>MagicNumber:KycService.kt$KycService$30</ID>
+    <ID>MagicNumber:KycService.kt$KycService$3600</ID>
+    <ID>MatchingDeclarationName:KycOutboxPort.kt$KycOutboxRepository : OutboxRepository</ID>
+    <ID>MatchingDeclarationName:KycRepositoryPort.kt$KycCaseRepository</ID>
+    <ID>NewLineAtEndOfFile:KycServiceTest.kt$com.openbank.kyc.application.KycServiceTest.kt</ID>
+    <ID>SwallowedException:KycOutboxDispatcher.kt$KycOutboxDispatcher$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:KycOutboxDispatcher.kt$KycOutboxDispatcher$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:KycService.kt$KycService$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:PartyEventConsumer.kt$PartyEventConsumer$e: Exception</ID>
+    <ID>TooManyFunctions:KycService.kt$KycService</ID>
+  </CurrentIssues>
+</SmellBaseline>

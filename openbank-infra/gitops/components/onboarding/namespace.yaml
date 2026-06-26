@@ -1,0 +1,13 @@
+# onboarding namespace (ADR-0037: domain = namespace). App plane.
+# Holds onboarding-service plus its single-owner CNPG Postgres.
+# Consumes party, kyc and sca domain events; exposes read API for the
+# onboarding cockpit (ADR-0068).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: onboarding
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

@@ -1,0 +1,57 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:AnalyticsConsumer.kt$AnalyticsConsumer$fun toEnvelope(node: JsonNode): AnalyticsEnvelope</ID>
+    <ID>LongParameterList:S3WormArchive.kt$S3WormArchive$( method: String, canonicalUri: String, query: Map&lt;String, String&gt;, headers: Map&lt;String, String&gt;, payloadHash: String, amzDate: String, service: String = "s3" )</ID>
+    <ID>MagicNumber:AnalyticsConsumer.kt$AnalyticsConsumer$200</ID>
+    <ID>MagicNumber:ApicurioSchemaCatalogSource.kt$ApicurioSchemaCatalogSource$100</ID>
+    <ID>MagicNumber:ApicurioSchemaCatalogSource.kt$ApicurioSchemaCatalogSource$200</ID>
+    <ID>MagicNumber:ApicurioSchemaCatalogSource.kt$ApicurioSchemaCatalogSource$299</ID>
+    <ID>MagicNumber:ApicurioSchemaCatalogSource.kt$ApicurioSchemaCatalogSource$300</ID>
+    <ID>MagicNumber:ClickHouseAnalyticsSink.kt$ClickHouseAnalyticsSink$100</ID>
+    <ID>MagicNumber:ClickHouseAnalyticsSink.kt$ClickHouseAnalyticsSink$200</ID>
+    <ID>MagicNumber:ClickHouseAnalyticsSink.kt$ClickHouseAnalyticsSink$299</ID>
+    <ID>MagicNumber:ClickHouseAnalyticsSink.kt$ClickHouseAnalyticsSink$500</ID>
+    <ID>MagicNumber:ClickHouseClient.kt$ClickHouseClient$200</ID>
+    <ID>MagicNumber:ClickHouseClient.kt$ClickHouseClient$299</ID>
+    <ID>MagicNumber:ClickHouseClient.kt$ClickHouseClient$500</ID>
+    <ID>MagicNumber:ClickHouseProposalStore.kt$ClickHouseProposalStore$100</ID>
+    <ID>MagicNumber:ClickHouseWarehouseStateReader.kt$ClickHouseWarehouseStateReader$100</ID>
+    <ID>MagicNumber:ClickHouseWarehouseStateReader.kt$ClickHouseWarehouseStateReader$3</ID>
+    <ID>MagicNumber:ClickHouseWormArchive.kt$ClickHouseWormArchive$100</ID>
+    <ID>MagicNumber:ClickHouseWormArchive.kt$ClickHouseWormArchive$5</ID>
+    <ID>MagicNumber:ClickHouseWormArchive.kt$ClickHouseWormArchive$6</ID>
+    <ID>MagicNumber:HttpReconciliationSource.kt$HttpReconciliationSource$100</ID>
+    <ID>MagicNumber:HttpReconciliationSource.kt$HttpReconciliationSource$200</ID>
+    <ID>MagicNumber:HttpReconciliationSource.kt$HttpReconciliationSource$299</ID>
+    <ID>MagicNumber:HttpReconciliationSource.kt$HttpReconciliationSource$30</ID>
+    <ID>MagicNumber:HttpReconciliationSource.kt$HttpReconciliationSource$500</ID>
+    <ID>MagicNumber:IngestHealthCheck.kt$IngestHealthCheck$100</ID>
+    <ID>MagicNumber:IngestHealthCheck.kt$IngestHealthCheck$900</ID>
+    <ID>MagicNumber:LoggingDeadLetterSink.kt$LoggingDeadLetterSink$500</ID>
+    <ID>MagicNumber:ReconciliationJob.kt$ReconciliationJob$12</ID>
+    <ID>MagicNumber:S3WormArchive.kt$S3WormArchive$0xFF</ID>
+    <ID>MagicNumber:S3WormArchive.kt$S3WormArchive$10</ID>
+    <ID>MagicNumber:S3WormArchive.kt$S3WormArchive$200</ID>
+    <ID>MagicNumber:S3WormArchive.kt$S3WormArchive$299</ID>
+    <ID>MagicNumber:S3WormArchive.kt$S3WormArchive$300</ID>
+    <ID>MagicNumber:S3WormArchive.kt$S3WormArchive$5</ID>
+    <ID>MagicNumber:S3WormArchive.kt$S3WormArchive$8</ID>
+    <ID>MagicNumber:VaultCryptoErasure.kt$VaultCryptoErasure$100</ID>
+    <ID>MagicNumber:VaultCryptoErasure.kt$VaultCryptoErasure$200</ID>
+    <ID>MagicNumber:VaultCryptoErasure.kt$VaultCryptoErasure$299</ID>
+    <ID>MagicNumber:VaultCryptoErasure.kt$VaultCryptoErasure$300</ID>
+    <ID>MagicNumber:VaultCryptoErasure.kt$VaultCryptoErasure$400</ID>
+    <ID>MagicNumber:VaultCryptoErasure.kt$VaultCryptoErasure$404</ID>
+    <ID>MatchingDeclarationName:ErasurePort.kt$CryptoErasure</ID>
+    <ID>TooGenericExceptionCaught:AnalyticsConsumer.kt$AnalyticsConsumer$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:ApicurioSchemaCatalogSource.kt$ApicurioSchemaCatalogSource$e: Exception</ID>
+    <ID>TooManyFunctions:S3WormArchive.kt$S3WormArchive : WormArchive</ID>
+    <ID>UnusedParameter:DataResidencyValidator.kt$DataResidencyValidator$@Observes event: StartupEvent</ID>
+    <ID>UseCheckOrError:ClickHouseAnalyticsSink.kt$ClickHouseAnalyticsSink$throw IllegalStateException( "ClickHouse insert failed: HTTP ${response.statusCode()} ${response.body().take(500)}" )</ID>
+    <ID>UseCheckOrError:ClickHouseClient.kt$ClickHouseClient$throw IllegalStateException( "ClickHouse query failed: HTTP ${response.statusCode()} ${response.body().take(500)}" )</ID>
+    <ID>UseCheckOrError:HttpReconciliationSource.kt$HttpReconciliationSource$throw IllegalStateException( "reconciliation-summary failed: HTTP ${response.statusCode()} ${response.body().take(500)}" )</ID>
+    <ID>UseCheckOrError:HttpReconciliationSourceTest.kt$HttpReconciliationSourceTest.&lt;no name provided&gt;$throw IllegalStateException("connection refused")</ID>
+  </CurrentIssues>
+</SmellBaseline>

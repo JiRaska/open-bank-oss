@@ -1,0 +1,97 @@
+# JMX Prometheus exporter rules for the Strimzi broker + a PodMonitor that
+# scrapes both the broker and the Kafka Exporter (Dynatrace-parity #0). These
+# are the canonical Strimzi example rules, trimmed to the signals that matter
+# for a single-broker sandbox: under-replicated/offline partitions, controller
+# health, request rate/latency and per-topic throughput. The PodMonitor selects
+# every pod of the openbank-cluster (broker + exporter both expose the
+# `tcp-prometheus` port) and is picked up by kube-prometheus-stack cluster-wide.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-metrics
+  namespace: messaging
+  labels:
+    app.kubernetes.io/part-of: observability
+data:
+  kafka-metrics-config.yml: |
+    lowercaseOutputName: true
+    rules:
+      # Special cases and very specific rules
+      - pattern: kafka.server<type=(.+), name=(.+), clientId=(.+), topic=(.+), partition=(.*)><>Value
+        name: kafka_server_$1_$2
+        type: GAUGE
+        labels:
+          clientId: "$3"
+          topic: "$4"
+          partition: "$5"
+      - pattern: kafka.server<type=(.+), name=(.+), clientId=(.+), brokerHost=(.+), brokerPort=(.+)><>Value
+        name: kafka_server_$1_$2
+        type: GAUGE
+        labels:
+          clientId: "$3"
+          broker: "$4:$5"
+      - pattern: kafka.server<type=(.+), cipher=(.+), protocol=(.+), listener=(.+), networkProcessor=(.+)><>connections
+        name: kafka_server_$1_connections_tls_info
+        type: GAUGE
+        labels:
+          cipher: "$2"
+          protocol: "$3"
+          listener: "$4"
+          networkProcessor: "$5"
+      # Generic per-second counters with no additional labels
+      - pattern: kafka.(\w+)<type=(.+), name=(.+)PerSec\w*, topic=(.+)><>Count
+        name: kafka_$1_$2_$3_total
+        type: COUNTER
+        labels:
+          topic: "$4"
+      - pattern: kafka.(\w+)<type=(.+), name=(.+)PerSec\w*><>Count
+        name: kafka_$1_$2_$3_total
+        type: COUNTER
+      # Generic gauges
+      - pattern: kafka.(\w+)<type=(.+), name=(.+), (.+)=(.+)><>Value
+        name: kafka_$1_$2_$3
+        type: GAUGE
+        labels:
+          "$4": "$5"
+      - pattern: kafka.(\w+)<type=(.+), name=(.+)><>Value
+        name: kafka_$1_$2_$3
+        type: GAUGE
+      # Percentiles
+      - pattern: kafka.(\w+)<type=(.+), name=(.+), (.+)=(.+)><>(\d+)thPercentile
+        name: kafka_$1_$2_$3
+        type: GAUGE
+        labels:
+          "$4": "$5"
+          quantile: "0.$6"
+      - pattern: kafka.(\w+)<type=(.+), name=(.+)><>(\d+)thPercentile
+        name: kafka_$1_$2_$3
+        type: GAUGE
+        labels:
+          quantile: "0.$4"
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: kafka-resources
+  namespace: messaging
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  selector:
+    matchLabels:
+      strimzi.io/cluster: openbank-cluster
+  namespaceSelector:
+    matchNames:
+      - messaging
+  podMetricsEndpoints:
+    - path: /metrics
+      port: tcp-prometheus
+      # Promote the strimzi.io/* pod labels to metric labels so panels can split
+      # broker vs exporter and by cluster.
+      relabelings:
+        - regex: __meta_kubernetes_pod_label_(strimzi_io_.+)
+          action: labelmap
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openbank
+  labels:
+    app.kubernetes.io/name: openbank
+    app.kubernetes.io/component: platform

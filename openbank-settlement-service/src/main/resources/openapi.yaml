@@ -1,0 +1,55 @@
+openapi: "3.0.3"
+info:
+  title: OpenBank Settlement Service
+  version: "1.1.0"
+  description: "Settlement orchestration service (ADR-0101 P3)"
+paths:
+  /api/v1/settlements:
+    post:
+      tags: [Settlements]
+      summary: Originate a settlement and start its workflow
+      operationId: originateSettlement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSettlementRequest"
+      responses:
+        "201":
+          description: Settlement created (PENDING); the workflow settles it asynchronously.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettlementResponse"
+        "401":
+          description: Unauthenticated.
+        "403":
+          description: Not authorized (requires SERVICE/OPERATOR/ADMIN).
+components:
+  schemas:
+    CreateSettlementRequest:
+      type: object
+      required: [idempotencyKey, payerAccountId, payeeAccountId, amount, currency]
+      properties:
+        idempotencyKey:
+          type: string
+          minLength: 1
+          description: "Caller-supplied dedup token; re-submitting the same key returns the original settlement."
+        payerAccountId: { type: string, format: uuid }
+        payeeAccountId: { type: string, format: uuid }
+        amount: { type: string, description: "Positive decimal amount, e.g. 250.00" }
+        currency: { type: string, minLength: 3, maxLength: 3, example: CZK }
+    SettlementResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        payerAccountId: { type: string, format: uuid }
+        payeeAccountId: { type: string, format: uuid }
+        amount: { type: string }
+        currency: { type: string }
+        status:
+          type: string
+          enum: [PENDING, DEBITED, CREDITED, BOOKED, REJECTED, REVERSED, CREDITED_REVERSED, LEDGER_REVERSED]
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }

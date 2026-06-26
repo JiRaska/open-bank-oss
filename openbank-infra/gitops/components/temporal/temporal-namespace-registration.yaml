@@ -1,0 +1,156 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+#
+# Declarative Temporal namespace provisioning (ADR-0101 operational follow-up).
+#
+# WHY: every service that flips `openbank.temporal.enabled=true` needs its
+# Temporal namespace to exist BEFORE its worker starts. A missing namespace does
+# not crash the pod — readiness is a TCP probe on the HTTP port, not on Temporal —
+# so the worker poller silently spins on `NOT_FOUND: Namespace <x> is not found`
+# while the pod reports Healthy. This used to be a manual break-glass step via the
+# admintools pod (`temporal operator namespace create ...`); this Job makes it
+# declarative and idempotent so the namespace set lives in git.
+#
+# WHEN A SERVICE ADOPTS TEMPORAL: add its namespace to NAMESPACES below AND to the
+# `temporal-platform-ingress` NetworkPolicy (temporal-network-policies.yaml) — both
+# are required, the NetworkPolicy gates frontend gRPC reachability and this Job
+# gates namespace existence.
+#
+# Hook choice — PostSync, NOT PreSync: a PreSync hook runs before the Application's
+# own resources are applied, so on first install the Temporal frontend would not yet
+# be running and namespace registration would fail. PostSync runs after sync; the
+# container additionally waits for the frontend to answer before registering, which
+# also covers frontend pod restarts. ArgoCD holds the Application in Progressing
+# until the Job completes, so a registration failure is visible (not silently green).
+#
+# Idempotency: each namespace is `describe`d first and only created if absent;
+# a lost race on create is tolerated when the error is "already exists".
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: temporal-namespace-registration
+  namespace: temporal
+  labels:
+    app.kubernetes.io/part-of: temporal
+    app.kubernetes.io/component: namespace-registration
+    openbank.io/derived: gitops-manual
+  annotations:
+    # Runs after the Temporal server resources are synced. BeforeHookCreation keeps
+    # the last run visible for debugging and recreates the Job on every sync (so
+    # adding a namespace to the list below re-runs registration on the next sync).
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 5
+  # Hard ceiling so a permanently-unreachable frontend fails the hook instead of
+  # hanging the sync forever (wait loop below is 60 × 5s = 5m per attempt).
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: temporal
+        app.kubernetes.io/component: namespace-registration
+    spec:
+      restartPolicy: Never
+      # No Kubernetes API calls are made (only Temporal gRPC) — drop the token.
+      automountServiceAccountToken: false
+      # PSS restricted-compliant (temporal namespace warns/audits at restricted).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: register-namespaces
+          # Same family as the chart's admintools pod — carries the modern `temporal`
+          # CLI (the legacy `tctl` is also present). Pinned; bump deliberately.
+          image: temporalio/admin-tools:1.29.7-tctl-1.18.4-cli-1.7.2
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            # readOnlyRootFilesystem is on; point HOME at the writable emptyDir so
+            # the temporal CLI never fails trying to touch $HOME/.config/temporalio.
+            - name: HOME
+              value: /tmp
+            - name: TEMPORAL_ADDRESS
+              value: "temporal-frontend.temporal.svc.cluster.local:7233"
+            # Space-separated list of Temporal NAMESPACES (not task queues) — the set
+            # of distinct `openbank.temporal.namespace` values across services that run
+            # workflows. Today: payments (sepa+domestic) → openbank-payments;
+            # fx → openbank-fx; statements → openbank-statements; settlement →
+            # openbank-settlement (its own TemporalConfig @WithDefault, like fx/statements —
+            # NOT openbank-default; an earlier comment here was wrong. The live worker polls
+            # namespace="openbank-settlement", confirmed by NOT_FOUND on go-live — runbook 0006).
+            - name: NAMESPACES
+              value: "openbank-default openbank-payments openbank-fx openbank-statements openbank-settlement openbank-finops"
+            - name: RETENTION
+              value: "168h"
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              echo "Temporal frontend: ${TEMPORAL_ADDRESS}"
+              echo "Namespaces:        ${NAMESPACES}"
+              echo "Retention:         ${RETENTION}"
+
+              # Wait for the frontend to answer (covers first-install + restarts).
+              ready=0
+              i=1
+              while [ "$i" -le 60 ]; do
+                if temporal operator namespace list --address "${TEMPORAL_ADDRESS}" >/dev/null 2>&1; then
+                  ready=1
+                  break
+                fi
+                echo "waiting for temporal frontend... (${i}/60)"
+                i=$((i + 1))
+                sleep 5
+              done
+              if [ "$ready" -ne 1 ]; then
+                echo "ERROR: temporal frontend ${TEMPORAL_ADDRESS} not reachable" >&2
+                exit 1
+              fi
+
+              rc=0
+              for ns in ${NAMESPACES}; do
+                if temporal operator namespace describe --namespace "$ns" \
+                     --address "${TEMPORAL_ADDRESS}" >/dev/null 2>&1; then
+                  echo "[ok] ${ns} already exists"
+                  continue
+                fi
+                echo "[create] ${ns} retention=${RETENTION}"
+                if temporal operator namespace create --namespace "$ns" \
+                     --retention "${RETENTION}" \
+                     --address "${TEMPORAL_ADDRESS}" 2>/tmp/create.err; then
+                  echo "[created] ${ns}"
+                elif grep -qi "already exists" /tmp/create.err; then
+                  # Lost the race with another replica / a concurrent sync — fine.
+                  echo "[ok] ${ns} already exists (raced)"
+                else
+                  echo "ERROR creating ${ns}:" >&2
+                  cat /tmp/create.err >&2
+                  rc=1
+                fi
+              done
+              exit "$rc"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

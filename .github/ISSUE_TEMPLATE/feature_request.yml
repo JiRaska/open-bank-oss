@@ -1,0 +1,46 @@
+name: Feature request
+description: Propose a new capability
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user / business / regulatory problem does this solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+
+  - type: dropdown
+    id: needs-adr
+    attributes:
+      label: Does this require an ADR?
+      options:
+        - "Yes — architectural decision"
+        - "No — fits existing patterns"
+        - "Unsure"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: compliance
+    attributes:
+      label: Compliance touchpoints
+      options:
+        - label: PCI DSS
+        - label: DORA
+        - label: GDPR
+        - label: PSD2 / SCA
+        - label: AML
+        - label: CNB

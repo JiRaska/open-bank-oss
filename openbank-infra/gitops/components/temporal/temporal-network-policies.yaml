@@ -1,0 +1,129 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+#
+# NetworkPolicy baseline for the Temporal namespace (ADR-0081).
+#
+# INERT until the VPC CNI network-policy agent is enabled
+# (manual platform-tofu apply, ADR-0060). Rollback = delete this NetworkPolicy.
+#
+# Rules:
+#   - Temporal pods may communicate freely within the temporal namespace
+#     (frontend/history/matching/worker/admintools inter-component traffic).
+#   - Ingress from the platform namespace is allowed (OpenBank services calling
+#     the Temporal frontend gRPC port 7233).
+#   - Prometheus scrape on port 9090 is admitted from the observability namespace.
+#   - All other ingress is denied.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: temporal-intra-namespace
+  namespace: temporal
+  labels:
+    app.kubernetes.io/part-of: temporal
+    openbank.io/derived: gitops-manual
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow all intra-namespace traffic (inter-component Temporal RPC)
+    - from:
+        - podSelector: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: temporal-platform-ingress
+  namespace: temporal
+  labels:
+    app.kubernetes.io/part-of: temporal
+    openbank.io/derived: gitops-manual
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: frontend
+  policyTypes:
+    - Ingress
+  ingress:
+    # OpenBank services calling the Temporal frontend gRPC (7233).
+    # - platform-plane: copilot, agent, etc. (openbank.io/plane: platform).
+    # - app-plane Temporal workflow clients enumerated explicitly (least-privilege).
+    #   ADD a namespace here when a service flips openbank.temporal.enabled=true,
+    #   otherwise its worker onStart() blocks on getSystemInfo → DEADLINE_EXCEEDED →
+    #   the service fails to boot (NetworkPolicy enforcement is live, ADR-0060).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              openbank.io/plane: platform
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values:
+                  - payments
+                  - fx
+                  - statements
+                  - finops-agent
+      ports:
+        - protocol: TCP
+          port: 7233
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: temporal-prometheus-scrape
+  namespace: temporal
+  labels:
+    app.kubernetes.io/part-of: temporal
+    openbank.io/derived: gitops-manual
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    # Prometheus / Alloy scrape: 9090 = Temporal server metrics; 9187 = the
+    # postgres_exporter sidecar on temporal-db (the temporal/temporal-db scrape
+    # target). 9187 was missing, so that scrape was DROPPED → "context deadline
+    # exceeded" → a permanent TargetDown false positive.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+      ports:
+        - protocol: TCP
+          port: 9090
+        - protocol: TCP
+          port: 9187
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: temporal-cnpg-operator
+  namespace: temporal
+  labels:
+    app.kubernetes.io/part-of: temporal
+    openbank.io/derived: gitops-manual
+spec:
+  # The temporal-db CNPG pods are caught by the podSelector:{} policies above, which
+  # default-deny everything not explicitly allowed. The CloudNativePG operator (cnpg-system)
+  # polls each instance manager at https://<pod>:8000/pg/status for health/lifecycle — without
+  # this rule that poll times out ("Cannot extract Pod status: dial tcp :8000: i/o timeout"), so
+  # the cluster never reports Healthy → the ArgoCD temporal sync hangs on "waiting for healthy
+  # state of temporal-db" → the 9187 scrape fix never applies (deadlock). Other namespaces don't
+  # hit this because their NPs select only the service pods, leaving the DB pods unrestricted.
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: temporal-db
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+      ports:
+        - protocol: TCP
+          port: 8000 # instance-manager status/health (operator poll)
+        - protocol: TCP
+          port: 9187 # instance metrics (operator-side scrape)
