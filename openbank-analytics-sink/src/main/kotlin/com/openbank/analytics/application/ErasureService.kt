@@ -29,7 +29,7 @@ data class ErasureDecision(
     val legalBasis: String,
     val explanation: String,
     val decidedAt: Instant,
-    val decidedBy: String
+    val decidedBy: String,
 )
 
 /**
@@ -43,6 +43,7 @@ data class ErasureDecision(
 class ErasureService {
 
     @Inject lateinit var cryptoErasure: CryptoErasure
+
     @Inject lateinit var clock: Clock
 
     private val log = Logger.getLogger(ErasureService::class.java)
@@ -53,28 +54,46 @@ class ErasureService {
         val now = Instant.now(clock)
 
         if (!policy.erasable) {
-            log.infof("erasure REFUSED %s/%s category=%s basis=%s by=%s",
-                aggregateType, aggregateId, category, policy.basis, requestedBy)
+            log.infof(
+                "erasure REFUSED %s/%s category=%s basis=%s by=%s",
+                aggregateType,
+                aggregateId,
+                category,
+                policy.basis,
+                requestedBy,
+            )
             return ErasureDecision(
-                aggregateType = aggregateType, aggregateId = aggregateId,
-                erased = false, rowsAffected = 0,
+                aggregateType = aggregateType,
+                aggregateId = aggregateId,
+                erased = false,
+                rowsAffected = 0,
                 legalBasis = policy.basis.name,
                 explanation = "Erasure refused: $category is under a ${policy.basis} hold " +
                     "(GDPR Art. 17(3)(b) — statutory record-keeping overrides erasure for ${policy.retention}). " +
                     "Directly-identifying PII is already masked at the sink; only the pseudonymous id is retained.",
-                decidedAt = now, decidedBy = requestedBy
+                decidedAt = now,
+                decidedBy = requestedBy,
             )
         }
 
         val rows = cryptoErasure.erase(AggregateKey(aggregateType, aggregateId))
-        log.infof("erasure PERFORMED %s/%s category=%s rows=%d by=%s",
-            aggregateType, aggregateId, category, rows, requestedBy)
+        log.infof(
+            "erasure PERFORMED %s/%s category=%s rows=%d by=%s",
+            aggregateType,
+            aggregateId,
+            category,
+            rows,
+            requestedBy,
+        )
         return ErasureDecision(
-            aggregateType = aggregateType, aggregateId = aggregateId,
-            erased = true, rowsAffected = rows,
+            aggregateType = aggregateType,
+            aggregateId = aggregateId,
+            erased = true,
+            rowsAffected = rows,
             legalBasis = (if (policy.basis == LegalBasis.CONSENT) "CONSENT_WITHDRAWN" else policy.basis.name),
             explanation = "Crypto-shredded analytics data for $category (no statutory hold).",
-            decidedAt = now, decidedBy = requestedBy
+            decidedAt = now,
+            decidedBy = requestedBy,
         )
     }
 }

@@ -7,6 +7,7 @@ package com.openbank.simulation.model
 import com.openbank.ledger.domain.model.AccountBookedDelta
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalSide
+import com.openbank.libs.domain.identifiers.Ids
 import java.math.BigDecimal
 import java.util.UUID
 
@@ -35,11 +36,16 @@ class LedgerState {
      * Reverse a previously-posted entry via the real `JournalEntry.reverse`. Idempotent on the
      * original id, so a double-compensation (retry / FSM re-entry) can never double-reverse.
      */
-    fun reverse(originalId: UUID, reversalId: UUID, reversedBy: UUID): JournalEntry {
+    fun reverse(
+        originalId: UUID,
+        reversalId: UUID,
+        reversedBy: UUID,
+        lineIdProvider: (UUID) -> UUID = { Ids.newId() },
+    ): JournalEntry {
         val reversalKey = "reversal-of-$originalId"
         byKey[reversalKey]?.let { return it }
         val original = posted.first { it.id == originalId }
-        val reversal = original.reverse(reversalId, reversedBy)
+        val reversal = original.reverse(reversalId, reversedBy, lineIdProvider)
         posted.add(reversal)
         byKey[reversalKey] = reversal
         return reversal

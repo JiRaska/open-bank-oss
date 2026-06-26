@@ -27,10 +27,12 @@ import java.util.concurrent.atomic.AtomicLong
 class IngestFreshness {
 
     @Inject lateinit var registry: MeterRegistry
+
     @Inject lateinit var clock: Clock
 
     /** Lag in seconds of the last ingested event; -1 until the first event is seen. */
     private val lagSeconds = AtomicLong(-1)
+
     /** Epoch millis of the last successful ingest; 0 until the first event. */
     private val lastIngestEpochMs = AtomicLong(0)
     private val deadLetterCount = AtomicLong(0)

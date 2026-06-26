@@ -4,6 +4,7 @@
 
 package com.openbank.transaction.domain.saga
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.domain.saga.SagaStateMachine
 import com.openbank.libs.domain.saga.SagaTransitionPolicy
 import java.time.Clock
@@ -48,10 +49,15 @@ data class PaymentSaga(
         get() = STATE_MACHINE.isTerminal(state)
 
     companion object {
-        fun start(transactionId: UUID, idempotencyKey: String, clock: Clock): PaymentSaga {
+        fun start(
+            transactionId: UUID,
+            idempotencyKey: String,
+            clock: Clock,
+            id: UUID = Ids.newId(),
+        ): PaymentSaga {
             val now = Instant.now(clock)
             return PaymentSaga(
-                id = UUID.randomUUID(),
+                id = id,
                 transactionId = transactionId,
                 state = SagaState.STARTED,
                 idempotencyKey = idempotencyKey,

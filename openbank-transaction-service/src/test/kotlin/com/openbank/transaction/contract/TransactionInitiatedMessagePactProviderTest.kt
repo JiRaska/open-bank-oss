@@ -34,7 +34,7 @@ import java.util.UUID
  * so this is a pure unit-level verification (no DB, no Kafka).
  */
 @Provider("openbank-transaction-service")
-@PactBroker
+@PactBroker(enablePendingPacts = "true")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class TransactionInitiatedMessagePactProviderTest {

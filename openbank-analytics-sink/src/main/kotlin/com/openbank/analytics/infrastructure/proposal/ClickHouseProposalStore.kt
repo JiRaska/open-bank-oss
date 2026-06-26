@@ -57,7 +57,9 @@ open class ClickHouseProposalStore : ProposalStore {
 
     override suspend fun get(id: String): Proposal<BackfillRequest>? {
         val sql = "SELECT $COLUMNS FROM reload_proposals FINAL WHERE proposal_id = '${escape(id)}' FORMAT JSONEachRow"
-        return clickhouse.query(sql).lineSequence().firstOrNull { it.isNotBlank() }?.let { parseRow(mapper.readTree(it)) }
+        return clickhouse.query(sql).lineSequence()
+            .firstOrNull { it.isNotBlank() }
+            ?.let { parseRow(mapper.readTree(it)) }
     }
 
     override suspend fun list(): List<Proposal<BackfillRequest>> {
@@ -85,7 +87,7 @@ open class ClickHouseProposalStore : ProposalStore {
             "decision_reason" to p.decisionReason,
             "executed_at" to p.executedAt?.let { DT.format(it) },
             "reason" to a.reason,
-            "updated_at" to DT.format(updatedAt)
+            "updated_at" to DT.format(updatedAt),
         )
         return mapper.writeValueAsString(row)
     }
@@ -99,7 +101,7 @@ open class ClickHouseProposalStore : ProposalStore {
             aggregateType = n.textOrNull("aggregate_type"),
             aggregateId = n.textOrNull("aggregate_id"),
             reason = n.get("reason").asText(),
-            requestedBy = n.get("requested_by").asText()
+            requestedBy = n.get("requested_by").asText(),
         )
         return Proposal(
             id = n.get("proposal_id").asText(),
@@ -110,15 +112,13 @@ open class ClickHouseProposalStore : ProposalStore {
             decidedBy = n.textOrNull("decided_by"),
             decidedAt = n.textOrNull("decided_at")?.let { parseDt(it) },
             decisionReason = n.textOrNull("decision_reason"),
-            executedAt = n.textOrNull("executed_at")?.let { parseDt(it) }
+            executedAt = n.textOrNull("executed_at")?.let { parseDt(it) },
         )
     }
 
-    private fun JsonNode.textOrNull(field: String): String? =
-        get(field)?.takeUnless { it.isNull }?.asText()
+    private fun JsonNode.textOrNull(field: String): String? = get(field)?.takeUnless { it.isNull }?.asText()
 
-    private fun parseDt(text: String): Instant =
-        LocalDateTime.parse(text.trim(), DT_PARSE).toInstant(ZoneOffset.UTC)
+    private fun parseDt(text: String): Instant = LocalDateTime.parse(text.trim(), DT_PARSE).toInstant(ZoneOffset.UTC)
 
     private fun escape(s: String): String = s.replace("'", "''")
 

@@ -39,14 +39,14 @@ class SecurityScannerServiceTest {
                 finding("critical", Severity.CRITICAL, OwaspCategory.A01_BROKEN_ACCESS_CONTROL),
                 finding("high", Severity.HIGH, OwaspCategory.A05_SECURITY_MISCONFIGURATION),
                 finding("medium", Severity.MEDIUM, OwaspCategory.A05_SECURITY_MISCONFIGURATION),
-                finding("info", Severity.INFO, OwaspCategory.A05_SECURITY_MISCONFIGURATION)
+                finding("info", Severity.INFO, OwaspCategory.A05_SECURITY_MISCONFIGURATION),
             ),
             score = 55,
             grade = "D",
             tlsVersion = "TLS 1.3",
             headersPresent = emptyMap(),
             openApiAvailable = false,
-            healthEndpointSecured = false
+            healthEndpointSecured = false,
         )
 
         assertThat(result.criticalCount).isEqualTo(1)
@@ -63,17 +63,17 @@ class SecurityScannerServiceTest {
                 reachable = true,
                 findings = listOf(
                     finding("f1", Severity.HIGH, OwaspCategory.A05_SECURITY_MISCONFIGURATION),
-                    finding("f2", Severity.MEDIUM, OwaspCategory.A01_BROKEN_ACCESS_CONTROL)
-                )
+                    finding("f2", Severity.MEDIUM, OwaspCategory.A01_BROKEN_ACCESS_CONTROL),
+                ),
             ),
             serviceResult(
                 serviceName = "svc-b",
                 score = 68,
                 reachable = true,
                 findings = listOf(
-                    finding("f3", Severity.INFO, OwaspCategory.A02_CRYPTOGRAPHIC_FAILURES)
-                )
-            )
+                    finding("f3", Severity.INFO, OwaspCategory.A02_CRYPTOGRAPHIC_FAILURES),
+                ),
+            ),
         )
 
         val report = invokeBuildReport(results)
@@ -120,7 +120,7 @@ class SecurityScannerServiceTest {
             tlsVersion = null,
             headersPresent = mapOf("x-frame-options" to true),
             openApiAvailable = false,
-            healthEndpointSecured = false
+            healthEndpointSecured = false,
         )
 
         assertThat(result.findings).hasSize(1)
@@ -129,26 +129,25 @@ class SecurityScannerServiceTest {
         assertThat(result.grade).isEqualTo("A+")
     }
 
-    private fun finding(id: String, severity: Severity, category: OwaspCategory) =
-        SecurityFinding(
-            id = id,
-            category = category,
-            severity = severity,
-            title = id,
-            description = id,
-            remediation = id,
-            cweId = null,
-            cvssScore = null,
-            endpoint = null,
-            evidence = null
-        )
+    private fun finding(id: String, severity: Severity, category: OwaspCategory) = SecurityFinding(
+        id = id,
+        category = category,
+        severity = severity,
+        title = id,
+        description = id,
+        remediation = id,
+        cweId = null,
+        cvssScore = null,
+        endpoint = null,
+        evidence = null,
+    )
 
     private fun serviceResult(
         serviceName: String,
         score: Int,
         reachable: Boolean,
         findings: List<SecurityFinding>
-    ) = ServiceScanResult(
+    ): ServiceScanResult = ServiceScanResult(
         serviceName = serviceName,
         serviceUrl = "http://localhost:8100",
         scannedAt = Instant.parse("2026-01-01T00:00:00Z"),
@@ -156,11 +155,18 @@ class SecurityScannerServiceTest {
         reachable = reachable,
         findings = findings,
         score = score,
-        grade = if (score >= 95) "A+" else if (score >= 90) "A" else if (score >= 80) "B" else if (score >= 70) "C" else if (score >= 60) "D" else "F",
+        grade = when {
+            score >= 95 -> "A+"
+            score >= 90 -> "A"
+            score >= 80 -> "B"
+            score >= 70 -> "C"
+            score >= 60 -> "D"
+            else -> "F"
+        },
         tlsVersion = "TLS 1.3",
         headersPresent = emptyMap(),
         openApiAvailable = false,
-        healthEndpointSecured = false
+        healthEndpointSecured = false,
     )
 
     private fun invokeBuildReport(results: List<ServiceScanResult>): PlatformSecurityReport {

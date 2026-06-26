@@ -61,7 +61,7 @@ object PaymentScenario {
         val index = world.sagas.size
         val clock = world.context.clock
         var saga = SimPaymentSaga(
-            saga = PaymentSaga.start(random.nextUuid(), "sim-$index", clock),
+            saga = PaymentSaga.start(random.nextUuid(), "sim-$index", clock, id = random.nextUuid()),
             sourceAccount = source,
         )
         world.sagas.add(saga)
@@ -159,7 +159,12 @@ object PaymentScenario {
         val journalId = saga.journalId
         if (journalId != null) {
             // Real JournalEntry.reverse() flips every side; re-project so balances unwind too.
-            val reversal = world.ledger.reverse(journalId, world.context.random.nextUuid(), SYSTEM_ACTOR)
+            val reversal = world.ledger.reverse(
+                journalId,
+                world.context.random.nextUuid(),
+                SYSTEM_ACTOR,
+                lineIdProvider = { world.context.random.nextUuid() },
+            )
             publishBooked(world, reversal)
         }
         // Release the hold placed on the source at FUNDS_RESERVED (both are carried on the saga).

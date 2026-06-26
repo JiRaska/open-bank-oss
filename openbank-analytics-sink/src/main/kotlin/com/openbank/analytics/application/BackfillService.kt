@@ -36,7 +36,7 @@ data class BackfillReport(
     val reason: String,
     val startedAt: Instant,
     val finishedAt: Instant,
-    val status: String
+    val status: String,
 )
 
 /**
@@ -54,10 +54,15 @@ data class BackfillReport(
 class BackfillService {
 
     @Inject lateinit var source: BackfillSource
+
     @Inject lateinit var clock: Clock
+
     @Inject lateinit var sink: AnalyticsSink
+
     @Inject lateinit var consumer: AnalyticsConsumer
+
     @Inject lateinit var objectMapper: ObjectMapper
+
     @Inject lateinit var worm: WormArchive
 
     /** Chunk size for splitting a (possibly multi-year) reload into bounded, committable windows. */
@@ -107,12 +112,18 @@ class BackfillService {
             reason = request.reason,
             startedAt = startedAt,
             finishedAt = Instant.now(clock),
-            status = "COMPLETED"
+            status = "COMPLETED",
         )
         lastRun.set(report)
         log.infof(
             "analytics backfill batchId=%s source=%s windows=%d ingested=%d deduped=%d by=%s reason=%s",
-            batchId, report.source, report.windows, ingested, deduped, request.requestedBy, request.reason
+            batchId,
+            report.source,
+            report.windows,
+            ingested,
+            deduped,
+            request.requestedBy,
+            request.reason,
         )
         return report
     }
@@ -128,8 +139,8 @@ class BackfillService {
                 previousAnchorHash = previous?.let { AnalyticsIntegrity.recordHashOfString(it.merkleRoot) },
                 recordCount = hashes.size,
                 source = source,
-                sealedAt = Instant.now(clock)
-            )
+                sealedAt = Instant.now(clock),
+            ),
         )
     }
 }

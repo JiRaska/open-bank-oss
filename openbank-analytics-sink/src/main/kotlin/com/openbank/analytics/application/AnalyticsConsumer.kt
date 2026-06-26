@@ -38,10 +38,15 @@ import org.jboss.logging.Logger
 class AnalyticsConsumer {
 
     @Inject lateinit var sink: AnalyticsSink
+
     @Inject lateinit var clock: Clock
+
     @Inject lateinit var deadLetters: DeadLetterSink
+
     @Inject lateinit var objectMapper: ObjectMapper
+
     @Inject lateinit var schemaGovernance: SchemaGovernance
+
     @Inject lateinit var freshness: IngestFreshness
 
     private val log = Logger.getLogger(AnalyticsConsumer::class.java)
@@ -53,14 +58,19 @@ class AnalyticsConsumer {
             val envelope = toEnvelope(node)
             // F7: schema governance — an unknown/newer-than-known schema is quarantined (when strict),
             // never silently written into the 10-year log of record.
-            if (::schemaGovernance.isInitialized && !schemaGovernance.accept(envelope.eventType, envelope.schemaVersion)) {
+            if (::schemaGovernance.isInitialized &&
+                !schemaGovernance.accept(
+                    envelope.eventType,
+                    envelope.schemaVersion,
+                )
+            ) {
                 deadLetters.quarantine(
                     DeadLetterRecord(
                         contentHash = sha256(payload),
                         rawPayload = payload,
                         error = "unknown schema ${envelope.eventType}:${envelope.schemaVersion}",
-                        failedAt = Instant.now(clock)
-                    )
+                        failedAt = Instant.now(clock),
+                    ),
                 )
                 return
             }
@@ -74,8 +84,8 @@ class AnalyticsConsumer {
                     contentHash = sha256(payload),
                     rawPayload = payload,
                     error = "${e.javaClass.simpleName}: ${e.message}",
-                    failedAt = Instant.now(clock)
-                )
+                    failedAt = Instant.now(clock),
+                ),
             )
             if (::freshness.isInitialized) freshness.recordDeadLetter()
         }
@@ -111,7 +121,7 @@ class AnalyticsConsumer {
             actorType = node["actorType"]?.asText(),
             traceId = node["traceId"]?.asText() ?: node["correlationId"]?.asText(),
             ingestedAt = Instant.now(clock),
-            payload = PayloadMasker.maskToMap(node["payload"] ?: node)
+            payload = PayloadMasker.maskToMap(node["payload"] ?: node),
         )
     }
 

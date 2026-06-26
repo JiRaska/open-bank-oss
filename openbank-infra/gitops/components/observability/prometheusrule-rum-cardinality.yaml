@@ -1,0 +1,52 @@
+# RUM gateway cardinality budget alerts (ADR-0088 O2).
+# Fires when the number of unique `route` or `screen` label values seen by Tempo
+# over the last hour exceeds the agreed ADR-0088 budgets (route ≤ 100, screen ≤ 50).
+# High cardinality from mobile apps can explode Tempo's index and query latency;
+# catching it early lets SREs add a transform/routing processor before it compounds.
+#
+# Metric source: Tempo span-metrics-generator emits
+#   traces_spanmetrics_calls_total{route="...", screen="...",...}
+# into the in-cluster Prometheus. The `count(count by (route) (...))` idiom counts
+# the number of distinct label values without pulling all series into memory.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: rum-cardinality-budget
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: rum.cardinality
+      interval: 5m
+      rules:
+        - alert: RumRouteCardinalityHigh
+          expr: |
+            count(count by (route) (traces_spanmetrics_calls_total{service_name="rum-gateway"})) > 100
+          for: 10m
+          labels:
+            severity: warning
+            component: rum-gateway
+          annotations:
+            summary: "RUM route cardinality exceeds budget (ADR-0088 O2)"
+            description: >
+              {{ $value }} unique `route` label values seen on Tempo span-metrics in the last 10 minutes.
+              Budget is 100. High cardinality inflates Tempo index and query latency.
+              Inspect the rum-gateway transform processor allow-list or add a routing processor to cap
+              the `http.route` attribute cardinality.
+            runbook_url: "https://github.com/openbank/openbank/blob/main/docs/runbooks/rum-cardinality.md"
+
+        - alert: RumScreenCardinalityHigh
+          expr: |
+            count(count by (screen_name) (traces_spanmetrics_calls_total{service_name="rum-gateway"})) > 50
+          for: 10m
+          labels:
+            severity: warning
+            component: rum-gateway
+          annotations:
+            summary: "RUM screen cardinality exceeds budget (ADR-0088 O2)"
+            description: >
+              {{ $value }} unique `screen_name` label values seen on Tempo span-metrics in the last 10 minutes.
+              Budget is 50. Check the mobile SDK for unbounded screen-name generation (e.g. dynamic IDs in
+              screen names). Add a transform processor entry to normalise or drop high-cardinality values.
+            runbook_url: "https://github.com/openbank/openbank/blob/main/docs/runbooks/rum-cardinality.md"

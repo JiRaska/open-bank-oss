@@ -39,8 +39,11 @@ import org.jboss.logging.Logger
 class ReconciliationJob {
 
     @Inject lateinit var source: ReconciliationSource
+
     @Inject lateinit var clock: Clock
+
     @Inject lateinit var warehouse: WarehouseStateReader
+
     @Inject lateinit var worm: WormArchive
 
     private val log = Logger.getLogger(ReconciliationJob::class.java)
@@ -74,8 +77,8 @@ class ReconciliationJob {
                     previousAnchorHash = worm.latest()?.merkleRoot,
                     recordCount = diff.checked,
                     source = "RECONCILIATION:$trigger",
-                    sealedAt = Instant.now(clock)
-                )
+                    sealedAt = Instant.now(clock),
+                ),
             )
         }.onFailure { log.errorf(it, "failed to seal reconciliation evidence trigger=%s", trigger) }
 
@@ -91,14 +94,21 @@ class ReconciliationJob {
             countDrift = countDrift,
             completenessGaps = completeness.gapCount.toLong(),
             evidenceFingerprint = fingerprint,
-            status = if (diff.inSync && countDrift.isEmpty() && completeness.complete) "IN_SYNC" else "DRIFT"
+            status = if (diff.inSync && countDrift.isEmpty() && completeness.complete) "IN_SYNC" else "DRIFT",
         )
         lastRun.set(result)
         log.infof(
             "analytics reconciliation trigger=%s status=%s checked=%d drift=%d (missingWh=%d orphan=%d mismatch=%d) countDrift=%d gaps=%d fp=%s",
-            trigger, result.status, result.aggregatesChecked, result.driftCount,
-            diff.missingInWarehouse.size, diff.missingInSource.size, diff.versionMismatch.size,
-            countDrift.size, completeness.gapCount, fingerprint.take(12)
+            trigger,
+            result.status,
+            result.aggregatesChecked,
+            result.driftCount,
+            diff.missingInWarehouse.size,
+            diff.missingInSource.size,
+            diff.versionMismatch.size,
+            countDrift.size,
+            completeness.gapCount,
+            fingerprint.take(12),
         )
         return result
     }
@@ -124,5 +134,5 @@ data class ReconciliationResult(
     val completenessGaps: Long = 0,
     /** Tamper-evident fingerprint of this outcome, sealed to WORM as audit evidence (F4). */
     val evidenceFingerprint: String? = null,
-    val status: String
+    val status: String,
 )

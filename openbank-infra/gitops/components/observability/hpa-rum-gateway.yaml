@@ -1,0 +1,49 @@
+# HorizontalPodAutoscaler for the RUM OTLP ingest gateway (ADR-0088 O1).
+# Scales the rum-gateway Deployment between 1 and 3 replicas based on CPU
+# utilisation. The gateway is stateless (all state is in Tempo); any replica can
+# handle any request, so horizontal scaling is safe.
+#
+# Target: 70 % average CPU — chosen to leave headroom for burst ingestion from
+# the mobile app (e.g. app launch spike) without triggering OOM or shedding by
+# the memory_limiter processor.
+#
+# Scale-down stabilisation is set to 5 minutes (default 5 min) so a short burst
+# does not thrash pods. Scale-up is immediate (default 0s).
+#
+# Note: the Deployment name must match `fullnameOverride: rum-gateway` in
+# rum-gateway.yaml (the Helm chart renders it as the Deployment name).
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: rum-gateway
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: rum-gateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: rum-gateway
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 30

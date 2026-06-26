@@ -34,7 +34,7 @@ data class ReloadProposalDto(
     val to: String? = null,
     val aggregateType: String? = null,
     val aggregateId: String? = null,
-    val reason: String
+    val reason: String,
 )
 
 /** Body for a checker decision (approve/reject). */
@@ -54,7 +54,9 @@ data class DecisionDto(val reason: String? = null)
 class BackfillResource {
 
     @Inject lateinit var reloads: SensitiveReloadService
+
     @Inject lateinit var clock: Clock
+
     @Inject lateinit var service: BackfillService
 
     /** Step 1 — propose a reload. Returns the PROPOSED proposal id to approve. */
@@ -69,10 +71,14 @@ class BackfillResource {
         val to = dto.to?.let(Instant::parse) ?: Instant.now(clock)
         return reloads.propose(
             BackfillRequest(
-                source = kind, from = from, to = to,
-                aggregateType = dto.aggregateType, aggregateId = dto.aggregateId,
-                reason = dto.reason, requestedBy = ctx.actorName
-            )
+                source = kind,
+                from = from,
+                to = to,
+                aggregateType = dto.aggregateType,
+                aggregateId = dto.aggregateId,
+                reason = dto.reason,
+                requestedBy = ctx.actorName,
+            ),
         )
     }
 
@@ -80,15 +86,21 @@ class BackfillResource {
     @POST
     @Path("/proposals/{id}/approve")
     @RolesAllowed(Roles.ADMIN, Roles.AUDITOR)
-    suspend fun approve(@Context ctx: SecurityContext, @PathParam("id") id: String, dto: DecisionDto): Proposal<BackfillRequest> =
-        reloads.approve(id, ctx.actorName, dto.reason)
+    suspend fun approve(
+        @Context ctx: SecurityContext,
+        @PathParam("id") id: String,
+        dto: DecisionDto,
+    ): Proposal<BackfillRequest> = reloads.approve(id, ctx.actorName, dto.reason)
 
     /** Optional — reject a pending proposal. */
     @POST
     @Path("/proposals/{id}/reject")
     @RolesAllowed(Roles.ADMIN, Roles.AUDITOR)
-    suspend fun reject(@Context ctx: SecurityContext, @PathParam("id") id: String, dto: DecisionDto): Proposal<BackfillRequest> =
-        reloads.reject(id, ctx.actorName, dto.reason)
+    suspend fun reject(
+        @Context ctx: SecurityContext,
+        @PathParam("id") id: String,
+        dto: DecisionDto,
+    ): Proposal<BackfillRequest> = reloads.reject(id, ctx.actorName, dto.reason)
 
     /** Step 3 — execute an APPROVED proposal. Runs the real reload, then marks it EXECUTED. */
     @POST
@@ -104,17 +116,15 @@ class BackfillResource {
     @GET
     @Path("/proposals/{id}")
     @RolesAllowed(Roles.ADMIN, Roles.AUDITOR)
-    suspend fun get(@PathParam("id") id: String): Response =
-        reloads.get(id)?.let { Response.ok(it).build() }
-            ?: Response.status(Response.Status.NOT_FOUND).build()
+    suspend fun get(@PathParam("id") id: String): Response = reloads.get(id)?.let { Response.ok(it).build() }
+        ?: Response.status(Response.Status.NOT_FOUND).build()
 
     /** The last actually-executed reload report. */
     @GET
     @Path("/last")
     @RolesAllowed(Roles.ADMIN, Roles.AUDITOR)
-    fun last(): Response =
-        service.lastReport()?.let { Response.ok(it).build() }
-            ?: Response.status(Response.Status.NO_CONTENT).build()
+    fun last(): Response = service.lastReport()?.let { Response.ok(it).build() }
+        ?: Response.status(Response.Status.NO_CONTENT).build()
 
     private fun parseRequired(value: String?, field: String): Instant =
         value?.let(Instant::parse) ?: throw badRequest("$field is required")

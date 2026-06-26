@@ -1,0 +1,89 @@
+# RUM attribute content audit job (ADR-0088 O3).
+# Runs weekly (Sunday 02:00 UTC) and queries Tempo for unique attribute values seen
+# over the last 7 days. The job emits a structured log to stdout so the result is
+# captured by Loki and can be reviewed manually (or queried with LogQL).
+#
+# The audit covers the ADR-0070/0075 allow-listed attributes that the rum-gateway
+# redaction processor keeps. Values are queried via the Tempo HTTP API
+# (GET /api/v2/search/tag-values); the output is a JSON line per attribute.
+#
+# This is a READ-ONLY audit — it writes nothing to Tempo and has no side effects.
+# The job is NOT a replacement for the cardinality budget alert (O2); it provides
+# the human-readable inventory that the on-call engineer uses to diagnose an alert.
+#
+# Resource limits are intentionally small: the job runs once a week and queries a
+# single Tempo instance. If the query times out (large trace volume), increase the
+# activeDeadlineSeconds and the --timeout flag below.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rum-attribute-audit
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: rum-audit
+spec:
+  # Sunday 02:00 UTC — low-traffic window, well before European business hours.
+  schedule: "0 2 * * 0"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 4
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: rum-attribute-audit
+        spec:
+          restartPolicy: OnFailure
+          # Least privilege: no service account needed for read-only Tempo HTTP queries.
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: audit
+              image: curlimages/curl:8.7.1
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              # ADR-0088 O3 allow-list — matches the rum-gateway redaction allow-list.
+              env:
+                - name: TEMPO_URL
+                  value: "http://tempo.observability.svc:3200"
+                - name: LOOKBACK
+                  value: "168h"  # 7 days
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -euo pipefail
+                  ATTRS="party_id x-correlation-id service.name app.version os.type os.version device.model http.route screen.name http.response.status_code"
+                  echo "{\"event\":\"rum-attribute-audit-start\",\"lookback\":\"${LOOKBACK}\"}"
+                  for attr in $ATTRS; do
+                    result=$(curl -sf --max-time 30 \
+                      "${TEMPO_URL}/api/v2/search/tag-values?tagName=${attr}&q={}&&start=$(date -d "-7 days" +%s)&end=$(date +%s)" \
+                      2>/dev/null || echo '{"tagValues":[]}')
+                    count=$(echo "$result" | grep -o '"value"' | wc -l | tr -d ' ')
+                    echo "{\"event\":\"rum-attribute-audit\",\"attribute\":\"${attr}\",\"unique_value_count\":${count},\"sample\":$(echo "$result" | head -c 512)}"
+                  done
+                  echo "{\"event\":\"rum-attribute-audit-done\"}"
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+          nodeSelector:
+            workload: observability
+          tolerations:
+            - key: workload
+              operator: Equal
+              value: observability
+              effect: NoSchedule

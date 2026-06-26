@@ -15,6 +15,7 @@ import com.openbank.libs.analytics.AnalyticsEnvelope
 import com.openbank.libs.analytics.BackfillRequest
 import com.openbank.libs.analytics.BackfillWindow
 import com.openbank.libs.analytics.IngestSource
+import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -55,7 +56,7 @@ class RecoveryFlowsTest {
     fun `malformed message is quarantined to the DLQ, not silently dropped`() = runBlocking<Unit> {
         val sink = CapturingSink()
         val dlq = CapturingDlq()
-        val consumer = AnalyticsConsumer().apply { this.sink = sink; this.deadLetters = dlq; objectMapper = mapper }
+        val consumer = AnalyticsConsumer().apply { this.sink = sink; this.deadLetters = dlq; objectMapper = mapper; clock = Clock.systemUTC() }
 
         consumer.consume("{ this is not valid json")
 
@@ -68,7 +69,7 @@ class RecoveryFlowsTest {
     @Test
     fun `DLQ content hash is stable so re-delivery is idempotent`() = runBlocking<Unit> {
         val dlq = CapturingDlq()
-        val consumer = AnalyticsConsumer().apply { sink = CapturingSink(); deadLetters = dlq; objectMapper = mapper }
+        val consumer = AnalyticsConsumer().apply { sink = CapturingSink(); deadLetters = dlq; objectMapper = mapper; clock = Clock.systemUTC() }
 
         consumer.consume("broken")
         consumer.consume("broken")
@@ -90,7 +91,7 @@ class RecoveryFlowsTest {
             source = FakeBackfillSource(listOf(event(idX, "a"), event(idX, "a"), event(idY, "b")))
             this.sink = sink
             this.worm = worm
-            consumer = AnalyticsConsumer().apply { objectMapper = mapper }
+            consumer = AnalyticsConsumer().apply { objectMapper = mapper; clock = Clock.systemUTC() }
             objectMapper = mapper
             chunk = Duration.ofDays(1)
         }
@@ -127,7 +128,7 @@ class RecoveryFlowsTest {
             source = FakeBackfillSource(emptyList())
             this.sink = sink
             this.worm = worm
-            consumer = AnalyticsConsumer().apply { objectMapper = mapper }
+            consumer = AnalyticsConsumer().apply { objectMapper = mapper; clock = Clock.systemUTC() }
             objectMapper = mapper
             chunk = Duration.ofDays(1)
         }

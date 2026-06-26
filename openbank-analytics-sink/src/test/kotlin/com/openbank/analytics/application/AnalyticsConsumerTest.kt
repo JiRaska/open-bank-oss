@@ -6,6 +6,7 @@ package com.openbank.analytics.application
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.security.PiiMask
+import java.time.Clock
 import java.util.UUID
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -18,7 +19,7 @@ import org.junit.jupiter.api.Test
 class AnalyticsConsumerTest {
 
     private val mapper = ObjectMapper()
-    private val consumer = AnalyticsConsumer().apply { objectMapper = mapper }
+    private val consumer = AnalyticsConsumer().apply { objectMapper = mapper; clock = Clock.systemUTC() }
 
     @Test
     fun `maps canonical fields from an outbox event`() {

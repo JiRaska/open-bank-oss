@@ -58,7 +58,10 @@ import javax.crypto.spec.SecretKeySpec
 @IfBuildProperty(name = "openbank.analytics.worm.backend", stringValue = "s3")
 open class S3WormArchive : WormArchive {
 
-    @ConfigProperty(name = "openbank.analytics.worm.s3.endpoint", defaultValue = "https://s3.eu-central-1.amazonaws.com")
+    @ConfigProperty(
+        name = "openbank.analytics.worm.s3.endpoint",
+        defaultValue = "https://s3.eu-central-1.amazonaws.com",
+    )
     lateinit var endpoint: String
 
     @ConfigProperty(name = "openbank.analytics.worm.s3.region", defaultValue = "eu-central-1")
@@ -93,7 +96,7 @@ open class S3WormArchive : WormArchive {
         val headers = linkedMapOf(
             "content-type" to "application/json",
             "x-amz-object-lock-mode" to "COMPLIANCE",
-            "x-amz-object-lock-retain-until-date" to retainUntil
+            "x-amz-object-lock-retain-until-date" to retainUntil,
         )
         val (status, respBody) = signedSend("PUT", "/$bucket/$key", emptyMap(), headers, body)
         if (status !in 200..299) {
@@ -105,7 +108,11 @@ open class S3WormArchive : WormArchive {
     override suspend fun latest(): IntegrityAnchor? {
         // Keys embed an inverted timestamp so the newest sorts first; list-type=2 max-keys=1 returns it.
         val (listStatus, listBody) = signedSend(
-            "GET", "/$bucket", linkedMapOf("list-type" to "2", "max-keys" to "1", "prefix" to "$KEY_PREFIX/"), emptyMap(), null
+            "GET",
+            "/$bucket",
+            linkedMapOf("list-type" to "2", "max-keys" to "1", "prefix" to "$KEY_PREFIX/"),
+            emptyMap(),
+            null,
         )
         if (listStatus !in 200..299) error("S3 WORM list failed: HTTP $listStatus ${listBody.take(300)}")
         val key = firstKey(listBody) ?: return null
@@ -130,7 +137,7 @@ open class S3WormArchive : WormArchive {
             "previousAnchorHash" to anchor.previousAnchorHash,
             "recordCount" to anchor.recordCount,
             "source" to anchor.source,
-            "sealedAt" to ISO.format(anchor.sealedAt)
+            "sealedAt" to ISO.format(anchor.sealedAt),
         )
         return mapper.writeValueAsString(row)
     }
@@ -141,10 +148,12 @@ open class S3WormArchive : WormArchive {
         return IntegrityAnchor(
             anchorId = n.path("anchorId").asText(),
             merkleRoot = n.path("merkleRoot").asText(),
-            previousAnchorHash = n.path("previousAnchorHash").let { if (it.isNull || it.isMissingNode) null else it.asText() },
+            previousAnchorHash = n.path("previousAnchorHash").let {
+                if (it.isNull || it.isMissingNode) null else it.asText()
+            },
             recordCount = n.path("recordCount").asInt(),
             source = n.path("source").asText(),
-            sealedAt = Instant.parse(n.path("sealedAt").asText())
+            sealedAt = Instant.parse(n.path("sealedAt").asText()),
         )
     }
 
@@ -170,20 +179,32 @@ open class S3WormArchive : WormArchive {
         headers: Map<String, String>,
         payloadHash: String,
         amzDate: String,
-        service: String = "s3"
+        service: String = "s3",
     ): String {
         val dateStamp = amzDate.substring(0, 8)
         val sortedHeaders = headers.toSortedMap()
-        val canonicalHeaders = sortedHeaders.entries.joinToString("") { "${it.key}:${it.value.trim()}\n" }
+        val canonicalHeaders = sortedHeaders.entries.joinToString("") {
+            "${it.key}:${it.value.trim()}\n"
+        }
         val signedHeaders = sortedHeaders.keys.joinToString(";")
         // Query strings encode '/' as %2F (unlike path segments); the signature won't match S3 otherwise.
-        val canonicalQuery = query.toSortedMap().entries.joinToString("&") { "${uriEncode(it.key, true)}=${uriEncode(it.value, true)}" }
+        val canonicalQuery = query.toSortedMap().entries.joinToString("&") {
+            "${uriEncode(it.key, true)}=${uriEncode(it.value, true)}"
+        }
         val canonicalRequest = listOf(
-            method, canonicalUri, canonicalQuery, canonicalHeaders, signedHeaders, payloadHash
+            method,
+            canonicalUri,
+            canonicalQuery,
+            canonicalHeaders,
+            signedHeaders,
+            payloadHash,
         ).joinToString("\n")
         val scope = "$dateStamp/$region/$service/aws4_request"
         val stringToSign = listOf(
-            "AWS4-HMAC-SHA256", amzDate, scope, sha256Hex(canonicalRequest.toByteArray(Charsets.UTF_8))
+            "AWS4-HMAC-SHA256",
+            amzDate,
+            scope,
+            sha256Hex(canonicalRequest.toByteArray(Charsets.UTF_8)),
         ).joinToString("\n")
         val signature = hex(hmac(signingKey(secretKey, dateStamp, region, service), stringToSign))
         return "AWS4-HMAC-SHA256 Credential=$accessKey/$scope, SignedHeaders=$signedHeaders, Signature=$signature"
@@ -196,14 +217,12 @@ open class S3WormArchive : WormArchive {
         return hmac(kService, "aws4_request")
     }
 
-    internal fun sha256Hex(bytes: ByteArray): String =
-        hex(MessageDigest.getInstance("SHA-256").digest(bytes))
+    internal fun sha256Hex(bytes: ByteArray): String = hex(MessageDigest.getInstance("SHA-256").digest(bytes))
 
-    private fun hmac(key: ByteArray, data: String): ByteArray =
-        Mac.getInstance("HmacSHA256").run {
-            init(SecretKeySpec(key, "HmacSHA256"))
-            doFinal(data.toByteArray(Charsets.UTF_8))
-        }
+    private fun hmac(key: ByteArray, data: String): ByteArray = Mac.getInstance("HmacSHA256").run {
+        init(SecretKeySpec(key, "HmacSHA256"))
+        doFinal(data.toByteArray(Charsets.UTF_8))
+    }
 
     private fun hex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
 
@@ -212,7 +231,13 @@ open class S3WormArchive : WormArchive {
         for (b in value.toByteArray(Charsets.UTF_8)) {
             val c = b.toInt().toChar()
             when {
-                c in 'A'..'Z' || c in 'a'..'z' || c in '0'..'9' || c == '_' || c == '-' || c == '~' || c == '.' -> append(c)
+                c in 'A'..'Z' ||
+                    c in 'a'..'z' ||
+                    c in '0'..'9' ||
+                    c == '_' ||
+                    c == '-' ||
+                    c == '~' ||
+                    c == '.' -> append(c)
                 c == '/' && !encodeSlash -> append(c)
                 else -> append("%%%02X".format(b.toInt() and 0xFF))
             }
@@ -227,7 +252,7 @@ open class S3WormArchive : WormArchive {
         canonicalUri: String,
         query: Map<String, String>,
         extraHeaders: Map<String, String>,
-        body: ByteArray?
+        body: ByteArray?,
     ): Pair<Int, String> {
         val host = URI.create(endpoint).host
         val amzDate = AMZ.format(Instant.now(clock))
@@ -239,19 +264,35 @@ open class S3WormArchive : WormArchive {
         signed.putAll(extraHeaders)
         val auth = authorization(method, canonicalUri, query, signed, payloadHash, amzDate)
         val sendHeaders = LinkedHashMap(signed).apply { put("Authorization", auth) }
-        val queryString = if (query.isEmpty()) "" else "?" + query.toSortedMap().entries
-            .joinToString("&") { "${uriEncode(it.key, true)}=${uriEncode(it.value, true)}" }
+        val queryString = if (query.isEmpty()) {
+            ""
+        } else {
+            "?" + query.toSortedMap().entries
+                .joinToString("&") { "${uriEncode(it.key, true)}=${uriEncode(it.value, true)}" }
+        }
         val url = "${endpoint.trimEnd('/')}$canonicalUri$queryString"
         return withContext(Dispatchers.IO) { send(method, url, sendHeaders, body) }
     }
 
     /** Raw HTTP exchange. `open` so tests capture the request and script the response without S3. */
-    protected open fun send(method: String, url: String, headers: Map<String, String>, body: ByteArray?): Pair<Int, String> {
-        val publisher = if (body == null) HttpRequest.BodyPublishers.noBody() else HttpRequest.BodyPublishers.ofByteArray(body)
+    protected open fun send(
+        method: String,
+        url: String,
+        headers: Map<String, String>,
+        body: ByteArray?,
+    ): Pair<Int, String> {
+        val publisher = if (body == null) {
+            HttpRequest.BodyPublishers.noBody()
+        } else {
+            HttpRequest.BodyPublishers.ofByteArray(body)
+        }
         val builder = HttpRequest.newBuilder(URI.create(url)).method(method, publisher)
         // 'host' is managed by the JDK client and must not be set explicitly.
         headers.filterKeys { it != "host" }.forEach { (k, v) -> builder.header(k, v) }
-        val response = http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+        val response = http.send(
+            builder.build(),
+            HttpResponse.BodyHandlers.ofString(),
+        )
         return response.statusCode() to response.body()
     }
 

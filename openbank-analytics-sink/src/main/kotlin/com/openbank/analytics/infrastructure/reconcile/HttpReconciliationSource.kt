@@ -23,8 +23,8 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
-import java.time.Duration
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 
 /**
@@ -79,9 +79,8 @@ open class HttpReconciliationSource : ReconciliationSource {
     private var memo: Pair<Instant, List<ServiceReconciliationSummary>>? = null
     private val memoTtl: Duration = Duration.ofSeconds(30)
 
-    override suspend fun currentVersions(): Map<AggregateKey, Long> =
-        summaries().flatMap { it.aggregates }
-            .associate { AggregateKey(it.aggregateType, it.aggregateId) to it.maxVersion }
+    override suspend fun currentVersions(): Map<AggregateKey, Long> = summaries().flatMap { it.aggregates }
+        .associate { AggregateKey(it.aggregateType, it.aggregateId) to it.maxVersion }
 
     override suspend fun rowCountsByType(): Map<String, Long> {
         val merged = HashMap<String, Long>()
@@ -92,17 +91,16 @@ open class HttpReconciliationSource : ReconciliationSource {
     }
 
     /** Parses the `service=baseUrl,...` spec, skipping blank/malformed entries (logged). */
-    internal fun endpoints(): Map<String, String> =
-        endpointsSpec.split(',').mapNotNull { raw ->
-            val entry = raw.trim()
-            if (entry.isEmpty()) return@mapNotNull null
-            val sep = entry.indexOf('=')
-            if (sep <= 0 || sep == entry.length - 1) {
-                log.warnf("ignoring malformed reconciliation source endpoint spec entry: %s", entry)
-                return@mapNotNull null
-            }
-            entry.substring(0, sep).trim() to entry.substring(sep + 1).trim()
-        }.toMap()
+    internal fun endpoints(): Map<String, String> = endpointsSpec.split(',').mapNotNull { raw ->
+        val entry = raw.trim()
+        if (entry.isEmpty()) return@mapNotNull null
+        val sep = entry.indexOf('=')
+        if (sep <= 0 || sep == entry.length - 1) {
+            log.warnf("ignoring malformed reconciliation source endpoint spec entry: %s", entry)
+            return@mapNotNull null
+        }
+        entry.substring(0, sep).trim() to entry.substring(sep + 1).trim()
+    }.toMap()
 
     private suspend fun summaries(): List<ServiceReconciliationSummary> {
         memo?.let { (at, value) -> if (Duration.between(at, Instant.now(clock)) < memoTtl) return value }
@@ -127,11 +125,12 @@ open class HttpReconciliationSource : ReconciliationSource {
     protected open suspend fun fetch(uri: URI, authHeader: String?): String = withContext(Dispatchers.IO) {
         val builder = HttpRequest.newBuilder(uri).header("Accept", "application/json").GET()
         if (authHeader != null) builder.header("Authorization", authHeader)
-        val response = http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
-        if (response.statusCode() !in 200..299) {
-            throw IllegalStateException(
-                "reconciliation-summary failed: HTTP ${response.statusCode()} ${response.body().take(500)}"
-            )
+        val response = http.send(
+            builder.build(),
+            HttpResponse.BodyHandlers.ofString(),
+        )
+        check(response.statusCode() in 200..299) {
+            "reconciliation-summary failed: HTTP ${response.statusCode()} ${response.body().take(500)}"
         }
         response.body()
     }

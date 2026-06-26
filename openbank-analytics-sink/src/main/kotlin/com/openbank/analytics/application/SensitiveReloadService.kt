@@ -31,7 +31,9 @@ import org.jboss.logging.Logger
 class SensitiveReloadService {
 
     @Inject lateinit var store: ProposalStore
+
     @Inject lateinit var clock: Clock
+
     @Inject lateinit var backfill: BackfillService
 
     private val log = Logger.getLogger(SensitiveReloadService::class.java)
@@ -41,11 +43,16 @@ class SensitiveReloadService {
             id = UUID.randomUUID().toString(),
             action = request,
             proposedBy = request.requestedBy,
-            proposedAt = Instant.now(clock)
+            proposedAt = Instant.now(clock),
         )
         store.save(proposal)
-        log.infof("reload proposed id=%s source=%s by=%s reason=%s",
-            proposal.id, request.source, request.requestedBy, request.reason)
+        log.infof(
+            "reload proposed id=%s source=%s by=%s reason=%s",
+            proposal.id,
+            request.source,
+            request.requestedBy,
+            request.reason,
+        )
         return proposal
     }
 

@@ -4,6 +4,7 @@
 
 package com.openbank.ledger.domain.model
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.domain.money.Money
 import java.time.Instant
 import java.time.LocalDate
@@ -71,11 +72,15 @@ data class JournalEntry(
             if (delta.signum() == 0) null else AccountBookedDelta(accountId, currency, delta)
         }
 
-    fun reverse(reversalId: UUID, reversedBy: UUID): JournalEntry {
+    fun reverse(
+        reversalId: UUID,
+        reversedBy: UUID,
+        lineIdProvider: (UUID) -> UUID = { Ids.newId() },
+    ): JournalEntry {
         check(status == JournalStatus.POSTED) { "Can only reverse POSTED journal entries" }
         val reversalLines = lines.map { line ->
             line.copy(
-                id = UUID.randomUUID(),
+                id = lineIdProvider(line.id),
                 side = if (line.side == JournalSide.DEBIT) JournalSide.CREDIT else JournalSide.DEBIT,
             )
         }

@@ -920,15 +920,20 @@ class CustomerEdgeResourceTest {
 
     // --- fxRateHistory (unit — upstream wiring + param validation) ---
 
-    private fun fxResource(upstream: UpstreamClient, callerParty: UUID): CustomerEdgeResource =
-        CustomerEdgeResource(upstream, mockk(relaxed = true), PaymentSessionStore(), mockk(relaxed = true), Clock.systemUTC()).apply {
-            jwt = mockk {
-                every { getClaim<String>("party_id") } returns callerParty.toString()
-                every { subject } returns callerParty.toString()
-            }
-            objectMapper = ObjectMapper()
-            fxServiceUrl = "http://fx"
+    private fun fxResource(upstream: UpstreamClient, callerParty: UUID): CustomerEdgeResource = CustomerEdgeResource(
+        upstream,
+        mockk(relaxed = true),
+        PaymentSessionStore(),
+        mockk(relaxed = true),
+        Clock.systemUTC(),
+    ).apply {
+        jwt = mockk {
+            every { getClaim<String>("party_id") } returns callerParty.toString()
+            every { subject } returns callerParty.toString()
         }
+        objectMapper = ObjectMapper()
+        fxServiceUrl = "http://fx"
+    }
 
     @Test
     fun `fxRateHistory returns 400 for invalid currency code`() {

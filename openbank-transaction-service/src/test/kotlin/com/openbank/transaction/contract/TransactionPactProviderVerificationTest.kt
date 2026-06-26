@@ -35,7 +35,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 @QuarkusTestResource(com.openbank.transaction.it.PostgresRedpandaTestResource::class)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR"])
 @Provider("openbank-transaction-service")
-@PactBroker
+@PactBroker(enablePendingPacts = "true")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class TransactionPactProviderVerificationTest {
