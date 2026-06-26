@@ -53,6 +53,13 @@ metadata:
     strimzi.io/kraft: enabled
 spec:
   kafka:
+    # SimpleAuthorizer for KafkaUser ACLs (ADR-0108 hardening, issue #2013).
+    # allow.everyone.if.no.acl.found=true is the migration gate: services
+    # without a KafkaUser retain full access until mTLS client auth is wired
+    # per-service in a future PR. KRaft inter-broker comms use the managed
+    # controller listener and are unaffected by SimpleAuthorizer.
+    authorization:
+      type: simple
     # Broker-layer observability (Dynatrace-parity #0). Strimzi's bundled JMX
     # Prometheus exporter publishes broker metrics on :9404 (container port
     # `tcp-prometheus`); rules are in the kafka-metrics ConfigMap below. Lights
@@ -77,6 +84,10 @@ spec:
       transaction.state.log.min.isr: 1
       default.replication.factor: 1
       min.insync.replicas: 1
+      # Migration gate (issue #2013): services without explicit KafkaUser ACLs
+      # retain full access. Flip to "false" once every service has mTLS +
+      # per-service ACLs wired — tracked in the follow-up of issue #2013.
+      allow.everyone.if.no.acl.found: "true"
   # Consumer-lag visibility (Dynatrace-parity #0). The Kafka Exporter is a
   # separate pod (also on `tcp-prometheus`:9404) that turns consumer group
   # offsets into `kafka_consumergroup_lag` — the single most useful event-bus
