@@ -32,7 +32,7 @@ jobs:
   build:
     name: ${{ inputs.service }}
     runs-on: openbank-build
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       # Pact Broker (ADR-0092). The broker has no public ingress (ADR-0056); the
       # in-cluster ARC runner reaches it over cluster DNS. Provider verification +
