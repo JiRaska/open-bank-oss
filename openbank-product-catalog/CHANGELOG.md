@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank/compare/product-catalog-v0.4.1...product-catalog-v0.5.0) (2026-06-27)
+
+
+### Features
+
+* **product-catalog,libs:** inject Clock for DST determinism (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2165](https://github.com/JiRaska/open-bank/issues/2165)) ([4956fc3](https://github.com/JiRaska/open-bank/commit/4956fc3eca24ea884281d09cd5c667c9f2f0dfb3))
+
+
+### Bug Fixes
+
+* **clearing-simulator,product-catalog:** resolve detekt MagicNumber and CyclomaticComplexMethod violations ([#2230](https://github.com/JiRaska/open-bank/issues/2230)) ([0359472](https://github.com/JiRaska/open-bank/commit/03594725eac2844caaaa33eebffaa620c86d5512))
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+* **product-catalog:** expand Fee and eligibilitySegments call sites to resolve ktlint violations ([#2259](https://github.com/JiRaska/open-bank/issues/2259)) ([d6a780a](https://github.com/JiRaska/open-bank/commit/d6a780ad483b1c5b32d12bbd7c575254863c68b8))
+
 ## [0.4.1](https://github.com/JiRaska/open-bank/compare/product-catalog-v0.4.0...product-catalog-v0.4.1) (2026-06-23)
 
 
