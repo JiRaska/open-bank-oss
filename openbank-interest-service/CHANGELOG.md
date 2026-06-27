@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.1](https://github.com/JiRaska/open-bank/compare/interest-service-v0.6.0...interest-service-v0.6.1) (2026-06-27)
+
+
+### Bug Fixes
+
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+* **interest,dispute,lending:** complete Clock injection (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2136](https://github.com/JiRaska/open-bank/issues/2136)) ([41a2921](https://github.com/JiRaska/open-bank/commit/41a2921b9b89cc06025cc71a4b428cb019fb499f))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank/compare/interest-service-v0.5.0...interest-service-v0.6.0) (2026-06-25)
 
 
