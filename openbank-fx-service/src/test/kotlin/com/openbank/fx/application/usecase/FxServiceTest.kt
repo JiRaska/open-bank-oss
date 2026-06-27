@@ -54,7 +54,11 @@ class FxServiceTest {
     private lateinit var metrics: DomainMetrics
     private lateinit var fraudScoringPort: FraudScoringPort
     private lateinit var service: FxService
-    private val clock: Clock = Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC)
+
+    // Must sit inside the fxRate() validity window (validFrom 2026-01-01 .. validTo 2026-12-31):
+    // convert() now reads `Instant.now(clock)` (ADR-0100) for the rate.isValid() gate, so a clock
+    // outside that window makes every conversion fail with "FX rate expired".
+    private val clock: Clock = Clock.fixed(Instant.parse("2026-06-15T12:00:00Z"), ZoneOffset.UTC)
 
     @BeforeEach
     fun setUp() {
