@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.1](https://github.com/JiRaska/open-bank/compare/card-issuance-service-v0.6.0...card-issuance-service-v0.6.1) (2026-06-27)
+
+
+### Bug Fixes
+
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+* **fleet:** resolve ktlint violations and sepa-payment compile error after ADR-0100 Clock sweep ([#2272](https://github.com/JiRaska/open-bank/issues/2272)) ([3cd3637](https://github.com/JiRaska/open-bank/commit/3cd3637372c52025cfac6f29d23129bab4d3919b))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank/compare/card-issuance-service-v0.5.0...card-issuance-service-v0.6.0) (2026-06-25)
 
 
