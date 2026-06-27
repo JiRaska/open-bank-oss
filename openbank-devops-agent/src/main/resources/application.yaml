@@ -73,7 +73,11 @@ openbank:
   devops:
     prometheus-url: ${PROMETHEUS_URL:http://prometheus-operated.observability:9090}
     alertmanager-url: ${ALERTMANAGER_URL:http://alertmanager-operated.observability:9093}
-    llm-gateway-url: ${LLM_GATEWAY_URL:http://litellm.ai-platform:4000}
+    # OpenAI-compatible model backend — DeepInfra + DeepSeek, same provider+model as the copilot
+    # (ADR-0089). The API key is read separately (devops.model.api-key ← DEVOPS_MODEL_API_KEY) so an
+    # un-seeded key degrades the diagnosis instead of CrashLooping the pod.
+    model-endpoint: ${DEVOPS_MODEL_ENDPOINT:https://api.deepinfra.com/v1/openai}
+    model-id: ${DEVOPS_MODEL_ID:deepseek-ai/DeepSeek-V3.2}
     ci-failure-rate-threshold: ${CI_FAILURE_RATE_THRESHOLD:0.20}
     change-failure-rate-threshold: ${CHANGE_FAILURE_RATE_THRESHOLD:0.05}
     runner-queue-pressure-threshold: ${RUNNER_QUEUE_PRESSURE_THRESHOLD:0.80}

@@ -17,8 +17,18 @@ interface DevOpsConfig {
     @WithDefault("http://alertmanager-operated.observability:9093")
     fun alertmanagerUrl(): String
 
-    @WithDefault("http://litellm.ai-platform:4000")
-    fun llmGatewayUrl(): String
+    /**
+     * Base URL of the OpenAI-compatible model backend. Defaults to DeepInfra — the same provider the
+     * customer copilot uses (ADR-0089) — reached at {endpoint}/chat/completions. The API key is read
+     * separately via an OPTIONAL lookup (openbank.devops.model.api-key) so an un-seeded key degrades
+     * the diagnosis call instead of CrashLooping the pod at boot (SmallRye SRCFG00040 on empty bind).
+     */
+    @WithDefault("https://api.deepinfra.com/v1/openai")
+    fun modelEndpoint(): String
+
+    /** Upstream model name, sent verbatim — the DeepSeek model the copilot already runs on. */
+    @WithDefault("deepseek-ai/DeepSeek-V3.2")
+    fun modelId(): String
 
     /** D1: CI workflow failure rate over 24h that trips a finding (0.20 = 20%). */
     @WithDefault("0.20")

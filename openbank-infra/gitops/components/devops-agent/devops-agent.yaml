@@ -44,10 +44,24 @@ spec:
               value: http://prometheus-operated.observability.svc:9090
             - name: ALERTMANAGER_URL
               value: http://alertmanager-operated.observability.svc:9093
-            - name: LLM_GATEWAY_URL
-              value: http://litellm.ai-platform.svc:4000
             - name: TEMPORAL_NAMESPACE
               value: openbank-devops
+            # LLM diagnosis backend — DeepInfra (OpenAI-compatible), DeepSeek-V3.2: the same
+            # provider+model as the customer copilot (ADR-0089). Swap backend by changing these
+            # env vars only; no image rebuild.
+            - name: DEVOPS_MODEL_ENDPOINT
+              value: https://api.deepinfra.com/v1/openai
+            - name: DEVOPS_MODEL_ID
+              value: deepseek-ai/DeepSeek-V3.2
+            # DeepInfra API key, projected from OpenBao by ESO (devops-agent-secrets).
+            # Seed: bao kv patch openbank/devops-agent MODEL_API_KEY=<deepinfra-key>
+            # Optional so an un-seeded key doesn't CrashLoop the pod — until set, diagnosis degrades.
+            - name: DEVOPS_MODEL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: devops-agent-secrets
+                  key: DEVOPS_MODEL_API_KEY
+                  optional: true
           resources:
             requests:
               cpu: 100m
