@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.9.1](https://github.com/JiRaska/open-bank/compare/account-service-v0.9.0...account-service-v0.9.1) (2026-06-27)
+
+
+### Bug Fixes
+
+* **account:** sort accounts CURRENT-first in findByPartyId ([#2257](https://github.com/JiRaska/open-bank/issues/2257)) ([3493c4c](https://github.com/JiRaska/open-bank/commit/3493c4cd3e0c1675e8de33fd41c84dcc1ca6ad06))
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+* **fleet:** resolve ktlint violations and sepa-payment compile error after ADR-0100 Clock sweep ([#2272](https://github.com/JiRaska/open-bank/issues/2272)) ([3cd3637](https://github.com/JiRaska/open-bank/commit/3cd3637372c52025cfac6f29d23129bab4d3919b))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank/compare/account-service-v0.8.0...account-service-v0.9.0) (2026-06-25)
 
 
