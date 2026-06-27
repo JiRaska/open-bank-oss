@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/JiRaska/open-bank/compare/settlement-service-v0.3.1...settlement-service-v0.4.0) (2026-06-27)
+
+
+### Features
+
+* **tpp-registry,statement,onboarding,agent,settlement,sdd:** inject Clock (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2138](https://github.com/JiRaska/open-bank/issues/2138)) ([baa0d03](https://github.com/JiRaska/open-bank/commit/baa0d03bcef7a1cd48cb7e115410ab625a26acde))
+
 ## [0.3.1](https://github.com/JiRaska/open-bank/compare/settlement-service-v0.3.0...settlement-service-v0.3.1) (2026-06-25)
 
 
