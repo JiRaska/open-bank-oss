@@ -9,6 +9,7 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.flags.FeatureClient
 import com.openbank.libs.flags.FeatureFlag
 import com.openbank.party.application.port.`in`.AddDocumentCommand
+import com.openbank.party.application.port.`in`.CreatePartyCommand
 import com.openbank.party.application.port.`in`.ErasePartyCommand
 import com.openbank.party.application.port.`in`.PartyUseCase
 import com.openbank.party.application.port.`in`.ResolvePartyByRcCommand
@@ -36,6 +37,7 @@ import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response

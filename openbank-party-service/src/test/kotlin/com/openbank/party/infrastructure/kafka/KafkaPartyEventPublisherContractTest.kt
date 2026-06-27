@@ -18,7 +18,9 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.reactive.messaging.Emitter
 import org.junit.jupiter.api.Test
+import java.time.Clock
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 
@@ -42,12 +44,15 @@ class KafkaPartyEventPublisherContractTest {
     // Instant exactly as the running producer does.
     private val mapper = ObjectMapper().findAndRegisterModules()
 
+    private val clock = Clock.fixed(Instant.parse("2026-06-11T08:00:00Z"), ZoneOffset.UTC)
+
     private fun publisher(captured: CapturingSlot<String>): KafkaPartyEventPublisher {
         val emitter = mockk<Emitter<String>>()
         every { emitter.send(capture(captured)) } returns CompletableFuture.completedFuture(null)
         return KafkaPartyEventPublisher().also {
             it.emitter = emitter
             it.objectMapper = mapper
+            it.clock = clock
         }
     }
 
@@ -79,8 +84,9 @@ class KafkaPartyEventPublisherContractTest {
         // Field-name contract — these exact names are read by account/aml/kyc/onboarding consumers.
         assertThat(json.get("eventType").asText()).isEqualTo("PARTY_CREATED")
         assertThat(json.get("partyId").asText()).isEqualTo("11111111-1111-1111-1111-111111111111")
-        assertThat(json.get("partyType").asText()).isEqualTo("INDIVIDUAL") // account-service gates on this value
-        assertThat(json.get("legalName").asText()).isEqualTo("Jan Novák") // required for OpenAccountCommand (sanctions, ADR-0032 §C)
+        // account-service gates on partyType; legalName required for OpenAccountCommand (sanctions, ADR-0032 §C)
+        assertThat(json.get("partyType").asText()).isEqualTo("INDIVIDUAL")
+        assertThat(json.get("legalName").asText()).isEqualTo("Jan Novák")
         assertThat(json.get("status").asText()).isEqualTo("PENDING_KYC")
         assertThat(json.has("occurredAt")).isTrue()
         // It must be a FLAT envelope — NOT the pid-service nested {aggregateId,payload} form.
@@ -95,7 +101,8 @@ class KafkaPartyEventPublisherContractTest {
 
         val json = mapper.readTree(slot.captured)
         assertThat(json.get("eventType").asText()).isEqualTo("PARTY_UPDATED")
-        assertThat(json.get("status").asText()).isEqualTo("ACTIVE") // account-service activates the pending account on this
+        // account-service activates the pending account when it sees status=ACTIVE
+        assertThat(json.get("status").asText()).isEqualTo("ACTIVE")
         assertThat(json.get("partyId").asText()).isEqualTo("11111111-1111-1111-1111-111111111111")
     }
 }
