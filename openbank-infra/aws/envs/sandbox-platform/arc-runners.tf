@@ -765,6 +765,41 @@ resource "aws_iam_role_policy" "arc_build_ecr" {
   policy = data.aws_iam_policy_document.arc_deploy_ecr.json
 }
 
+# ECR pull-through cache read + import for the CI Testcontainers pre-warm
+# (_service-ci.yml). The pre-warm pulls postgres/redpanda/valkey/apicurio from the
+# docker-hub/* pull-through repos (ecr-pull-through-cache.tf, rule "docker-hub").
+# The push grant above (arc_deploy_ecr) is scoped to repository/openbank-* and has
+# only push verbs, so the build runner could log in (GetAuthorizationToken is
+# account-wide) but the FIRST pull of an uncached docker-hub/* tag returned 403
+# Forbidden — both because the read verbs do not cover docker-hub/* AND because a
+# pull-through cache MISS needs ecr:BatchImportUpstreamImage to fetch from upstream
+# and ecr:CreateRepository to auto-create the cache repo. Full-fleet build symptom:
+# openbank-transaction-service (and any matrix job on a cold cache) could not start
+# its Testcontainers. The same import grant exists for Karpenter NODE pods in
+# ecr-pull-through-cache.tf; this is its CI-runner counterpart.
+data "aws_iam_policy_document" "arc_build_ecr_pullthrough" {
+  count = var.arc_runner_enabled ? 1 : 0
+  statement {
+    sid = "EcrPullThroughReadAndImport"
+    actions = [
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:BatchGetImage",
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:CreateRepository",
+      "ecr:BatchImportUpstreamImage",
+      "ecr:TagResource",
+    ]
+    resources = ["arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/docker-hub/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "arc_build_ecr_pullthrough" {
+  count  = var.arc_runner_enabled ? 1 : 0
+  name   = "ecr-pull-through-docker-hub"
+  role   = aws_iam_role.arc_build_runner[0].id
+  policy = data.aws_iam_policy_document.arc_build_ecr_pullthrough[0].json
+}
+
 # Cosign image signing (ADR-0029/0030 supply-chain). The auto-deploy build job signs
 # every pushed image with the AWS KMS key alias/openbank-cosign-signing (cosign v2,
 # tag-based) so kyverno's verify-openbank-image-signatures Enforce policy admits the

@@ -150,6 +150,12 @@ jobs:
   build:
     needs: changes
     if: needs.changes.outputs.any == 'true'
+    # The reusable workflow assumes openbank-arc-build-runner via GitHub OIDC for ECR auth
+    # (needed on the Hetzner pool, which has no ambient AWS creds). A job that calls a reusable
+    # workflow must grant the token here; the callee cannot elevate beyond the caller.
+    permissions:
+      contents: read
+      id-token: write
     strategy:
       fail-fast: false
       # Cap concurrent matrix jobs. The ARC init container raises fs.aio-max-nr to

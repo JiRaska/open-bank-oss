@@ -27,6 +27,10 @@ on:
 
 permissions:
   contents: read
+  # GitHub OIDC → assume openbank-arc-build-runner for ECR auth (see the "Authenticate to
+  # ECR via OIDC" step). Needed on the Hetzner self-hosted pool, which has no ambient AWS
+  # creds (no EKS Pod Identity); harmless on the ARC pool.
+  id-token: write
 
 jobs:
   build:
@@ -166,38 +170,59 @@ jobs:
       # canonical docker.io name so Testcontainers finds it in the local docker image store
       # without needing to pull again (Testcontainers uses the image name as cache key).
       #
-      # Skip on non-ARC runners (Hetzner/Mac): those use OrbStack's local daemon.
+      # Auth: the ARC pool gets ambient AWS creds via EKS Pod Identity, but the Hetzner
+      # self-hosted pool has NONE — so `aws ecr get-login-password` failed there ("ECR login
+      # failed"), and even on ARC the build-runner role lacked pull-through import rights so the
+      # first uncached pull 403'd (transaction-service). Fix both with GitHub OIDC: assume
+      # openbank-arc-build-runner (which already trusts repo:JiRaska/open-bank:* — arc-runners.tf)
+      # and let the ECR-login action docker-login the runner. Keyless and host-agnostic: the
+      # amazon-ecr-login action needs no awscli on the host (absent on Hetzner). Both steps soft-
+      # fail so a runner without OIDC still falls through to the in-cluster registry-cache below.
+      - name: Authenticate to ECR via OIDC
+        id: ecr_auth
+        if: ${{ runner.environment == 'self-hosted' }}
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b # v5.0.0
+        with:
+          role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
+          aws-region: eu-north-1
+      - name: Login to Amazon ECR
+        id: ecr_login
+        if: ${{ runner.environment == 'self-hosted' && steps.ecr_auth.outcome == 'success' }}
+        continue-on-error: true
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
       - name: Pre-warm Testcontainers image cache via ECR
         if: ${{ runner.environment == 'self-hosted' }}
         continue-on-error: true
         env:
           ECR: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
-          AWS_DEFAULT_REGION: "eu-north-1"
         run: |
-          aws ecr get-login-password | docker login --username AWS --password-stdin "$ECR" || {
-            echo "::warning title=TC pre-warm::ECR login failed — falling back to registry-cache"
-            # Fallback: try in-cluster registry-cache
-            if curl -sf --connect-timeout 1 \
-                http://registry-cache.registry-cache.svc.cluster.local:5000/v2/ > /dev/null 2>&1; then
-              docker pull postgres:16.3-alpine &
-              docker pull valkey/valkey:7.2-alpine &
-              docker pull redpandadata/redpanda:v24.1.2 &
-              docker pull apicurio/apicurio-registry-mem:2.6.2.Final &
-              wait
-            fi
-            exit 0
-          }
-          # Pull from ECR pull-through (zero NAT) in parallel, then retag to canonical names
-          docker pull "$ECR/docker-hub/library/postgres:16.3-alpine" &
-          docker pull "$ECR/docker-hub/valkey/valkey:7.2-alpine" &
-          docker pull "$ECR/docker-hub/redpandadata/redpanda:v24.1.2" &
-          docker pull "$ECR/docker-hub/apicurio/apicurio-registry-mem:2.6.2.Final" &
-          wait
-          docker tag "$ECR/docker-hub/library/postgres:16.3-alpine"                  postgres:16.3-alpine
-          docker tag "$ECR/docker-hub/valkey/valkey:7.2-alpine"                      valkey/valkey:7.2-alpine
-          docker tag "$ECR/docker-hub/redpandadata/redpanda:v24.1.2"                 redpandadata/redpanda:v24.1.2
-          docker tag "$ECR/docker-hub/apicurio/apicurio-registry-mem:2.6.2.Final"   apicurio/apicurio-registry-mem:2.6.2.Final
-          echo "::notice title=TC pre-warm done::Testcontainers images ready (ECR pull-through, zero NAT)"
+          # docker is already authenticated to ECR by the "Login to Amazon ECR" step (OIDC) when it
+          # succeeded — no `aws ecr get-login-password` here (that needs host awscli, absent on
+          # Hetzner). Pull from the ECR pull-through cache (zero NAT) and retag to canonical
+          # docker.io names so Testcontainers cache-hits locally without a second pull.
+          if [ "${{ steps.ecr_login.outcome }}" = "success" ] \
+             && docker pull "$ECR/docker-hub/library/postgres:16.3-alpine"; then
+            docker pull "$ECR/docker-hub/valkey/valkey:7.2-alpine" &
+            docker pull "$ECR/docker-hub/redpandadata/redpanda:v24.1.2" &
+            docker pull "$ECR/docker-hub/apicurio/apicurio-registry-mem:2.6.2.Final" &
+            wait
+            docker tag "$ECR/docker-hub/library/postgres:16.3-alpine"                  postgres:16.3-alpine
+            docker tag "$ECR/docker-hub/valkey/valkey:7.2-alpine"                      valkey/valkey:7.2-alpine
+            docker tag "$ECR/docker-hub/redpandadata/redpanda:v24.1.2"                 redpandadata/redpanda:v24.1.2
+            docker tag "$ECR/docker-hub/apicurio/apicurio-registry-mem:2.6.2.Final"   apicurio/apicurio-registry-mem:2.6.2.Final
+            echo "::notice title=TC pre-warm done::Testcontainers images ready (ECR pull-through, zero NAT)"
+          elif curl -sf --connect-timeout 1 \
+              http://registry-cache.registry-cache.svc.cluster.local:5000/v2/ > /dev/null 2>&1; then
+            echo "::warning title=TC pre-warm::ECR unavailable — using in-cluster registry-cache"
+            docker pull postgres:16.3-alpine &
+            docker pull valkey/valkey:7.2-alpine &
+            docker pull redpandadata/redpanda:v24.1.2 &
+            docker pull apicurio/apicurio-registry-mem:2.6.2.Final &
+            wait
+          else
+            echo "::warning title=TC pre-warm::no image cache reachable — Testcontainers will pull at test time"
+          fi
       # Most modules pin kotlin { jvmToolchain(25) }; a few use 21. Installing both
       # lets Gradle's toolchain resolution pick the right one with zero Foojay
       # downloads at build time (faster, fewer billed minutes).

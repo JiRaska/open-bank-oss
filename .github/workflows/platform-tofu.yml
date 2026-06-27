@@ -73,7 +73,15 @@ jobs:
       - name: Ensure AWS CLI
         run: |
           if command -v aws >/dev/null; then aws --version; exit 0; fi
-          curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip -o /tmp/awscliv2.zip
+          # Arch-aware: the openbank-batch pool mixes ARC Graviton (aarch64) and Hetzner
+          # (x86_64) hosts, so a hardcoded aarch64 bundle gives "Exec format error" (exit
+          # 126) when the job lands on an x86_64 host. Map uname -m to the AWS CLI suffix.
+          case "$(uname -m)" in
+            aarch64 | arm64) aws_arch=aarch64 ;;
+            x86_64 | amd64) aws_arch=x86_64 ;;
+            *) aws_arch=aarch64 ;;
+          esac
+          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}.zip" -o /tmp/awscliv2.zip
           python3 -m zipfile -e /tmp/awscliv2.zip /tmp/
           # python zipfile extraction drops ALL execute bits; restore them (lowercase
           # x, unconditional). Run the self-contained v2 bundle in place from dist/
@@ -184,7 +192,15 @@ jobs:
       - name: Ensure AWS CLI
         run: |
           if command -v aws >/dev/null; then aws --version; exit 0; fi
-          curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip -o /tmp/awscliv2.zip
+          # Arch-aware: the openbank-batch pool mixes ARC Graviton (aarch64) and Hetzner
+          # (x86_64) hosts, so a hardcoded aarch64 bundle gives "Exec format error" (exit
+          # 126) when the job lands on an x86_64 host. Map uname -m to the AWS CLI suffix.
+          case "$(uname -m)" in
+            aarch64 | arm64) aws_arch=aarch64 ;;
+            x86_64 | amd64) aws_arch=x86_64 ;;
+            *) aws_arch=aarch64 ;;
+          esac
+          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}.zip" -o /tmp/awscliv2.zip
           python3 -m zipfile -e /tmp/awscliv2.zip /tmp/
           # python zipfile extraction drops ALL execute bits; restore them (lowercase
           # x, unconditional). Run the self-contained v2 bundle in place from dist/
