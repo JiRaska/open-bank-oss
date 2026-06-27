@@ -15,7 +15,7 @@ OpenBank is an **early-stage, community-driven** banking platform reference impl
 
 ## Project Status
 
-**Alpha — Foundation hardening (Milestone M1).** 27 services run in the AWS sandbox with domain logic, REST APIs, tests, CI gates, GitOps auto-deploy, and an observability stack with on-call and SLO-as-code. The intra-bank money path is end-to-end; interbank settlement rails, compliance evidence, and multi-region are later milestones. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full M1–M7 plan.
+**Alpha — M1 complete, M2/M3/M5 in progress.** 26 backend services + customer-edge + admin-UI run in the AWS sandbox. The intra-bank money path is end-to-end; the ISO 20022 pipeline and clearing simulator are wired; live interbank network connections and multi-region are later milestones. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full M1–M7 plan.
 
 | Area | Status |
 |---|---|

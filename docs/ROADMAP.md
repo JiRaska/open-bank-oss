@@ -20,7 +20,7 @@ milestone completion in releases, not by inferred dates.
 
 **Current focus: M2 + M3 + M5 in parallel.**
 
-- **M1 (Foundation)** is complete: all 32 services build green, CI gates enforced fleet-wide
+- **M1 (Foundation)** is complete: all services build green, CI gates enforced fleet-wide
   (SAST/SBOM/gitleaks/OpenAPI/governance-as-code), branch protection on `main`, per-service SemVer and
   release-please changelogs live.
 - **M2 (Resilience)** — transactional outbox and saga patterns are fleet-wide; Temporal durable execution
