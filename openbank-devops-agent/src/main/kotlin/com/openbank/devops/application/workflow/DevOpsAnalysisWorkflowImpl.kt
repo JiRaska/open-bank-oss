@@ -48,6 +48,7 @@ class DevOpsAnalysisWorkflowImpl : DevOpsAnalysisWorkflow {
         allFindings += detect.detect(DetectorId.D2_DORA_REGRESSION, collect.collectDoraSignals())
         allFindings += detect.detect(DetectorId.D3_RUNNER_CAPACITY, collect.collectRunnerCapacitySignals())
         allFindings += detect.detect(DetectorId.D4_DEPLOY_HEALTH, collect.collectDeployHealthSignals())
+        allFindings += detect.detect(DetectorId.D5_SSDLC_HYGIENE, collect.collectSsdlcSignals())
         allFindings += detect.detect(DetectorId.D6_INCIDENT_RECURRENCE, collect.collectIncidentRecurrenceSignals())
 
         // Diagnose (LLM) and, when warranted, draft a durable remediation for the HITL queue.

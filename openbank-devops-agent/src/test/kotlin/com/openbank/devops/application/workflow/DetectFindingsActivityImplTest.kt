@@ -29,6 +29,7 @@ class DetectFindingsActivityImplTest {
         every { config.ciFailureRateThreshold() } returns 0.20
         every { config.changeFailureRateThreshold() } returns 0.05
         every { config.runnerQueuePressureThreshold() } returns 0.80
+        every { config.ssdlcDriftThreshold() } returns 3
         every { config.incidentRecurrenceThreshold() } returns 3
         detect = DetectFindingsActivityImpl(config)
     }
@@ -77,13 +78,30 @@ class DetectFindingsActivityImplTest {
     }
 
     @Test
-    fun `CI pipeline detector is inert when the exporter series is absent`() {
-        // ci_runs_last_day == 0 means the github-actions exporter is not deployed yet.
-        val findings = detect.detect(
-            DetectorId.D1_CI_PIPELINE_HEALTH,
-            mapOf("ci_failures_last_day" to 0.0, "ci_runs_last_day" to 0.0),
-        )
+    fun `CI pipeline detector is inert when the failure-rate signal is absent`() {
+        // No ci_failure_rate key means the GitHub token isn't seeded -> no signal -> inert.
+        val findings = detect.detect(DetectorId.D1_CI_PIPELINE_HEALTH, emptyMap())
         assertThat(findings).isEmpty()
+    }
+
+    @Test
+    fun `CI pipeline failure rate over threshold trips a finding`() {
+        val findings = detect.detect(DetectorId.D1_CI_PIPELINE_HEALTH, mapOf("ci_failure_rate" to 0.45))
+        assertThat(findings).hasSize(1)
+        assertThat(findings.single().severity).isEqualTo(FindingSeverity.CRITICAL) // 0.45 > 0.20*2
+        assertThat(findings.single().affectedResource).isEqualTo("github-actions/workflows")
+    }
+
+    @Test
+    fun `SSDLC drift - open fleet-health issues over threshold - trips a finding`() {
+        val findings = detect.detect(DetectorId.D5_SSDLC_HYGIENE, mapOf("open_fleet_health_issues" to 5.0))
+        assertThat(findings).hasSize(1)
+        assertThat(findings.single().affectedResource).isEqualTo("github/fleet-health-issues")
+    }
+
+    @Test
+    fun `SSDLC detector is inert when the signal is absent`() {
+        assertThat(detect.detect(DetectorId.D5_SSDLC_HYGIENE, emptyMap())).isEmpty()
     }
 
     @Test

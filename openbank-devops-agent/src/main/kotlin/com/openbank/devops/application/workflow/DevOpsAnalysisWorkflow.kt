@@ -34,6 +34,9 @@ interface CollectSignalsActivity {
     fun collectDeployHealthSignals(): Map<String, Double>
 
     @ActivityMethod
+    fun collectSsdlcSignals(): Map<String, Double>
+
+    @ActivityMethod
     fun collectIncidentRecurrenceSignals(): Map<String, Double>
 }
 

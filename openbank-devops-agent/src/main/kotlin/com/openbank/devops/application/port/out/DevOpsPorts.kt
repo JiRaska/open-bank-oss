@@ -26,6 +26,19 @@ interface RemediationProposalPort {
     suspend fun openProposalPr(finding: DevOpsFinding, remediation: String): String?
 }
 
+/**
+ * SSDLC signals read straight from the GitHub REST API (no Prometheus exporter needed). Each returns
+ * null when unavailable (token not seeded / API error), which keeps the dependent detector inert
+ * rather than noisy.
+ */
+interface GitHubMetricsPort {
+    /** Workflow-run failure rate over the most recent completed runs (0.0..1.0). */
+    suspend fun ciFailureRate(): Double?
+
+    /** Count of OPEN `fleet-health` issues — accumulated CI/SSDLC drift the nightly jobs file. */
+    suspend fun openFleetHealthIssues(): Int?
+}
+
 interface FindingRepository {
     suspend fun save(finding: DevOpsFinding): DevOpsFinding
     suspend fun findActive(): List<DevOpsFinding>

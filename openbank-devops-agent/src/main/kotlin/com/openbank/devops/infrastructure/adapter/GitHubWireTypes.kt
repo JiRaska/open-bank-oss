@@ -27,3 +27,13 @@ data class CreatePrRequest(val title: String, val head: String, val base: String
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class CreatePrResponse(@JsonProperty("html_url") val htmlUrl: String = "")
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class WorkflowRunsResponse(@JsonProperty("workflow_runs") val workflowRuns: List<WorkflowRun> = emptyList())
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class WorkflowRun(val conclusion: String? = null)
+
+/** GitHub Issues API returns PRs too; `pull_request` is non-null for a PR, so we filter those out. */
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class IssueItem(@JsonProperty("pull_request") val pullRequest: Map<String, Any>? = null)

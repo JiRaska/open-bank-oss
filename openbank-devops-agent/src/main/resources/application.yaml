@@ -96,4 +96,5 @@ openbank:
     ci-failure-rate-threshold: ${CI_FAILURE_RATE_THRESHOLD:0.20}
     change-failure-rate-threshold: ${CHANGE_FAILURE_RATE_THRESHOLD:0.05}
     runner-queue-pressure-threshold: ${RUNNER_QUEUE_PRESSURE_THRESHOLD:0.80}
+    ssdlc-drift-threshold: ${SSDLC_DRIFT_THRESHOLD:3}
     incident-recurrence-threshold: ${INCIDENT_RECURRENCE_THRESHOLD:3}

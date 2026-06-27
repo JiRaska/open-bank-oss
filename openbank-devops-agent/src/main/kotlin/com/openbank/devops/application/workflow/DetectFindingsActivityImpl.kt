@@ -30,23 +30,21 @@ class DetectFindingsActivityImpl(private val config: DevOpsConfig) : DetectFindi
         DetectorId.D2_DORA_REGRESSION -> detectDoraRegression(signals)
         DetectorId.D3_RUNNER_CAPACITY -> detectRunnerCapacity(signals)
         DetectorId.D4_DEPLOY_HEALTH -> detectDeployHealth(signals)
+        DetectorId.D5_SSDLC_HYGIENE -> detectSsdlcHygiene(signals)
         DetectorId.D6_INCIDENT_RECURRENCE -> detectIncidentRecurrence(signals)
-        else -> emptyList()
     }
 
     @Suppress("MagicNumber")
     private fun detectCiPipeline(signals: Map<String, Double>): List<DevOpsFinding> {
-        val runs = signals["ci_runs_last_day"] ?: 0.0
-        if (runs < 1.0) return emptyList() // exporter absent -> inert, never noisy
-        val failures = signals["ci_failures_last_day"] ?: 0.0
-        val failureRate = failures / runs
+        // ci_failure_rate is absent when the GitHub token isn't seeded -> detector inert, never noisy.
+        val failureRate = signals["ci_failure_rate"] ?: return emptyList()
         val threshold = config.ciFailureRateThreshold()
         if (failureRate < threshold) return emptyList()
         return listOf(
             finding(
                 detector = DetectorId.D1_CI_PIPELINE_HEALTH,
                 severity = if (failureRate > threshold * 2) FindingSeverity.CRITICAL else FindingSeverity.WARNING,
-                title = "CI pipeline failure rate %.0f%% over last 24h (threshold %.0f%%)".format(
+                title = "CI pipeline failure rate %.0f%% over recent runs (threshold %.0f%%)".format(
                     failureRate * 100,
                     threshold * 100,
                 ),
@@ -55,6 +53,28 @@ class DetectFindingsActivityImpl(private val config: DevOpsConfig) : DetectFindi
                 resource = "github-actions/workflows",
                 dora = DoraMetric.CHANGE_FAILURE_RATE,
                 remediation = RemediationKind.PULL_REQUEST,
+            ),
+        )
+    }
+
+    private fun detectSsdlcHygiene(signals: Map<String, Double>): List<DevOpsFinding> {
+        // open `fleet-health` issues = accumulated CI/SSDLC drift; absent signal -> inert.
+        val open = signals["open_fleet_health_issues"] ?: return emptyList()
+        val threshold = config.ssdlcDriftThreshold().toDouble()
+        if (open < threshold) return emptyList()
+        return listOf(
+            finding(
+                detector = DetectorId.D5_SSDLC_HYGIENE,
+                severity = FindingSeverity.WARNING,
+                title = "%.0f open fleet-health issues (threshold %.0f) — accumulating SSDLC drift".format(
+                    open,
+                    threshold,
+                ),
+                raw = BigDecimal.valueOf(open),
+                threshold = BigDecimal.valueOf(threshold),
+                resource = "github/fleet-health-issues",
+                dora = DoraMetric.LEAD_TIME_FOR_CHANGES,
+                remediation = RemediationKind.TICKET,
             ),
         )
     }

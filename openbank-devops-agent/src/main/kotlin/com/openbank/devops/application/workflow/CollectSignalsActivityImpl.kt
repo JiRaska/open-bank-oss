@@ -4,6 +4,7 @@
 
 package com.openbank.devops.application.workflow
 
+import com.openbank.devops.application.port.out.GitHubMetricsPort
 import com.openbank.devops.application.port.out.PrometheusQueryPort
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
@@ -23,24 +24,26 @@ import org.jboss.logging.Logger
  * until that exporter lands, so the detector is inert rather than noisy.
  */
 @ApplicationScoped
-open class CollectSignalsActivityImpl(private val prometheusQuery: PrometheusQueryPort) : CollectSignalsActivity {
+open class CollectSignalsActivityImpl(
+    private val prometheusQuery: PrometheusQueryPort,
+    private val githubMetrics: GitHubMetricsPort,
+) : CollectSignalsActivity {
 
     private val log = Logger.getLogger(CollectSignalsActivityImpl::class.java)
 
     override fun collectCiPipelineSignals(): Map<String, Double> = runOnVertxContext {
-        log.debug("Collecting CI pipeline health signals")
-        // Follow-up (ADR-0119): a github-actions exporter publishes workflow run conclusions.
-        // Until then this series is absent and the query yields null -> 0.0 (detector inert).
-        val failuresLastDay = prometheusQuery.queryInstant(
-            "sum(increase(github_workflow_run_conclusion_total{conclusion=\"failure\"}[24h]))",
-        ) ?: 0.0
-        val totalLastDay = prometheusQuery.queryInstant(
-            "sum(increase(github_workflow_run_conclusion_total[24h]))",
-        ) ?: 0.0
-        mapOf(
-            "ci_failures_last_day" to failuresLastDay,
-            "ci_runs_last_day" to totalLastDay,
-        )
+        log.debug("Collecting CI pipeline health signals (GitHub Actions)")
+        // Read the failure rate straight from the GitHub Actions API (no exporter needed). null means
+        // the token isn't seeded or the API failed -> no signal key -> the D1 detector stays inert.
+        val rate = githubMetrics.ciFailureRate()
+        if (rate != null) mapOf("ci_failure_rate" to rate) else emptyMap()
+    }
+
+    override fun collectSsdlcSignals(): Map<String, Double> = runOnVertxContext {
+        log.debug("Collecting SSDLC hygiene signals (open fleet-health issues)")
+        // Open `fleet-health` issues = accumulated CI/SSDLC drift the nightly build/lint jobs file.
+        val openIssues = githubMetrics.openFleetHealthIssues()
+        if (openIssues != null) mapOf("open_fleet_health_issues" to openIssues.toDouble()) else emptyMap()
     }
 
     override fun collectDoraSignals(): Map<String, Double> = runOnVertxContext {

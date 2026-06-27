@@ -61,6 +61,10 @@ interface DevOpsConfig {
     @WithDefault("0.80")
     fun runnerQueuePressureThreshold(): Double
 
+    /** D5: how many OPEN fleet-health issues constitute accumulating SSDLC drift worth flagging. */
+    @WithDefault("3")
+    fun ssdlcDriftThreshold(): Int
+
     /** D6: how many times the same critical alert must recur before the learning-loop remediation fires. */
     @WithDefault("3")
     fun incidentRecurrenceThreshold(): Int
