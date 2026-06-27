@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank/compare/sdd-service-v0.5.0...sdd-service-v0.6.0) (2026-06-27)
+
+
+### Features
+
+* **tpp-registry,statement,onboarding,agent,settlement,sdd:** inject Clock (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2138](https://github.com/JiRaska/open-bank/issues/2138)) ([baa0d03](https://github.com/JiRaska/open-bank/commit/baa0d03bcef7a1cd48cb7e115410ab625a26acde))
+
+
+### Bug Fixes
+
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank/compare/sdd-service-v0.4.0...sdd-service-v0.5.0) (2026-06-25)
 
 
