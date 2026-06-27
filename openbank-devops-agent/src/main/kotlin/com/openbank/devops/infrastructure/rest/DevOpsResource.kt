@@ -4,6 +4,7 @@
 
 package com.openbank.devops.infrastructure.rest
 
+import com.openbank.devops.application.port.incoming.DecideFindingUseCase
 import com.openbank.devops.application.port.incoming.GetFindingsUseCase
 import com.openbank.devops.application.port.incoming.RunDevOpsAnalysisUseCase
 import com.openbank.devops.domain.model.DevOpsFinding
@@ -22,7 +23,11 @@ import kotlinx.coroutines.runBlocking
 
 @Path("/api/v1/devops")
 @Produces(MediaType.APPLICATION_JSON)
-class DevOpsResource(private val runAnalysis: RunDevOpsAnalysisUseCase, private val getFindings: GetFindingsUseCase) {
+class DevOpsResource(
+    private val runAnalysis: RunDevOpsAnalysisUseCase,
+    private val getFindings: GetFindingsUseCase,
+    private val decide: DecideFindingUseCase,
+) {
     // @Blocking: starts a Temporal workflow and waits for it synchronously — must run on a worker
     // thread, not the event loop. It touches no reactive DB session, so runBlocking is fine here.
     @POST
@@ -45,4 +50,18 @@ class DevOpsResource(private val runAnalysis: RunDevOpsAnalysisUseCase, private 
     @RolesAllowed("platform-admin", "platform-viewer")
     suspend fun getFinding(@PathParam("id") id: String): DevOpsFinding =
         getFindings.getById(id) ?: throw NotFoundException("Finding $id not found")
+
+    // HITL decisions (ADR-0031 D4). platform-admin only — a human operator disposes; the agent
+    // (a viewer at most) can never approve its own proposal (segregation of duties).
+    @POST
+    @Path("/findings/{id}/approve")
+    @RolesAllowed("platform-admin")
+    suspend fun approve(@PathParam("id") id: String): DevOpsFinding =
+        decide.approve(id) ?: throw NotFoundException("Finding $id not found")
+
+    @POST
+    @Path("/findings/{id}/reject")
+    @RolesAllowed("platform-admin")
+    suspend fun reject(@PathParam("id") id: String): DevOpsFinding =
+        decide.reject(id) ?: throw NotFoundException("Finding $id not found")
 }

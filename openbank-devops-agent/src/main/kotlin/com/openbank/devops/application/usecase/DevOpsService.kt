@@ -4,12 +4,14 @@
 
 package com.openbank.devops.application.usecase
 
+import com.openbank.devops.application.port.incoming.DecideFindingUseCase
 import com.openbank.devops.application.port.incoming.GetFindingsUseCase
 import com.openbank.devops.application.port.incoming.RunDevOpsAnalysisUseCase
 import com.openbank.devops.application.port.out.FindingRepository
 import com.openbank.devops.application.workflow.DevOpsAnalysisWorkflow
 import com.openbank.devops.domain.model.DevOpsFinding
 import com.openbank.devops.domain.model.DevOpsRunReport
+import com.openbank.devops.domain.model.FindingStatus
 import com.openbank.devops.domain.model.RunTrigger
 import com.openbank.devops.infrastructure.temporal.TemporalConfig
 import io.temporal.client.WorkflowClient
@@ -23,7 +25,8 @@ class DevOpsService(
     private val temporalConfig: TemporalConfig,
     private val findingRepository: FindingRepository,
 ) : RunDevOpsAnalysisUseCase,
-    GetFindingsUseCase {
+    GetFindingsUseCase,
+    DecideFindingUseCase {
 
     private val log = Logger.getLogger(DevOpsService::class.java)
 
@@ -40,4 +43,14 @@ class DevOpsService(
     override suspend fun getActive(): List<DevOpsFinding> = findingRepository.findActive()
 
     override suspend fun getById(id: String): DevOpsFinding? = findingRepository.findById(id)
+
+    override suspend fun approve(id: String): DevOpsFinding? = transition(id, FindingStatus.APPROVED)
+
+    override suspend fun reject(id: String): DevOpsFinding? = transition(id, FindingStatus.REJECTED)
+
+    private suspend fun transition(id: String, status: FindingStatus): DevOpsFinding? {
+        val finding = findingRepository.findById(id) ?: return null
+        log.infof("HITL %s on finding %s by operator", status, id)
+        return findingRepository.update(finding.copy(status = status))
+    }
 }

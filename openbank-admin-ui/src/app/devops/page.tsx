@@ -201,6 +201,7 @@ function DevOpsContent() {
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const [deciding, setDeciding] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -227,6 +228,25 @@ function DevOpsContent() {
       setLastRefresh(new Date())
     }
   }, [])
+
+  // HITL decision — an operator approves/rejects a proposed remediation (ADR-0031 D4). On success the
+  // finding leaves the active list, so we just refresh. Write action: degrade quietly per the
+  // graceful-state rule (no raw HTTP status in the UI).
+  const decide = useCallback(async (id: string, action: 'approve' | 'reject') => {
+    setDeciding(id)
+    try {
+      await fetch('/api/devops/decide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action }),
+      })
+      await load()
+    } catch {
+      // swallow — the next 60s refresh reconciles state
+    } finally {
+      setDeciding(null)
+    }
+  }, [load])
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
@@ -463,18 +483,22 @@ function DevOpsContent() {
                         <span style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginLeft: 'auto' }}>
                           {new Date(f.detectedAt).toLocaleString()}
                         </span>
-                        {/* HITL Approve/Dismiss placeholders — HITL backend wired in ADR-0119 follow-up */}
+                        {/* HITL decision — a human operator approves/rejects; the agent only proposes (ADR-0031 D4) */}
                         <button
-                          onClick={() => console.log('HITL approve', f.id)}
+                          onClick={() => decide(f.id, 'approve')}
+                          disabled={deciding === f.id}
                           style={{ fontSize: '11px', fontWeight: 700, padding: '4px 12px', borderRadius: '8px',
-                            border: 'none', background: '#16a34a', color: '#fff', cursor: 'pointer' }}>
+                            border: 'none', background: '#16a34a', color: '#fff',
+                            cursor: deciding === f.id ? 'wait' : 'pointer', opacity: deciding === f.id ? 0.6 : 1 }}>
                           {t('Schválit', 'Approve')}
                         </button>
                         <button
-                          onClick={() => console.log('HITL dismiss', f.id)}
+                          onClick={() => decide(f.id, 'reject')}
+                          disabled={deciding === f.id}
                           style={{ fontSize: '11px', fontWeight: 700, padding: '4px 12px', borderRadius: '8px',
-                            border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', cursor: 'pointer' }}>
-                          {t('Odmítnout', 'Dismiss')}
+                            border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)',
+                            cursor: deciding === f.id ? 'wait' : 'pointer', opacity: deciding === f.id ? 0.6 : 1 }}>
+                          {t('Odmítnout', 'Reject')}
                         </button>
                       </div>
                     </div>
