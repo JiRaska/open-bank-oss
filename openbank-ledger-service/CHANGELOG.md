@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.7.0](https://github.com/JiRaska/open-bank/compare/ledger-service-v1.6.0...ledger-service-v1.7.0) (2026-06-27)
+
+
+### Features
+
+* **ledger:** inject Clock for DST determinism (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2099](https://github.com/JiRaska/open-bank/issues/2099)) ([8d5f5f8](https://github.com/JiRaska/open-bank/commit/8d5f5f861e49fe48d34068834acbc05ff8759105))
+* **observability:** RUM gateway cardinality budget, attribute audit, HPA (ADR-0088 O1-O3) ([#2208](https://github.com/JiRaska/open-bank/issues/2208)) ([b7f0849](https://github.com/JiRaska/open-bank/commit/b7f08494cf923f66dbd910e92522fb9453394de7))
+
+
+### Bug Fixes
+
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+* **fleet:** resolve ktlint violations and sepa-payment compile error after ADR-0100 Clock sweep ([#2272](https://github.com/JiRaska/open-bank/issues/2272)) ([3cd3637](https://github.com/JiRaska/open-bank/commit/3cd3637372c52025cfac6f29d23129bab4d3919b))
+
 ## [1.6.0](https://github.com/JiRaska/open-bank/compare/ledger-service-v1.5.0...ledger-service-v1.6.0) (2026-06-25)
 
 
