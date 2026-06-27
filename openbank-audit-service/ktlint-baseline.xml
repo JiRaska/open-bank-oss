@@ -81,9 +81,8 @@
         <error line="34" column="17" source="standard:function-expression-body" />
     </file>
     <file name="src/test/kotlin/com/openbank/audit/application/AuditConsumerTest.kt">
-        <error line="50" column="23" source="standard:wrapping" />
-        <error line="59" column="13" source="standard:wrapping" />
-        <error line="71" column="1" source="standard:final-newline" />
+        <error line="54" column="23" source="standard:wrapping" />
+        <error line="63" column="13" source="standard:wrapping" />
     </file>
     <file name="src/test/kotlin/com/openbank/audit/infrastructure/persistence/AuditChainHashTest.kt">
         <error line="44" column="20" source="standard:argument-list-wrapping" />

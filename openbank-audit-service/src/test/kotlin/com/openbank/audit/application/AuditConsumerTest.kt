@@ -10,7 +10,9 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThatCode
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.time.Clock
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 
 class AuditConsumerTest {
@@ -24,6 +26,8 @@ class AuditConsumerTest {
         consumer = AuditConsumer().also {
             it.repo = repo
             it.objectMapper = jacksonObjectMapper().findAndRegisterModules()
+            // ADR-0100: recordedAt is stamped via Instant.now(clock); fix it for determinism.
+            it.clock = Clock.fixed(Instant.parse("2026-05-27T12:00:00Z"), ZoneOffset.UTC)
         }
     }
 

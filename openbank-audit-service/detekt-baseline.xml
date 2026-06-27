@@ -11,7 +11,6 @@
     <ID>MagicNumber:AuditResource.kt$AuditResource$500</ID>
     <ID>MatchingDeclarationName:AuditOutboxPort.kt$AuditOutboxRepository : OutboxRepository</ID>
     <ID>NestedBlockDepth:AuditRepository.kt$AuditRepository$suspend fun verifyChain(fromEntryId: UUID? = null): ChainVerification</ID>
-    <ID>NewLineAtEndOfFile:AuditConsumerTest.kt$com.openbank.audit.application.AuditConsumerTest.kt</ID>
     <ID>SwallowedException:AuditOutboxDispatcher.kt$AuditOutboxDispatcher$ex: Exception</ID>
     <ID>TooGenericExceptionCaught:AuditConsumer.kt$AuditConsumer$e: Exception</ID>
     <ID>TooGenericExceptionCaught:AuditOutboxDispatcher.kt$AuditOutboxDispatcher$ex: Exception</ID>
