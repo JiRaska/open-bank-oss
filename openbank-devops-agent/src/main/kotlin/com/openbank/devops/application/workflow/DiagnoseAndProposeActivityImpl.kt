@@ -55,6 +55,12 @@ open class DiagnoseAndProposeActivityImpl(
             return@runOnVertxContext finding
         }
         val prUrl = remediationProposal.openProposalPr(finding, remediation)
+        if (prUrl == null) {
+            // No PR (token not seeded / API failed). Keep the proposal TEXT for the dashboard, but
+            // stay DIAGNOSED — there is nothing for a human to approve yet.
+            log.infof("No proposal PR opened for finding %s; recording remediation text, staying DIAGNOSED", finding.id)
+            return@runOnVertxContext findingRepository.update(finding.copy(proposedRemediation = remediation))
+        }
         val proposed = finding.copy(
             proposedRemediation = remediation,
             proposalPrUrl = prUrl,

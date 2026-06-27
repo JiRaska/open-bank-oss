@@ -21,8 +21,9 @@ interface LlmDiagnosisPort {
 }
 
 interface RemediationProposalPort {
-    /** Open a proposal PR (code/IaC/runbook diff) for HITL review. Returns the PR URL. */
-    suspend fun openProposalPr(finding: DevOpsFinding, remediation: String): String
+    /** Open a proposal PR for HITL review. Returns the PR URL, or null if none was opened
+     *  (e.g. the GitHub token is not seeded or the API call failed — the agent degrades gracefully). */
+    suspend fun openProposalPr(finding: DevOpsFinding, remediation: String): String?
 }
 
 interface FindingRepository {

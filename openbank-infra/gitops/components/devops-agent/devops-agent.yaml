@@ -72,6 +72,15 @@ spec:
                   name: devops-agent-secrets
                   key: DEVOPS_MODEL_API_KEY
                   optional: true
+            # Fine-grained GitHub token for opening remediation-proposal PRs.
+            # Seed: bao kv patch openbank/devops-agent GITHUB_TOKEN=<pat>
+            # Optional — until set, the agent records the proposal text but opens no PR.
+            - name: DEVOPS_GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: devops-agent-secrets
+                  key: DEVOPS_GITHUB_TOKEN
+                  optional: true
           resources:
             requests:
               cpu: 100m

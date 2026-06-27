@@ -10,6 +10,7 @@ import jakarta.enterprise.context.ApplicationScoped
 
 @ConfigMapping(prefix = "openbank.devops")
 @ApplicationScoped
+@Suppress("TooManyFunctions") // flat config mapping: one accessor per tunable (model, GitHub, detector thresholds)
 interface DevOpsConfig {
     @WithDefault("http://prometheus-operated.observability:9090")
     fun prometheusUrl(): String
@@ -29,6 +30,24 @@ interface DevOpsConfig {
     /** Upstream model name, sent verbatim — the DeepSeek model the copilot already runs on. */
     @WithDefault("deepseek-ai/DeepSeek-V3.2")
     fun modelId(): String
+
+    /**
+     * GitHub for remediation-proposal PRs. The token is read separately via an OPTIONAL lookup
+     * (devops.github.token ← DEVOPS_GITHUB_TOKEN) so an un-seeded token degrades to "no PR opened"
+     * rather than CrashLooping. The agent opens a PR adding a markdown proposal under {proposalDir} —
+     * it proposes a document, a human implements; it never writes code or merges (charter ADR-0031).
+     */
+    @WithDefault("https://api.github.com")
+    fun githubApiUrl(): String
+
+    @WithDefault("JiRaska")
+    fun githubOwner(): String
+
+    @WithDefault("open-bank")
+    fun githubRepo(): String
+
+    @WithDefault("docs/devops-proposals")
+    fun githubProposalDir(): String
 
     /** D1: CI workflow failure rate over 24h that trips a finding (0.20 = 20%). */
     @WithDefault("0.20")
