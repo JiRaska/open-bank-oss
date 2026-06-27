@@ -9,6 +9,7 @@ import com.openbank.devops.application.port.incoming.RunDevOpsAnalysisUseCase
 import com.openbank.devops.domain.model.DevOpsFinding
 import com.openbank.devops.domain.model.DevOpsRunReport
 import com.openbank.devops.domain.model.RunTrigger
+import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.NotFoundException
@@ -22,24 +23,26 @@ import kotlinx.coroutines.runBlocking
 @Path("/api/v1/devops")
 @Produces(MediaType.APPLICATION_JSON)
 class DevOpsResource(private val runAnalysis: RunDevOpsAnalysisUseCase, private val getFindings: GetFindingsUseCase) {
+    // @Blocking: starts a Temporal workflow and waits for it synchronously — must run on a worker
+    // thread, not the event loop. It touches no reactive DB session, so runBlocking is fine here.
     @POST
     @Path("/analysis/trigger")
     @RolesAllowed("platform-admin")
+    @Blocking
     fun triggerAnalysis(): DevOpsRunReport = runBlocking {
         runAnalysis.run(RunTrigger.OPERATOR_MANUAL)
     }
 
+    // suspend: the reads hit reactive Panache, which needs a Vert.x context — RESTEasy Reactive runs
+    // Kotlin suspend resource methods on one, so the session resolves correctly.
     @GET
     @Path("/findings")
     @RolesAllowed("platform-admin", "platform-viewer")
-    fun getActiveFindings(): List<DevOpsFinding> = runBlocking {
-        getFindings.getActive()
-    }
+    suspend fun getActiveFindings(): List<DevOpsFinding> = getFindings.getActive()
 
     @GET
     @Path("/findings/{id}")
     @RolesAllowed("platform-admin", "platform-viewer")
-    fun getFinding(@PathParam("id") id: String): DevOpsFinding = runBlocking {
+    suspend fun getFinding(@PathParam("id") id: String): DevOpsFinding =
         getFindings.getById(id) ?: throw NotFoundException("Finding $id not found")
-    }
 }

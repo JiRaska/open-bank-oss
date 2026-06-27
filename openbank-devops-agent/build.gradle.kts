@@ -20,6 +20,15 @@ dependencies {
     implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.scheduler)
+    // Persistence: reactive Panache + Postgres + Flyway, the fleet standard (openbank-libs is built on
+    // reactive Panache, so a service that depends on it must use reactive too — a blocking ORM cannot
+    // index the libs reactive entities). The Uni results are bridged to the suspend ports via the
+    // Mutiny↔coroutine adapter; the Temporal activities already run on a Vert.x duplicated context.
+    implementation(libs.quarkus.hibernate.reactive.panache)
+    implementation(libs.quarkus.hibernate.reactive.panache.base)
+    implementation(libs.quarkus.reactive.pg.client)
+    implementation(libs.quarkus.jdbc.postgresql) // Flyway runs migrations over JDBC
+    implementation(libs.quarkus.flyway)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
     implementation(libs.jackson.module.kotlin)
@@ -31,6 +40,8 @@ dependencies {
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
+    testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.rest.assured.kotlin)
 }
 
 kover {
