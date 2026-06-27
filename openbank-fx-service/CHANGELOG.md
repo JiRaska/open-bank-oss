@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank/compare/fx-service-v0.6.0...fx-service-v0.7.0) (2026-06-27)
+
+
+### Features
+
+* **fx:** inject Clock for DST determinism (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2100](https://github.com/JiRaska/open-bank/issues/2100)) ([c524c09](https://github.com/JiRaska/open-bank/commit/c524c09dcedcf27c4749281fd868344ac99b7c86))
+
+
+### Bug Fixes
+
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+* **sepa-payment,analytics,clearing-simulator,finrep,fx,customer-edge,security-scanner:** inject Clock for DST determinism (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2174](https://github.com/JiRaska/open-bank/issues/2174)) ([51a872e](https://github.com/JiRaska/open-bank/commit/51a872ec0ce0b9f888226ca94ffcfb9f392174c2))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank/compare/fx-service-v0.5.0...fx-service-v0.6.0) (2026-06-25)
 
 
