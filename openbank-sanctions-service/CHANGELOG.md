@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank/compare/sanctions-service-v0.4.0...sanctions-service-v0.5.0) (2026-06-27)
+
+
+### Features
+
+* **sanctions,aml,psd2,card-issuance:** inject Clock for DST determinism (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2118](https://github.com/JiRaska/open-bank/issues/2118)) ([bbd0da0](https://github.com/JiRaska/open-bank/commit/bbd0da0dfd269d3c5ac5af8d5bac9d754c48a2d0))
+* **sanctions:** inject Clock for DST determinism (ADR-0100 Layer 1) ([#2125](https://github.com/JiRaska/open-bank/issues/2125)) ([61da7c2](https://github.com/JiRaska/open-bank/commit/61da7c24c384a4ec70674f95ba95f401a4817c18))
+
+
+### Bug Fixes
+
+* **fleet:** resolve ktlint violations and sepa-payment compile error after ADR-0100 Clock sweep ([#2272](https://github.com/JiRaska/open-bank/issues/2272)) ([3cd3637](https://github.com/JiRaska/open-bank/commit/3cd3637372c52025cfac6f29d23129bab4d3919b))
+* **sanctions:** raise HIT_THRESHOLD 0.55→0.85, POTENTIAL_HIT 0.35→0.65 ([#2226](https://github.com/JiRaska/open-bank/issues/2226)) ([990a311](https://github.com/JiRaska/open-bank/commit/990a3112030f28d22f7b00d1a4447c289795f576))
+
 ## [0.4.0](https://github.com/JiRaska/open-bank/compare/sanctions-service-v0.3.0...sanctions-service-v0.4.0) (2026-06-25)
 
 
