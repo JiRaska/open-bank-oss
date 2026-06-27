@@ -212,10 +212,13 @@ jobs:
             const { owner, repo } = context.repo;
             const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
             const detected = new Date().toISOString();
-            // Dedupe on the marker label: one open "fleet is red" issue, commented on
-            // until it is fixed and closed — not a fresh issue every night.
+            // Dedupe on the BUILD-specific marker label, NOT the shared 'fleet-health'
+            // umbrella: the fleet-lint alert also carries 'fleet-health', so deduping on
+            // the umbrella made this build alert comment its breakage onto whatever
+            // fleet-health issue was open (usually the LINT one) instead of opening its
+            // own — the build rot then hid as a comment on an unrelated issue for days.
             const { data: open } = await github.rest.issues.listForRepo({
-              owner, repo, state: 'open', labels: 'fleet-health',
+              owner, repo, state: 'open', labels: 'fleet-health-build',
             });
             if (open.length > 0) {
               const n = open[0].number;
@@ -223,12 +226,12 @@ jobs:
                 owner, repo, issue_number: n,
                 body: `Still failing as of the latest nightly full-fleet run.\n\nRun: ${runUrl}\nDetected: ${detected}`,
               });
-              core.info(`Commented on existing fleet-health issue #${n}.`);
+              core.info(`Commented on existing fleet-health-build issue #${n}.`);
             } else {
               const { data: created } = await github.rest.issues.create({
                 owner, repo,
                 title: 'Nightly full-fleet build is failing',
-                labels: ['fleet-health', 'bug'],
+                labels: ['fleet-health', 'fleet-health-build', 'bug'],
                 body: `The scheduled full-fleet build failed — a service on \`main\` no longer compiles or its tests are red, even though no recent PR touched it (path-scoped CI cannot catch this). Investigate which module is red in the run and open a fix PR.\n\nRun: ${runUrl}\nDetected: ${detected}`,
               });
               core.info(`Opened a new fleet-health issue #${created.number}.`);

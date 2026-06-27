@@ -175,8 +175,12 @@ jobs:
             const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
             const detected = new Date().toISOString();
             const trigger = context.eventName; // push | schedule | workflow_dispatch
+            // Dedupe on the LINT-specific marker label, NOT the shared 'fleet-health'
+            // umbrella — otherwise this alert and the services-ci build alert (both carry
+            // 'fleet-health') collide on a single issue and one source's failures hide as
+            // comments on the other's issue.
             const { data: open } = await github.rest.issues.listForRepo({
-              owner, repo, state: 'open', labels: 'fleet-health',
+              owner, repo, state: 'open', labels: 'fleet-health-lint',
             });
             const note = `The fast fleet-lint gate (compile + detekt + ktlint, no tests) failed on \`${trigger}\` — a module no longer compiles or violates the current detekt/ktlint ruleset, even though path-scoped PR CI was green. See the run for the full per-module list.\n\nRun: ${runUrl}\nDetected: ${detected}`;
             if (open.length > 0) {
@@ -184,13 +188,13 @@ jobs:
               await github.rest.issues.createComment({
                 owner, repo, issue_number: n, body: note,
               });
-              core.info(`Commented on existing fleet-health issue #${n}.`);
+              core.info(`Commented on existing fleet-health-lint issue #${n}.`);
             } else {
               const { data: created } = await github.rest.issues.create({
                 owner, repo,
                 title: 'Full-fleet lint gate is failing',
-                labels: ['fleet-health', 'bug'],
+                labels: ['fleet-health', 'fleet-health-lint', 'bug'],
                 body: note,
               });
-              core.info(`Opened a new fleet-health issue #${created.number}.`);
+              core.info(`Opened a new fleet-health-lint issue #${created.number}.`);
             }

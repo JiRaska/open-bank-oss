@@ -36,7 +36,13 @@ labels:
     description: "Documentation, ADRs, runbooks, process specs."
   - name: fleet-health
     color: "b60205"
-    description: "Auto-opened by the nightly full-fleet build when a service on main is red."
+    description: "Umbrella: any fleet-wide health alert (build or lint). Filter by this; dedupe by the source-specific label."
+  - name: fleet-health-build
+    color: "b60205"
+    description: "Dedup marker for the nightly full-fleet BUILD alert (services-ci). One open issue at a time."
+  - name: fleet-health-lint
+    color: "b60205"
+    description: "Dedup marker for the full-fleet LINT gate alert (fleet-lint). One open issue at a time."
 
   # --- Triage / workflow state ---------------------------------------------------------
   - name: triage
