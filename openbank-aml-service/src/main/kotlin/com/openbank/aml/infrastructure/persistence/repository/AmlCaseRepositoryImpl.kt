@@ -19,9 +19,9 @@ import jakarta.enterprise.context.ApplicationScoped
 import java.util.UUID
 
 @ApplicationScoped
-class AmlCaseRepositoryImpl(
-    private val outboxRepository: AmlOutboxRepositoryImpl
-) : AmlCaseRepository, PanacheRepository<AmlCaseEntity> {
+class AmlCaseRepositoryImpl(private val outboxRepository: AmlOutboxRepositoryImpl) :
+    AmlCaseRepository,
+    PanacheRepository<AmlCaseEntity> {
 
     // ADR-0050: case row + outbox row persist in ONE transaction (atomic write-then-publish).
     override suspend fun save(amlCase: AmlCase, event: OutboxMessage): AmlCase = Panache.withTransaction {

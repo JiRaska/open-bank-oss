@@ -9,11 +9,11 @@ import com.openbank.aml.application.port.`in`.AmlCaseUseCase
 import com.openbank.aml.application.port.`in`.ListAmlCasesQuery
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.ScreeningType
-import com.openbank.libs.authz.Authorize
-import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.aml.infrastructure.rest.dto.CreateAmlCaseRequest
 import com.openbank.aml.infrastructure.rest.dto.UpdateAmlDecisionRequest
 import com.openbank.aml.infrastructure.rest.dto.toResponse
+import com.openbank.libs.authz.Authorize
+import com.openbank.libs.idempotency.IdempotencyStore
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
@@ -39,7 +39,7 @@ import java.util.UUID
 class AmlCaseResource(
     private val amlCaseUseCase: AmlCaseUseCase,
     private val idempotencyStore: IdempotencyStore,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
 ) {
 
     @POST
@@ -47,7 +47,7 @@ class AmlCaseResource(
     @Operation(summary = "Submit an AML screening case")
     suspend fun createCase(
         request: CreateAmlCaseRequest,
-        @HeaderParam("Idempotency-Key") idempotencyKey: String
+        @HeaderParam("Idempotency-Key") idempotencyKey: String,
     ): Response {
         require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }
 
@@ -71,9 +71,8 @@ class AmlCaseResource(
     @GET
     @Path("/{caseId}")
     @Operation(summary = "Get AML case by ID")
-    suspend fun getCase(@PathParam("caseId") caseId: UUID): Response {
-        return Response.ok(amlCaseUseCase.getCase(caseId).toResponse()).build()
-    }
+    suspend fun getCase(@PathParam("caseId") caseId: UUID): Response =
+        Response.ok(amlCaseUseCase.getCase(caseId).toResponse()).build()
 
     @GET
     @Operation(summary = "List AML screening cases")
@@ -82,7 +81,7 @@ class AmlCaseResource(
         @QueryParam("partyId") partyId: UUID?,
         @QueryParam("screeningType") screeningType: String?,
         @QueryParam("limit") @DefaultValue("50") limit: Int,
-        @QueryParam("offset") @DefaultValue("0") offset: Int
+        @QueryParam("offset") @DefaultValue("0") offset: Int,
     ): Response {
         val amlCases = amlCaseUseCase.listCases(
             ListAmlCasesQuery(
@@ -90,8 +89,8 @@ class AmlCaseResource(
                 partyId = partyId,
                 screeningType = screeningType?.let(ScreeningType::valueOf),
                 limit = limit,
-                offset = offset
-            )
+                offset = offset,
+            ),
         )
         return Response.ok(amlCases.map { it.toResponse() }).build()
     }
@@ -101,10 +100,6 @@ class AmlCaseResource(
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE")
     @Authorize(action = "amlCase.updateDecision", resource = "#caseId")
     @Operation(summary = "Update AML case decision")
-    suspend fun updateDecision(
-        @PathParam("caseId") caseId: UUID,
-        request: UpdateAmlDecisionRequest
-    ): Response {
-        return Response.ok(amlCaseUseCase.updateDecision(request.toCommand(caseId)).toResponse()).build()
-    }
+    suspend fun updateDecision(@PathParam("caseId") caseId: UUID, request: UpdateAmlDecisionRequest): Response =
+        Response.ok(amlCaseUseCase.updateDecision(request.toCommand(caseId)).toResponse()).build()
 }

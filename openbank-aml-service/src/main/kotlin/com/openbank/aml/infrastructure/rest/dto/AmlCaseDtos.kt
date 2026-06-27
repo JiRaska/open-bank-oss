@@ -22,7 +22,7 @@ data class CreateAmlCaseRequest(
     val riskLevel: String,
     val alertCode: String,
     val alertDetail: String?,
-    val matchedEntity: String?
+    val matchedEntity: String?,
 ) {
     fun toCommand(idempotencyKey: String) = CreateAmlCaseCommand(
         idempotencyKey = idempotencyKey,
@@ -34,7 +34,7 @@ data class CreateAmlCaseRequest(
         riskLevel = AmlRiskLevel.valueOf(riskLevel),
         alertCode = alertCode,
         alertDetail = alertDetail,
-        matchedEntity = matchedEntity
+        matchedEntity = matchedEntity,
     )
 }
 
@@ -42,14 +42,14 @@ data class UpdateAmlDecisionRequest(
     val targetStatus: String,
     val decisionReason: String?,
     val assignedAnalyst: String?,
-    val decidedBy: String
+    val decidedBy: String,
 ) {
     fun toCommand(caseId: UUID) = UpdateAmlDecisionCommand(
         caseId = caseId,
         targetStatus = AmlCaseStatus.valueOf(targetStatus),
         decisionReason = decisionReason,
         assignedAnalyst = assignedAnalyst,
-        decidedBy = decidedBy
+        decidedBy = decidedBy,
     )
 }
 
@@ -72,7 +72,7 @@ data class AmlCaseResponse(
     val screenedAt: Instant,
     val decidedAt: Instant?,
     val createdAt: Instant,
-    val updatedAt: Instant
+    val updatedAt: Instant,
 )
 
 fun AmlCase.toResponse() = AmlCaseResponse(
@@ -94,5 +94,5 @@ fun AmlCase.toResponse() = AmlCaseResponse(
     screenedAt = screenedAt,
     decidedAt = decidedAt,
     createdAt = createdAt,
-    updatedAt = updatedAt
+    updatedAt = updatedAt,
 )

@@ -59,7 +59,7 @@ class PartyEventConsumer(
                     alertCode = "ONBOARDING_SCREENING",
                     alertDetail = null,
                     matchedEntity = null,
-                )
+                ),
             )
             log.infof("Opened onboarding AML case %s for party %s", case.id, partyId)
 
@@ -71,7 +71,7 @@ class PartyEventConsumer(
                         decisionReason = "Sandbox auto-clear (no adverse match)",
                         assignedAnalyst = "SANDBOX_BOT",
                         decidedBy = "SANDBOX_SYSTEM",
-                    )
+                    ),
                 )
                 log.infof("Auto-cleared AML case %s for party %s", case.id, partyId)
             }

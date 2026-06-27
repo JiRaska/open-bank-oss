@@ -53,7 +53,7 @@ class AmlCaseService(
             screenedAt = now,
             decidedAt = null,
             createdAt = now,
-            updatedAt = now
+            updatedAt = now,
         )
 
         // ADR-0050: the aggregate and its domain event commit atomically via the outbox.
@@ -61,7 +61,12 @@ class AmlCaseService(
             amlCaseRepository.save(amlCase, caseCreatedEvent(amlCase, now))
         } catch (e: Exception) {
             org.jboss.logging.Logger.getLogger(AmlCaseService::class.java)
-                .errorf("createCase save failed: %s: %s | cause: %s", e::class.qualifiedName, e.message, e.cause?.message)
+                .errorf(
+                    "createCase save failed: %s: %s | cause: %s",
+                    e::class.qualifiedName,
+                    e.message,
+                    e.cause?.message,
+                )
             throw e
         }
     }
@@ -69,14 +74,13 @@ class AmlCaseService(
     override suspend fun getCase(caseId: UUID): AmlCase =
         amlCaseRepository.findById(caseId) ?: throw AmlCaseNotFoundException(caseId)
 
-    override suspend fun listCases(query: ListAmlCasesQuery): List<AmlCase> =
-        amlCaseRepository.list(
-            status = query.status,
-            partyId = query.partyId,
-            screeningType = query.screeningType,
-            limit = query.limit.coerceIn(1, 200),
-            offset = query.offset.coerceAtLeast(0)
-        )
+    override suspend fun listCases(query: ListAmlCasesQuery): List<AmlCase> = amlCaseRepository.list(
+        status = query.status,
+        partyId = query.partyId,
+        screeningType = query.screeningType,
+        limit = query.limit.coerceIn(1, 200),
+        offset = query.offset.coerceAtLeast(0),
+    )
 
     override suspend fun updateDecision(command: UpdateAmlDecisionCommand): AmlCase {
         val amlCase = amlCaseRepository.findById(command.caseId)
@@ -84,7 +88,7 @@ class AmlCaseService(
 
         if (!amlCase.canTransitionTo(command.targetStatus)) {
             throw InvalidAmlCaseStateTransitionException(
-                "Invalid AML case status transition: ${amlCase.status} -> ${command.targetStatus}"
+                "Invalid AML case status transition: ${amlCase.status} -> ${command.targetStatus}",
             )
         }
 
@@ -93,7 +97,7 @@ class AmlCaseService(
                 targetStatus = command.targetStatus,
                 decisionReason = command.decisionReason,
                 assignedAnalyst = command.assignedAnalyst,
-                decidedBy = command.decidedBy
+                decidedBy = command.decidedBy,
             )
         } catch (ex: IllegalArgumentException) {
             throw InvalidAmlCaseStateTransitionException(ex.message ?: "Invalid AML case state transition")
@@ -105,9 +109,11 @@ class AmlCaseService(
 
     private fun initialStatus(riskLevel: com.openbank.aml.domain.model.AmlRiskLevel): AmlCaseStatus = when (riskLevel) {
         com.openbank.aml.domain.model.AmlRiskLevel.CRITICAL,
-        com.openbank.aml.domain.model.AmlRiskLevel.HIGH -> AmlCaseStatus.UNDER_REVIEW
+        com.openbank.aml.domain.model.AmlRiskLevel.HIGH,
+        -> AmlCaseStatus.UNDER_REVIEW
         com.openbank.aml.domain.model.AmlRiskLevel.MEDIUM,
-        com.openbank.aml.domain.model.AmlRiskLevel.LOW -> AmlCaseStatus.OPEN
+        com.openbank.aml.domain.model.AmlRiskLevel.LOW,
+        -> AmlCaseStatus.OPEN
     }
 
     private fun caseCreatedEvent(amlCase: AmlCase, now: Instant): OutboxMessage = OutboxMessage(

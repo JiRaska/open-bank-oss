@@ -28,8 +28,8 @@ class AmlOutboxDispatchTest {
         payload = """{"caseId":"x"}""",
         status = OutboxStatus.PENDING,
         attemptCount = 0,
-        createdAt = Instant.now(),
-        updatedAt = Instant.now(),
+        createdAt = Instant.parse("2024-01-15T10:00:00Z"),
+        updatedAt = Instant.parse("2024-01-15T10:00:00Z"),
         sentAt = null,
         lastError = null,
     )

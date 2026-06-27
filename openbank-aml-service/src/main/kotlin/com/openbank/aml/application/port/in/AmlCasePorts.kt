@@ -20,7 +20,7 @@ data class CreateAmlCaseCommand(
     val riskLevel: AmlRiskLevel,
     val alertCode: String,
     val alertDetail: String?,
-    val matchedEntity: String?
+    val matchedEntity: String?,
 )
 
 data class ListAmlCasesQuery(
@@ -28,7 +28,7 @@ data class ListAmlCasesQuery(
     val partyId: UUID? = null,
     val screeningType: ScreeningType? = null,
     val limit: Int = 50,
-    val offset: Int = 0
+    val offset: Int = 0,
 )
 
 data class UpdateAmlDecisionCommand(
@@ -36,7 +36,7 @@ data class UpdateAmlDecisionCommand(
     val targetStatus: AmlCaseStatus,
     val decisionReason: String?,
     val assignedAnalyst: String?,
-    val decidedBy: String
+    val decidedBy: String,
 )
 
 interface AmlCaseUseCase {

@@ -71,7 +71,7 @@ class AmlCaseServiceTest {
                     it.aggregateId == result.id &&
                         it.eventType == AmlCaseService.EVENT_CASE_CREATED &&
                         it.payload.contains(result.id.toString())
-                }
+                },
             )
         }
     }
@@ -100,8 +100,8 @@ class AmlCaseServiceTest {
                         targetStatus = AmlCaseStatus.BLOCKED,
                         decisionReason = "   ",
                         assignedAnalyst = "analyst-1",
-                        decidedBy = "reviewer-1"
-                    )
+                        decidedBy = "reviewer-1",
+                    ),
                 )
             }
         }
@@ -111,21 +111,19 @@ class AmlCaseServiceTest {
         coVerify(exactly = 0) { amlCaseRepository.update(any(), any()) }
     }
 
-    private fun createCommand(
-        idempotencyKey: String = "aml-idem-1",
-        riskLevel: AmlRiskLevel = AmlRiskLevel.HIGH
-    ) = CreateAmlCaseCommand(
-        idempotencyKey = idempotencyKey,
-        partyId = UUID.randomUUID(),
-        accountId = UUID.randomUUID(),
-        transactionId = UUID.randomUUID(),
-        customerReference = "  CUST-1001  ",
-        screeningType = ScreeningType.TRANSACTION_MONITORING,
-        riskLevel = riskLevel,
-        alertCode = "  TM-900  ",
-        alertDetail = "  Multiple rapid inbound transfers  ",
-        matchedEntity = "  Listed Merchant  "
-    )
+    private fun createCommand(idempotencyKey: String = "aml-idem-1", riskLevel: AmlRiskLevel = AmlRiskLevel.HIGH) =
+        CreateAmlCaseCommand(
+            idempotencyKey = idempotencyKey,
+            partyId = UUID.randomUUID(),
+            accountId = UUID.randomUUID(),
+            transactionId = UUID.randomUUID(),
+            customerReference = "  CUST-1001  ",
+            screeningType = ScreeningType.TRANSACTION_MONITORING,
+            riskLevel = riskLevel,
+            alertCode = "  TM-900  ",
+            alertDetail = "  Multiple rapid inbound transfers  ",
+            matchedEntity = "  Listed Merchant  ",
+        )
 
     private fun amlCase(status: AmlCaseStatus = AmlCaseStatus.OPEN) = AmlCase(
         id = UUID.randomUUID(),
@@ -146,6 +144,6 @@ class AmlCaseServiceTest {
         screenedAt = Instant.now(),
         decidedAt = null,
         createdAt = Instant.now(),
-        updatedAt = Instant.now()
+        updatedAt = Instant.now(),
     )
 }

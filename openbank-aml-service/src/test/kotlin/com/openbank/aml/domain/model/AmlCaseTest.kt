@@ -12,7 +12,7 @@ class AmlCaseTest {
     @Test
     fun `blocking requires decision reason`() {
         assertThatThrownBy {
-            amlCase().transitionTo(AmlCaseStatus.BLOCKED, null, null, "analyst")
+            amlCase().transitionTo(AmlCaseStatus.BLOCKED, null, null, "analyst", Instant.parse("2026-01-02T00:00:00Z"))
         }.isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("decisionReason is required")
     }
@@ -24,7 +24,7 @@ class AmlCaseTest {
             decisionReason = "  review  ",
             assignedAnalyst = "  alice  ",
             decidedBy = "  bob  ",
-            now = Instant.parse("2026-01-02T00:00:00Z")
+            now = Instant.parse("2026-01-02T00:00:00Z"),
         )
 
         assertThat(updated.status).isEqualTo(AmlCaseStatus.UNDER_REVIEW)
@@ -51,6 +51,6 @@ class AmlCaseTest {
         screenedAt = Instant.parse("2026-01-01T00:00:00Z"),
         decidedAt = null,
         createdAt = Instant.parse("2026-01-01T00:00:00Z"),
-        updatedAt = Instant.parse("2026-01-01T00:00:00Z")
+        updatedAt = Instant.parse("2026-01-01T00:00:00Z"),
     )
 }

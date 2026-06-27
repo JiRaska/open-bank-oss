@@ -51,5 +51,5 @@ fun AmlCaseEntity.toDomain() = AmlCase(
     screenedAt = screenedAt,
     decidedAt = decidedAt,
     createdAt = createdAt,
-    updatedAt = updatedAt
+    updatedAt = updatedAt,
 )
