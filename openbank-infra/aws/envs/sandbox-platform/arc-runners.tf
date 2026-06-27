@@ -295,13 +295,16 @@ resource "kubectl_manifest" "ec2nodeclass_runners" {
       # builds and image pushes are meaningfully quicker. It is also FREE (local
       # NVMe is included in the spot instance price) and large enough that
       # DiskPressure can never recur. The runner NodePools below require
-      # instance-local-nvme>0 so only NVMe-equipped (d-family) instances are picked.
-      # The 50Gi gp3 root now only holds the OS + a safety fallback.
+      # instance-local-nvme>0 so only NVMe-equipped (d-family) instances are picked,
+      # which means RAID0 always mounts and ephemeral never lands on EBS. The gp3
+      # root therefore only holds the OS, so it is shrunk 50Gi -> 25Gi (AL2023 OS
+      # ~4Gi + headroom). This makes the NVMe switch net cost-NEGATIVE: free fast
+      # NVMe for ephemeral + a smaller paid gp3 root than before the runner-disk work.
       instanceStorePolicy = "RAID0"
       blockDeviceMappings = [{
         deviceName = "/dev/xvda"
         ebs = {
-          volumeSize          = "50Gi"
+          volumeSize          = "25Gi"
           volumeType          = "gp3"
           encrypted           = true
           deleteOnTermination = true
