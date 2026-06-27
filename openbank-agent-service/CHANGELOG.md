@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.10.1](https://github.com/JiRaska/open-bank/compare/agent-service-v1.10.0...agent-service-v1.10.1) (2026-06-27)
+
+
+### Bug Fixes
+
+* **agent:** suppress UnusedParameter in OversightEventConsumer ([#2232](https://github.com/JiRaska/open-bank/issues/2232)) ([f8ff3d2](https://github.com/JiRaska/open-bank/commit/f8ff3d29503c4be0e4905fbca516aebc3efb3586)), closes [#2084](https://github.com/JiRaska/open-bank/issues/2084)
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+
 ## [1.10.0](https://github.com/JiRaska/open-bank/compare/agent-service-v1.9.0...agent-service-v1.10.0) (2026-06-25)
 
 
