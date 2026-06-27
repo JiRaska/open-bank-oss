@@ -16,6 +16,8 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.net.URI
+import java.time.Clock
+import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
@@ -29,6 +31,9 @@ class SettlementAdapterTest {
         init {
             @Suppress("LeakingThis")
             self = this
+            // ADR-0100: settle() formats the value date via LocalDate.now(clock); a fixed
+            // clock keeps it deterministic (the assertions don't depend on the date).
+            clock = Clock.fixed(Instant.parse("2026-01-01T10:00:00Z"), ZoneOffset.UTC)
         }
     }
 
