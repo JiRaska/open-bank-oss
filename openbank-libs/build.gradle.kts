@@ -86,6 +86,10 @@ dependencies {
     // into the OPA input. compileOnly — every service with quarkus-oidc (which is all of them)
     // transitively ships quarkus-security at runtime. Pinned to quarkus-bom:3.33.2.
     compileOnly("io.quarkus:quarkus-security:3.33.2")
+    // ADR-0100: DefaultClockProducer marks its @Produces Clock with io.quarkus.arc.DefaultBean so a
+    // service's own ClockProducer overrides it without ambiguity. compileOnly — quarkus-arc is core
+    // CDI, shipped transitively at runtime by every service. Pinned to quarkus-bom:3.33.2.
+    compileOnly("io.quarkus:quarkus-arc:3.33.2")
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)

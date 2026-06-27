@@ -17,6 +17,9 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.lang.reflect.Method
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 import java.security.Principal as JavaPrincipal
 
 /**
@@ -41,6 +44,10 @@ class AuthorizeInterceptorTest {
             this.identity = mockk { every { get() } returns this@AuthorizeInterceptorTest.identity }
             enforce = true
             httpHeaders = mockk { every { isResolvable } returns false }
+            // ADR-0100: the interceptor now reads the wall clock through an injected Clock
+            // (resolveAttributes: "time-of-day" → Instant.now(clock)). A fixed clock keeps the
+            // attribute-forwarding assertions deterministic.
+            clock = Clock.fixed(Instant.parse("2026-06-22T10:20:00Z"), ZoneOffset.UTC)
         }
         every { sc.userPrincipal } returns JavaPrincipal { "user-42" }
     }

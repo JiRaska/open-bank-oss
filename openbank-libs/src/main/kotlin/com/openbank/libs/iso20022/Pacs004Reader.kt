@@ -29,8 +29,12 @@ class Pacs004Reader {
             setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
             setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
         }
-        val doc = factory.newDocumentBuilder()
-            .parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))
+        // Wrap the XML parse: the document comes off the wire, so malformed input
+        // (SAXParseException, IOException) must surface as the reader's own
+        // Pacs004ParseException rather than leaking a raw parser exception to callers.
+        val doc = runCatching {
+            factory.newDocumentBuilder().parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))
+        }.getOrElse { fail("malformed XML: ${it.message}") }
         doc.documentElement.normalize()
 
         val root = doc.documentElement
