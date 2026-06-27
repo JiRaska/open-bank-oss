@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.1](https://github.com/JiRaska/open-bank/compare/sepa-instant-v0.6.0...sepa-instant-v0.6.1) (2026-06-27)
+
+
+### Bug Fixes
+
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+* **sepa-instant,balance,audit,security-scanner,copilot,customer-edge,sca:** inject Clock via CDI (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2145](https://github.com/JiRaska/open-bank/issues/2145)) ([d680007](https://github.com/JiRaska/open-bank/commit/d68000775625cc423c95d8a27db29ff25a708f9f))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank/compare/sepa-instant-v0.5.0...sepa-instant-v0.6.0) (2026-06-25)
 
 
