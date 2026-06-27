@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/JiRaska/open-bank/compare/security-scanner-v0.3.3...security-scanner-v0.4.0) (2026-06-27)
+
+
+### Features
+
+* **observability:** RUM gateway cardinality budget, attribute audit, HPA (ADR-0088 O1-O3) ([#2208](https://github.com/JiRaska/open-bank/issues/2208)) ([b7f0849](https://github.com/JiRaska/open-bank/commit/b7f08494cf923f66dbd910e92522fb9453394de7))
+
+
+### Bug Fixes
+
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+
 ## [0.3.3](https://github.com/JiRaska/open-bank/compare/security-scanner-v0.3.2...security-scanner-v0.3.3) (2026-06-25)
 
 
