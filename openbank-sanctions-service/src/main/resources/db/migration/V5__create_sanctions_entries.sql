@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: MPL-2.0
+-- SPDX-License-Identifier: Apache-2.0
 -- Sanctions entries — one row per individual/org from a sanctions or PEP list.
 -- search_text = normalize(primaryName + aliases), indexed with pg_trgm for
 -- fuzzy similarity matching in screen().

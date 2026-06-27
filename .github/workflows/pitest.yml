@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # Mutation testing — pitest on money-path domain layers (ADR-0063, ADR-0030 D3).
 # Run: weekly on Sunday 03:00 UTC (low-traffic window) + manual dispatch.
 # NOT part of the per-PR gate (cost); advisory alert on score < 70%.

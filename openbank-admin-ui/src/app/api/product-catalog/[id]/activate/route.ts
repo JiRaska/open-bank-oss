@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: Apache-2.0
 import { NextRequest, NextResponse } from 'next/server'
 
 const BASE = process.env.PRODUCT_CATALOG_URL ?? 'http://openbank-product-catalog:8104'

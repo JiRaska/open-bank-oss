@@ -1,0 +1,15 @@
+OpenBank
+Copyright 2026 OpenBank contributors
+
+This product includes software developed by the OpenBank contributors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+The OpenBank AI agent runtime component is a separate, independently licensed
+work (AGPL-3.0 + a parallel commercial licence) maintained in its own
+repository; it is not covered by this NOTICE or the Apache-2.0 LICENSE in this
+repository. See docs/adr/0031-ai-agent-governance-and-operations.md.

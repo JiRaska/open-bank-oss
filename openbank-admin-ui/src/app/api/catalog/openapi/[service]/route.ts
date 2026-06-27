@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: MPL-2.0
-// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
-// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 // API-catalog OpenAPI surface (ADR-0056). Serves a service's OpenAPI document to
 // the catalog page server-side, from the SPEC BAKED INTO THE IMAGE — never from

@@ -50,7 +50,7 @@ git commit -s -m "feat(ledger): add double-entry invariant assertion"
 
 This adds a `Signed-off-by: Your Name <your.email@example.com>` trailer to your commit, certifying that:
 
-> By making a contribution to this project, I certify that the contribution was created in whole or in part by me and I have the right to submit it under the Mozilla Public License 2.0; or the contribution is based upon previous work that, to the best of my knowledge, is covered under an appropriate open source license and I have the right under that license to submit that work under the same license.
+> By making a contribution to this project, I certify that the contribution was created in whole or in part by me and I have the right to submit it under the Apache License 2.0; or the contribution is based upon previous work that, to the best of my knowledge, is covered under an appropriate open source license and I have the right under that license to submit that work under the same license.
 
 PRs containing unsigned-off commits will be blocked by CI.
 
@@ -133,7 +133,7 @@ A pull request is **ready to merge** only when ALL apply:
 - [ ] No hardcoded secrets, tokens, passwords, PII, or real customer data.
 - [ ] No `@SuppressWarnings`, `as Any`, `@Suppress("...")` without justification in PR description.
 - [ ] No new third-party dependency without:
-  - License check (allowlist: Apache-2.0, MIT, BSD-2/3, EPL-2.0, MPL-2.0, ISC). GPL and AGPL are NOT compatible with MPL-2.0 in the same file — open an issue first.
+  - License check (allowlist: Apache-2.0, MIT, BSD-2/3, EPL-2.0, MPL-2.0, ISC). GPL and AGPL would force copyleft on the Apache-2.0 tree — open an issue first.
   - CVE check (no Critical / High open vulnerabilities).
   - Reasonable source review (no obfuscated or suspicious patterns).
 
@@ -157,7 +157,7 @@ Architectural changes require an ADR in `docs/adr/`. See [`docs/adr/0001-record-
 
 ## License of Contributions
 
-By contributing to OpenBank, you agree that your contributions will be licensed under the [Mozilla Public License 2.0](LICENSE), the same license as the project. The DCO sign-off on each commit is your acknowledgement of this.
+By contributing to OpenBank, you agree that your contributions will be licensed under the [Apache License 2.0](LICENSE), the same license as the project. The DCO sign-off on each commit is your acknowledgement of this.
 
 ## Questions?
 

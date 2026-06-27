@@ -1,5 +1,5 @@
--- SPDX-License-Identifier: MPL-2.0
--- Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 --
 -- ADR-0035: account statements. We persist ONLY the period-close record (metadata + sequence +
 -- balance anchors) and the outbox — never rendered camt.053/MT940/PDF bytes. Renders are produced

@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: MPL-2.0
-// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
-// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 // Server-only docs source for the docs BFF (ADR-0056). The browser never calls
 // GitHub directly; admin-ui resolves release-please output server-side here and

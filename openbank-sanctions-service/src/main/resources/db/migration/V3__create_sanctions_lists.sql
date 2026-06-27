@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: MPL-2.0
+-- SPDX-License-Identifier: Apache-2.0
 CREATE TABLE IF NOT EXISTS sanctions_lists (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     list_type       VARCHAR(30) NOT NULL UNIQUE,

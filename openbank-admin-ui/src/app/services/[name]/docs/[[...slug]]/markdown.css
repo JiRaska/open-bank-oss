@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MPL-2.0
+/* SPDX-License-Identifier: Apache-2.0
    Markdown rendering tweaks for /services/[name]/docs.
    Imported into the page once via global stylesheet if needed.   */
 .markdown-body h1 { font-size: 28px; font-weight: 300; margin-bottom: 16px; letter-spacing: -0.02em; }

@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 # Release & changelog rule (ADR-0029 Layer B, refined by ADR-0048)
 
 **This is the rule. It is enforced by machine, not by discipline.** Release versions, changelogs and

@@ -10,11 +10,11 @@ metadata:
     app.kubernetes.io/name: customer-edge
     app.kubernetes.io/part-of: customer-edge
   annotations:
-    openbank.tech/policy-checksum: "2d28b895db2fe15a"
+    openbank.tech/policy-checksum: "89694e6eaff1b228"
 data:
   rest.rego: |
-    # SPDX-License-Identifier: MPL-2.0
-    # Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+    # SPDX-License-Identifier: Apache-2.0
+    # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
     #
     # REST endpoint authorization (ADR-0034 D1). This is the policy enforcement point that
     # AuthorizeInterceptor in openbank-libs queries before letting a @Authorize-annotated
@@ -186,8 +186,8 @@ data:
     	input.attributes.flag in data.rules.feature_flags.prohibited_flag_combinations
     }
   agents.rego: |
-    # SPDX-License-Identifier: MPL-2.0
-    # Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+    # SPDX-License-Identifier: Apache-2.0
+    # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
     #
     # Agent tool-call authorization (ADR-0031 D2). This is the policy enforcement point in front
     # of the MCP /tools/call endpoint: before dispatching a tool, the endpoint queries
@@ -279,8 +279,8 @@ data:
     glob_match(pattern, value) if pattern == value
     glob_match(pattern, value) if glob.match(pattern, ["."], value)
   rules-data.yaml: |
-    # SPDX-License-Identifier: MPL-2.0
-    # Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+    # SPDX-License-Identifier: Apache-2.0
+    # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
     #
     # OpenBank governance rules — the single, machine-readable source of truth.
     #
@@ -327,6 +327,7 @@ data:
     branches:
       pattern: "^(feat|fix|chore|docs|refactor|test|security|ci|perf)/[a-z0-9-]+$"
       no_direct_commits_to: [main]
+      no_direct_commits_enforced: true  # branch protection live (issue #282, github-governance.tf)
 
     # ---------------------------------------------------------------------------------------
     # SemVer per service (ADR-0029 D2). Independent per-service versioning.
@@ -451,6 +452,21 @@ data:
           - "compliance scorecard reflects current live/partial/planned status"
         gate: docs-currency
         enforced: advisory
+      clock_injection:
+        # ADR-0100 (DST Layer 1): no Instant.now() / LocalDateTime.now() / System.currentTimeMillis()
+        # in domain or application layer of money-path services. All time must flow from an injected
+        # java.time.Clock CDI bean (the pattern ledger/dispute already follow) so the DST harness can
+        # virtualise it. A centralised libs Clock producer is tracked in #1612. Kotlin stdlib
+        # Clock.System.now() is equally forbidden — use injected Clock.
+        detect:
+          - "money_path service src/main/kotlin/**/domain/**"
+          - "money_path service src/main/kotlin/**/application/**"
+          - "Instant.now()|LocalDateTime.now()|System.currentTimeMillis()|Clock.System.now()"
+        require:
+          - "injected java.time.Clock CDI bean used (centralised libs Clock producer tracked in #1612)"
+          - "no Instant.now() / LocalDateTime.now() / System.currentTimeMillis() / Clock.System.now() in domain or application layer"
+        gate: dst-clock-injection
+        enforced: advisory                  # advisory until openbank-simulation harness lands (ADR-0100)
 
     # ---------------------------------------------------------------------------------------
     # Money-path services (from CODEOWNERS critical paths) — stricter rules apply.
@@ -573,15 +589,20 @@ data:
     # ---------------------------------------------------------------------------------------
     dependencies:
       license_allowlist: [Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, EPL-2.0, MPL-2.0, ISC]
-      license_denylist: [GPL-2.0, GPL-3.0, AGPL-3.0]   # incompatible with MPL-2.0 in the same file
-      # Carve-out (ADR-0031 D8 + ADR-0012 amendment): the AI agent RUNTIME component is AGPL-3.0 +
-      # commercial dual-license, in its OWN repo/module with a CLA -- NOT MPL. The denylist above governs
-      # MPL code; AGPL-3.0 is permitted for that isolated component only, so the gate must not flag it there.
+      license_denylist: [GPL-2.0, GPL-3.0, AGPL-3.0]   # copyleft -- would contaminate the Apache-2.0 tree
+      # Carve-out (ADR-0031 D8): the AI agent RUNTIME component is AGPL-3.0 +
+      # commercial dual-license, in its OWN repo/module with a CLA -- NOT Apache-2.0. The denylist above governs
+      # the main tree; AGPL-3.0 is permitted for that isolated component only, so the gate must not flag it there.
       license_denylist_exceptions:
         - license: AGPL-3.0
           scope: agent-runtime-component        # separate repo/module, own LICENSE + CLA
           reason: "commercial dual-licensing of the agent component"
           adr: ADR-0031
+      license_boundary_exceptions:
+        - description: "AGPL/Apache seam — openbank-agent-runtime (external repo) implements ModelProvider port. AGPL code must not leak into the Apache-2.0 tree; only the port interface may cross the boundary."
+          allowed_at: "openbank-agent-service/src/main/kotlin/com/openbank/agent/application/ModelProvider.kt"
+          external_repo: "JiRaska/openbank-agent-runtime"
+          license: "AGPL-3.0-or-later"
       block_on_cve_severity: [CRITICAL, HIGH]
       catalog: openbank-libs/gradle/libs.versions.toml  # version catalog is the single dependency source
 
@@ -904,8 +925,8 @@ data:
         services: [audit-service]
         regulatory_ref: "DORA Art. 17 — immutable"
   agents-data.yaml: |
-    # SPDX-License-Identifier: MPL-2.0
-    # Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+    # SPDX-License-Identifier: Apache-2.0
+    # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
     #
     # OpenBank AI-agent charters — the single, machine-readable source of truth for what each
     # agent may see, call, and do, and where a human must decide (ADR-0031).
@@ -960,8 +981,8 @@ data:
       identity:      spiffe-spire       # short-TTL SVID per run; signing root stays in Vault (ADR-0017)
 
     # Licensing note (ADR-0031 D8): the agent RUNTIME component is AGPL-3.0 + commercial dual-license,
-    # in a SEPARATE repo with a CLA -- NOT this MPL-2.0 governance file. rules.yaml license_denylist gets
-    # a documented carve-out for it. This charter config itself stays MPL-2.0.
+    # in a SEPARATE repo with a CLA -- NOT this Apache-2.0 governance file. rules.yaml license_denylist gets
+    # a documented carve-out for it. This charter config itself stays Apache-2.0.
 
     # ---------------------------------------------------------------------------------------
     # Model strategy -- hybrid, model-agnostic via an open LLM gateway (ADR-0031 D6).
@@ -984,7 +1005,6 @@ data:
     tool_tiers:
       read:           # read-only, PII masked
         - query.ledger.readonly
-        - query.gl.readonly           # GL aggregate reads (trial balance, Refs #299)
         - query.catalog.readonly
         - read.logs
         - read.governance      # rules.yaml / coverage / vuln SLAs
@@ -1024,7 +1044,7 @@ data:
           read: [transaction, sanction-screening, consent, audit, aml, sanctions, dispute, clearing, sepa-instant]
           pii: masked
         tools:
-          allow: [query.ledger.readonly, query.gl.readonly, query.catalog.readonly, read.logs, read.governance, draft.ticket,
+          allow: [query.ledger.readonly, query.catalog.readonly, read.logs, read.governance, draft.ticket,
                   query.compliance.readonly, query.payments.readonly, query.disputes.readonly,
                   query.observability.readonly,   # Prometheus/Loki/Alertmanager read (oversight telemetry)
                   flags.write]    # feature-flag flip proposals (ADR-0067 / issue #419)
@@ -1067,7 +1087,7 @@ data:
           # drove aml_list_cases and returned real AML data (GDPR Art. 9) to any logged-in operator.
           # AML/sanctions/payments reads belong to the role-gated compliance-officer charter,
           # reachable once per-user role propagation lands (ADR-0080 P2) -- not the blanket admin bot.
-          allow: [query.ledger.readonly, query.gl.readonly, query.catalog.readonly, draft.ticket]
+          allow: [query.ledger.readonly, query.catalog.readonly, draft.ticket]
           deny:  ["money.*", "gh.pr.*", "*.write", secrets.read.raw,
                   query.compliance.readonly, query.payments.readonly,
                   query.interest.readonly, query.disputes.readonly,
@@ -1113,5 +1133,57 @@ data:
           - sca: dynamic_linking                     # HITL + SCA bound to amount+payee before any state change
           - scope: customer_own                      # audience-scoped on-behalf-of token (one customer)
         limits: { tokens_per_run: 80000, runs_per_day: 1000 }
+
+      - id: finops-agent
+        plane: control
+        charter: "ADR-0112"
+        description: >
+          Proactive AWS cost monitoring and optimization agent. Detects NAT egress spikes,
+          cross-AZ traffic anomalies, Karpenter node churn, EBS attachment failures, and
+          CI runner pool pressure. Proposes IaC fixes as GitHub PRs through HITL queue.
+          Never writes to AWS directly.
+        enabled: true
+        enforcement: block
+        schedule:
+          daily: "03:00 UTC"
+          reactive: goalert-webhook       # triggered by GoAlert on cost/infra anomaly alert
+        data_scope:
+          read:
+            - aws-cost-explorer-readonly  # ce:GetCostAndUsage, ce:GetCostForecast only
+            - cloudwatch-metrics-readonly # GetMetricData for NAT/VPC FlowLogs
+            - prometheus-query-readonly   # container_network_*, karpenter_*, kube_events
+            - kubernetes-events-readonly  # FailedAttachVolume, node lifecycle events
+            - langfuse-readonly           # token usage, cost per model/agent
+          pii: none                       # cost/infra metadata only; no customer data in scope
+        tools:
+          allow:
+            - tier: read
+              resources: [aws-cost-explorer, cloudwatch, prometheus, kubernetes-events, langfuse]
+            - tier: write_proposal
+              resources: [github-pr]      # opens IaC diff PRs only; no AWS write, no k8s write
+          deny:
+            - tier: write
+              resources: ["*"]            # explicit: no direct infra writes ever
+            - tier: execute
+              resources: ["*"]
+        requires_human:
+          - any_infrastructure_change     # HITL mandatory; EU AI Act Art. 9
+          - cost_impact_gt_100_usd        # explicit approval for >$100 estimated monthly saving/cost
+        limits:
+          tokens_per_run: 50000           # cap: agent must not cost more than it saves
+          runs_per_day: 4
+          kill_switch: true
+        audit:
+          capture:
+            - model_id
+            - prompt_hash
+            - tool_calls
+            - policy_decision
+            - anomalies_detected
+            - estimated_cost_impact_usd
+            - human_approved_by
+        compliance:
+          eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency (all proposals logged)"
+          dora: "continuous monitoring; operational resilience cost controls"
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}

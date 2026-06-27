@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: MPL-2.0
-# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
 # Assemble + verify the OPA policy bundle that gates the MCP /tools/call endpoint
 # (ADR-0031 D2/D8). This is the "bundle wiring" step: the agent charters in

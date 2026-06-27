@@ -193,7 +193,7 @@ Security controls are verified by:
 
 - **Physical security** — operators must address data centre / colocation security.
 - **HR security** — operators apply their own background-check policy.
-- **Insurance and liability** — operator concern; MPL-2.0 disclaims warranty.
+- **Insurance and liability** — operator concern; Apache-2.0 disclaims warranty.
 
 ## Disclaimer
 

@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: MPL-2.0
-// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
-// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 // Serves the cluster-topology dossier artefact (ADR-0081). The build bakes cluster-topology.json
 // via scripts/generate-cluster-topology.mjs — a pure GitOps + Dockerfile repo-walk (no creds) that

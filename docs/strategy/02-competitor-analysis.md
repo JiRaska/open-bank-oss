@@ -87,7 +87,7 @@ These moats erode over time for OSS challengers that build community.
 
 ## Positioning statement
 
-> OpenBank is the first cloud-native, event-sourced, BIAN-aligned core banking platform released under a permissive open-source licence (MPL-2.0), targeting European retail banking with PSD2, DORA, and 5AMLD compliance baked in from day one. We do not compete with Temenos or Mambu in the enterprise sales motion — we obsolete the question by giving you the core for free, transparently, with no vendor between you and your regulator.
+> OpenBank is the first cloud-native, event-sourced, BIAN-aligned core banking platform released under a permissive open-source licence (Apache-2.0), targeting European retail banking with PSD2, DORA, and 5AMLD compliance baked in from day one. We do not compete with Temenos or Mambu in the enterprise sales motion — we obsolete the question by giving you the core for free, transparently, with no vendor between you and your regulator.
 
 ## Realistic threats
 

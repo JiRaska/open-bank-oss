@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: MPL-2.0
-# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 openapi: 3.1.0
 info:
   title: Statement Service API
@@ -13,8 +13,8 @@ info:
     Art. 58(2) "made available"). A closing balance that disagrees with balance-service fails the
     close (fail-closed reconciliation).
   license:
-    name: MPL-2.0
-    url: https://www.mozilla.org/MPL/2.0/
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
 servers:
   - url: http://localhost:8136
     description: Local development

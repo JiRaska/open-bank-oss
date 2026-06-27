@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: MPL-2.0
-# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
 # Copilot tool-dispatch authorization (ADR-0031, ADR-0089).
 # Queried by openbank-copilot-service before dispatching any tool call:

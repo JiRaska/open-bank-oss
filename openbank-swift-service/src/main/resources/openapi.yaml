@@ -1,6 +1,6 @@
-# SPDX-License-Identifier: MPL-2.0
-# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
-# See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 openapi: "3.1.0"
 
@@ -11,8 +11,8 @@ info:
     SWIFT MT/MX message dispatch, acknowledgement, and status tracking.
     Supports MT103 (customer credit transfer), MT202 (bank transfer), MT900/910/940/950 (confirmations/statements).
   license:
-    name: MPL-2.0
-    url: https://www.mozilla.org/MPL/2.0/
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
 
 servers:
   - url: http://localhost:8122

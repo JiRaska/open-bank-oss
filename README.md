@@ -2,8 +2,8 @@
 
 > Cloud-native, open-source retail banking platform built on Kotlin + Quarkus, Next.js, and event-driven microservices — with governance, supply-chain security, and AI-agent operations baked in as code.
 
-[![License: MPL 2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Agent runtime: AGPL 3.0 + commercial](https://img.shields.io/badge/Agent_runtime-AGPL_3.0_%2B_commercial-blue.svg)](docs/adr/0012-mpl-license-and-dco.md)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-brightgreen.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Agent runtime: AGPL 3.0 + commercial](https://img.shields.io/badge/Agent_runtime-AGPL_3.0_%2B_commercial-blue.svg)](docs/adr/0119-relicense-to-apache-2.0.md)
 [![Status: Alpha](https://img.shields.io/badge/Status-Alpha-orange.svg)](#project-status)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-blue.svg)](CONTRIBUTING.md)
 
@@ -281,28 +281,28 @@ The platform is designed with the following regulatory frameworks in mind. None 
 
 ## License
 
-OpenBank uses a **dual-license model** (ADR-0012):
+OpenBank uses a **dual-license model** (ADR-0119, superseding ADR-0012):
 
-**The platform (this repository) — [Mozilla Public License 2.0](LICENSE) + DCO.**
+**The platform (this repository) — [Apache License 2.0](LICENSE) + DCO.**
 
 - ✅ Free to use, modify, distribute (including commercially)
 - ✅ Patent grant included
-- ⚠️ Modifications to MPL-licensed files must be released under MPL
-- ✅ You may combine OpenBank with proprietary code in new files
+- ✅ Permissive — no copyleft; forks and downstream may relicense their changes
+- ✅ You may combine OpenBank with proprietary code
 
-Every source file carries an SPDX header (`// SPDX-License-Identifier: MPL-2.0`), and contributions are
+Every source file carries an SPDX header (`// SPDX-License-Identifier: Apache-2.0`), and contributions are
 certified via the [Developer Certificate of Origin](https://developercertificate.org/) — no CLA.
 
 **The AI agent runtime component — AGPL-3.0 + a parallel commercial licence (open-core).**
 
-Per the ADR-0012 amendment (ADR-0031 D8), the part of OpenBank intended for commercialization — the AI
+Per ADR-0031 D8, the part of OpenBank intended for commercialization — the AI
 agent **runtime** — is dual-licensed AGPL-3.0 / commercial and lives in a **separate repository/module with
 its own LICENSE and a CLA** (the CLA is what makes dual-licensing possible). This does **not** apply to any
-MPL-2.0 code in this repo; the policy/charter config here (`openbank-agent-service`, `governance/agents.yaml`)
-stays MPL-2.0 + DCO. `rules.yaml` carries a documented carve-out so the governance gate and reality agree.
+Apache-2.0 code in this repo; the policy/charter config here (`openbank-agent-service`, `governance/agents.yaml`)
+stays Apache-2.0 + DCO. `rules.yaml` carries a documented carve-out so the governance gate and reality agree.
 
-See [`LICENSE`](LICENSE) for full MPL text and [ADR-0012](docs/adr/0012-mpl-license-and-dco.md) for the
-dual-license rationale.
+See [`LICENSE`](LICENSE) for full Apache-2.0 text and [ADR-0119](docs/adr/0119-relicense-to-apache-2.0.md) for the
+relicensing rationale (and [ADR-0012](docs/adr/0012-mpl-license-and-dco.md) for the original MPL decision it supersedes).
 
 ---
 

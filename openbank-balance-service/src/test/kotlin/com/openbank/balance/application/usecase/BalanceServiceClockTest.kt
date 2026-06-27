@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: Apache-2.0
 package com.openbank.balance.application.usecase
 
 import com.openbank.balance.application.port.`in`.InitializeBalanceCommand

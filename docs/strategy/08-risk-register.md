@@ -155,8 +155,8 @@
 - Category: Legal
 - Inherent: L3 × I2 = **6**
 - Residual: L2 × I1 = **2**
-- Description: Downstream user violates MPL-2.0 (e.g. removes attribution).
-- Mitigation: MPL-2.0 is widely understood; clear LICENSE + NOTICE; community vigilance; legal escalation only for material harm.
+- Description: Downstream user violates Apache-2.0 (e.g. removes attribution).
+- Mitigation: Apache-2.0 is widely understood; clear LICENSE + NOTICE; community vigilance; legal escalation only for material harm.
 - Owner: Maintainers.
 
 ### R-017 Hostile fork / community fragmentation

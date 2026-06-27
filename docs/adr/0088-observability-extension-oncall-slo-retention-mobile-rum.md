@@ -129,7 +129,7 @@ clause is **not triggered** — it activates only when a *modified* version is c
 over a network. OpenBank runs these as upstream images to monitor its own infrastructure, so:
 
 - **No source-disclosure obligation arises.**
-- **OpenBank's own MPL-2.0 code is not contaminated** — these are separate runtime deployments, not
+- **OpenBank's own Apache-2.0 code is not contaminated** — these are separate runtime deployments, not
   linked/derived works.
 - **The load-bearing control is ADR-0056 (Grafana internal-only).** "Internal-only" is exactly what
   keeps the AGPL argument sound: no third-party network service, no conveyance. **If a Grafana panel,

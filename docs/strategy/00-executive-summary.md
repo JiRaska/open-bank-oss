@@ -5,7 +5,7 @@
 
 ## 1. What OpenBank is
 
-OpenBank is an **open-source, cloud-native core banking platform** designed as a reference implementation of a modern retail bank that a licenced operator could deploy in production. It is licensed under **MPL-2.0** (file-level copyleft + patent grant), giving a workable balance between community contribution and the ability to embed proprietary modules (such as bank-specific risk models, AML rules, and regulatory adapters) without polluting the open core.
+OpenBank is an **open-source, cloud-native core banking platform** designed as a reference implementation of a modern retail bank that a licenced operator could deploy in production. It is licensed under **Apache-2.0** (permissive + patent grant), maximising adoption while letting operators embed proprietary modules (such as bank-specific risk models, AML rules, and regulatory adapters) without polluting the open core.
 
 OpenBank targets the gap between:
 - **Legacy core banking** (Temenos, Finacle, FIS) — mature but monolithic, expensive, slow to evolve.
@@ -46,7 +46,7 @@ See `02-competitor-analysis.md` for the full matrix. Headline differentiators:
 
 | Dimension | OpenBank | Fineract | Mambu | Thought Machine |
 |---|---|---|---|---|
-| Licence | MPL-2.0 | Apache 2.0 | Commercial | Commercial |
+| Licence | Apache-2.0 | Apache 2.0 | Commercial | Commercial |
 | Language | Kotlin | Java (legacy EE) | Java/Scala (closed) | Python smart-contracts |
 | Architecture | Event-sourced microservices | Modular monolith | Microservices (SaaS-only) | Smart-contracts on Vault |
 | BIAN alignment | Yes (v13) | Partial | Partial | Partial |

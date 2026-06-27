@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: MPL-2.0
-// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
-// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 // Server component (ADR-0056). Compliance Control Tower — the regulation →
 // control → evidence matrix. Reads the authored control catalogue and joins

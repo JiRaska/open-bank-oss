@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: MPL-2.0
+-- SPDX-License-Identifier: Apache-2.0
 -- Copyright (c) OpenBank contributors.
 --
 -- ADR-0072 — Client identity unification.

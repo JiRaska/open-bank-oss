@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # CNPG Postgres cluster for openbank-lending-service (money-path, ADR-0030).
 # Namespace: lending — isolated from the payments namespace so credit-risk schema
 # migrations run independently and cannot be blocked by payment-rail migrations.

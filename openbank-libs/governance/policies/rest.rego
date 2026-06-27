@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: MPL-2.0
-# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
 # REST endpoint authorization (ADR-0034 D1). This is the policy enforcement point that
 # AuthorizeInterceptor in openbank-libs queries before letting a @Authorize-annotated

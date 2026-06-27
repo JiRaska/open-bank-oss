@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: MPL-2.0
-# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 asyncapi: 3.0.0
 info:
   title: OpenBank Async Event API
@@ -8,8 +8,8 @@ info:
     Kafka event streams across all OpenBank services.
     All topics follow the naming convention: openbank.{domain}.{aggregate}.{event}
   license:
-    name: MPL-2.0
-    url: https://www.mozilla.org/MPL/2.0/
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
 
 servers:
   production:

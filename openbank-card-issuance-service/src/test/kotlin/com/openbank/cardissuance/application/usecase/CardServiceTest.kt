@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: Apache-2.0
 package com.openbank.cardissuance.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper

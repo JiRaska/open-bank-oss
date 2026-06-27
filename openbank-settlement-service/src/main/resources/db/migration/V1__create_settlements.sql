@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: MPL-2.0
+-- SPDX-License-Identifier: Apache-2.0
 CREATE TABLE settlements (
     id UUID PRIMARY KEY,
     payer_account_id UUID NOT NULL,

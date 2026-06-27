@@ -149,10 +149,10 @@ single vendor's agent SDK** — tools via MCP, policy via Rego, models via a gat
   are enforced at the gateway, and a per-agent and global **kill switch** halts agents without a redeploy.
   ⬜ PLANNED.
 
-### D8 — Licensing and IP strategy (deviates from MPL-2.0)
+### D8 — Licensing and IP strategy (deviates from Apache-2.0)
 
 The agent component is the part of OpenBank we intend to **commercialize**, so it does **not** ship under
-the repo-wide MPL-2.0 (ADR-0012). We will:
+the repo-wide Apache-2.0 (ADR-0119, superseding ADR-0012). We will:
 
 - License the agent component under **AGPL-3.0** — the network/SaaS copyleft is the moat: a competitor who
   runs it as a service must publish their modifications, which blocks silent strip-mining.
@@ -163,20 +163,20 @@ the repo-wide MPL-2.0 (ADR-0012). We will:
   component switches from the repo's **DCO to a CLA**. This is itself an amendment to **ADR-0012** and must
   be recorded there, scoped to this component only.
 - The agent component lives in a **separate repository / module with its own LICENSE and CLA**, not mixed
-  into the MPL services. `rules.yaml`'s `license_denylist` (which lists AGPL-3.0 as incompatible with
-  MPL-2.0 *in the same file*) gets an explicit, documented **carve-out** for this component so governance
-  and reality agree. Combining AGPL agent code with MPL `openbank-libs` is one-directional and acceptable
-  (MPL files stay MPL; the conveyed agent work is AGPL); the carve-out makes that intentional, not a leak.
+  into the Apache-2.0 services. `rules.yaml`'s `license_denylist` (which lists AGPL-3.0 as incompatible with
+  Apache-2.0 *in the same file*) gets an explicit, documented **carve-out** for this component so governance
+  and reality agree. Combining AGPL agent code with Apache-2.0 `openbank-libs` is one-directional and acceptable
+  (Apache-2.0 files stay Apache-2.0; the conveyed agent work is AGPL); the carve-out makes that intentional, not a leak.
 
-**Seam (resolved 2026-06-01):** the MPL/AGPL boundary is the **`ModelProvider` port** in
-`openbank-agent-service`. The MPL monorepo keeps only the **governance plumbing** that belongs in a
+**Seam (resolved 2026-06-01):** the Apache/AGPL boundary is the **`ModelProvider` port** in
+`openbank-agent-service`. The Apache-2.0 monorepo keeps only the **governance plumbing** that belongs in a
 banking codebase — the model gateway *port*, the OPA policy gate, AI-attributed audit, the `agents.yaml`
 charters, and reference/mock provider adapters. The **commercialised agent runtime** — autonomous
 multi-step orchestration and proprietary model adapters — is implemented behind that port in the
 **separate AGPL-3.0 + CLA repository** and plugged in at deploy time. This keeps the demo
-(provider-agnostic gateway + offline mock, no production runtime) cleanly MPL-2.0 inside the monorepo
+(provider-agnostic gateway + offline mock, no production runtime) cleanly Apache-2.0 inside the monorepo
 without prejudging the runtime's license, and gives the `license_denylist` carve-out a precise edge to
-sit on: nothing AGPL is conveyed from the monorepo; the AGPL work *consumes* the MPL port, one-directional.
+sit on: nothing AGPL is conveyed from the monorepo; the AGPL work *consumes* the Apache-2.0 port, one-directional.
 
 ✅ — seam decided and demonstrated (PR #216); separate AGPL repo created: JiRaska/openbank-agent-runtime (AGPL-3.0 + commercial dual-license, CLA, CODEOWNERS scaffold); `license_boundary_exceptions` carve-out added to `rules.yaml`. (Considered and rejected for now: BSL 1.1 / FSL — source-available with direct
 commercial control but not OSI-"open"; revisit if AGPL+dual-license friction proves too high.)
@@ -238,7 +238,7 @@ commercial control but not OSI-"open"; revisit if AGPL+dual-license friction pro
 - The LLM gateway concentrates every (masked) prompt and is in every action path — an availability and
   data-exposure single point unless HA + sensitive-data routing hold (D6).
 - Dual-licensing requires a CLA and copyright ownership (D8) — contributor friction and an ADR-0012
-  amendment; a wrong carve-out risks licence leakage between AGPL and MPL code.
+  amendment; a wrong carve-out risks licence leakage between AGPL and Apache-2.0 code.
 
 **Neutral**
 - Agents become first-class `actor`s in the same governance machinery as humans; no parallel rulebook.

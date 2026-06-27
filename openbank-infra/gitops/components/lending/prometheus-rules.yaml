@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # Per-service PrometheusRule for openbank-lending-service (money-path, ADR-0077/0079).
 # Complements the fleet-wide tier-1 rules with lending-specific credit-risk alerts.
 apiVersion: monitoring.coreos.com/v1

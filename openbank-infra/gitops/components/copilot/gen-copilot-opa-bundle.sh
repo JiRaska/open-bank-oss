@@ -11,7 +11,7 @@ MANIFEST=$REPO/openbank-infra/opa/bundle.manifest
 
 # Copilot REST extension — allows copilot.chat for authenticated customers in the customer realm
 COPILOT_REST_EXT=$(cat << 'REGO'
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # Copilot-service REST extension (ADR-0034, ADR-0089).
 # Extends openbank.rest with copilot-specific allow reasons.
 # Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.

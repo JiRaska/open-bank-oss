@@ -1,5 +1,5 @@
--- SPDX-License-Identifier: MPL-2.0
--- Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 --
 -- ADR-0078 D5 / issue #471, increment 1 — entity-level fiscal-year close record.
 --

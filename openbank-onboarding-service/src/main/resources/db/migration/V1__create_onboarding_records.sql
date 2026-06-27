@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: MPL-2.0
+-- SPDX-License-Identifier: Apache-2.0
 -- Copyright (c) OpenBank contributors.
 -- Flyway migration V1: create onboarding read-model table (ADR-0068).
 -- Rollback note: DROP TABLE onboarding_records;

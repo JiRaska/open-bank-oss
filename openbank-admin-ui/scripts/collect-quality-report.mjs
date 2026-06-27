@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Collect pitest XML reports + pact verification results from the monorepo and
 // produce quality-report.json for the admin-ui image (ADR-0063).
 //

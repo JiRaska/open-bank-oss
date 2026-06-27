@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 import { NextResponse } from 'next/server'
 import { promises as fs } from 'fs'

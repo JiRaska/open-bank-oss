@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: MPL-2.0
-# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
 # openbank-clearing-simulator (ADR-0104 D2) — a NON-PRODUCTION scheme/clearing counterparty.
 # It receives a pacs.008, validates it against the real XSD, and returns a realistic pacs.002

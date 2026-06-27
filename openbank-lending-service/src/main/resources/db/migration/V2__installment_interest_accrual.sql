@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: MPL-2.0
+-- SPDX-License-Identifier: Apache-2.0
 -- Servicing posting loop (ADR-0028 Phase 2): accrual-basis interest recognition.
 -- Each installment's interest is recognized as income once it falls due (IAS 1 accrual basis),
 -- independent of cash collection; the flag makes the scheduled accrual pass idempotent.

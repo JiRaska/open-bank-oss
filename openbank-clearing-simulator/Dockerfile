@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: MPL-2.0
-# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 # fast-jar only (never uber-jar): the runtime stage COPYs quarkus-app/ (CLAUDE.md GitOps rules).
 FROM eclipse-temurin:25-jdk-alpine AS build
 WORKDIR /build

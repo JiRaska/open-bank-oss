@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: MPL-2.0
+-- SPDX-License-Identifier: Apache-2.0
 -- Seed representative entries for sandbox/dev.
 -- Production entries are populated via SanctionsImportService (scheduled download).
 -- search_text = unaccented lowercase of all names — mirrors what the import service computes.

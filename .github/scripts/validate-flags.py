@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors.
 #
 # CI gate for flag-as-code (ADR-0067 / issue #419).

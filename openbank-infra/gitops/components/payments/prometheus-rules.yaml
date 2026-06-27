@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # Per-service PrometheusRule alerts for the payments namespace (money-path, ADR-0077/0079).
 # Covers: transaction-service, clearing-service, swift-service, sepa-payment, sepa-instant,
 # domestic-payment, sdd-service. Complements the fleet-wide tier-1 rules with payment-rail

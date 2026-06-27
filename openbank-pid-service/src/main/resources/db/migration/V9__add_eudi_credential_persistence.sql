@@ -1,5 +1,5 @@
--- SPDX-License-Identifier: MPL-2.0
--- Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 --
 -- ADR-0094 go-live — durable persistence for the EUDI issuer/verifier stores. Before this, the
 -- Token Status List (revocation), the status-index allocation counter, and the in-flight

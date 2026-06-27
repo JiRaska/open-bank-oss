@@ -1,5 +1,5 @@
--- SPDX-License-Identifier: MPL-2.0
--- Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 --
 -- ADR-0072: blind index for Czech RČ dedup (1 person = 1 party).
 --

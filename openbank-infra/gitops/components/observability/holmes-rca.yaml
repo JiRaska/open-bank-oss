@@ -18,7 +18,7 @@ metadata:
     app.kubernetes.io/part-of: observability
 data:
   relay.py: |
-    # SPDX-License-Identifier: MPL-2.0
+    # SPDX-License-Identifier: Apache-2.0
     import json, os, time, threading, urllib.request
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 

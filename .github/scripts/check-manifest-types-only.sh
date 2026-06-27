@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # ADR-0071 Phase 4: verify that manifest.ts contains ONLY type definitions —
 # no hand-edited version strings, no inline data arrays, no hardcoded lineage.
 #

@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: MPL-2.0
-# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
 # OpenBank governance rules — the single, machine-readable source of truth.
 #
@@ -308,17 +308,17 @@ provenance:
 # ---------------------------------------------------------------------------------------
 dependencies:
   license_allowlist: [Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, EPL-2.0, MPL-2.0, ISC]
-  license_denylist: [GPL-2.0, GPL-3.0, AGPL-3.0]   # incompatible with MPL-2.0 in the same file
-  # Carve-out (ADR-0031 D8 + ADR-0012 amendment): the AI agent RUNTIME component is AGPL-3.0 +
-  # commercial dual-license, in its OWN repo/module with a CLA -- NOT MPL. The denylist above governs
-  # MPL code; AGPL-3.0 is permitted for that isolated component only, so the gate must not flag it there.
+  license_denylist: [GPL-2.0, GPL-3.0, AGPL-3.0]   # copyleft -- would contaminate the Apache-2.0 tree
+  # Carve-out (ADR-0031 D8): the AI agent RUNTIME component is AGPL-3.0 +
+  # commercial dual-license, in its OWN repo/module with a CLA -- NOT Apache-2.0. The denylist above governs
+  # the main tree; AGPL-3.0 is permitted for that isolated component only, so the gate must not flag it there.
   license_denylist_exceptions:
     - license: AGPL-3.0
       scope: agent-runtime-component        # separate repo/module, own LICENSE + CLA
       reason: "commercial dual-licensing of the agent component"
       adr: ADR-0031
   license_boundary_exceptions:
-    - description: "AGPL/MPL seam — openbank-agent-runtime (external repo) implements ModelProvider port. AGPL code must not leak into MPL tree; only the port interface may cross the boundary."
+    - description: "AGPL/Apache seam — openbank-agent-runtime (external repo) implements ModelProvider port. AGPL code must not leak into the Apache-2.0 tree; only the port interface may cross the boundary."
       allowed_at: "openbank-agent-service/src/main/kotlin/com/openbank/agent/application/ModelProvider.kt"
       external_repo: "JiRaska/openbank-agent-runtime"
       license: "AGPL-3.0-or-later"

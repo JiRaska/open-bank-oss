@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: MPL-2.0
-# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 openapi: 3.1.0
 info:
   title: Interest Service API
@@ -12,8 +12,8 @@ info:
     (ADR-0038): the remittance endpoints assemble the per-period *Vyúčtování daně vybírané srážkou*
     and advance the paired records RECORDED → REMITTED.
   license:
-    name: MPL-2.0
-    url: https://www.mozilla.org/MPL/2.0/
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
 servers:
   - url: http://localhost:8119
     description: Local development

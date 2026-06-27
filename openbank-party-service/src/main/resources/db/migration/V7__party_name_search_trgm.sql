@@ -1,5 +1,5 @@
--- SPDX-License-Identifier: MPL-2.0
--- Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 --
 -- ADR-0055 Phase 2 (party-service): bounded name search.
 -- Trigram GIN indexes back the case-insensitive substring search over the party's

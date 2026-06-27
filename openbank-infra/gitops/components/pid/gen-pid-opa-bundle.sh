@@ -10,7 +10,7 @@ MANIFEST=$REPO/openbank-infra/opa/bundle.manifest
 
 # Pid REST extension — identity + EUDI + party actions for operators/admins
 PID_REST_EXT=$(cat << 'REGO'
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # Pid-service REST extension (ADR-0034, ADR-0094, ADR-0072).
 # Extends openbank.rest with identity-domain allow reasons.
 # Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.

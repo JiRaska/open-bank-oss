@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: MPL-2.0
-# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
-# See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 #
 # Re-register an ALREADY-INSTALLED self-hosted GitHub Actions runner whose
 # server-side registration was lost, and (re)install it as a managed service so

@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: MPL-2.0
-// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
-// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 'use client'
 
 import Link from 'next/link'
@@ -146,7 +146,7 @@ export default function QrlessPayPage() {
       {/* SDK / Third-party bank integration */}
       <Section
         title={t('SDK a integrace pro banky třetích stran', 'SDK & third-party bank integration')}
-        subtitle={t('QRlessPay je otevřený protokol — každá banka může implementovat roli plátce i příjemce nezávisle na OpenBank. SDK plánujeme publikovat pod MPL-2.0.', 'QRlessPay is an open protocol — any bank can implement both payer and payee roles independently of OpenBank. We plan to publish the SDK under MPL-2.0.')}
+        subtitle={t('QRlessPay je otevřený protokol — každá banka může implementovat roli plátce i příjemce nezávisle na OpenBank. SDK plánujeme publikovat pod Apache-2.0.', 'QRlessPay is an open protocol — any bank can implement both payer and payee roles independently of OpenBank. We plan to publish the SDK under Apache-2.0.')}
       >
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(295px, 1fr))', gap: 12, marginBottom: 14 }}>
           {[
@@ -182,12 +182,12 @@ export default function QrlessPayPage() {
           </div>
           <div style={{ fontSize: 12.5, color: SUB, lineHeight: 1.6 }}>
             {t(
-              'SDK pro Android (Kotlin) a iOS (Swift) pod MPL-2.0 pokryje: BLE scanning/advertising, GATT přenos, Ed25519 podepisování/ověřování a SPAYD parser. Banky doplní pouze svůj platební backend (IBAN rail). Cíl: standard kompatibilní s ČBA a EPC pro mezibankovní proximity platby bez kódu.',
-              'SDK for Android (Kotlin) and iOS (Swift) under MPL-2.0 will cover: BLE scanning/advertising, GATT transfer, Ed25519 signing/verification and SPAYD parser. Banks need only plug in their own payment backend (IBAN rail). Goal: a ČBA and EPC-compatible standard for interbank proximity payments without a QR code.',
+              'SDK pro Android (Kotlin) a iOS (Swift) pod Apache-2.0 pokryje: BLE scanning/advertising, GATT přenos, Ed25519 podepisování/ověřování a SPAYD parser. Banky doplní pouze svůj platební backend (IBAN rail). Cíl: standard kompatibilní s ČBA a EPC pro mezibankovní proximity platby bez kódu.',
+              'SDK for Android (Kotlin) and iOS (Swift) under Apache-2.0 will cover: BLE scanning/advertising, GATT transfer, Ed25519 signing/verification and SPAYD parser. Banks need only plug in their own payment backend (IBAN rail). Goal: a ČBA and EPC-compatible standard for interbank proximity payments without a QR code.',
             )}
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Tag>KMP / MPL-2.0</Tag>
+            <Tag>KMP / Apache-2.0</Tag>
             <Tag>ČBA / EPC</Tag>
             <Tag>{t('Otevřený protokol', 'Open protocol')}</Tag>
             <Tag>{t('Mezibankovní', 'Interbank')}</Tag>

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # Production Readiness — manuální atestace (M-dimenze).
 #
 # Tohle je JEDINÉ místo, kde se zralost zadává ručně. Derived signály (kód, testy,

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Add SPDX MPL-2.0 license headers to source files that lack them.
+# Add SPDX Apache-2.0 license headers to source files that lack them.
 #
-# MPL-2.0 itself does not require per-file headers (unlike Apache-2.0 / GPL),
-# but SPDX identifiers improve license-scanner accuracy and downstream clarity.
+# Apache-2.0 recommends a per-file header; the SPDX identifier is the compact
+# form and improves license-scanner accuracy and downstream clarity.
 #
 # Usage:
 #   ./scripts/add-license-headers.sh            # dry-run, list files that would be modified
@@ -13,14 +13,14 @@ set -euo pipefail
 APPLY="${1:-}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-KT_HEADER='// SPDX-License-Identifier: MPL-2.0
-// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
-// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+KT_HEADER='// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 '
 
-TS_HEADER='// SPDX-License-Identifier: MPL-2.0
-// Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
-// See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
+TS_HEADER='// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 '
 
 count_total=0

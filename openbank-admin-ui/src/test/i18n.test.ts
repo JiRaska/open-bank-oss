@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: Apache-2.0
 import { describe, it, expect } from 'vitest'
 
 const makeT = (language: 'cs' | 'en') => (csText: string, enText: string) =>

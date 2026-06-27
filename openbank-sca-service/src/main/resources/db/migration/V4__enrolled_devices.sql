@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: MPL-2.0
+-- SPDX-License-Identifier: Apache-2.0
 -- ADR-0021: decoupled device approval. Durable store of device credentials enrolled
 -- to a party; the public key verifies later out-of-band approval assertions.
 --

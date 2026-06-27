@@ -41,7 +41,7 @@ must therefore split discovery from payload transfer.
 We will define **QRlessPay**, an open BLE proximity profile that transfers a
 **signed SPAYD descriptor** directly between two phones in two phases, and we
 will publish it as an open standard. The reference implementation ships in
-`openbank-app` (MPL-2.0).
+`openbank-app` (Apache-2.0).
 
 **Two-phase protocol** (full wire format in
 [`docs/specs/qrlesspay-v1.md`](../specs/qrlesspay-v1.md)):

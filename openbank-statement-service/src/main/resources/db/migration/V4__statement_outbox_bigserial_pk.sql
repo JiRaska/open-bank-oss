@@ -1,5 +1,5 @@
--- SPDX-License-Identifier: MPL-2.0
--- Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 --
 -- ADR-0049 D3: migrate statement_outbox.id from UUID to BIGSERIAL so that the entity can extend
 -- PanacheOutboxEntity (which extends PanacheEntity with a generated Long id).

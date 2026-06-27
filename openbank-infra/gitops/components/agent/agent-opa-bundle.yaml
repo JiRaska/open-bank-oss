@@ -9,11 +9,11 @@ metadata:
     app.kubernetes.io/name: agent-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "8962c9570cf4e465"
+    openbank.tech/policy-checksum: "d9c0e0c208980614"
 data:
   agents.rego: |
-    # SPDX-License-Identifier: MPL-2.0
-    # Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+    # SPDX-License-Identifier: Apache-2.0
+    # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
     #
     # Agent tool-call authorization (ADR-0031 D2). This is the policy enforcement point in front
     # of the MCP /tools/call endpoint: before dispatching a tool, the endpoint queries
@@ -105,8 +105,8 @@ data:
     glob_match(pattern, value) if pattern == value
     glob_match(pattern, value) if glob.match(pattern, ["."], value)
   agents-data.yaml: |
-    # SPDX-License-Identifier: MPL-2.0
-    # Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+    # SPDX-License-Identifier: Apache-2.0
+    # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
     #
     # OpenBank AI-agent charters — the single, machine-readable source of truth for what each
     # agent may see, call, and do, and where a human must decide (ADR-0031).
@@ -161,8 +161,8 @@ data:
       identity:      spiffe-spire       # short-TTL SVID per run; signing root stays in Vault (ADR-0017)
 
     # Licensing note (ADR-0031 D8): the agent RUNTIME component is AGPL-3.0 + commercial dual-license,
-    # in a SEPARATE repo with a CLA -- NOT this MPL-2.0 governance file. rules.yaml license_denylist gets
-    # a documented carve-out for it. This charter config itself stays MPL-2.0.
+    # in a SEPARATE repo with a CLA -- NOT this Apache-2.0 governance file. rules.yaml license_denylist gets
+    # a documented carve-out for it. This charter config itself stays Apache-2.0.
 
     # ---------------------------------------------------------------------------------------
     # Model strategy -- hybrid, model-agnostic via an open LLM gateway (ADR-0031 D6).

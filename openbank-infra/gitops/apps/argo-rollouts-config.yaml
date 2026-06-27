@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors.
 #
 # Argo Rollouts cluster-scoped configuration (ADR-0098 Phase 1).

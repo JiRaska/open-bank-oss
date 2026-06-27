@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: MPL-2.0
+-- SPDX-License-Identifier: Apache-2.0
 -- Lending / credit bounded context (ADR-0028): origination, servicing, collateral, IFRS 9 provisioning.
 
 CREATE TYPE amortization_method AS ENUM ('ANNUITY', 'EQUAL_PRINCIPAL', 'BULLET');

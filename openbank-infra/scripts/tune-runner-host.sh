@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: MPL-2.0
-# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
 # Raise fs.aio-max-nr on a self-hosted Linux GitHub Actions runner host so that
 # Redpanda / Kafka Testcontainers can allocate their async-I/O contexts.

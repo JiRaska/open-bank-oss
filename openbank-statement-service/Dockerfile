@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: MPL-2.0
-# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
 # Fast-jar only (never uber-jar): the runtime stage COPYs quarkus-app/. The host-side
 # build-push-service.sh runs quarkusBuild locally first; this in-image build is the CI/portable path.

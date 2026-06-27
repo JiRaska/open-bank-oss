@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 export type DataLineageRole = 'producer' | 'consumer' | 'both' | 'internal'
 export type DataDomain = 'core' | 'payments' | 'compliance' | 'identity' | 'open-banking' | 'platform'
