@@ -35,7 +35,8 @@ class CardServiceTest {
 
     private val clock = Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC)
 
-    @BeforeEach fun setUp() {
+    @BeforeEach
+    fun setUp() {
         repo = mockk()
         service = CardService(repo, mapper, clock)
     }

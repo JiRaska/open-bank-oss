@@ -53,6 +53,15 @@ class CardRepositoryImpl(private val outboxRepository: CardOutboxRepositoryImpl)
     override suspend fun findByPartyId(partyId: UUID): List<Card> =
         Panache.withSession { find("partyId", partyId).list() }.awaitSuspending().map { it.toDomain() }
 
+    override suspend fun anonymizeByPartyId(partyId: UUID) {
+        Panache.withTransaction {
+            update(
+                "cardholderName = '[ERASED]', embossedName = '[ERASED]', deliveryAddress = null, blockedReason = null WHERE partyId = ?1",
+                partyId,
+            )
+        }.awaitSuspending()
+    }
+
     /** Copy the mutable (lifecycle) fields of [card] onto a managed entity for an in-place update. */
     private fun CardEntity.applyFrom(card: Card) {
         status = card.status.name

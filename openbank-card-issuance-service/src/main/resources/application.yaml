@@ -79,6 +79,14 @@ quarkus:
 
 mp:
   messaging:
+    incoming:
+      party-events-in:
+        connector: smallrye-kafka
+        client.id: cardissuance-party-${quarkus.uuid}
+        group.id: cardissuance-party
+        topic: openbank.party.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto.offset.reset: earliest
     outgoing:
       # ADR-0050 transactional-outbox egress. The dispatcher sets the Kafka key (= aggregate id, N2)
       # and ce-id/idempotency-key/ce-type headers (N3) via OutgoingKafkaRecordMetadata, so both a key

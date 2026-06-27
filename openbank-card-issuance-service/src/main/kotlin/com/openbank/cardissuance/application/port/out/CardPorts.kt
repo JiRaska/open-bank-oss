@@ -29,4 +29,6 @@ interface CardRepository {
     suspend fun findByAccountId(accountId: UUID): List<Card>
 
     suspend fun findByPartyId(partyId: UUID): List<Card>
+
+    suspend fun anonymizeByPartyId(partyId: UUID)
 }
