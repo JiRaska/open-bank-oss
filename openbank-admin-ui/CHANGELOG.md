@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.33.0](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.32.0...admin-ui-v0.33.0) (2026-06-27)
+
+
+### Features
+
+* **admin-ui:** FinOps AI costs card + IAOps anomaly timeline (ADR-0112) ([#2183](https://github.com/JiRaska/open-bank/issues/2183)) ([225cc57](https://github.com/JiRaska/open-bank/commit/225cc574b6eabc543f00aedc7871b0981ac0dbfa))
+
+
+### Bug Fixes
+
+* **admin-ui:** move MCP server registry out of ToolCard loop ([#2176](https://github.com/JiRaska/open-bank/issues/2176)) ([97f7d29](https://github.com/JiRaska/open-bank/commit/97f7d2916a0424b43e0fb688280598c7aa9164ce))
+* **admin-ui:** normalise finops-agent tier-object tools in /iaops API ([#2203](https://github.com/JiRaska/open-bank/issues/2203)) ([a629f4b](https://github.com/JiRaska/open-bank/commit/a629f4b2d2bbfb2c6cdd7daf5251f264ef514d03))
+
 ## [0.32.0](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.31.0...admin-ui-v0.32.0) (2026-06-25)
 
 
