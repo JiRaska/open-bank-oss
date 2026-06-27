@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/JiRaska/open-bank/compare/lending-service-v0.6.1...lending-service-v0.6.2) (2026-06-27)
+
+
+### Bug Fixes
+
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+
 ## [0.6.1](https://github.com/JiRaska/open-bank/compare/lending-service-v0.6.0...lending-service-v0.6.1) (2026-06-25)
 
 
