@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank/compare/aml-service-v0.5.1...aml-service-v0.6.0) (2026-06-27)
+
+
+### Features
+
+* **aml:** inject Clock for DST determinism (ADR-0100 Layer 1) ([#2124](https://github.com/JiRaska/open-bank/issues/2124)) ([b292145](https://github.com/JiRaska/open-bank/commit/b29214592a622fb9f003685e5c9f7b8d984d2f41))
+* **product-catalog,libs:** inject Clock for DST determinism (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2165](https://github.com/JiRaska/open-bank/issues/2165)) ([4956fc3](https://github.com/JiRaska/open-bank/commit/4956fc3eca24ea884281d09cd5c667c9f2f0dfb3))
+* **sanctions,aml,psd2,card-issuance:** inject Clock for DST determinism (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2118](https://github.com/JiRaska/open-bank/issues/2118)) ([bbd0da0](https://github.com/JiRaska/open-bank/commit/bbd0da0dfd269d3c5ac5af8d5bac9d754c48a2d0))
+
+
+### Bug Fixes
+
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+
 ## [0.5.1](https://github.com/JiRaska/open-bank/compare/aml-service-v0.5.0...aml-service-v0.5.1) (2026-06-25)
 
 
