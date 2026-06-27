@@ -74,7 +74,7 @@ All API calls require a Bearer token from `https://kc.open-bank.tech/realms/open
 
 ## Quick Start (Local Docker)
 
-**Prerequisites:** Docker Desktop ≥ 4.x (Compose v2), 16 GB RAM recommended (the full fleet is ~30 services).
+**Prerequisites:** Docker Desktop ≥ 4.x (Compose v2), 16 GB RAM recommended (the full fleet is ~40 services).
 
 ```bash
 cd openbank-infra
@@ -142,10 +142,10 @@ idempotency, audit, outbox, service-info, API-version filter, authz) lives in `o
 |---|---|---|
 | `openbank-account-service` | 8100 | Account lifecycle (open, freeze, close) |
 | `openbank-ledger-service` | 8101 | Double-entry general ledger |
-| `openbank-transaction-service` | 8102 | Transaction posting, idempotency |
+| `openbank-transaction-service` | 8102 | Transaction posting, saga orchestration, idempotency |
 | `openbank-balance-service` | 8103 | Real-time balance projection |
 | `openbank-product-catalog` | 8104 | Banking product catalog |
-| `openbank-pid-service` | 8105 | Party identity resolution & dedup (ADR-0072) |
+| `openbank-pid-service` | 8105 | Party identity resolution & dedup; EUDI/PID (ADR-0072/0094) |
 | `openbank-consent-service` | 8106 | PSD2 consent management |
 | `openbank-psd2-service` | 8107 | PSD2 AISP/PISP API |
 | `openbank-tpp-registry-service` | 8108 | Third-party provider registry |
@@ -156,35 +156,40 @@ idempotency, audit, outbox, service-info, API-version filter, authz) lives in `o
 | `openbank-audit-service` | 8113 | Audit trail aggregation |
 | `openbank-kyc-service` | 8114 | Know-Your-Customer onboarding |
 | `openbank-sepa-payment` | 8115 | SEPA Credit Transfer |
-| `openbank-domestic-payment` | 8116 | Domestic payment processing |
+| `openbank-domestic-payment` | 8116 | Domestic (CERTIS-style) payment processing |
 | `openbank-aml-service` | 8117 | Anti-money-laundering screening |
 | `openbank-card-issuance-service` | 8118 | Card issuance |
 | `openbank-fx-service` | 8119 | Foreign exchange |
 | `openbank-security-scanner` | 8120 | Internal security scanning |
-| `openbank-standing-order-service` | 8121 | Recurring payments |
+| `openbank-standing-order-service` | 8121 | Recurring payments (daily due-date sweep) |
 | `openbank-swift-service` | 8122 | SWIFT MT/MX messaging |
+| `openbank-sanctions-service` | 8123 | Sanctions list screening (pg_trgm fuzzy match) |
 | `openbank-clearing-service` | 8124 | Clearing & settlement |
 | `openbank-interest-service` | 8125 | Interest calculation & accrual |
-| `openbank-dispute-service` | 8135 | Card disputes & chargebacks |
+| `openbank-lending-service` | 8126 | Loan origination & servicing (four-eyes) |
 | `openbank-sepa-instant` | 8127 | SEPA Instant Credit Transfer |
+| `openbank-customer-edge` | 8128 | Customer BFF for the mobile app (OPA enforce mode) |
+| `openbank-sdd-service` | 8129 | SEPA Direct Debit mandates (debtor side) |
+| `openbank-onboarding-service` | 8130 | Onboarding funnel projection (party/KYC/SCA) |
 | `openbank-copilot-service` | 8131 | Customer AI assistant (LLM, policy-gated) |
-| `openbank-settlement-service` | — | Net settlement & reconciliation |
-| `openbank-sanctions-service` | — | Sanctions list screening (pg_trgm fuzzy match) |
-| `openbank-onboarding-service` | — | Onboarding funnel projection (party/KYC/SCA) |
-| `openbank-statement-service` | — | Account statements (camt.053 / MT940 / PDF) |
-| `openbank-sdd-service` | — | SEPA Direct Debit mandates (debtor side) |
-| `openbank-lending-service` | — | Loan origination & servicing (four-eyes) |
-| `openbank-anacredit-service` | — | AnaCredit regulatory report builder |
-| `openbank-finrep-service` | — | FINREP / COREP regulatory reporting |
-| `openbank-analytics-sink` | — | Event analytics sink |
-| `openbank-customer-edge` | — | Customer BFF for the mobile app (OPA enforce mode) |
-| `openbank-fraud-service` | — | Fraud detection — deployed; velocity-counter signal plane live (ADR-0084) |
+| `openbank-fraud-service` | 8133 | Fraud detection (velocity-counter signal plane, ADR-0084) |
+| `openbank-analytics-sink` | 8134 | Event analytics sink |
+| `openbank-dispute-service` | 8135 | Card disputes & chargebacks |
+| `openbank-statement-service` | 8136 | Account statements (camt.053 / MT940 / PDF) |
+| `openbank-anacredit-service` | 8137 | AnaCredit regulatory report builder |
+| `openbank-settlement-service` | 8138 | Net settlement & reconciliation |
+| `openbank-clearing-simulator` | 8139 | ISO 20022 clearing/settlement simulator (ADR-0104) |
+| `openbank-finrep-service` | 8140 | FINREP / COREP regulatory reporting |
+| `openbank-finops-agent` | 8141 | FinOps cost/usage agent |
+| `openbank-developer-portal` | — | PSD2 XS2A developer portal (static site, developer.open-bank.tech) |
+| `openbank-simulation` | — | Deterministic simulation harness (DST, ADR-0100) |
 | `openbank-api-gateway` | — | Kong gateway configuration |
 | `openbank-admin-ui` | 3000 | Bank operator console (Next.js) |
 | `openbank-libs` | — | Shared primitives + runtime plumbing |
 
-> `openbank-analytics-sink` is implemented but not a released component (no `version.txt`).
-> Deployed-to-sandbox vs code-only status is tracked in the [Project Status](#project-status) table above.
+> `openbank-analytics-sink`, `openbank-developer-portal`, `openbank-simulation`, and `openbank-api-gateway`
+> are implemented but are not released components (no `version.txt`). Deployed-to-sandbox vs code-only
+> status is tracked in the [Project Status](#project-status) table above.
 
 ### Governance, security & operations as code
 
@@ -206,14 +211,15 @@ OpenBank treats non-functional concerns as machine-enforced, not as prose:
 
 | Layer | Technology |
 |---|---|
-| Backend | Kotlin 2.0 + Quarkus 3.x |
+| Backend | Kotlin 2.3 + Quarkus 3.33 |
 | Database | PostgreSQL 16 (Flyway migrations); upgrading to 18 via CNPG (runbook 0003, in progress) |
-| Messaging | Apache Kafka 3.7 + transactional outbox |
+| Messaging | Apache Kafka (transactional outbox); Redpanda for per-JVM integration tests |
 | Schema registry | Apicurio 2.6 |
-| Cache | Valkey 7.x |
+| Cache | Valkey 7.2 |
 | IAM | Keycloak 24 |
-| Secrets | HashiCorp Vault |
+| Secrets | OpenBao (LF fork of Vault; runbook 0005) |
 | Policy / authz | Open Policy Agent (OPA) |
+| Durable execution | Temporal (ADR-0101) — FX + statement flows on durable workflows |
 | Observability | OpenTelemetry → Grafana (Prometheus + Loki + Tempo + Pyroscope); GoAlert on-call, Pyrra SLO-as-code, GlitchTip errors |
 | Admin UI | Next.js 16 + React 19 + TypeScript + shadcn/ui |
 | API Gateway | Kong |
