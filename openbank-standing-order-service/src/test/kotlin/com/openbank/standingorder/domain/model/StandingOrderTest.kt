@@ -7,9 +7,13 @@ package com.openbank.standingorder.domain.model
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.Arguments
+import org.junit.jupiter.params.provider.MethodSource
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
+import java.util.stream.Stream
 
 class StandingOrderTest {
 
@@ -124,7 +128,29 @@ class StandingOrderTest {
         updatedAt = updatedAt,
     )
 
+    @ParameterizedTest
+    @MethodSource("frequencyNextDateCases")
+    fun `calculateNextDate advances the date by the frequency`(
+        frequency: Frequency,
+        from: LocalDate,
+        expected: LocalDate,
+    ) {
+        val order = standingOrder(frequency = frequency)
+
+        assertThat(order.calculateNextDate(from)).isEqualTo(expected)
+    }
+
     private companion object {
         val FIXED_NOW: Instant = Instant.parse("2026-01-15T10:15:30Z")
+
+        @JvmStatic
+        fun frequencyNextDateCases(): Stream<Arguments> = Stream.of(
+            Arguments.of(Frequency.DAILY, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 2)),
+            Arguments.of(Frequency.WEEKLY, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 8)),
+            Arguments.of(Frequency.BIWEEKLY, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 15)),
+            Arguments.of(Frequency.MONTHLY, LocalDate.of(2026, 1, 31), LocalDate.of(2026, 2, 28)),
+            Arguments.of(Frequency.QUARTERLY, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 4, 1)),
+            Arguments.of(Frequency.ANNUALLY, LocalDate.of(2026, 3, 15), LocalDate.of(2027, 3, 15)),
+        )
     }
 }

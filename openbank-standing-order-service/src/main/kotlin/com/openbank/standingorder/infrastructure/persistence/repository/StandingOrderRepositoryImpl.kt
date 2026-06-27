@@ -4,6 +4,7 @@
 
 package com.openbank.standingorder.infrastructure.persistence.repository
 
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.standingorder.application.port.out.StandingOrderRepository
 import com.openbank.standingorder.domain.model.StandingOrder
 import com.openbank.standingorder.infrastructure.persistence.entity.StandingOrderEntity
@@ -13,6 +14,7 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import java.time.LocalDate
 import java.util.UUID
 
@@ -20,6 +22,10 @@ import java.util.UUID
 class StandingOrderRepositoryImpl :
     StandingOrderRepository,
     PanacheRepository<StandingOrderEntity> {
+
+    @Inject
+    lateinit var outboxRepo: StandingOrderOutboxRepositoryImpl
+
     override suspend fun save(order: StandingOrder): StandingOrder {
         val e = order.toEntity()
         Panache.withTransaction { persist(e) }.awaitSuspending()
@@ -37,4 +43,25 @@ class StandingOrderRepositoryImpl :
     override suspend fun findDueForExecution(asOf: LocalDate) =
         Panache.withSession { find("nextExecutionDate <= ?1 AND status = 'ACTIVE'", asOf).list() }
             .awaitSuspending().map { it.toDomain() }
+
+    override suspend fun saveWithExecution(order: StandingOrder, outboxMessage: OutboxMessage): StandingOrder =
+        Panache.withTransaction {
+            find("id", order.id).firstResult().flatMap { existing ->
+                if (existing != null) {
+                    existing.applyFrom(order)
+                    outboxRepo.persistInTransaction(outboxMessage).replaceWith(order)
+                } else {
+                    persist(order.toEntity()).chain { _ -> outboxRepo.persistInTransaction(outboxMessage) }
+                        .replaceWith(order)
+                }
+            }
+        }.awaitSuspending()
+
+    private fun StandingOrderEntity.applyFrom(order: StandingOrder) {
+        status = order.status
+        nextExecutionDate = order.nextExecutionDate
+        lastExecutionDate = order.lastExecutionDate
+        executionCount = order.executionCount
+        updatedAt = order.updatedAt
+    }
 }

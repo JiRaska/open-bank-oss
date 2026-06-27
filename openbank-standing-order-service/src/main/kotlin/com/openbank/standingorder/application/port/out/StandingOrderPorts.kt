@@ -4,6 +4,7 @@
 
 package com.openbank.standingorder.application.port.out
 
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.standingorder.domain.model.StandingOrder
 import java.time.LocalDate
 import java.util.UUID
@@ -24,4 +25,6 @@ interface StandingOrderRepository {
     suspend fun findByAccountId(accountId: UUID): List<StandingOrder>
 
     suspend fun findDueForExecution(asOf: LocalDate): List<StandingOrder>
+
+    suspend fun saveWithExecution(order: StandingOrder, outboxMessage: OutboxMessage): StandingOrder
 }

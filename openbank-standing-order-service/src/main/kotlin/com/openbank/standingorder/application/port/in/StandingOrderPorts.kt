@@ -34,4 +34,6 @@ interface StandingOrderUseCase {
     suspend fun listByParty(partyId: UUID): List<StandingOrder>
     suspend fun listByAccount(accountId: UUID): List<StandingOrder>
     suspend fun listDueForExecution(asOf: LocalDate): List<StandingOrder>
+
+    suspend fun executeOrders(asOf: LocalDate): Int
 }

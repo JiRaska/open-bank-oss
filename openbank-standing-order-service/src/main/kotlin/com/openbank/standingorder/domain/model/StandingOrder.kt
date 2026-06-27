@@ -56,4 +56,13 @@ data class StandingOrder(
         updatedAt = now,
         status = if (endDate != null && nextDate.isAfter(endDate)) StandingOrderStatus.COMPLETED else status,
     )
+
+    fun calculateNextDate(from: LocalDate): LocalDate = when (frequency) {
+        Frequency.DAILY -> from.plusDays(1)
+        Frequency.WEEKLY -> from.plusWeeks(1)
+        Frequency.BIWEEKLY -> from.plusWeeks(2)
+        Frequency.MONTHLY -> from.plusMonths(1)
+        Frequency.QUARTERLY -> from.plusMonths(3)
+        Frequency.ANNUALLY -> from.plusYears(1)
+    }
 }

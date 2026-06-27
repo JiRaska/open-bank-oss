@@ -98,6 +98,9 @@ openbank:
     dispatch-enabled: true
     poll-interval: 5s
     initial-delay: 5s
+  scheduler:
+    execution-cron: "0 3 * * ?"
+    execution-enabled: true
 
 mp:
   messaging:
