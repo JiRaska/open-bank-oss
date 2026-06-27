@@ -309,7 +309,15 @@ jobs:
           # Net effect: eliminates ~74 GB/day upload + corresponding download traffic
           # ≈ $6.66/day saved ($200/month). Re-enable if cold-start build time degrades
           # unacceptably after the remote build cache fills (typically 1-2 runs).
-          cache-enabled: false
+          #
+          # NOTE: the input is `cache-disabled` (gradle/actions/setup-gradle v6). The
+          # earlier `cache-enabled: false` was NOT a valid input — the action ignored it
+          # ("Unexpected input(s) 'cache-enabled'") so caching stayed ON: the post-action
+          # kept uploading the Gradle home, silently negating the FinOps saving above AND
+          # exhausting the shared storage quota during full-fleet rebuilds
+          # ("Failed to CreateArtifact: Artifact storage quota has been hit"), which failed
+          # otherwise-green service builds.
+          cache-disabled: true
 
       # No --no-daemon (ADR-0043): on a persistent runner the Gradle daemon is kept
       # warm and reused across jobs, so the JVM + 30-module configuration is not paid
