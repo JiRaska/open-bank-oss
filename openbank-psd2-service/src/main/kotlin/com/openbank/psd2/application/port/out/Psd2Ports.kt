@@ -45,6 +45,7 @@ data class ConsentSnapshot(val consentId: String, val partyId: String, val statu
 interface ConsentServiceClient {
     suspend fun getConsent(consentId: String): ConsentSnapshot
 
+    @Suppress("LongParameterList")
     suspend fun createConsent(
         partyId: String,
         granteeId: String,

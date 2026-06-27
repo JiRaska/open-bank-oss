@@ -20,6 +20,7 @@ class EidasMtlsFilter(private val tppAuthorizationGuard: TppAuthorizationGuard) 
 
     private val log = Logger.getLogger(EidasMtlsFilter::class.java)
 
+    @Suppress("LongMethod")
     override fun filter(ctx: ContainerRequestContext) {
         val path = ctx.uriInfo.path
         // Gate both the deprecated bespoke surface (`open-banking/`) and the Berlin Group XS2A
