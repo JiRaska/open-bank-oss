@@ -172,7 +172,15 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: openbank-deploy # credentialed lane (ADR-0053)
     timeout-minutes: 30
-    environment: platform-apply  # issue #282: audit trail + future reviewer gate (Pro/Team)
+    # NOTE (bootstrap): `environment: platform-apply` is temporarily removed. When a
+    # job declares an environment, GitHub rewrites the OIDC sub to
+    # "repo:OWNER/REPO:environment:platform-apply", which the openbank-ci-tofu-apply
+    # trust policy did not accept (it pinned sub=ref:refs/heads/main) → AssumeRole was
+    # denied and NO apply could run. This same PR broadens the trust to accept the
+    # environment sub too; once that apply lands, re-add the line below so the apply is
+    # gated/audited again (issue #282). Until then the security boundary is unchanged:
+    # manual dispatch on main + the job_workflow_ref pin (ADR-0060).
+    # environment: platform-apply
     env:
       TF_VAR_governance_gh_pat: ${{ secrets.GOVERNANCE_GH_PAT }}
     steps:

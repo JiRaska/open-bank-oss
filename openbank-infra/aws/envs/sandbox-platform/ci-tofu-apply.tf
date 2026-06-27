@@ -114,11 +114,21 @@ data "aws_iam_policy_document" "ci_tofu_apply_assume" {
     }
     # Primary gate: pin to main of this repo. `sub` is always present in the
     # OIDC token for all runner types (GitHub-hosted and ARC self-hosted).
-    # `workflow_dispatch` on refs/heads/main → sub = "repo:OWNER/REPO:ref:refs/heads/main".
+    # Two legitimate sub forms for the apply, both accepted (StringEquals on a list
+    # is an OR):
+    #   - no environment   → sub = "repo:OWNER/REPO:ref:refs/heads/main"
+    #   - environment gate  → sub = "repo:OWNER/REPO:environment:platform-apply"
+    # GitHub rewrites the sub to the environment form whenever the job declares
+    # `environment:` (issue #282 audit-trail + reviewer gate). Accepting both lets
+    # the apply job opt into the environment without breaking AssumeRole, while the
+    # job_workflow_ref pin below remains the actual security boundary (ADR-0060).
     condition {
       test     = "StringEquals"
       variable = "${local.ci_oidc_host}:sub"
-      values   = ["repo:${local.ci_github_repo}:ref:refs/heads/main"]
+      values = [
+        "repo:${local.ci_github_repo}:ref:refs/heads/main",
+        "repo:${local.ci_github_repo}:environment:platform-apply",
+      ]
     }
     # Belt-and-suspenders: further restrict to the exact workflow file when the
     # job_workflow_ref claim is present. ARC self-hosted runners omit this claim
