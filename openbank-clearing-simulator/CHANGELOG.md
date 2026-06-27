@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.0](https://github.com/JiRaska/open-bank/compare/clearing-simulator-v0.2.0...clearing-simulator-v0.3.0) (2026-06-27)
+
+
+### Features
+
+* **sanctions:** inject Clock for DST determinism (ADR-0100 Layer 1) ([#2125](https://github.com/JiRaska/open-bank/issues/2125)) ([61da7c2](https://github.com/JiRaska/open-bank/commit/61da7c24c384a4ec70674f95ba95f401a4817c18))
+
+
+### Bug Fixes
+
+* **clearing-simulator,product-catalog:** resolve detekt MagicNumber and CyclomaticComplexMethod violations ([#2230](https://github.com/JiRaska/open-bank/issues/2230)) ([0359472](https://github.com/JiRaska/open-bank/commit/03594725eac2844caaaa33eebffaa620c86d5512))
+* **clearing-simulator:** switch ClearingSimulatorService to field Clock injection to fix CDI proxy NPE in ClearingSimulatorApiIT ([#2263](https://github.com/JiRaska/open-bank/issues/2263)) ([abf7bc4](https://github.com/JiRaska/open-bank/commit/abf7bc4e945e6eeba1cca4e8e5f9a7ee2bffbbd2))
+* **sepa-payment,analytics,clearing-simulator,finrep,fx,customer-edge,security-scanner:** inject Clock for DST determinism (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2174](https://github.com/JiRaska/open-bank/issues/2174)) ([51a872e](https://github.com/JiRaska/open-bank/commit/51a872ec0ce0b9f888226ca94ffcfb9f392174c2))
+
 ## [0.2.0](https://github.com/JiRaska/open-bank/compare/clearing-simulator-v0.1.0...clearing-simulator-v0.2.0) (2026-06-25)
 
 
