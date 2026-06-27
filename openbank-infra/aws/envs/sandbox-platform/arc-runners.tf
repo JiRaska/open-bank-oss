@@ -252,13 +252,21 @@ locals {
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Dedicated EC2NodeClass for runner nodes — 30 GiB root EBS instead of 20 GiB.
+# Dedicated EC2NodeClass for runner nodes — 50 GiB root EBS instead of 20 GiB.
 # Non-runner nodes stay on the default EC2NodeClass (20 GiB) because they run
 # stateless workloads that don't accumulate Docker layers.
 # Runner nodes pull 400-800 MB service images per dind build; with the
-# docker-lib emptyDir capped at 14 GiB, a single pod needs up to 22 GiB
-# (8 GiB OS + 14 GiB docker-lib). 30 GiB covers one pod comfortably.
-# Cost delta: +$0.80/runner-node/month (10 GiB × $0.08 gp3).
+# docker-lib emptyDir capped at 14 GiB, one pod needs up to 22 GiB (8 GiB OS +
+# 14 GiB docker-lib). Paired with the runner pod's 16Gi ephemeral-storage
+# request (see above), 50 GiB (~42 GiB allocatable) holds 2 runner pods with a
+# safety buffer above their reservations, so the node never hits DiskPressure.
+# This dedicated nodeclass was previously only in code — the live runner
+# NodePools were still on the 20 GiB `default` nodeclass; applying this wires
+# them to `runners`.
+# Cost delta: +$2.40/runner-node/month (30 GiB × $0.08 gp3) — and these are spot
+# + ephemeral (expireAfter 72h, scale-to-zero), so the real monthly cost is a
+# fraction of that. Net negative cost: it eliminates the wasted node-hours + NAT
+# + Trivy-DB re-downloads from every evicted job that currently re-runs.
 # ---------------------------------------------------------------------------
 resource "kubectl_manifest" "ec2nodeclass_runners" {
   count      = var.arc_runner_enabled ? 1 : 0
@@ -269,9 +277,9 @@ resource "kubectl_manifest" "ec2nodeclass_runners" {
     kind       = "EC2NodeClass"
     metadata   = { name = "runners" }
     spec = {
-      amiFamily        = "AL2023"
-      amiSelectorTerms = [{ alias = "al2023@latest" }]
-      role             = local.karpenter_node_role_name
+      amiFamily                  = "AL2023"
+      amiSelectorTerms           = [{ alias = "al2023@latest" }]
+      role                       = local.karpenter_node_role_name
       subnetSelectorTerms        = [{ tags = { "karpenter.sh/discovery" = local.cluster_name } }]
       securityGroupSelectorTerms = [{ id = local.node_security_group_id }]
       tags = {
@@ -283,7 +291,7 @@ resource "kubectl_manifest" "ec2nodeclass_runners" {
       blockDeviceMappings = [{
         deviceName = "/dev/xvda"
         ebs = {
-          volumeSize          = "30Gi"
+          volumeSize          = "50Gi"
           volumeType          = "gp3"
           encrypted           = true
           deleteOnTermination = true
@@ -556,7 +564,14 @@ resource "helm_release" "arc_build" {
             env          = local.runner_docker_env
             volumeMounts = local.runner_docker_volume_mounts
             resources = {
-              requests = { cpu = "3", memory = "6Gi" }
+              # ephemeral-storage request (the actual root-cause fix, and FREE —
+              # scheduling only): without it the scheduler/Karpenter packed runner pods
+              # by CPU alone, so a large spot node took ~5 pods × up-to-14Gi docker-lib
+              # ≈ 70Gi onto a 20-30Gi root disk → node DiskPressure evicted a running
+              # job ("self-hosted runner lost communication"), failing Trivy/builds
+              # fleet-wide. 16Gi (14Gi docker-lib cap + work/slack) bounds packing to
+              # ≤2 runner pods on a 50Gi node.
+              requests = { cpu = "3", memory = "6Gi", "ephemeral-storage" = "16Gi" }
               limits   = { memory = "12Gi" }
             }
           },
