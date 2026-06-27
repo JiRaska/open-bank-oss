@@ -122,7 +122,13 @@ jobs:
         # falls through to AWS_ACCESS_KEY_ID / AWS_SESSION_TOKEN from the OIDC step.
         run: |
           mkdir -p ~/.aws
-          printf '[profile openbank]\nregion = eu-north-1\n' >> ~/.aws/config
+          # Idempotent: on PERSISTENT runners (Hetzner/Mac) a bare `>>` appended a
+          # duplicate [profile openbank] section every run; awscli v2 then rejects the
+          # whole file ("Unable to parse config file"), breaking aws for any other job
+          # that lands on the same host (e.g. tofu plan/apply on the openbank-batch pool).
+          # Only add the stub if it isn't already present.
+          grep -q '^\[profile openbank\]' ~/.aws/config 2>/dev/null \
+            || printf '[profile openbank]\nregion = eu-north-1\n' >> ~/.aws/config
 
       - name: Clear stale ECR credentials (macOS keychain)
         if: runner.os == 'macOS'
