@@ -38,6 +38,6 @@
   "openbank-standing-order-service": "0.6.0",
   "openbank-statement-service": "0.5.0",
   "openbank-swift-service": "0.6.0",
-  "openbank-tpp-registry-service": "0.6.0",
+  "openbank-tpp-registry-service": "0.6.1",
   "openbank-transaction-service": "1.9.0"
 }
