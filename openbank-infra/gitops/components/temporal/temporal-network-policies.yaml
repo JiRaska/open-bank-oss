@@ -65,6 +65,7 @@ spec:
                   - fx
                   - statements
                   - finops-agent
+                  - devops-agent
       ports:
         - protocol: TCP
           port: 7233
