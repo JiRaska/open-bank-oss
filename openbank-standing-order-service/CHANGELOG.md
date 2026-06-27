@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank/compare/standing-order-service-v0.6.0...standing-order-service-v0.7.0) (2026-06-27)
+
+
+### Features
+
+* **notification,party,standing-order:** inject Clock for DST determinism (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2115](https://github.com/JiRaska/open-bank/issues/2115)) ([596924a](https://github.com/JiRaska/open-bank/commit/596924a5ea3f05e8722767c66fe89638aeaaeb87))
+
+
+### Bug Fixes
+
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+* **fleet:** resolve ktlint violations and sepa-payment compile error after ADR-0100 Clock sweep ([#2272](https://github.com/JiRaska/open-bank/issues/2272)) ([3cd3637](https://github.com/JiRaska/open-bank/commit/3cd3637372c52025cfac6f29d23129bab4d3919b))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank/compare/standing-order-service-v0.5.0...standing-order-service-v0.6.0) (2026-06-25)
 
 
