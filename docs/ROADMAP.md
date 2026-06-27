@@ -8,19 +8,32 @@ verified. Effort is measured in engineer-weeks (a focused solo engineer), delibe
 dates**: elapsed time depends on maintainer availability and community participation. Track progress by
 milestone completion in releases, not by inferred dates.
 
-| # | Name | Goal | Effort (eng-weeks) |
-|---|---|---|---|
-| **M1** | Foundation hardening | Audit-ready, testable, contributor-friendly repo | 2–3 |
-| M2 | Resilience primitives | Outbox + saga + idempotency everywhere; coverage ≥ 70% | 3–4 |
-| M3 | Compliance evidence | Every regulatory requirement mapped to demonstrable evidence | 2–3 |
-| M4 | Observability & ops | OTel everywhere; SLOs; chaos engineering begins | 2–3 |
-| M5 | Security baseline | OWASP ASVS L3 + SLSA L3 supply chain + independent pen-test | 3–4 |
-| M6 | Multi-region active-passive | DR failover within 30 min (RTO ≤ 30m, RPO ≤ 5m) | 2–3 |
-| M7 | Multi-region active-active + scale | Sustain Tier-A workload; production chaos | 3–4 |
+| # | Name | Goal | Effort (eng-weeks) | Status |
+|---|---|---|---|---|
+| **M1** | Foundation hardening | Audit-ready, testable, contributor-friendly repo | 2–3 | ✅ Complete |
+| **M2** | Resilience primitives | Outbox + saga + idempotency everywhere; coverage ≥ 70% | 3–4 | 🟡 In progress |
+| **M3** | Compliance evidence | Every regulatory requirement mapped to demonstrable evidence | 2–3 | 🟡 In progress |
+| **M4** | Observability & ops | OTel everywhere; SLOs; chaos engineering begins | 2–3 | 🟢 Largely done |
+| **M5** | Security baseline | OWASP ASVS L3 + SLSA L3 supply chain + independent pen-test | 3–4 | 🟡 In progress |
+| M6 | Multi-region active-passive | DR failover within 30 min (RTO ≤ 30m, RPO ≤ 5m) | 2–3 | 🔴 Not started |
+| M7 | Multi-region active-active + scale | Sustain Tier-A workload; production chaos | 3–4 | 🔴 Not started |
 
-**Current focus: M1 — Foundation hardening.** Bring the repo from "code dump" to "audit-grade reference
-implementation": all modules build green, CI gates (build/test/lint/SAST/SBOM/license/gitleaks/OpenAPI),
-branch protection on `main`, test scaffolding per service, and a signed `v0.1.0-alpha` release.
+**Current focus: M2 + M3 + M5 in parallel.**
+
+- **M1 (Foundation)** is complete: all 32 services build green, CI gates enforced fleet-wide
+  (SAST/SBOM/gitleaks/OpenAPI/governance-as-code), branch protection on `main`, per-service SemVer and
+  release-please changelogs live.
+- **M2 (Resilience)** — transactional outbox and saga patterns are fleet-wide; Temporal durable execution
+  is live (ADR-0101, FX + statement flows); idempotency coverage and integration-test depth are the
+  remaining gaps.
+- **M3 (Compliance)** — PSD2 XS2A developer portal live, GDPR Art. 17 erasure pipeline wired fleet-wide,
+  EUDI/PID digital identity (OpenID4VP + OpenID4VCI) live. AnaCredit/FINREP reporting and full AML vendor
+  feed integration are pending.
+- **M4 (Observability)** — OTel fleet-wide, DomainMetrics on every service, GoAlert on-call,
+  Pyrra SLO-as-code, GlitchTip error tracking, Grafana dashboards. Chaos engineering is deferred to M6.
+- **M5 (Security)** — external pen-test P0–P2 findings remediated, SBOM + cosign signing in CI,
+  NetworkPolicies deployed (inert, activation gated on remaining pen-test findings). OPA authz in enforce
+  mode on customer-edge. OWASP ASVS L3 self-assessment and SLSA L3 formal attestation are pending.
 
 ## Cross-cutting workstreams
 
@@ -31,14 +44,14 @@ doc for the full matrix.
 ## Public-launch trigger
 
 The repo flips from private to public when M1 is complete, the security disclosure programme is wired, the
-git history is secret-free (gitleaks-confirmed), and the public-facing docs are polished. Earliest realistic
-launch is end of M1; latest sensible is end of M3 (compliance evidence lowers regulator FUD).
+git history is secret-free (gitleaks-confirmed), and the public-facing docs are polished. M1 is done —
+launch readiness is now gated on doc polish and the security disclosure workflow being publicly accessible.
 
 ## Explicitly out of scope (all milestones)
 
 OpenBank distributes **software**; it does not run a SaaS bank, hold a banking licence, or join payment
 schemes directly — operators do. AI-driven account-opening / payment decisions stay experimental in
-`openbank-agent-service` only. See the strategy doc for the full list.
+`openbank-agent-service` and `openbank-copilot-service` only. See the strategy doc for the full list.
 
 ---
 

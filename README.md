@@ -21,21 +21,24 @@ OpenBank is an **early-stage, community-driven** banking platform reference impl
 |---|---|
 | Core domain (account, ledger, transaction, balance) | 🟢 Implemented, tested, deployed |
 | Payments — intra-bank (transaction saga → ledger → balance) | 🟢 End-to-end, deployed |
-| Payments — interbank rails (SEPA, domestic, instant, SWIFT, clearing) | 🟡 Accept + screen + persist + emit event; **no ISO 20022 / settlement wiring yet** |
-| PSD2 / Open Banking (consent, SCA, TPP registry) | 🟡 Consent + SCA deployed; PSD2 XS2A + TPP registry code-only |
+| Payments — interbank rails (SEPA, domestic, instant, clearing) | 🟡 ISO 20022 pipeline + clearing simulator wired (ADR-0104/0108); **live interbank network not connected** |
+| PSD2 / Open Banking (consent, SCA, TPP registry) | 🟡 Consent + SCA + XS2A developer portal live (developer.open-bank.tech); TPP registry code-only |
+| EUDI / PID digital identity | 🟢 OpenID4VP + OpenID4VCI e2e live (ADR-0094); pid-service deployed |
 | KYC / AML / Sanctions screening | 🟡 Real screening logic (pg_trgm), deployed; vendor feeds are stubs |
-| Cards, disputes, interest, standing orders, statements, onboarding | 🟢 Implemented + deployed in sandbox |
-| Lending, AnaCredit, SDD, SWIFT, PID identity | 🟡 Implemented, code-only (not deployed) |
+| GDPR Art. 17 right-to-erasure | 🟢 PARTY_ERASED event handled fleet-wide (kyc, notification, card-issuance) |
+| Cards, disputes, interest, standing orders, statements, onboarding | 🟢 Implemented + deployed; standing-order daily scheduler live |
+| Lending, AnaCredit, SDD, SWIFT | 🟡 Implemented, code-only (not deployed) |
 | Product catalog | 🟢 Implemented, deployed |
-| Customer edge (BFF) + mobile app | 🟡 BFF deployed; KMP/Compose app in active dev (separate repo) |
-| AI agent service (MCP, policy-gated) | 🟡 Kill-switch + prompt-injection guardrail + read tools (ADR-0031); no production LLM yet |
-| Fraud service | 🔴 Scaffold only (ADR-0084) — built, not yet deployed |
+| Customer edge (BFF) + mobile app | 🟡 BFF deployed (OPA enforce mode on); KMP/Compose app in active dev (separate repo) |
+| AI agent service (MCP, policy-gated) | 🟡 Fleet read tools + audit (ADR-0031); **copilot-service with LLM deployed in sandbox** |
+| Fraud detection | 🟡 Deployed; Phase 2 velocity-counter signal plane wired (ADR-0084); rule engine pending |
+| Durable workflow execution | 🟢 Temporal live (ADR-0101); FX + statement flows on durable execution |
 | Test coverage | 🟡 Ratchet-only gate; money-path services carry higher floors |
 | Governance-as-code (versioning, release, catalog) | 🟢 CI-enforced (ADR-0029) |
-| Supply-chain security (SBOM, signing, SAST, gitleaks, image scan) | 🟢 CI-enforced (ADR-0030) |
+| Supply-chain security (SBOM, signing, SAST, pen-test P0–P2) | 🟢 CI-enforced (ADR-0030); external pen-test P0–P2 findings remediated |
 | CI/CD | 🟢 Self-hosted runners + path-scoped gates + GitOps auto-deploy (ADR-0040) |
-| Observability (OTel, Grafana, Prometheus, Loki, Tempo, Pyroscope) | 🟢 Live; + GoAlert on-call, Pyrra SLO-as-code, GlitchTip errors (ADR-0088) |
-| Cloud substrate (AWS, OpenTofu, ArgoCD GitOps) | 🟢 Sandbox live (EKS + ArgoCD), 27 services deployed |
+| Observability (OTel, Grafana, Prometheus, Loki, Tempo, Pyroscope) | 🟢 Live; GoAlert on-call, Pyrra SLO-as-code, GlitchTip errors, DomainMetrics fleet-wide |
+| Cloud substrate (AWS, OpenTofu, ArgoCD GitOps) | 🟢 Sandbox live (EKS + ArgoCD), 26 backend services + customer-edge + admin-UI deployed |
 
 ### What works right now (sandbox at open-bank.tech)
 
@@ -46,21 +49,25 @@ OpenBank is an **early-stage, community-driven** banking platform reference impl
 | **SEPA payment** | `POST https://api.open-bank.tech/api/v1/sepa-payments` | Sanctions/AML gate, saga → ledger |
 | **Domestic payment** | `POST https://api.open-bank.tech/api/v1/domestic-payments` | CERTIS-style Czech domestic |
 | **SEPA Instant** | `POST https://api.open-bank.tech/api/v1/sepa-instant-payments` | 10s settlement window |
+| **Standing orders** | `POST https://api.open-bank.tech/api/v1/standing-orders` | Daily due-date sweep, outbox-backed |
 | **Admin UI** | https://admin.open-bank.tech | Operator backoffice (Keycloak auth) |
-| **AI agent** | MCP endpoint (see agent-service docs) | Policy-gated, read-only fleet tools |
+| **Developer portal** | https://developer.open-bank.tech | PSD2 XS2A API explorer, TPP sandbox (WAF/ModSecurity) |
+| **AI copilot** | `POST https://api.open-bank.tech/api/v1/copilot/chat` | Customer-facing LLM, sandbox only |
+| **EUDI identity** | `GET https://api.open-bank.tech/api/v1/pid` | OpenID4VP + OpenID4VCI credential flows live |
+| **AI agent (ops)** | MCP endpoint (see agent-service docs) | Policy-gated, read-only fleet tools |
 
 All API calls require a Bearer token from `https://kc.open-bank.tech/realms/openbank`. See [docs/QUICKSTART_SANDBOX.md](docs/QUICKSTART_SANDBOX.md) for a `curl` walkthrough.
 
 ### What is NOT there yet (honest list)
 
-- **Interbank rails do not settle.** Money only moves end-to-end for intra-bank transfers (transaction saga → ledger → balance). SEPA / domestic / instant / SWIFT / clearing accept, screen, persist and **emit an event**, but build no ISO 20022 / MT message and post nothing to the ledger — the settlement leg is not wired yet.
-- **Customer app is not GA.** A Kotlin Multiplatform + Compose customer app and its `openbank-customer-edge` BFF exist and are in active development in a **separate repo** (`JiRaska/openbank-app`); the BFF is deployed but the app is not released.
+- **Interbank rails do not connect to live networks.** ISO 20022 pipeline and clearing simulator are wired and flags are on (ADR-0104/0108); money moves end-to-end with a simulated counterparty. Real SEPA/SWIFT/CERTIS network connections and the net-settlement ledger leg are not built.
+- **Customer app is not GA.** A Kotlin Multiplatform + Compose customer app (iOS + Android) is in active development in a **separate repo** (`JiRaska/openbank-app`); the `openbank-customer-edge` BFF is deployed with OPA enforce mode on, but app stores releases are not yet public.
 - **KYC/AML vendors are stubs** — screening logic is real (sanctions uses pg_trgm fuzzy matching) but runs against in-memory/seed lists, not real providers (Refinitiv, ComplyAdvantage, EBA feed).
-- **Some services are code-only, not deployed** — lending, anacredit, sdd, swift, pid (identity resolution), psd2 and tpp-registry are implemented but not yet wired into the sandbox cluster.
+- **Some services are code-only, not deployed** — lending, anacredit, sdd, psd2 (separate from the XS2A developer portal), and tpp-registry are implemented but not yet wired into the sandbox cluster.
 - **SCA is maturing, not complete** — passkey RP, settlement gate and non-repudiation hash chain are in (ADR-0086), but full FIDO2 attestation / real OTP delivery are not finished.
-- **AI agent has no production LLM** — kill-switch, prompt-injection guardrail and read-only fleet tools are in; the model gateway is deferred (sandbox/free model only).
-- **Contract tests are thin** — one published pact across the fleet; the contract-test gate exists but coverage is a known gap.
-- **No pen test, no DR test, no HA** — single-node sandbox, no failover; most Postgres clusters still lack S3 backups — only 2 are configured (blocks the PG 18 upgrade).
+- **AI copilot is sandbox-only** — a real LLM (meta/llama-3.1-70b-instruct) runs in the sandbox copilot-service; production model gateway, rate-limiting, and abuse guardrails are not hardened for public traffic.
+- **Contract tests are thin** — Pact Broker is live (pact.open-bank.tech) but published pact coverage across the fleet is a known gap.
+- **No DR test, no HA** — single-node sandbox, no failover; PostgreSQL 16 is upgrading to 18 (CNPG, runbook in progress).
 - **Not licensed to operate as a bank.** See the disclaimer above.
 
 ---
@@ -160,20 +167,22 @@ idempotency, audit, outbox, service-info, API-version filter, authz) lives in `o
 | `openbank-interest-service` | 8125 | Interest calculation & accrual |
 | `openbank-dispute-service` | 8135 | Card disputes & chargebacks |
 | `openbank-sepa-instant` | 8127 | SEPA Instant Credit Transfer |
+| `openbank-copilot-service` | 8131 | Customer AI assistant (LLM, policy-gated) |
+| `openbank-settlement-service` | — | Net settlement & reconciliation |
 | `openbank-sanctions-service` | — | Sanctions list screening (pg_trgm fuzzy match) |
 | `openbank-onboarding-service` | — | Onboarding funnel projection (party/KYC/SCA) |
 | `openbank-statement-service` | — | Account statements (camt.053 / MT940 / PDF) |
 | `openbank-sdd-service` | — | SEPA Direct Debit mandates (debtor side) |
 | `openbank-lending-service` | — | Loan origination & servicing (four-eyes) |
 | `openbank-anacredit-service` | — | AnaCredit regulatory report builder |
+| `openbank-finrep-service` | — | FINREP / COREP regulatory reporting |
 | `openbank-analytics-sink` | — | Event analytics sink |
-| `openbank-customer-edge` | — | Customer BFF for the mobile app (ownership/IDOR guards) |
-| `openbank-fraud-service` | — | Fraud detection (scaffold, ADR-0084) |
+| `openbank-customer-edge` | — | Customer BFF for the mobile app (OPA enforce mode) |
+| `openbank-fraud-service` | — | Fraud detection — deployed; velocity-counter signal plane live (ADR-0084) |
 | `openbank-api-gateway` | — | Kong gateway configuration |
 | `openbank-admin-ui` | 3000 | Bank operator console (Next.js) |
 | `openbank-libs` | — | Shared primitives + runtime plumbing |
 
-> `openbank-fraud-service` is an **early scaffold** (ADR-0084) — built by Gradle but not yet deployed.
 > `openbank-analytics-sink` is implemented but not a released component (no `version.txt`).
 > Deployed-to-sandbox vs code-only status is tracked in the [Project Status](#project-status) table above.
 
@@ -198,7 +207,7 @@ OpenBank treats non-functional concerns as machine-enforced, not as prose:
 | Layer | Technology |
 |---|---|
 | Backend | Kotlin 2.0 + Quarkus 3.x |
-| Database | PostgreSQL 16 (Flyway migrations); 18 upgrade in progress (CNPG, blocked on S3 backups) |
+| Database | PostgreSQL 16 (Flyway migrations); upgrading to 18 via CNPG (runbook 0003, in progress) |
 | Messaging | Apache Kafka 3.7 + transactional outbox |
 | Schema registry | Apicurio 2.6 |
 | Cache | Valkey 7.x |
