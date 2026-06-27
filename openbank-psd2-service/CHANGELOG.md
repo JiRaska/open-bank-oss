@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank/compare/psd2-service-v0.8.0...psd2-service-v0.8.1) (2026-06-27)
+
+
+### Bug Fixes
+
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+* **fleet:** resolve ktlint violations and sepa-payment compile error after ADR-0100 Clock sweep ([#2272](https://github.com/JiRaska/open-bank/issues/2272)) ([3cd3637](https://github.com/JiRaska/open-bank/commit/3cd3637372c52025cfac6f29d23129bab4d3919b))
+* **psd2:** suppress LongMethod and LongParameterList detekt violations ([#2274](https://github.com/JiRaska/open-bank/issues/2274)) ([96ffa0e](https://github.com/JiRaska/open-bank/commit/96ffa0e4d6dce4eed55e412f360f0280eff8ab63)), closes [#2084](https://github.com/JiRaska/open-bank/issues/2084)
+
 ## [0.8.0](https://github.com/JiRaska/open-bank/compare/psd2-service-v0.7.0...psd2-service-v0.8.0) (2026-06-25)
 
 
