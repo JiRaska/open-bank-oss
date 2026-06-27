@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/JiRaska/open-bank/compare/finrep-service-v0.2.0...finrep-service-v0.3.0) (2026-06-27)
+
+
+### Features
+
+* **admin-ui:** FinOps AI costs card + IAOps anomaly timeline (ADR-0112) ([#2183](https://github.com/JiRaska/open-bank/issues/2183)) ([225cc57](https://github.com/JiRaska/open-bank/commit/225cc574b6eabc543f00aedc7871b0981ac0dbfa))
+
+
+### Bug Fixes
+
+* **sepa-payment,analytics,clearing-simulator,finrep,fx,customer-edge,security-scanner:** inject Clock for DST determinism (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2174](https://github.com/JiRaska/open-bank/issues/2174)) ([51a872e](https://github.com/JiRaska/open-bank/commit/51a872ec0ce0b9f888226ca94ffcfb9f392174c2))
+
 ## [0.2.0](https://github.com/JiRaska/open-bank/compare/finrep-service-v0.1.0...finrep-service-v0.2.0) (2026-06-25)
 
 
