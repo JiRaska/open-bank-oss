@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank/compare/sca-service-v0.8.0...sca-service-v0.8.1) (2026-06-27)
+
+
+### Bug Fixes
+
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+* **sca:** make V5 migration idempotent (ADD COLUMN IF NOT EXISTS) ([#2198](https://github.com/JiRaska/open-bank/issues/2198)) ([adfa571](https://github.com/JiRaska/open-bank/commit/adfa571894790bcd437811de3f2d57f992165aa6))
+* **sca:** use merge() instead of persist() in ScaChallengeRepository.save() ([#2215](https://github.com/JiRaska/open-bank/issues/2215)) ([2fda5bc](https://github.com/JiRaska/open-bank/commit/2fda5bc490d812739e6f3a528385dd29440c940c))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank/compare/sca-service-v0.7.0...sca-service-v0.8.0) (2026-06-25)
 
 
