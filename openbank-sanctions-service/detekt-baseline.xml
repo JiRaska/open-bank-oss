@@ -4,7 +4,7 @@
   <CurrentIssues>
     <ID>CyclomaticComplexMethod:SanctionsImportService.kt$SanctionsImportService$private suspend fun importOpenSanctionsCsv( url: String, listType: SanctionsListType, defaultPrograms: List&lt;String&gt; = listOf("PEP"), ): Int</ID>
     <ID>LongMethod:SanctionsImportService.kt$SanctionsImportService$private suspend fun importOpenSanctionsCsv( url: String, listType: SanctionsListType, defaultPrograms: List&lt;String&gt; = listOf("PEP"), ): Int</ID>
-    <ID>LongParameterList:SanctionsListRepositoryImpl.kt$SanctionsListRepositoryImpl$(id: UUID, enabled: Boolean?, sourceUrl: String?, cronHour: Int?, cronMinute: Int?, cronDays: String?)</ID>
+    <ID>LongParameterList:SanctionsListRepositoryImpl.kt$SanctionsListRepositoryImpl$( id: UUID, enabled: Boolean?, sourceUrl: String?, cronHour: Int?, cronMinute: Int?, cronDays: String?, )</ID>
     <ID>LoopWithTooManyJumpStatements:SanctionsImportService.kt$SanctionsImportService$while</ID>
     <ID>MagicNumber:SanctionsCheck.kt$SanctionsCheck$0.85</ID>
     <ID>MagicNumber:SanctionsEntryRepositoryImpl.kt$SanctionsEntryRepositoryImpl$500</ID>

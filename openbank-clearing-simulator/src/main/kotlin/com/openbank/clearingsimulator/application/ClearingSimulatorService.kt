@@ -8,6 +8,7 @@ import com.openbank.clearingsimulator.application.dto.ReturnRequest
 import com.openbank.clearingsimulator.domain.RejectReason
 import com.openbank.clearingsimulator.domain.SchemeDecision
 import com.openbank.clearingsimulator.domain.SchemeDecisionEngine
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.iso20022.Camt054Builder
 import com.openbank.libs.iso20022.CreditDebitIndicator
 import com.openbank.libs.iso20022.DebitCreditNotification
@@ -30,7 +31,6 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
-import java.util.UUID
 
 /** The pacs.002 status report plus, when the transfer settles, the camt.054 beneficiary notice. */
 data class ClearingResult(val statusReportXml: String, val settled: Boolean, val creditNotificationXml: String?)
@@ -67,10 +67,10 @@ class ClearingSimulatorService {
     fun generateReturn(request: ReturnRequest, now: Instant = Instant.now(clock)): String {
         val pacs004Validator = Iso20022Validator.forSchema(Pacs004Builder.SCHEMA_RESOURCE)
         val paymentReturn = PaymentReturn(
-            messageId = "RET-${UUID.randomUUID()}".take(MAX_35),
+            messageId = "RET-${Ids.randomId()}".take(MAX_35),
             creationDateTime = now.atUtc(),
             settlementMethod = SettlementMethod.CLRG,
-            returnId = "RTRN-${UUID.randomUUID().toString().take(RETURN_ID_SUFFIX_LEN)}",
+            returnId = "RTRN-${Ids.randomId().toString().take(RETURN_ID_SUFFIX_LEN)}",
             originalEndToEndId = request.originalEndToEndId,
             originalTransactionId = request.originalTransactionId,
             returnedAmount = request.amount,

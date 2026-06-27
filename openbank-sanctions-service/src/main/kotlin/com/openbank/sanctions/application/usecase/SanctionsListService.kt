@@ -14,7 +14,9 @@ import io.smallrye.common.annotation.NonBlocking
 import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import jakarta.ws.rs.NotFoundException
+import java.time.Clock
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.util.UUID
@@ -23,7 +25,17 @@ import java.util.UUID
 class SanctionsListService(
     private val repo: SanctionsListRepositoryImpl,
     private val importer: SanctionsImportService,
+    private val clock: Clock,
 ) {
+
+    // CDI entry point: injects the production UTC clock. Tests use the primary constructor with a
+    // fixed Clock for deterministic timestamps (ADR-0100 Layer 1).
+    @Inject
+    constructor(
+        repo: SanctionsListRepositoryImpl,
+        importer: SanctionsImportService,
+    ) : this(repo, importer, Clock.systemUTC())
+
     suspend fun listAll(): List<SanctionsList> = repo.listSanctionsLists()
 
     suspend fun getById(id: UUID): SanctionsList? = repo.findSanctionsListById(id)
@@ -32,7 +44,14 @@ class SanctionsListService(
         val normalizedDays = normalizeCronDays(req.cronDays)
         validateCron(req.cronHour, req.cronMinute, normalizedDays)
         val normalizedSourceUrl = req.sourceUrl?.trim()?.takeIf { it.isNotEmpty() }
-        return repo.updateSanctionsList(id, req.enabled, normalizedSourceUrl, req.cronHour, req.cronMinute, normalizedDays)
+        return repo.updateSanctionsList(
+            id,
+            req.enabled,
+            normalizedSourceUrl,
+            req.cronHour,
+            req.cronMinute,
+            normalizedDays,
+        )
     }
 
     suspend fun refresh(listType: String): SanctionsList {
@@ -42,8 +61,14 @@ class SanctionsListService(
         val count = if (enumType != null) {
             val imported = importer.importList(enumType, list.sourceUrl)
             // If importer returned 0 (format stub / network error), fall back to stored count
-            if (imported > 0) imported else (list.lastEntryCount ?: 0)
-        } else list.lastEntryCount ?: 0
+            if (imported > 0) {
+                imported
+            } else {
+                list.lastEntryCount ?: 0
+            }
+        } else {
+            list.lastEntryCount ?: 0
+        }
         return repo.markUpdated(listType, count)
             ?: throw IllegalStateException("Failed to persist sanctions list refresh for $listType")
     }
@@ -62,7 +87,7 @@ class SanctionsListService(
     @Scheduled(every = "60s", delayed = "30s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     @NonBlocking
     fun scheduledRefresh(): Uni<Void> {
-        val now = ZonedDateTime.now(ZONE_ID).withSecond(0).withNano(0)
+        val now = ZonedDateTime.now(clock).withSecond(0).withNano(0)
         return repo.listSanctionsListsUni()
             .onItem().transformToMulti { lists ->
                 Multi.createFrom().iterable(lists.filter { it.isDueForScheduledRefresh(now) })
@@ -70,14 +95,17 @@ class SanctionsListService(
             .onItem().transformToUniAndConcatenate { list ->
                 Log.infof("Scheduled refresh for %s", list.listType)
                 val enumType = runCatching { SanctionsListType.valueOf(list.listType) }.getOrNull()
-                val importUni: Uni<Int> = if (enumType != null)
+                val importUni: Uni<Int> = if (enumType != null) {
                     Uni.createFrom().item(0) // importer is suspend — invoke via separate coroutine in prod
-                else
+                } else {
                     Uni.createFrom().item(list.lastEntryCount ?: 0)
+                }
                 importUni.flatMap { imported ->
                     val count = if (imported > 0) imported else (list.lastEntryCount ?: 0)
                     repo.markUpdatedUni(list.listType, count, now.toInstant())
-                        .onItem().ifNull().failWith(IllegalStateException("Failed to persist refresh for ${list.listType}"))
+                        .onItem().ifNull().failWith(
+                            IllegalStateException("Failed to persist refresh for ${list.listType}"),
+                        )
                         .replaceWithVoid()
                 }
             }
@@ -114,7 +142,12 @@ class SanctionsListService(
 
         val lastRun = lastUpdatedAt ?: return true
         val lastRunAt = ZonedDateTime.ofInstant(lastRun, ZONE_ID)
-        return !(lastRunAt.year == now.year && lastRunAt.dayOfYear == now.dayOfYear && lastRunAt.hour == now.hour && lastRunAt.minute == now.minute)
+        return !(
+            lastRunAt.year == now.year &&
+                lastRunAt.dayOfYear == now.dayOfYear &&
+                lastRunAt.hour == now.hour &&
+                lastRunAt.minute == now.minute
+            )
     }
 
     companion object {

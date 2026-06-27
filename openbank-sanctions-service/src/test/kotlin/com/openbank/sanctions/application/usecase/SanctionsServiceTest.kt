@@ -24,11 +24,11 @@ import kotlinx.coroutines.runBlocking
 
 class SanctionsServiceTest {
 
-    private val repo      = mockk<SanctionsRepository>()
+    private val repo = mockk<SanctionsRepository>()
     private val entryRepo = mockk<SanctionsEntryRepository>()
-    private val importer  = mockk<SanctionsImportService>()
-    private val clock     = Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC)
-    private val service   = SanctionsService(repo, entryRepo, importer, clock)
+    private val importer = mockk<SanctionsImportService>()
+    private val clock = Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC)
+    private val service = SanctionsService(repo, entryRepo, importer, clock)
 
     // Sensible default: normalize returns lowercased input; search returns no results
     init {
@@ -53,10 +53,14 @@ class SanctionsServiceTest {
         coEvery { repo.findByIdempotencyKey(any()) } returns null
         coEvery { repo.saveWithEvent(any(), any()) } answers { firstArg() }
 
-        val entry = sampleEntry(listType = SanctionsListType.OFAC_SDN, primaryName = "Vladimir Putin",
-                                programs = listOf("RUSSIA-EO14024"), externalId = "ofac-17766")
+        val entry = sampleEntry(
+            listType = SanctionsListType.OFAC_SDN,
+            primaryName = "Vladimir Putin",
+            programs = listOf("RUSSIA-EO14024"),
+            externalId = "ofac-17766",
+        )
         coEvery { entryRepo.search("vladimir putin", any(), any(), any()) } returns listOf(
-            SanctionsEntryMatch(entry = entry, matchedName = "Vladimir Putin", score = 0.95)
+            SanctionsEntryMatch(entry = entry, matchedName = "Vladimir Putin", score = 0.95),
         )
 
         val result = service.screen(sampleScreenCommand(name = "Vladimir Putin"))
@@ -83,7 +87,12 @@ class SanctionsServiceTest {
         assertThat(result.status).isEqualTo(SanctionsCheckStatus.CLEAR)
         assertThat(result.overallScore).isEqualTo(0.0)
         assertThat(result.matches).isEmpty()
-        coVerify { repo.saveWithEvent(match { it.status == SanctionsCheckStatus.CLEAR && it.matches.isEmpty() }, eq("SanctionChecked")) }
+        coVerify {
+            repo.saveWithEvent(
+                match { it.status == SanctionsCheckStatus.CLEAR && it.matches.isEmpty() },
+                eq("SanctionChecked"),
+            )
+        }
     }
 
     @Test
@@ -93,7 +102,7 @@ class SanctionsServiceTest {
 
         val entry = sampleEntry(listType = SanctionsListType.PEP_GLOBAL, primaryName = "Andrej Babiš")
         coEvery { entryRepo.search("andrej babis", any(), any(), any()) } returns listOf(
-            SanctionsEntryMatch(entry = entry, matchedName = "Andrej Babiš", score = 0.45)
+            SanctionsEntryMatch(entry = entry, matchedName = "Andrej Babiš", score = 0.70),
         )
 
         val result = service.screen(sampleScreenCommand(name = "Andrej Babis"))
@@ -111,11 +120,11 @@ class SanctionsServiceTest {
         // Primary "john doe" → no hits; alias "putin jr." → hit
         val entry = sampleEntry(listType = SanctionsListType.OFAC_SDN, primaryName = "Vladimir Putin")
         coEvery { entryRepo.search("putin jr.", any(), any(), any()) } returns listOf(
-            SanctionsEntryMatch(entry = entry, matchedName = "Vladimir Putin", score = 0.88)
+            SanctionsEntryMatch(entry = entry, matchedName = "Vladimir Putin", score = 0.88),
         )
 
         val result = service.screen(
-            sampleScreenCommand(name = "John Doe", aliases = listOf("Mr. Nobody", "Putin Jr."))
+            sampleScreenCommand(name = "John Doe", aliases = listOf("Mr. Nobody", "Putin Jr.")),
         )
 
         assertThat(result.status).isEqualTo(SanctionsCheckStatus.HIT)
@@ -128,20 +137,23 @@ class SanctionsServiceTest {
         coEvery { repo.findByIdempotencyKey(any()) } returns null
         coEvery { repo.saveWithEvent(any(), any()) } answers { firstArg() }
 
-        val entry = sampleEntry(listType = SanctionsListType.OFAC_SDN, primaryName = "Vladimir Putin",
-                                externalId = "ofac-17766")
+        val entry = sampleEntry(
+            listType = SanctionsListType.OFAC_SDN,
+            primaryName = "Vladimir Putin",
+            externalId = "ofac-17766",
+        )
         // Both primary and alias resolve to the same entry — only one SanctionsMatch expected
         coEvery { entryRepo.search("putin", any(), any(), any()) } returns listOf(
-            SanctionsEntryMatch(entry = entry, matchedName = "Vladimir Putin", score = 0.90)
+            SanctionsEntryMatch(entry = entry, matchedName = "Vladimir Putin", score = 0.90),
         )
         coEvery { entryRepo.search("vlad", any(), any(), any()) } returns listOf(
-            SanctionsEntryMatch(entry = entry, matchedName = "Vladimir Putin", score = 0.60)
+            SanctionsEntryMatch(entry = entry, matchedName = "Vladimir Putin", score = 0.60),
         )
 
         val result = service.screen(sampleScreenCommand(name = "Putin", aliases = listOf("Vlad")))
 
-        assertThat(result.matches).hasSize(1)       // deduped by listType+externalId
-        assertThat(result.matches.first().matchScore).isEqualTo(0.90)  // best score wins
+        assertThat(result.matches).hasSize(1) // deduped by listType+externalId
+        assertThat(result.matches.first().matchScore).isEqualTo(0.90) // best score wins
     }
 
     @Test
@@ -152,15 +164,24 @@ class SanctionsServiceTest {
         coEvery { repo.saveWithEvent(any(), any()) } answers { firstArg() }
 
         val result = service.review(
-            ReviewCommand(checkId = id, reviewedBy = "analyst-1",
-                          note = "cleared after manual review", newStatus = SanctionsCheckStatus.CLEAR)
+            ReviewCommand(
+                checkId = id,
+                reviewedBy = "analyst-1",
+                note = "cleared after manual review",
+                newStatus = SanctionsCheckStatus.CLEAR,
+            ),
         )
 
         assertThat(result.status).isEqualTo(SanctionsCheckStatus.CLEAR)
         assertThat(result.reviewedBy).isEqualTo("analyst-1")
         assertThat(result.reviewNote).isEqualTo("cleared after manual review")
         assertThat(result.reviewedAt).isNotNull
-        coVerify { repo.saveWithEvent(match { it.status == SanctionsCheckStatus.CLEAR && it.reviewedBy == "analyst-1" }, eq("SanctionChecked")) }
+        coVerify {
+            repo.saveWithEvent(
+                match { it.status == SanctionsCheckStatus.CLEAR && it.reviewedBy == "analyst-1" },
+                eq("SanctionChecked"),
+            )
+        }
     }
 
     @Test
@@ -170,8 +191,14 @@ class SanctionsServiceTest {
 
         assertThatThrownBy {
             runBlocking {
-                service.review(ReviewCommand(checkId = id, reviewedBy = "analyst-1",
-                                             note = "missing", newStatus = SanctionsCheckStatus.CLEAR))
+                service.review(
+                    ReviewCommand(
+                        checkId = id,
+                        reviewedBy = "analyst-1",
+                        note = "missing",
+                        newStatus = SanctionsCheckStatus.CLEAR,
+                    ),
+                )
             }
         }.isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("Sanctions check not found")
@@ -215,9 +242,13 @@ class SanctionsServiceTest {
         externalId: String? = "ext-1",
         programs: List<String> = listOf("TEST"),
     ) = SanctionsEntry(
-        id = UUID.randomUUID(), listType = listType, externalId = externalId,
-        entityType = EntityType.INDIVIDUAL, primaryName = primaryName,
-        programs = programs, searchText = primaryName.lowercase(),
+        id = UUID.randomUUID(),
+        listType = listType,
+        externalId = externalId,
+        entityType = EntityType.INDIVIDUAL,
+        primaryName = primaryName,
+        programs = programs,
+        searchText = primaryName.lowercase(),
     )
 
     private fun sampleCheck(

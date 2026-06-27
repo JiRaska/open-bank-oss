@@ -24,8 +24,7 @@ import java.util.UUID
  * need direct row-level result access with score column.
  */
 @ApplicationScoped
-class SanctionsEntryRepositoryImpl(private val pool: PgPool, private val clock: Clock) :
-    SanctionsEntryRepository {
+class SanctionsEntryRepositoryImpl(private val pool: PgPool, private val clock: Clock) : SanctionsEntryRepository {
 
     private val mapper = jacksonObjectMapper().findAndRegisterModules()
 

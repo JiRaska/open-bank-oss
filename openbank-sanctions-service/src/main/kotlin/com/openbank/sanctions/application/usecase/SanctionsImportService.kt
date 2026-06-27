@@ -5,9 +5,12 @@
 package com.openbank.sanctions.application.usecase
 
 import com.openbank.sanctions.application.port.out.SanctionsEntryRepository
-import com.openbank.sanctions.domain.model.*
+import com.openbank.sanctions.domain.model.EntityType
+import com.openbank.sanctions.domain.model.SanctionsEntry
+import com.openbank.sanctions.domain.model.SanctionsListType
 import io.quarkus.logging.Log
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.xml.sax.Attributes
@@ -20,7 +23,9 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.text.Normalizer
+import java.time.Clock
 import java.time.Duration
+import java.time.Instant
 import java.util.UUID
 import javax.xml.parsers.SAXParserFactory
 
@@ -37,9 +42,13 @@ import javax.xml.parsers.SAXParserFactory
  * Memory design: never buffers the full HTTP body as String; parses from InputStream.
  */
 @ApplicationScoped
-class SanctionsImportService(
-    private val entryRepo: SanctionsEntryRepository,
-) {
+class SanctionsImportService(private val entryRepo: SanctionsEntryRepository, private val clock: Clock) {
+
+    // CDI entry point: injects the production UTC clock. Tests use the primary constructor with a
+    // fixed Clock for deterministic timestamps (ADR-0100 Layer 1).
+    @Inject
+    constructor(entryRepo: SanctionsEntryRepository) : this(entryRepo, Clock.systemUTC())
+
     private val http: HttpClient = HttpClient.newBuilder()
         .followRedirects(HttpClient.Redirect.NORMAL)
         .connectTimeout(Duration.ofSeconds(30))
@@ -54,18 +63,28 @@ class SanctionsImportService(
         return try {
             when (listType) {
                 // OFAC SDN: official Treasury XML — SAX streaming
-                SanctionsListType.OFAC_SDN       -> importOfacSdn(sourceUrl)
+                SanctionsListType.OFAC_SDN -> importOfacSdn(sourceUrl)
                 // OpenSanctions-normalised CSV for PEP, EU, UN, HM — stream line-by-line
-                SanctionsListType.PEP_GLOBAL      -> importOpenSanctionsCsv(sourceUrl, listType, listOf("PEP"))
+                SanctionsListType.PEP_GLOBAL -> importOpenSanctionsCsv(sourceUrl, listType, listOf("PEP"))
                 SanctionsListType.EU_CONSOLIDATED -> importOpenSanctionsCsv(sourceUrl, listType, listOf("EU-SANCTIONS"))
                 SanctionsListType.UN_CONSOLIDATED -> importOpenSanctionsCsv(sourceUrl, listType, listOf("UN-SANCTIONS"))
-                SanctionsListType.HM_TREASURY     -> importOpenSanctionsCsv(sourceUrl, listType, listOf("HMT-SANCTIONS"))
-                SanctionsListType.FATF_HIGH_RISK  -> { Log.info("FATF is country-risk — skipping import"); 0 }
-                SanctionsListType.CNB_DOMESTIC    -> { Log.info("CNB has no machine-readable feed — entries seeded via migration"); 0 }
+                SanctionsListType.HM_TREASURY -> importOpenSanctionsCsv(sourceUrl, listType, listOf("HMT-SANCTIONS"))
+                SanctionsListType.FATF_HIGH_RISK -> {
+                    Log.info("FATF is country-risk — skipping import")
+                    0
+                }
+                SanctionsListType.CNB_DOMESTIC -> {
+                    Log.info("CNB has no machine-readable feed — entries seeded via migration")
+                    0
+                }
             }
         } catch (ex: Exception) {
-            Log.warnf("Import failed for %s (%s: %s) — keeping existing entries",
-                      listType, ex.javaClass.simpleName, ex.message)
+            Log.warnf(
+                "Import failed for %s (%s: %s) — keeping existing entries",
+                listType,
+                ex.javaClass.simpleName,
+                ex.message,
+            )
             0
         }
     }
@@ -79,82 +98,105 @@ class SanctionsImportService(
         val allEntries = mutableListOf<SanctionsEntry>()
 
         val saxFactory = SAXParserFactory.newInstance().apply { isNamespaceAware = false }
-        saxFactory.newSAXParser().parse(inputStream, object : DefaultHandler() {
-            private var inEntry    = false
-            private var inAka      = false
-            private var inDobItem  = false
-            private val text       = StringBuilder()
+        saxFactory.newSAXParser().parse(
+            inputStream,
+            object : DefaultHandler() {
+                private var inEntry = false
+                private var inAka = false
+                private var inDobItem = false
+                private val text = StringBuilder()
 
-            private var uid: String?      = null
-            private var firstName: String? = null
-            private var lastName: String?  = null
-            private var sdnType: String?   = null
-            private val programs = mutableListOf<String>()
-            private val aliases  = mutableListOf<String>()
-            private var dob: String?      = null
+                private var uid: String? = null
+                private var firstName: String? = null
+                private var lastName: String? = null
+                private var sdnType: String? = null
+                private val programs = mutableListOf<String>()
+                private val aliases = mutableListOf<String>()
+                private var dob: String? = null
 
-            private var akaFirst: String? = null
-            private var akaLast: String?  = null
+                private var akaFirst: String? = null
+                private var akaLast: String? = null
 
-            override fun startElement(uri: String, local: String, qName: String, attrs: Attributes) {
-                text.clear()
-                when (qName) {
-                    "sdnEntry" -> {
-                        inEntry = true
-                        uid = null; firstName = null; lastName = null; sdnType = null; dob = null
-                        programs.clear(); aliases.clear()
-                    }
-                    "aka"             -> { inAka = true; akaFirst = null; akaLast = null }
-                    "dateOfBirthItem" -> inDobItem = true
-                }
-            }
-
-            override fun characters(ch: CharArray, start: Int, length: Int) {
-                text.append(ch, start, length)
-            }
-
-            override fun endElement(uri: String, local: String, qName: String) {
-                val t = text.toString().trim()
-                text.clear()
-                if (!inEntry) return
-
-                when {
-                    inAka && qName == "firstName" -> akaFirst = t.takeIf { it.isNotBlank() }
-                    inAka && qName == "lastName"  -> akaLast  = t.takeIf { it.isNotBlank() }
-                    inAka && qName == "aka" -> {
-                        val fn = akaFirst ?: ""; val ln = akaLast ?: ""
-                        val alias = if (fn.isBlank()) ln else "$fn $ln".trim()
-                        if (alias.isNotBlank()) aliases += alias
-                        inAka = false
-                    }
-                    !inAka && qName == "firstName"     -> if (firstName == null) firstName = t.takeIf { it.isNotBlank() }
-                    !inAka && qName == "lastName"      -> if (lastName  == null) lastName  = t.takeIf { it.isNotBlank() }
-                    qName == "uid"     && uid == null  -> uid     = t.takeIf { it.isNotBlank() }
-                    qName == "sdnType"                 -> sdnType = t.takeIf { it.isNotBlank() }
-                    qName == "program"                 -> if (t.isNotBlank()) programs += t
-                    inDobItem && qName == "dateOfBirth" -> if (dob == null) dob = t.takeIf { it.isNotBlank() }
-                    qName == "dateOfBirthItem"          -> inDobItem = false
-                    qName == "sdnEntry" -> {
-                        inEntry = false
-                        val u  = uid ?: return
-                        val fn = firstName ?: ""; val ln = lastName ?: ""
-                        val pn = if (fn.isBlank()) ln else "$fn $ln".trim()
-                        if (pn.isBlank()) return
-                        val et = if (sdnType?.lowercase()?.contains("entity") == true)
-                            EntityType.ORGANIZATION else EntityType.INDIVIDUAL
-                        allEntries += buildEntry(
-                            listType    = SanctionsListType.OFAC_SDN,
-                            externalId  = "ofac-$u",
-                            entityType  = et,
-                            primaryName = pn,
-                            aliases     = aliases.toList(),
-                            dateOfBirth = dob,
-                            programs    = programs.toList(),
-                        )
+                override fun startElement(uri: String, local: String, qName: String, attrs: Attributes) {
+                    text.clear()
+                    when (qName) {
+                        "sdnEntry" -> {
+                            inEntry = true
+                            uid = null
+                            firstName = null
+                            lastName = null
+                            sdnType = null
+                            dob = null
+                            programs.clear()
+                            aliases.clear()
+                        }
+                        "aka" -> {
+                            inAka = true
+                            akaFirst = null
+                            akaLast = null
+                        }
+                        "dateOfBirthItem" -> inDobItem = true
                     }
                 }
-            }
-        })
+
+                override fun characters(ch: CharArray, start: Int, length: Int) {
+                    text.append(ch, start, length)
+                }
+
+                override fun endElement(uri: String, local: String, qName: String) {
+                    val t = text.toString().trim()
+                    text.clear()
+                    if (!inEntry) return
+
+                    when {
+                        inAka && qName == "firstName" -> akaFirst = t.takeIf { it.isNotBlank() }
+                        inAka && qName == "lastName" -> akaLast = t.takeIf { it.isNotBlank() }
+                        inAka && qName == "aka" -> {
+                            val fn = akaFirst ?: ""
+                            val ln = akaLast ?: ""
+                            val alias = if (fn.isBlank()) ln else "$fn $ln".trim()
+                            if (alias.isNotBlank()) aliases += alias
+                            inAka = false
+                        }
+                        !inAka && qName == "firstName" -> if (firstName == null) {
+                            firstName = t.takeIf { it.isNotBlank() }
+                        }
+                        !inAka && qName == "lastName" -> if (lastName == null) {
+                            lastName = t.takeIf { it.isNotBlank() }
+                        }
+                        qName == "uid" && uid == null -> uid = t.takeIf { it.isNotBlank() }
+                        qName == "sdnType" -> sdnType = t.takeIf { it.isNotBlank() }
+                        qName == "program" -> if (t.isNotBlank()) programs += t
+                        inDobItem && qName == "dateOfBirth" -> if (dob == null) {
+                            dob = t.takeIf { it.isNotBlank() }
+                        }
+                        qName == "dateOfBirthItem" -> inDobItem = false
+                        qName == "sdnEntry" -> {
+                            inEntry = false
+                            val u = uid ?: return
+                            val fn = firstName ?: ""
+                            val ln = lastName ?: ""
+                            val pn = if (fn.isBlank()) ln else "$fn $ln".trim()
+                            if (pn.isBlank()) return
+                            val et = if (sdnType?.lowercase()?.contains("entity") == true) {
+                                EntityType.ORGANIZATION
+                            } else {
+                                EntityType.INDIVIDUAL
+                            }
+                            allEntries += buildEntry(
+                                listType = SanctionsListType.OFAC_SDN,
+                                externalId = "ofac-$u",
+                                entityType = et,
+                                primaryName = pn,
+                                aliases = aliases.toList(),
+                                dateOfBirth = dob,
+                                programs = programs.toList(),
+                            )
+                        }
+                    }
+                }
+            },
+        )
 
         Log.infof("SAX-parsed %d OFAC SDN entries", allEntries.size)
         var total = 0
@@ -188,12 +230,12 @@ class SanctionsImportService(
         val headers = parseCsvLine(headerLine)
 
         // Resolve column indexes from actual header (format-safe)
-        val idxId         = headers.indexOf("id")
-        val idxSchema     = headers.indexOf("schema")
-        val idxName       = headers.indexOf("name")
-        val idxAliases    = headers.indexOf("aliases")
-        val idxBirthDate  = headers.indexOf("birth_date")
-        val idxCountries  = headers.indexOf("countries")
+        val idxId = headers.indexOf("id")
+        val idxSchema = headers.indexOf("schema")
+        val idxName = headers.indexOf("name")
+        val idxAliases = headers.indexOf("aliases")
+        val idxBirthDate = headers.indexOf("birth_date")
+        val idxCountries = headers.indexOf("countries")
         val idxProgramIds = headers.indexOf("program_ids")
 
         if (idxId < 0 || idxName < 0) {
@@ -216,13 +258,13 @@ class SanctionsImportService(
                 if (rawLine.isBlank()) continue
 
                 val cols = parseCsvLine(rawLine)
-                val id          = col(cols, idxId)
-                val schema      = col(cols, idxSchema)
-                val name        = col(cols, idxName)
-                val aliasesRaw  = col(cols, idxAliases)
-                val birthDate   = col(cols, idxBirthDate)
+                val id = col(cols, idxId)
+                val schema = col(cols, idxSchema)
+                val name = col(cols, idxName)
+                val aliasesRaw = col(cols, idxAliases)
+                val birthDate = col(cols, idxBirthDate)
                 val countriesRaw = col(cols, idxCountries)
-                val programRaw  = col(cols, idxProgramIds)
+                val programRaw = col(cols, idxProgramIds)
 
                 if (name.isBlank()) continue
 
@@ -235,27 +277,28 @@ class SanctionsImportService(
                     .map { it.trim() }
                     .filter { it.isNotBlank() }
 
-                val programs = if (programRaw.isNotBlank())
+                val programs = if (programRaw.isNotBlank()) {
                     programRaw.split(";").map { it.trim() }.filter { it.isNotBlank() }
-                else
+                } else {
                     defaultPrograms
+                }
 
                 val entityType = when {
                     schema in listOf("Organization", "Company", "PublicBody", "LegalEntity") -> EntityType.ORGANIZATION
-                    schema == "Vessel"   -> EntityType.VESSEL
+                    schema == "Vessel" -> EntityType.VESSEL
                     schema == "Aircraft" -> EntityType.AIRCRAFT
-                    else                 -> EntityType.INDIVIDUAL
+                    else -> EntityType.INDIVIDUAL
                 }
 
                 batch += buildEntry(
-                    listType      = listType,
-                    externalId    = id.takeIf { it.isNotBlank() },
-                    entityType    = entityType,
-                    primaryName   = name,
-                    aliases       = aliases,
-                    dateOfBirth   = birthDate.takeIf { it.isNotBlank() },
+                    listType = listType,
+                    externalId = id.takeIf { it.isNotBlank() },
+                    entityType = entityType,
+                    primaryName = name,
+                    aliases = aliases,
+                    dateOfBirth = birthDate.takeIf { it.isNotBlank() },
                     nationalities = nationalities,
-                    programs      = programs,
+                    programs = programs,
                 )
 
                 if (batch.size >= IMPORT_BATCH_SIZE) {
@@ -301,20 +344,21 @@ class SanctionsImportService(
             .filter { it.isNotBlank() }
             .distinct()
             .joinToString(" | ")
+        val now = Instant.now(clock)
         return SanctionsEntry(
             id = UUID.randomUUID(),
             listType = listType, externalId = externalId, entityType = entityType,
             primaryName = primaryName, aliases = aliases, dateOfBirth = dateOfBirth,
             nationalities = nationalities, programs = programs, searchText = searchText,
+            createdAt = now, updatedAt = now,
         )
     }
 
     /** Strip diacritics and lowercase — mirrors what the similarity query receives. */
-    fun normalizeForSearch(input: String): String =
-        Normalizer.normalize(input, Normalizer.Form.NFD)
-            .replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
-            .lowercase()
-            .trim()
+    fun normalizeForSearch(input: String): String = Normalizer.normalize(input, Normalizer.Form.NFD)
+        .replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
+        .lowercase()
+        .trim()
 
     /** RFC 4180-compatible CSV line parser (handles quoted fields with embedded commas/quotes). */
     private fun parseCsvLine(line: String): List<String> {
@@ -326,10 +370,16 @@ class SanctionsImportService(
             val ch = line[i]
             when {
                 ch == '"' && !inQuote -> inQuote = true
-                ch == '"' && inQuote && i + 1 < line.length && line[i + 1] == '"' -> { current.append('"'); i++ }
-                ch == '"' && inQuote  -> inQuote = false
-                ch == ',' && !inQuote -> { result += current.toString(); current.clear() }
-                else                  -> current.append(ch)
+                ch == '"' && inQuote && i + 1 < line.length && line[i + 1] == '"' -> {
+                    current.append('"')
+                    i++
+                }
+                ch == '"' && inQuote -> inQuote = false
+                ch == ',' && !inQuote -> {
+                    result += current.toString()
+                    current.clear()
+                }
+                else -> current.append(ch)
             }
             i++
         }
