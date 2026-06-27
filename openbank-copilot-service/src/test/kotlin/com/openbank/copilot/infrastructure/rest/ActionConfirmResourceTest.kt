@@ -19,6 +19,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.time.Clock
 import java.time.Instant
 import java.util.UUID
 
@@ -38,6 +39,10 @@ class ActionConfirmResourceTest {
         resource.tokenStore = tokenStore
         resource.opaGate = opaGate
         resource.identity = identity
+        // ADR-0100: the resource now reads the wall clock through an injected Clock
+        // (Instant.now(clock) for token expiry). The test tokens are minted relative to
+        // real time (Instant.now() ± seconds), so systemUTC keeps the expiry checks correct.
+        resource.clock = Clock.systemUTC()
     }
 
     private fun stubIdentity(sub: String) {
