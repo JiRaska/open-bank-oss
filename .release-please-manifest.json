@@ -13,7 +13,7 @@
   "openbank-copilot-service": "0.4.0",
   "openbank-customer-edge": "0.15.0",
   "openbank-dispute-service": "0.7.0",
-  "openbank-domestic-payment": "0.8.0",
+  "openbank-domestic-payment": "0.8.1",
   "openbank-finops-agent": "0.1.0",
   "openbank-finrep-service": "0.2.0",
   "openbank-fraud-service": "0.4.1",

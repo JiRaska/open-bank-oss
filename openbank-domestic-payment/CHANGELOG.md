@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank/compare/domestic-payment-v0.8.0...domestic-payment-v0.8.1) (2026-06-27)
+
+
+### Bug Fixes
+
+* **domestic-payment:** derive transferScope server-side and apply AMLD4 SDD screening ([#2261](https://github.com/JiRaska/open-bank/issues/2261)) ([0d36834](https://github.com/JiRaska/open-bank/commit/0d368341e39f70ed3a87ff31af0d061113cf07f2))
+* **domestic-payment:** extract HTTP_NOT_FOUND constant to resolve detekt MagicNumber ([#2258](https://github.com/JiRaska/open-bank/issues/2258)) ([5c7769b](https://github.com/JiRaska/open-bank/commit/5c7769b027986683365e0cfab01fd979af2df0c2)), closes [#2084](https://github.com/JiRaska/open-bank/issues/2084)
+* **domestic-payment:** resolve ktlint violations in AccountServiceClient and IdempotencyConfig ([#2260](https://github.com/JiRaska/open-bank/issues/2260)) ([6895569](https://github.com/JiRaska/open-bank/commit/689556955b67ae66fdaad5e40bf176a4270cf06e))
+* **domestic-payment:** serialize amount as String in response DTO ([#2222](https://github.com/JiRaska/open-bank/issues/2222)) ([403d738](https://github.com/JiRaska/open-bank/commit/403d738f1ffc236ab1a3714faf6064982b3be427))
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank/compare/domestic-payment-v0.7.0...domestic-payment-v0.8.0) (2026-06-25)
 
 
