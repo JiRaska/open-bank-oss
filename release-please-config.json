@@ -99,6 +99,9 @@
     "openbank-customer-edge": {
       "component": "customer-edge"
     },
+    "openbank-devops-agent": {
+      "component": "devops-agent"
+    },
     "openbank-dispute-service": {
       "component": "dispute-service"
     },

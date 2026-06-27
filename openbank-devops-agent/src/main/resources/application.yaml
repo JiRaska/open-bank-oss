@@ -1,0 +1,80 @@
+quarkus:
+  application:
+    name: devops-agent
+    version: 0.1.0
+  http:
+    port: 8142
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+      headers: Content-Type,Authorization
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+    oidc:
+      enabled: false
+
+"%test":
+  quarkus:
+    oidc:
+      enabled: false
+    management:
+      enabled: false
+
+openbank:
+  temporal:
+    enabled: ${TEMPORAL_ENABLED:false}
+    server-url: ${TEMPORAL_HOST:temporal-frontend.temporal:7233}
+    namespace: ${TEMPORAL_NAMESPACE:openbank}
+    task-queue: devops-agent
+  devops:
+    prometheus-url: ${PROMETHEUS_URL:http://prometheus-operated.observability:9090}
+    alertmanager-url: ${ALERTMANAGER_URL:http://alertmanager-operated.observability:9093}
+    llm-gateway-url: ${LLM_GATEWAY_URL:http://litellm.ai-platform:4000}
+    ci-failure-rate-threshold: ${CI_FAILURE_RATE_THRESHOLD:0.20}
+    change-failure-rate-threshold: ${CHANGE_FAILURE_RATE_THRESHOLD:0.05}
+    runner-queue-pressure-threshold: ${RUNNER_QUEUE_PRESSURE_THRESHOLD:0.80}
+    incident-recurrence-threshold: ${INCIDENT_RECURRENCE_THRESHOLD:3}

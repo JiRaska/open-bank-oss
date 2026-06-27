@@ -258,3 +258,56 @@ agents:
     compliance:
       eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency (all proposals logged)"
       dora: "continuous monitoring; operational resilience cost controls"
+
+  - id: devops-agent
+    plane: control
+    charter: "ADR-0119"
+    description: >
+      Proactive SSDLC, CI/CD and DORA reliability agent — the delivery-pipeline twin of the
+      finops-agent (ADR-0112). Watches build/lint health, the four DORA metrics (deployment
+      frequency, lead time, change failure rate, time-to-restore), runner-pool capacity,
+      deploy/rollout health, SSDLC hygiene and recurring incidents. Diagnoses the root cause
+      and proposes a DURABLE fix (a code/IaC PR, a runbook update, a tracking ticket) through
+      the HITL queue. Never merges, applies or executes anything.
+    enabled: true
+    enforcement: block
+    schedule:
+      daily: "04:00 UTC"
+      reactive: goalert-webhook       # triggered by GoAlert on a CI / deploy / runner anomaly alert
+    data_scope:
+      read:
+        - prometheus-query-readonly   # ARC runner metrics, Argo Rollouts alerts, 5xx CFR proxy, ALERTS
+        - github-actions-readonly     # workflow run conclusions/durations (exporter is the follow-up)
+        - kubernetes-events-readonly  # deploy / rollout lifecycle events
+        - read.governance             # rules.yaml, ADRs, runbooks — grounding for the proposal
+      pii: none                       # pipeline / infra metadata only; no customer data in scope
+    tools:
+      allow:
+        - tier: read
+          resources: [prometheus, github-actions, kubernetes-events, governance, runbooks]
+        - tier: write_proposal
+          resources: [github-pr]      # opens code/IaC/runbook diff PRs only; no write, no merge
+      deny:
+        - tier: write
+          resources: ["*"]            # explicit: no direct repo / infra writes ever
+        - tier: execute
+          resources: ["*"]
+    requires_human:
+      - any_pipeline_or_infra_change  # HITL mandatory; a human merges every proposal
+      - every: proposal               # segregation of duties: agent proposes, human disposes
+    limits:
+      tokens_per_run: 50000
+      runs_per_day: 6
+      kill_switch: true
+    audit:
+      capture:
+        - model_id
+        - prompt_hash
+        - tool_calls
+        - policy_decision
+        - findings_detected
+        - dora_metric_impacted
+        - human_approved_by
+    compliance:
+      eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
+      dora: "ICT change management (Art. 8–10); operational resilience via proactive pipeline monitoring"

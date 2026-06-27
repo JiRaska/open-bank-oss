@@ -8,13 +8,14 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   GitBranch, RefreshCw, Rocket, Clock, AlertTriangle, Wrench,
   CheckCircle2, XCircle, Minus, FlaskConical,
-  Shield, Info, Zap,
+  Shield, Info, Zap, Bot,
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import type { TestResultsResponse, ServiceTestResult } from '@/lib/types/test-results'
+import type { DevOpsFinding } from '@/app/api/devops/insights/route'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -180,12 +181,23 @@ function SourceChip({ available, label }: { available: boolean; label: string })
   )
 }
 
+// ── DevOps Insights (AI) — ADR-0119 ───────────────────────────────────────────
+
+// Short bilingual label for the DORA metric a finding impacts.
+const DORA_METRIC_LABEL: Record<NonNullable<DevOpsFinding['doraMetricImpacted']>, { cs: string; en: string }> = {
+  DEPLOYMENT_FREQUENCY:  { cs: 'Frekvence nasazení', en: 'Deployment freq.' },
+  LEAD_TIME_FOR_CHANGES: { cs: 'Průběžná doba',       en: 'Lead time' },
+  CHANGE_FAILURE_RATE:   { cs: 'Chybovost změn',      en: 'Change failure' },
+  TIME_TO_RESTORE:       { cs: 'Doba obnovy',         en: 'Time to restore' },
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 function DevOpsContent() {
   const { t, language } = useLanguage()
   const [dora, setDora] = useState<DoraData | null>(null)
   const [tests, setTests] = useState<TestResultsResponse | null>(null)
+  const [findings, setFindings] = useState<DevOpsFinding[]>([])
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
@@ -194,15 +206,20 @@ function DevOpsContent() {
     setLoading(true)
     setUnavailable(null)
     try {
-      const [doraRes, testRes] = await Promise.all([
+      const [doraRes, testRes, insightsRes] = await Promise.all([
         fetch('/api/devops/dora', { cache: 'no-store' }),
         fetch('/api/test-results',  { cache: 'no-store' }),
+        fetch('/api/devops/insights', { cache: 'no-store' }),
       ])
 
       if (!doraRes.ok) { setUnavailable({ kind: 'error' }); return }
 
       setDora(await doraRes.json())
       if (testRes.ok) setTests(await testRes.json())
+      if (insightsRes.ok) {
+        const ins = await insightsRes.json() as { findings?: DevOpsFinding[] }
+        setFindings(ins.findings ?? [])
+      }
     } catch {
       setUnavailable({ kind: 'unreachable' })
     } finally {
@@ -358,6 +375,113 @@ function DevOpsContent() {
               note={mttr?.note}
               noDataMsg={t('Roadmapa: z ICT incident registru (ADR-0061 fáze 3)', 'Roadmap: from the ICT incident register (ADR-0061 phase 3)')}
             />
+          </div>
+
+          {/* ── DevOps Insights (AI) — ADR-0119 ── */}
+          <div style={{ background: 'var(--surface)', border: '1px solid #d9770640', borderRadius: 'var(--r-lg)',
+            padding: '20px 24px', marginBottom: '20px' }}>
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Bot size={16} style={{ color: '#6366f1' }} />
+                <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  {t('DevOps náhledy (AI)', 'DevOps Insights (AI)')}
+                </span>
+              </div>
+              <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: '6px 0 0' }}>
+                {t(
+                  'Aktivní nálezy z devops-agenta (CI zdraví, DORA regrese, kapacita runnerů, deploy, SSDLC, opakované incidenty — ADR-0119). HITL schválení záplat přijde ve follow-upu.',
+                  'Active findings from the devops-agent (CI health, DORA regressions, runner capacity, deploys, SSDLC, incident recurrence — ADR-0119). HITL patch approval coming in a follow-up.',
+                )}
+              </p>
+            </div>
+
+            {findings.length === 0 ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px', borderRadius: '8px',
+                background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                <Info size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  {t('Žádné aktivní DevOps nálezy — pipeline v pořádku', 'No active DevOps findings — pipeline healthy')}
+                </span>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {findings.map(f => {
+                  const sevColor = f.severity === 'CRITICAL' ? '#dc2626' : '#d97706'
+                  const sevBg    = f.severity === 'CRITICAL' ? '#fee2e2' : '#fef3c7'
+                  const statusCfg: Record<string, { color: string; bg: string }> = {
+                    OPEN:      { color: '#2563eb', bg: '#dbeafe' },
+                    DIAGNOSED: { color: '#0891b2', bg: '#cffafe' },
+                    PROPOSED:  { color: '#d97706', bg: '#fef3c7' },
+                    APPROVED:  { color: '#16a34a', bg: '#dcfce7' },
+                    REJECTED:  { color: '#dc2626', bg: '#fee2e2' },
+                    RESOLVED:  { color: 'var(--text-secondary)', bg: 'var(--surface-2)' },
+                  }
+                  const sc = statusCfg[f.status] ?? statusCfg['OPEN']
+                  const dora = f.doraMetricImpacted ? DORA_METRIC_LABEL[f.doraMetricImpacted] : null
+                  return (
+                    <div key={f.id} style={{ padding: '12px 14px', borderRadius: '10px',
+                      border: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '6px' }}>
+                        <span style={{ fontSize: '10px', fontWeight: 800, padding: '2px 7px', borderRadius: '6px',
+                          background: '#ede9fe', color: '#6366f1', fontFamily: 'monospace', flexShrink: 0 }}>
+                          {f.detector}
+                        </span>
+                        <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '6px',
+                          color: sevColor, background: sevBg, flexShrink: 0 }}>
+                          {f.severity}
+                        </span>
+                        <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', flex: 1 }}>{f.title}</span>
+                        {dora && (
+                          <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '6px',
+                            color: '#0891b2', background: '#cffafe', flexShrink: 0 }}>
+                            {t(`DORA: ${dora.cs}`, `DORA: ${dora.en}`)}
+                          </span>
+                        )}
+                        <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px',
+                          color: sc.color, background: sc.bg }}>
+                          {f.status}
+                        </span>
+                      </div>
+                      {f.rootCause && (
+                        <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '0 0 8px', lineHeight: 1.5 }}>
+                          {f.rootCause}
+                        </p>
+                      )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        {f.remediationKind !== 'NONE' && (
+                          <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '6px',
+                            color: 'var(--text-secondary)', background: 'var(--surface-3)', fontFamily: 'monospace' }}>
+                            {f.remediationKind}
+                          </span>
+                        )}
+                        {f.proposalPrUrl && (
+                          <a href={f.proposalPrUrl} target="_blank" rel="noopener noreferrer"
+                            style={{ fontSize: '11px', fontWeight: 700, color: '#6366f1', textDecoration: 'none' }}>
+                            {t('Zobrazit návrh →', 'View proposal →')}
+                          </a>
+                        )}
+                        <span style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginLeft: 'auto' }}>
+                          {new Date(f.detectedAt).toLocaleString()}
+                        </span>
+                        {/* HITL Approve/Dismiss placeholders — HITL backend wired in ADR-0119 follow-up */}
+                        <button
+                          onClick={() => console.log('HITL approve', f.id)}
+                          style={{ fontSize: '11px', fontWeight: 700, padding: '4px 12px', borderRadius: '8px',
+                            border: 'none', background: '#16a34a', color: '#fff', cursor: 'pointer' }}>
+                          {t('Schválit', 'Approve')}
+                        </button>
+                        <button
+                          onClick={() => console.log('HITL dismiss', f.id)}
+                          style={{ fontSize: '11px', fontWeight: 700, padding: '4px 12px', borderRadius: '8px',
+                            border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                          {t('Odmítnout', 'Dismiss')}
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
 
           {/* Data source guidance */}

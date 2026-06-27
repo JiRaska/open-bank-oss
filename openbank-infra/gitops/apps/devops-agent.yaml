@@ -1,0 +1,29 @@
+# devops-agent: DevOps automation and remediation Temporal workflow service. Namespace: devops-agent.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: devops-agent
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/devops-agent
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: devops-agent
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
