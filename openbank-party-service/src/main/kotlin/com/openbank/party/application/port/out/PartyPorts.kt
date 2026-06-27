@@ -60,8 +60,10 @@ interface PartyDocumentRepository {
 interface PartyDocumentFileRepository {
     suspend fun save(file: PartyDocumentFile): PartyDocumentFile
     suspend fun findByPartyId(partyId: UUID): List<PartyDocumentFile>
+
     /** Fetch by id, constrained to [partyId] to prevent cross-party reads. */
     suspend fun findByIdAndPartyId(id: UUID, partyId: UUID): PartyDocumentFile?
+
     /** GDPR Art. 17 — delete all document files for [partyId] as part of erasure. */
     suspend fun deleteByPartyId(partyId: UUID)
 }

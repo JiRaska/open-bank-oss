@@ -11,17 +11,29 @@ fun StandingOrderEntity.toDomain() = StandingOrder(
     id, idempotencyKey, partyId, debitAccountId, creditorIban, creditorName, creditorBic,
     amountMinorUnits, currency, frequency, paymentType, remittanceInfo,
     startDate, endDate, nextExecutionDate, lastExecutionDate, executionCount, failureCount,
-    status, createdAt, updatedAt
+    status, createdAt, updatedAt,
 )
 
 fun StandingOrder.toEntity() = StandingOrderEntity().also {
-    it.id = id; it.idempotencyKey = idempotencyKey; it.partyId = partyId
-    it.debitAccountId = debitAccountId; it.creditorIban = creditorIban
-    it.creditorName = creditorName; it.creditorBic = creditorBic
-    it.amountMinorUnits = amountMinorUnits; it.currency = currency
-    it.frequency = frequency; it.paymentType = paymentType
-    it.remittanceInfo = remittanceInfo; it.startDate = startDate; it.endDate = endDate
-    it.nextExecutionDate = nextExecutionDate; it.lastExecutionDate = lastExecutionDate
-    it.executionCount = executionCount; it.failureCount = failureCount
-    it.status = status; it.createdAt = createdAt; it.updatedAt = updatedAt
+    it.id = id
+    it.idempotencyKey = idempotencyKey
+    it.partyId = partyId
+    it.debitAccountId = debitAccountId
+    it.creditorIban = creditorIban
+    it.creditorName = creditorName
+    it.creditorBic = creditorBic
+    it.amountMinorUnits = amountMinorUnits
+    it.currency = currency
+    it.frequency = frequency
+    it.paymentType = paymentType
+    it.remittanceInfo = remittanceInfo
+    it.startDate = startDate
+    it.endDate = endDate
+    it.nextExecutionDate = nextExecutionDate
+    it.lastExecutionDate = lastExecutionDate
+    it.executionCount = executionCount
+    it.failureCount = failureCount
+    it.status = status
+    it.createdAt = createdAt
+    it.updatedAt = updatedAt
 }

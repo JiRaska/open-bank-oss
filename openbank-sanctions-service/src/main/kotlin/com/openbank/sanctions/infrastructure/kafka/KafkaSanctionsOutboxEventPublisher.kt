@@ -15,9 +15,8 @@ import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Message
 
 @ApplicationScoped
-class KafkaSanctionsOutboxEventPublisher(
-    @Channel("sanctions-events-out") private val emitter: MutinyEmitter<String>
-) : OutboxEventPublisher {
+class KafkaSanctionsOutboxEventPublisher(@Channel("sanctions-events-out") private val emitter: MutinyEmitter<String>) :
+    OutboxEventPublisher {
 
     override suspend fun publish(entry: OutboxEntry) {
         val kafkaHeaders = RecordHeaders()

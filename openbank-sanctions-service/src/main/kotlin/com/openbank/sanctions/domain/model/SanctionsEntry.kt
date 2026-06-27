@@ -30,8 +30,4 @@ data class SanctionsEntry(
     val updatedAt: Instant = Instant.EPOCH,
 )
 
-data class SanctionsEntryMatch(
-    val entry: SanctionsEntry,
-    val matchedName: String,
-    val score: Double,
-)
+data class SanctionsEntryMatch(val entry: SanctionsEntry, val matchedName: String, val score: Double)

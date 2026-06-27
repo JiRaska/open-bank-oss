@@ -31,16 +31,12 @@ interface AccountServiceClient {
         dateTo: LocalDate?,
         bookingStatus: BookingStatus,
         limit: Int,
-        afterCursor: String?
+        afterCursor: String?,
     ): Pair<List<ObTransaction>, String?>
 }
 
 /** A minimal projection of a consent as seen by the PSD2 facade. */
-data class ConsentSnapshot(
-    val consentId: String,
-    val partyId: String,
-    val status: String
-)
+data class ConsentSnapshot(val consentId: String, val partyId: String, val status: String)
 
 /**
  * Outbound port to consent-service, backing the PSD2 consent (AIS) lifecycle: creation, status
@@ -58,7 +54,7 @@ interface ConsentServiceClient {
         validUntil: LocalDate,
         redirectUri: String?,
         tppTransactionId: String?,
-        ipAddress: String?
+        ipAddress: String?,
     ): String
 
     suspend fun getConsentStatus(consentId: String): String
@@ -81,7 +77,7 @@ interface TransactionServiceClient {
         currency: String,
         endToEndId: String?,
         remittanceInfo: String?,
-        idempotencyKey: String
+        idempotencyKey: String,
     ): String
 
     suspend fun getPaymentStatus(paymentId: String): PaymentStatus

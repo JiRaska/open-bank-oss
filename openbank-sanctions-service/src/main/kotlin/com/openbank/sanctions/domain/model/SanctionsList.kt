@@ -19,7 +19,7 @@ data class SanctionsList(
     val cronMinute: Int,
     val cronDays: String,
     val createdAt: Instant,
-    val updatedAt: Instant
+    val updatedAt: Instant,
 )
 
 data class UpdateSanctionsListRequest(
@@ -27,5 +27,5 @@ data class UpdateSanctionsListRequest(
     val sourceUrl: String?,
     val cronHour: Int?,
     val cronMinute: Int?,
-    val cronDays: String?
+    val cronDays: String?,
 )

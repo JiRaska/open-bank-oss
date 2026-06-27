@@ -3,8 +3,8 @@
 // See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
 package com.openbank.psd2.infrastructure.outbox
 
-import com.openbank.psd2.application.port.out.Psd2OutboxRepository
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.psd2.application.port.out.Psd2OutboxRepository
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk

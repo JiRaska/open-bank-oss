@@ -20,7 +20,6 @@ import java.util.UUID
 class DeviceTokenRepository : PanacheRepository<DeviceTokenEntity> {
     @Inject lateinit var clock: Clock
 
-
     /**
      * Active device tokens for a party — the PUSH fan-out target set.
      *

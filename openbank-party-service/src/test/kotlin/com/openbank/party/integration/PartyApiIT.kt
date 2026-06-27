@@ -151,11 +151,13 @@ class PartyApiIT {
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
     fun `GET party documents returns added document`() {
         val id = createdPartyId ?: return
-        val body = (Given { this } When {
-            get("/api/v1/parties/$id/documents")
-        } Then {
-            statusCode(200)
-        }).extract().body().asString()
+        val body = (
+            Given { this } When {
+                get("/api/v1/parties/$id/documents")
+            } Then {
+                statusCode(200)
+            }
+            ).extract().body().asString()
         assertThat(body).contains("PASSPORT")
     }
 
@@ -224,15 +226,17 @@ class PartyApiIT {
             }
         """.trimIndent()
 
-        val body = (Given {
-            contentType("application/json")
-            header("Idempotency-Key", UUID.randomUUID().toString())
-            body(payload)
-        } When {
-            post("/api/v1/parties")
-        } Then {
-            statusCode(400)
-        }).extract().body().asString()
+        val body = (
+            Given {
+                contentType("application/json")
+                header("Idempotency-Key", UUID.randomUUID().toString())
+                body(payload)
+            } When {
+                post("/api/v1/parties")
+            } Then {
+                statusCode(400)
+            }
+            ).extract().body().asString()
 
         assertThat(body).isNotBlank()
         assertThat(body.lowercase()).contains("email")
@@ -248,7 +252,9 @@ class PartyApiIT {
         Given {
             contentType("application/json")
             header("Idempotency-Key", UUID.randomUUID().toString())
-            body("""{"partyType":"INDIVIDUAL","legalName":"$marker Novak","email":"s.${UUID.randomUUID()}@openbank.test","phone":"+420777000111"}""")
+            body(
+                """{"partyType":"INDIVIDUAL","legalName":"$marker Novak","email":"s.${UUID.randomUUID()}@openbank.test","phone":"+420777000111"}""",
+            )
         } When { post("/api/v1/parties") } Then { statusCode(201) }
 
         Given {

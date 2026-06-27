@@ -39,7 +39,12 @@ class StubAccountServiceClient(private val clock: Clock) : AccountServiceClient 
         ObAccount(accountId, "CZ6508000000192000145399", "CZK", "Jan Novák", "Běžný účet", "CURRENT", "CACC")
 
     override suspend fun getBalances(accountId: String): List<ObBalance> = listOf(
-        ObBalance(ObAmount("CZK", BigDecimal("12500.00")), "closingBooked", OffsetDateTime.now(clock), LocalDate.now(clock)),
+        ObBalance(
+            ObAmount("CZK", BigDecimal("12500.00")),
+            "closingBooked",
+            OffsetDateTime.now(clock),
+            LocalDate.now(clock),
+        ),
         ObBalance(ObAmount("CZK", BigDecimal("12500.00")), "expected", OffsetDateTime.now(clock), LocalDate.now(clock)),
     )
 

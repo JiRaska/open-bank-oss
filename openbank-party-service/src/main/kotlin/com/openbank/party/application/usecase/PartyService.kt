@@ -32,10 +32,15 @@ class PartyKeycloakSubAlreadyBoundException(sub: String) : RuntimeException("Key
 class PartyService : PartyUseCase {
 
     @Inject lateinit var partyRepo: PartyRepository
+
     @Inject lateinit var documentRepo: PartyDocumentRepository
+
     @Inject lateinit var documentFileRepo: PartyDocumentFileRepository
+
     @Inject lateinit var eventPublisher: PartyEventPublisher
+
     @Inject lateinit var metrics: DomainMetrics
+
     @Inject lateinit var clock: Clock
 
     /** ADR-0072: pepper for RČ blind index. Optional — dedup is silently skipped when absent. */
@@ -100,8 +105,7 @@ class PartyService : PartyUseCase {
         return partyRepo.findByRcBlindIndex(index)
     }
 
-    override suspend fun getParty(id: UUID): Party =
-        partyRepo.findById(id) ?: throw PartyNotFoundException(id)
+    override suspend fun getParty(id: UUID): Party = partyRepo.findById(id) ?: throw PartyNotFoundException(id)
 
     override suspend fun updateParty(cmd: UpdatePartyCommand): Party {
         val party = partyRepo.findById(cmd.id) ?: throw PartyNotFoundException(cmd.id)
@@ -110,7 +114,7 @@ class PartyService : PartyUseCase {
             phone = cmd.phone ?: party.phone,
             address = cmd.address ?: party.address,
             tradingName = cmd.tradingName ?: party.tradingName,
-            updatedAt = Instant.now(clock)
+            updatedAt = Instant.now(clock),
         )
         val saved = partyRepo.update(updated)
         eventPublisher.publishPartyUpdated(saved)
@@ -127,7 +131,7 @@ class PartyService : PartyUseCase {
             issuingCountry = cmd.issuingCountry,
             expiryDate = cmd.expiryDate,
             verifiedAt = null,
-            createdAt = Instant.now(clock)
+            createdAt = Instant.now(clock),
         )
         return documentRepo.save(doc)
     }
@@ -141,12 +145,21 @@ class PartyService : PartyUseCase {
         val items = if (status != null) partyRepo.listByStatus(status, page, size) else partyRepo.listAll(page, size)
         val total = if (status != null) partyRepo.countByStatus(status) else partyRepo.countAll()
         val result = mutableMapOf<String, Any>(
-            "items" to items.map { p -> mapOf(
-                "id" to p.id, "partyType" to p.partyType, "status" to p.status,
-                "legalName" to p.legalName, "tradingName" to p.tradingName,
-                "email" to p.email, "kycStatus" to p.kycStatus, "createdAt" to p.createdAt,
-            )},
-            "total" to total, "page" to page, "size" to size,
+            "items" to items.map { p ->
+                mapOf(
+                    "id" to p.id,
+                    "partyType" to p.partyType,
+                    "status" to p.status,
+                    "legalName" to p.legalName,
+                    "tradingName" to p.tradingName,
+                    "email" to p.email,
+                    "kycStatus" to p.kycStatus,
+                    "createdAt" to p.createdAt,
+                )
+            },
+            "total" to total,
+            "page" to page,
+            "size" to size,
         )
         // Present the applied filter so callers don't have to echo it back
         status?.name?.let { result["statusFilter"] = it }
@@ -168,7 +181,13 @@ class PartyService : PartyUseCase {
         val rows = partyRepo.searchByName(req.term!!, req.limit + 1, afterId)
         val hasNext = rows.size > req.limit
         val pageRows = if (hasNext) rows.dropLast(1) else rows
-        val nextCursor = if (hasNext && pageRows.isNotEmpty()) CursorEncoder.encode(pageRows.last().id.toString()) else null
+        val nextCursor = if (hasNext &&
+            pageRows.isNotEmpty()
+        ) {
+            CursorEncoder.encode(pageRows.last().id.toString())
+        } else {
+            null
+        }
         return CursorPage(
             data = pageRows,
             pagination = PageInfo(limit = req.limit, hasNextPage = hasNext, nextCursor = nextCursor),
@@ -257,15 +276,14 @@ class PartyService : PartyUseCase {
             kycStatus = KycStatus.NOT_STARTED,
             keycloakSub = cmd.keycloakSub,
             createdAt = Instant.now(clock),
-            updatedAt = Instant.now(clock)
+            updatedAt = Instant.now(clock),
         )
         val saved = partyRepo.save(party)
         eventPublisher.publishPartyCreated(saved)
         return Pair(saved, true)
     }
 
-    override suspend fun getMyParty(keycloakSub: String): Party? =
-        partyRepo.findByKeycloakSub(keycloakSub)
+    override suspend fun getMyParty(keycloakSub: String): Party? = partyRepo.findByKeycloakSub(keycloakSub)
 
     override suspend fun uploadDocument(cmd: UploadDocumentCommand): PartyDocumentFile {
         partyRepo.findById(cmd.partyId) ?: throw PartyNotFoundException(cmd.partyId)
@@ -276,7 +294,7 @@ class PartyService : PartyUseCase {
             fileName = cmd.fileName,
             mimeType = cmd.mimeType,
             content = cmd.content,
-            uploadedAt = Instant.now(clock)
+            uploadedAt = Instant.now(clock),
         )
         return documentFileRepo.save(file)
     }

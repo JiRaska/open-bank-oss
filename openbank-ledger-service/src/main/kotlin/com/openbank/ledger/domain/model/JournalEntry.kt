@@ -72,11 +72,7 @@ data class JournalEntry(
             if (delta.signum() == 0) null else AccountBookedDelta(accountId, currency, delta)
         }
 
-    fun reverse(
-        reversalId: UUID,
-        reversedBy: UUID,
-        lineIdProvider: (UUID) -> UUID = { Ids.newId() },
-    ): JournalEntry {
+    fun reverse(reversalId: UUID, reversedBy: UUID, lineIdProvider: (UUID) -> UUID = { Ids.newId() }): JournalEntry {
         check(status == JournalStatus.POSTED) { "Can only reverse POSTED journal entries" }
         val reversalLines = lines.map { line ->
             line.copy(

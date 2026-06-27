@@ -53,7 +53,15 @@ class DispatchControlService(private val store: DispatchControlStore, private va
         require(actor.isNotBlank()) { "actor is required" }
         require(reason.isNotBlank()) { "reason is required" }
         val next = snapshot().let { prev ->
-            DispatchControlSnapshot(KEY, DispatchState.HALTED, prev.version + 1, reason, actor, Instant.now(clock), true)
+            DispatchControlSnapshot(
+                KEY,
+                DispatchState.HALTED,
+                prev.version + 1,
+                reason,
+                actor,
+                Instant.now(clock),
+                true,
+            )
         }
         store.append(next)
         emit(actor, "notification.dispatch.halted", reason)

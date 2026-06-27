@@ -18,8 +18,12 @@ import java.util.UUID
 @ApplicationScoped
 class KafkaPartyEventPublisher : PartyEventPublisher {
 
-    @Inject @Channel("party-events-out") lateinit var emitter: Emitter<String>
+    @Inject
+    @Channel("party-events-out")
+    lateinit var emitter: Emitter<String>
+
     @Inject lateinit var objectMapper: ObjectMapper
+
     @Inject lateinit var clock: Clock
 
     override suspend fun publishPartyCreated(party: Party) = publish("PARTY_CREATED", party)
@@ -30,7 +34,7 @@ class KafkaPartyEventPublisher : PartyEventPublisher {
         val event = mapOf(
             "eventType" to "PARTY_ERASED",
             "partyId" to id,
-            "erasedAt" to Instant.now(clock)
+            "erasedAt" to Instant.now(clock),
         )
         emitter.send(objectMapper.writeValueAsString(event))
     }
@@ -44,7 +48,7 @@ class KafkaPartyEventPublisher : PartyEventPublisher {
             "kycStatus" to party.kycStatus,
             "legalName" to party.legalName,
             "email" to party.email,
-            "occurredAt" to Instant.now(clock)
+            "occurredAt" to Instant.now(clock),
         )
         emitter.send(objectMapper.writeValueAsString(event))
     }

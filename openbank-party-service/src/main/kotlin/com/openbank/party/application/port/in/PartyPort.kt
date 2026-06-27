@@ -18,7 +18,7 @@ data class SelfRegisterPartyCommand(
     val phone: String?,
     val dateOfBirth: String?,
     val nationality: String?,
-    val address: Address?
+    val address: Address?,
 )
 
 /**
@@ -34,7 +34,7 @@ data class UploadDocumentCommand(
     val documentType: DocumentType,
     val fileName: String?,
     val mimeType: String,
-    val content: ByteArray
+    val content: ByteArray,
 )
 
 data class CreatePartyCommand(
@@ -50,7 +50,7 @@ data class CreatePartyCommand(
     val phone: String?,
     val address: Address?,
     /** Explicit party id (ADR-0069 §B1: id == Keycloak sub for self-service onboarding). */
-    val id: UUID? = null
+    val id: UUID? = null,
 )
 
 data class UpdatePartyCommand(
@@ -58,7 +58,7 @@ data class UpdatePartyCommand(
     val email: String?,
     val phone: String?,
     val address: Address?,
-    val tradingName: String?
+    val tradingName: String?,
 )
 
 data class AddDocumentCommand(
@@ -66,17 +66,13 @@ data class AddDocumentCommand(
     val documentType: DocumentType,
     val documentNumber: String,
     val issuingCountry: String,
-    val expiryDate: String?
+    val expiryDate: String?,
 )
 
 data class ErasePartyCommand(val id: UUID)
 
 /** ADR-0055 bounded name search. `q` is normalised via SearchRequest; a blank/`*`/sub-2-char term returns an empty page. */
-data class SearchPartiesQuery(
-    val q: String?,
-    val limit: Int = 20,
-    val cursor: String? = null,
-)
+data class SearchPartiesQuery(val q: String?, val limit: Int = 20, val cursor: String? = null)
 
 interface PartyUseCase {
     suspend fun searchParties(query: SearchPartiesQuery): CursorPage<Party>
@@ -86,8 +82,10 @@ interface PartyUseCase {
     suspend fun addDocument(cmd: AddDocumentCommand): PartyDocument
     suspend fun listDocuments(partyId: UUID): List<PartyDocument>
     suspend fun updateKycStatus(partyId: UUID, status: KycStatus): Party
+
     /** Record the AML screening outcome; re-evaluates the KYC+AML activation gate (ADR-0073). */
     suspend fun updateAmlStatus(partyId: UUID, amlStatus: AmlStatus): Party
+
     /**
      * List parties, optionally filtered by [status]. When [status] is null all parties are
      * returned (existing behaviour). When provided the result is scoped to that funnel stage,
@@ -95,12 +93,16 @@ interface PartyUseCase {
      */
     suspend fun listParties(page: Int, size: Int, status: PartyStatus? = null): Map<String, Any>
     suspend fun eraseParty(cmd: ErasePartyCommand)
+
     /** Self-registration from mobile: idempotent by keycloakSub. Returns existing party if already registered. */
     suspend fun selfRegisterParty(cmd: SelfRegisterPartyCommand): Pair<Party, Boolean> // Party, isNew
+
     /** Returns party for the calling Keycloak sub, or null if not yet registered. */
     suspend fun getMyParty(keycloakSub: String): Party?
+
     /** Upload a KYC document binary file. Content stored as bytea (Sprint 1; replace with S3 in prod). */
     suspend fun uploadDocument(cmd: UploadDocumentCommand): PartyDocumentFile
+
     /**
      * Fetch the binary content of a KYC document file.
      * Returns null if the file does not exist or does not belong to [partyId] (access boundary enforcement).

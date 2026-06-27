@@ -6,8 +6,8 @@ package com.openbank.sanctions.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
 import com.openbank.sanctions.application.port.`in`.ReviewCommand
-import com.openbank.sanctions.application.port.`in`.ScreenEntityCommand
 import com.openbank.sanctions.application.port.`in`.SanctionsUseCase
+import com.openbank.sanctions.application.port.`in`.ScreenEntityCommand
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET

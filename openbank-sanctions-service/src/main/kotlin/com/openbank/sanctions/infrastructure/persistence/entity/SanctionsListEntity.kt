@@ -52,6 +52,6 @@ class SanctionsListEntity {
         id = id, listType = listType, displayName = displayName, sourceUrl = sourceUrl,
         enabled = enabled, lastUpdatedAt = lastUpdatedAt, lastEntryCount = lastEntryCount,
         cronHour = cronHour, cronMinute = cronMinute, cronDays = cronDays,
-        createdAt = createdAt, updatedAt = updatedAt
+        createdAt = createdAt, updatedAt = updatedAt,
     )
 }

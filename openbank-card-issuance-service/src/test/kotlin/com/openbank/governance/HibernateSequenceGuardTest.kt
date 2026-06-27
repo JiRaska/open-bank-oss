@@ -51,7 +51,7 @@ class HibernateSequenceGuardTest {
             .`as`(
                 "PanacheEntity tables missing their <table>_seq sequence (Hibernate allocates ids " +
                     "from it; add CREATE SEQUENCE IF NOT EXISTS <name> INCREMENT BY 50). Present: %s",
-                presentSequences
+                presentSequences,
             )
             .isEmpty()
     }
@@ -65,7 +65,7 @@ class HibernateSequenceGuardTest {
         if (!migrations.isDirectory) return emptySet()
         val create = Regex(
             """create\s+sequence(?:\s+if\s+not\s+exists)?\s+("?)([A-Za-z0-9_]+)\1""",
-            RegexOption.IGNORE_CASE
+            RegexOption.IGNORE_CASE,
         )
         return migrations.walkTopDown()
             .filter { it.isFile && it.extension == "sql" }

@@ -40,7 +40,7 @@ data class Address(
     val line2: String?,
     val city: String,
     val postalCode: String,
-    val countryCode: String
+    val countryCode: String,
 )
 
 enum class KycStatus { NOT_STARTED, IN_PROGRESS, APPROVED, REJECTED, EXPIRED }
@@ -55,7 +55,7 @@ data class PartyDocument(
     val issuingCountry: String,
     val expiryDate: String?,
     val verifiedAt: Instant?,
-    val createdAt: Instant
+    val createdAt: Instant,
 )
 
 data class PartyDocumentFile(
@@ -65,5 +65,5 @@ data class PartyDocumentFile(
     val fileName: String?,
     val mimeType: String,
     val content: ByteArray,
-    val uploadedAt: java.time.Instant
+    val uploadedAt: java.time.Instant,
 )

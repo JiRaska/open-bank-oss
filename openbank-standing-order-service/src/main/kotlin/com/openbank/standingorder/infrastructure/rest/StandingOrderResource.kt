@@ -4,48 +4,66 @@
 
 package com.openbank.standingorder.infrastructure.rest
 
-import com.openbank.standingorder.application.port.`in`.*
-import com.openbank.standingorder.infrastructure.rest.dto.*
 import com.openbank.libs.authz.Authorize
-import jakarta.ws.rs.*; import jakarta.ws.rs.core.MediaType; import jakarta.ws.rs.core.Response
-import java.time.LocalDate; import java.util.UUID
+import com.openbank.standingorder.application.port.`in`.CreateStandingOrderCommand
+import com.openbank.standingorder.application.port.`in`.StandingOrderUseCase
+import com.openbank.standingorder.infrastructure.rest.dto.CreateStandingOrderRequest
+import com.openbank.standingorder.infrastructure.rest.dto.toResponse
+import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DELETE
+import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
+import jakarta.ws.rs.NotFoundException
+import jakarta.ws.rs.POST
+import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
+import jakarta.ws.rs.Produces
+import jakarta.ws.rs.core.MediaType
+import jakarta.ws.rs.core.Response
+import java.util.UUID
 
 @Path("/api/v1/standing-orders")
-@Produces(MediaType.APPLICATION_JSON) @Consumes(MediaType.APPLICATION_JSON)
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
 class StandingOrderResource(private val useCase: StandingOrderUseCase) {
 
     @POST
     suspend fun create(req: CreateStandingOrderRequest): Response {
-        val order = useCase.create(CreateStandingOrderCommand(
-            req.idempotencyKey, req.partyId, req.debitAccountId,
-            req.creditorIban, req.creditorName, req.creditorBic,
-            req.amountMinorUnits, req.currency, req.frequency, req.paymentType,
-            req.remittanceInfo, req.startDate, req.endDate
-        ))
+        val order = useCase.create(
+            CreateStandingOrderCommand(
+                req.idempotencyKey, req.partyId, req.debitAccountId,
+                req.creditorIban, req.creditorName, req.creditorBic,
+                req.amountMinorUnits, req.currency, req.frequency, req.paymentType,
+                req.remittanceInfo, req.startDate, req.endDate,
+            ),
+        )
         return Response.status(201).entity(order.toResponse()).build()
     }
 
     @GET
     suspend fun listAll() = useCase.listAll().map { it.toResponse() }
 
-    @GET @Path("/{id}")
-    suspend fun get(@PathParam("id") id: UUID) =
-        useCase.getById(id) ?: throw NotFoundException()
+    @GET
+    @Path("/{id}")
+    suspend fun get(@PathParam("id") id: UUID) = useCase.getById(id) ?: throw NotFoundException()
 
-    @GET @Path("/party/{partyId}")
-    suspend fun listByParty(@PathParam("partyId") partyId: UUID) =
-        useCase.listByParty(partyId).map { it.toResponse() }
+    @GET
+    @Path("/party/{partyId}")
+    suspend fun listByParty(@PathParam("partyId") partyId: UUID) = useCase.listByParty(partyId).map { it.toResponse() }
 
-    @POST @Path("/{id}/pause")
+    @POST
+    @Path("/{id}/pause")
     @Authorize(action = "standingOrder.pause", resource = "#id")
     suspend fun pause(@PathParam("id") id: UUID, @HeaderParam("X-Customer-Party-Id") actor: String?) =
         useCase.pause(id, actor(actor)).toResponse()
 
-    @POST @Path("/{id}/resume")
+    @POST
+    @Path("/{id}/resume")
     suspend fun resume(@PathParam("id") id: UUID, @HeaderParam("X-Customer-Party-Id") actor: String?) =
         useCase.resume(id, actor(actor)).toResponse()
 
-    @DELETE @Path("/{id}")
+    @DELETE
+    @Path("/{id}")
     suspend fun cancel(@PathParam("id") id: UUID, @HeaderParam("X-Customer-Party-Id") actor: String?): Response {
         useCase.cancel(id, actor(actor))
         return Response.noContent().build()

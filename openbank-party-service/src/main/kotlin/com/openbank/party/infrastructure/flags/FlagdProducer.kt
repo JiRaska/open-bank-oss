@@ -31,9 +31,8 @@ class FlagdProducer {
 
     @Produces
     @ApplicationScoped
-    fun featureClient(): FeatureClient =
-        FlagdProvider(
-            baseUrl = flagsUrl,
-            timeout = Duration.ofMillis(flagsTimeoutMs),
-        )
+    fun featureClient(): FeatureClient = FlagdProvider(
+        baseUrl = flagsUrl,
+        timeout = Duration.ofMillis(flagsTimeoutMs),
+    )
 }

@@ -17,9 +17,9 @@ import jakarta.enterprise.context.ApplicationScoped
 import java.util.UUID
 
 @ApplicationScoped
-class CardRepositoryImpl(
-    private val outboxRepository: CardOutboxRepositoryImpl
-) : CardRepository, PanacheRepository<CardEntity> {
+class CardRepositoryImpl(private val outboxRepository: CardOutboxRepositoryImpl) :
+    CardRepository,
+    PanacheRepository<CardEntity> {
 
     /**
      * Persists the card **and** its outbox row in one transaction (ADR-0050). Issue is an insert;

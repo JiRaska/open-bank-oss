@@ -34,10 +34,9 @@ class AuthzProducer {
 
     @Produces
     @ApplicationScoped
-    fun policyDecisionPoint(): PolicyDecisionPoint =
-        OpaSidecarPolicyDecisionPoint(
-            baseUrl = opaUrl,
-            queryPath = opaPath,
-            timeout = Duration.ofMillis(opaTimeoutMs),
-        )
+    fun policyDecisionPoint(): PolicyDecisionPoint = OpaSidecarPolicyDecisionPoint(
+        baseUrl = opaUrl,
+        queryPath = opaPath,
+        timeout = Duration.ofMillis(opaTimeoutMs),
+    )
 }

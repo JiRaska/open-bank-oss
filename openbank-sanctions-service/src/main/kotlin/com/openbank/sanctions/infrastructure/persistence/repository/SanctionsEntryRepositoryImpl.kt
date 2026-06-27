@@ -11,11 +11,11 @@ import com.openbank.sanctions.domain.model.*
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.mutiny.pgclient.PgPool
 import io.vertx.mutiny.sqlclient.Tuple
-import io.vertx.sqlclient.Tuple as CoreTuple
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
+import io.vertx.sqlclient.Tuple as CoreTuple
 
 /**
  * PgPool-based implementation of [SanctionsEntryRepository].

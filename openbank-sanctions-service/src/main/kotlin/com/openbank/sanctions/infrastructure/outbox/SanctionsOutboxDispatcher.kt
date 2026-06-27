@@ -21,7 +21,7 @@ class SanctionsOutboxDispatcher(
     private val repo: SanctionsOutboxRepository,
     private val publisher: OutboxEventPublisher,
     @ConfigProperty(name = "openbank.outbox.dispatch-enabled", defaultValue = "false")
-    private val dispatchEnabled: Boolean
+    private val dispatchEnabled: Boolean,
 ) : AbstractOutboxDispatcher() {
 
     override val outboxRepository: OutboxRepository get() = repo
@@ -31,13 +31,13 @@ class SanctionsOutboxDispatcher(
         every = "\${openbank.outbox.poll-interval:5s}",
         delayed = "\${openbank.outbox.initial-delay:5s}",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
-        identity = "sanctions-outbox-dispatcher"
+        identity = "sanctions-outbox-dispatcher",
     )
     @Bulkhead(1)
     @CircuitBreaker(requestVolumeThreshold = 10, failureRatio = 0.5, delay = 5000)
     @Retry(maxRetries = 2, delay = 200, jitter = 100)
     @Timeout(30000)
-    suspend fun dispatch(): Unit {
+    suspend fun dispatch() {
         if (dispatchEnabled) dispatchScheduledBatch()
     }
 
@@ -45,6 +45,5 @@ class SanctionsOutboxDispatcher(
     @CircuitBreaker(requestVolumeThreshold = 10, failureRatio = 0.5, delay = 5000)
     @Retry(maxRetries = 2, delay = 200, jitter = 100)
     @Timeout(3000)
-    override suspend fun publishWithResilience(entry: OutboxEntry): Unit =
-        publisher.publish(entry)
+    override suspend fun publishWithResilience(entry: OutboxEntry): Unit = publisher.publish(entry)
 }

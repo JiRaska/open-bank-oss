@@ -35,7 +35,10 @@ class CardServiceTest {
 
     private val clock = Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC)
 
-    @BeforeEach fun setUp() { repo = mockk(); service = CardService(repo, mapper, clock) }
+    @BeforeEach fun setUp() {
+        repo = mockk()
+        service = CardService(repo, mapper, clock)
+    }
 
     @Test fun `issue card is idempotent on same idempotency key`(): Unit = runBlocking {
         val existing = card(status = CardStatus.PENDING)
@@ -64,7 +67,7 @@ class CardServiceTest {
                     it.aggregateId == result.id &&
                         it.eventType == CardService.EVENT_CARD_ISSUED &&
                         it.payload.contains(result.id.toString())
-                }
+                },
             )
         }
     }
@@ -88,7 +91,7 @@ class CardServiceTest {
                         it.payload.contains("ACTIVE") &&
                         it.payload.contains("Manual activation") &&
                         it.payload.contains("ops-user")
-                }
+                },
             )
         }
     }
@@ -120,7 +123,7 @@ class CardServiceTest {
         currency = "EUR",
         dailyLimitMinorUnits = 100_00,
         monthlyLimitMinorUnits = 1_000_00,
-        deliveryAddress = "123 Main St"
+        deliveryAddress = "123 Main St",
     )
 
     private fun card(status: CardStatus) = Card(
@@ -144,6 +147,6 @@ class CardServiceTest {
         blockedAt = null,
         blockedReason = null,
         createdAt = Instant.parse("2026-01-01T00:00:00Z"),
-        updatedAt = Instant.parse("2026-01-01T00:00:00Z")
+        updatedAt = Instant.parse("2026-01-01T00:00:00Z"),
     )
 }

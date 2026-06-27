@@ -92,9 +92,11 @@ class SepaPaymentService(
         @ConfigProperty(name = "openbank.temporal.task-queue", defaultValue = "openbank-sepa-payment")
         temporalTaskQueue: String,
         workflowClient: WorkflowClient,
-    ) : this(paymentRepository, eventPublisher, screeningPort, amlCasePort, fraudScoringPort, schemeGatewayPort,
+    ) : this(
+        paymentRepository, eventPublisher, screeningPort, amlCasePort, fraudScoringPort, schemeGatewayPort,
         settlementPort, reversalPort, metrics, schemeSubmissionEnabled, temporalEnabled, temporalTaskQueue,
-        workflowClient, Clock.systemUTC())
+        workflowClient, Clock.systemUTC(),
+    )
 
     private val log = Logger.getLogger(SepaPaymentService::class.java)
 

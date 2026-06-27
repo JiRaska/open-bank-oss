@@ -3,12 +3,12 @@
 // See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
 package com.openbank.standingorder.infrastructure.persistence.repository
 
+import com.openbank.libs.persistence.outbox.OutboxEntry
+import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
+import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.persistence.outbox.OutboxStatus
 import com.openbank.standingorder.application.port.out.StandingOrderOutboxRepository
 import com.openbank.standingorder.infrastructure.persistence.entity.StandingOrderOutboxEntity
-import com.openbank.libs.persistence.outbox.OutboxEntry
-import com.openbank.libs.persistence.outbox.OutboxMessage
-import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
-import com.openbank.libs.persistence.outbox.OutboxStatus
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni

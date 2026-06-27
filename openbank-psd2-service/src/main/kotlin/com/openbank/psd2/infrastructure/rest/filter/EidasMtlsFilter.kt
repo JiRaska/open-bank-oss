@@ -16,9 +16,7 @@ import org.jboss.logging.Logger
 
 @Provider
 @Priority(Priorities.AUTHENTICATION)
-class EidasMtlsFilter(
-    private val tppAuthorizationGuard: TppAuthorizationGuard
-) : ContainerRequestFilter {
+class EidasMtlsFilter(private val tppAuthorizationGuard: TppAuthorizationGuard) : ContainerRequestFilter {
 
     private val log = Logger.getLogger(EidasMtlsFilter::class.java)
 
@@ -37,10 +35,17 @@ class EidasMtlsFilter(
             log.warnf("Missing TPP identification on path: %s", path)
             ctx.abortWith(
                 Response.status(401)
-                    .entity(mapOf("tppMessages" to listOf(
-                        mapOf("category" to "ERROR", "code" to "CERTIFICATE_MISSING",
-                            "text" to "eIDAS QWAC certificate or X-TPP-ID header required")
-                    ))).build()
+                    .entity(
+                        mapOf(
+                            "tppMessages" to listOf(
+                                mapOf(
+                                    "category" to "ERROR",
+                                    "code" to "CERTIFICATE_MISSING",
+                                    "text" to "eIDAS QWAC certificate or X-TPP-ID header required",
+                                ),
+                            ),
+                        ),
+                    ).build(),
             )
             return
         }
@@ -66,13 +71,17 @@ class EidasMtlsFilter(
             log.warnf("TPP %s rejected for role=%s path=%s", tppId, requiredRole, path)
             ctx.abortWith(
                 Response.status(401)
-                    .entity(mapOf("tppMessages" to listOf(
+                    .entity(
                         mapOf(
-                            "category" to "ERROR",
-                            "code" to "CERTIFICATE_INVALID",
-                            "text" to (authorization.reason ?: "TPP not authorized")
-                        )
-                    ))).build()
+                            "tppMessages" to listOf(
+                                mapOf(
+                                    "category" to "ERROR",
+                                    "code" to "CERTIFICATE_INVALID",
+                                    "text" to (authorization.reason ?: "TPP not authorized"),
+                                ),
+                            ),
+                        ),
+                    ).build(),
             )
             return
         }
@@ -81,11 +90,15 @@ class EidasMtlsFilter(
     }
 
     private fun serviceUnavailable(): Response = Response.status(503)
-        .entity(mapOf("tppMessages" to listOf(
+        .entity(
             mapOf(
-                "category" to "ERROR",
-                "code" to "SERVICE_UNAVAILABLE",
-                "text" to "TPP registry is temporarily unavailable"
-            )
-        ))).build()
+                "tppMessages" to listOf(
+                    mapOf(
+                        "category" to "ERROR",
+                        "code" to "SERVICE_UNAVAILABLE",
+                        "text" to "TPP registry is temporarily unavailable",
+                    ),
+                ),
+            ),
+        ).build()
 }

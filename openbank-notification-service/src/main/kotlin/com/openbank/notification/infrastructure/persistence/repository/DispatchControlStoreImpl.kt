@@ -25,7 +25,6 @@ class DispatchControlStoreImpl(private val proposals: DispatchResumeProposalRepo
     PanacheRepository<DispatchControlLogEntity> {
     @Inject lateinit var clock: Clock
 
-
     override suspend fun current(controlKey: String): DispatchControlSnapshot? = Panache.withSession {
         find("controlKey = ?1 order by versionNo desc", controlKey).firstResult()
     }.awaitSuspending()?.toSnapshot()

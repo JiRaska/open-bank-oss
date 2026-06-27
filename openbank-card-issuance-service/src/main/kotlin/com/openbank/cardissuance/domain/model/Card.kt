@@ -4,22 +4,36 @@
 
 package com.openbank.cardissuance.domain.model
 
-import java.time.Instant; import java.time.LocalDate; import java.util.UUID
+import java.time.Instant
+import java.time.LocalDate
+import java.util.UUID
 
 enum class CardStatus { PENDING, ACTIVE, SUSPENDED, BLOCKED, EXPIRED, CANCELLED }
-enum class CardType   { DEBIT, CREDIT, PREPAID, VIRTUAL }
-enum class CardNetwork{ VISA, MASTERCARD, AMEX, UNIONPAY }
+enum class CardType { DEBIT, CREDIT, PREPAID, VIRTUAL }
+enum class CardNetwork { VISA, MASTERCARD, AMEX, UNIONPAY }
 
 data class Card(
-    val id: UUID, val idempotencyKey: String,
-    val partyId: UUID, val accountId: UUID,
-    val productCode: String, val cardType: CardType, val network: CardNetwork,
-    val maskedPan: String, val cardholderName: String, val embossedName: String,
-    val expiryDate: LocalDate, val status: CardStatus,
-    val dailyLimitMinorUnits: Long, val monthlyLimitMinorUnits: Long, val currency: String,
+    val id: UUID,
+    val idempotencyKey: String,
+    val partyId: UUID,
+    val accountId: UUID,
+    val productCode: String,
+    val cardType: CardType,
+    val network: CardNetwork,
+    val maskedPan: String,
+    val cardholderName: String,
+    val embossedName: String,
+    val expiryDate: LocalDate,
+    val status: CardStatus,
+    val dailyLimitMinorUnits: Long,
+    val monthlyLimitMinorUnits: Long,
+    val currency: String,
     val deliveryAddress: String?,
-    val activatedAt: Instant?, val blockedAt: Instant?, val blockedReason: String?,
-    val createdAt: Instant, val updatedAt: Instant
+    val activatedAt: Instant?,
+    val blockedAt: Instant?,
+    val blockedReason: String?,
+    val createdAt: Instant,
+    val updatedAt: Instant,
 ) {
     fun activate(now: Instant = Instant.EPOCH) = also {
         require(status == CardStatus.PENDING) { "Only PENDING cards can be activated, current: $status" }

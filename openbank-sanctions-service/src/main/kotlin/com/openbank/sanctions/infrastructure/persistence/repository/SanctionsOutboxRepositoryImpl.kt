@@ -18,28 +18,27 @@ import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
-class SanctionsOutboxRepositoryImpl : SanctionsOutboxRepository, PanacheRepository<SanctionsOutboxEntity> {
+class SanctionsOutboxRepositoryImpl :
+    SanctionsOutboxRepository,
+    PanacheRepository<SanctionsOutboxEntity> {
 
-    override fun persistInTransaction(message: OutboxMessage): Uni<Void> =
-        persist(message.toEntity()).replaceWithVoid()
+    override fun persistInTransaction(message: OutboxMessage): Uni<Void> = persist(message.toEntity()).replaceWithVoid()
 
-    override suspend fun listProcessable(limit: Int): List<OutboxEntry> =
-        Panache.withSession {
-            find(
-                "status in (?1, ?2) order by createdAt asc",
-                OutboxStatus.PENDING.name,
-                OutboxStatus.FAILED.name
-            ).range(0, limit.coerceAtLeast(1) - 1).list()
-        }.map { entities -> entities.map { it.toEntry() } }.awaitSuspending()
+    override suspend fun listProcessable(limit: Int): List<OutboxEntry> = Panache.withSession {
+        find(
+            "status in (?1, ?2) order by createdAt asc",
+            OutboxStatus.PENDING.name,
+            OutboxStatus.FAILED.name,
+        ).range(0, limit.coerceAtLeast(1) - 1).list()
+    }.map { entities -> entities.map { it.toEntry() } }.awaitSuspending()
 
-    override suspend fun countProcessable(): Long =
-        Panache.withSession {
-            count(
-                "status in (?1, ?2)",
-                OutboxStatus.PENDING.name,
-                OutboxStatus.FAILED.name
-            )
-        }.awaitSuspending()
+    override suspend fun countProcessable(): Long = Panache.withSession {
+        count(
+            "status in (?1, ?2)",
+            OutboxStatus.PENDING.name,
+            OutboxStatus.FAILED.name,
+        )
+    }.awaitSuspending()
 
     override suspend fun markSent(eventId: UUID, sentAt: Instant) {
         Panache.withTransaction {

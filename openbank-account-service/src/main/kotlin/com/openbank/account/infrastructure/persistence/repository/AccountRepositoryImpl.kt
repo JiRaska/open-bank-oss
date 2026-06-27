@@ -33,7 +33,8 @@ class AccountRepositoryImpl :
         val query = if (afterId != null) {
             find(
                 "partyId = ?1 AND id > ?2 ORDER BY CASE accountType WHEN 'CURRENT' THEN 0 WHEN 'SAVINGS' THEN 1 ELSE 2 END, id",
-                partyId, afterId,
+                partyId,
+                afterId,
             )
         } else {
             find(

@@ -13,10 +13,13 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
-import java.time.LocalDate; import java.util.UUID
+import java.time.LocalDate
+import java.util.UUID
 
 @ApplicationScoped
-class StandingOrderRepositoryImpl : StandingOrderRepository, PanacheRepository<StandingOrderEntity> {
+class StandingOrderRepositoryImpl :
+    StandingOrderRepository,
+    PanacheRepository<StandingOrderEntity> {
     override suspend fun save(order: StandingOrder): StandingOrder {
         val e = order.toEntity()
         Panache.withTransaction { persist(e) }.awaitSuspending()
@@ -26,8 +29,7 @@ class StandingOrderRepositoryImpl : StandingOrderRepository, PanacheRepository<S
         Panache.withSession { find("id", id).firstResult() }.awaitSuspending()?.toDomain()
     override suspend fun findByIdempotencyKey(key: String) =
         Panache.withSession { find("idempotencyKey", key).firstResult() }.awaitSuspending()?.toDomain()
-    override suspend fun listAllOrders() =
-        Panache.withSession { listAll() }.awaitSuspending().map { it.toDomain() }
+    override suspend fun listAllOrders() = Panache.withSession { listAll() }.awaitSuspending().map { it.toDomain() }
     override suspend fun findByPartyId(partyId: UUID) =
         Panache.withSession { find("partyId", partyId).list() }.awaitSuspending().map { it.toDomain() }
     override suspend fun findByAccountId(accountId: UUID) =

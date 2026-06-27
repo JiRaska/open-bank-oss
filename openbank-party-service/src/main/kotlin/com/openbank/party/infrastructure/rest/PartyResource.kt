@@ -4,18 +4,39 @@
 
 package com.openbank.party.infrastructure.rest
 
-import com.openbank.party.application.port.`in`.*
-import com.openbank.party.application.usecase.PartyAlreadyExistsException
-import com.openbank.party.application.usecase.PartyNotFoundException
-import com.openbank.party.domain.model.*
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.flags.FeatureClient
 import com.openbank.libs.flags.FeatureFlag
+import com.openbank.party.application.port.`in`.AddDocumentCommand
+import com.openbank.party.application.port.`in`.ErasePartyCommand
+import com.openbank.party.application.port.`in`.PartyUseCase
+import com.openbank.party.application.port.`in`.ResolvePartyByRcCommand
+import com.openbank.party.application.port.`in`.SearchPartiesQuery
+import com.openbank.party.application.port.`in`.SelfRegisterPartyCommand
+import com.openbank.party.application.port.`in`.UpdatePartyCommand
+import com.openbank.party.application.port.`in`.UploadDocumentCommand
+import com.openbank.party.domain.model.Address
+import com.openbank.party.domain.model.DocumentType
+import com.openbank.party.domain.model.KycStatus
+import com.openbank.party.domain.model.Party
+import com.openbank.party.domain.model.PartyStatus
+import com.openbank.party.domain.model.PartyType
 import io.quarkus.security.Authenticated
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
-import jakarta.ws.rs.*
+import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DELETE
+import jakarta.ws.rs.FormParam
+import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
+import jakarta.ws.rs.PATCH
+import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
+import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
+import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.jwt.JsonWebToken
@@ -36,15 +57,18 @@ class PartyResource {
 
     @Inject lateinit var flags: FeatureClient
 
-    @Inject @io.quarkus.arc.Unremovable lateinit var jwt: JsonWebToken
+    @Inject @io.quarkus.arc.Unremovable
+    lateinit var jwt: JsonWebToken
 
     @GET
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_SERVICE")
-    @Operation(summary = "List parties (paginated). Optional ?status= filter for onboarding cockpit funnel views (ADR-0068).")
+    @Operation(
+        summary = "List parties (paginated). Optional ?status= filter for onboarding cockpit funnel views (ADR-0068).",
+    )
     suspend fun listParties(
         @QueryParam("page") @DefaultValue("0") page: Int,
         @QueryParam("size") @DefaultValue("20") size: Int,
-        @QueryParam("status") statusParam: String?
+        @QueryParam("status") statusParam: String?,
     ): Response {
         val status = statusParam?.uppercase()?.let { runCatching { PartyStatus.valueOf(it) }.getOrNull() }
         // ADR-0067 pilot: first live feature-flag evaluation in the fleet. Cosmetic, fail-static —
@@ -60,15 +84,17 @@ class PartyResource {
     @Path("/search")
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_SERVICE")
     @FeatureFlag(flag = "party-search")
-    @Operation(summary = "Search parties by name (trigram), cursor-paginated (ADR-0055). Gated by feature flag party-search.")
+    @Operation(
+        summary = "Search parties by name (trigram), cursor-paginated (ADR-0055). Gated by feature flag party-search.",
+    )
     suspend fun searchParties(
         @QueryParam("q") q: String?,
         @QueryParam("limit") @DefaultValue("20") limit: Int,
-        @QueryParam("cursor") cursor: String?
+        @QueryParam("cursor") cursor: String?,
     ): Response {
         val page = partyUseCase.searchParties(SearchPartiesQuery(q, limit, cursor))
         return Response.ok(
-            mapOf("data" to page.data.map { it.toSimpleResponse() }, "pagination" to page.pagination)
+            mapOf("data" to page.data.map { it.toSimpleResponse() }, "pagination" to page.pagination),
         ).build()
     }
 
@@ -84,9 +110,8 @@ class PartyResource {
     @Path("/{id}")
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_SERVICE")
     @Operation(summary = "Get party by ID")
-    suspend fun getParty(@PathParam("id") id: UUID): Response {
-        return Response.ok(partyUseCase.getParty(id).toResponse()).build()
-    }
+    suspend fun getParty(@PathParam("id") id: UUID): Response =
+        Response.ok(partyUseCase.getParty(id).toResponse()).build()
 
     @PATCH
     @Path("/{id}")
@@ -94,7 +119,9 @@ class PartyResource {
     @Authorize(action = "party.update", resource = "#id")
     @Operation(summary = "Update party contact details")
     suspend fun updateParty(@PathParam("id") id: UUID, req: UpdatePartyRequest): Response {
-        val party = partyUseCase.updateParty(UpdatePartyCommand(id, req.email, req.phone, req.address?.toDomain(), req.tradingName))
+        val party = partyUseCase.updateParty(
+            UpdatePartyCommand(id, req.email, req.phone, req.address?.toDomain(), req.tradingName),
+        )
         return Response.ok(party.toResponse()).build()
     }
 
@@ -103,7 +130,15 @@ class PartyResource {
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC")
     @Operation(summary = "Add identity document to party")
     suspend fun addDocument(@PathParam("id") id: UUID, req: AddDocumentRequest): Response {
-        val doc = partyUseCase.addDocument(AddDocumentCommand(id, DocumentType.valueOf(req.documentType), req.documentNumber, req.issuingCountry, req.expiryDate))
+        val doc = partyUseCase.addDocument(
+            AddDocumentCommand(
+                id,
+                DocumentType.valueOf(req.documentType),
+                req.documentNumber,
+                req.issuingCountry,
+                req.expiryDate,
+            ),
+        )
         return Response.status(201).entity(doc).build()
     }
 
@@ -111,9 +146,7 @@ class PartyResource {
     @Path("/{id}/documents")
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_SERVICE")
     @Operation(summary = "List party documents")
-    suspend fun listDocuments(@PathParam("id") id: UUID): Response {
-        return Response.ok(partyUseCase.listDocuments(id)).build()
-    }
+    suspend fun listDocuments(@PathParam("id") id: UUID): Response = Response.ok(partyUseCase.listDocuments(id)).build()
 
     @PUT
     @Path("/{id}/kyc-status")
@@ -168,8 +201,8 @@ class PartyResource {
                 phone = req.phone,
                 dateOfBirth = req.dateOfBirth,
                 nationality = req.nationality,
-                address = req.address?.toDomain()
-            )
+                address = req.address?.toDomain(),
+            ),
         )
         return if (isNew) {
             Response.created(URI.create("/api/v1/parties/${party.id}")).entity(party.toResponse()).build()
@@ -201,14 +234,19 @@ class PartyResource {
                 documentType = DocumentType.valueOf(form.documentType.uppercase()),
                 fileName = form.fileName,
                 mimeType = form.mimeType ?: "application/octet-stream",
-                content = form.content
-            )
+                content = form.content,
+            ),
         )
-        return Response.status(201).entity(mapOf(
-            "id" to file.id, "partyId" to file.partyId,
-            "documentType" to file.documentType, "fileName" to file.fileName,
-            "mimeType" to file.mimeType, "uploadedAt" to file.uploadedAt
-        )).build()
+        return Response.status(201).entity(
+            mapOf(
+                "id" to file.id,
+                "partyId" to file.partyId,
+                "documentType" to file.documentType,
+                "fileName" to file.fileName,
+                "mimeType" to file.mimeType,
+                "uploadedAt" to file.uploadedAt,
+            ),
+        ).build()
     }
 
     @GET
@@ -251,8 +289,8 @@ class PartyResource {
                             UUID.randomUUID().toString(),
                             Response.Status.SERVICE_UNAVAILABLE.statusCode,
                             "DEDUP_UNAVAILABLE",
-                            "RČ dedup pepper not configured; uniqueness not enforced"
-                        )
+                            "RČ dedup pepper not configured; uniqueness not enforced",
+                        ),
                     ).build()
             } else {
                 Response.status(Response.Status.NOT_FOUND)
@@ -261,8 +299,8 @@ class PartyResource {
                             UUID.randomUUID().toString(),
                             Response.Status.NOT_FOUND.statusCode,
                             "PARTY_NOT_FOUND",
-                            "No party matches the supplied RČ"
-                        )
+                            "No party matches the supplied RČ",
+                        ),
                     ).build()
             }
         return Response.ok(party.toSimpleResponse()).build()
@@ -275,11 +313,11 @@ data class ResolvePartyRequest(val rc: String)
 data class SelfRegisterRequest(
     val partyType: String = "INDIVIDUAL",
     val legalName: String,
-    val email: String,    // fallback pokud není v JWT
+    val email: String, // fallback pokud není v JWT
     val phone: String?,
     val dateOfBirth: String?,
     val nationality: String?,
-    val address: AddressRequest?
+    val address: AddressRequest?,
 )
 
 class DocumentUploadForm {
@@ -301,41 +339,71 @@ class DocumentUploadForm {
 }
 
 data class CreatePartyRequest(
-    val partyType: String, val legalName: String, val tradingName: String?,
-    val dateOfBirth: String?, val nationality: String?, val taxId: String?,
+    val partyType: String,
+    val legalName: String,
+    val tradingName: String?,
+    val dateOfBirth: String?,
+    val nationality: String?,
+    val taxId: String?,
     // email is required by the contract (openapi.yaml: required[...email]) and downstream
     // (Party/PartyEntity NOT NULL + unique). It is declared nullable here ONLY so a request
     // that omits it deserialises cleanly and fails our own explicit check below — a non-null
     // Kotlin field would make Jackson hard-fail first and return a silent, body-less 400.
-    val registrationNumber: String?, val email: String?, val phone: String?,
+    val registrationNumber: String?,
+    val email: String?,
+    val phone: String?,
     val address: AddressRequest?,
     // Caller-supplied party id (ADR-0069 §B1): the customer edge passes the Keycloak `sub`
     // here so party id == sub and the principal binding holds without a KC admin client.
     // The endpoint is operator-realm-only, so customers cannot mint arbitrary ids.
-    val id: String? = null
+    val id: String? = null,
 ) {
     fun toCommand(key: String): CreatePartyCommand {
         require(!email.isNullOrBlank()) { "email is required" }
-        return CreatePartyCommand(key, PartyType.valueOf(partyType), legalName, tradingName,
+        return CreatePartyCommand(
+            key, PartyType.valueOf(partyType), legalName, tradingName,
             dateOfBirth, nationality, taxId, registrationNumber, email, phone, address?.toDomain(),
-            id?.takeIf { it.isNotBlank() }?.let { UUID.fromString(it) })
+            id?.takeIf { it.isNotBlank() }?.let { UUID.fromString(it) },
+        )
     }
 }
 
-data class UpdatePartyRequest(val email: String?, val phone: String?, val tradingName: String?, val address: AddressRequest?)
-data class AddDocumentRequest(val documentType: String, val documentNumber: String, val issuingCountry: String, val expiryDate: String?)
+data class UpdatePartyRequest(
+    val email: String?,
+    val phone: String?,
+    val tradingName: String?,
+    val address: AddressRequest?,
+)
+data class AddDocumentRequest(
+    val documentType: String,
+    val documentNumber: String,
+    val issuingCountry: String,
+    val expiryDate: String?,
+)
 data class KycStatusRequest(val kycStatus: String)
-data class AddressRequest(val line1: String, val line2: String?, val city: String, val postalCode: String, val countryCode: String) {
+data class AddressRequest(
+    val line1: String,
+    val line2: String?,
+    val city: String,
+    val postalCode: String,
+    val countryCode: String,
+) {
     fun toDomain() = Address(line1, line2, city, postalCode, countryCode)
 }
 
 fun Party.toSimpleResponse() = mapOf(
-    "id" to id, "partyType" to partyType, "status" to status, "legalName" to legalName,
-    "tradingName" to tradingName, "email" to email, "kycStatus" to kycStatus, "createdAt" to createdAt
+    "id" to id,
+    "partyType" to partyType,
+    "status" to status,
+    "legalName" to legalName,
+    "tradingName" to tradingName,
+    "email" to email,
+    "kycStatus" to kycStatus,
+    "createdAt" to createdAt,
 )
 
 fun Party.toResponse() = mapOf(
     "id" to id, "partyType" to partyType, "status" to status, "legalName" to legalName,
     "tradingName" to tradingName, "email" to email, "phone" to phone,
-    "kycStatus" to kycStatus, "address" to address, "createdAt" to createdAt, "updatedAt" to updatedAt
+    "kycStatus" to kycStatus, "address" to address, "createdAt" to createdAt, "updatedAt" to updatedAt,
 )

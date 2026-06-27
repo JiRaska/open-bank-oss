@@ -3,8 +3,8 @@
 // See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
 package com.openbank.standingorder.infrastructure.outbox
 
-import com.openbank.standingorder.application.port.out.StandingOrderOutboxRepository
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.standingorder.application.port.out.StandingOrderOutboxRepository
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk

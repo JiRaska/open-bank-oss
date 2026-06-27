@@ -3,8 +3,8 @@
 // See LICENSE in the repository root or https://www.mozilla.org/MPL/2.0/ for details.
 package com.openbank.party.infrastructure.outbox
 
-import com.openbank.party.application.port.out.PartyOutboxRepository
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.party.application.port.out.PartyOutboxRepository
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk

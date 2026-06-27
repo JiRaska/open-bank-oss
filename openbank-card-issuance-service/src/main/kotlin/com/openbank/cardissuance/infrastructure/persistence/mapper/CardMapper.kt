@@ -15,16 +15,29 @@ fun CardEntity.toDomain() = Card(
     dailyLimitMinorUnits = dailyLimitMinorUnits, monthlyLimitMinorUnits = monthlyLimitMinorUnits,
     currency = currency, deliveryAddress = deliveryAddress,
     activatedAt = activatedAt, blockedAt = blockedAt, blockedReason = blockedReason,
-    createdAt = createdAt, updatedAt = updatedAt
+    createdAt = createdAt, updatedAt = updatedAt,
 )
 
 fun Card.toEntity() = CardEntity().also { e ->
-    e.id = id; e.idempotencyKey = idempotencyKey; e.partyId = partyId; e.accountId = accountId
-    e.productCode = productCode; e.cardType = cardType.name; e.network = network.name
-    e.maskedPan = maskedPan; e.cardholderName = cardholderName; e.embossedName = embossedName
-    e.expiryDate = expiryDate; e.status = status.name
-    e.dailyLimitMinorUnits = dailyLimitMinorUnits; e.monthlyLimitMinorUnits = monthlyLimitMinorUnits
-    e.currency = currency; e.deliveryAddress = deliveryAddress
-    e.activatedAt = activatedAt; e.blockedAt = blockedAt; e.blockedReason = blockedReason
-    e.createdAt = createdAt; e.updatedAt = updatedAt
+    e.id = id
+    e.idempotencyKey = idempotencyKey
+    e.partyId = partyId
+    e.accountId = accountId
+    e.productCode = productCode
+    e.cardType = cardType.name
+    e.network = network.name
+    e.maskedPan = maskedPan
+    e.cardholderName = cardholderName
+    e.embossedName = embossedName
+    e.expiryDate = expiryDate
+    e.status = status.name
+    e.dailyLimitMinorUnits = dailyLimitMinorUnits
+    e.monthlyLimitMinorUnits = monthlyLimitMinorUnits
+    e.currency = currency
+    e.deliveryAddress = deliveryAddress
+    e.activatedAt = activatedAt
+    e.blockedAt = blockedAt
+    e.blockedReason = blockedReason
+    e.createdAt = createdAt
+    e.updatedAt = updatedAt
 }

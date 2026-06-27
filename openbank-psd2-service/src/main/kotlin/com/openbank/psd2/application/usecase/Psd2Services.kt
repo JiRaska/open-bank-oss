@@ -32,7 +32,6 @@ import com.openbank.psd2.domain.model.PaymentProduct
 import com.openbank.psd2.domain.model.PaymentStatus
 import com.openbank.psd2.domain.model.SipoPayment
 import jakarta.enterprise.context.ApplicationScoped
-
 import java.time.Clock
 import java.time.LocalDate
 

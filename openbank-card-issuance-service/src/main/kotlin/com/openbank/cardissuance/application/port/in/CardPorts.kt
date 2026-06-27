@@ -5,12 +5,22 @@
 package com.openbank.cardissuance.application.port.`in`
 
 import com.openbank.cardissuance.domain.model.*
-import java.time.LocalDate; import java.util.UUID
+import java.util.UUID
 
-data class IssueCardCommand(val idempotencyKey: String, val partyId: UUID, val accountId: UUID,
-    val productCode: String, val cardType: CardType, val network: CardNetwork,
-    val cardholderName: String, val embossedName: String, val currency: String,
-    val dailyLimitMinorUnits: Long, val monthlyLimitMinorUnits: Long, val deliveryAddress: String?)
+data class IssueCardCommand(
+    val idempotencyKey: String,
+    val partyId: UUID,
+    val accountId: UUID,
+    val productCode: String,
+    val cardType: CardType,
+    val network: CardNetwork,
+    val cardholderName: String,
+    val embossedName: String,
+    val currency: String,
+    val dailyLimitMinorUnits: Long,
+    val monthlyLimitMinorUnits: Long,
+    val deliveryAddress: String?,
+)
 
 data class CardStatusCommand(val cardId: UUID, val reason: String?, val changedBy: String)
 

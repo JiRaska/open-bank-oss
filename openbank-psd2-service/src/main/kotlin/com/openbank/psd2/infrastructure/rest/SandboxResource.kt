@@ -36,31 +36,30 @@ class SandboxResource(private val clock: Clock) {
 
     @GET
     @Path("/accounts")
-    fun sandboxAccounts(@HeaderParam("Consent-ID") consentId: String?): Response =
-        Response.ok(
-            mapOf(
-                "accounts" to listOf(
-                    ObAccount(
-                        "sandbox-acc-001",
-                        "CZ6508000000192000145399",
-                        "CZK",
-                        "Sandbox User",
-                        "Sandbox Account",
-                        "CURRENT",
-                        "CACC",
-                    ),
-                    ObAccount(
-                        "sandbox-acc-002",
-                        "CZ6508000000192000145400",
-                        "EUR",
-                        "Sandbox User",
-                        "EUR Account",
-                        "CURRENT",
-                        "CACC",
-                    ),
+    fun sandboxAccounts(@HeaderParam("Consent-ID") consentId: String?): Response = Response.ok(
+        mapOf(
+            "accounts" to listOf(
+                ObAccount(
+                    "sandbox-acc-001",
+                    "CZ6508000000192000145399",
+                    "CZK",
+                    "Sandbox User",
+                    "Sandbox Account",
+                    "CURRENT",
+                    "CACC",
+                ),
+                ObAccount(
+                    "sandbox-acc-002",
+                    "CZ6508000000192000145400",
+                    "EUR",
+                    "Sandbox User",
+                    "EUR Account",
+                    "CURRENT",
+                    "CACC",
                 ),
             ),
-        ).build()
+        ),
+    ).build()
 
     @GET
     @Path("/accounts/{accountId}/balances")

@@ -117,16 +117,22 @@ class PartyDocumentEntity : PanacheEntity() {
 class PartyDocumentFileEntity {
     @Id
     lateinit var id: UUID
+
     @Column(name = "party_id", nullable = false)
     lateinit var partyId: UUID
+
     @Column(name = "document_type", nullable = false)
     lateinit var documentType: String
+
     @Column(name = "file_name")
     var fileName: String? = null
+
     @Column(name = "mime_type", nullable = false)
     lateinit var mimeType: String
+
     @Column(name = "content", nullable = false, columnDefinition = "BYTEA")
     lateinit var content: ByteArray
+
     @Column(name = "uploaded_at", nullable = false)
     lateinit var uploadedAt: java.time.Instant
 }

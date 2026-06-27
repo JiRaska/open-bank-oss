@@ -14,17 +14,17 @@ import java.util.UUID
 enum class PaymentProduct {
     SEPA_CREDIT_TRANSFERS,
     INSTANT_SEPA_CREDIT_TRANSFERS,
-    DOMESTIC_CZ,          // ČOBS: domácí platba CZ (Kč, tuzemský mezibankovní převod)
-    SIPO                  // ČOBS: SIPO (Sdružené inkaso plateb obyvatelstva)
+    DOMESTIC_CZ, // ČOBS: domácí platba CZ (Kč, tuzemský mezibankovní převod)
+    SIPO, // ČOBS: SIPO (Sdružené inkaso plateb obyvatelstva)
 }
 
 enum class PaymentStatus {
-    RCVD,   // Received
-    PDNG,   // Pending
-    ACTC,   // AcceptedTechnicalValidation
-    ACSC,   // AcceptedSettlementCompleted
-    RJCT,   // Rejected
-    CANC    // Cancelled
+    RCVD, // Received
+    PDNG, // Pending
+    ACTC, // AcceptedTechnicalValidation
+    ACSC, // AcceptedSettlementCompleted
+    RJCT, // Rejected
+    CANC, // Cancelled
 }
 
 enum class ConsentStatusOb {
@@ -34,13 +34,13 @@ enum class ConsentStatusOb {
     REVOKED_BY_PSU,
     EXPIRED,
     TERMINATED_BY_ASPSP,
-    PARTIALLY_AUTHORISED
+    PARTIALLY_AUTHORISED,
 }
 
 enum class BookingStatus {
     BOOKED,
     PENDING,
-    BOTH
+    BOTH,
 }
 
 // ─── Account Information ──────────────────────────────────────────────────────
@@ -52,20 +52,17 @@ data class ObAccount(
     val ownerName: String?,
     val name: String?,
     val product: String?,
-    val cashAccountType: String?
+    val cashAccountType: String?,
 )
 
 data class ObBalance(
     val balanceAmount: ObAmount,
     val balanceType: String,
     val lastChangeDateTime: OffsetDateTime?,
-    val referenceDate: LocalDate?
+    val referenceDate: LocalDate?,
 )
 
-data class ObAmount(
-    val currency: String,
-    val amount: BigDecimal
-)
+data class ObAmount(val currency: String, val amount: BigDecimal)
 
 data class ObTransaction(
     val transactionId: String?,
@@ -79,7 +76,7 @@ data class ObTransaction(
     val debtorAccount: ObAccountRef?,
     val remittanceInformationUnstructured: String?,
     val bankTransactionCode: String?,
-    val bookingStatus: String
+    val bookingStatus: String,
 )
 
 data class ObAccountRef(
@@ -88,7 +85,7 @@ data class ObAccountRef(
     val pan: String?,
     val maskedPan: String?,
     val msisdn: String?,
-    val currency: String?
+    val currency: String?,
 )
 
 // ─── Payment Initiation ───────────────────────────────────────────────────────
@@ -101,7 +98,7 @@ data class PaymentInitiation(
     val creditorName: String,
     val creditorAddress: ObAddress?,
     val remittanceInformationUnstructured: String?,
-    val requestedExecutionDate: LocalDate?
+    val requestedExecutionDate: LocalDate?,
 )
 
 data class DomesticCzPayment(
@@ -114,14 +111,14 @@ data class DomesticCzPayment(
     val specificSymbol: String?,
     val constantSymbol: String?,
     val remittanceInformationUnstructured: String?,
-    val requestedExecutionDate: LocalDate?
+    val requestedExecutionDate: LocalDate?,
 )
 
 data class SipoPayment(
     val debtorAccount: ObAccountRef,
     val sipoNumber: String,
     val variableSymbol: String?,
-    val requestedExecutionDate: LocalDate?
+    val requestedExecutionDate: LocalDate?,
 )
 
 data class ObAddress(
@@ -129,14 +126,14 @@ data class ObAddress(
     val buildingNumber: String?,
     val city: String?,
     val postalCode: String?,
-    val country: String
+    val country: String,
 )
 
 data class PaymentInitiationResponse(
     val paymentId: String,
     val transactionStatus: PaymentStatus,
     val scaStatus: String?,
-    val links: ObLinks
+    val links: ObLinks,
 )
 
 // ─── Consent ─────────────────────────────────────────────────────────────────
@@ -146,21 +143,21 @@ data class ObConsentRequest(
     val recurringIndicator: Boolean,
     val validUntil: LocalDate,
     val frequencyPerDay: Int,
-    val combinedServiceIndicator: Boolean = false
+    val combinedServiceIndicator: Boolean = false,
 )
 
 data class ObAccess(
     val accounts: List<ObAccountRef>?,
     val balances: List<ObAccountRef>?,
     val transactions: List<ObAccountRef>?,
-    val additionalInformation: ObAdditionalInformation?
+    val additionalInformation: ObAdditionalInformation?,
 )
 
 data class ObAdditionalInformation(
     val ownerName: List<ObAccountRef>?,
     val trustedBeneficiaries: List<ObAccountRef>?,
-    val standingOrders: List<ObAccountRef>?,    // ČOBS extension
-    val directDebits: List<ObAccountRef>?       // ČOBS extension
+    val standingOrders: List<ObAccountRef>?, // ČOBS extension
+    val directDebits: List<ObAccountRef>?, // ČOBS extension
 )
 
 data class ObConsentResponse(
@@ -171,7 +168,7 @@ data class ObConsentResponse(
     val validUntil: LocalDate,
     val frequencyPerDay: Int,
     val lastActionDate: LocalDate?,
-    val links: ObLinks
+    val links: ObLinks,
 )
 
 // ─── Links (HATEOAS) ─────────────────────────────────────────────────────────
@@ -182,7 +179,7 @@ data class ObLinks(
     val scaOAuth: String? = null,
     val scaRedirect: String? = null,
     val startAuthorisation: String? = null,
-    val account: String? = null
+    val account: String? = null,
 )
 
 // ─── Webhook (ČOBS povinné) ───────────────────────────────────────────────────
@@ -199,5 +196,5 @@ enum class TppEventType {
     TRANSACTION_REPORT,
     CONSENT_REVOKED,
     PAYMENT_STATUS_CHANGED,
-    ACCOUNT_STATUS_CHANGED
+    ACCOUNT_STATUS_CHANGED,
 }

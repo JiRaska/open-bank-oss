@@ -5,14 +5,23 @@
 package com.openbank.standingorder.application.port.`in`
 
 import com.openbank.standingorder.domain.model.*
-import java.time.LocalDate; import java.util.UUID
+import java.time.LocalDate
+import java.util.UUID
 
 data class CreateStandingOrderCommand(
-    val idempotencyKey: String, val partyId: UUID, val debitAccountId: UUID,
-    val creditorIban: String, val creditorName: String, val creditorBic: String?,
-    val amountMinorUnits: Long, val currency: String,
-    val frequency: Frequency, val paymentType: PaymentType,
-    val remittanceInfo: String?, val startDate: LocalDate, val endDate: LocalDate?
+    val idempotencyKey: String,
+    val partyId: UUID,
+    val debitAccountId: UUID,
+    val creditorIban: String,
+    val creditorName: String,
+    val creditorBic: String?,
+    val amountMinorUnits: Long,
+    val currency: String,
+    val frequency: Frequency,
+    val paymentType: PaymentType,
+    val remittanceInfo: String?,
+    val startDate: LocalDate,
+    val endDate: LocalDate?,
 )
 
 interface StandingOrderUseCase {

@@ -19,8 +19,12 @@ data class ScreenEntityCommand(
     val listTypes: List<String>? = null,
 )
 
-data class ReviewCommand(val checkId: UUID, val reviewedBy: String, val note: String,
-    val newStatus: SanctionsCheckStatus)
+data class ReviewCommand(
+    val checkId: UUID,
+    val reviewedBy: String,
+    val note: String,
+    val newStatus: SanctionsCheckStatus,
+)
 
 interface SanctionsUseCase {
     suspend fun screen(cmd: ScreenEntityCommand): SanctionsCheck

@@ -18,9 +18,9 @@ import jakarta.enterprise.context.ApplicationScoped
 import java.util.UUID
 
 @ApplicationScoped
-class SanctionsRepositoryImpl(
-    private val outboxRepo: SanctionsOutboxRepository
-) : SanctionsRepository, PanacheRepository<SanctionsCheckEntity> {
+class SanctionsRepositoryImpl(private val outboxRepo: SanctionsOutboxRepository) :
+    SanctionsRepository,
+    PanacheRepository<SanctionsCheckEntity> {
 
     private val mapper = jacksonObjectMapper().findAndRegisterModules()
 
@@ -32,8 +32,11 @@ class SanctionsRepositoryImpl(
 
     override suspend fun saveWithEvent(check: SanctionsCheck, eventType: String): SanctionsCheck {
         val e = check.toEntity()
-        val event = OutboxMessage(aggregateId = check.id, eventType = eventType,
-            payload = mapper.writeValueAsString(check))
+        val event = OutboxMessage(
+            aggregateId = check.id,
+            eventType = eventType,
+            payload = mapper.writeValueAsString(check),
+        )
         Panache.withTransaction { persist(e).chain { _ -> outboxRepo.persistInTransaction(event) } }.awaitSuspending()
         return e.toDomain()
     }

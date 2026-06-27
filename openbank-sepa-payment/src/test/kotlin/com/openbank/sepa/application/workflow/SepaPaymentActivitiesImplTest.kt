@@ -33,6 +33,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Clock
 import java.time.Instant
 import java.util.UUID
 
@@ -45,6 +46,8 @@ class SepaPaymentActivitiesImplTest {
     private lateinit var schemeGatewayPort: SchemeGatewayPort
     private lateinit var settlementPort: SettlementPort
     private lateinit var activities: SepaPaymentActivitiesImpl
+
+    private val clock = Clock.systemUTC()
 
     private val paymentId = UUID.randomUUID()
     private val payment = SepaPayment(
@@ -85,6 +88,7 @@ class SepaPaymentActivitiesImplTest {
             fraudScoringPort,
             schemeGatewayPort,
             settlementPort,
+            clock = clock,
             schemeSubmissionEnabled = true,
         )
         coJustRun { amlCasePort.openCase(any()) }
@@ -243,6 +247,7 @@ class SepaPaymentActivitiesImplTest {
             fraudScoringPort,
             schemeGatewayPort,
             settlementPort,
+            clock = clock,
             schemeSubmissionEnabled = false,
         )
         coEvery { paymentRepository.findById(paymentId) } returns validated
@@ -269,6 +274,7 @@ private class TestableActivities(
     fraudScoringPort: FraudScoringPort,
     schemeGatewayPort: SchemeGatewayPort,
     settlementPort: SettlementPort,
+    clock: Clock,
     schemeSubmissionEnabled: Boolean,
 ) : SepaPaymentActivitiesImpl(
     paymentRepository,
@@ -277,6 +283,7 @@ private class TestableActivities(
     fraudScoringPort,
     schemeGatewayPort,
     settlementPort,
+    clock,
     schemeSubmissionEnabled,
 ) {
     override fun <T> runOnVertxContext(block: suspend () -> T): T = runBlocking { block() }

@@ -4,11 +4,11 @@
 
 package com.openbank.party.infrastructure.rest
 
-import com.openbank.party.application.usecase.PartyAlreadyExistsException
-import com.openbank.party.application.usecase.PartyNotFoundException
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
 import com.openbank.libs.flags.FeatureDisabledException
+import com.openbank.party.application.usecase.PartyAlreadyExistsException
+import com.openbank.party.application.usecase.PartyNotFoundException
 import io.vertx.pgclient.PgException
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper

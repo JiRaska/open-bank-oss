@@ -35,15 +35,14 @@ data class SepaPaymentStatusChangedEvent(
     val occurredAt: Instant,
 )
 
-fun SepaPayment.toStatusChangedEvent(previousStatus: SepaPaymentStatus, clock: Clock) =
-    SepaPaymentStatusChangedEvent(
-        paymentId = id,
-        previousStatus = previousStatus,
-        newStatus = status,
-        rejectReason = rejectReason?.name,
-        rejectDetail = rejectDetail,
-        occurredAt = Instant.now(clock),
-    )
+fun SepaPayment.toStatusChangedEvent(previousStatus: SepaPaymentStatus, clock: Clock) = SepaPaymentStatusChangedEvent(
+    paymentId = id,
+    previousStatus = previousStatus,
+    newStatus = status,
+    rejectReason = rejectReason?.name,
+    rejectDetail = rejectDetail,
+    occurredAt = Instant.now(clock),
+)
 
 fun SepaPayment.toCreatedEvent(clock: Clock) = SepaPaymentCreatedEvent(
     paymentId = id,

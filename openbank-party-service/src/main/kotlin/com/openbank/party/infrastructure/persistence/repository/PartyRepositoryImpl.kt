@@ -21,9 +21,10 @@ import java.time.Clock
 import java.util.UUID
 
 @ApplicationScoped
-class PartyRepositoryImpl : PartyRepository, PanacheRepository<PartyEntity> {
+class PartyRepositoryImpl :
+    PartyRepository,
+    PanacheRepository<PartyEntity> {
     @Inject lateinit var clock: Clock
-
 
     override suspend fun save(party: Party): Party {
         val e = party.toEntity()
@@ -40,8 +41,9 @@ class PartyRepositoryImpl : PartyRepository, PanacheRepository<PartyEntity> {
     override suspend fun listAll(page: Int, size: Int): List<Party> =
         Panache.withSession { findAll().page(page, size).list() }.awaitSuspending().map { it.toDomain() }
 
-    override suspend fun listByStatus(status: PartyStatus, page: Int, size: Int): List<Party> =
-        Panache.withSession { find("status", status.name).page(page, size).list() }.awaitSuspending().map { it.toDomain() }
+    override suspend fun listByStatus(status: PartyStatus, page: Int, size: Int): List<Party> = Panache.withSession {
+        find("status", status.name).page(page, size).list()
+    }.awaitSuspending().map { it.toDomain() }
 
     override suspend fun countByStatus(status: PartyStatus): Long =
         Panache.withSession { count("status", status.name) }.awaitSuspending()
@@ -57,7 +59,8 @@ class PartyRepositoryImpl : PartyRepository, PanacheRepository<PartyEntity> {
                 find(
                     "(lower(legalName) like ?1 escape '\\' or lower(tradingName) like ?1 escape '\\') " +
                         "and partyId > ?2 order by partyId",
-                    pattern, afterId,
+                    pattern,
+                    afterId,
                 )
             } else {
                 find(
@@ -69,8 +72,7 @@ class PartyRepositoryImpl : PartyRepository, PanacheRepository<PartyEntity> {
             query.page(0, limit).list()
         }.awaitSuspending().map { it.toDomain() }
 
-    override suspend fun countAll(): Long =
-        Panache.withSession { count() }.awaitSuspending()
+    override suspend fun countAll(): Long = Panache.withSession { count() }.awaitSuspending()
 
     override suspend fun anonymize(id: UUID) {
         Panache.withTransaction {
@@ -100,25 +102,24 @@ class PartyRepositoryImpl : PartyRepository, PanacheRepository<PartyEntity> {
         }.awaitSuspending()
     }
 
-    override suspend fun update(party: Party): Party =
-        Panache.withTransaction {
-            find("partyId", party.id).firstResult().map { e ->
-                e?.also {
-                    it.status = party.status.name
-                    it.email = party.email
-                    it.phone = party.phone
-                    it.tradingName = party.tradingName
-                    it.kycStatus = party.kycStatus.name
-                    it.amlStatus = party.amlStatus.name
-                    it.addressLine1 = party.address?.line1
-                    it.addressLine2 = party.address?.line2
-                    it.addressCity = party.address?.city
-                    it.addressPostalCode = party.address?.postalCode
-                    it.addressCountryCode = party.address?.countryCode
-                    it.updatedAt = party.updatedAt
-                }
-            }.replaceWith(party)
-        }.awaitSuspending()
+    override suspend fun update(party: Party): Party = Panache.withTransaction {
+        find("partyId", party.id).firstResult().map { e ->
+            e?.also {
+                it.status = party.status.name
+                it.email = party.email
+                it.phone = party.phone
+                it.tradingName = party.tradingName
+                it.kycStatus = party.kycStatus.name
+                it.amlStatus = party.amlStatus.name
+                it.addressLine1 = party.address?.line1
+                it.addressLine2 = party.address?.line2
+                it.addressCity = party.address?.city
+                it.addressPostalCode = party.address?.postalCode
+                it.addressCountryCode = party.address?.countryCode
+                it.updatedAt = party.updatedAt
+            }
+        }.replaceWith(party)
+    }.awaitSuspending()
 
     override suspend fun findByKeycloakSub(sub: String): Party? =
         Panache.withSession { find("keycloakSub", sub).firstResult() }.awaitSuspending()?.toDomain()
@@ -127,15 +128,26 @@ class PartyRepositoryImpl : PartyRepository, PanacheRepository<PartyEntity> {
         Panache.withSession { find("rcBlindIndex", index).firstResult() }.awaitSuspending()?.toDomain()
 
     private fun Party.toEntity() = PartyEntity().also {
-        it.partyId = id; it.partyType = partyType.name; it.status = status.name
-        it.legalName = legalName; it.tradingName = tradingName; it.dateOfBirth = dateOfBirth
-        it.nationality = nationality; it.taxId = taxId; it.registrationNumber = registrationNumber
-        it.email = email; it.phone = phone; it.kycStatus = kycStatus.name
+        it.partyId = id
+        it.partyType = partyType.name
+        it.status = status.name
+        it.legalName = legalName
+        it.tradingName = tradingName
+        it.dateOfBirth = dateOfBirth
+        it.nationality = nationality
+        it.taxId = taxId
+        it.registrationNumber = registrationNumber
+        it.email = email
+        it.phone = phone
+        it.kycStatus = kycStatus.name
         it.amlStatus = amlStatus.name
-        it.addressLine1 = address?.line1; it.addressLine2 = address?.line2
-        it.addressCity = address?.city; it.addressPostalCode = address?.postalCode
+        it.addressLine1 = address?.line1
+        it.addressLine2 = address?.line2
+        it.addressCity = address?.city
+        it.addressPostalCode = address?.postalCode
         it.addressCountryCode = address?.countryCode
-        it.createdAt = createdAt; it.updatedAt = updatedAt
+        it.createdAt = createdAt
+        it.updatedAt = updatedAt
         it.keycloakSub = keycloakSub
         it.rcBlindIndex = rcBlindIndex
         it.rcIndexKeyVersion = rcIndexKeyVersion
@@ -146,7 +158,19 @@ class PartyRepositoryImpl : PartyRepository, PanacheRepository<PartyEntity> {
         legalName = legalName, tradingName = tradingName, dateOfBirth = dateOfBirth,
         nationality = nationality, taxId = taxId, registrationNumber = registrationNumber,
         email = email, phone = phone, kycStatus = KycStatus.valueOf(kycStatus),
-        address = if (addressLine1 != null) Address(addressLine1!!, addressLine2, addressCity ?: "", addressPostalCode ?: "", addressCountryCode ?: "") else null,
+        address = if (addressLine1 !=
+            null
+        ) {
+            Address(
+                addressLine1!!,
+                addressLine2,
+                addressCity ?: "",
+                addressPostalCode ?: "",
+                addressCountryCode ?: "",
+            )
+        } else {
+            null
+        },
         createdAt = createdAt, updatedAt = updatedAt,
         keycloakSub = keycloakSub,
         amlStatus = AmlStatus.valueOf(amlStatus),
@@ -156,14 +180,20 @@ class PartyRepositoryImpl : PartyRepository, PanacheRepository<PartyEntity> {
 }
 
 @ApplicationScoped
-class PartyDocumentRepositoryImpl : PartyDocumentRepository, PanacheRepository<PartyDocumentEntity> {
+class PartyDocumentRepositoryImpl :
+    PartyDocumentRepository,
+    PanacheRepository<PartyDocumentEntity> {
 
     override suspend fun save(doc: PartyDocument): PartyDocument {
         val e = PartyDocumentEntity().also {
-            it.documentId = doc.id; it.partyId = doc.partyId
-            it.documentType = doc.documentType.name; it.documentNumber = doc.documentNumber
-            it.issuingCountry = doc.issuingCountry; it.expiryDate = doc.expiryDate
-            it.verifiedAt = doc.verifiedAt; it.createdAt = doc.createdAt
+            it.documentId = doc.id
+            it.partyId = doc.partyId
+            it.documentType = doc.documentType.name
+            it.documentNumber = doc.documentNumber
+            it.issuingCountry = doc.issuingCountry
+            it.expiryDate = doc.expiryDate
+            it.verifiedAt = doc.verifiedAt
+            it.createdAt = doc.createdAt
         }
         Panache.withTransaction { persist(e) }.awaitSuspending()
         return doc
@@ -171,19 +201,32 @@ class PartyDocumentRepositoryImpl : PartyDocumentRepository, PanacheRepository<P
 
     override suspend fun findByPartyId(partyId: UUID): List<PartyDocument> =
         Panache.withSession { find("partyId", partyId).list() }.awaitSuspending().map {
-            PartyDocument(it.documentId, it.partyId, DocumentType.valueOf(it.documentType),
-                it.documentNumber, it.issuingCountry, it.expiryDate, it.verifiedAt, it.createdAt)
+            PartyDocument(
+                it.documentId,
+                it.partyId,
+                DocumentType.valueOf(it.documentType),
+                it.documentNumber,
+                it.issuingCountry,
+                it.expiryDate,
+                it.verifiedAt,
+                it.createdAt,
+            )
         }
 }
 
 @ApplicationScoped
-class PartyDocumentFileRepositoryImpl : PartyDocumentFileRepository, PanacheRepository<PartyDocumentFileEntity> {
+class PartyDocumentFileRepositoryImpl :
+    PartyDocumentFileRepository,
+    PanacheRepository<PartyDocumentFileEntity> {
 
     override suspend fun save(file: PartyDocumentFile): PartyDocumentFile {
         val e = PartyDocumentFileEntity().also {
-            it.id = file.id; it.partyId = file.partyId
-            it.documentType = file.documentType.name; it.fileName = file.fileName
-            it.mimeType = file.mimeType; it.content = file.content
+            it.id = file.id
+            it.partyId = file.partyId
+            it.documentType = file.documentType.name
+            it.fileName = file.fileName
+            it.mimeType = file.mimeType
+            it.content = file.content
             it.uploadedAt = file.uploadedAt
         }
         Panache.withTransaction { persist(e) }.awaitSuspending()
@@ -193,15 +236,21 @@ class PartyDocumentFileRepositoryImpl : PartyDocumentFileRepository, PanacheRepo
     override suspend fun findByPartyId(partyId: UUID): List<PartyDocumentFile> =
         Panache.withSession { find("partyId", partyId).list() }.awaitSuspending().map { it.toDomain() }
 
-    override suspend fun findByIdAndPartyId(id: UUID, partyId: UUID): PartyDocumentFile? =
-        Panache.withSession { find("id = ?1 AND partyId = ?2", id, partyId).firstResult() }.awaitSuspending()?.toDomain()
+    override suspend fun findByIdAndPartyId(id: UUID, partyId: UUID): PartyDocumentFile? = Panache.withSession {
+        find("id = ?1 AND partyId = ?2", id, partyId).firstResult()
+    }.awaitSuspending()?.toDomain()
 
     override suspend fun deleteByPartyId(partyId: UUID) {
         Panache.withTransaction { delete("partyId", partyId) }.awaitSuspending()
     }
 
     private fun PartyDocumentFileEntity.toDomain() = PartyDocumentFile(
-        id = id, partyId = partyId, documentType = DocumentType.valueOf(documentType),
-        fileName = fileName, mimeType = mimeType, content = content, uploadedAt = uploadedAt
+        id = id,
+        partyId = partyId,
+        documentType = DocumentType.valueOf(documentType),
+        fileName = fileName,
+        mimeType = mimeType,
+        content = content,
+        uploadedAt = uploadedAt,
     )
 }

@@ -23,10 +23,7 @@ import java.util.UUID
  * the consumer group (kyc-/aml-service remain the source of truth and can be replayed).
  */
 @ApplicationScoped
-class KycAmlEventConsumer(
-    private val partyUseCase: PartyUseCase,
-    private val objectMapper: ObjectMapper,
-) {
+class KycAmlEventConsumer(private val partyUseCase: PartyUseCase, private val objectMapper: ObjectMapper) {
     private val log = Logger.getLogger(KycAmlEventConsumer::class.java)
 
     @Incoming("kyc-events-in")

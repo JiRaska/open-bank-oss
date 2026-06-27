@@ -14,20 +14,21 @@ import com.openbank.psd2.application.port.`in`.TransactionPage
 import com.openbank.psd2.application.port.out.AccountServiceClient
 import com.openbank.psd2.application.port.out.ConsentServiceClient
 import com.openbank.psd2.application.port.out.ConsentSnapshot
+import com.openbank.psd2.domain.model.BookingStatus
+import com.openbank.psd2.domain.model.ConsentStatusOb
+import com.openbank.psd2.domain.model.ObAccess
 import com.openbank.psd2.domain.model.ObAccount
 import com.openbank.psd2.domain.model.ObAccountRef
-import com.openbank.psd2.domain.model.ObAccess
 import com.openbank.psd2.domain.model.ObAmount
 import com.openbank.psd2.domain.model.ObBalance
-import com.openbank.psd2.domain.model.BookingStatus
 import com.openbank.psd2.domain.model.ObConsentRequest
 import com.openbank.psd2.domain.model.ObLinks
 import com.openbank.psd2.domain.model.ObTransaction
-import com.openbank.psd2.domain.model.ConsentStatusOb
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.slot
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -36,7 +37,6 @@ import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
-import kotlinx.coroutines.runBlocking
 
 class Psd2ServicesTest {
 

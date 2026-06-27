@@ -5,14 +5,24 @@
 package com.openbank.standingorder.infrastructure.rest.dto
 
 import com.openbank.standingorder.domain.model.*
-import java.time.Instant; import java.time.LocalDate; import java.util.UUID
+import java.time.Instant
+import java.time.LocalDate
+import java.util.UUID
 
 data class CreateStandingOrderRequest(
-    val idempotencyKey: String, val partyId: UUID, val debitAccountId: UUID,
-    val creditorIban: String, val creditorName: String, val creditorBic: String?,
-    val amountMinorUnits: Long, val currency: String,
-    val frequency: Frequency, val paymentType: PaymentType,
-    val remittanceInfo: String?, val startDate: LocalDate, val endDate: LocalDate?
+    val idempotencyKey: String,
+    val partyId: UUID,
+    val debitAccountId: UUID,
+    val creditorIban: String,
+    val creditorName: String,
+    val creditorBic: String?,
+    val amountMinorUnits: Long,
+    val currency: String,
+    val frequency: Frequency,
+    val paymentType: PaymentType,
+    val remittanceInfo: String?,
+    val startDate: LocalDate,
+    val endDate: LocalDate?,
 )
 
 data class StandingOrderResponse(
@@ -32,7 +42,7 @@ data class StandingOrderResponse(
     val description: String?,
     val executionCount: Int,
     val createdAt: Instant,
-    val updatedAt: Instant
+    val updatedAt: Instant,
 )
 
 fun StandingOrder.toResponse() = StandingOrderResponse(
@@ -52,5 +62,5 @@ fun StandingOrder.toResponse() = StandingOrderResponse(
     description = remittanceInfo,
     executionCount = executionCount,
     createdAt = createdAt,
-    updatedAt = updatedAt
+    updatedAt = updatedAt,
 )

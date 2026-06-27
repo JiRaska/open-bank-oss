@@ -6,13 +6,11 @@ package com.openbank.party.application.usecase
 
 import com.openbank.party.application.port.`in`.AddDocumentCommand
 import com.openbank.party.application.port.`in`.CreatePartyCommand
+import com.openbank.party.application.port.`in`.ErasePartyCommand
+import com.openbank.party.application.port.`in`.ResolvePartyByRcCommand
 import com.openbank.party.application.port.`in`.SelfRegisterPartyCommand
 import com.openbank.party.application.port.`in`.UpdatePartyCommand
 import com.openbank.party.application.port.`in`.UploadDocumentCommand
-import com.openbank.party.application.port.out.PartyDocumentFileRepository
-import com.openbank.party.application.port.out.PartyDocumentRepository
-import com.openbank.party.application.port.out.PartyEventPublisher
-import com.openbank.party.application.port.out.PartyRepository
 import com.openbank.party.domain.model.Address
 import com.openbank.party.domain.model.AmlStatus
 import com.openbank.party.domain.model.DocumentType
@@ -22,24 +20,21 @@ import com.openbank.party.domain.model.PartyDocument
 import com.openbank.party.domain.model.PartyDocumentFile
 import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
-import com.openbank.party.application.port.`in`.ErasePartyCommand
-import com.openbank.party.application.port.`in`.ResolvePartyByRcCommand
-import com.openbank.libs.observability.DomainMetrics
-import java.util.Optional
 import io.mockk.coEvery
 import io.mockk.coJustRun
 import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.Optional
 import java.util.UUID
-import kotlinx.coroutines.runBlocking
 
 class PartyServiceTest {
 
@@ -74,8 +69,8 @@ class PartyServiceTest {
                 registrationNumber = null,
                 email = "alice@example.com",
                 phone = "+420123456789",
-                address = Address("Line 1", null, "Prague", "11000", "CZ")
-            )
+                address = Address("Line 1", null, "Prague", "11000", "CZ"),
+            ),
         )
 
         assertThat(savedPartySlot.captured.email).isEqualTo("alice@example.com")
@@ -90,7 +85,9 @@ class PartyServiceTest {
     fun `updateKycStatus verifying transition into ACTIVE counts partyVerified once`(): Unit = runBlocking {
         val service = newService()
         val original = sampleParty(
-            status = PartyStatus.PENDING_KYC, kycStatus = KycStatus.IN_PROGRESS, amlStatus = AmlStatus.CLEARED,
+            status = PartyStatus.PENDING_KYC,
+            kycStatus = KycStatus.IN_PROGRESS,
+            amlStatus = AmlStatus.CLEARED,
         )
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
@@ -143,8 +140,8 @@ class PartyServiceTest {
                         registrationNumber = null,
                         email = "alice@example.com",
                         phone = null,
-                        address = null
-                    )
+                        address = null,
+                    ),
                 )
             }
         }.isInstanceOf(PartyAlreadyExistsException::class.java)
@@ -185,8 +182,8 @@ class PartyServiceTest {
                 email = "new@example.com",
                 phone = null,
                 address = null,
-                tradingName = "New Trade"
-            )
+                tradingName = "New Trade",
+            ),
         )
 
         assertThat(updatedSlot.captured.email).isEqualTo("new@example.com")
@@ -212,8 +209,8 @@ class PartyServiceTest {
                         documentType = DocumentType.PASSPORT,
                         documentNumber = "P1234567",
                         issuingCountry = "CZ",
-                        expiryDate = null
-                    )
+                        expiryDate = null,
+                    ),
                 )
             }
         }.isInstanceOf(PartyNotFoundException::class.java)
@@ -232,8 +229,8 @@ class PartyServiceTest {
                 documentType = DocumentType.PASSPORT,
                 documentNumber = "P1234567",
                 issuingCountry = "CZ",
-                expiryDate = "2030-01-01"
-            )
+                expiryDate = "2030-01-01",
+            ),
         )
 
         assertThat(documentSlot.captured.partyId).isEqualTo(partyId)
@@ -248,7 +245,9 @@ class PartyServiceTest {
     fun `updateKycStatus sets ACTIVE only when AML already CLEARED (two-key gate)`(): Unit = runBlocking {
         val service = newService()
         val original = sampleParty(
-            status = PartyStatus.PENDING_KYC, kycStatus = KycStatus.IN_PROGRESS, amlStatus = AmlStatus.CLEARED,
+            status = PartyStatus.PENDING_KYC,
+            kycStatus = KycStatus.IN_PROGRESS,
+            amlStatus = AmlStatus.CLEARED,
         )
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
@@ -266,7 +265,9 @@ class PartyServiceTest {
     fun `updateKycStatus stays PENDING_KYC when AML not yet cleared`(): Unit = runBlocking {
         val service = newService()
         val original = sampleParty(
-            status = PartyStatus.PENDING_KYC, kycStatus = KycStatus.IN_PROGRESS, amlStatus = AmlStatus.NOT_SCREENED,
+            status = PartyStatus.PENDING_KYC,
+            kycStatus = KycStatus.IN_PROGRESS,
+            amlStatus = AmlStatus.NOT_SCREENED,
         )
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
@@ -281,7 +282,9 @@ class PartyServiceTest {
     fun `updateAmlStatus activates when KYC already APPROVED`(): Unit = runBlocking {
         val service = newService()
         val original = sampleParty(
-            status = PartyStatus.PENDING_KYC, kycStatus = KycStatus.APPROVED, amlStatus = AmlStatus.NOT_SCREENED,
+            status = PartyStatus.PENDING_KYC,
+            kycStatus = KycStatus.APPROVED,
+            amlStatus = AmlStatus.NOT_SCREENED,
         )
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
@@ -297,7 +300,9 @@ class PartyServiceTest {
     fun `updateAmlStatus BLOCKED suspends the party`(): Unit = runBlocking {
         val service = newService()
         val original = sampleParty(
-            status = PartyStatus.PENDING_KYC, kycStatus = KycStatus.APPROVED, amlStatus = AmlStatus.NOT_SCREENED,
+            status = PartyStatus.PENDING_KYC,
+            kycStatus = KycStatus.APPROVED,
+            amlStatus = AmlStatus.NOT_SCREENED,
         )
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
@@ -373,8 +378,8 @@ class PartyServiceTest {
             SelfRegisterPartyCommand(
                 keycloakSub = sub, emailVerified = true, partyType = PartyType.INDIVIDUAL,
                 legalName = "Test User", email = "test@example.com",
-                phone = null, dateOfBirth = null, nationality = null, address = null
-            )
+                phone = null, dateOfBirth = null, nationality = null, address = null,
+            ),
         )
 
         assertThat(isNew).isTrue()
@@ -394,8 +399,8 @@ class PartyServiceTest {
             SelfRegisterPartyCommand(
                 keycloakSub = sub, emailVerified = true, partyType = PartyType.INDIVIDUAL,
                 legalName = "Test User", email = "test@example.com",
-                phone = null, dateOfBirth = null, nationality = null, address = null
-            )
+                phone = null, dateOfBirth = null, nationality = null, address = null,
+            ),
         )
 
         assertThat(isNew).isFalse()
@@ -439,8 +444,8 @@ class PartyServiceTest {
                 documentType = DocumentType.PASSPORT,
                 fileName = "passport.jpg",
                 mimeType = "image/jpeg",
-                content = content
-            )
+                content = content,
+            ),
         )
 
         assertThat(fileSlot.captured.partyId).isEqualTo(partyId)
@@ -458,9 +463,12 @@ class PartyServiceTest {
             runBlocking {
                 service.uploadDocument(
                     UploadDocumentCommand(
-                        partyId = partyId, documentType = DocumentType.PASSPORT,
-                        fileName = null, mimeType = "image/jpeg", content = byteArrayOf()
-                    )
+                        partyId = partyId,
+                        documentType = DocumentType.PASSPORT,
+                        fileName = null,
+                        mimeType = "image/jpeg",
+                        content = byteArrayOf(),
+                    ),
                 )
             }
         }.isInstanceOf(PartyNotFoundException::class.java)
@@ -509,7 +517,7 @@ class PartyServiceTest {
             fileName = "passport.jpg",
             mimeType = "image/jpeg",
             content = byteArrayOf(1, 2, 3),
-            uploadedAt = now
+            uploadedAt = now,
         )
         coEvery { service.documentFileRepo.findByIdAndPartyId(fileId, partyId) } returns file
 
@@ -553,7 +561,7 @@ class PartyServiceTest {
     fun `resolvePartyByRc returns null when pepper absent (dedup off)`(): Unit = runBlocking {
         val service = newService() // rcPepper = Optional.empty()
         val result = service.resolvePartyByRc(
-            ResolvePartyByRcCommand("7601010032")
+            ResolvePartyByRcCommand("7601010032"),
         )
         assertThat(result).isNull()
         coVerify(exactly = 0) { service.partyRepo.findByRcBlindIndex(any()) }
@@ -563,7 +571,7 @@ class PartyServiceTest {
     fun `resolvePartyByRc returns null when RC is syntactically invalid`(): Unit = runBlocking {
         val service = newService().also { it.rcPepper = Optional.of("pepper") }
         val result = service.resolvePartyByRc(
-            ResolvePartyByRcCommand("not-an-rc")
+            ResolvePartyByRcCommand("not-an-rc"),
         )
         assertThat(result).isNull()
         coVerify(exactly = 0) { service.partyRepo.findByRcBlindIndex(any()) }
@@ -576,7 +584,7 @@ class PartyServiceTest {
         coEvery { service.partyRepo.findByRcBlindIndex(any()) } returns party
 
         val result = service.resolvePartyByRc(
-            ResolvePartyByRcCommand("7601010032")
+            ResolvePartyByRcCommand("7601010032"),
         )
 
         assertThat(result).isEqualTo(party)
@@ -589,7 +597,7 @@ class PartyServiceTest {
         coEvery { service.partyRepo.findByRcBlindIndex(any()) } returns null
 
         val result = service.resolvePartyByRc(
-            ResolvePartyByRcCommand("7601010032")
+            ResolvePartyByRcCommand("7601010032"),
         )
 
         assertThat(result).isNull()
@@ -615,7 +623,7 @@ class PartyServiceTest {
                 email = "t@example.com",
                 phone = null,
                 address = null,
-            )
+            ),
         )
 
         assertThat(savedSlot.captured.rcBlindIndex).isNotNull()
@@ -642,7 +650,7 @@ class PartyServiceTest {
                 email = "t2@example.com",
                 phone = null,
                 address = null,
-            )
+            ),
         )
 
         assertThat(savedSlot.captured.rcBlindIndex).isNull()

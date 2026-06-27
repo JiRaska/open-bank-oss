@@ -7,8 +7,8 @@ package com.openbank.cardissuance.application.usecase
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.cardissuance.application.port.`in`.*
 import com.openbank.cardissuance.application.port.out.*
-import com.openbank.cardissuance.domain.model.*
 import com.openbank.cardissuance.domain.event.*
+import com.openbank.cardissuance.domain.model.*
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
@@ -17,11 +17,8 @@ import java.time.LocalDate
 import java.util.UUID
 
 @ApplicationScoped
-class CardService(
-    private val repo: CardRepository,
-    private val mapper: ObjectMapper,
-    private val clock: Clock,
-) : CardUseCase {
+class CardService(private val repo: CardRepository, private val mapper: ObjectMapper, private val clock: Clock) :
+    CardUseCase {
 
     override suspend fun issueCard(cmd: IssueCardCommand): Card {
         repo.findByIdempotencyKey(cmd.idempotencyKey)?.let { return it }
@@ -68,8 +65,7 @@ class CardService(
     override suspend fun suspendCard(cmd: CardStatusCommand): Card =
         changeStatus(cmd) { it.suspend(Instant.now(clock)) }
 
-    override suspend fun resumeCard(cmd: CardStatusCommand): Card =
-        changeStatus(cmd) { it.resume(Instant.now(clock)) }
+    override suspend fun resumeCard(cmd: CardStatusCommand): Card = changeStatus(cmd) { it.resume(Instant.now(clock)) }
 
     /**
      * Shared status-transition path: load the card, apply [transition], then persist the updated

@@ -19,7 +19,7 @@ data class TppAuthorizationResponse(
     val tppId: String,
     val authorized: Boolean,
     val roles: Set<String>,
-    val reason: String?
+    val reason: String?,
 )
 
 @Path("/api/v1/tpp-registry")
@@ -29,14 +29,12 @@ interface TppRegistryRestClient {
     @Path("/check")
     fun checkAuthorization(
         @QueryParam("tppId") tppId: String,
-        @QueryParam("role") role: String
+        @QueryParam("role") role: String,
     ): TppAuthorizationResponse
 }
 
 @ApplicationScoped
-class TppAuthorizationGuard @Inject constructor(
-    @RestClient private val client: TppRegistryRestClient
-) {
+class TppAuthorizationGuard @Inject constructor(@RestClient private val client: TppRegistryRestClient) {
 
     @Timeout(2000)
     @Retry(maxRetries = 2, delay = 200, jitter = 100, retryOn = [Exception::class])

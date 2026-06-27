@@ -14,10 +14,8 @@ import java.time.LocalDate
 import java.util.UUID
 
 @ApplicationScoped
-class StandingOrderService(
-    private val repo: StandingOrderRepository,
-    private val clock: Clock,
-) : StandingOrderUseCase {
+class StandingOrderService(private val repo: StandingOrderRepository, private val clock: Clock) :
+    StandingOrderUseCase {
 
     override suspend fun create(cmd: CreateStandingOrderCommand): StandingOrder {
         repo.findByIdempotencyKey(cmd.idempotencyKey)?.let { return it }
@@ -32,7 +30,7 @@ class StandingOrderService(
             startDate = cmd.startDate, endDate = cmd.endDate,
             nextExecutionDate = cmd.startDate,
             lastExecutionDate = null, executionCount = 0, failureCount = 0,
-            status = StandingOrderStatus.ACTIVE, createdAt = now, updatedAt = now
+            status = StandingOrderStatus.ACTIVE, createdAt = now, updatedAt = now,
         )
         return repo.save(order)
     }
