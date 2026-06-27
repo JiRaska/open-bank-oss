@@ -28,7 +28,7 @@
 #   RUNNER_DIR     runner install dir            (default: $HOME/actions-runner)
 #   RUNNER_NAME    runner name on GitHub         (default: hostname)
 #   RUNNER_LABELS  custom labels (self-hosted/OS/arch are auto-added)
-#                                                (default: openbank-build,openbank-sandbox)
+#                                  (default: openbank-build,openbank-batch,openbank-sandbox)
 #   RUNNER_TOKEN   registration token            (default: minted via `gh`)
 #   SVC_USER       Linux-only run-as user for svc install when running as root
 #                                                (default: current user)
@@ -37,7 +37,19 @@ set -euo pipefail
 REPO_URL="https://github.com/JiRaska/open-bank"
 RUNNER_DIR="${RUNNER_DIR:-$HOME/actions-runner}"
 RUNNER_NAME="${RUNNER_NAME:-$(hostname -s 2>/dev/null || hostname)}"
-RUNNER_LABELS="${RUNNER_LABELS:-openbank-build,openbank-sandbox}"
+# Pool labels for a persistent accelerator host. `openbank-build` and
+# `openbank-batch` are the SAME trust level (no cloud-write creds, both PR-allowed —
+# rules.yaml: ci_runners.pr_jobs_allowed_pools); the build/batch split is an ARC
+# CAPACITY lever (ADR-0053/0082: no job preemption, so a separate low-capped batch
+# scale set is the only way a scan/cron burst can't starve the merge-required build
+# lane). That isolation is an ARC-scheduler concern — a single static host schedules
+# one job at a time, so it can safely sit in BOTH pools. Carrying `openbank-batch`
+# here is what keeps the batch lane (Trivy in security.yml, FinOps in
+# finops-lifecycle.yml — all `runs-on: openbank-batch`) served when the ARC batch
+# scale set + Mac-mini are offline; a live GitHub-API label add is NOT durable (a
+# re-register resets to these `--labels`). Hetzner hosts add the `hetzner` host-id
+# tag: RUNNER_LABELS=openbank-build,openbank-batch,openbank-sandbox,hetzner
+RUNNER_LABELS="${RUNNER_LABELS:-openbank-build,openbank-batch,openbank-sandbox}"
 
 [ -x "$RUNNER_DIR/config.sh" ] || {
   echo "❌ No runner install at $RUNNER_DIR (config.sh missing). Set RUNNER_DIR=..." >&2
