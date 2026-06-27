@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.34.0](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.33.0...admin-ui-v0.34.0) (2026-06-27)
+
+
+### Features
+
+* **devops:** add AI DevOps agent for SSDLC/DORA monitoring (ADR-0119) ([#2295](https://github.com/JiRaska/open-bank/issues/2295)) ([c0ede0a](https://github.com/JiRaska/open-bank/commit/c0ede0a075be0be7381637476d0944c0a7ac9792))
+* **devops:** HITL approve/reject for findings (ADR-0119) ([#2308](https://github.com/JiRaska/open-bank/issues/2308)) ([0e21c8c](https://github.com/JiRaska/open-bank/commit/0e21c8c3e5d8a855fec9a25204d5b16e3559804f))
+
 ## [0.33.0](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.32.0...admin-ui-v0.33.0) (2026-06-27)
 
 
