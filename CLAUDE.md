@@ -159,6 +159,19 @@ CI is path-scoped (only changed services build). Domain layer has **zero** frame
   the root token is revoked and recovery keys are the only break-glass. If they are lost (not saved
   to AWS Secrets Manager `openbank/openbao/break-glass`) the cluster is unrecoverable without a
   full re-init. Save them immediately after `openbao operator init`.
+- **Bare docker.io images bypass Kyverno ECR pull-through rewrite → NAT cost.** The Kyverno
+  `ecr-pull-through-rewrite` ClusterPolicy only rewrites refs matching `^docker\.io/`. Bare images
+  like `nginx:1.27-alpine` or `valkey/valkey:8-alpine` (no registry prefix) bypass the rule and are
+  pulled from Docker Hub via NAT gateway. **Always use explicit `docker.io/library/<image>` for
+  official images and `docker.io/<org>/<image>` for org images in every gitops manifest.** Verify:
+  `kubectl get pods -A -o jsonpath='{range .items[*]}{.spec.containers[*].image}{"\n"}{end}' | grep -v '\.ecr\.' | grep -v 602401`
+  should return empty (all pods via ECR). D1 anomaly signature: "NAT egress 2× rolling avg — <namespace>".
+- **Missing EC2 VPC endpoint = steady kube-system NAT drain.** `aws-node` (VPC CNI) polls the EC2
+  API every few seconds per node (IPAM, ENI management). Without `com.amazonaws.<region>.ec2` as a
+  VPC Interface endpoint, every call crosses the NAT gateway. D1 signature: "NAT egress 2× rolling
+  avg — kube-system". Required VPC endpoints for a healthy EKS cluster: S3 (Gateway), STS, ECR
+  (dkr+api), EC2, CodeArtifact (api+repositories). Verify: `aws ec2 describe-vpc-endpoints --region
+  <region> --query 'VpcEndpoints[*].ServiceName'`.
 
 ### GitOps merge conflicts — image tags
 - **NEVER `git checkout --theirs` blindly for image tags.** `--theirs` (main) may have an older
