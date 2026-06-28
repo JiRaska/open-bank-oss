@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Scrapes the Temporal SERVER pods (frontend/history/matching/worker) on the
+# named 'metrics' port (9090). The Helm chart's enablePodMonitor only covers the
+# CNPG database; without this the server's temporal_* metrics never reach
+# Prometheus. Ingress is already permitted by the temporal-prometheus-scrape
+# NetworkPolicy (observability -> 9090). A metricRelabeling adds the temporal_
+# prefix the admin-ui dashboards and the Temporal convention expect, while
+# leaving go_/process_/promhttp_ runtime metrics under their standard names.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: temporal-server
+  namespace: temporal
+  labels:
+    app.kubernetes.io/name: temporal
+    app.kubernetes.io/part-of: temporal
+    app.kubernetes.io/component: metrics
+spec:
+  # Server pods (frontend/history/matching/worker) all carry name=temporal and
+  # expose the named container port `metrics` (9090). admintools / the
+  # namespace-registration job carry the label but have no `metrics` port, so the
+  # port filter below means only the four server services are actually scraped.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: temporal
+      app.kubernetes.io/managed-by: Helm
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scheme: http
+      relabelings:
+        # Surface the Temporal role (frontend/history/matching/worker) as a label.
+        - sourceLabels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+          targetLabel: temporal_role
+      metricRelabelings:
+        # The Temporal server's tally/prometheus reporter emits UNPREFIXED metric
+        # names (service_requests, service_latency_bucket, persistence_requests,
+        # namespace_active, build_information, …). The admin-ui dashboards and the
+        # Temporal convention use the `temporal_` prefix. Add it at scrape time so
+        # the names line up — but leave Go/process/promhttp runtime metrics alone
+        # so they remain queryable under their standard names.
+        - sourceLabels: [__name__]
+          regex: 'go_.*|process_.*|promhttp_.*'
+          targetLabel: __tmp_runtime
+          replacement: 'yes'
+        - sourceLabels: [__tmp_runtime, __name__]
+          regex: ';(.+)'
+          targetLabel: __name__
+          replacement: 'temporal_${1}'
+        - action: labeldrop
+          regex: __tmp_runtime

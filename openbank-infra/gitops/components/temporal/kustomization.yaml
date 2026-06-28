@@ -10,3 +10,4 @@ resources:
   - temporal-helmrelease.yaml
   - temporal-network-policies.yaml
   - temporal-namespace-registration.yaml
+  - temporal-server-podmonitor.yaml
