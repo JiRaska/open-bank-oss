@@ -307,6 +307,13 @@ jobs:
       - name: "duplicate YAML key guard (application.yaml, #1170/#1193, enforced)"
         run: bash .github/scripts/check-duplicate-yaml-keys.sh . --enforce
 
+      # admin-ui version sync guard (ADR-0029 release_invariant). release-please bumps version.txt
+      # but its package.json extra-file updater is replace-based and silently desyncs after a one-off
+      # drift — which otherwise only surfaces at deploy (build-push-admin-ui.sh fails post-merge).
+      # This catches it at PR time instead. ENFORCED.
+      - name: "admin-ui version sync guard (version.txt == package.json, enforced)"
+        run: bash .github/scripts/check-admin-ui-version-sync.sh .
+
       # ADR-0106 identifier intent split (#1699): new code mints identifiers via
       # com.openbank.libs.domain.identifiers.Ids — Ids.newId() (UUIDv7, time-ordered,
       # for durable/indexed keys) or Ids.randomId() (UUIDv4, for idempotency keys,
