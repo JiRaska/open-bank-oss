@@ -102,6 +102,14 @@ change_requirements:
       - "api contract bump per OpenAPI diff"
       - "api_invariant holds: major(openapi.yaml:info.version) == openbank.api.version == URL /api/v{N}"
       - "consumer-driven contract test updated (Pact)"   # ADR-0029 D3
+      # Pact provider verification: ONE @Provider test per provider. Separate HTTP and message
+      # test classes that share @Provider + @PactBroker (no interaction-type filter) BOTH pull every
+      # pact the broker holds for that provider — the HTTP class then tries to verify the message pact
+      # via HttpTestTarget and fails the state-change callback (UnsupportedOperationException). Use one
+      # class that picks the target per interaction (context.interaction.isAsynchronousMessage() ?
+      # MessageTestTarget(listOf("<pkg>")) : HttpTestTarget(...)). Package-scope MessageTestTarget
+      # (classpath-wide ClassGraph scan throws on JDK 25). Latent: ktlint runs before tests.
+      - "single @Provider verification test per provider; per-interaction target for mixed HTTP+message"
     contract_diff_tool: oasdiff
     gate: api-contract
     enforced: advisory
@@ -195,6 +203,21 @@ change_requirements:
       - "no Instant.now() / LocalDateTime.now() / System.currentTimeMillis() / Clock.System.now() in domain or application layer"
     gate: dst-clock-injection
     enforced: advisory                  # advisory until openbank-simulation harness lands (ADR-0100)
+  release_please_merge:
+    # A release-please merge commit that reorders the tail of .release-please-manifest.json can
+    # SILENTLY drop a component line while it stays in release-please-config.json. The
+    # release-registration gate (rule #3, ADR-0029) runs against repo STATE, not the diff, so it then
+    # fails on EVERY open PR; release-please also loses the version baseline and proposes a REGRESSED
+    # version (observed: transaction-service 1.10.0 -> a fresh 1.0.0, #2342/#2351). After ANY RP merge,
+    # config and manifest MUST stay in lockstep (same component set). Restore a dropped line with its
+    # version.txt value (= latest git tag) as baseline.
+    detect: ["release-please merge to main", ".release-please-manifest.json change"]
+    require:
+      - "release-please-config.json and .release-please-manifest.json list the SAME components (lockstep)"
+      - "check-release-registration.py reports equal counts (modules==config==manifest)"
+      - "no released component proposes a version BELOW its latest git tag"
+    gate: release-registration                            # openbank-infra/scripts/check-release-registration.py
+    enforced: enforce
 
 # ---------------------------------------------------------------------------------------
 # Money-path services (from CODEOWNERS critical paths) — stricter rules apply.

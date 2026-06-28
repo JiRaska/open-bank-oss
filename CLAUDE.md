@@ -133,11 +133,47 @@ CI is path-scoped (only changed services build). Domain layer has **zero** frame
 - **ktlint wildcard imports surface on first edit.** Path-scoped CI only lints changed files; pre-existing
   wildcard imports in a file are invisible until you touch it. When editing an older `.kt` file, manually
   expand any wildcards in the import block — `ktlintFormat` is unreliable for this.
+- **ktlint `function-signature` is latent on never-edited files.** A multi-line function signature that
+  fits `max-line-length` (120) violates the rule, but path-scoped CI never lints an untouched file — it
+  only surfaces when the WHOLE service is rebuilt (e.g. a release PR). Run `ktlintFormat` and let it
+  collapse the signature; don't hand-wrap.
+
+### Contract tests (Pact) pitfalls
+- **One `@Provider` test per provider — separate HTTP and message test classes collide.** Two provider
+  verification classes with the same `@Provider(...)` + `@PactBroker` and no interaction-type filter
+  BOTH pull every pact the broker holds for that provider. An `HttpTestTarget` class then also fetches
+  the consumer's *message* pact and fails its state-change callback with
+  `java.lang.UnsupportedOperationException` (PactVerificationExtension). Fix: a SINGLE `@Provider` test
+  that picks the target per interaction in `@BeforeEach` —
+  `context.target = if (context.interaction.isAsynchronousMessage()) MessageTestTarget(listOf("<pkg>")) else HttpTestTarget(...)`
+  — holding every `@State` + `@PactVerifyProvider`. Package-scope the `MessageTestTarget` (the
+  classpath-wide ClassGraph scan throws on the JDK 25 toolchain, same as account-service). Latent
+  because ktlint runs before tests: while ktlint fails the build never reaches Pact (surfaced on the
+  transaction-service release build).
+- **Pact provider tests don't run locally without a broker.** They are gated
+  `@EnabledIfSystemProperty(named = "pactbroker.url", …)` → skipped locally. Verify a change with
+  `compileTestKotlin` + `ktlintCheck` locally; the real Pact verification only runs in CI.
 
 ### Flyway migrations
 - **Never change a migration after it is applied to a live DB.** Rewriting V10 (CONCURRENTLY →
   plain) caused `FlywayValidateException: checksum mismatch` → startup fail. Fix:
   `QUARKUS_FLYWAY_REPAIR_AT_START=true` in gitops env, then remove once DB is settled.
+
+### Release-please pitfalls
+- **A release-please merge can silently DROP a manifest entry.** When the RP merge commit reorders the
+  tail of `.release-please-manifest.json`, a component line can vanish while it stays in
+  `release-please-config.json` → the release-registration gate (rule #3, ADR-0029) FAILS on EVERY open
+  PR (it runs against repo state, not the diff), and RP loses the version baseline → proposes a
+  regressed version (e.g. transaction-service `1.10.0` → a fresh `1.0.0`). After ANY release-please
+  merge, verify config and manifest stay in lockstep:
+  `python3 openbank-infra/scripts/check-release-registration.py` (must report equal counts). Fix:
+  restore the dropped line with its `version.txt` value (= latest git tag) as the baseline.
+- **release-please bumps `version.txt` but not `package.json` for admin-ui.** Even with `extra-files`
+  configured, the RP admin-ui release PR can leave `openbank-admin-ui/package.json` behind → the
+  version-sync guard fails (`version.txt != package.json`, `check-admin-ui-version-sync.sh`). Fix: set
+  package.json `version` equal to version.txt on the release branch. The local release-please branch
+  ref is usually STALE — `git reset --hard origin/<release-branch>` BEFORE editing or you regress the
+  version; push with `--force-with-lease --no-verify` (branch-claiming guard, own PR).
 
 ### Kubernetes / ArgoCD pitfalls
 - **`strategy.type: Recreate` with Server-Side Apply = HTTP 403 Forbidden.** SSA merges the
@@ -205,6 +241,15 @@ CI is path-scoped (only changed services build). Domain layer has **zero** frame
   manually: `gh workflow run auto-deploy.yml -f services=<svc>`.
 - **chain-branch pollution.** A branch cut from a feature branch (not `main`) carries the feature's
   uncommitted diff. Always branch from `main` or cherry-pick specific commits.
+- **A stale PR branch can't see a fix merged to `main` after it was cut.** If `main` gets a fix (e.g. a
+  manifest restore) but a PR branch was cut before it, that PR's CI still evaluates the OLD tree —
+  `gh run rerun --failed` re-runs the SAME old merge commit, so it stays red. REBASE the branch onto
+  `origin/main` (or close/reopen for a fresh merge ref); don't keep re-running.
+- **Check `git worktree list` before touching another PR.** Branches checked out under
+  `.claude/worktrees/<name>` (or `/private/tmp/ob-*`) are LIVE work by a parallel instance —
+  rebasing / force-pushing / merging them stomps it. Safe: PR-metadata only (`gh pr edit --body`,
+  hygiene fixes) without touching the git branch. Close stale deploy-snapshot PRs (image older than
+  `main` HEAD) as superseded rather than merging a rollback.
 
 ### GHA / CI pitfalls
 - **`env.VAR` is unavailable in job-level `env:` inside a reusable workflow.** The `env` context is
