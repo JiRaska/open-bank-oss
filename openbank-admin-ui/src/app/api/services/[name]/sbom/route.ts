@@ -5,11 +5,16 @@
 import { NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
+import { resolveInClusterBaseUrl } from '@/lib/discovery'
 
-// Serves the per-service CycloneDX SBOM baked into the admin-ui image at
-// build time (Dockerfile sbom-collector stage). NO host filesystem mount —
-// SBOMs are an immutable artifact, version-locked with whatever the local
-// `./gradlew sbomAll` produced when the image was built.
+// Serves the per-service CycloneDX SBOM. Preferred source is LIVE from the
+// running service: each service self-publishes its baked SBOM at
+// `/q/openbank/sbom` (openbank-libs.web.SbomResource), so what we render is
+// exactly what that image was built with — no 14-day artifact retention, no
+// stale baked bundle. We fall back to the SBOM baked into the admin-ui image
+// (Dockerfile sbom-collector stage) when the service isn't reachable or hasn't
+// been rebuilt with the endpoint yet, so the panel never regresses during the
+// fleet rollout.
 //
 // Two response modes:
 //   - default (`Accept: application/vnd.cyclonedx+json` or no ?summary param):
@@ -196,6 +201,31 @@ async function loadSbom(name: string): Promise<{ raw: string; parsed: CycloneDxS
   return null
 }
 
+// Live fetch from the running service's own /q/openbank/sbom endpoint
+// (openbank-libs.web.SbomResource). Returns null off-cluster (no SA token →
+// resolveInClusterBaseUrl is null), when the service is undeployed, when it
+// predates the endpoint (404 not_generated), or on timeout — every one of those
+// degrades cleanly to the baked-bundle fallback in GET. The k8s Deployment name
+// may be `<name>` or `<name>-service` depending on the route param shape.
+async function fetchLiveSbom(name: string): Promise<{ raw: string; parsed: CycloneDxSbom } | null> {
+  for (const k8sName of [name, `${name}-service`]) {
+    const base = await resolveInClusterBaseUrl(k8sName)
+    if (!base) continue
+    try {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 8000)
+      const res = await fetch(`${base}/q/openbank/sbom`, { signal: ctrl.signal, cache: 'no-store' })
+      clearTimeout(timer)
+      if (!res.ok) return null // 404 not_generated / 5xx → fall back to bundle
+      const raw = await res.text()
+      return { raw, parsed: JSON.parse(raw) as CycloneDxSbom }
+    } catch {
+      return null // timeout / parse error → fall back to bundle
+    }
+  }
+  return null
+}
+
 export async function GET(
   req: Request,
   ctx: { params: Promise<{ name: string }> }
@@ -208,11 +238,12 @@ export async function GET(
   const url = new URL(req.url)
   const wantSummary = url.searchParams.get('summary') === 'true'
 
-  const loaded = await loadSbom(name)
+  // Prefer the live SBOM from the running service; fall back to the baked bundle.
+  const loaded = (await fetchLiveSbom(name)) ?? (await loadSbom(name))
   if (!loaded) {
     return NextResponse.json({
       error: 'SBOM not found',
-      hint: `Run ./gradlew :openbank-${name}-service:cyclonedxBom (or ./gradlew sbomAll) and rebuild admin-ui.`,
+      hint: `Service /q/openbank/sbom unreachable and no baked bundle. Rebuild the service image (bakes bom.json) or run ./gradlew :openbank-${name}-service:cyclonedxBom and rebuild admin-ui.`,
     }, { status: 404 })
   }
 
