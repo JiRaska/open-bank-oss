@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.1](https://github.com/JiRaska/open-bank/compare/transaction-service-v1.10.0...transaction-service-v1.10.1) (2026-06-28)
+
+
+### Bug Fixes
+
+* **transaction:** unblock release build — ktlint signature + unify Pact provider tests ([#2353](https://github.com/JiRaska/open-bank/issues/2353)) ([d733b0c](https://github.com/JiRaska/open-bank/commit/d733b0cfb4839d2b22e0db2f8d6339b31cf5af9e))
+
 ## [1.10.0](https://github.com/JiRaska/open-bank/compare/transaction-service-v1.9.0...transaction-service-v1.10.0) (2026-06-27)
 
 
