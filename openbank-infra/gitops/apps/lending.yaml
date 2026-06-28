@@ -1,0 +1,49 @@
+# Lending credit-risk domain: lending-service + its single-owner CNPG Postgres,
+# an ESO-projected OIDC client secret, the Strimzi KafkaTopic it produces to,
+# and per-service PrometheusRules. lending-service is a money-path service
+# (ADR-0030): every PR requires 2 approvals and an updated threat model.
+# Ledger posting is synchronous REST (LENDING_LEDGER_BACKEND=rest); the outbox
+# → Kafka carries downstream analytics only.
+#
+# lending-service stays in CrashLoop until the CNPG primary, Kafka broker, the
+# Keycloak realm client, and ledger-service are all reachable — ArgoCD converges
+# as each dependency comes up.
+#
+# No public Ingress: lending is internal ClusterIP reached over in-cluster REST
+# (admin-ui BFF + customer-edge) only. The admin-ui presents the lending
+# origination and servicing screens.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: lending
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/lending
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: lending
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
+  # Argo Rollouts sets spec.selector.rollouts-pod-template-hash on Services at
+  # runtime; ignore that one controller-managed key so the Application stays Synced.
+  ignoreDifferences:
+    - group: ""
+      kind: Service
+      jqPathExpressions:
+        - .spec.selector."rollouts-pod-template-hash"

@@ -20,15 +20,15 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: ledger-service-ingress-allow-list
-  namespace: ledger
+  name: lending-service-ingress-allow-list
+  namespace: lending
   labels:
-    app.kubernetes.io/part-of: ledger
+    app.kubernetes.io/part-of: lending
     openbank.io/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: ledger-service
+      app.kubernetes.io/name: lending-service
   policyTypes:
     - Ingress
   ingress:
@@ -37,39 +37,21 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: balances
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: finrep
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: lending
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: payments
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: platform
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: security-scanner
-        - namespaceSelector:
-            matchLabels:
               kubernetes.io/metadata.name: admin-ui
       ports:
         - protocol: TCP
-          port: 8101
+          port: 8126
     - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: observability
       ports:
         - protocol: TCP
-          port: 8085
+          port: 8086
     - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: security-scanner
       ports:
         - protocol: TCP
-          port: 8085
+          port: 8086

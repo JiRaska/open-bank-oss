@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+# Domain event topic owned by lending-service. Declared explicitly (the broker
+# does not auto-create topics) so the Strimzi topic operator manages it and the
+# outbox producer channel `lending-events-out` has a destination. Lives in the
+# `messaging` namespace (where the Strimzi entity/topic operator watches).
+# Single partition + RF 1 for the single-broker sandbox; production should
+# raise partitions for parallelism and RF to 3. Retention 7 days matches the
+# ledger event topic; credit records carry a compliance retention obligation
+# (CRD IV Article 20) handled at the storage layer, not the topic.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.lending.events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

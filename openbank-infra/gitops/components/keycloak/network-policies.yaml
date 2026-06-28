@@ -82,6 +82,9 @@ spec:
               kubernetes.io/metadata.name: ledger
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: lending
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: notifications
         - namespaceSelector:
             matchLabels:
