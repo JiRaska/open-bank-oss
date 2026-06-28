@@ -111,4 +111,4 @@ openbank:
   outbox:
     poll-interval: 5s
     initial-delay: 5s
-    dispatch-enabled: false
+    dispatch-enabled: true
