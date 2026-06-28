@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/JiRaska/open-bank/compare/sanctions-service-v0.5.0...sanctions-service-v0.5.1) (2026-06-28)
+
+
+### Bug Fixes
+
+* **sanctions:** enable outbox dispatch so screening events publish ([#2315](https://github.com/JiRaska/open-bank/issues/2315)) ([fcfd3f9](https://github.com/JiRaska/open-bank/commit/fcfd3f949a042db32b6fe7f40c074d295e64db03))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank/compare/sanctions-service-v0.4.0...sanctions-service-v0.5.0) (2026-06-27)
 
 
