@@ -1,0 +1,81 @@
+# -----------------------------------------------------------------------------
+# OpenSSF Scorecard — supply-chain security self-assessment (ADR-0124, ADR-0030).
+#
+# Scores the repo against the OpenSSF security-health checks (Branch-Protection,
+# Pinned-Dependencies, Token-Permissions, Dangerous-Workflow, Code-Review, etc.)
+# so the go-public readiness program has a tracked, improving number instead of a
+# guess. ADR-0124 §5 flagged its absence.
+#
+# PRIVATE-REPO ADAPTATION (this repo is not public yet):
+#   - `publish_results: false` — publishing to the public OpenSSF API requires a
+#     public repo. Flip to `true` at the go-public cutover.
+#   - SARIF is uploaded as a build ARTIFACT, not to GitHub code-scanning — the
+#     code-scanning upload needs GitHub Advanced Security on a private repo
+#     (CodeQL/code-scanning is OFF today, ADR-0124 §2). The commented
+#     `upload-sarif` step + `security-events: write` get enabled at go-public.
+#   - NOT triggered on `pull_request`: this is a posture gauge, not a PR gate, so
+#     it never blocks a contributor's PR (and never lands on the hot CI path).
+#
+# COVERAGE NOTE: the Branch-Protection check reads org/branch settings that the
+# default GITHUB_TOKEN cannot see; for the full score, set a fine-grained PAT as
+# the `repo_token` input (follow-up). All other checks work with GITHUB_TOKEN.
+#
+# Runs on ubuntu-latest (not the self-hosted openbank-build pool): scorecard ships
+# a linux/amd64 binary and the openbank-build label spans x86 + Mac ARM, so a clean
+# GitHub-hosted Linux runner is the reliable target. Cost is a single ~2-min run
+# per week — negligible, and off the per-PR FinOps path (ADR-0040 / ADR-0053).
+# -----------------------------------------------------------------------------
+name: OpenSSF Scorecard
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/scorecard.yml"
+  branch_protection_rule: {}
+  workflow_dispatch: {}
+
+# Read-only by default; the job narrows further.
+permissions: read-all
+
+concurrency:
+  group: scorecard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analysis:
+    name: scorecard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # security-events: write  # enable at go-public — upload SARIF to code-scanning (needs GHAS / public repo)
+      # id-token: write         # enable at go-public — OIDC for publish_results
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard analysis
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Private repo: publishing requires public. Flip to true at go-public (ADR-0124).
+          publish_results: false
+
+      - name: Upload Scorecard SARIF (artifact)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scorecard-sarif
+          path: results.sarif
+          retention-days: 14
+
+      # --- enable at go-public (needs public repo or GitHub Advanced Security) ---
+      # - name: Upload SARIF to code-scanning
+      #   uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+      #   with:
+      #     sarif_file: results.sarif
