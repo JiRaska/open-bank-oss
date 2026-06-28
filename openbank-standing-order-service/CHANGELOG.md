@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank/compare/standing-order-service-v0.8.0...standing-order-service-v0.8.1) (2026-06-28)
+
+
+### Bug Fixes
+
+* **standing-order:** use 6-field Quartz cron for execution scheduler ([#2346](https://github.com/JiRaska/open-bank/issues/2346)) ([1c49e55](https://github.com/JiRaska/open-bank/commit/1c49e5587d63b9f5b4425c8266edac79efeb4f49))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank/compare/standing-order-service-v0.7.0...standing-order-service-v0.8.0) (2026-06-28)
 
 
