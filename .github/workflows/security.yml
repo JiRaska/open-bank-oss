@@ -116,7 +116,7 @@ jobs:
       # [self-hosted, openbank-sandbox] pool (ADR-0040).
       - name: Trivy fs scan
         run: |
-          trivy fs --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
+          trivy fs --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed --skip-version-check \
             --skip-dirs node_modules,.next,build,.gradle \
             --format sarif --output trivy-fs.sarif --exit-code 1 .
 
@@ -124,9 +124,9 @@ jobs:
         if: always()
         run: |
           # Print findings to log for visibility (includes baseline-suppressed ones via || true).
-          trivy config --severity CRITICAL,HIGH --ignorefile .trivyignore --format table openbank-infra || true
+          trivy config --severity CRITICAL,HIGH --ignorefile .trivyignore --skip-version-check --format table openbank-infra || true
           # Gate: fail on new HIGH/CRITICAL findings not in .trivyignore baseline.
-          trivy config --severity CRITICAL,HIGH --ignorefile .trivyignore \
+          trivy config --severity CRITICAL,HIGH --ignorefile .trivyignore --skip-version-check \
             --format sarif --output trivy-config.sarif --exit-code 1 openbank-infra
 
       # SARIF upload targets GitHub code scanning (paid GHAS on a private repo), so
