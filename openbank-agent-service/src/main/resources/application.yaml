@@ -200,6 +200,16 @@ agent:
     enforcement: ${AGENT_POLICY_ENFORCEMENT:advisory}
     opa:
       enabled: true
+  # D3 (ADR-0031): verifiable agent identity. The /mcp surface authenticates the operator (Keycloak
+  # bearer, @RolesAllowed); this binds WHICH agent identity that operator may assert via X-Agent-Id
+  # to their verified roles — deny-by-default — so a lower-privileged operator cannot forge a
+  # higher-privileged charter. Enforced only when authenticated (OIDC off in %dev/%test → anonymous
+  # → legacy header trust, tests unaffected). Interim hardening; the short-TTL SPIFFE/SVID per run
+  # (D3b) replaces the header entirely.
+  identity:
+    binding-enforced: ${AGENT_IDENTITY_BINDING_ENFORCED:true}
+    # role -> assertable agent ids (comma list; '*' = any). Deny-by-default for unlisted roles.
+    role-bindings: ${AGENT_IDENTITY_ROLE_BINDINGS:ROLE_ADMIN=*;ROLE_OPERATOR=ui-assistant;ROLE_COMPLIANCE=compliance-officer,ui-assistant}
   # D2 (ADR-0031): per-agent charter limits enforced by CharterRateLimiter. Mirrors the canonical
   # values in openbank-libs/governance/agents.yaml; code reads from config so no YAML parsing at
   # runtime. Adding an agent = one entry here + the charter entry in agents.yaml.

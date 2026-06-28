@@ -6,11 +6,24 @@ package com.openbank.agent.infrastructure.mcp
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.agent.application.AgentIdentityBinding
 import com.openbank.agent.application.AgentPolicyGate
 import com.openbank.agent.application.CharterRegistry
 import com.openbank.agent.application.McpToolRegistry
-import com.openbank.agent.domain.*
+import com.openbank.agent.domain.InitializeResult
+import com.openbank.agent.domain.McpError
+import com.openbank.agent.domain.McpErrorCode
+import com.openbank.agent.domain.McpResponse
+import com.openbank.agent.domain.ServerCapabilities
+import com.openbank.agent.domain.ServerInfo
+import com.openbank.agent.domain.ToolCallResult
+import com.openbank.agent.domain.ToolContent
+import com.openbank.agent.domain.ToolsListResult
 import com.openbank.agent.domain.policy.AgentIdentity
+import com.openbank.libs.audit.AuditEvent
+import com.openbank.libs.audit.AuditEventPublisher
+import com.openbank.libs.audit.AuditResult
+import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -22,6 +35,7 @@ import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.HttpHeaders
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 
@@ -47,6 +61,12 @@ class McpEndpoint {
     @Inject lateinit var policyGate: AgentPolicyGate
 
     @Inject lateinit var charterRegistry: CharterRegistry
+
+    @Inject lateinit var binding: AgentIdentityBinding
+
+    @Inject lateinit var identity: SecurityIdentity
+
+    @Inject lateinit var auditPublisher: AuditEventPublisher
 
     @Context lateinit var headers: HttpHeaders
 
@@ -93,7 +113,14 @@ class McpEndpoint {
     // AML/sanctions/payments tool schemas (reduces the FIND-S4-03 disclosure surface). No
     // agent id, or an agent with no configured allow-list → full list (call path still gates).
     private fun handleToolsList(): ToolsListResult {
-        val agentId = headers.getHeaderString("X-Agent-Id")?.takeIf { it.isNotBlank() }
+        val requested = headers.getHeaderString("X-Agent-Id")?.takeIf { it.isNotBlank() }
+        val agentId = verifiedAgentId(requested)
+        // ADR-0031 D3: a header that was present but rejected by the identity binding must NOT fall
+        // through to the full tool list — advertise nothing. No header at all keeps the legacy
+        // full list (the call path still gates every invocation).
+        if (requested != null && agentId == null) {
+            return ToolsListResult(tools = emptyList())
+        }
         val allowed = agentId?.let { charterRegistry.allowedCapabilities(it) } ?: emptySet()
         val tools = if (allowed.isEmpty()) {
             registry.tools
@@ -134,12 +161,49 @@ class McpEndpoint {
      * replaces this with a SPIFFE/SPIRE SVID. Absent header -> null -> deny-by-default.
      */
     private fun agentIdentity(arguments: JsonNode?): AgentIdentity? {
-        val agentId = headers.getHeaderString("X-Agent-Id")?.takeIf { it.isNotBlank() } ?: return null
+        val agentId = verifiedAgentId(headers.getHeaderString("X-Agent-Id")?.takeIf { it.isNotBlank() })
+            ?: return null
         return AgentIdentity(
             agentId = agentId,
             plane = headers.getHeaderString("X-Agent-Plane")?.takeIf { it.isNotBlank() },
             skill = arguments?.get("skill")?.asText()?.takeIf { it.isNotBlank() },
         )
+    }
+
+    /**
+     * ADR-0031 D3: resolve the asserted X-Agent-Id to a *verified* agent identity. The operator is
+     * already authenticated (@RolesAllowed); this checks that their verified Keycloak roles
+     * authorize assuming the requested agent ([AgentIdentityBinding], deny-by-default). A rejected
+     * assertion is audited and returns null (→ deny-by-default at the gate). OIDC is off in
+     * %dev/%test (anonymous), where the legacy header trust is preserved so the unit/contract
+     * tests are unaffected; in prod @RolesAllowed guarantees a non-anonymous principal.
+     */
+    private fun verifiedAgentId(requested: String?): String? {
+        if (requested == null) return null
+        if (!binding.enforced || identity.isAnonymous) return requested
+        if (binding.permits(identity.roles, requested)) return requested
+        auditRejectedAssumption(requested, identity.roles)
+        return null
+    }
+
+    private fun auditRejectedAssumption(requested: String, roles: Set<String>) {
+        val operator = identity.principal?.name?.takeIf { it.isNotBlank() } ?: "unknown"
+        log.warnf(
+            "D3: operator=%s roles=%s attempted to assume agent '%s' — not permitted, rejected",
+            operator,
+            roles,
+            requested,
+        )
+        val event = AuditEvent(
+            actorId = operator,
+            actorType = "OPERATOR",
+            operation = "agent.identity.rejected",
+            resourceType = "agent.identity",
+            resourceId = requested,
+            result = AuditResult.DENIED,
+            payload = mapOf("attempted_agent" to requested, "operator_roles" to roles.sorted()),
+        )
+        runBlocking { auditPublisher.publish(event) }
     }
 
     /** Best-effort resource id for the audit trail; null when the tool has no resource argument. */
