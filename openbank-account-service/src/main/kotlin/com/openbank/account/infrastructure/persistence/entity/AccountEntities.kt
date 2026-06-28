@@ -68,6 +68,10 @@ class AccountEntity : PanacheEntityBase {
     @Column(name = "sanctions_status", length = 20)
     var sanctionsStatus: String? = null
 
+    /** Account holder name stored for downstream display / statements (V12). Nulled out on GDPR Art. 17 erasure. */
+    @Column(name = "legal_name", length = 255)
+    var legalName: String? = null
+
     @Column(name = "created_at", nullable = false, updatable = false)
     var createdAt: Instant = Instant.EPOCH
 

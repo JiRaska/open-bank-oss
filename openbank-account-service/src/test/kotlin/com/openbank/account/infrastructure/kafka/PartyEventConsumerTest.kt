@@ -175,4 +175,30 @@ class PartyEventConsumerTest {
         // No bonus → no "you received money" notification.
         coVerify(exactly = 0) { notificationRequestPort.notifyIncomingCredit(any(), any(), any()) }
     }
+
+    // ── GDPR Art. 17 ──────────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `PARTY_ERASED anonymises legalName via anonymizeByPartyId`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { accountRepository.anonymizeByPartyId(partyId) } returns 2
+
+        consumer(bonusEnabled = false).consume(erasedEvent(partyId))
+
+        coVerify(exactly = 1) { accountRepository.anonymizeByPartyId(partyId) }
+    }
+
+    @Test
+    fun `PARTY_ERASED anonymisation failure is swallowed and does not wedge the consumer`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { accountRepository.anonymizeByPartyId(partyId) } throws RuntimeException("DB down")
+
+        // Must not throw — poison-pill safe.
+        consumer(bonusEnabled = false).consume(erasedEvent(partyId))
+
+        coVerify(exactly = 1) { accountRepository.anonymizeByPartyId(partyId) }
+    }
+
+    private fun erasedEvent(partyId: UUID) =
+        """{"eventType":"PARTY_ERASED","partyId":"$partyId","occurredAt":"2026-06-28T10:00:00Z"}"""
 }

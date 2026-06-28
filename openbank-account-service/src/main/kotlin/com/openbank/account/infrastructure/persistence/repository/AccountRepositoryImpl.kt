@@ -90,6 +90,9 @@ class AccountRepositoryImpl :
     override suspend fun existsByIban(iban: Iban): Boolean =
         Panache.withSession { count("accountNumber", iban.value) }.awaitSuspending() > 0
 
+    override suspend fun anonymizeByPartyId(partyId: UUID): Int =
+        Panache.withTransaction { update("legalName = null WHERE partyId = ?1", partyId) }.awaitSuspending()
+
     private fun AccountEntity.toDomain() = Account(
         id = id,
         accountNumber = Iban.of(accountNumber),
@@ -104,6 +107,7 @@ class AccountRepositoryImpl :
         version = version,
         sanctionsScreenedAt = sanctionsScreenedAt,
         sanctionsStatus = sanctionsStatus,
+        legalName = legalName,
     )
 
     private fun Account.toEntity() = AccountEntity().also {
@@ -120,5 +124,6 @@ class AccountRepositoryImpl :
         it.version = version
         it.sanctionsScreenedAt = sanctionsScreenedAt
         it.sanctionsStatus = sanctionsStatus
+        it.legalName = legalName
     }
 }

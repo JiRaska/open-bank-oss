@@ -98,6 +98,7 @@ class PartyEventConsumer(
                 // party via PARTY_UPDATED / KYC_STATUS_CHANGED, both carrying the new `status`.
                 "PARTY_UPDATED", "KYC_STATUS_CHANGED" ->
                     reconcileToPartyStatus(partyId, node.path("status").asText(""))
+                "PARTY_ERASED" -> handleErased(partyId)
             }
         } catch (e: Exception) {
             log.errorf(e, "Failed to handle party event: %.300s", payload)
@@ -155,6 +156,18 @@ class PartyEventConsumer(
                     // account activates dry and gets funded by the customer's own transfers.
                     if (it.accountType == AccountType.CURRENT) grantWelcomeBonus(it.id, partyId)
                 }
+        }
+    }
+
+    // GDPR Art. 17 right to erasure: null out the stored legalName for every account of the
+    // erased party. Best-effort / poison-pill safe: a DB failure is logged and the message is
+    // acked so a transient error does not wedge the consumer group.
+    private suspend fun handleErased(partyId: UUID) {
+        try {
+            val count = accountRepository.anonymizeByPartyId(partyId)
+            log.infof("GDPR Art. 17: anonymised legalName for erased party %s (%d account(s))", partyId, count)
+        } catch (e: Exception) {
+            log.errorf(e, "Failed to anonymise account legalName for erased party %s", partyId)
         }
     }
 

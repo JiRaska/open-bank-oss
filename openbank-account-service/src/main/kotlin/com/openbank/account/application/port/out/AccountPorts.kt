@@ -34,6 +34,9 @@ interface AccountRepository {
     suspend fun update(account: Account): Account
 
     suspend fun existsByIban(iban: Iban): Boolean
+
+    /** GDPR Art. 17: nullify the stored legalName for every account owned by the erased party. Returns row count. */
+    suspend fun anonymizeByPartyId(partyId: UUID): Int
 }
 
 /** Outbound persistence port for the per-account currency pockets. */

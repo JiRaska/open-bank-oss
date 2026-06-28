@@ -87,6 +87,7 @@ class AccountService(
             version = 0L,
             sanctionsScreenedAt = now,
             sanctionsStatus = screening.status,
+            legalName = command.legalName.ifBlank { null },
         )
 
         val saved = accountRepository.save(account)

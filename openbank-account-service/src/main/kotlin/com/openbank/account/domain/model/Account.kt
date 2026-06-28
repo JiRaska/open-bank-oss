@@ -27,6 +27,8 @@ data class Account(
     val sanctionsScreenedAt: Instant? = null,
     /** Result of the sanctions screen: CLEAR | HIT | REVIEW. Null for pre-Sprint-1 accounts. */
     val sanctionsStatus: String? = null,
+    /** Account holder name stored for display / statements (V12). Null after GDPR Art. 17 erasure. */
+    val legalName: String? = null,
 ) {
     fun canDebit(amount: Money): Boolean {
         require(amount.currency == currency) { "Currency mismatch" }
