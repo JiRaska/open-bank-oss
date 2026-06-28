@@ -1,11 +1,11 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-06-26T03:54:46.142Z",
+  "generatedAt": "2026-06-27T21:13:02.514Z",
   "counts": {
-    "namespaces": 49,
-    "networkPolicies": 67,
-    "externalSecrets": 45,
+    "namespaces": 50,
+    "networkPolicies": 68,
+    "externalSecrets": 46,
     "clusterPolicies": 3
   },
   "groups": [
@@ -119,6 +119,12 @@
       "name": "developer-portal",
       "group": "domain",
       "role": "developer-portal",
+      "declared": true
+    },
+    {
+      "name": "devops-agent",
+      "group": "domain",
+      "role": "devops-agent",
       "declared": true
     },
     {
@@ -362,9 +368,9 @@
       "icon": "network",
       "status": "planned",
       "analogy": "Zamčené dveře mezi patry — bez propustky se mezi odděleními neprojde.",
-      "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 67 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
+      "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 68 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
       "controls": [
-        "NetworkPolicy (67 / 49)",
+        "NetworkPolicy (68 / 50)",
         "per-namespace deny-by-default (cíl)"
       ],
       "adr": [
@@ -432,10 +438,10 @@
       "icon": "key",
       "status": "live",
       "analogy": "Trezor s časovým zámkem — hesla nikdy neleží v kódu.",
-      "summary": "OpenBao drží tajemství; 45 ExternalSecret je sype do k8s. Žádný secret v gitu.",
+      "summary": "OpenBao drží tajemství; 46 ExternalSecret je sype do k8s. Žádný secret v gitu.",
       "controls": [
         "OpenBao",
-        "External Secrets (45)",
+        "External Secrets (46)",
         "KMS unseal"
       ],
       "adr": [
@@ -522,13 +528,13 @@
     {
       "item": "Namespace segmentace",
       "plan": "Doménová izolace, 1 ns / doména",
-      "reality": "49 namespaců",
+      "reality": "50 namespaců",
       "status": "live"
     },
     {
       "item": "NetworkPolicy (east-west)",
       "plan": "deny-by-default v každém ns",
-      "reality": "67 / 49 ns má NetworkPolicy → většina provozu otevřená",
+      "reality": "68 / 50 ns má NetworkPolicy → většina provozu otevřená",
       "status": "planned"
     },
     {
@@ -540,7 +546,7 @@
     {
       "item": "Tajemství",
       "plan": "OpenBao + ESO, nic v gitu",
-      "reality": "45 ExternalSecret",
+      "reality": "46 ExternalSecret",
       "status": "live"
     },
     {
