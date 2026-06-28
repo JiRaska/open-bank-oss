@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank/compare/standing-order-service-v0.7.0...standing-order-service-v0.8.0) (2026-06-28)
+
+
+### Features
+
+* **standing-order:** daily execution scheduler emitting standing-order.due.v1 outbox events ([#2269](https://github.com/JiRaska/open-bank/issues/2269)) ([c7eb84b](https://github.com/JiRaska/open-bank/commit/c7eb84b817208f511f5c724956e95103e1592907))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank/compare/standing-order-service-v0.6.0...standing-order-service-v0.7.0) (2026-06-27)
 
 
