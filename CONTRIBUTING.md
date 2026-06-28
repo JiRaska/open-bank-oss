@@ -26,7 +26,7 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 ### Proposing features
 
 - Open a GitHub issue using the **Feature request** template.
-- Larger features benefit from a draft Architecture Decision Record (ADR) in `docs/adr/`. Use [`docs/adr/TEMPLATE.md`](docs/adr/TEMPLATE.md) as a starting point.
+- Larger features benefit from a draft Architecture Decision Record (ADR) in `docs/adr/`. Create one with **`docs/adr/new.sh "Your decision title"`** — it allocates a collision-free number (checking your local tree, `origin/main`, and every open PR) and scaffolds [`docs/adr/TEMPLATE.md`](docs/adr/TEMPLATE.md) with the canonical two-axis (`Decision-Status` / `Delivery-Status`) header. Then open a PR promptly so the number is claimed; the `adr-registry` CI gate is the backstop against any residual collision.
 - Discuss design before writing significant code — saves everyone's time.
 
 ### Submitting changes

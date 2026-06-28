@@ -6,11 +6,11 @@
 #
 #   1. DUPLICATE NUMBERS. Three ADRs shared `0119` (ai-devops-agent / relicense /
 #      oss-readiness), created by parallel agent sessions that each grabbed "the
-#      next number" against a stale local tree while origin/main had already moved
-#      on (0120-0122 were taken). `adr new` has no cross-session lock, and nothing
-#      in CI checked uniqueness — so the collision merged. (Fixed in PR #2414.)
+#      next number" by hand against a stale local tree while origin/main had already
+#      moved on (0120-0122 were taken). Nothing in CI checked uniqueness — so the
+#      collision merged. (Fixed in PR #2414.)
 #
-#   2. OFF-BY-ONE TITLES. `adr new` numbered five H1 headings one behind their
+#   2. OFF-BY-ONE TITLES. Hand-copied ADRs numbered five H1 headings one behind their
 #      filename: `# 112.` inside `0113-*.md`, etc. (0113/0115/0116/0117/0118). The
 #      filename is the source of truth; the heading silently disagreed.
 #
@@ -19,7 +19,10 @@
 #      ADRs it indexes — derived data that rots (CLAUDE.md rule #7).
 #
 # This gate makes all three impossible to merge. It is pure bash over the files in
-# docs/adr/ — no Gradle, no Docker — so it runs in seconds on a docs-only PR.
+# docs/adr/ — no Gradle, no Docker — so it runs in seconds on a docs-only PR. It is the
+# BACKSTOP; the PREVENTION is `docs/adr/new.sh`, which allocates a collision-free number
+# (local ∪ origin/main ∪ open PRs) and derives the H1 from it, so defects 1 & 2 are
+# avoided at authoring time rather than caught at merge.
 #
 # NOT covered (be honest about the gap): a reference that points to a WRONG-but-
 # EXISTING ADR number (e.g. 0121 citing `ADR-0119` when it meant the renamed
