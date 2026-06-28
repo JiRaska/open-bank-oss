@@ -1,0 +1,182 @@
+# ADR-0031 D3b — OpenBao PKI engine for short-TTL agent identity (issuer half)
+#
+# Stands up a DEDICATED, isolated PKI engine (`pki-agent`) in the existing OpenBao
+# instance — NOT a SPIRE server, NOT a second Vault — that issues short-TTL (<=5 min)
+# client certificates whose Common Name carries the agent id (e.g. `ui-assistant`).
+# A per-run cert replaces the forgeable `X-Agent-Id` header (the gap closed defensively
+# by the D3a role-binding, PR #2403): the agent identity becomes a cryptographically
+# signed, non-repudiable, time-bounded credential rooted in OpenBao (ADR-0017).
+#
+# This is the ISSUER half and is INERT until a consumer is granted (PR5b): nothing can
+# call `pki-agent/issue/agent-run` yet because no Kubernetes-auth role is bound to the
+# `agent-identity-issue` policy here. PR5b adds the dedicated agent-service ServiceAccount,
+# the k8s-auth binding, the per-run mint, and the McpEndpoint verification. The consumer
+# design + the out-of-band `agent-identity-admin` bootstrap are in
+# docs/runbooks/0007-openbao-agent-identity.md.
+#
+# Why PKI (not Identity-OIDC tokens): the agent id varies PER RUN, and the cert CN is a
+# per-request parameter — an Identity-OIDC token only carries claims templated from the
+# caller's static entity metadata, so it cannot express the per-run charter.
+#
+# Deployed via the openbao-config ArgoCD Application (apps/openbao-config.yaml); requires
+# the openbao Helm release synced first so the `vault` namespace exists.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openbao-agent-identity-config
+  namespace: vault
+  labels:
+    app.kubernetes.io/part-of: openbao
+    openbank.io/plane: platform
+    openbank.io/adr: "0031"
+data:
+  configure.sh: |
+    #!/bin/sh
+    set -eu
+
+    # -------------------------------------------------------------------------
+    # OpenBao agent-identity PKI — idempotent setup (ADR-0031 D3b, issuer half)
+    # -------------------------------------------------------------------------
+    BAO_ADDR="${BAO_ADDR:-http://openbao.vault.svc:8200}"
+    export BAO_ADDR
+
+    # Authenticate via the Kubernetes auth method (role agent-identity-admin, bootstrapped
+    # out-of-band by runbook 0007 — mirrors how db-admin is set up for runbook 0006).
+    if [ -z "${BAO_TOKEN:-}" ]; then
+      SA_TOKEN="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+      BAO_TOKEN="$(bao write -field=token auth/kubernetes/login \
+        role=agent-identity-admin \
+        jwt="${SA_TOKEN}")"
+      export BAO_TOKEN
+    fi
+
+    PKI_PATH="pki-agent"
+
+    # Enable a DEDICATED PKI engine for agent identity (idempotent; isolated from any
+    # future general-purpose PKI so its policy surface stays minimal).
+    bao secrets enable -path="${PKI_PATH}" pki 2>/dev/null || true
+    bao secrets tune -max-lease-ttl=87600h "${PKI_PATH}" >/dev/null
+
+    # Generate the internal root CA ONCE. Re-running root/generate mints a NEW CA and would
+    # invalidate every previously-issued identity — guard on the existing CA cert.
+    if ! bao read "${PKI_PATH}/cert/ca" >/dev/null 2>&1; then
+      echo "[openbao-agent] generating agent-identity root CA ..."
+      bao write -field=certificate "${PKI_PATH}/root/generate/internal" \
+        common_name="OpenBank Agent Identity CA" \
+        issuer_name="agent-identity-root" \
+        key_type="ec" \
+        key_bits=256 \
+        ttl=87600h >/dev/null
+    else
+      echo "[openbao-agent] agent-identity root CA already present — keeping it."
+    fi
+
+    # Per-run issuing role. The CN carries the agent id (allow_any_name — it is a charter
+    # name like 'ui-assistant', not a hostname). client-auth only; short max TTL bounds a
+    # compromised run to minutes; no_store keeps ephemeral certs out of OpenBao storage.
+    bao write "${PKI_PATH}/roles/agent-run" \
+      allow_any_name=true \
+      enforce_hostnames=false \
+      allow_ip_sans=false \
+      server_flag=false \
+      client_flag=true \
+      key_type="ec" \
+      key_bits=256 \
+      ttl="300s" \
+      max_ttl="300s" \
+      no_store=true
+
+    # Narrow consumer policy: issue from agent-run + read the CA chain (so a verifier can
+    # publish/trust it). NOT bound to any k8s-auth role here — INERT until PR5b grants the
+    # agent-service ServiceAccount. Cannot read other secrets or tune the engine.
+    bao policy write agent-identity-issue - <<EOF
+    path "${PKI_PATH}/issue/agent-run" {
+      capabilities = ["create", "update"]
+    }
+    path "${PKI_PATH}/cert/ca" {
+      capabilities = ["read"]
+    }
+    EOF
+
+    echo "[openbao-agent] agent-identity PKI configured (issuer half; inert until PR5b)."
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-agent-identity-admin
+  namespace: vault
+  labels:
+    app.kubernetes.io/part-of: openbao
+    openbank.io/plane: platform
+    openbank.io/adr: "0031"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: openbao-agent-identity-sync
+  namespace: vault
+  labels:
+    app.kubernetes.io/part-of: openbao
+    openbank.io/plane: platform
+    openbank.io/adr: "0031"
+  annotations:
+    openbank.io/description: "ADR-0031 D3b: re-asserts the OpenBao agent-identity PKI config weekly"
+    openbank.io/runbook: "docs/runbooks/0007-openbao-agent-identity.md"
+spec:
+  # Sunday 02:15 UTC — staggered after the db-rotation sync (02:00), outside banking hours.
+  schedule: "15 2 * * 0"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: openbao
+            openbank.io/plane: platform
+        spec:
+          serviceAccountName: openbao-agent-identity-admin
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: configure
+              # Pin the same image tag as the openbao server (apps/openbao.yaml → openbao 2.5.4).
+              # Update together when the server image is bumped.
+              image: quay.io/openbao/openbao:2.5.4
+              command: ["/bin/sh", "/config/configure.sh"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                capabilities:
+                  drop:
+                    - ALL
+              env:
+                - name: BAO_ADDR
+                  value: "http://openbao.vault.svc:8200"
+                # BAO_TOKEN intentionally unset; configure.sh logs in via the Kubernetes auth
+                # method using the pod's projected SA token (zero standing token, ADR-0034).
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+              volumeMounts:
+                - name: config
+                  mountPath: /config
+                  readOnly: true
+          volumes:
+            - name: config
+              configMap:
+                name: openbao-agent-identity-config
+                defaultMode: 0555

@@ -14,3 +14,5 @@ resources:
   - dynamic-db-credentials.yaml
   - db-rotation-job.yaml
   - secret-rotator-cronjob.yaml
+  # ADR-0031 D3b: short-TTL agent-identity PKI issuer (inert until PR5b grants a consumer)
+  - openbao-agent-identity.yaml
