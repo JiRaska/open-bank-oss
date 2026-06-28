@@ -78,11 +78,11 @@ const DECISIONS: { id: string; title: string; status: DStatus; detail: string }[
   { id: 'D4', title: 'Human-in-the-loop (two channels)', status: 'built',
     detail: 'Development plane reuses GitHub PR + CODEOWNERS + branch protection (live for humans). Control-plane approval queue shipped in admin-ui (/approvals + /api/agent/proposals, #657): agent proposals are recorded for explicit human approval with segregation of duties (approver ≠ author).' },
   { id: 'D5', title: 'AI-attributed, tamper-evident audit', status: 'partial',
-    detail: 'Every tool-call decision (agent.mcp.tool_call), tool-execution outcome (agent.mcp.tool_exec, #706) and model completion emits an AuditEvent (actorType=AI_AGENT) with model_id, prompt_hash, policy_decision. Tamper-evidence (hash-chain + cosign) and the release-bundle ai_attribution field are planned.' },
+    detail: 'Every tool-call decision (agent.mcp.tool_call), tool-execution outcome (agent.mcp.tool_exec, #706) and model completion emits an AuditEvent (actorType=AI_AGENT) with model_id, prompt_hash, policy_decision. Tamper-evidence is now live: a per-event SHA-256 hash chain (audit_entries) plus periodic externally-signed anchors over the chain head (audit_anchor, #2383) — GET /api/v1/audit/anchors/verify catches a wholesale rewrite the internal walk alone would miss. The production KMS/cosign-keyed anchor signer and the release-bundle ai_attribution field remain.' },
   { id: 'D6', title: 'Open, model-agnostic stack', status: 'partial',
     detail: 'Model-gateway port + OpenAI-compatible provider are built (provider-agnostic). Temporal, LangGraph, vLLM+LiteLLM, Langfuse, guardrails and pgvector RAG are planned.' },
   { id: 'D7', title: 'Observability, budgets, kill switch', status: 'partial',
-    detail: 'Budget enforcement live (CharterRateLimiter: runs_per_day pre-flight + tokens_per_run). Kill switch live (KillSwitchService): config baseline (agents.yaml enabled / global_controls) + runtime break-glass (/api/v1/admin/agents), gate pre-flight DENY + audit. Per-run OTel tracing remains.' },
+    detail: 'Budget enforcement live (CharterRateLimiter: runs_per_day pre-flight + tokens_per_run). Kill switch live (KillSwitchService): config baseline (agents.yaml enabled / global_controls) + runtime break-glass (/api/v1/admin/agents), gate pre-flight DENY + audit. Per-run OTel tracing now live: every governed run emits one agent.run span to Tempo with agent/model/outcome/token attributes (#2385). Nested model-call spans and LLM-level Langfuse observability remain.' },
   { id: 'D8', title: 'Licensing & IP (AGPL agent runtime)', status: 'partial',
     detail: 'The MPL/AGPL seam is the ModelProvider port (demonstrated in PR #216). The separate AGPL-3.0 + CLA repo and the license_denylist carve-out are planned.' },
   { id: 'D9', title: 'Phasing (blast radius grows with controls)', status: 'partial',
@@ -111,8 +111,8 @@ const COMPLIANCE: { framework: string; requirement: string; control: string; sta
 const AUDIT_TRAIL = {
   capture: ['actorType=AI_AGENT', 'actorId (agent)', 'operation', 'model_id', 'model_version', 'prompt_hash', 'tool_calls[]', 'policy_decision (ALLOW/DENY)', 'result', 'traceId'],
   pipeline: ['agent-service emits AuditEvent', 'Kafka audit-events-out', 'audit-service append-only store', 'release evidence bundle (ai_attribution)'],
-  live: ['Tool-call decisions audited (agent.mcp.tool_call)', 'Tool-execution outcomes audited (agent.mcp.tool_exec)', 'Model completions audited (agent.model.complete)', 'Audit envelope + Kafka pipeline'],
-  planned: ['By-actor live query endpoint (audit-service)', 'Tamper-evidence: hash-chain + cosign', 'ai_attribution populated in evidence bundle', 'Approval decisions (human_approver, reason)'],
+  live: ['Tool-call decisions audited (agent.mcp.tool_call)', 'Tool-execution outcomes audited (agent.mcp.tool_exec)', 'Model completions audited (agent.model.complete)', 'Audit envelope + Kafka pipeline', 'Tamper-evidence: per-event hash chain + signed anchors (/audit/anchors/verify)', 'Per-run agent.run OTel span → Tempo'],
+  planned: ['By-actor live query endpoint (audit-service)', 'Production KMS/cosign-keyed anchor signer (asymmetric, third-party verifiable)', 'ai_attribution populated in evidence bundle', 'Approval decisions (human_approver, reason)'],
 }
 
 export async function GET() {
