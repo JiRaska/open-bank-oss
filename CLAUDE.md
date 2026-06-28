@@ -93,11 +93,72 @@ CI is path-scoped (only changed services build). Domain layer has **zero** frame
   Generic build: `openbank-infra/scripts/build-push-service.sh <service>`.
 - **Host-side build, not in-Docker Gradle.** `build-push-service.sh` runs `quarkusBuild` locally
   first; in-image Gradle hits download timeouts and can't find sub-project dirs.
+- **Dirty worktree = corrupted image.** Before `build-push-service.sh`, verify `git status src/main/`
+  is clean. A second parallel agent can leave uncommitted edits that get baked into the image silently.
+- **Stale `build/quarkus-app/` = ClassNotFoundException at boot.** Delete `build/quarkus-app/` and
+  `build/classes/` before re-building if the previous build was interrupted or from a different branch.
+- **Quarkus CDI wiring is NOT validated by `ktlintCheck` + unit tests.** Add `:svc:quarkusBuild`
+  (no Docker) to the pre-push gate; ArC/CDI failures only surface at that step, not in `./gradlew test`.
+- **Never-deployed service = latent boot defects.** A service that passes unit tests but has never
+  booted against a real container stack silently accumulates config/CDI bugs. Add a Testcontainers
+  boot smoke-test (`@QuarkusTest` + `management.enabled=false`) before first deploy.
+- **Local JDK version mismatch.** Mac default JDK may be JDK 26; the Gradle toolchain is pinned to 25.
+  mockk/Objenesis fails with `ObjenesisException` on JDK 26. Fix: `export JAVA_HOME=$(path to temurin-25)`
+  before running Gradle. Symptom: tests that pass in CI fail locally with reflection errors.
+- **Two local Gradle instances stomp each other.** A second `./gradlew` on the same `GRADLE_USER_HOME`
+  stops the first daemon and corrupts the local `~/.gradle` cache. Isolate with
+  `GRADLE_USER_HOME=/tmp/gradle-isolated-$$ ./gradlew ...`.
+- **`quarkusBuild` produces `quarkus-app/lib/` with 600 permissions.** Non-root user inside the
+  container cannot open the JARs → `ClassNotFoundException` at boot. `build-push-service.sh` contains
+  the fix (`chmod -R a+r`); if you run `quarkusBuild` manually and then `docker buildx`, add the chmod
+  before the docker step.
+- **Parallel Docker/Gradle builds OOM on 16 GB Docker Desktop.** Running N Quarkus builds concurrently
+  multiplies heap usage; the Docker VM gets OOM-killed silently. Run service builds sequentially with a
+  60–90 s gap, or increase Docker Desktop memory to 24 GB+.
+- **admin-ui does NOT go through `auto-deploy.yml`.** Next.js has no `quarkusBuild`; the standard
+  auto-deploy pipeline skips or errors on it. Deploy admin-ui manually:
+  `openbank-infra/scripts/build-push-admin-ui.sh` from a clean worktree with `AWS_PROFILE=openbank`.
+
+### Kotlin / Quarkus code pitfalls
+- **Kotlin JUnit5 + `runBlocking` silent test drop.** `fun foo() = runBlocking { }` infers return
+  type `T` (not `Unit`) → JUnit5 silently ignores the method (not a `void` test). Always write
+  `fun foo(): Unit = runBlocking { }` or use `suspend` + coroutine test runner.
+- **`@ConfigProperty` optional field must be `Optional<String>`, not `String`.** A missing optional
+  property typed as plain `String` throws `SRCFG00040` at boot. Use `Optional<String>` + `defaultValue`
+  or accept `Optional.empty()`. Symptom: `@QuarkusTest` boots fine locally (env set) but fails in CI.
+- **`openbank.outbox.dispatch-enabled` defaults to `false`.** A new service that uses outbox but
+  omits this key silently never dispatches events — no error, no log, `attempt_count` stays 0.
+  Every service with an outbox entity MUST have `openbank.outbox.dispatch-enabled: true` in
+  `application.yaml`.
+- **ktlint wildcard imports surface on first edit.** Path-scoped CI only lints changed files; pre-existing
+  wildcard imports in a file are invisible until you touch it. When editing an older `.kt` file, manually
+  expand any wildcards in the import block — `ktlintFormat` is unreliable for this.
 
 ### Flyway migrations
 - **Never change a migration after it is applied to a live DB.** Rewriting V10 (CONCURRENTLY →
   plain) caused `FlywayValidateException: checksum mismatch` → startup fail. Fix:
   `QUARKUS_FLYWAY_REPAIR_AT_START=true` in gitops env, then remove once DB is settled.
+
+### Kubernetes / ArgoCD pitfalls
+- **`strategy.type: Recreate` with Server-Side Apply = HTTP 403 Forbidden.** SSA merges the
+  defaulted `rollingUpdate` sub-block even when `type: Recreate`; the API rejects the combination.
+  Use `RollingUpdate` with `maxSurge: 0 / maxUnavailable: 1` — identical zero-concurrency behaviour,
+  cleanly SSA-mergeable.
+- **DaemonSet node-agents on bin-packed nodes need `system-node-critical` priority.** On a
+  resource-tight sandbox node, a DaemonSet pod without `priorityClassName: system-node-critical`
+  gets `Insufficient cpu` or `Too many pods`. Set `priorityClassName` from the start; fix the pod
+  spec (not the node provisioning) — Karpenter does not provision new nodes solely for DaemonSet pods.
+- **Temporal app-plane workers need explicit `frontend` NetworkPolicy allowlisting.** `AppWorkerRegistrar`
+  connects to Temporal frontend via gRPC `:7233` synchronously at startup — a boot fail, not a
+  runtime error. The `temporal-platform-ingress` NetworkPolicy must explicitly list every
+  application namespace that runs Temporal workers, not just `temporal-platform`.
+- **CNPG DaemonSet + broad `podSelector: {}` = operator deadlock.** A DaemonSet NetworkPolicy with
+  an empty pod selector captures CNPG pods in the same namespace → operator status extraction
+  hangs → cluster health check stalls. Always allow `cnpg-system → db:8000,9187` in the NP.
+- **OpenBao recovery keys must be stored externally at init time.** After a Vault→OpenBao migration
+  the root token is revoked and recovery keys are the only break-glass. If they are lost (not saved
+  to AWS Secrets Manager `openbank/openbao/break-glass`) the cluster is unrecoverable without a
+  full re-init. Save them immediately after `openbao operator init`.
 
 ### GitOps merge conflicts — image tags
 - **NEVER `git checkout --theirs` blindly for image tags.** `--theirs` (main) may have an older
@@ -110,6 +171,35 @@ CI is path-scoped (only changed services build). Domain layer has **zero** frame
   commits with `jiri@iraska.cz` are `no_user` → unverified → merge blocked by ruleset.
   Global config: `git config --global user.email "jiri@iraska.cz"`. Re-sign:
   `git commit --amend --reset-author --no-edit -S`.
+
+### Multi-agent / parallel work
+- **Shared worktree = branch stomping.** Two agent instances on the same working tree overwrite each
+  other's branch refs. Always do PR work in an isolated `git worktree add /tmp/wt-<name> -b <branch>`.
+  Use a **unique suffix** per agent: `/private/tmp/ob-<task>-$$` — generic names like `wt-fix` collide.
+- **Verify branch before commit.** A parallel agent can switch the branch in the shared tree mid-build.
+  Run `git branch --show-current` immediately before `git commit`, and push with an explicit refspec
+  (`git push origin HEAD:refs/heads/<branch>`) to avoid landing on the wrong branch.
+- **NEVER `git add -A` or `git add .` in a shared worktree.** These pick up the other agent's WIP
+  files. Stage an explicit file list: `git add path/to/file1 path/to/file2`.
+- **Recovering a stomped branch: use `git reflog`.** If a second agent reset your branch ref, the
+  commit survives in the reflog. `git reflog | grep <sha-prefix>`, then
+  `git branch -f <branch> <sha>` — no destructive `reset --hard` needed.
+- **Tool feedback after Edit/Write can be stale.** In multi-agent sessions, after writing a file in the
+  main worktree confirm the change persisted with a `grep` Bash call — another agent writing the same
+  file concurrently can silently overwrite it. Prefer isolated worktrees for any concurrent work.
+- **Auto-deploy concurrency: second merge cancels first deploy.** Two merges in quick succession →
+  the later push cancels the earlier deploy workflow. If two services merge within seconds, re-dispatch
+  manually: `gh workflow run auto-deploy.yml -f services=<svc>`.
+- **chain-branch pollution.** A branch cut from a feature branch (not `main`) carries the feature's
+  uncommitted diff. Always branch from `main` or cherry-pick specific commits.
+
+### GHA / CI pitfalls
+- **`env.VAR` is unavailable in job-level `env:` inside a reusable workflow.** The `env` context is
+  not resolved at parse time for called workflows — use a setup step that writes to `$GITHUB_ENV`
+  instead. This caused a 30-hour CI outage (PR #1888).
+- **`gen-network-policies.py` ignores `@ConfigProperty` code defaults.** The generator reads only
+  gitops env declarations. A port defined only as a code default is missing from the generated
+  NetworkPolicy and gets silently blocked. Declare every port as an explicit SmallRye env var.
 
 ### 2-dot vs 3-dot git diff
 - **Always 3-dot for pre-merge review.** `git diff origin/main...origin/branch` (3-dot) = actual

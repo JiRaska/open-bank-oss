@@ -145,6 +145,15 @@ change_requirements:
       - "docs/threat-models/<service>.md present/updated"   # ADR-0030 D2
     gate: threat-model
     enforced: advisory
+  new_service_with_outbox:
+    # A service that extends AbstractOutboxEntity / uses OutboxDispatcher but does NOT
+    # set openbank.outbox.dispatch-enabled=true silently never dispatches events —
+    # no error, no log, attempt_count stays 0. This is the #1 new-service silent failure.
+    detect: ["new <service>/ directory", "AbstractOutboxEntity subclass in src/main/**"]
+    require:
+      - "openbank.outbox.dispatch-enabled: true in <service>/src/main/resources/application.yaml"
+    gate: outbox-dispatch-enabled
+    enforced: advisory
   admin_ui_code_change:
     # admin-ui is a released component (scope `admin-ui`); the version-bump discipline that
     # applies to every service applies here too. Changing app code under
