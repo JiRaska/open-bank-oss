@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/JiRaska/open-bank/compare/agent-service-v1.10.1...agent-service-v1.11.0) (2026-06-28)
+
+
+### Features
+
+* **agent:** per-run OTel span for governed agent runs (ADR-0031 D7) ([#2385](https://github.com/JiRaska/open-bank/issues/2385)) ([baa1ce6](https://github.com/JiRaska/open-bank/commit/baa1ce68683e030bf62d2e5c2cd7b89d14161478))
+
 ## [1.10.1](https://github.com/JiRaska/open-bank/compare/agent-service-v1.10.0...agent-service-v1.10.1) (2026-06-27)
 
 
