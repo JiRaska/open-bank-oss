@@ -136,4 +136,13 @@ regexes = [
   # placeholder account digits) — a public API-contract example, not a secret;
   # the 10-digit string trips the rod-cislo numeric heuristic.
   '''0800000019''',
+  # customer-edge test account base from the demo IBAN CZ6508000000192000145399
+  # (bank 0800, prefix 19, base 2000145399). It is NOT a rodné číslo — month digits
+  # "00" make it structurally invalid and it fails the mod-11 birth-number check; it
+  # is the BBAN base of the canonical demo IBAN already safelisted above. The full
+  # IBAN form is covered by CZ6508000000192000145\d{3}, but earlier commits embedded
+  # the bare 10-digit base in src/main (creditor-account examples in CustomerEdgeResource
+  # / openapi.yaml, since refactored into src/test), so a full-history scan
+  # (--log-opts=--all) still trips the bare-number rod-cislo heuristic on those blobs.
+  '''2000145399''',
 ]
