@@ -20,10 +20,11 @@
 # default GITHUB_TOKEN cannot see; for the full score, set a fine-grained PAT as
 # the `repo_token` input (follow-up). All other checks work with GITHUB_TOKEN.
 #
-# Runs on ubuntu-latest (not the self-hosted openbank-build pool): scorecard ships
-# a linux/amd64 binary and the openbank-build label spans x86 + Mac ARM, so a clean
-# GitHub-hosted Linux runner is the reliable target. Cost is a single ~2-min run
-# per week — negligible, and off the per-PR FinOps path (ADR-0040 / ADR-0053).
+# Runs on the self-hosted pool, pinned to Linux x86. GitHub-hosted runners
+# (ubuntu-latest) are blocked by the Actions-minutes budget on this repo — which is
+# the whole point of the Hetzner/ARC fleet (ADR-0040 / ADR-0053). The scorecard
+# binary is linux/amd64 and the `openbank-build` label also spans the Mac ARM host,
+# so runs-on pins `Linux` + `X64` to land on a Hetzner/ARC x86 runner, never the Mac.
 # -----------------------------------------------------------------------------
 name: OpenSSF Scorecard
 
@@ -47,7 +48,7 @@ concurrency:
 jobs:
   analysis:
     name: scorecard
-    runs-on: ubuntu-latest
+    runs-on: [openbank-build, Linux, X64]
     timeout-minutes: 15
     permissions:
       contents: read
