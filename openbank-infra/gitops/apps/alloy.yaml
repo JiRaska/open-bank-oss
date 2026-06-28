@@ -29,6 +29,16 @@ spec:
     helm:
       releaseName: alloy
       valuesObject:
+        # Pull Alloy from our ECR Public mirror, not Docker Hub. grafana/alloy is
+        # not a Docker Official Image, so the anonymous docker-hub ECR pull-through
+        # rate-limited it to NotFound on fresh nodes (2026-06-27). Kyverno
+        # rewrite-ecr-public turns this ref into the ecr-public pull-through. Keep
+        # tag in lockstep with the chart targetRevision above and the mirror entry
+        # in scripts/mirror-ci-base-images.sh.
+        image:
+          registry: public.ecr.aws/d7v4f3x6
+          repository: alloy
+          tag: v1.5.1
         controller:
           type: daemonset
           # Node-level log collector: run at system-node-critical so the DaemonSet

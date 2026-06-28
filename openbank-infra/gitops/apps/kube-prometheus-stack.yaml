@@ -166,7 +166,14 @@ spec:
         grafana:
           enabled: true
           # Security patch (ADR-0079 lifecycle): 13.0.1-security-01 -> 13.0.2.
+          # Pull from our ECR Public mirror, not Docker Hub: grafana/grafana is not
+          # a Docker Official Image, so the anonymous docker-hub ECR pull-through
+          # rate-limited it to NotFound on fresh nodes (2026-06-27, stuck rollout).
+          # Kyverno rewrite-ecr-public turns this into the ecr-public pull-through;
+          # keep tag in lockstep with the mirror entry in mirror-ci-base-images.sh.
           image:
+            registry: public.ecr.aws/d7v4f3x6
+            repository: grafana
             tag: "13.0.2"
           defaultDashboardsTimezone: browser
           # INTERNAL ONLY — no ingress by decision (ADR-0056: the admin-UI BFF

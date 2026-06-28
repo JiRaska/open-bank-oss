@@ -36,3 +36,36 @@ output "ecr_public_kafka_repository_uri" {
   description = "public.ecr.aws URI of the CI kafka mirror (feeds KAFKA_IMAGE in _service-ci.yml)."
   value       = aws_ecrpublic_repository.kafka.repository_uri
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Platform-image mirror (ECR Public) — runtime, not CI.
+# ─────────────────────────────────────────────────────────────────────────────
+# alloy / grafana / falco / falcoctl are NOT Docker Official Images, so AWS's free
+# public.ecr.aws/docker/library mirror does not carry them. They were reaching the
+# cluster via the anonymous `docker-hub/` ECR pull-through, whose shared anonymous
+# Docker Hub budget is exhausted under Karpenter node churn — ECR then returns
+# NotFound for these tags on fresh nodes (2026-06-27 incident: stuck alloy + falco
+# DaemonSets and the Grafana rollout). Mirroring them here (same mechanism as kafka)
+# removes Docker Hub from the runtime image path entirely — no Docker Hub credential.
+#
+# The gitops apps reference public.ecr.aws/d7v4f3x6/<name>; the Kyverno
+# `rewrite-ecr-public` rule rewrites that to the authenticated, unthrottled
+# `ecr-public/` ECR pull-through. Repo bytes are pushed by mirror-ci-base-images.sh.
+resource "aws_ecrpublic_repository" "platform_mirror" {
+  provider = aws.us_east_1
+  for_each = toset(["alloy", "grafana", "falco", "falcoctl"])
+
+  repository_name = each.key
+
+  catalog_data {
+    about_text        = "OpenBank mirror of ${each.key} (sourced from Docker Hub via scripts/mirror-ci-base-images.sh). Byte-identical mirror to take Docker Hub off the runtime image path; consumed by the in-cluster platform workloads via the ecr-public pull-through."
+    architectures     = ["ARM 64", "x86-64"]
+    operating_systems = ["Linux"]
+    usage_text        = "Internal platform use. Pinned tags only, kept in lockstep with the Helm chart values in gitops/apps. Do not depend on :latest."
+  }
+}
+
+output "ecr_public_platform_mirror_repository_uris" {
+  description = "public.ecr.aws URIs of the platform-image mirrors (alloy/grafana/falco/falcoctl)."
+  value       = { for k, r in aws_ecrpublic_repository.platform_mirror : k => r.repository_uri }
+}

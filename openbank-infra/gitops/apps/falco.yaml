@@ -38,6 +38,23 @@ spec:
       valuesObject:
         fullnameOverride: falco
 
+        # Pull falco + falcoctl from our ECR Public mirror, not Docker Hub. Neither
+        # falcosecurity/falco nor falcosecurity/falcoctl is a Docker Official Image,
+        # so the anonymous docker-hub ECR pull-through rate-limited falcoctl to
+        # NotFound on fresh nodes (2026-06-27, falco DaemonSet stuck on init).
+        # Kyverno rewrite-ecr-public turns these refs into the ecr-public pull-
+        # through. Keep tags in lockstep with the chart targetRevision above and the
+        # mirror entries in scripts/mirror-ci-base-images.sh.
+        image:
+          registry: public.ecr.aws/d7v4f3x6
+          repository: falco
+          tag: "0.44.1"
+        falcoctl:
+          image:
+            registry: public.ecr.aws/d7v4f3x6
+            repository: falcoctl
+            tag: "0.13.0"
+
         driver:
           kind: modern_ebpf
 
