@@ -4,25 +4,32 @@
 
 package com.openbank.settlement.infrastructure.temporal
 
+import com.uber.m3.tally.RootScopeBuilder
+import com.uber.m3.util.Duration
+import io.micrometer.core.instrument.MeterRegistry
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowClientOptions
+import io.temporal.common.reporter.MicrometerClientStatsReporter
 import io.temporal.serviceclient.WorkflowServiceStubs
 import io.temporal.serviceclient.WorkflowServiceStubsOptions
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Produces
 
 @ApplicationScoped
-class TemporalClientProducer(private val config: TemporalConfig) {
-    private val serverUrl get() = config.serverUrl()
-    private val namespace get() = config.namespace()
-
+class TemporalClientProducer(private val config: TemporalConfig, private val meterRegistry: MeterRegistry) {
     private val client: WorkflowClient by lazy {
+        val scope = RootScopeBuilder()
+            .reporter(MicrometerClientStatsReporter(meterRegistry))
+            .reportEvery(Duration.ofSeconds(1.0))
         val stubs = WorkflowServiceStubs.newServiceStubs(
-            WorkflowServiceStubsOptions.newBuilder().setTarget(serverUrl).build(),
+            WorkflowServiceStubsOptions.newBuilder()
+                .setTarget(config.serverUrl())
+                .setMetricsScope(scope)
+                .build(),
         )
         WorkflowClient.newInstance(
             stubs,
-            WorkflowClientOptions.newBuilder().setNamespace(namespace).build(),
+            WorkflowClientOptions.newBuilder().setNamespace(config.namespace()).build(),
         )
     }
 
