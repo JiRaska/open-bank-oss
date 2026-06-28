@@ -12,6 +12,9 @@ import com.openbank.agent.domain.model.StopReason
 import com.openbank.agent.domain.model.ToolSpec
 import com.openbank.agent.domain.policy.AgentIdentity
 import com.openbank.libs.audit.AuditResult
+import io.opentelemetry.api.GlobalOpenTelemetry
+import io.opentelemetry.api.trace.StatusCode
+import io.opentelemetry.api.trace.Tracer
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.jboss.logging.Logger
@@ -49,6 +52,12 @@ class AgentChatService {
     @Inject lateinit var runAuditor: AgentRunAuditor
 
     @Inject lateinit var injectionGuard: PromptInjectionGuard
+
+    // D7 (ADR-0031): one OTel span per governed run, exported to the existing Tempo backend.
+    // Field-injected by Quarkus; defaults to the global tracer (a no-op when no SDK is installed,
+    // e.g. in unit tests) so the loop never depends on tracing being wired.
+    @Inject
+    var tracer: Tracer = GlobalOpenTelemetry.getTracer(INSTRUMENTATION_NAME)
 
     private val log = Logger.getLogger(AgentChatService::class.java)
 
@@ -91,22 +100,50 @@ class AgentChatService {
         modelId: String?,
         trigger: String,
     ): ChatOutcome {
-        val run = chatLoop(identity, systemPrompt, history, modelId)
-        // D5: one run-level AI-attribution event per invocation, whatever the outcome.
-        runAuditor.runCompleted(
-            AgentRunAuditor.AgentRun(
-                identity = identity,
-                trigger = trigger,
-                modelId = run.outcome.model,
-                promptHash = run.promptHash,
-                toolCalls = run.outcome.toolCalls,
-                totalTokens = run.totalTokens,
-                isProposal = run.outcome.isProposal,
-                result = run.auditResult,
-                detail = run.detail,
-            ),
-        )
-        return run.outcome
+        // D7: wrap the whole governed run in one span. Parented off the inbound HTTP span for a
+        // chat turn, or a root span for a scheduled sweep (OversightService) — either way "one run
+        // = one trace" in Tempo, carrying the same agent attributes the D5 audit event records so
+        // traces are queryable by agent, model, outcome and token spend.
+        val span = tracer.spanBuilder(RUN_SPAN)
+            .setAttribute("openbank.agent.id", identity.agentId)
+            .setAttribute("openbank.agent.plane", identity.plane ?: "")
+            .setAttribute("openbank.agent.trigger", trigger)
+            .startSpan()
+        try {
+            val run = chatLoop(identity, systemPrompt, history, modelId)
+            span.setAttribute("openbank.agent.model_id", run.outcome.model)
+            span.setAttribute("openbank.agent.tool_calls", run.outcome.toolCalls.size.toLong())
+            span.setAttribute("openbank.agent.tokens_total", run.totalTokens)
+            span.setAttribute("openbank.agent.is_proposal", run.outcome.isProposal)
+            span.setAttribute("openbank.agent.result", run.auditResult.name)
+            run.detail?.let { span.setAttribute("openbank.agent.detail", it) }
+            // A degraded model call is the operational signal worth alerting on; denials are
+            // policy working as designed, so they stay OK (visible via the result attribute).
+            if (run.auditResult == AuditResult.FAILURE) {
+                span.setStatus(StatusCode.ERROR, run.detail ?: "model_failure")
+            }
+            // D5: one run-level AI-attribution event per invocation, whatever the outcome.
+            runAuditor.runCompleted(
+                AgentRunAuditor.AgentRun(
+                    identity = identity,
+                    trigger = trigger,
+                    modelId = run.outcome.model,
+                    promptHash = run.promptHash,
+                    toolCalls = run.outcome.toolCalls,
+                    totalTokens = run.totalTokens,
+                    isProposal = run.outcome.isProposal,
+                    result = run.auditResult,
+                    detail = run.detail,
+                ),
+            )
+            return run.outcome
+        } catch (e: Exception) {
+            span.recordException(e)
+            span.setStatus(StatusCode.ERROR)
+            throw e
+        } finally {
+            span.end()
+        }
     }
 
     private suspend fun chatLoop(
@@ -343,6 +380,8 @@ class AgentChatService {
     }
 
     private companion object {
+        const val INSTRUMENTATION_NAME = "openbank-agent-service"
+        const val RUN_SPAN = "agent.run"
         const val MAX_ITERATIONS = 5
 
         // Kept small to stay well under the free Groq tier's 12k tokens/min budget: a tool round
