@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/JiRaska/open-bank/compare/domestic-payment-v0.8.1...domestic-payment-v0.8.2) (2026-06-28)
+
+
+### Bug Fixes
+
+* **temporal:** wire MicrometerClientStatsReporter in all Temporal workers ([35c6a63](https://github.com/JiRaska/open-bank/commit/35c6a6309e10c0a56558d93de5c494a89da72ceb))
+
 ## [0.8.1](https://github.com/JiRaska/open-bank/compare/domestic-payment-v0.8.0...domestic-payment-v0.8.1) (2026-06-27)
 
 

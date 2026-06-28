@@ -14,7 +14,7 @@
   "openbank-customer-edge": "0.15.0",
   "openbank-devops-agent": "0.2.0",
   "openbank-dispute-service": "0.7.1",
-  "openbank-domestic-payment": "0.8.1",
+  "openbank-domestic-payment": "0.8.2",
   "openbank-finops-agent": "0.2.0",
   "openbank-finrep-service": "0.3.0",
   "openbank-fraud-service": "0.4.1",
