@@ -25,6 +25,10 @@ that is balance-service).
 [Kafka party events] --in--> [account-service PartyEventConsumer] --activate--> [account-service]
                                                                 |
                                                                 +--M2M client_credentials (ROLE_OPERATOR)--> [transaction-service POST /api/v1/transactions]   (welcome bonus, sandbox-only)
+                                                                |
+                                                                +--M2M client_credentials (ROLE_OPERATOR)--> [fx-service POST /api/v1/fx/convert]  (pocket exchange, ADR-0110)
+                                                                    |
+                                                                    +--M2M--> [transaction-service POST /api/v1/transactions] x2 (DEBIT + CREDIT)
 ```
 
 - **External entities:** operators/admins (human, OIDC via Keycloak), downstream consumers of account events, party-service (event source).
@@ -130,3 +134,36 @@ that is balance-service).
   per-caller allowlist / mTLS-SPIFFE identity is the production follow-up). Mitigated by
   `PartyEventConsumerTest` (enabled/disabled/grant-failure isolation). Rollback: flip the flag OFF (or
   revert the commit); no DB or schema change. Money-path PR — see PR #555 / #554.
+- **2026-06-28** — FX pocket exchange (`POST /api/v1/accounts/{id}/pockets/{from}/exchange`,
+  ADR-0110). **New trust boundary:** account-service → fx-service (M2M, OIDC client_credentials,
+  ROLE_OPERATOR). **New DFD path:** caller → account-service → fx-service (rate + conversion record) →
+  account-service → transaction-service (DEBIT then CREDIT).
+  **STRIDE analysis:**
+  - **S (Spoofing):** endpoint requires `ROLE_OPERATOR` or `ROLE_ADMIN` — no anonymous or
+    `ROLE_VIEWER` access. `Idempotency-Key` is caller-supplied; account-service derives the
+    transaction idempotency keys (`{key}-debit`, `{key}-credit`) server-side so a replayed caller
+    key is idempotent end-to-end.
+  - **T (Tampering):** `fromAmountMinorUnits` is validated positive; `fromCurrency != toCurrency`
+    enforced. The applied rate is authoritative from fx-service — the caller cannot inject a
+    rate. DEBIT and CREDIT amounts are taken from the FX conversion result, not from the request.
+  - **R (Repudiation):** fx-service records every conversion with a stable `conversionId` returned
+    to the caller. The two transaction-service calls each receive a deterministic idempotency key
+    so the full trail (`conversionId → debitTxId → creditTxId`) is reconstructable from audit logs.
+  - **I (Information disclosure):** `partyName` is the party UUID stringified (not a legal name)
+    — no PII sent to fx-service beyond the accountId and partyId already known to both services.
+    `ExchangeResult` response carries amounts and rate but no unrelated account data.
+  - **D (Denial of service):** fx-service unavailability blocks exchanges (connect 3 s, read 5 s).
+    Acceptable — the exchange is a customer-initiated action, not a background process. Gateway
+    rate limits apply at the ROLE_OPERATOR/ADMIN boundary.
+  - **E (Elevation of privilege):** caller must hold ROLE_OPERATOR/ADMIN. The endpoint validates
+    account ownership via the `X-Customer-Party-Id` header (same defense-in-depth as the read
+    endpoints). An operator cannot exchange between accounts (source = target = `accountId`).
+  **Risk class = integrity / money-movement** — a defect could transfer the wrong amount or
+  credit the wrong currency. Mitigated by: unit tests (`exchangePockets calls fx-service and
+  settles debit+credit`, `rejects same-currency exchange`); `Idempotency-Key` prevents
+  double-execution; DEBIT + CREDIT idempotency keys are deterministic so a retry settles
+  exactly once at transaction-service. **Residual risk:** failure between the DEBIT and CREDIT
+  calls leaves a dangling debit — the idempotent retry path recovers it, but only if the caller
+  retries with the same `Idempotency-Key`. A monitoring alert on `debit`-without-matching-`credit`
+  within 60 s is a follow-up (#TBD). Rollback: no DB change in account-service; revert the
+  commit and redeploy removes the endpoint. Existing conversions in fx-service are independent.

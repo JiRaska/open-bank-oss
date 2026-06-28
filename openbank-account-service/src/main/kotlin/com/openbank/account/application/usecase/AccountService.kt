@@ -11,6 +11,8 @@ import com.openbank.account.application.port.out.AccountSanctionsScreeningPort
 import com.openbank.account.application.port.out.BalanceQueryPort
 import com.openbank.account.application.port.out.BalanceView
 import com.openbank.account.application.port.out.CurrencyPocketRepository
+import com.openbank.account.application.port.out.FxConversionPort
+import com.openbank.account.application.port.out.FxSettlementPort
 import com.openbank.account.domain.event.AccountClosedEvent
 import com.openbank.account.domain.event.AccountCreatedEvent
 import com.openbank.account.domain.event.AccountStatusChangedEvent
@@ -29,6 +31,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 @ApplicationScoped
@@ -41,6 +44,8 @@ class AccountService(
     private val sanctionsScreening: AccountSanctionsScreeningPort,
     private val metrics: DomainMetrics,
     private val clock: Clock,
+    private val fxConversion: FxConversionPort,
+    private val fxSettlement: FxSettlementPort,
 ) : AccountUseCase {
 
     override suspend fun openAccount(command: OpenAccountCommand): Account {
@@ -300,6 +305,46 @@ class AccountService(
             paymentCurrency = query.paymentCurrency,
             primaryCurrency = account.currency,
             policy = query.policy,
+        )
+    }
+
+    override suspend fun exchangePockets(command: ExchangePocketsCommand): ExchangeResult {
+        val account = requireAccount(command.accountId)
+        require(account.status == com.openbank.account.domain.model.AccountStatus.ACTIVE) {
+            "Cannot exchange on non-ACTIVE account ${command.accountId}"
+        }
+        require(command.fromCurrency != command.toCurrency) {
+            "fromCurrency and toCurrency must differ"
+        }
+        require(command.fromAmountMinorUnits > 0) { "fromAmountMinorUnits must be positive" }
+
+        val conversion = fxConversion.convert(
+            idempotencyKey = command.idempotencyKey,
+            accountId = account.id,
+            partyId = command.partyId,
+            partyName = command.partyName,
+            fromCurrency = command.fromCurrency.code,
+            toCurrency = command.toCurrency.code,
+            fromAmountMinorUnits = command.fromAmountMinorUnits,
+        )
+
+        fxSettlement.settleFxExchange(
+            idempotencyKey = command.idempotencyKey,
+            accountId = account.id,
+            fromCurrency = conversion.fromCurrency,
+            fromAmountMinorUnits = conversion.fromAmountMinorUnits,
+            toCurrency = conversion.toCurrency,
+            toAmountMinorUnits = conversion.toAmountMinorUnits,
+            valueDate = LocalDate.now(clock),
+        )
+
+        return ExchangeResult(
+            conversionId = conversion.id,
+            fromCurrency = conversion.fromCurrency,
+            toCurrency = conversion.toCurrency,
+            fromAmountMinorUnits = conversion.fromAmountMinorUnits,
+            toAmountMinorUnits = conversion.toAmountMinorUnits,
+            appliedRate = conversion.appliedRate,
         )
     }
 

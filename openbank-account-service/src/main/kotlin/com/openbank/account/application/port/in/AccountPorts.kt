@@ -47,6 +47,25 @@ data class SearchAccountsQuery(val query: String, val limit: Int = 20, val after
 data class AddPocketCommand(val accountId: UUID, val currency: CurrencyCode, val requestedBy: UUID)
 data class ClosePocketCommand(val accountId: UUID, val currency: CurrencyCode, val requestedBy: UUID)
 data class ListPocketsQuery(val accountId: UUID)
+data class ExchangePocketsCommand(
+    val idempotencyKey: String,
+    val accountId: UUID,
+    val partyId: UUID,
+    val partyName: String,
+    val fromCurrency: CurrencyCode,
+    val toCurrency: CurrencyCode,
+    val fromAmountMinorUnits: Long,
+)
+
+data class ExchangeResult(
+    val conversionId: java.util.UUID,
+    val fromCurrency: String,
+    val toCurrency: String,
+    val fromAmountMinorUnits: Long,
+    val toAmountMinorUnits: Long,
+    val appliedRate: java.math.BigDecimal,
+)
+
 data class ResolvePocketQuery(
     val accountId: UUID,
     val paymentCurrency: CurrencyCode,
@@ -70,6 +89,9 @@ interface AccountUseCase {
     suspend fun closePocket(command: ClosePocketCommand): CurrencyPocket
     suspend fun listPockets(query: ListPocketsQuery): List<CurrencyPocket>
     suspend fun resolvePocket(query: ResolvePocketQuery): PocketResolution
+
+    /** Exchange between two currency pockets on the same account (ADR-0110). */
+    suspend fun exchangePockets(command: ExchangePocketsCommand): ExchangeResult
 }
 
 data class GrantAuthorizationCommand(

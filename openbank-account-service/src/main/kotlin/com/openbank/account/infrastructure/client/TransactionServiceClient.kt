@@ -4,6 +4,7 @@
 
 package com.openbank.account.infrastructure.client
 
+import com.openbank.account.application.port.out.FxSettlementPort
 import com.openbank.account.application.port.out.WelcomeBonusPort
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
@@ -41,7 +42,8 @@ interface TransactionServiceRestClient {
 data class InitiateTransactionBody(
     val idempotencyKey: String,
     val type: String,
-    val targetAccountId: UUID,
+    val sourceAccountId: UUID? = null,
+    val targetAccountId: UUID? = null,
     val amount: BigDecimal,
     val currencyCode: String,
     val description: String,
@@ -52,7 +54,8 @@ data class TransactionAck(val id: UUID, val status: String)
 
 @ApplicationScoped
 class TransactionServiceClient(@RestClient private val client: TransactionServiceRestClient, private val clock: Clock) :
-    WelcomeBonusPort {
+    WelcomeBonusPort,
+    FxSettlementPort {
 
     // Incoming credit with no source account: transaction-service posts the deposit journal and
     // credits the beneficiary pocket. idempotencyKey is derived from the account so the saga's
@@ -67,6 +70,41 @@ class TransactionServiceClient(@RestClient private val client: TransactionServic
                 currencyCode = currency,
                 description = "Vítací bonus za založení účtu",
                 valueDate = LocalDate.now(clock).toString(),
+            ),
+        ).awaitSuspending()
+    }
+
+    override suspend fun settleFxExchange(
+        idempotencyKey: String,
+        accountId: UUID,
+        fromCurrency: String,
+        fromAmountMinorUnits: Long,
+        toCurrency: String,
+        toAmountMinorUnits: Long,
+        valueDate: LocalDate,
+    ) {
+        val date = valueDate.toString()
+        val desc = "FX $fromCurrency→$toCurrency"
+        client.initiate(
+            InitiateTransactionBody(
+                idempotencyKey = "$idempotencyKey-debit",
+                type = "DEBIT",
+                sourceAccountId = accountId,
+                amount = fromAmountMinorUnits.toBigDecimal(),
+                currencyCode = fromCurrency,
+                description = desc,
+                valueDate = date,
+            ),
+        ).awaitSuspending()
+        client.initiate(
+            InitiateTransactionBody(
+                idempotencyKey = "$idempotencyKey-credit",
+                type = "CREDIT",
+                targetAccountId = accountId,
+                amount = toAmountMinorUnits.toBigDecimal(),
+                currencyCode = toCurrency,
+                description = desc,
+                valueDate = date,
             ),
         ).awaitSuspending()
     }
