@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/JiRaska/open-bank/compare/card-issuance-service-v0.6.1...card-issuance-service-v0.6.2) (2026-06-28)
+
+
+### Bug Fixes
+
+* **card-issuance:** handle PARTY_ERASED event to anonymise cardholder PII (GDPR Art. 17) ([#2268](https://github.com/JiRaska/open-bank/issues/2268)) ([9f098fd](https://github.com/JiRaska/open-bank/commit/9f098fd07a3eed8c8a3e803d15eef4b3cb975afe))
+
 ## [0.6.1](https://github.com/JiRaska/open-bank/compare/card-issuance-service-v0.6.0...card-issuance-service-v0.6.1) (2026-06-27)
 
 
