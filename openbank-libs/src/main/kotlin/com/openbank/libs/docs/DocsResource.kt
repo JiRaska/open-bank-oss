@@ -182,6 +182,7 @@ class DocsResource @Inject constructor(
             "health" to "/q/health",
             "metrics" to "/q/metrics",
             "info" to "/api/v1/info",
+            "sbom" to "/q/openbank/sbom",
             "docsMeta" to "/q/openbank/docs/_meta",
         )
     }
