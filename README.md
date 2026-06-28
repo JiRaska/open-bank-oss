@@ -247,8 +247,9 @@ tests for new behavior, and a threat model for money-path services (ADR-0030).
 
 ## Documentation
 
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the services fit together (bounded contexts, runtime patterns, deployment)
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — milestones M1–M7
-- [`docs/adr/`](docs/adr/) — Architecture Decision Records (governance lives in 0029–0031 and 0040)
+- [`docs/adr/README.md`](docs/adr/README.md) — Architecture Decision Records index, with per-decision delivery status (governance lives in 0029–0031 and 0040)
 - [`docs/strategy/`](docs/strategy/) — BIAN mapping, security baseline, compliance matrix, resilience
 - [`CLAUDE.md`](CLAUDE.md) — agent & contributor guide (human summary of `rules.yaml`)
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to contribute
