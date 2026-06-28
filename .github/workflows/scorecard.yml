@@ -16,9 +16,11 @@
 #   - NOT triggered on `pull_request`: this is a posture gauge, not a PR gate, so
 #     it never blocks a contributor's PR (and never lands on the hot CI path).
 #
-# COVERAGE NOTE: the Branch-Protection check reads org/branch settings that the
-# default GITHUB_TOKEN cannot see; for the full score, set a fine-grained PAT as
-# the `repo_token` input (follow-up). All other checks work with GITHUB_TOKEN.
+# TOKEN NOTE: on a PRIVATE repo the default GITHUB_TOKEN cannot run Scorecard's
+# GraphQL commit/review queries ("Resource not accessible by integration"), so the
+# action needs a classic PAT (`repo` read) passed as `repo_token`. This workflow is
+# token-gated: until the SCORECARD_TOKEN secret exists, the analysis is SKIPPED (the
+# job stays green with a notice) — it auto-activates once the secret is added.
 #
 # Runs on the self-hosted pool, pinned to Linux x86. GitHub-hosted runners
 # (ubuntu-latest) are blocked by the Actions-minutes budget on this repo — which is
@@ -54,26 +56,44 @@ jobs:
       contents: read
       # security-events: write  # enable at go-public — upload SARIF to code-scanning (needs GHAS / public repo)
       # id-token: write         # enable at go-public — OIDC for publish_results
+    env:
+      # Scorecard needs a PAT to query a PRIVATE repo: the default GITHUB_TOKEN can't run
+      # the GraphQL commit/review queries ("Resource not accessible by integration"). Until
+      # the secret is provisioned (a classic PAT with `repo` read, stored as SCORECARD_TOKEN)
+      # — or the repo goes public — the analysis step is SKIPPED so this gauge never fails
+      # red. To enable: add the SCORECARD_TOKEN repo secret; the step auto-activates.
+      SCORECARD_TOKEN: ${{ secrets.SCORECARD_TOKEN }}
     steps:
       - name: Checkout
+        if: ${{ env.SCORECARD_TOKEN != '' }}
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
       - name: Run Scorecard analysis
+        if: ${{ env.SCORECARD_TOKEN != '' }}
         uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
         with:
           results_file: results.sarif
           results_format: sarif
+          repo_token: ${{ secrets.SCORECARD_TOKEN }}
           # Private repo: publishing requires public. Flip to true at go-public (ADR-0124).
           publish_results: false
 
       - name: Upload Scorecard SARIF (artifact)
+        if: ${{ env.SCORECARD_TOKEN != '' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: scorecard-sarif
           path: results.sarif
           retention-days: 14
+
+      - name: Scorecard disabled (no token)
+        if: ${{ env.SCORECARD_TOKEN == '' }}
+        run: |
+          echo "::notice title=Scorecard skipped::OpenSSF Scorecard needs a PAT on a private repo. \
+          Add a repo secret SCORECARD_TOKEN (classic PAT, 'repo' read scope) to enable; the analysis \
+          auto-activates. At go-public, switch to publish_results + code-scanning upload (ADR-0124)."
 
       # --- enable at go-public (needs public repo or GitHub Advanced Security) ---
       # - name: Upload SARIF to code-scanning
