@@ -32,7 +32,8 @@ import java.util.UUID
  */
 @ApplicationScoped
 class DispatchControlService(private val store: DispatchControlStore, private val audit: AuditEventPublisher) {
-    @Inject lateinit var clock: Clock
+    @Inject
+    lateinit var clock: Clock
 
     suspend fun snapshot(): DispatchControlSnapshot = store.current(KEY) ?: DispatchControlSnapshot(
         controlKey = KEY,

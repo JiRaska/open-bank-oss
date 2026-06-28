@@ -90,6 +90,13 @@ mp:
         topic: openbank.notification.requests
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         auto.offset.reset: earliest
+      party-events-in:
+        connector: smallrye-kafka
+        client.id: notification-service-party-${quarkus.uuid}
+        group.id: notification-service-party
+        topic: openbank.party.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto.offset.reset: earliest
 "%dev":
   quarkus:
     log:

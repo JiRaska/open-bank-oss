@@ -38,4 +38,7 @@ class NotificationRepository : PanacheRepository<NotificationEntity> {
 
     suspend fun findById(id: UUID): NotificationEntity? =
         Panache.withSession { find("notificationId", id).firstResult() }.awaitSuspending()
+
+    suspend fun deleteByPartyId(partyId: UUID): Long =
+        Panache.withTransaction { delete("partyId", partyId) }.awaitSuspending()
 }

@@ -18,7 +18,8 @@ import java.util.UUID
 
 @ApplicationScoped
 class DeviceTokenRepository : PanacheRepository<DeviceTokenEntity> {
-    @Inject lateinit var clock: Clock
+    @Inject
+    lateinit var clock: Clock
 
     /**
      * Active device tokens for a party — the PUSH fan-out target set.
@@ -82,4 +83,7 @@ class DeviceTokenRepository : PanacheRepository<DeviceTokenEntity> {
             deviceIds,
         )
     }
+
+    suspend fun deleteByPartyId(partyId: UUID): Long =
+        Panache.withTransaction { delete("partyId", partyId) }.awaitSuspending()
 }

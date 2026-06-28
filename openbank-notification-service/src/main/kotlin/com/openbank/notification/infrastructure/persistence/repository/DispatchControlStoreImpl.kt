@@ -23,8 +23,8 @@ import java.time.Instant
 class DispatchControlStoreImpl(private val proposals: DispatchResumeProposalRepository) :
     DispatchControlStore,
     PanacheRepository<DispatchControlLogEntity> {
-    @Inject lateinit var clock: Clock
-
+    @Inject
+    lateinit var clock: Clock
     override suspend fun current(controlKey: String): DispatchControlSnapshot? = Panache.withSession {
         find("controlKey = ?1 order by versionNo desc", controlKey).firstResult()
     }.awaitSuspending()?.toSnapshot()
