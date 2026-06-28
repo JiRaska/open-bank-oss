@@ -82,22 +82,35 @@ export async function GET() {
       workerTaskSlotsUsed,
       namespaces,
     ] = await Promise.all([
-      // temporal_server_start_count exists if Temporal is running and scraped
-      queryInstant('count(temporal_server_start_count) or vector(0)', controller.signal),
-      queryInstant('sum(increase(temporal_request_total{operation="StartWorkflowExecution"}[1h])) or vector(0)', controller.signal),
-      queryInstant('sum(increase(temporal_workflow_completed_count[1h])) or vector(0)', controller.signal),
-      queryInstant('sum(increase(temporal_workflow_failed_count[1h])) or vector(0)', controller.signal),
-      queryInstant('sum(increase(temporal_workflow_timeout_count[1h])) or vector(0)', controller.signal),
-      queryInstant('histogram_quantile(0.5, rate(temporal_activity_task_schedule_to_start_latency_bucket[5m]))', controller.signal),
-      queryInstant('histogram_quantile(0.5, rate(temporal_workflow_task_schedule_to_start_latency_bucket[5m]))', controller.signal),
-      queryInstant('histogram_quantile(0.99, rate(temporal_request_latency_bucket[5m]))', controller.signal),
-      queryInstant('sum(rate(temporal_persistence_requests_total[5m]))', controller.signal),
+      // Metric names below are the Temporal SERVER (tally/prometheus) names as
+      // scraped by the temporal-server PodMonitor (prefixed temporal_ at scrape
+      // time). They are NOT the SDK/client names — the server emits e.g.
+      // temporal_restarts (not _server_start_count), temporal_service_requests
+      // (not _request_total), temporal_workflow_success (not _completed_count),
+      // temporal_service_latency (not _request_latency), temporal_persistence_requests
+      // (not _total). See docs.temporal.io/references/cluster-metrics.
+      //
+      // temporal_restarts is emitted once per process start, so its presence is a
+      // reliable "Temporal is up and scraped" signal.
+      queryInstant('count(temporal_restarts) or vector(0)', controller.signal),
+      queryInstant('sum(increase(temporal_service_requests{operation="StartWorkflowExecution"}[1h])) or vector(0)', controller.signal),
+      queryInstant('sum(increase(temporal_workflow_success[1h])) or vector(0)', controller.signal),
+      queryInstant('sum(increase(temporal_workflow_failed[1h])) or vector(0)', controller.signal),
+      queryInstant('sum(increase(temporal_workflow_timeout[1h])) or vector(0)', controller.signal),
+      // schedule-to-start latency + worker task slots are Temporal SDK (worker)
+      // metrics emitted by the application services' workers, not the server, so
+      // they are absent until the services expose SDK metrics — these resolve to
+      // null and the UI shows them as "no data" (honest) until that lands.
+      queryInstant('histogram_quantile(0.5, rate(temporal_activity_schedule_to_start_latency_bucket[5m]))', controller.signal),
+      queryInstant('histogram_quantile(0.5, rate(temporal_task_schedule_to_start_latency_bucket[5m]))', controller.signal),
+      queryInstant('histogram_quantile(0.99, rate(temporal_service_latency_bucket[5m]))', controller.signal),
+      queryInstant('sum(rate(temporal_persistence_requests[5m]))', controller.signal),
       queryInstant('sum(temporal_worker_task_slots_available)', controller.signal),
       queryInstant('sum(temporal_worker_task_slots_used)', controller.signal),
-      queryVector('group by (namespace) (temporal_namespace_active_count)', controller.signal),
+      queryVector('group by (namespace) (temporal_workflow_success)', controller.signal),
     ])
 
-    // If temporal_server_start_count returns 0 (from vector(0)), Temporal not yet scraped
+    // temporal_restarts is absent (count → vector(0)) only when Temporal is not scraped yet
     const temporalDeployed = (temporalUpCount ?? 0) > 0
 
     const activeNamespaces = namespaces.map(n => n.labels.namespace ?? 'unknown')
