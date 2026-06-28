@@ -5,8 +5,17 @@
 package com.openbank.onboarding.application.usecase
 
 import com.openbank.onboarding.application.port.out.OnboardingRepository
-import com.openbank.onboarding.domain.model.*
-import io.mockk.*
+import com.openbank.onboarding.domain.model.FunnelStage
+import com.openbank.onboarding.domain.model.KycStage
+import com.openbank.onboarding.domain.model.OnboardingEvent
+import com.openbank.onboarding.domain.model.OnboardingRecord
+import com.openbank.onboarding.domain.model.PartyStage
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.just
+import io.mockk.mockk
+import io.mockk.runs
+import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -71,7 +80,7 @@ class OnboardingProjectionServiceTest {
                 legalName = "Alice Example",
                 email = "alice@example.com",
                 occurredAt = Instant.parse("2026-06-01T10:00:00Z"),
-            )
+            ),
         )
 
         with(slot.captured) {
@@ -97,7 +106,11 @@ class OnboardingProjectionServiceTest {
         coEvery { repo.upsert(capture(slot)) } just runs
 
         service.applyEvent(
-            OnboardingEvent.KycCaseOpened(partyId, caseId, Instant.parse("2026-06-01T11:00:00Z"))
+            OnboardingEvent.KycCaseOpened(
+                partyId,
+                caseId,
+                Instant.parse("2026-06-01T11:00:00Z"),
+            ),
         )
 
         with(slot.captured) {
@@ -113,15 +126,22 @@ class OnboardingProjectionServiceTest {
     fun `applyEvent KycStatusChanged APPROVED moves to SCA_PENDING`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
         val caseId = UUID.randomUUID()
-        val existing = sampleRecord(partyId, kycStatus = KycStage.UNDER_REVIEW,
-            funnelStage = FunnelStage.KYC_UNDER_REVIEW)
+        val existing = sampleRecord(
+            partyId,
+            kycStatus = KycStage.UNDER_REVIEW,
+            funnelStage = FunnelStage.KYC_UNDER_REVIEW,
+        )
         val slot = slot<OnboardingRecord>()
         coEvery { repo.findByPartyId(partyId) } returns existing
         coEvery { repo.upsert(capture(slot)) } just runs
 
         service.applyEvent(
-            OnboardingEvent.KycStatusChanged(partyId, caseId, KycStage.APPROVED,
-                Instant.parse("2026-06-02T09:00:00Z"))
+            OnboardingEvent.KycStatusChanged(
+                partyId,
+                caseId,
+                KycStage.APPROVED,
+                Instant.parse("2026-06-02T09:00:00Z"),
+            ),
         )
 
         // ACTIVE party + KYC approved + no SCA = SCA_PENDING
@@ -138,14 +158,21 @@ class OnboardingProjectionServiceTest {
     @Test
     fun `applyEvent DeviceEnrolled marks scaEnrolled and advances to ACTIVE`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
-        val existing = sampleRecord(partyId, funnelStage = FunnelStage.SCA_PENDING,
-            kycStatus = KycStage.APPROVED)
+        val existing = sampleRecord(
+            partyId,
+            funnelStage = FunnelStage.SCA_PENDING,
+            kycStatus = KycStage.APPROVED,
+        )
         val slot = slot<OnboardingRecord>()
         coEvery { repo.findByPartyId(partyId) } returns existing
         coEvery { repo.upsert(capture(slot)) } just runs
 
         service.applyEvent(
-            OnboardingEvent.DeviceEnrolled(partyId, "cred-abc", Instant.parse("2026-06-03T08:00:00Z"))
+            OnboardingEvent.DeviceEnrolled(
+                partyId,
+                "cred-abc",
+                Instant.parse("2026-06-03T08:00:00Z"),
+            ),
         )
 
         with(slot.captured) {
@@ -179,6 +206,18 @@ class OnboardingProjectionServiceTest {
 
         assertThat(result.keys).containsExactlyInAnyOrderElementsOf(FunnelStage.entries.map { it.name })
         assertThat(result["ACTIVE"]).isEqualTo(FunnelStage.ACTIVE.ordinal.toLong())
+    }
+
+    // ── eraseParty (GDPR Art. 17) ─────────────────────────────────────────────
+
+    @Test
+    fun `eraseParty delegates to repository eraseByPartyId`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { repo.eraseByPartyId(partyId) } just runs
+
+        service.eraseParty(partyId)
+
+        coVerify(exactly = 1) { repo.eraseByPartyId(partyId) }
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────

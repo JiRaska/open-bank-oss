@@ -15,7 +15,7 @@ import java.util.UUID
     indexes = [
         Index(name = "idx_onboarding_party_id", columnList = "party_id", unique = true),
         Index(name = "idx_onboarding_funnel_stage", columnList = "funnel_stage"),
-    ]
+    ],
 )
 class OnboardingEntity : PanacheEntity() {
 

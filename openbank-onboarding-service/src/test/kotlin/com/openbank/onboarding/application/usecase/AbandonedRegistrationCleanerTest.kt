@@ -4,11 +4,11 @@
 
 package com.openbank.onboarding.application.usecase
 
+import com.openbank.onboarding.application.port.out.OnboardingRepository
 import com.openbank.onboarding.domain.model.FunnelStage
 import com.openbank.onboarding.domain.model.KycStage
 import com.openbank.onboarding.domain.model.OnboardingRecord
 import com.openbank.onboarding.domain.model.PartyStage
-import com.openbank.onboarding.application.port.out.OnboardingRepository
 import com.openbank.onboarding.infrastructure.client.PartyServiceClient
 import com.openbank.onboarding.infrastructure.scheduler.AbandonedRegistrationCleaner
 import io.mockk.coEvery

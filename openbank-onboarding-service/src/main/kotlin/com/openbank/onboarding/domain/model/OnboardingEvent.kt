@@ -22,17 +22,11 @@ sealed class OnboardingEvent {
         override val occurredAt: Instant,
     ) : OnboardingEvent()
 
-    data class PartyStatusChanged(
-        val partyId: UUID,
-        val newStatus: PartyStage,
-        override val occurredAt: Instant,
-    ) : OnboardingEvent()
+    data class PartyStatusChanged(val partyId: UUID, val newStatus: PartyStage, override val occurredAt: Instant) :
+        OnboardingEvent()
 
-    data class KycCaseOpened(
-        val partyId: UUID,
-        val kycCaseId: UUID,
-        override val occurredAt: Instant,
-    ) : OnboardingEvent()
+    data class KycCaseOpened(val partyId: UUID, val kycCaseId: UUID, override val occurredAt: Instant) :
+        OnboardingEvent()
 
     data class KycStatusChanged(
         val partyId: UUID,
@@ -41,9 +35,6 @@ sealed class OnboardingEvent {
         override val occurredAt: Instant,
     ) : OnboardingEvent()
 
-    data class DeviceEnrolled(
-        val partyId: UUID,
-        val credentialId: String,
-        override val occurredAt: Instant,
-    ) : OnboardingEvent()
+    data class DeviceEnrolled(val partyId: UUID, val credentialId: String, override val occurredAt: Instant) :
+        OnboardingEvent()
 }

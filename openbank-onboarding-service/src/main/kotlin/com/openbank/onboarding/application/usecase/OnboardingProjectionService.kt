@@ -6,10 +6,13 @@ package com.openbank.onboarding.application.usecase
 
 import com.openbank.onboarding.application.port.`in`.OnboardingUseCase
 import com.openbank.onboarding.application.port.out.OnboardingRepository
-import com.openbank.onboarding.domain.model.*
+import com.openbank.onboarding.domain.model.FunnelStage
+import com.openbank.onboarding.domain.model.KycStage
+import com.openbank.onboarding.domain.model.OnboardingEvent
+import com.openbank.onboarding.domain.model.OnboardingRecord
+import com.openbank.onboarding.domain.model.PartyStage
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
-import java.time.Instant
 import java.util.UUID
 
 class OnboardingRecordNotFoundException(partyId: UUID) :
@@ -74,8 +77,13 @@ class OnboardingProjectionService : OnboardingUseCase {
                 val updated = existing.copy(
                     partyStatus = event.newStatus,
                     funnelStage = FunnelStage.derive(event.newStatus, existing.kycStatus, existing.scaEnrolled),
-                    blockedReason = if (event.newStatus == PartyStage.SUSPENDED || event.newStatus == PartyStage.CLOSED)
-                        "Party ${event.newStatus.name.lowercase()}" else null,
+                    blockedReason = if (event.newStatus == PartyStage.SUSPENDED ||
+                        event.newStatus == PartyStage.CLOSED
+                    ) {
+                        "Party ${event.newStatus.name.lowercase()}"
+                    } else {
+                        null
+                    },
                     updatedAt = event.occurredAt,
                 )
                 repo.upsert(updated)
@@ -119,6 +127,17 @@ class OnboardingProjectionService : OnboardingUseCase {
                 repo.upsert(updated)
             }
         }
+    }
+
+    // ── GDPR erasure ─────────────────────────────────────────────────────────
+
+    /**
+     * GDPR Art. 17 — Right to Erasure.
+     * Delegates PII removal to the repository.  The row itself is kept so funnel metrics
+     * remain accurate; only legalName and email are nulled out.
+     */
+    suspend fun eraseParty(partyId: UUID) {
+        repo.eraseByPartyId(partyId)
     }
 
     // ── DTO mapping (application layer — no infra import) ───────────────────

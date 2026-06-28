@@ -5,7 +5,10 @@
 package com.openbank.onboarding.infrastructure.persistence.repository
 
 import com.openbank.onboarding.application.port.out.OnboardingRepository
-import com.openbank.onboarding.domain.model.*
+import com.openbank.onboarding.domain.model.FunnelStage
+import com.openbank.onboarding.domain.model.KycStage
+import com.openbank.onboarding.domain.model.OnboardingRecord
+import com.openbank.onboarding.domain.model.PartyStage
 import com.openbank.onboarding.infrastructure.persistence.entity.OnboardingEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
@@ -15,7 +18,9 @@ import jakarta.enterprise.context.ApplicationScoped
 import java.util.UUID
 
 @ApplicationScoped
-class OnboardingRepositoryImpl : OnboardingRepository, PanacheRepository<OnboardingEntity> {
+class OnboardingRepositoryImpl :
+    OnboardingRepository,
+    PanacheRepository<OnboardingEntity> {
 
     override suspend fun upsert(record: OnboardingRecord) {
         Panache.withTransaction {
@@ -56,14 +61,27 @@ class OnboardingRepositoryImpl : OnboardingRepository, PanacheRepository<Onboard
     override suspend fun listAll(page: Int, size: Int): List<OnboardingRecord> =
         Panache.withSession { findAll().page(page, size).list() }.awaitSuspending().map { it.toDomain() }
 
-    override suspend fun countAll(): Long =
-        Panache.withSession { count() }.awaitSuspending()
+    override suspend fun countAll(): Long = Panache.withSession { count() }.awaitSuspending()
 
     override suspend fun listStuckBefore(stages: List<FunnelStage>, cutoff: java.time.Instant): List<OnboardingRecord> {
         val stageNames = stages.map { it.name }
         return Panache.withSession {
             find("funnelStage IN ?1 AND updatedAt < ?2", stageNames, cutoff).list()
         }.awaitSuspending().map { it.toDomain() }
+    }
+
+    override suspend fun eraseByPartyId(partyId: UUID) {
+        Panache.withTransaction {
+            find("partyId", partyId).firstResult().flatMap { existing ->
+                if (existing != null) {
+                    existing.legalName = null
+                    existing.email = null
+                    Uni.createFrom().item(existing)
+                } else {
+                    Uni.createFrom().nullItem()
+                }
+            }
+        }.awaitSuspending()
     }
 
     private fun OnboardingRecord.toEntity() = OnboardingEntity().also {

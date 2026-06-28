@@ -25,5 +25,4 @@ interface OnboardingUseCase {
      * Map key = FunnelStage.name, value = count.
      */
     suspend fun funnelCounts(): Map<String, Long>
-
 }

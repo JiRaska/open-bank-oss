@@ -49,14 +49,13 @@ class OnboardingResource {
     @GET
     @Path("/records/{partyId}")
     @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN, Roles.KYC, Roles.COMPLIANCE)
-    suspend fun getRecord(@PathParam("partyId") partyId: UUID): Response =
-        try {
-            Response.ok(useCase.getRecord(partyId)).build()
-        } catch (e: OnboardingRecordNotFoundException) {
-            Response.status(Response.Status.NOT_FOUND)
-                .entity(mapOf("code" to "NOT_FOUND", "message" to e.message))
-                .build()
-        }
+    suspend fun getRecord(@PathParam("partyId") partyId: UUID): Response = try {
+        Response.ok(useCase.getRecord(partyId)).build()
+    } catch (e: OnboardingRecordNotFoundException) {
+        Response.status(Response.Status.NOT_FOUND)
+            .entity(mapOf("code" to "NOT_FOUND", "message" to e.message))
+            .build()
+    }
 
     /**
      * Funnel KPI tiles — count per stage.
@@ -67,6 +66,5 @@ class OnboardingResource {
     @GET
     @Path("/funnel")
     @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN, Roles.KYC, Roles.COMPLIANCE)
-    suspend fun funnelCounts(): Response =
-        Response.ok(useCase.funnelCounts()).build()
+    suspend fun funnelCounts(): Response = Response.ok(useCase.funnelCounts()).build()
 }

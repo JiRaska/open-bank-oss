@@ -28,4 +28,12 @@ interface OnboardingRepository {
 
     /** Returns records stuck in early KYC stages since before [cutoff]. Used by abandoned-registration cleanup. */
     suspend fun listStuckBefore(stages: List<FunnelStage>, cutoff: java.time.Instant): List<OnboardingRecord>
+
+    /**
+     * GDPR Art. 17 — Right to Erasure.
+     * Anonymises the onboarding read-model row for the given party by overwriting PII fields
+     * (legalName, email) with sentinel values.  The row is retained so funnel metrics stay
+     * consistent; only identifiable data is removed.
+     */
+    suspend fun eraseByPartyId(partyId: UUID)
 }

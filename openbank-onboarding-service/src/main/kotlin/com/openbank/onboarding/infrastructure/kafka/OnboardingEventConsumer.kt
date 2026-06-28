@@ -42,7 +42,41 @@ class OnboardingEventConsumer(private val clock: Clock) {
 
     @Incoming("party-events-in")
     suspend fun consumePartyEvent(payload: String) {
-        val event = parseEvent(payload, "party-events-in") { parsePartyEvent(it) } ?: return
+        // Fast-path: intercept PARTY_ERASED before routing through parsePartyEvent, which
+        // returns null for unknown event types and would silently drop the erasure request.
+        // This mirrors the pattern used in kyc-service's PartyEventConsumer (GDPR Art. 17).
+        val node = try {
+            objectMapper.readTree(payload)
+        } catch (e: Exception) {
+            log.errorf(e, "[party-events-in] Failed to parse JSON payload: %.200s", payload)
+            return
+        }
+
+        if (node.path("eventType").asText() == "PARTY_ERASED") {
+            val partyId = node.path("partyId").asUuid()
+            if (partyId == null) {
+                log.warnf("[party-events-in] PARTY_ERASED without valid partyId, skipping: %.200s", payload)
+                return
+            }
+            try {
+                projection.eraseParty(partyId)
+                log.infof("[party-events-in] GDPR Art. 17: erased onboarding read-model for party %s", partyId)
+            } catch (e: Exception) {
+                log.errorf(
+                    e,
+                    "[party-events-in] GDPR Art. 17: failed to erase onboarding read-model for party %s",
+                    partyId,
+                )
+            }
+            return
+        }
+
+        val event = try {
+            parsePartyEvent(node)
+        } catch (e: Exception) {
+            log.errorf(e, "[party-events-in] Failed to map event: %.200s", payload)
+            return
+        } ?: return
         project(event, "party-events-in")
     }
 
