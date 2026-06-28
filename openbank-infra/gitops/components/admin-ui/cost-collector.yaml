@@ -106,7 +106,7 @@ spec:
           # the piped `kubectl apply` needs a shell-bearing image like this one.
           containers:
             - name: collect-publish
-              image: alpine/k8s:1.34.1
+              image: docker.io/alpine/k8s:1.34.1
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true

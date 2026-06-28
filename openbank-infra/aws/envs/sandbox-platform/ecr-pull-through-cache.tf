@@ -28,18 +28,23 @@ resource "aws_ecr_pull_through_cache_rule" "quay" {
   upstream_registry_url = "quay.io"
 }
 
-# docker.io pull-through cache — eliminates NAT for Testcontainers images
-# (postgres, redpanda, valkey, apicurio) pulled by every CI job. These are the
-# dominant registry-cache NAT spikes (D1 anomaly "registry-cache > 50 GB/day").
-# Anonymous Docker Hub pulls are rate-limited per-IP; ECR pull-through pulls
-# server-side so our runner IPs are not rate-limited.
-# Flow: dind --registry-mirror → ECR pull-through → docker.io upstream (ECR-side)
-#       → ecr.dkr VPC endpoint → runner pod. Zero NAT after first cache warm.
-# credential_arn omitted: Docker Hub public images work without auth for ECR
-# pull-through (ECR fetches anonymously on AWS-side IPs, not runner IPs).
+# docker.io pull-through cache — eliminates NAT for docker.io image pulls
+# (Testcontainers: postgres, redpanda, valkey, apicurio; k8s workloads: nginx,
+# valkey, openpolicyagent/opa, temporalio, etc.).
+#
+# Docker Hub requires authentication for ECR pull-through even for public images
+# (UnsupportedUpstreamRegistryException without credential_arn). PAT stored in
+# Secrets Manager (jiraska account, read:packages scope). ECR fetches upstream
+# server-side so our runner/node IPs never hit Docker Hub rate limits.
+#
+# Flow: Kyverno rewrites docker.io/ refs → ECR docker-hub/ prefix at pod
+# admission; ECR pull-through serves from cache after first pull; first pull
+# fetches from registry-1.docker.io server-side using the PAT.
+# Zero NAT after first cache warm per tag.
 resource "aws_ecr_pull_through_cache_rule" "docker" {
   ecr_repository_prefix = "docker-hub"
   upstream_registry_url = "registry-1.docker.io"
+  credential_arn        = "arn:aws:secretsmanager:eu-north-1:265175468565:secret:ecr-pullthroughcache/dockerhub-D4ZCq3"
 }
 
 # ghcr.io pull-through cache — PAT stored in Secrets Manager (classic token, read:packages).

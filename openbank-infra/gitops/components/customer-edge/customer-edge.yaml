@@ -197,7 +197,7 @@ spec:
         # @Authorize CustomerEdgeResource endpoint. Without it, authz.enforce=true fails
         # closed (503 on /accounts etc.). Bundle mounted from customer-edge-opa-bundle.
         - name: opa
-          image: openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.17.0
           imagePullPolicy: IfNotPresent
           args:
             - run

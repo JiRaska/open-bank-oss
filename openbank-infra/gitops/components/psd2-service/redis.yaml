@@ -20,7 +20,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: redis
-          image: valkey/valkey:8-alpine
+          image: docker.io/valkey/valkey:8-alpine
           args: ["--save", "", "--appendonly", "no"]
           ports: [{name: redis, containerPort: 6379}]
           securityContext:

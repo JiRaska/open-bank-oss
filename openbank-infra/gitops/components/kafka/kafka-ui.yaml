@@ -32,7 +32,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kafka-ui
-          image: provectuslabs/kafka-ui:v0.7.2
+          image: docker.io/provectuslabs/kafka-ui:v0.7.2
           ports:
             - name: http
               containerPort: 8080

@@ -46,7 +46,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: audit
-              image: curlimages/curl:8.7.1
+              image: docker.io/curlimages/curl:8.7.1
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
