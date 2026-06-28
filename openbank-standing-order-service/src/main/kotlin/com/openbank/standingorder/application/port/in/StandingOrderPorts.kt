@@ -4,7 +4,9 @@
 
 package com.openbank.standingorder.application.port.`in`
 
-import com.openbank.standingorder.domain.model.*
+import com.openbank.standingorder.domain.model.Frequency
+import com.openbank.standingorder.domain.model.PaymentType
+import com.openbank.standingorder.domain.model.StandingOrder
 import java.time.LocalDate
 import java.util.UUID
 
@@ -36,4 +38,10 @@ interface StandingOrderUseCase {
     suspend fun listDueForExecution(asOf: LocalDate): List<StandingOrder>
 
     suspend fun executeOrders(asOf: LocalDate): Int
+
+    /** Rail service confirms a payment was dispatched successfully — resets consecutive failure count. */
+    suspend fun confirmExecution(id: UUID): StandingOrder
+
+    /** Rail service reports a payment dispatch failed — increments failure count, transitions to FAILED after 3. */
+    suspend fun recordFailure(id: UUID): StandingOrder
 }

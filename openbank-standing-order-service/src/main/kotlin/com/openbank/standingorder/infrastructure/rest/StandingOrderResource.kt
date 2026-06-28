@@ -9,11 +9,13 @@ import com.openbank.standingorder.application.port.`in`.CreateStandingOrderComma
 import com.openbank.standingorder.application.port.`in`.StandingOrderUseCase
 import com.openbank.standingorder.infrastructure.rest.dto.CreateStandingOrderRequest
 import com.openbank.standingorder.infrastructure.rest.dto.toResponse
+import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.NotFoundException
+import jakarta.ws.rs.PATCH
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -68,6 +70,18 @@ class StandingOrderResource(private val useCase: StandingOrderUseCase) {
         useCase.cancel(id, actor(actor))
         return Response.noContent().build()
     }
+
+    @PATCH
+    @Path("/{id}/record-execution")
+    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    suspend fun recordExecution(@PathParam("id") id: UUID): Response =
+        Response.ok(useCase.confirmExecution(id).toResponse()).build()
+
+    @PATCH
+    @Path("/{id}/record-failure")
+    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    suspend fun recordFailure(@PathParam("id") id: UUID): Response =
+        Response.ok(useCase.recordFailure(id).toResponse()).build()
 
     // Attribute the lifecycle action to the customer the edge forwarded (X-Customer-Party-Id),
     // not a blanket "system" — so the order's own history records who paused/cancelled it.

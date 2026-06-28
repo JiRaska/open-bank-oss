@@ -65,4 +65,23 @@ data class StandingOrder(
         Frequency.QUARTERLY -> from.plusMonths(3)
         Frequency.ANNUALLY -> from.plusYears(1)
     }
+
+    fun recordFailure(now: Instant): StandingOrder {
+        require(status == StandingOrderStatus.ACTIVE) { "Cannot record failure for $status order" }
+        val newFailureCount = failureCount + 1
+        return copy(
+            failureCount = newFailureCount,
+            updatedAt = now,
+            status = if (newFailureCount >= MAX_CONSECUTIVE_FAILURES) StandingOrderStatus.FAILED else status,
+        )
+    }
+
+    fun confirmExecution(now: Instant): StandingOrder {
+        require(status == StandingOrderStatus.ACTIVE) { "Cannot confirm execution for $status order" }
+        return copy(failureCount = 0, updatedAt = now)
+    }
+
+    companion object {
+        const val MAX_CONSECUTIVE_FAILURES = 3
+    }
 }

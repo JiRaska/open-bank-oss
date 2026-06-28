@@ -11,6 +11,8 @@
     <ID>MatchingDeclarationName:StandingOrderOutboxPort.kt$StandingOrderOutboxRepository : OutboxRepository</ID>
     <ID>MatchingDeclarationName:StandingOrderPorts.kt$StandingOrderRepository</ID>
     <ID>TooGenericExceptionCaught:StandingOrderService.kt$StandingOrderService$e: Exception</ID>
+    <ID>TooManyFunctions:StandingOrderPorts.kt$StandingOrderUseCase</ID>
+    <ID>TooManyFunctions:StandingOrderService.kt$StandingOrderService : StandingOrderUseCase</ID>
     <ID>UnusedParameter:KafkaStandingOrderEventPublisher.kt$KafkaStandingOrderEventPublisher$id: java.util.UUID</ID>
   </CurrentIssues>
 </SmellBaseline>

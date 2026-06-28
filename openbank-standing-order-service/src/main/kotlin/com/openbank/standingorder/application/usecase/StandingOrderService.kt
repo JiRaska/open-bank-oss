@@ -97,8 +97,39 @@ class StandingOrderService(
         return scheduled
     }
 
+    override suspend fun confirmExecution(id: UUID): StandingOrder {
+        val order = repo.findById(id) ?: error("Standing order not found: $id")
+        if (order.failureCount == 0) return order
+        return repo.save(order.confirmExecution(Instant.now(clock)))
+    }
+
+    override suspend fun recordFailure(id: UUID): StandingOrder {
+        val order = repo.findById(id) ?: error("Standing order not found: $id")
+        val now = Instant.now(clock)
+        val updated = order.recordFailure(now)
+        return if (updated.status == StandingOrderStatus.FAILED) {
+            val outboxMsg = OutboxMessage(
+                eventId = Ids.newId(),
+                aggregateId = order.id,
+                eventType = EVENT_STANDING_ORDER_FAILED,
+                payload = objectMapper.writeValueAsString(
+                    mapOf(
+                        "orderId" to order.id,
+                        "partyId" to order.partyId,
+                        "failureCount" to updated.failureCount,
+                        "status" to updated.status,
+                    ),
+                ),
+            )
+            repo.saveWithExecution(updated, outboxMsg)
+        } else {
+            repo.save(updated)
+        }
+    }
+
     companion object {
         const val EVENT_STANDING_ORDER_DUE = "standing-order.due.v1"
+        const val EVENT_STANDING_ORDER_FAILED = "standing-order.failed.v1"
         private val log = Logger.getLogger(StandingOrderService::class.java)
     }
 }

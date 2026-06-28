@@ -103,6 +103,61 @@ class StandingOrderServiceTest {
     }
 
     @Test
+    fun `recordFailure() increments failureCount and saves`(): Unit = runBlocking {
+        val id = UUID.fromString("00000000-0000-0000-0000-000000000501")
+        val order = standingOrder(id = id, status = StandingOrderStatus.ACTIVE)
+        coEvery { repo.findById(id) } returns order
+        val saved = slot<StandingOrder>()
+        coEvery { repo.save(capture(saved)) } answers { saved.captured }
+
+        val result = service.recordFailure(id)
+
+        assertThat(result.failureCount).isEqualTo(1)
+        assertThat(result.status).isEqualTo(StandingOrderStatus.ACTIVE)
+    }
+
+    @Test
+    fun `recordFailure() transitions to FAILED and emits outbox event after 3 failures`(): Unit = runBlocking {
+        val id = UUID.fromString("00000000-0000-0000-0000-000000000502")
+        val order = standingOrder(id = id, status = StandingOrderStatus.ACTIVE, failureCount = 2)
+        coEvery { repo.findById(id) } returns order
+        val savedOrder = slot<StandingOrder>()
+        coEvery { repo.saveWithExecution(capture(savedOrder), any()) } answers { savedOrder.captured }
+
+        val result = service.recordFailure(id)
+
+        assertThat(result.failureCount).isEqualTo(3)
+        assertThat(result.status).isEqualTo(StandingOrderStatus.FAILED)
+        coVerify(exactly = 1) { repo.saveWithExecution(any(), any()) }
+    }
+
+    @Test
+    fun `confirmExecution() resets failureCount to zero`(): Unit = runBlocking {
+        val id = UUID.fromString("00000000-0000-0000-0000-000000000503")
+        val order = standingOrder(id = id, status = StandingOrderStatus.ACTIVE, failureCount = 2)
+        coEvery { repo.findById(id) } returns order
+        val saved = slot<StandingOrder>()
+        coEvery { repo.save(capture(saved)) } answers { saved.captured }
+
+        val result = service.confirmExecution(id)
+
+        assertThat(result.failureCount).isEqualTo(0)
+        coVerify(exactly = 1) { repo.save(any()) }
+    }
+
+    @Test
+    fun `confirmExecution() is a no-op when failureCount is already 0`(): Unit = runBlocking {
+        val id = UUID.fromString("00000000-0000-0000-0000-000000000504")
+        val order = standingOrder(id = id, status = StandingOrderStatus.ACTIVE, failureCount = 0)
+        coEvery { repo.findById(id) } returns order
+
+        val result = service.confirmExecution(id)
+
+        assertThat(result.failureCount).isEqualTo(0)
+        coVerify(exactly = 0) { repo.save(any()) }
+    }
+
+    @Test
     fun `executeOrders() skips failing orders and continues processing remaining ones`(): Unit = runBlocking {
         val order1 = standingOrder(
             id = UUID.fromString("00000000-0000-0000-0000-000000000401"),
@@ -142,6 +197,7 @@ class StandingOrderServiceTest {
         id: UUID = UUID.fromString("00000000-0000-0000-0000-000000000301"),
         status: StandingOrderStatus = StandingOrderStatus.ACTIVE,
         nextExecutionDate: LocalDate = LocalDate.of(2026, 2, 1),
+        failureCount: Int = 0,
     ) = StandingOrder(
         id = id,
         idempotencyKey = "idem-existing",
@@ -160,7 +216,7 @@ class StandingOrderServiceTest {
         nextExecutionDate = nextExecutionDate,
         lastExecutionDate = null,
         executionCount = 0,
-        failureCount = 0,
+        failureCount = failureCount,
         status = status,
         createdAt = FIXED_NOW,
         updatedAt = FIXED_NOW,

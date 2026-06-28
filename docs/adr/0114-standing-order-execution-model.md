@@ -1,8 +1,8 @@
-# 113. Standing order execution model — Temporal-driven daily sweep (NOT YET IMPLEMENTED)
+# 114. Standing order execution model — outbox-driven daily sweep
 
 Date: 2026-06-25
 Author: Claude (paired with Jiří Raška)
-Status: Proposed
+Status: Accepted
 
 ## Context
 
@@ -12,57 +12,55 @@ DOMESTIC, INTERNAL). The domain model is complete: `StandingOrder.recordExecutio
 `nextExecutionDate`, decrements end-of-series detection, and transitions to `COMPLETED` when
 `endDate` is passed.
 
-**However, no execution engine exists.** `StandingOrderUseCase.listDueForExecution(asOf: LocalDate)`
-is defined in the port-in interface and implemented in `StandingOrderService`, but as of
-2026-06-25 no caller invokes it — not a Temporal workflow, not a Quartz job, not any other scheduler.
-Standing orders can be created, paused, resumed and cancelled, but they never execute.
+**However, no execution engine existed.** `StandingOrderUseCase.listDueForExecution(asOf: LocalDate)`
+was defined but no caller invoked it. Standing orders could be created, paused, resumed and cancelled,
+but they never executed.
 
-This ADR decides how the execution engine will be built.
+This ADR decides how the execution engine is built.
 
 ## Decision
 
-We will implement standing order execution as a **Temporal durable workflow** (ADR-0101), triggered
-by a daily schedule at **03:00 UTC**.
+Standing order execution is implemented as a **Quartz-scheduled outbox sweep** (simpler than Temporal
+for this use case; Temporal's durability is already used for payment rail workflows — ADR-0101).
 
-**1. Daily sweep workflow.**
-A Temporal `CronSchedule("0 3 * * *")` workflow calls `listDueForExecution(today)` and fans out
-one child workflow per due order. The sweep is idempotent: if re-triggered on the same day, child
-workflows deduplicate via `idempotencyKey = "so-{id}-{nextExecutionDate}"`.
+**1. Daily sweep.**
+`StandingOrderExecutionScheduler` runs at **03:00 UTC** (`"0 0 3 * * ?"`) using Quarkus Scheduler with
+`SKIP` concurrency. It calls `StandingOrderService.executeOrders(today)`, which finds all ACTIVE orders
+due on or before today.
 
-**2. Payment dispatch per child workflow.**
-Each child workflow dispatches to the appropriate rail via REST activity:
-- `SEPA_CREDIT` → `POST /api/v1/sepa-payments` on sepa-payment-service
-- `DOMESTIC` → `POST /api/v1/domestic-payments` on domestic-payment-service
-- `INTERNAL` → direct ledger transfer (balance-service debit + credit, no payment rail)
+**2. Atomic dispatch.**
+For each due order, the service atomically:
+(a) advances `nextExecutionDate` via `StandingOrder.recordExecution()`,
+(b) writes a `standing-order.due.v1` outbox event with `idempotencyKey = "so-exec-{id}-{date}"`.
+Both operations commit in a single DB transaction — the order can never be advanced without the event
+being queued for delivery.
 
-**3. Success path.**
-On HTTP 2xx from the rail service, the child workflow calls
-`standing-order-service PATCH /api/v1/standing-orders/{id}/record-execution` to advance
-`nextExecutionDate` and increment `executionCount`. If `endDate` is reached, status transitions to
-`COMPLETED`.
+**3. Rail dispatch.**
+Downstream consumers (sepa-payment, domestic-payment) subscribe to `openbank.standing-orders.order.event`
+and initiate payments keyed on the idempotency key. Exactly-once delivery is guaranteed by the consumer
+idempotency store.
 
 **4. Failure handling.**
-On rail rejection (insufficient funds, validation error) or timeout, the child workflow increments
-`failureCount`. After 3 consecutive failures the order transitions to `FAILED` and emits
-`standing-order.failed.v1` → notification-service sends an alert to the party.
+Rail services call back `PATCH /api/v1/standing-orders/{id}/record-failure` when a payment is rejected.
+After **3 consecutive failures** the order transitions to `FAILED` and `standing-order.failed.v1` is
+emitted so notification-service can alert the party.
+Rail services call `PATCH /api/v1/standing-orders/{id}/record-execution` on confirmed success to reset
+the consecutive failure counter.
 
 **5. SCA exemption.**
-Standing orders qualify as PSD2 recurring transaction SCA exemption (Art. 97(3)(c)) after the
-first SCA-authenticated setup. The dispatch payload must carry `scaExemption = RECURRING`.
-
-**6. Status after this ADR is implemented.**
-This ADR will be marked **Accepted** once the Temporal workflow and the
-`record-execution` endpoint exist and pass the boot smoke test.
+The dispatch payload carries `scaExemption = RECURRING` (PSD2 RTS Art. 97(3)(c) — recurring transaction
+exemption after the first SCA-authenticated setup).
 
 ## Alternatives considered
 
-- **Quartz `@Scheduled` inside the service.** Simple, but not tolerant to pod restarts mid-sweep
-  of hundreds of orders; no built-in retry/history visibility.
+- **Temporal durable workflow per sweep.** Offers full replay history and pod-restart tolerance, but
+  adds a Temporal task queue, worker registrar, and activity wrappers for a simple daily sweep where
+  the outbox already provides at-least-once delivery and the scheduler SKIP concurrency guard prevents
+  overlap. Reconsidered as ADR-0101 complexity; deferred unless sub-daily frequency is needed.
 - **Kafka delay topic.** Kafka does not natively support scheduled delivery; requires an external
   scheduler anyway.
 - **Temporal Timer per order (perpetual workflow).** Each order gets its own long-running workflow
-  sleeping until next execution date. Scales well but operationally complex; chosen approach is
-  simpler for initial implementation.
+  sleeping until next execution date. Operationally complex for initial implementation.
 
 ## Consequences
 

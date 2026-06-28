@@ -90,6 +90,8 @@ quarkus:
   quarkus:
     oidc:
       enabled: false
+    management:
+      enabled: false
 openbank:
   rate-limit:
     enabled: true

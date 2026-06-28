@@ -82,6 +82,44 @@ class StandingOrderTest {
         assertThat(updated.status).isEqualTo(StandingOrderStatus.COMPLETED)
     }
 
+    @Test
+    fun `recordFailure() increments failureCount`() {
+        val order = standingOrder(status = StandingOrderStatus.ACTIVE, failureCount = 0)
+
+        val updated = order.recordFailure(FIXED_NOW)
+
+        assertThat(updated.failureCount).isEqualTo(1)
+        assertThat(updated.status).isEqualTo(StandingOrderStatus.ACTIVE)
+    }
+
+    @Test
+    fun `recordFailure() transitions to FAILED after MAX_CONSECUTIVE_FAILURES`() {
+        val order = standingOrder(status = StandingOrderStatus.ACTIVE, failureCount = 2)
+
+        val updated = order.recordFailure(FIXED_NOW)
+
+        assertThat(updated.failureCount).isEqualTo(3)
+        assertThat(updated.status).isEqualTo(StandingOrderStatus.FAILED)
+    }
+
+    @Test
+    fun `recordFailure() throws when order is not ACTIVE`() {
+        val order = standingOrder(status = StandingOrderStatus.PAUSED)
+
+        assertThatThrownBy { order.recordFailure(FIXED_NOW) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `confirmExecution() resets failureCount to zero`() {
+        val order = standingOrder(status = StandingOrderStatus.ACTIVE, failureCount = 2)
+
+        val updated = order.confirmExecution(FIXED_NOW)
+
+        assertThat(updated.failureCount).isEqualTo(0)
+        assertThat(updated.status).isEqualTo(StandingOrderStatus.ACTIVE)
+    }
+
     private fun standingOrder(
         id: UUID = UUID.fromString("00000000-0000-0000-0000-000000000001"),
         idempotencyKey: String = "idempotency-key",
