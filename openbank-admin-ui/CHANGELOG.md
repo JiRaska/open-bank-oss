@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.34.2](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.34.1...admin-ui-v0.34.2) (2026-06-28)
+
+
+### Bug Fixes
+
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2344](https://github.com/JiRaska/open-bank/issues/2344)) ([88d1d8a](https://github.com/JiRaska/open-bank/commit/88d1d8ac2f743630e1caa9be80f0a399e6e79ff2))
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2358](https://github.com/JiRaska/open-bank/issues/2358)) ([9e47bcc](https://github.com/JiRaska/open-bank/commit/9e47bcc7e4a1a1a6c40bd2daafbd1a2b041df018))
+
 ## [0.34.1](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.34.0...admin-ui-v0.34.1) (2026-06-28)
 
 
