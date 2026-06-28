@@ -49,12 +49,7 @@ data class PaymentSaga(
         get() = STATE_MACHINE.isTerminal(state)
 
     companion object {
-        fun start(
-            transactionId: UUID,
-            idempotencyKey: String,
-            clock: Clock,
-            id: UUID = Ids.newId(),
-        ): PaymentSaga {
+        fun start(transactionId: UUID, idempotencyKey: String, clock: Clock, id: UUID = Ids.newId()): PaymentSaga {
             val now = Instant.now(clock)
             return PaymentSaga(
                 id = id,
