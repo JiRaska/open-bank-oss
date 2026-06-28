@@ -35,4 +35,13 @@ interface AmlCaseRepository {
     ): List<AmlCase>
 
     suspend fun update(amlCase: AmlCase, event: OutboxMessage): AmlCase
+
+    /**
+     * Anonymizes PII in all AML cases for the given party (GDPR Art. 17 right of erasure).
+     *
+     * Sets [AmlCase.customerReference] to `"ERASED-<partyId>"` and nulls [AmlCase.matchedEntity]
+     * and [AmlCase.alertDetail] so that no personal data is retained. Returns the number of rows
+     * affected. Idempotent: re-running after a previous erasure leaves rows unchanged.
+     */
+    suspend fun anonymizeByPartyId(partyId: UUID): Int
 }

@@ -12,21 +12,21 @@ enum class AmlCaseStatus {
     UNDER_REVIEW,
     CLEARED,
     BLOCKED,
-    ESCALATED
+    ESCALATED,
 }
 
 enum class ScreeningType {
     CUSTOMER_ONBOARDING,
     TRANSACTION_MONITORING,
     PERIODIC_REVIEW,
-    MANUAL_INVESTIGATION
+    MANUAL_INVESTIGATION,
 }
 
 enum class AmlRiskLevel {
     LOW,
     MEDIUM,
     HIGH,
-    CRITICAL
+    CRITICAL,
 }
 
 data class AmlCase(
@@ -48,14 +48,14 @@ data class AmlCase(
     val screenedAt: Instant,
     val decidedAt: Instant?,
     val createdAt: Instant,
-    val updatedAt: Instant
+    val updatedAt: Instant,
 ) {
     fun transitionTo(
         targetStatus: AmlCaseStatus,
         decisionReason: String?,
         assignedAnalyst: String?,
         decidedBy: String,
-        now: Instant = Instant.EPOCH
+        now: Instant = Instant.EPOCH,
     ): AmlCase {
         require(canTransitionTo(targetStatus)) { "Invalid AML case status transition: $status -> $targetStatus" }
         require(decidedBy.isNotBlank()) { "decidedBy is required" }
@@ -69,7 +69,7 @@ data class AmlCase(
             assignedAnalyst = assignedAnalyst?.trim()?.ifBlank { null },
             decidedBy = decidedBy.trim(),
             decidedAt = now,
-            updatedAt = now
+            updatedAt = now,
         )
     }
 
@@ -78,22 +78,23 @@ data class AmlCase(
             AmlCaseStatus.UNDER_REVIEW,
             AmlCaseStatus.CLEARED,
             AmlCaseStatus.BLOCKED,
-            AmlCaseStatus.ESCALATED
+            AmlCaseStatus.ESCALATED,
         )
 
         AmlCaseStatus.UNDER_REVIEW -> targetStatus in setOf(
             AmlCaseStatus.CLEARED,
             AmlCaseStatus.BLOCKED,
-            AmlCaseStatus.ESCALATED
+            AmlCaseStatus.ESCALATED,
         )
 
         AmlCaseStatus.ESCALATED -> targetStatus in setOf(
             AmlCaseStatus.UNDER_REVIEW,
             AmlCaseStatus.CLEARED,
-            AmlCaseStatus.BLOCKED
+            AmlCaseStatus.BLOCKED,
         )
 
         AmlCaseStatus.CLEARED,
-        AmlCaseStatus.BLOCKED -> false
+        AmlCaseStatus.BLOCKED,
+        -> false
     }
 }

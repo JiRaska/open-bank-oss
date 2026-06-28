@@ -82,4 +82,15 @@ class AmlCaseRepositoryImpl(private val outboxRepository: AmlOutboxRepositoryImp
             .chain { _ -> outboxRepository.persistInTransaction(event) }
             .replaceWith(amlCase)
     }.awaitSuspending()
+
+    // GDPR Art. 17: right of erasure — null out PII fields and replace customerReference with a
+    // non-identifying sentinel so the case row itself (required for audit/SAR trails) survives.
+    override suspend fun anonymizeByPartyId(partyId: UUID): Int = Panache.withTransaction {
+        update(
+            "customerReference = concat('ERASED-', cast(partyId as string))," +
+                " matchedEntity = null, alertDetail = null" +
+                " where partyId = ?1",
+            partyId,
+        )
+    }.awaitSuspending().toInt()
 }

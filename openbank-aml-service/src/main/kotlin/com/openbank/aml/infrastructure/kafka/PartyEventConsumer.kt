@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.aml.application.port.`in`.AmlCaseUseCase
 import com.openbank.aml.application.port.`in`.CreateAmlCaseCommand
 import com.openbank.aml.application.port.`in`.UpdateAmlDecisionCommand
+import com.openbank.aml.application.port.out.AmlCaseRepository
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.AmlRiskLevel
 import com.openbank.aml.domain.model.ScreeningType
@@ -25,6 +26,11 @@ import java.util.UUID
  *
  * Idempotent: the case idempotency key is "<partyId>:CUSTOMER_ONBOARDING", so a redelivered
  * PARTY_CREATED reuses the existing case; the auto-clear is skipped once the case is terminal.
+ *
+ * PARTY_ERASED: anonymises PII in all AML cases for the party (GDPR Art. 17 right of erasure).
+ * The case row itself is retained for audit/SAR obligations; only the personal data fields are
+ * nulled and customerReference is replaced with "ERASED-<partyId>".
+ *
  * Poison-pill safe: failures are logged and acked.
  *
  * Auto-clear is sandbox-only (openbank.aml.auto-clear, default false). Production keeps the
@@ -33,6 +39,7 @@ import java.util.UUID
 @ApplicationScoped
 class PartyEventConsumer(
     private val amlUseCase: AmlCaseUseCase,
+    private val amlCaseRepository: AmlCaseRepository,
     private val objectMapper: ObjectMapper,
     @ConfigProperty(name = "openbank.aml.auto-clear", defaultValue = "false")
     private val autoClear: Boolean,
@@ -41,12 +48,29 @@ class PartyEventConsumer(
 
     @Incoming("party-events-in")
     suspend fun consume(payload: String) {
-        try {
-            val node = objectMapper.readTree(payload)
-            if (node.path("eventType").asText() != "PARTY_CREATED") return
-            if (node.path("partyType").asText("") != "INDIVIDUAL") return
-            val partyId = runCatching { UUID.fromString(node.path("partyId").asText()) }.getOrNull() ?: return
+        val node = try {
+            objectMapper.readTree(payload)
+        } catch (e: Exception) {
+            log.errorf(e, "[party-events-in] Failed to parse JSON payload: %.200s", payload)
+            return
+        }
 
+        val eventType = node.path("eventType").asText()
+        val partyId = runCatching { UUID.fromString(node.path("partyId").asText()) }.getOrNull()
+
+        when (eventType) {
+            "PARTY_CREATED" -> handleCreated(partyId, node, payload)
+            "PARTY_ERASED" -> handleErased(partyId, payload)
+        }
+    }
+
+    private suspend fun handleCreated(partyId: UUID?, node: com.fasterxml.jackson.databind.JsonNode, payload: String) {
+        if (node.path("partyType").asText("") != "INDIVIDUAL") return
+        if (partyId == null) {
+            log.warnf("[party-events-in] PARTY_CREATED without a valid partyId, skipping: %.200s", payload)
+            return
+        }
+        try {
             val case = amlUseCase.createCase(
                 CreateAmlCaseCommand(
                     idempotencyKey = "$partyId:CUSTOMER_ONBOARDING",
@@ -61,7 +85,7 @@ class PartyEventConsumer(
                     matchedEntity = null,
                 ),
             )
-            log.infof("Opened onboarding AML case %s for party %s", case.id, partyId)
+            log.infof("[party-events-in] Opened onboarding AML case %s for party %s", case.id, partyId)
 
             if (autoClear && case.status != AmlCaseStatus.CLEARED && case.status != AmlCaseStatus.BLOCKED) {
                 amlUseCase.updateDecision(
@@ -73,10 +97,27 @@ class PartyEventConsumer(
                         decidedBy = "SANDBOX_SYSTEM",
                     ),
                 )
-                log.infof("Auto-cleared AML case %s for party %s", case.id, partyId)
+                log.infof("[party-events-in] Auto-cleared AML case %s for party %s", case.id, partyId)
             }
         } catch (e: Exception) {
-            log.errorf(e, "Failed to handle party event: %.300s", payload)
+            log.errorf(e, "[party-events-in] Failed to handle PARTY_CREATED for party %s", partyId)
+        }
+    }
+
+    private suspend fun handleErased(partyId: UUID?, payload: String) {
+        if (partyId == null) {
+            log.warnf("[party-events-in] PARTY_ERASED without valid partyId, skipping: %.200s", payload)
+            return
+        }
+        try {
+            val count = amlCaseRepository.anonymizeByPartyId(partyId)
+            log.infof(
+                "[party-events-in] GDPR Art. 17: anonymised PII in %d AML case(s) for erased party %s",
+                count,
+                partyId,
+            )
+        } catch (e: Exception) {
+            log.errorf(e, "[party-events-in] Failed to anonymise AML PII for party %s", partyId)
         }
     }
 }

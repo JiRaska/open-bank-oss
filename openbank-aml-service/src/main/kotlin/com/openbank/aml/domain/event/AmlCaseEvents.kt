@@ -23,7 +23,7 @@ data class AmlCaseCreatedEvent(
     val status: AmlCaseStatus,
     val alertCode: String,
     val matchedEntity: String?,
-    val occurredAt: Instant
+    val occurredAt: Instant,
 )
 
 data class AmlCaseStatusChangedEvent(
@@ -34,7 +34,7 @@ data class AmlCaseStatusChangedEvent(
     val decisionReason: String?,
     val assignedAnalyst: String?,
     val decidedBy: String?,
-    val occurredAt: Instant
+    val occurredAt: Instant,
 )
 
 fun AmlCase.toCreatedEvent(now: Instant = Instant.EPOCH) = AmlCaseCreatedEvent(
@@ -49,5 +49,5 @@ fun AmlCase.toCreatedEvent(now: Instant = Instant.EPOCH) = AmlCaseCreatedEvent(
     status = status,
     alertCode = alertCode,
     matchedEntity = matchedEntity,
-    occurredAt = now
+    occurredAt = now,
 )

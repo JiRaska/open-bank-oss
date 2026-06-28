@@ -208,6 +208,13 @@ CI is path-scoped (only changed services build). Domain layer has **zero** frame
   avg — kube-system". Required VPC endpoints for a healthy EKS cluster: S3 (Gateway), STS, ECR
   (dkr+api), EC2, CodeArtifact (api+repositories). Verify: `aws ec2 describe-vpc-endpoints --region
   <region> --query 'VpcEndpoints[*].ServiceName'`.
+- **ECR pull-through with `credentialArn` requires a Secrets Manager resource policy.** Adding
+  `credential_arn` to `aws_ecr_pull_through_cache_rule` is not enough — the ECR service needs
+  `secretsmanager:GetSecretValue` on the secret via a resource-based policy (`aws_secretsmanager_secret_policy`).
+  Without it every pull returns "not found" even though the rule and node IAM permissions are correct.
+  Node IAM roles are NOT involved — ECR calls Secrets Manager server-side. Always create the secret
+  policy alongside the pull-through rule. Also: Docker Hub requires credentials even for public
+  images (`UnsupportedUpstreamRegistryException` without `credential_arn`).
 
 ### GitOps merge conflicts — image tags
 - **NEVER `git checkout --theirs` blindly for image tags.** `--theirs` (main) may have an older
