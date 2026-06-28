@@ -230,7 +230,11 @@ jobs:
           # --continue reports all failures before exiting non-zero.
           TASKS=()
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
-            TASKS+=(":${svc}:quarkusBuild")
+            # cyclonedxBom alongside quarkusBuild so every service's image gets its
+            # CycloneDX SBOM baked in (served live at /q/openbank/sbom by libs
+            # SbomResource). Fleet-wide via this central loop — no per-service
+            # Dockerfile edits, no separate sweep.
+            TASKS+=(":${svc}:quarkusBuild" ":${svc}:cyclonedxBom")
           done
 
           echo "==> Building ${#TASKS[@]} service(s) via single Gradle invocation (--parallel --max-workers=4)"
@@ -281,6 +285,17 @@ jobs:
             # and treats zero-indented heredoc lines as invalid YAML nodes).
             cp "${GITHUB_WORKSPACE}/.github/workflows/Dockerfile.deploy" \
               "${ctx}/Dockerfile"
+            # Bake the CycloneDX SBOM (if cyclonedxBom produced one) so the running
+            # service serves it live at /q/openbank/sbom (libs SbomResource). Best-
+            # effort: a service without the report just ships without it and the
+            # endpoint returns not_generated (admin-ui falls back to the bundle).
+            if [ -f "${svc}/build/reports/bom.json" ]; then
+              mkdir -p "${ctx}/sbom"
+              cp "${svc}/build/reports/bom.json" "${ctx}/sbom/bom.json"
+              chmod a+r "${ctx}/sbom/bom.json"
+              echo "COPY sbom/bom.json /app/sbom/bom.json" >> "${ctx}/Dockerfile"
+              echo "ENV OPENBANK_SBOM_PATH=/app/sbom/bom.json" >> "${ctx}/Dockerfile"
+            fi
             # EXPOSE is written dynamically after the static COPY/ENTRYPOINT lines.
             echo "EXPOSE ${port}" >> "${ctx}/Dockerfile"
 
