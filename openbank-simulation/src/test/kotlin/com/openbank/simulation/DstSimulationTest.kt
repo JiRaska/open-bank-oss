@@ -19,7 +19,11 @@ import org.junit.jupiter.api.Test
 class DstSimulationTest {
 
     private val steps = 50
-    private val seeds = 300
+
+    // ADR-0115: tunable via `-Pseed.count=N` (forwarded as the `seed.count` system property by the
+    // Gradle test task) for deep manual/nightly runs; defaults high enough that the adversarial
+    // dedup-gap defect is reliably caught by the negative tests below.
+    private val seeds = System.getProperty("seed.count")?.toIntOrNull() ?: 300
 
     @Test
     fun `happy path holds every invariant across many seeds`() {

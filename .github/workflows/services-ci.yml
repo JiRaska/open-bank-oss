@@ -116,6 +116,18 @@ jobs:
                   CHANGED="$CHANGED $m"
                 fi
               done
+              # DST harness dependency edge (ADR-0115). openbank-simulation validates money-path
+              # invariants against the ledger/balance/transaction domains, but this detector is
+              # per-directory, NOT dependency-aware: a change to one of those services would build
+              # only that service and silently skip the simulation that depends on it. Add the edge
+              # explicitly so the invariant checker runs on every money-path change (it already runs
+              # on its own edits, on push to main, and nightly). Code-global changes (libs etc.)
+              # already build everything incl. the simulation, so this only matters per-module.
+              if grep -qE '(^| )openbank-(ledger|balance|transaction)-service( |$)' <<< " $CHANGED " \
+                 && ! grep -qE '(^| )openbank-simulation( |$)' <<< " $CHANGED "; then
+                echo "Decision: money-path change -> add openbank-simulation (DST harness, ADR-0115)."
+                CHANGED="$CHANGED openbank-simulation"
+              fi
               # A change to the CI recipe itself (services-ci / _service-ci) can NOT
               # alter any service's compile/test inputs, so it does NOT warrant a
               # 28-module fan-out -- that is what turned the trivial #547 cache-flag

@@ -2,7 +2,8 @@
 
 Date: 2026-06-25
 Author: Claude (paired with Jiří Raška)
-Status: Proposed
+Status: Accepted (2026-06-28 — CI gate wired in `services-ci.yml`: DST harness runs on every
+money-path change via a dependency edge to `openbank-simulation`, under `Services CI / all-green`)
 
 ## Context
 
@@ -51,18 +52,25 @@ Five invariants in `MoneyPathInvariants.ALL`, checked after every step:
 **Fault injection:** `FaultProfile` can inject timeout, duplicate event, and replay fault modes to
 exercise compensating transaction paths.
 
-**CI integration (NOT YET DONE — this ADR proposes it):**
+**CI integration (DONE — `services-ci.yml`):**
 
-We will add `openbank-simulation` to the CI pipeline as a standalone job in `ci.yml`:
-```yaml
-- name: DST harness
-  run: ./gradlew :openbank-simulation:test -Pseed.count=200
-```
-This job runs on every PR that touches `openbank-simulation/`, `openbank-ledger-service/src/main/`,
-`openbank-balance-service/src/main/`, or `openbank-transaction-service/src/main/` (path filter).
-A failing seed produces a reproducible `(seed, step)` tuple in the test report.
+The harness runs as part of the existing per-service matrix rather than a hand-rolled standalone
+job — `openbank-simulation` is a Gradle module, so `_service-ci.yml` already runs
+`:openbank-simulation:build` (which runs `DstSimulationTest`) whenever the simulation itself changes,
+on every push to `main`, and in the nightly full-fleet run.
 
-This ADR will be marked **Accepted** once the CI job exists and is enforced.
+The one gap that needed closing: CI change-detection is **per-directory, not dependency-aware**, so a
+change to a money-path service the harness validates (`openbank-ledger-service`,
+`openbank-balance-service`, `openbank-transaction-service`) would *not* have triggered the simulation
+that depends on it. The `changes` detector in `services-ci.yml` now adds an explicit **dependency
+edge**: when any of those three services is in the per-module fan-out, `openbank-simulation` is added
+to the build matrix. The harness therefore gates every money-path change, aggregated under the
+required `Services CI / all-green` check. A failing seed produces a reproducible `(seed, step)` tuple
+in the service's test report; the seed count is tunable via `-Pseed.count=N` for deep manual runs
+(default in `DstSimulationTest`).
+
+This realises the intent of the originally-proposed standalone job while reusing the proven
+path-scoped pipeline (toolchain, caching, Testcontainers-free) instead of duplicating its setup.
 
 ## Alternatives considered
 

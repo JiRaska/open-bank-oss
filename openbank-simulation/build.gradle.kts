@@ -67,4 +67,7 @@ kotlin {
 
 tasks.test {
     useJUnitPlatform()
+    // ADR-0115: let CI / a deep manual run dial the seed count (`-Pseed.count=N`). Absent the
+    // property the test falls back to its built-in default, so a plain `:test` stays reproducible.
+    providers.gradleProperty("seed.count").orNull?.let { systemProperty("seed.count", it) }
 }
