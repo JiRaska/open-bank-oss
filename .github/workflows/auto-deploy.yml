@@ -679,20 +679,45 @@ jobs:
           arch="$(uname -m)"; case "$arch" in aarch64|arm64) a=arm64 ;; *) a=x86_64 ;; esac
           tgz="pact-${PACT_STANDALONE_VERSION}-linux-${a}.tar.gz"
           url="https://github.com/pact-foundation/pact-ruby-standalone/releases/download/v${PACT_STANDALONE_VERSION}/${tgz}"
-          if ! curl -fsSL -o /tmp/pact.tgz "$url"; then
-            echo "::warning::could not download pact standalone — skipping record-deployment"
-            exit 0
+          # record-deployment MUST be reliable: a silent skip here lets the broker's
+          # deployed-version matrix drift from reality, which then makes can-i-deploy
+          # PHANTOM-BLOCK future deploys of healthy services ("no version recorded as
+          # deployed" for a service that is actually running). Retry the flaky CLI
+          # download, then FAIL LOUD rather than skipping (ADR-0092).
+          dl_ok=0
+          for attempt in 1 2 3; do
+            if curl -fsSL --retry 2 --retry-delay 3 -o /tmp/pact.tgz "$url"; then dl_ok=1; break; fi
+            echo "::warning::pact standalone download attempt ${attempt}/3 failed; retrying in 5s"
+            sleep 5
+          done
+          if [ "$dl_ok" -ne 1 ]; then
+            echo "::error::could not download pact standalone after 3 attempts — record-deployment is mandatory (ADR-0092); skipping would drift the broker from reality and phantom-block later deploys"
+            exit 1
           fi
           mkdir -p /tmp/pact && tar -xzf /tmp/pact.tgz -C /tmp/pact
           CLI="/tmp/pact/pact/bin/pact-broker"
+          rec_failed=0
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
             echo "==> record-deployment ${svc} @ ${GITHUB_SHA::8} → sandbox"
-            "$CLI" record-deployment \
-              --pacticipant "$svc" --version "$GITHUB_SHA" \
-              --environment sandbox \
-              --broker-base-url "$PACT_BROKER_URL" \
-              --broker-username "$PACT_BROKER_USERNAME" \
-              --broker-password "$PACT_BROKER_PASSWORD" \
-              && echo "  ✓ recorded" \
-              || echo "::warning::record-deployment failed for ${svc} (advisory — non-blocking)"
+            ok=0
+            for attempt in 1 2 3; do
+              if "$CLI" record-deployment \
+                   --pacticipant "$svc" --version "$GITHUB_SHA" \
+                   --environment sandbox \
+                   --broker-base-url "$PACT_BROKER_URL" \
+                   --broker-username "$PACT_BROKER_USERNAME" \
+                   --broker-password "$PACT_BROKER_PASSWORD"; then
+                ok=1; echo "  ✓ recorded"; break
+              fi
+              echo "::warning::record-deployment ${svc} attempt ${attempt}/3 failed; retrying in 5s"
+              sleep 5
+            done
+            if [ "$ok" -ne 1 ]; then
+              echo "::error::record-deployment failed for ${svc} after 3 attempts"
+              rec_failed=1
+            fi
           done
+          if [ "$rec_failed" -ne 0 ]; then
+            echo "::error::one or more record-deployments failed — broker matrix now diverges from what is actually deployed (ADR-0092)"
+            exit 1
+          fi
