@@ -9,10 +9,11 @@
 # PRIVATE-REPO ADAPTATION (this repo is not public yet):
 #   - `publish_results: false` — publishing to the public OpenSSF API requires a
 #     public repo. Flip to `true` at the go-public cutover.
-#   - SARIF is uploaded as a build ARTIFACT, not to GitHub code-scanning — the
-#     code-scanning upload needs GitHub Advanced Security on a private repo
-#     (CodeQL/code-scanning is OFF today, ADR-0124 §2). The commented
-#     `upload-sarif` step + `security-events: write` get enabled at go-public.
+#   - The score is rendered to the run's job SUMMARY (JSON → markdown table), not
+#     uploaded to GitHub code-scanning — the code-scanning upload needs GitHub
+#     Advanced Security on a private repo (CodeQL/code-scanning is OFF today,
+#     ADR-0124 §2) and the Actions artifact quota is routinely full. At go-public,
+#     switch to SARIF + the commented `upload-sarif` step + `security-events: write`.
 #   - NOT triggered on `pull_request`: this is a posture gauge, not a PR gate, so
 #     it never blocks a contributor's PR (and never lands on the hot CI path).
 #
@@ -74,19 +75,29 @@ jobs:
         if: ${{ env.SCORECARD_TOKEN != '' }}
         uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
         with:
-          results_file: results.sarif
-          results_format: sarif
+          # JSON (not SARIF) so the score renders directly in the run summary below.
+          # At go-public, switch to `sarif` + the code-scanning upload step.
+          results_file: scorecard.json
+          results_format: json
           repo_token: ${{ secrets.SCORECARD_TOKEN }}
           # Private repo: publishing requires public. Flip to true at go-public (ADR-0124).
           publish_results: false
 
-      - name: Upload Scorecard SARIF (artifact)
+      # Render the score to the run's Summary page instead of an artifact: the repo's
+      # Actions artifact storage quota is routinely full (SBOM/evidence bundles), so an
+      # artifact upload is fragile. The job summary is always available and human-readable.
+      - name: Publish score to job summary
         if: ${{ env.SCORECARD_TOKEN != '' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: scorecard-sarif
-          path: results.sarif
-          retention-days: 14
+        run: |
+          {
+            echo "## OpenSSF Scorecard"
+            echo
+            echo "**Aggregate score: $(jq -r '.score // "n/a"' scorecard.json) / 10**"
+            echo
+            echo "| Check | Score | Reason |"
+            echo "|---|---:|---|"
+            jq -r '.checks[] | "| \(.name) | \(.score // "—") | \((.reason // "") | gsub("\\|";"/") | .[0:90]) |"' scorecard.json
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Scorecard disabled (no token)
         if: ${{ env.SCORECARD_TOKEN == '' }}
