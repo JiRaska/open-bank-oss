@@ -169,6 +169,40 @@ class PartyServiceTest {
     }
 
     @Test
+    fun `exportPartyData returns the subject and document metadata stamped with the clock`(): Unit = runBlocking {
+        val service = newService()
+        val party = sampleParty()
+        val doc = PartyDocument(
+            id = UUID.fromString("33333333-3333-3333-3333-333333333333"),
+            partyId = party.id,
+            documentType = DocumentType.NATIONAL_ID,
+            documentNumber = "990101/1234",
+            issuingCountry = "CZ",
+            expiryDate = "2030-01-01",
+            verifiedAt = now,
+            createdAt = now,
+        )
+        coEvery { service.partyRepo.findById(party.id) } returns party
+        coEvery { service.documentRepo.findByPartyId(party.id) } returns listOf(doc)
+
+        val export = service.exportPartyData(party.id)
+
+        assertThat(export.party).isEqualTo(party)
+        assertThat(export.documents).containsExactly(doc)
+        assertThat(export.exportedAt).isEqualTo(now)
+    }
+
+    @Test
+    fun `exportPartyData throws PartyNotFoundException when not found`() {
+        val service = newService()
+        coEvery { service.partyRepo.findById(partyId) } returns null
+
+        assertThatThrownBy {
+            runBlocking { service.exportPartyData(partyId) }
+        }.isInstanceOf(PartyNotFoundException::class.java)
+    }
+
+    @Test
     fun `updateParty updates only provided fields`(): Unit = runBlocking {
         val service = newService()
         val original = sampleParty()

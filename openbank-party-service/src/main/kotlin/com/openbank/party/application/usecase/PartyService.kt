@@ -141,6 +141,12 @@ class PartyService : PartyUseCase {
         return documentRepo.findByPartyId(partyId)
     }
 
+    override suspend fun exportPartyData(id: UUID): PartyGdprExport {
+        val party = partyRepo.findById(id) ?: throw PartyNotFoundException(id)
+        val documents = documentRepo.findByPartyId(id)
+        return PartyGdprExport(party, documents, clock.instant())
+    }
+
     override suspend fun listParties(page: Int, size: Int, status: PartyStatus?): Map<String, Any> {
         val items = if (status != null) partyRepo.listByStatus(status, page, size) else partyRepo.listAll(page, size)
         val total = if (status != null) partyRepo.countByStatus(status) else partyRepo.countAll()

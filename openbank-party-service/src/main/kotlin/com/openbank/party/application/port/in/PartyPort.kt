@@ -81,6 +81,9 @@ interface PartyUseCase {
     suspend fun updateParty(cmd: UpdatePartyCommand): Party
     suspend fun addDocument(cmd: AddDocumentCommand): PartyDocument
     suspend fun listDocuments(partyId: UUID): List<PartyDocument>
+
+    /** GDPR Art. 15 (Right of Access): all party-service-direct PII for the subject (ADR-0118 §6). */
+    suspend fun exportPartyData(id: UUID): PartyGdprExport
     suspend fun updateKycStatus(partyId: UUID, status: KycStatus): Party
 
     /** Record the AML screening outcome; re-evaluates the KYC+AML activation gate (ADR-0073). */

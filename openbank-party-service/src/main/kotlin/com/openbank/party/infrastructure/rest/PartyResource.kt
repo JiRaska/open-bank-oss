@@ -21,6 +21,7 @@ import com.openbank.party.domain.model.Address
 import com.openbank.party.domain.model.DocumentType
 import com.openbank.party.domain.model.KycStatus
 import com.openbank.party.domain.model.Party
+import com.openbank.party.domain.model.PartyGdprExport
 import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
 import io.quarkus.security.Authenticated
@@ -167,6 +168,13 @@ class PartyResource {
         partyUseCase.eraseParty(ErasePartyCommand(id))
         return Response.noContent().build()
     }
+
+    @GET
+    @Path("/{id}/gdpr-export")
+    @RolesAllowed("ROLE_ADMIN")
+    @Operation(summary = "Export all PII held for a party — GDPR Art. 15 Right of Access (ADR-0118)")
+    suspend fun exportPartyGdpr(@PathParam("id") id: UUID): Response =
+        Response.ok(partyUseCase.exportPartyData(id).toResponse()).build()
 
     // ─── Mobile self-registration endpoints ───────────────────────────────────────
 
@@ -409,3 +417,41 @@ fun Party.toResponse() = mapOf(
     "tradingName" to tradingName, "email" to email, "phone" to phone,
     "kycStatus" to kycStatus, "address" to address, "createdAt" to createdAt, "updatedAt" to updatedAt,
 )
+
+fun PartyGdprExport.toResponse() = mapOf(
+    "subject" to mapOf(
+        "id" to party.id,
+        "partyType" to party.partyType,
+        "status" to party.status,
+        "legalName" to party.legalName,
+        "tradingName" to party.tradingName,
+        "dateOfBirth" to party.dateOfBirth,
+        "nationality" to party.nationality,
+        "taxId" to party.taxId,
+        "registrationNumber" to party.registrationNumber,
+        "email" to party.email,
+        "phone" to party.phone,
+        "address" to party.address,
+        "kycStatus" to party.kycStatus,
+        "amlStatus" to party.amlStatus,
+        "createdAt" to party.createdAt,
+        "updatedAt" to party.updatedAt,
+    ),
+    "documents" to documents.map {
+        mapOf(
+            "documentType" to it.documentType,
+            "documentNumber" to it.documentNumber,
+            "issuingCountry" to it.issuingCountry,
+            "expiryDate" to it.expiryDate,
+            "verifiedAt" to it.verifiedAt,
+            "createdAt" to it.createdAt,
+        )
+    },
+    "exportedAt" to exportedAt,
+    "scope" to GDPR_EXPORT_SCOPE,
+)
+
+private const val GDPR_EXPORT_SCOPE =
+    "party-service direct PII and identity-document metadata. KYC PII (kyc-service) and " +
+        "card PII (card-issuance-service) are held by those services; aggregating them into this " +
+        "subject-access response is a tracked follow-up (ADR-0118 §6)."

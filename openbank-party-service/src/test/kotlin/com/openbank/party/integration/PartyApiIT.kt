@@ -242,6 +242,36 @@ class PartyApiIT {
         assertThat(body.lowercase()).contains("email")
     }
 
+    // ── ADR-0118 GDPR Art. 15 subject-access export ───────────────────────
+
+    @Test
+    @Order(13)
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_ADMIN"])
+    fun `GET gdpr-export returns the subject PII and document metadata`() {
+        val id = createdPartyId ?: return
+        Given { this } When {
+            get("/api/v1/parties/$id/gdpr-export")
+        } Then {
+            statusCode(200)
+            body("subject.id", equalTo(id))
+            body("subject.email", equalTo(uniqueEmail))
+            body("documents[0].documentType", notNullValue())
+            body("exportedAt", notNullValue())
+            body("scope", notNullValue())
+        }
+    }
+
+    @Test
+    @Order(14)
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_ADMIN"])
+    fun `GET gdpr-export for an unknown party returns 404`() {
+        Given { this } When {
+            get("/api/v1/parties/${UUID.randomUUID()}/gdpr-export")
+        } Then {
+            statusCode(404)
+        }
+    }
+
     // ── ADR-0055 name search ──────────────────────────────────────────────
 
     @Test

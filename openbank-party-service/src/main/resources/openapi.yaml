@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Party Service API
-  version: 1.5.0
+  version: 1.6.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -251,6 +251,29 @@ paths:
         '200':
           description: Updated
 
+  /api/v1/parties/{id}/gdpr-export:
+    get:
+      tags: [Parties]
+      summary: Export all PII held for a party — GDPR Art. 15 Right of Access
+      description: >-
+        Returns the party-service-direct PII for the data subject (personal details,
+        address, and identity-document metadata). KYC and card PII are held by the
+        respective services; aggregating them is a tracked follow-up (ADR-0118 §6).
+      operationId: exportPartyGdpr
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      responses:
+        '200':
+          description: GDPR Art. 15 subject-access export (ROLE_ADMIN only)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GdprExport'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
 components:
   parameters:
     partyId:
@@ -270,6 +293,50 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    GdprExport:
+      type: object
+      description: GDPR Art. 15 subject-access export (party-service-direct PII).
+      properties:
+        subject:
+          type: object
+          description: The party's personal data held by party-service.
+          properties:
+            id: { type: string, format: uuid }
+            partyType: { type: string }
+            status: { type: string }
+            legalName: { type: string }
+            tradingName: { type: string, nullable: true }
+            dateOfBirth: { type: string, nullable: true }
+            nationality: { type: string, nullable: true }
+            taxId: { type: string, nullable: true }
+            registrationNumber: { type: string, nullable: true }
+            email: { type: string }
+            phone: { type: string, nullable: true }
+            address:
+              type: object
+              nullable: true
+            kycStatus: { type: string }
+            amlStatus: { type: string }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+        documents:
+          type: array
+          description: Identity-document metadata (no binary content).
+          items:
+            type: object
+            properties:
+              documentType: { type: string }
+              documentNumber: { type: string }
+              issuingCountry: { type: string }
+              expiryDate: { type: string, nullable: true }
+              verifiedAt: { type: string, format: date-time, nullable: true }
+              createdAt: { type: string, format: date-time }
+        exportedAt:
+          type: string
+          format: date-time
+        scope:
+          type: string
+          description: What this export does and does not cover.
     CreatePartyRequest:
       type: object
       # email is mandatory: a party is uniquely keyed by email (DB unique + not-null),
