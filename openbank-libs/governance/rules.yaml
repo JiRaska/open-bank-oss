@@ -352,6 +352,25 @@ ci_runners:
   model: ephemeral-scale-to-zero        # ADR-0053; per-job ARC pods, NOT persistent
   platform: arc-on-eks                  # actions-runner-controller; Karpenter spot nodes
   scale_to_zero: true                   # minRunners=0 idle; spend -> $0 when no CI
+  # FinOps dispatch order — AGENTS MUST ENFORCE THIS, never bypass:
+  #   1. Hetzner (x86, CPX42) + Mac mini (arm64) = primary; zero AWS cost; always-on
+  #   2. ARC on EKS Spot = overflow only; scales to zero when idle
+  # Consequence: if a build FAILS on Hetzner/Mac due to an arch/platform issue, fix the
+  # root cause (e.g. Dockerfile --platform=$BUILDPLATFORM on build-only stages so x86
+  # runners can build arm64 images without QEMU). NEVER "fix" it by removing Hetzner/Mac
+  # from the runner label pool — that silently routes work to expensive ARC.
+  # Removing openbank-build from a Hetzner runner to avoid a crash is a FinOps violation.
+  static_hosts:
+    hetzner:
+      type: cpx42                        # x86_64, 8 vCPU, 16 GB; pending migration to CAX31 ARM (~40% saving)
+      labels: [openbank-build, openbank-batch, openbank-sandbox, hetzner]
+      count: 2
+      role: primary_build_and_batch      # first pick for ALL jobs; never remove from pool to work around a build failure
+    mac_mini:
+      arch: arm64
+      labels: [openbank-build, openbank-sandbox]
+      count: 1
+      role: primary_build_arm64          # native arm64 fallback; offline = ARC takes over
   spot:
     provider: karpenter                 # diversified Graviton spot, price-capacity-optimized
     interruption: karpenter-managed     # no persistent spot request; node replaced on reclaim

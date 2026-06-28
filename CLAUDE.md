@@ -116,6 +116,22 @@ CI is path-scoped (only changed services build). Domain layer has **zero** frame
   squash delta. 2-dot includes main's post-divergence commits → makes stale branches look like
   regressions → fed false NO-GO to Sonnet twice in one session.
 
+### CI/CD runner fleet — FinOps order (NEVER violate)
+- **Primary: Hetzner (x86) + Mac mini (ARM) — cheap, always-on, zero AWS cost.**
+  Everything that fits runs here first. `openbank-build` and `openbank-batch` labels on both.
+- **Secondary: ARC on AWS Spot — overflow only.** `minRunners=0` (scale-to-zero); idle cost $0.
+  ARC handles bursts (full-fleet rebuild, parallel PR storm) that exceed Hetzner+Mac capacity.
+  It is NEVER the primary build target. Do not change `arc_min_runners` > 0 without a measured
+  SLO miss and explicit owner approval.
+- **If a build fails on Hetzner due to a platform/arch issue → fix the root cause, never remove
+  Hetzner from the label pool.** Removing `openbank-build` from Hetzner silently routes all
+  builds to expensive ARC. The correct fix for an arm64 Docker build crashing on x86 is
+  `--platform=$BUILDPLATFORM` on build-only stages (deps/compile); the runtime stage inherits
+  `--platform linux/arm64` from `docker buildx build --platform`. JS/JVM build artefacts are
+  arch-agnostic and safe to copy into the arm64 runtime stage.
+- **Hetzner ARM (CAX) migration is pending** — Hetzner CAX capacity was exhausted on 2026-06-28;
+  monitor and migrate CPX42→CAX31 when available (~40% cost saving + native arm64).
+
 ## Where things are
 
 - Rules (authoritative): `openbank-libs/governance/rules.yaml`

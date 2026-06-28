@@ -152,8 +152,13 @@ RUN set -e; \
 
 # ──────────────────────────────────────────────────────────────────────
 # Stage 2: Install Node dependencies (cacheable layer).
+# --platform=$BUILDPLATFORM: run npm ci on the BUILD host's native arch
+# (amd64 on Hetzner x86_64, arm64 on ARC/Mac). Without this, buildx forces
+# arm64 + QEMU on x86 hosts → npm ci crashes with SIGILL. The resulting
+# node_modules contains only JS/JSON — no arch-specific binaries — so it
+# is safe to copy into the arm64 runtime stage unchanged.
 # ──────────────────────────────────────────────────────────────────────
-FROM node:20-alpine AS deps
+FROM --platform=$BUILDPLATFORM node:20-alpine AS deps
 WORKDIR /app
 COPY openbank-admin-ui/package.json openbank-admin-ui/package-lock.json* ./
 # Resilient install: the registry/network can flake (ECONNRESET mid-download) and a bare
@@ -173,8 +178,12 @@ RUN npm config set fetch-retries 5 \
 
 # ──────────────────────────────────────────────────────────────────────
 # Stage 3: Build the Next.js app.
+# --platform=$BUILDPLATFORM: next build is pure JS compilation — the output
+# (.next/standalone, .next/static) is architecture-agnostic and safe to
+# copy into the arm64 runtime stage. Running on the native arch avoids
+# QEMU overhead (~10× slower) and SIGILL crashes on x86 hosts.
 # ──────────────────────────────────────────────────────────────────────
-FROM node:20-alpine AS build
+FROM --platform=$BUILDPLATFORM node:20-alpine AS build
 WORKDIR /app
 
 # BuildInfo — passed in via docker-compose build args, stamped into the bundle.
