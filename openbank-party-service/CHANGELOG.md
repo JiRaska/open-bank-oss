@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/JiRaska/open-bank/compare/party-service-v0.5.0...party-service-v0.5.1) (2026-06-28)
+
+
+### Bug Fixes
+
+* **party:** add missing imports and Clock injection after [#2272](https://github.com/JiRaska/open-bank/issues/2272) wildcard expansion ([b1b53b6](https://github.com/JiRaska/open-bank/commit/b1b53b6ff3a62d740c1e36565b2c8748f4e6749b))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank/compare/party-service-v0.4.1...party-service-v0.5.0) (2026-06-27)
 
 
