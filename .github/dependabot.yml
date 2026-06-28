@@ -84,6 +84,15 @@ updates:
       - "github-actions"
     commit-message:
       prefix: "chore(ci)"
+    groups:
+      # Consolidate action minor/patch bumps into one PR (mirrors the gradle/npm
+      # ecosystems). Majors stay separate — they can change action inputs/behaviour.
+      actions-minor:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   # Docker
   - package-ecosystem: "docker"
@@ -96,3 +105,11 @@ updates:
       - "docker"
     commit-message:
       prefix: "chore(docker)"
+    groups:
+      # One PR for base-image minor/patch bumps; majors stay separate.
+      docker-minor:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
