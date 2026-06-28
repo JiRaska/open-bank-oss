@@ -183,7 +183,7 @@ spec:
         # agents.rego bundle (agent-opa-bundle ConfigMap) over localhost:8181. The
         # agent-service policy gate queries data.openbank.agents.decision per tool call.
         - name: opa
-          image: openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.17.0
           imagePullPolicy: IfNotPresent
           args:
             - run

@@ -105,7 +105,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: reposilite
-          image: dzikoysk/reposilite:3.5.14
+          image: docker.io/dzikoysk/reposilite:3.5.14
           args:
             - "--working-directory=/data/reposilite"
             - "--port=8080"

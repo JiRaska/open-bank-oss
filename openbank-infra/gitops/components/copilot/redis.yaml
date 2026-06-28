@@ -34,7 +34,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: redis
-          image: valkey/valkey:8-alpine
+          image: docker.io/valkey/valkey:8-alpine
           args: ["--save", "", "--appendonly", "no"]
           ports:
             - name: redis
@@ -69,7 +69,7 @@ spec:
         # Valkey/Redis protocol and exposes redis_* metrics on :9121. Non-alpine tag:
         # multi-arch (incl. arm64/Graviton) — the -alpine variant is amd64-only.
         - name: exporter
-          image: oliver006/redis_exporter:v1.62.0
+          image: docker.io/oliver006/redis_exporter:v1.62.0
           args: ["--redis.addr=redis://localhost:6379"]
           ports:
             - name: redis-metrics
