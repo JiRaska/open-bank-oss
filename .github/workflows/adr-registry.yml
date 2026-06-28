@@ -1,0 +1,53 @@
+# -----------------------------------------------------------------------------
+# ADR registry integrity gate (ADR-0001 / ADR-0029 "governance as code").
+#
+# Runs `.github/scripts/check-adr-registry.sh` on every PR that touches the ADR
+# directory. Enforces three structural invariants the human workflow kept breaking
+# (all real, 2026-06):
+#   - unique ADR numbers          (the 0119 ×3 collision from parallel sessions),
+#   - H1 heading number == filename (the `adr new` off-by-one batch),
+#   - docs/adr/README.md is the deterministic output of gen-index.sh (no rot).
+#
+# Pure bash over docs/adr/ — no Gradle, no Docker — so it is seconds, not minutes,
+# and runs on the cheap always-on pool. Lives in its own workflow (like
+# issue-hygiene) so it is a small, named, required status check rather than a step
+# buried in the heavy services-ci matrix. The job name `adr-registry` is intended
+# to be a required check in the main-protection ruleset — do not rename it.
+# -----------------------------------------------------------------------------
+name: ADR registry
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'docs/adr/**'
+      - '.github/scripts/check-adr-registry.sh'
+      - '.github/workflows/adr-registry.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/adr/**'
+      - '.github/scripts/check-adr-registry.sh'
+      - '.github/workflows/adr-registry.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: adr-registry-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  adr-registry:
+    name: adr-registry
+    runs-on: openbank-build
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # The index-freshness check diffs the regenerated README against the
+          # committed one; a normal single-commit checkout is enough (diff is vs HEAD).
+          fetch-depth: 1
+      - name: Check ADR registry integrity
+        run: bash .github/scripts/check-adr-registry.sh

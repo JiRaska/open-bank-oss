@@ -6,6 +6,7 @@ from `docs/adr/` while being referenced 27× across the ADR set and the admin-ui
 `/docs/cloud-architecture` overlay; this record is rebuilt faithfully from those
 cross-references and the as-built sandbox. The decision itself long predates the
 reconstruction and is in force.)
+Delivery-Status: Shipped
 Author(s): Jiří Raška
 
 ## Context

@@ -2,6 +2,7 @@
 
 Date: 2026-06-28
 Status: Proposed
+Delivery-Status: Planned
 Author(s): jiri.raska
 
 ## Context

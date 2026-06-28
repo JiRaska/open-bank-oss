@@ -1,6 +1,7 @@
 # ADR-0088 — Observability Extension: On-Call, SLO-as-Code, Durable Retention & Mobile RUM
 
 **Status:** Accepted
+**Delivery-Status:** Partial
 **Date:** 2026-06-13
 **Accepted:** 2026-06-25
 **Author:** @JiRaska

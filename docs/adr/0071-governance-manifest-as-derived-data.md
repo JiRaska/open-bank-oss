@@ -2,6 +2,7 @@
 
 Date: 2026-06-07
 Status: Accepted
+Delivery-Status: Shipped
 Author(s): Jiří Raška
 
 ## Context

@@ -2,6 +2,7 @@
 
 Date: 2026-05-29
 Status: Superseded by ADR-0034
+Delivery-Status: N/A
 Author(s): jiri.raska
 
 ## Context

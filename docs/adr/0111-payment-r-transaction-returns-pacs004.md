@@ -3,6 +3,7 @@
 Date: 2026-06-24
 Author: Claude (paired with Jiří Raška)
 Status: Accepted
+Delivery-Status: Shipped
 
 ## Context
 

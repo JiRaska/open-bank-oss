@@ -1,6 +1,7 @@
 # ADR-0093 — Public developer portal for the PSD2 XS2A API
 
 **Status:** Accepted (2026-06-15 — Phase 1 implemented: static public docs + hardened edge)
+**Delivery-Status:** Partial
 **Date:** 2026-06-15
 **Relates to:** ADR-0090 (PSD2 XS2A Berlin + ČOBS), ADR-0056 (admin-ui is the internal-only console),
 ADR-0027 (cloud-agnostic in-cluster substrate), ADR-0030 (threat-model discipline for public boundaries),

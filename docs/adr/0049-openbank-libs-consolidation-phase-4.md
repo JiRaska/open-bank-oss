@@ -2,6 +2,7 @@
 
 Date: 2026-05-31
 Status: Accepted
+Delivery-Status: Partial
 Author(s): jiri.raska
 
 > **Amendment 2026-06-19 — D3 outbox abstraction sweep complete; D4 exception-mapper sweep complete.**

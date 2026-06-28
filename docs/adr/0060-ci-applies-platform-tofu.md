@@ -2,6 +2,7 @@
 
 Date: 2026-06-02
 Status: Accepted
+Delivery-Status: Partial
 Author(s): Jiri Raska
 
 ## Context

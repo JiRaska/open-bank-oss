@@ -2,6 +2,7 @@
 
 Date: 2026-06-09
 Status: Accepted
+Delivery-Status: Shipped
 Extends: ADR-0011 (testing pyramid, layers 2–3), ADR-0063 (contract tests, money-path)
 Relates to: ADR-0019 (Docs-as-Service), ADR-0051 (service discovery), ADR-0056 (BFF)
 

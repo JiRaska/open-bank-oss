@@ -2,6 +2,7 @@
 
 Date: 2026-06-01
 Status: Accepted
+Delivery-Status: Shipped
 Author(s): Jiri Raska
 Supersedes: ADR-0082 (CI runner governance — renumbered from ADR-0051 on 2026-06-11 to
 resolve a duplicate number with the service-discovery ADR-0051)

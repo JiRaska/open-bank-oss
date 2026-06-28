@@ -6,6 +6,7 @@ branch is retired and no `per-service-pipeline` workflow remains under
 `.github/workflows/`; `main` is the single canonical trunk with the unchanged
 `all-green` aggregate gate. The two latent CI bugs noted here — Postgres readiness
 and under-build — were fixed in the consolidation.)
+Delivery-Status: Shipped
 Author(s): Jiri Raska
 
 ## Context

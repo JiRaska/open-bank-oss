@@ -2,6 +2,7 @@
 
 Date: 2026-05-29
 Status: Accepted
+Delivery-Status: Partial
 Supersedes: nothing (additive)
 Implements: openbank-libs `com.openbank.libs.docs`
 

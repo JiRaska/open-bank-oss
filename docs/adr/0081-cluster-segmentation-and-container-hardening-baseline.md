@@ -9,6 +9,7 @@ the policies are no longer inert. An edge not captured by a derived allow-list o
 a hand-maintained policy is dropped — e.g. app-plane Temporal clients had to be
 added to `temporal-network-policies.yaml` (ADR-0101 follow-up) once enforcement
 was on.)
+Delivery-Status: Partial
 Author(s): Jiří Raška
 
 ## Context

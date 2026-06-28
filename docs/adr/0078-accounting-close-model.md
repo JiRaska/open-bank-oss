@@ -6,6 +6,7 @@ End-of-Year closes are live (period lock + re-verify endpoint #985, four-eyes
 maker≠checker year-close attestation #1014); statement-close hardening (D3) and
 trial-balance attestation shipped. D5 entity-level statutory close remains
 explicitly out of scope per this ADR.)
+Delivery-Status: Partial
 Author(s): jiri.raska
 
 ## Context

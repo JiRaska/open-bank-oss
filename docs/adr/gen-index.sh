@@ -31,7 +31,9 @@ OUT=README.md
       decision=$(grep -m1 -iE '^[*_| ]*Status[*_ |]*[:|]' "$f" \
         | sed -E 's/^[*_| ]*Status[*_ ]*[:|]+[*_ ]*//; s/\|.*$//; s/[*_ ]*$//; s/^[*_ ]*//' || true)
     fi
-    delivery=$(grep -m1 -iE '^[*_ ]*Delivery-Status[*_ ]*:' "$f" | sed -E 's/.*[Dd]elivery-[Ss]tatus[*_ ]*:[* ]*//; s/<!--.*-->//; s/ *$//' || true)
+    # tolerate plain / bold / table (| Delivery-Status | … |) encodings
+    delivery=$(grep -m1 -iE '^[*_| ]*Delivery-Status[*_ |]*[:|]' "$f" \
+      | sed -E 's/^[*_| ]*Delivery-Status[*_ ]*[:|]+[*_ ]*//; s/<!--.*-->//; s/\|.*$//; s/[*_ ]*$//; s/^[*_ ]*//' || true)
 
     [ -z "$decision" ] && decision="—"
     [ -z "$delivery" ] && delivery="—"

@@ -2,6 +2,7 @@
 
 Date: 2026-06-01
 Status: Accepted
+Delivery-Status: Partial
 Author(s): Platform
 
 ## Context

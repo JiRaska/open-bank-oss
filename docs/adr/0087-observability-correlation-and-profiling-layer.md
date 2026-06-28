@@ -1,6 +1,7 @@
 # ADR-0087 — Observability Correlation & Profiling Layer
 
 **Status:** Accepted
+**Delivery-Status:** Partial
 **Date:** 2026-06-11
 **Implemented:** 2026-06-25
 **Author:** @JiRaska

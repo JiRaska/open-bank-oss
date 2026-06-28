@@ -1,6 +1,7 @@
 # ADR-0091 — HolmesGPT: AI root-cause-analysis agent over observability signals
 
 **Status:** Accepted
+**Delivery-Status:** Shipped
 **Date:** 2026-06-14
 **Author:** @JiRaska
 

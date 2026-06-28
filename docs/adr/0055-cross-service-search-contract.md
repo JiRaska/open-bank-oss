@@ -2,6 +2,7 @@
 
 Date: 2026-06-01
 Status: Accepted
+Delivery-Status: Partial
 Author(s): OpenBank platform
 
 > **Amendment 2026-06-19 — Phase 1 complete.** `SearchRequest` + `CursorPage`/`CursorEncoder`

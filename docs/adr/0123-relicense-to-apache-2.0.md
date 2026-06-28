@@ -2,6 +2,7 @@
 
 Date: 2026-06-27
 Status: Accepted
+Delivery-Status: Shipped
 
 Supersedes [ADR-0012](0012-mpl-license-and-dco.md) (MPL-2.0 + DCO).
 

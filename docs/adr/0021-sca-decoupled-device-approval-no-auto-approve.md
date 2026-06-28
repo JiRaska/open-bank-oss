@@ -2,6 +2,7 @@
 
 Date: 2026-05-29
 Status: Accepted
+Delivery-Status: Shipped
 
 ## Context
 

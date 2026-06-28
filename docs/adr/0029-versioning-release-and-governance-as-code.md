@@ -2,6 +2,7 @@
 
 Date: 2026-05-30
 Status: Accepted
+Delivery-Status: Partial
 Author(s): jiri.raska
 
 > **Accepted (2026-06-11).** Status raised from Proposed to reflect established practice:

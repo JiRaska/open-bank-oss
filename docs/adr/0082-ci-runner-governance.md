@@ -2,6 +2,7 @@
 
 Date: 2026-06-01
 Status: Superseded by ADR-0053
+Delivery-Status: N/A
 Author(s): Jiri Raska
 
 > **Renumbered 0051 → 0082 (2026-06-11).** This ADR was originally filed as ADR-0051, a

@@ -6,6 +6,7 @@ GitOps (`openbank-infra/gitops/apps/glitchtip.yaml`, external-secrets wired) and
 live; the Sentry KMP SDK (off-by-default, redaction allowlist) landed in the
 openbank-app repo. Client-side wiring beyond the shared CrashMonitor seam is
 tracked in the app repo.)
+Delivery-Status: Partial
 Author(s): Jiří Raška
 
 ## Context

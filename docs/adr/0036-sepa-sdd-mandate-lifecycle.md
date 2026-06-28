@@ -2,6 +2,7 @@
 
 Date: 2026-05-30
 Status: Accepted
+Delivery-Status: Shipped
 Author(s): OpenBank core-banking
 
 ## Context

@@ -2,6 +2,7 @@
 
 Date: 2026-06-15
 Status: Accepted
+Delivery-Status: Partial
 Author(s): OpenBank platform
 
 ## Context

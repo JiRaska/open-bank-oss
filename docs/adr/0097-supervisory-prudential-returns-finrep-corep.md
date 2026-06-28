@@ -2,6 +2,7 @@
 
 Date: 2026-06-16
 Status: Accepted
+Delivery-Status: Partial
 
 Phase 1 implemented: openbank-finrep-service derives F01.01+F02.00 from ledger trial balance. Phase 2 (COREP+XBRL transmission) tracked separately.
 Author(s): @JiRaska

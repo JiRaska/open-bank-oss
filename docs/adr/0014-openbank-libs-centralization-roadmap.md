@@ -2,6 +2,7 @@
 
 Date: 2026-05-28
 Status: Accepted
+Delivery-Status: Partial
 Author(s): jiri.raska
 
 ## Context

@@ -4,6 +4,7 @@ Date: 2026-06-25
 Author: Claude (paired with Jiří Raška)
 Status: Accepted (2026-06-28 — CI gate wired in `services-ci.yml`: DST harness runs on every
 money-path change via a dependency edge to `openbank-simulation`, under `Services CI / all-green`)
+Delivery-Status: Shipped
 
 ## Context
 

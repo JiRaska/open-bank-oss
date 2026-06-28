@@ -6,6 +6,7 @@ ships the OpenFeature-aligned surface (`FeatureClient`, `FlagdProvider`,
 `@FeatureFlag` + interceptor, `FlagDefinition`/`FlagExposure`) merged to `main`.
 Remaining tail is tracked as a follow-up issue, not a blocker: four-eyes
 enforcement on money-path flag flips — issue #419.)
+Delivery-Status: Partial
 Author(s): Jiří Raška
 
 ## Context

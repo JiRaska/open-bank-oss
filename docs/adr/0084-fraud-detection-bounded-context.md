@@ -2,6 +2,7 @@
 
 Date: 2026-06-12
 Status: Accepted
+Delivery-Status: Shipped
 Author(s): Jiří Raška
 
 > **Implementation note 2026-06-23 — all three delivery phases complete.**

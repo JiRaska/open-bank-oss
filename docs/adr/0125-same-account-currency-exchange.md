@@ -1,7 +1,8 @@
-# 110. Same-account currency exchange (the app's currency swap)
+# 125. Same-account currency exchange (the app's currency swap)
 
 Date: 2026-06-23
 Status: Accepted
+Delivery-Status: Shipped
 Author(s): Jiří Raška
 
 ## Context

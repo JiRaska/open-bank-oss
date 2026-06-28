@@ -3,6 +3,7 @@
 | Field | Value |
 |---|---|
 | **Status** | Accepted |
+| **Delivery-Status** | Shipped |
 | **Date** | 2026-06-28 |
 | **Deciders** | Platform Team |
 | **Supersedes** | — |

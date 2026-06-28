@@ -4,6 +4,7 @@
 psd2-service 0.5.0: P1 Berlin XS2A consent+AIS (#1117), P2 PIS (#1120), P3 ČOBS
 Czech products (#1121), P4 eIDAS QSEAL signing + bespoke-API deprecation (#1123).
 Sandbox deploy runs with QSEAL enforcement OFF — no TPP eIDAS certs in the sandbox.)
+**Delivery-Status:** Shipped
 **Date:** 2026-06-15
 **Relates to:** ADR-0021 (decoupled SCA / device approval), ADR-0030 (threat-model discipline for money-path), ADR-0034 (unified OPA authz), ADR-0048 (two version axes — API contract vs release), ADR-0039 (ledger golden source), ADR-0069 (party / `party_id`), consent-service (ČOBS-aware `ConsentScope`)
 

@@ -2,6 +2,7 @@
 
 Date: 2026-05-30
 Status: Accepted
+Delivery-Status: Partial
 Author(s): Claude (session: Phase 5b consolidation)
 Amends: ADR-0018 (OPA for fine-grained authz, Proposed)
 Extends: ADR-0031 (AI agent governance, Accepted)

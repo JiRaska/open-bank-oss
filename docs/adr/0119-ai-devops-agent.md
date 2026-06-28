@@ -3,6 +3,7 @@
 | Field       | Value |
 |-------------|-------|
 | Status      | Accepted |
+| Delivery-Status | Partial |
 | Date        | 2026-06-27 |
 | Authors     | OpenBank Platform Team |
 | Relates to  | ADR-0031, ADR-0061, ADR-0053, ADR-0082, ADR-0101, ADR-0112, ADR-0002, ADR-0029 |

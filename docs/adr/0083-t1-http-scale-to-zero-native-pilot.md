@@ -2,6 +2,7 @@
 
 Date: 2026-06-02
 Status: Accepted
+Delivery-Status: Shipped
 Author(s): Jiri Raska
 
 > **Renumbered 0059 → 0083 (2026-06-11).** This ADR was originally filed as ADR-0059, a

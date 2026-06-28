@@ -2,6 +2,7 @@
 
 Date: 2026-06-04
 Status: Accepted
+Delivery-Status: Partial
 Extends: ADR-0011 (Layer 3 contract tests; pitest mutation section)
 Relates to: ADR-0029 (governance-as-code), ADR-0030 (SSDLC D3)
 

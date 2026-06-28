@@ -1,6 +1,7 @@
 # ADR-0077 — Observability Three-Pillar Strategy for OpenBank
 
 **Status:** Accepted  
+**Delivery-Status:** Partial
 **Date:** 2026-06-10  
 **Author:** @JiRaska  
 **Relates to:** ADR-0008 (OpenTelemetry), ADR-0029 (Governance as Code), ADR-0054 (FinOps)

@@ -2,6 +2,7 @@
 
 Date: 2026-05-30
 Status: Accepted
+Delivery-Status: Partial
 Author(s): jiri.raska
 
 > **Ratification (2026-06-10).** The load-bearing controls are in place and deployed, so the

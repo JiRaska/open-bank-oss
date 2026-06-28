@@ -1,6 +1,7 @@
 # ADR-0099 — Automated secret rotation: OpenBao dynamic credentials + CronJob rotator
 
 **Status:** Accepted
+**Delivery-Status:** Partial
 **Date:** 2026-06-19
 **Accepted:** 2026-06-25
 **Author:** @JiRaska

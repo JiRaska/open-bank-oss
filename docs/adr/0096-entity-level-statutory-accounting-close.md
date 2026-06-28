@@ -2,6 +2,7 @@
 
 Date: 2026-06-16
 Status: Accepted
+Delivery-Status: Planned
 Author(s): @JiRaska
 
 Relates to: ADR-0039 (ledger golden source, balance projection), ADR-0078 (per-customer

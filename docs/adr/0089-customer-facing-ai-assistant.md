@@ -1,6 +1,7 @@
 # ADR-0089 — Customer-Facing AI Assistant (Mobile Copilot)
 
 **Status:** Accepted
+**Delivery-Status:** Partial
 **Date:** 2026-06-14
 **Accepted:** 2026-06-25
 **Author:** @JiRaska

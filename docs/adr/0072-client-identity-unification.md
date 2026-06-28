@@ -2,6 +2,7 @@
 
 Date: 2026-06-07
 Status: Accepted (2026-06-16, under the ADR-0094 umbrella)
+Delivery-Status: Shipped
 Author(s): OpenBank platform
 
 ## Context

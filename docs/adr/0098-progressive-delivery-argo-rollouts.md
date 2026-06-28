@@ -1,6 +1,7 @@
 # ADR-0098 — Progressive Delivery for Money-Path Services via Argo Rollouts
 
 **Status:** Accepted
+**Delivery-Status:** Shipped
 **Date:** 2026-06-19
 **Author:** @JiRaska
 

@@ -1,6 +1,7 @@
 # ADR-0092 — Pact Broker: broker-backed contract pipeline (enacts ADR-0063 follow-up)
 
 **Status:** Accepted
+**Delivery-Status:** Shipped
 **Date:** 2026-06-15
 **Author:** @JiRaska
 

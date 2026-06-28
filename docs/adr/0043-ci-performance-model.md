@@ -2,6 +2,7 @@
 
 Date: 2026-05-31
 Status: Accepted
+Delivery-Status: Shipped
 Author(s): Jiri Raska
 
 > **Amendment 2026-06-19 — implemented in `.github/workflows/_service-ci.yml` + gitops.**
