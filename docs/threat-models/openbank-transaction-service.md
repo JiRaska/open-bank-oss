@@ -79,9 +79,29 @@ reference/counterparty/amount/date). Holds customer financial movement data.
 - Search authorization is role-coarse — per-account/per-party scoping is OPA's job (ADR-0034 follow-up).
 - A null security principal on initiate falls back to a zero-UUID actor — acceptable only while OIDC
   is mandatory at the gateway; revisit if the gateway becomes optional.
+- **Temporal orchestration path (ADR-0120 Phase 1, flag-gated OFF).** When
+  `openbank.transaction.orchestration.temporal.enabled=true`, `initiateTransaction` drives the payment
+  through a durable `PaymentWorkflow` instead of `PaymentSagaOrchestrator`; activities wrap the **same**
+  ports with identical arguments, so the §4 money-direction and the ADR-0039 D-2 hold-release invariant
+  are preserved (success path never releases the hold; balance projection does). New trust surface: the
+  worker opens a synchronous gRPC connection to the Temporal frontend (`:7233`) at startup — a *boot*
+  failure if the `openbank-payments` Temporal namespace is unprovisioned or the NetworkPolicy blocks it
+  (the `payments` k8s namespace is already allowlisted in `temporal-platform-ingress`). Workflow history
+  becomes a second store of in-flight payment state (durable, replayable — a DORA Art. 17 positive); it
+  must be access-controlled like the saga table. The ledger idempotency key on the Temporal path is
+  `workflow-<txid>-ledger` (distinct from the saga path's `saga-<txid>-ledger`): safe because a
+  transaction is initiated under exactly one flag value, but the canary cutover (Phase 4) must not
+  re-initiate an in-flight saga transaction under the workflow path. Flag is OFF in all environments;
+  this change is inert until a separately-approved cutover.
 
 ## 6. Change log
 
+- **2026-06-28** — ADR-0120 Phase 1: Temporal payment orchestration scaffolding (flag-gated, default
+  OFF). Additive `PaymentWorkflow` + activities mirroring `PaymentSagaOrchestrator`; no cutover, no saga
+  removal. Risk class = **integrity** (must preserve the §4 money-direction + D-2 invariant) + new
+  **gRPC trust boundary** to the Temporal frontend; mitigated by `PaymentWorkflowImplTest` (asserts the
+  success path never releases/reverses and compensation unwinds correctly), `PaymentActivitiesImplTest`
+  (port-args identical to the orchestrator), and the flag defaulting OFF. See §5.
 - **2026-06-25** — ADR-0108 rail settlement consumer. Opens new Kafka inbound trust boundary (`payment.scheme-accepted`); threat analysis in §2a. Spoofing mitigated by Strimzi mTLS + per-service-account ACL. DLQ topic (`payment.scheme-accepted.dlq`) provisioned. `originatingPaymentId` stored for reconciliation audit trail.
 - **2026-06-25** — #2013 mTLS + write-ACL hardening. §2a gap closed: `KafkaUser` manifests deployed in `openbank-infra/gitops/components/payments/kafka-scheme-accepted-acl.yaml`. Four producer ACLs (sepa-payment, sepa-instant, domestic-payment, swift-service) and one consumer ACL (transaction-service / `transaction-scheme-accepted-cg`) enforce mTLS authentication and broker-level `Write`/`Read` restrictions at the Strimzi User Operator. No other principal can produce to `payment.scheme-accepted`.
 

@@ -38,6 +38,9 @@ dependencies {
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
+    // ADR-0120 Phase 1: Temporal-backed payment orchestration (flag-gated, default off). Inline
+    // version matching openbank-settlement-service so enabling it stays path-scoped to this service.
+    implementation("io.temporal:temporal-sdk:1.25.1")
     implementation(project(":openbank-libs"))
 
     testImplementation(libs.quarkus.junit5)
@@ -55,6 +58,9 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.testcontainers.redpanda)
+    // ADR-0120 Phase 1: in-memory Temporal test environment for the payment workflow tests.
+    testImplementation("io.temporal:temporal-testing:1.25.1")
+    testImplementation("io.grpc:grpc-inprocess:1.68.1")
 }
 
 kover {
@@ -63,6 +69,9 @@ kover {
             excludes {
                 annotatedBy("jakarta.ws.rs.Path")
                 annotatedBy("io.quarkus.runtime.annotations.RegisterForReflection")
+                // StartupEvent observer (ADR-0120 P1): can't be unit-tested without @QuarkusTest;
+                // only exercised when the Temporal flag is enabled.
+                classes("com.openbank.transaction.application.workflow.PaymentWorkerRegistrar")
             }
         }
         verify {

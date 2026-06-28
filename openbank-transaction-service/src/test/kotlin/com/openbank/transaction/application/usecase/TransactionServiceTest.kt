@@ -13,15 +13,20 @@ import com.openbank.transaction.application.port.out.FxRatePort
 import com.openbank.transaction.application.port.out.FxRateView
 import com.openbank.transaction.application.port.out.TransactionEventPublisher
 import com.openbank.transaction.application.port.out.TransactionRepository
+import com.openbank.transaction.application.workflow.PaymentWorkflow
 import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionStatus
 import com.openbank.transaction.domain.model.TransactionType
 import com.openbank.transaction.domain.saga.PaymentSaga
 import com.openbank.transaction.domain.saga.SagaState
+import com.openbank.transaction.infrastructure.temporal.TemporalConfig
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
+import io.temporal.client.WorkflowClient
+import io.temporal.client.WorkflowOptions
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
@@ -37,6 +42,8 @@ class TransactionServiceTest {
     private lateinit var eventPublisher: TransactionEventPublisher
     private lateinit var sagaOrchestrator: PaymentSagaOrchestrator
     private lateinit var fxRatePort: FxRatePort
+    private lateinit var temporalConfig: TemporalConfig
+    private lateinit var workflowClient: WorkflowClient
 
     private lateinit var service: TransactionService
 
@@ -46,7 +53,18 @@ class TransactionServiceTest {
         eventPublisher = mockk()
         sagaOrchestrator = mockk()
         fxRatePort = mockk()
-        service = TransactionService(transactionRepository, eventPublisher, sagaOrchestrator, fxRatePort)
+        temporalConfig = mockk()
+        workflowClient = mockk()
+        // Default: Temporal orchestration OFF — TransactionService uses PaymentSagaOrchestrator.
+        every { temporalConfig.enabled() } returns false
+        service = TransactionService(
+            transactionRepository,
+            eventPublisher,
+            sagaOrchestrator,
+            fxRatePort,
+            temporalConfig,
+            workflowClient,
+        )
     }
 
     @Test
@@ -113,6 +131,52 @@ class TransactionServiceTest {
                 },
             )
         }
+    }
+
+    @Test
+    fun `flag off dispatches to the saga orchestrator and not the workflow`(): Unit = runBlocking {
+        val command = initiateCommand()
+
+        // temporalConfig.enabled() = false from setUp().
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        every { eventPublisher.completedPayload(any()) } returns "{}"
+        coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
+        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
+        coEvery { sagaOrchestrator.startSaga(any()) } answers {
+            val tx = firstArg<Transaction>()
+            PaymentSaga.start(tx.id, tx.idempotencyKey, Clock.systemUTC()).copy(state = SagaState.COMPLETED)
+        }
+
+        val result = service.initiateTransaction(command)
+
+        assertThat(result.status).isEqualTo(TransactionStatus.COMPLETED)
+        coVerify(exactly = 1) { sagaOrchestrator.startSaga(any()) }
+        verify(exactly = 0) { workflowClient.newWorkflowStub(any<Class<*>>(), any<WorkflowOptions>()) }
+    }
+
+    @Test
+    fun `flag on dispatches to the payment workflow and not the orchestrator`(): Unit = runBlocking {
+        val command = initiateCommand()
+        every { temporalConfig.enabled() } returns true
+        every { temporalConfig.taskQueue() } returns "openbank-payment-execution"
+        val workflowStub = mockk<PaymentWorkflow>()
+        every {
+            workflowClient.newWorkflowStub(PaymentWorkflow::class.java, any<WorkflowOptions>())
+        } returns workflowStub
+        every { workflowStub.execute(any()) } returns SagaState.COMPLETED
+
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        every { eventPublisher.completedPayload(any()) } returns "{}"
+        coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
+        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
+
+        val result = service.initiateTransaction(command)
+
+        assertThat(result.status).isEqualTo(TransactionStatus.COMPLETED)
+        coVerify(exactly = 0) { sagaOrchestrator.startSaga(any()) }
+        verify(exactly = 1) { workflowStub.execute(result.id) }
     }
 
     @Test

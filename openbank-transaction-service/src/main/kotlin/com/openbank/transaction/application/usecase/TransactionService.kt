@@ -18,12 +18,18 @@ import com.openbank.transaction.application.port.`in`.TransactionUseCase
 import com.openbank.transaction.application.port.out.FxRatePort
 import com.openbank.transaction.application.port.out.TransactionEventPublisher
 import com.openbank.transaction.application.port.out.TransactionRepository
+import com.openbank.transaction.application.workflow.PaymentWorkflow
 import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionStatus
 import com.openbank.transaction.domain.saga.SagaState
 import com.openbank.transaction.domain.settlement.SettlementDateResolver
+import com.openbank.transaction.infrastructure.temporal.TemporalConfig
+import io.temporal.client.WorkflowClient
+import io.temporal.client.WorkflowOptions
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.math.RoundingMode
 import java.time.Clock
 import java.time.Instant
@@ -35,6 +41,8 @@ class TransactionService(
     private val eventPublisher: TransactionEventPublisher,
     private val sagaOrchestrator: PaymentSagaOrchestrator,
     private val fxRatePort: FxRatePort,
+    private val temporalConfig: TemporalConfig,
+    private val workflowClient: WorkflowClient,
     private val clock: Clock,
 ) : TransactionUseCase {
 
@@ -44,7 +52,17 @@ class TransactionService(
         eventPublisher: TransactionEventPublisher,
         sagaOrchestrator: PaymentSagaOrchestrator,
         fxRatePort: FxRatePort,
-    ) : this(transactionRepository, eventPublisher, sagaOrchestrator, fxRatePort, Clock.systemUTC())
+        temporalConfig: TemporalConfig,
+        workflowClient: WorkflowClient,
+    ) : this(
+        transactionRepository,
+        eventPublisher,
+        sagaOrchestrator,
+        fxRatePort,
+        temporalConfig,
+        workflowClient,
+        Clock.systemUTC(),
+    )
 
     companion object {
         private const val TRANSACTION_INITIATED_EVENT = "openbank.transactions.transaction.initiated"
@@ -121,12 +139,34 @@ class TransactionService(
             ),
         )
 
-        val saga = sagaOrchestrator.startSaga(saved)
+        // ADR-0120 Phase 1 (flag-gated, default off): when Temporal orchestration is enabled, drive the
+        // payment through the durable PaymentWorkflow; otherwise keep the synchronous PaymentSagaOrchestrator
+        // path UNCHANGED. Both produce a terminal SagaState; only the source of the state changes.
+        val state: SagaState
+        var failureReason: String? = null
+        if (temporalConfig.enabled()) {
+            // stub.execute(...) is a blocking Temporal client call; this method runs on a reactive
+            // (suspend) thread, so offload the blocking wait to the IO dispatcher.
+            state = withContext(Dispatchers.IO) {
+                val stub = workflowClient.newWorkflowStub(
+                    PaymentWorkflow::class.java,
+                    WorkflowOptions.newBuilder()
+                        .setTaskQueue(temporalConfig.taskQueue())
+                        .setWorkflowId("payment-${saved.id}")
+                        .build(),
+                )
+                stub.execute(saved.id)
+            }
+        } else {
+            val saga = sagaOrchestrator.startSaga(saved)
+            state = saga.state
+            failureReason = saga.failureReason
+        }
 
-        // The orchestrator runs to a terminal state synchronously: COMPLETED on a successful
+        // The orchestration runs to a terminal state synchronously: COMPLETED on a successful
         // ledger posting, otherwise COMPENSATED/FAILED. Close the transaction lifecycle to match
         // and emit the corresponding domain event through the outbox.
-        return if (saga.state == SagaState.COMPLETED) {
+        return if (state == SagaState.COMPLETED) {
             val completed = saved.complete(clock)
             transactionRepository.update(
                 transaction = completed,
@@ -137,7 +177,7 @@ class TransactionService(
                 ),
             )
         } else {
-            val reason = saga.failureReason ?: "Payment saga did not complete (state=${saga.state})"
+            val reason = failureReason ?: "Payment saga did not complete (state=$state)"
             val failed = saved.fail(reason, clock)
             transactionRepository.update(
                 transaction = failed,
