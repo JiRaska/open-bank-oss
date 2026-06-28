@@ -34,11 +34,11 @@
   "openbank-sdd-service": "0.6.0",
   "openbank-security-scanner": "0.4.0",
   "openbank-sepa-instant": "0.6.1",
-  "openbank-sepa-payment": "0.7.1",
-  "openbank-settlement-service": "0.4.1",
   "openbank-standing-order-service": "0.8.0",
   "openbank-statement-service": "0.5.2",
   "openbank-swift-service": "0.6.1",
   "openbank-tpp-registry-service": "0.6.1",
-  "openbank-transaction-service": "1.10.0"
+  "openbank-transaction-service": "1.10.0",
+  "openbank-sepa-payment": "0.7.2",
+  "openbank-settlement-service": "0.4.1"
 }
