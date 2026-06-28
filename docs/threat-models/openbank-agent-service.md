@@ -52,13 +52,24 @@ Trust boundaries: (a) browser→BFF (NextAuth session), (b) BFF→agent-service 
   header. **Mitigation (this change, D3a):** `AgentIdentityBinding` binds the assertable agent-id to
   the operator's *verified* Keycloak roles, **deny-by-default**; a rejected assertion yields no
   identity (deny-by-default at the gate), an empty `tools/list` (no disclosure), and an audited
-  `agent.identity.rejected` event attributed to the OIDC subject. **Residual:** the header is still
-  *named* by the caller; full per-run cryptographic identity (short-TTL SPIFFE/SVID, signing root in
-  OpenBao) is **D3b (planned)** and removes the header entirely. The binding remains a defense-in-depth
-  backstop after SVID lands.
+  `agent.identity.rejected` event attributed to the OIDC subject. **D3b (verify side, this change):**
+  `AgentSvidVerifier` now accepts a per-run OpenBao-issued client cert (CN = agent id) proven via a
+  PoP signature (`X-Agent-Cert` / `X-Agent-PoP` / `-Ts` / `-Nonce`) — chain to the `pki-agent` CA
+  (#2405), cert-validity window, signature, timestamp freshness and single-use nonce. A valid SVID's
+  CN is the strongest identity, checked before the header binding. **Residual:** the SVID is verified
+  but not yet *minted/presented* (the BFF mint side is PR5b-2) and not yet *enforced*
+  (`agent.identity.svid.enforced=false` by default → falls back to the binding). When enforcement is
+  flipped, the header path is closed and the binding remains a defense-in-depth backstop.
 - **T-S2 — anonymous reach.** `@RolesAllowed` blocks unauthenticated callers in prod (OIDC on); the
   binding additionally fails closed. In `%dev/%test` OIDC is off (anonymous) and the legacy header
   trust is preserved — acceptable because those profiles never touch real data or a real cluster.
+- **T-S3 — security-control off-switches.** Two env flags disable a primary identity control:
+  `AGENT_IDENTITY_BINDING_ENFORCED=false` (disables the D3a role binding) and
+  `AGENT_IDENTITY_SVID_ENFORCED` (when false, a missing/invalid SVID falls back to the binding rather
+  than being rejected). Both default to the safe value (binding on, SVID non-enforcing during rollout);
+  flipping them is a change-controlled GitOps action and is visible in the deployment manifest. They
+  exist for staged rollout, not as a runtime bypass — a production deploy must not set
+  `BINDING_ENFORCED=false`.
 
 ### Tampering
 
@@ -78,8 +89,11 @@ Trust boundaries: (a) browser→BFF (NextAuth session), (b) BFF→agent-service 
 ### Information disclosure
 
 - **T-I1 — tool-schema disclosure (pentest FIND-S4-03).** `tools/list` advertises only the calling
-  agent's charter tools (ADR-0080). This change closes the gap where a *rejected* identity fell
-  through to the full list — a rejected assertion now returns an empty list.
+  agent's charter tools (ADR-0080). A *rejected* identity returns an empty list. **Residual (accepted):**
+  an authenticated operator that presents *no* identity at all (no SVID, no `X-Agent-Id`) still sees the
+  full tool-schema list — this is the legacy least-restrictive default and is bounded by the call path,
+  which denies every actual invocation at the gate (no charter ⇒ deny-by-default). It is not a data
+  path, only schema names; closing it (default-deny on no-identity `tools/list`) is a follow-up.
 - **T-I2 — prompt-injection exfiltration (FIND-S4-05).** Untrusted tool results are wrapped in
   data markers; the system prompt forbids following embedded instructions; the charter allow-list +
   gate bound what any missed phrasing could reach. PII is masked on every agent data scope.

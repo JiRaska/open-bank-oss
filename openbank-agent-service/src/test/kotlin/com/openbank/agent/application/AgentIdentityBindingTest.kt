@@ -45,14 +45,6 @@ class AgentIdentityBindingTest {
     }
 
     @Test
-    fun `permittedAgents returns the explicit set, null for wildcard, empty for unbound`() {
-        val b = binding("ROLE_OPERATOR=ui-assistant,extra;ROLE_ADMIN=*")
-        assertThat(b.permittedAgents(setOf("ROLE_OPERATOR"))).containsExactlyInAnyOrder("ui-assistant", "extra")
-        assertThat(b.permittedAgents(setOf("ROLE_ADMIN"))).isNull()
-        assertThat(b.permittedAgents(setOf("ROLE_GUEST"))).isEmpty()
-    }
-
-    @Test
     fun `parser tolerates whitespace and drops malformed entries`() {
         val b = binding(" ROLE_OPERATOR = ui-assistant , extra ; garbage ; =orphan ; ROLE_EMPTY= ")
         assertThat(b.permits(setOf("ROLE_OPERATOR"), "ui-assistant")).isTrue()

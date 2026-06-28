@@ -7,6 +7,7 @@ package com.openbank.agent.infrastructure.mcp
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.agent.application.AgentIdentityBinding
 import com.openbank.agent.application.AgentPolicyGate
+import com.openbank.agent.application.AgentSvidVerifier
 import com.openbank.agent.application.CharterRegistry
 import com.openbank.agent.application.McpToolRegistry
 import com.openbank.agent.domain.McpResponse
@@ -27,6 +28,7 @@ import jakarta.ws.rs.core.HttpHeaders
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.security.Principal
+import java.util.Optional
 
 /**
  * ADR-0031 D3: the /mcp surface must not let an authenticated operator assume an agent identity
@@ -62,8 +64,8 @@ class McpEndpointIdentityTest {
         enforced: Boolean = true,
     ): McpEndpoint {
         val headers = mockk<HttpHeaders> {
+            every { getHeaderString(any()) } returns null
             every { getHeaderString("X-Agent-Id") } returns headerAgentId
-            every { getHeaderString("X-Agent-Plane") } returns null
         }
         val ident = mockk<SecurityIdentity> {
             every { isAnonymous } returns anonymous
@@ -81,6 +83,9 @@ class McpEndpointIdentityTest {
             )
             this.identity = ident
             this.auditPublisher = this@McpEndpointIdentityTest.auditPublisher
+            // SVID disabled (no CA) → resolveAgentId falls through to the D3a header binding,
+            // so these tests exercise the binding path unchanged.
+            this.svid = AgentSvidVerifier(caCertPem = Optional.empty(), maxSkewSeconds = 60)
             this.headers = headers
         }
     }

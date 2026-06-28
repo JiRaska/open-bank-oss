@@ -46,6 +46,10 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    // D3b SVID tests build an EC CA + leaf cert at runtime (no committed private keys → gitleaks-clean).
+    // Declared directly (not via the shared catalog) so this one-service test dep does not trigger a
+    // full-fleet rebuild on the shared libs.versions.toml.
+    testImplementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
     // First integration test (ADR-0011 L2): isolated PostgreSQL per JVM (#578 pattern).
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)

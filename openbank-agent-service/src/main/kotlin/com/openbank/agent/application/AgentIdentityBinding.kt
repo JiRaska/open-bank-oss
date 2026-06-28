@@ -31,16 +31,6 @@ class AgentIdentityBinding(
     fun permits(roles: Set<String>, agentId: String): Boolean =
         roles.any { role -> bindings[role]?.let { it.contains(WILDCARD) || it.contains(agentId) } == true }
 
-    /**
-     * The agent ids [roles] may assert: `null` means wildcard (any agent), an empty set means none.
-     * Used to scope `tools/list` so a caller never even sees a charter it cannot assume.
-     */
-    fun permittedAgents(roles: Set<String>): Set<String>? {
-        val sets = roles.mapNotNull { bindings[it] }
-        if (sets.any { it.contains(WILDCARD) }) return null
-        return sets.flatten().toSet()
-    }
-
     private fun parse(raw: String): Map<String, Set<String>> = raw.split(';').mapNotNull { entry ->
         val parts = entry.split('=', limit = 2)
         if (parts.size != 2) return@mapNotNull null

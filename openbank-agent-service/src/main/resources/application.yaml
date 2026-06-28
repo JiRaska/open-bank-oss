@@ -210,6 +210,14 @@ agent:
     binding-enforced: ${AGENT_IDENTITY_BINDING_ENFORCED:true}
     # role -> assertable agent ids (comma list; '*' = any). Deny-by-default for unlisted roles.
     role-bindings: ${AGENT_IDENTITY_ROLE_BINDINGS:ROLE_ADMIN=*;ROLE_OPERATOR=ui-assistant;ROLE_COMPLIANCE=compliance-officer,ui-assistant}
+    # D3b (ADR-0031): verify a PoP-signed pki-agent cert (#2405) as the per-run agent identity
+    # (CN = agent id) — strongest evidence, checked before the header binding. DISABLED until the CA
+    # is supplied (ca-cert empty → fall back to the binding). `enforced: true` rejects a missing/
+    # invalid SVID instead of falling back — flip it once PR5b-2 has the BFF presenting certs.
+    svid:
+      ca-cert: ${AGENT_IDENTITY_SVID_CA_CERT:}
+      enforced: ${AGENT_IDENTITY_SVID_ENFORCED:false}
+      max-skew-seconds: ${AGENT_IDENTITY_SVID_MAX_SKEW_SECONDS:60}
   # D2 (ADR-0031): per-agent charter limits enforced by CharterRateLimiter. Mirrors the canonical
   # values in openbank-libs/governance/agents.yaml; code reads from config so no YAML parsing at
   # runtime. Adding an agent = one entry here + the charter entry in agents.yaml.

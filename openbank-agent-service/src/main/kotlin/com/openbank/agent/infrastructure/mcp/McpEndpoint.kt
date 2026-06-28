@@ -8,8 +8,10 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.agent.application.AgentIdentityBinding
 import com.openbank.agent.application.AgentPolicyGate
+import com.openbank.agent.application.AgentSvidVerifier
 import com.openbank.agent.application.CharterRegistry
 import com.openbank.agent.application.McpToolRegistry
+import com.openbank.agent.application.SvidResult
 import com.openbank.agent.domain.InitializeResult
 import com.openbank.agent.domain.McpError
 import com.openbank.agent.domain.McpErrorCode
@@ -38,6 +40,7 @@ import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
+import java.time.Clock
 
 /**
  * ADR-0031 D3: the MCP surface now requires an authenticated operator (Keycloak bearer from the
@@ -67,6 +70,16 @@ class McpEndpoint {
     @Inject lateinit var identity: SecurityIdentity
 
     @Inject lateinit var auditPublisher: AuditEventPublisher
+
+    @Inject lateinit var svid: AgentSvidVerifier
+
+    // D3b: when true a missing/invalid SVID is rejected instead of falling back to the D3a header
+    // binding. Default false so the binding stays in force until PR5b-2 has the BFF presenting certs.
+    @ConfigProperty(name = "agent.identity.svid.enforced", defaultValue = "false")
+    var svidEnforced: Boolean = false
+
+    // Plain field (no CDI Clock producer in this service); overridden in tests for deterministic time.
+    var clock: Clock = Clock.systemUTC()
 
     @Context lateinit var headers: HttpHeaders
 
@@ -113,13 +126,12 @@ class McpEndpoint {
     // AML/sanctions/payments tool schemas (reduces the FIND-S4-03 disclosure surface). No
     // agent id, or an agent with no configured allow-list → full list (call path still gates).
     private fun handleToolsList(): ToolsListResult {
-        val requested = headers.getHeaderString("X-Agent-Id")?.takeIf { it.isNotBlank() }
-        val agentId = verifiedAgentId(requested)
-        // ADR-0031 D3: a header that was present but rejected by the identity binding must NOT fall
-        // through to the full tool list — advertise nothing. No header at all keeps the legacy
-        // full list (the call path still gates every invocation).
-        if (requested != null && agentId == null) {
-            return ToolsListResult(tools = emptyList())
+        // ADR-0031 D3: a rejected identity (forged SVID, or a header binding the caller may not
+        // assume) must NOT fall through to the full tool list — advertise nothing. A resolved-but-
+        // absent identity (no SVID, no header) keeps the legacy full list (the call path still gates).
+        val agentId = when (val res = resolveAgentId()) {
+            Resolution.Rejected -> return ToolsListResult(tools = emptyList())
+            is Resolution.Allowed -> res.agentId
         }
         val allowed = agentId?.let { charterRegistry.allowedCapabilities(it) } ?: emptySet()
         val tools = if (allowed.isEmpty()) {
@@ -156,13 +168,11 @@ class McpEndpoint {
         return registry.call(toolName, arguments, actorId = identity?.agentId ?: "unknown")
     }
 
-    /**
-     * Phase-1 identity (ADR-0031 D9): asserted via the `X-Agent-Id` header; ADR-0031 D3
-     * replaces this with a SPIFFE/SPIRE SVID. Absent header -> null -> deny-by-default.
-     */
     private fun agentIdentity(arguments: JsonNode?): AgentIdentity? {
-        val agentId = verifiedAgentId(headers.getHeaderString("X-Agent-Id")?.takeIf { it.isNotBlank() })
-            ?: return null
+        val agentId = when (val res = resolveAgentId()) {
+            Resolution.Rejected -> return null
+            is Resolution.Allowed -> res.agentId ?: return null
+        }
         return AgentIdentity(
             agentId = agentId,
             plane = headers.getHeaderString("X-Agent-Plane")?.takeIf { it.isNotBlank() },
@@ -170,38 +180,92 @@ class McpEndpoint {
         )
     }
 
+    /** The resolved agent identity for a request. [Allowed.agentId] is null for the legacy no-identity case. */
+    private sealed interface Resolution {
+        data class Allowed(val agentId: String?) : Resolution
+        data object Rejected : Resolution
+    }
+
     /**
-     * ADR-0031 D3: resolve the asserted X-Agent-Id to a *verified* agent identity. The operator is
-     * already authenticated (@RolesAllowed); this checks that their verified Keycloak roles
-     * authorize assuming the requested agent ([AgentIdentityBinding], deny-by-default). A rejected
-     * assertion is audited and returns null (→ deny-by-default at the gate). OIDC is off in
-     * %dev/%test (anonymous), where the legacy header trust is preserved so the unit/contract
-     * tests are unaffected; in prod @RolesAllowed guarantees a non-anonymous principal.
+     * Resolve the calling agent identity, strongest evidence first (ADR-0031 D3):
+     *  1. **D3b SVID** — a PoP-signed `pki-agent` cert. A valid cert's CN is the identity; an
+     *     invalid one is rejected (audited). When SVID is enforced, its absence is also a rejection.
+     *  2. **D3a header binding** (fallback while SVID is not yet presented) — the `X-Agent-Id` header
+     *     bound to the operator's verified roles, deny-by-default.
+     */
+    private fun resolveAgentId(): Resolution {
+        when (
+            val r = svid.verify(
+                certPem = headers.getHeaderString("X-Agent-Cert"),
+                popB64 = headers.getHeaderString("X-Agent-PoP"),
+                timestampMillis = headers.getHeaderString("X-Agent-PoP-Ts"),
+                nonce = headers.getHeaderString("X-Agent-PoP-Nonce"),
+                now = clock.instant(),
+            )
+        ) {
+            is SvidResult.Verified -> return Resolution.Allowed(r.agentId)
+            is SvidResult.Rejected -> {
+                auditIdentityRejected(reason = r.reason, attemptedAgent = null, method = "svid")
+                return Resolution.Rejected
+            }
+            SvidResult.Disabled -> Unit // no SVID configured/presented → fall through
+        }
+        if (svidEnforced) {
+            auditIdentityRejected(reason = "SVID required but none presented", attemptedAgent = null, method = "svid")
+            return Resolution.Rejected
+        }
+        val requested = headers.getHeaderString("X-Agent-Id")?.takeIf { it.isNotBlank() }
+        val bound = verifiedAgentId(requested)
+        return if (requested != null && bound == null) Resolution.Rejected else Resolution.Allowed(bound)
+    }
+
+    /**
+     * ADR-0031 D3a: resolve the asserted X-Agent-Id to a *verified* agent identity bound to the
+     * operator's roles ([AgentIdentityBinding], deny-by-default). Used as the fallback when no SVID
+     * is presented. OIDC is off in %dev/%test (anonymous → legacy header trust); in prod
+     * @RolesAllowed guarantees a non-anonymous principal.
      */
     private fun verifiedAgentId(requested: String?): String? {
         if (requested == null) return null
         if (!binding.enforced || identity.isAnonymous) return requested
         if (binding.permits(identity.roles, requested)) return requested
-        auditRejectedAssumption(requested, identity.roles)
+        auditIdentityRejected(
+            reason = "not permitted to assume this agent",
+            attemptedAgent = requested,
+            method = "header_binding",
+            roles = identity.roles,
+        )
         return null
     }
 
-    private fun auditRejectedAssumption(requested: String, roles: Set<String>) {
+    /** Single AI-attributed rejection audit for both the SVID and the header-binding paths (D3). */
+    private fun auditIdentityRejected(
+        reason: String,
+        attemptedAgent: String?,
+        method: String,
+        roles: Set<String>? = null,
+    ) {
         val operator = identity.principal?.name?.takeIf { it.isNotBlank() } ?: "unknown"
         log.warnf(
-            "D3: operator=%s roles=%s attempted to assume agent '%s' — not permitted, rejected",
+            "D3: operator=%s method=%s identity rejected: %s (attempted=%s)",
             operator,
-            roles,
-            requested,
+            method,
+            reason,
+            attemptedAgent,
         )
+        val payload = buildMap<String, Any?> {
+            put("method", method)
+            put("reason", reason)
+            roles?.let { put("operator_roles", it.sorted()) }
+        }
         val event = AuditEvent(
             actorId = operator,
             actorType = "OPERATOR",
             operation = "agent.identity.rejected",
             resourceType = "agent.identity",
-            resourceId = requested,
+            resourceId = attemptedAgent,
             result = AuditResult.DENIED,
-            payload = mapOf("attempted_agent" to requested, "operator_roles" to roles.sorted()),
+            payload = payload,
         )
         runBlocking { auditPublisher.publish(event) }
     }
