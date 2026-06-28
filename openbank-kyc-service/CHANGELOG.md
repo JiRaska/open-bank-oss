@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/JiRaska/open-bank/compare/kyc-service-v0.5.1...kyc-service-v0.5.2) (2026-06-28)
+
+
+### Bug Fixes
+
+* **kyc:** handle PARTY_ERASED event to anonymise PII (GDPR Art. 17) ([033753c](https://github.com/JiRaska/open-bank/commit/033753c3d036faa36a3d05c95c4800c577857e5e))
+
 ## [0.5.1](https://github.com/JiRaska/open-bank/compare/kyc-service-v0.5.0...kyc-service-v0.5.1) (2026-06-27)
 
 
