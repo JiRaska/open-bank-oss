@@ -31,7 +31,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: redis
-          image: docker.io/valkey/valkey:8-alpine
+          image: valkey/valkey:8-alpine
           args: ["--save", "", "--appendonly", "no"]
           ports:
             - name: redis

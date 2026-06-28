@@ -25,7 +25,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: registry
-          image: docker.io/apicurio/apicurio-registry-sql:2.6.2.Final
+          image: apicurio/apicurio-registry-sql:2.6.2.Final
           ports:
             - name: http
               containerPort: 8080

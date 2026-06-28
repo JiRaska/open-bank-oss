@@ -67,7 +67,7 @@ spec:
         - name: register-namespaces
           # Same family as the chart's admintools pod — carries the modern `temporal`
           # CLI (the legacy `tctl` is also present). Pinned; bump deliberately.
-          image: docker.io/temporalio/admin-tools:1.29.7-tctl-1.18.4-cli-1.7.2
+          image: temporalio/admin-tools:1.29.7-tctl-1.18.4-cli-1.7.2
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false

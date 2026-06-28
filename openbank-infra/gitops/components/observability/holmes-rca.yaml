@@ -168,7 +168,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: relay
-          image: docker.io/library/python:3.12-slim
+          image: python:3.12-slim
           command: ["python", "/app/relay.py"]
           ports:
             - name: http

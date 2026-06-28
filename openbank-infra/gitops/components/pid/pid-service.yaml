@@ -134,7 +134,7 @@ spec:
         # all @Authorize-annotated endpoints in pid-service (identity.*, pid.resolve,
         # party.changeStatus). Bundle mounted from pid-opa-bundle ConfigMap.
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: openpolicyagent/opa:1.17.0
           imagePullPolicy: IfNotPresent
           args:
             - run
