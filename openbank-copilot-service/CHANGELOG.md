@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/JiRaska/open-bank/compare/copilot-service-v0.4.0...copilot-service-v0.4.1) (2026-06-28)
+
+
+### Bug Fixes
+
+* **sepa-instant,balance,audit,security-scanner,copilot,customer-edge,sca:** inject Clock via CDI (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2145](https://github.com/JiRaska/open-bank/issues/2145)) ([d680007](https://github.com/JiRaska/open-bank/commit/d68000775625cc423c95d8a27db29ff25a708f9f))
+
 ## [0.4.0](https://github.com/JiRaska/open-bank/compare/copilot-service-v0.3.0...copilot-service-v0.4.0) (2026-06-25)
 
 
