@@ -1,6 +1,6 @@
 # Runbook 0007 — OpenBao agent-identity PKI (ADR-0031 D3b)
 
-Status: Draft (issuer half landed; consumer is PR5b)
+Status: Draft (issuer + consumer implemented; e2e-verified in sandbox 2026-06-28)
 Owner: Platform + Security
 Related: ADR-0031 (AI agent governance — D3 verifiable identity), ADR-0017 (Vault/OpenBao secrets),
 ADR-0034 (zero-standing-token), ADR-0099 (dynamic DB creds — the k8s-auth pattern reused here),
@@ -47,6 +47,7 @@ path "sys/mounts/pki-agent"      { capabilities = ["create","read","update"] }
 path "sys/mounts/pki-agent/tune" { capabilities = ["update"] }
 path "pki-agent/*"               { capabilities = ["create","read","update","list"] }
 path "sys/policies/acl/agent-identity-issue" { capabilities = ["create","update","read"] }
+path "auth/kubernetes/role/admin-ui-mcp"     { capabilities = ["create","update","read"] }
 EOF
 
 bao write auth/kubernetes/role/agent-identity-admin \
@@ -56,43 +57,31 @@ bao write auth/kubernetes/role/agent-identity-admin \
   ttl=10m
 ```
 
-## Consumer half (PR5b — design for review)
+## Consumer half (PR5b-2 — implemented)
 
-PR5b makes the agent runtime an active OpenBao client and verifies the cert:
+The minter is the **admin-ui BFF** (the `/mcp` caller for the `ui-assistant` chat), NOT agent-service:
+`/mcp` is called by external clients; agent-service's in-process loop calls the tool registry
+directly. So minting + presentation belong to the caller. Chosen scheme: **bearer +
+proof-of-possession** (no mTLS ingress plumbing); the D3a role binding stays as a defense-in-depth
+backstop; mTLS / a self-minting agent workload is revisited when the loop moves onto Temporal (D6).
 
-1. **Dedicated identity for the minting workload.** agent-service today runs under the `default` SA
-   in `platform`. PR5b creates a dedicated SA and binds the consumer k8s-auth role to it
-   (least privilege — `default` must not be able to mint agent identities):
-   ```sh
-   bao write auth/kubernetes/role/agent-service \
-     bound_service_account_names=agent-service \
-     bound_service_account_namespaces=platform \
-     token_policies=agent-identity-issue ttl=10m
-   ```
-2. **Per-run mint.** The run initiator authenticates to OpenBao (k8s auth) and calls
-   `pki-agent/issue/agent-run` with `common_name=<agent-id>`, receiving a ≤5-min client cert.
-3. **Verify at `/mcp`.** McpEndpoint validates the cert against the `pki-agent` CA and reads the
-   agent id from the CN — replacing the `X-Agent-Id` header. The D3a role-binding (#2403) stays as a
-   defense-in-depth backstop.
+1. **Minter role (gitops, `openbao-agent-identity.yaml`).** `auth/kubernetes/role/admin-ui-mcp` binds
+   the admin-ui SA (default `admin-ui`/`admin-ui`; override via `MCP_MINTER_SA`/`MCP_MINTER_NS`) to
+   `agent-identity-issue`. The BFF (`src/lib/agent/svidMint.ts`) k8s-auth logs in, calls
+   `pki-agent/issue/agent-run` with `common_name=ui-assistant`, signs `<ts>.<nonce>` (SHA256withECDSA)
+   with the leaf key, and sends `X-Agent-Cert` (base64 PEM) + `X-Agent-PoP` + `-Ts` + `-Nonce`.
+2. **Verifier CA (agent-service).** `AgentSvidVerifier` reads `agent.identity.svid.ca-cert`
+   (`AGENT_IDENTITY_SVID_CA_CERT`) — the `pki-agent` CA, base64-encoded (an env / HTTP header cannot
+   carry the PEM's newlines; the verifier base64-decodes). Wire it via an ESO ExternalSecret reading
+   OpenBao `pki-agent/cert/ca` into an `agent-svid-ca` Secret, mounted as that env var, base64-encoded.
+3. **Rollout (additive → enforced).** Deploy with `AGENT_IDENTITY_SVID_ENFORCED=false`: a valid SVID
+   becomes the identity, anything else falls back to the D3a binding — chat is unaffected before the
+   BFF presents certs. Once the minter is live and certs verify, flip `AGENT_IDENTITY_SVID_ENFORCED=true`
+   to close the header path (the binding remains a backstop).
 
-### ⚠️ Open decision (resolve before PR5b)
-
-**Who mints the cert, and how is it presented to `/mcp`?** `/mcp` is called by *external* MCP clients
-(the admin-ui BFF for `ui-assistant`; a developer agent runtime), not by agent-service itself — the
-in-process loop calls the tool registry directly. So the minting + presentation belongs to the
-**caller**:
-
-- **Option 1 — mTLS:** the caller presents the OpenBao-issued cert as a client cert; the gateway/
-  service terminates mTLS and McpEndpoint reads the verified CN. Strongest, but needs mTLS plumbing
-  on the `/mcp` ingress path.
-- **Option 2 — bearer + proof-of-possession:** the caller sends the cert + a signature over the
-  request in a header; McpEndpoint verifies chain + PoP. No mTLS, more custom code.
-- **Coupling to D6:** a fully self-minting *agent workload* identity only exists once the reasoning
-  loop runs as a separate workload (D6, Temporal). Until then D3b hardens the **external** `/mcp`
-  callers; the in-process path keeps the trusted in-process identity.
-
-Recommendation: start with **Option 2 for the BFF→/mcp path** (no mTLS infra), keep the D3a binding,
-and revisit mTLS + workload identity when the loop moves onto Temporal (D6).
+**Verified e2e (2026-06-28, sandbox):** `pki-agent` bootstrapped live; a real OpenBao-issued
+`CN=ui-assistant` cert + PoP verified through the deployed `AgentSvidVerifier` →
+`Verified(agentId=ui-assistant)`; the operator-bearer → `/mcp` HTTP path returns 200.
 
 ## Verify
 
@@ -105,5 +94,5 @@ bao write pki-agent/issue/agent-run common_name=ui-assistant ttl=300s
 
 ## Rollback
 
-`bao secrets disable pki-agent` removes the engine and every (ephemeral, `no_store`) cert. Safe while
-inert — no consumer depends on it until PR5b.
+`bao secrets disable pki-agent` removes the engine and every (ephemeral, `no_store`) cert. Remove the
+`admin-ui-mcp` role binding and the agent-service CA config first so no consumer depends on it.

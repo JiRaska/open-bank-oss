@@ -176,4 +176,14 @@ class AgentSvidVerifierTest {
         assertThat(v.verify(p.leafPem, sig, t, "n1", now)).isEqualTo(SvidResult.Verified("ui-assistant"))
         assertThat(v.verify(p.leafPem, sig, t, "n1", now)).isEqualTo(SvidResult.Rejected("replayed nonce"))
     }
+
+    @Test
+    fun `a base64-encoded cert and CA verify the same as raw PEM (on-the-wire transport)`() {
+        val p = pki("ui-assistant")
+        val b64 = { s: String -> Base64.getEncoder().encodeToString(s.toByteArray(Charsets.UTF_8)) }
+        val v = AgentSvidVerifier(Optional.of(b64(p.caPem)), skew)
+        val t = ts()
+        assertThat(v.verify(b64(p.leafPem), pop(p.leafKey, t, "n1"), t, "n1", now))
+            .isEqualTo(SvidResult.Verified("ui-assistant"))
+    }
 }

@@ -71,11 +71,16 @@ data:
       echo "[openbao-agent] agent-identity root CA already present — keeping it."
     fi
 
-    # Per-run issuing role. The CN carries the agent id (allow_any_name — it is a charter
-    # name like 'ui-assistant', not a hostname). client-auth only; short max TTL bounds a
+    # Per-run issuing role. The CN carries the agent id (a charter name, not a hostname). The CN is
+    # CONSTRAINED to the allow-list (default ui-assistant — the only BFF-minted agent today) so a
+    # compromised minter cannot forge a higher-privileged charter (e.g. compliance-officer); extend
+    # AGENT_RUN_ALLOWED_CNS as more agents mint via the BFF. client-auth only; short max TTL bounds a
     # compromised run to minutes; no_store keeps ephemeral certs out of OpenBao storage.
     bao write "${PKI_PATH}/roles/agent-run" \
-      allow_any_name=true \
+      allow_any_name=false \
+      allowed_domains="${AGENT_RUN_ALLOWED_CNS:-ui-assistant}" \
+      allow_bare_domains=true \
+      allow_subdomains=false \
       enforce_hostnames=false \
       allow_ip_sans=false \
       server_flag=false \
@@ -87,8 +92,7 @@ data:
       no_store=true
 
     # Narrow consumer policy: issue from agent-run + read the CA chain (so a verifier can
-    # publish/trust it). NOT bound to any k8s-auth role here — INERT until PR5b grants the
-    # agent-service ServiceAccount. Cannot read other secrets or tune the engine.
+    # publish/trust it). Cannot read other secrets or tune the engine.
     bao policy write agent-identity-issue - <<EOF
     path "${PKI_PATH}/issue/agent-run" {
       capabilities = ["create", "update"]
@@ -98,7 +102,16 @@ data:
     }
     EOF
 
-    echo "[openbao-agent] agent-identity PKI configured (issuer half; inert until PR5b)."
+    # PR5b-2: bind the MINTER — the admin-ui BFF, the /mcp caller that mints a per-run cert for
+    # the ui-assistant chat — to the issue policy via Kubernetes auth (zero standing token). The
+    # agent-service VERIFIER does not mint; it reads the CA from an ExternalSecret (runbook 0007).
+    bao write "auth/kubernetes/role/admin-ui-mcp" \
+      bound_service_account_names="${MCP_MINTER_SA:-admin-ui}" \
+      bound_service_account_namespaces="${MCP_MINTER_NS:-admin-ui}" \
+      token_policies=agent-identity-issue \
+      ttl=10m
+
+    echo "[openbao-agent] agent-identity PKI + admin-ui-mcp minter role configured."
 ---
 apiVersion: v1
 kind: ServiceAccount

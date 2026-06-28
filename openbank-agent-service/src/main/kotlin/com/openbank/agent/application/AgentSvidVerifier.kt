@@ -132,12 +132,26 @@ class AgentSvidVerifier(
 
     private fun parseCertOrNull(pem: String): X509Certificate? = runCatching { parseCert(pem) }.getOrNull()
 
-    private fun parseCert(pem: String): X509Certificate = CertificateFactory.getInstance("X.509")
-        .generateCertificate(ByteArrayInputStream(pem.toByteArray(Charsets.UTF_8))) as X509Certificate
+    /**
+     * Parse a cert from either a raw PEM (in-process callers, a file/secret mount) or a
+     * base64-encoded cert (the on-the-wire transport): an HTTP header cannot carry the PEM's
+     * newlines, and YAML `${}` env expansion mangles a multi-line value — so the `X-Agent-Cert`
+     * header and the `ca-cert` config carry base64(PEM|DER), decoded here (detected by the PEM marker).
+     */
+    private fun parseCert(value: String): X509Certificate {
+        val bytes = if (value.contains(PEM_MARKER)) {
+            value.toByteArray(Charsets.UTF_8)
+        } else {
+            Base64.getMimeDecoder().decode(value.trim())
+        }
+        return CertificateFactory.getInstance("X.509")
+            .generateCertificate(ByteArrayInputStream(bytes)) as X509Certificate
+    }
 
     private companion object {
         const val MAX_NONCES = 10_000
         const val NONCE_TTL_MULTIPLIER = 2L
+        const val PEM_MARKER = "BEGIN CERTIFICATE"
         val CN_PATTERN = Regex("CN=([^,]+)")
         val INCOMPLETE = SvidResult.Rejected("incomplete SVID headers")
     }

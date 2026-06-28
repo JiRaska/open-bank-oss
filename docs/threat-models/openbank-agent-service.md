@@ -113,6 +113,12 @@ Trust boundaries: (a) browser→BFF (NextAuth session), (b) BFF→agent-service 
 
 ## 3. Open items (tracked under issue #2386)
 
-- **D3b:** short-TTL SPIFFE/SVID per run; agent identity from a verified credential, not a header.
+- ✅ **D3b SHIPPED:** short-TTL OpenBao `pki-agent` cert per run + PoP; agent identity from a verified
+  credential, not a header (#2405 issuer, #2412 verify, #2439 mint). Verify side is flag-gated
+  (`svid.enforced`); flip to enforced after the BFF is live (runbook 0007).
+- **D3b hardening:** a *verified* SVID currently bypasses the D3a role binding (the CN is trusted as
+  the identity). The OpenBao `agent-run` role is constrained to the `ui-assistant` CN so a compromised
+  minter cannot forge a higher-privileged charter; a deeper defense (verify the CN against the
+  operator's roles) is a follow-up. Requires admin-ui pod compromise to exploit; deny tier untouched.
 - **D3b:** author≠approver codified in agent policy (not only GitHub branch protection).
 - Explicit per-run OTel trace already live (D7, #2385); LLM-level Langfuse observability planned.
