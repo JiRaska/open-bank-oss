@@ -54,6 +54,14 @@ paths = [
   '''docs/.*''',
   '''.*test.*''',
   '''\.gitleaks\.toml$''',
+  # Deploy manifests pin images by a build tag — a git short-sha or a numeric sandbox
+  # build id (e.g. `…/openbank-admin-ui:sandbox-3567574752`). A purely numeric 9-10 digit
+  # tag trips the rod-cislo heuristic (\d{6}\d{3,4}) and blocked deploy PRs (#2423). These
+  # are GENERATED GitOps/deploy manifests — image refs + k8s config, not secrets (secrets
+  # flow via OpenBao / sealed-secrets, never plaintext here), so whole-file allowlist is safe.
+  # (A scoped regexTarget="line" allowlist does not apply under [extend] useDefault in gitleaks 8.x.)
+  '''(^|/)openbank-infra/gitops/components/[a-z0-9-]+/[a-z0-9._-]+\.yaml$''',
+  '''(^|/)openbank-admin-ui/(cluster-topology|infra-lifecycle)\.json$''',
   # Build/cache directories — these are gitignored, but `--no-git` scans the FS directly.
   # Skipping them prevents thousands of false positives from minified JS / compiled artifacts.
   '''(^|/)node_modules/''',
