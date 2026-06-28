@@ -54,9 +54,14 @@ echo "    platform: ${PLATFORM}"
 
 # 1. Build the fast-jar on the host (warm Gradle cache, real network).
 echo "==> gradle ${MODULE}:quarkusBuild (fast-jar)"
-./gradlew "${MODULE}:quarkusBuild" -Dquarkus.package.jar.type=fast-jar --console=plain -q
+./gradlew "${MODULE}:quarkusBuild" "${MODULE}:cyclonedxBom" -Dquarkus.package.jar.type=fast-jar --console=plain -q
 QA="${DIR}/build/quarkus-app"
 [ -f "${QA}/quarkus-run.jar" ] || { echo "ERROR: fast-jar not produced at ${QA}/quarkus-run.jar" >&2; exit 1; }
+# CycloneDX SBOM (schema 1.5, runtimeClasspath) — baked into the image and served
+# live by libs SbomResource at /q/openbank/sbom. Best-effort: warn if absent so a
+# missing plugin never fails an otherwise-good deploy build.
+BOM="${DIR}/build/reports/bom.json"
+[ -f "$BOM" ] || echo "WARN: no SBOM at ${BOM} — image will serve /q/openbank/sbom as not_generated" >&2
 
 # 2. Bake quarkus-app/ into a runtime image. EXPOSE is cosmetic (k8s uses the
 #    Deployment containerPort); we lift it from the service Dockerfile when present.
@@ -67,6 +72,13 @@ cp -r "${QA}" "${CTX}/quarkus-app"
 # Gradle produces quarkus-app files with 600 permissions (owner-only). The container
 # runs as a non-root 'openbank' user who can't read them → ClassNotFoundException.
 chmod -R a+r "${CTX}/quarkus-app"
+# Stage the SBOM (if produced) so the runtime stage can COPY it in.
+SBOM_COPY=""; SBOM_ENV=""
+if [ -f "$BOM" ]; then
+  mkdir -p "${CTX}/sbom"; cp "$BOM" "${CTX}/sbom/bom.json"; chmod a+r "${CTX}/sbom/bom.json"
+  SBOM_COPY=$'COPY sbom/bom.json /app/sbom/bom.json'
+  SBOM_ENV=$'ENV OPENBANK_SBOM_PATH=/app/sbom/bom.json'
+fi
 cat > "${CTX}/Dockerfile" <<EOF
 FROM eclipse-temurin:25-jre-alpine
 WORKDIR /app
@@ -76,6 +88,8 @@ COPY quarkus-app/lib/ /app/lib/
 COPY quarkus-app/*.jar /app/
 COPY quarkus-app/app/ /app/app/
 COPY quarkus-app/quarkus/ /app/quarkus/
+${SBOM_COPY}
+${SBOM_ENV}
 EXPOSE ${PORT}
 ENTRYPOINT ["java", "-XX:+UseZGC", "-Djava.util.logging.manager=org.jboss.logmanager.LogManager", "-jar", "/app/quarkus-run.jar"]
 EOF
