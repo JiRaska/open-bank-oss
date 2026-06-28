@@ -1,7 +1,8 @@
 # <Short noun phrase>
 
 Date: YYYY-MM-DD
-Status: Proposed
+Decision-Status: Proposed   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
+Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only; the build-axis status, independent of the decision axis -->
 Author(s): <name>
 
 ## Context

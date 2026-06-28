@@ -1,4 +1,4 @@
-# 114. Deterministic simulation harness — seed-driven money-path invariant checker (ADR-0100 Layer 2/3)
+# 115. Deterministic simulation harness — seed-driven money-path invariant checker (ADR-0100 Layer 2/3)
 
 Date: 2026-06-25
 Author: Claude (paired with Jiří Raška)

@@ -1,10 +1,10 @@
 # 12. MPL-2.0 licence + Developer Certificate of Origin
 
 Date: 2026-05-26
-Status: Superseded by [ADR-0119](0119-relicense-to-apache-2.0.md) on 2026-06-27 (amended 2026-05-30 — see Amendment)
+Status: Superseded by [ADR-0123](0123-relicense-to-apache-2.0.md) on 2026-06-27 (amended 2026-05-30 — see Amendment)
 
 > **Superseded.** The platform was relicensed from MPL-2.0 to **Apache-2.0** on 2026-06-27 — see
-> [ADR-0119](0119-relicense-to-apache-2.0.md). The DCO contribution mechanism and the AGPL-3.0 +
+> [ADR-0123](0123-relicense-to-apache-2.0.md). The DCO contribution mechanism and the AGPL-3.0 +
 > commercial carve-out for the agent runtime (Amendment below, ADR-0031 D8) both carry over unchanged;
 > only the permissive baseline changed from MPL-2.0 to Apache-2.0. This record is kept for history.
 

@@ -1,4 +1,4 @@
-# 116. Dispute and complaint handling — PSD2 statutory deadlines, evidence chain, breach detection
+# 117. Dispute and complaint handling — PSD2 statutory deadlines, evidence chain, breach detection
 
 Date: 2026-06-25
 Author: Claude (paired with Jiří Raška)

@@ -1,4 +1,4 @@
-# 119. Relicense the platform from MPL-2.0 to Apache-2.0
+# 123. Relicense the platform from MPL-2.0 to Apache-2.0
 
 Date: 2026-06-27
 Status: Accepted

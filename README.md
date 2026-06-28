@@ -3,7 +3,7 @@
 > Cloud-native, open-source retail banking platform built on Kotlin + Quarkus, Next.js, and event-driven microservices — with governance, supply-chain security, and AI-agent operations baked in as code.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-brightgreen.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Agent runtime: AGPL 3.0 + commercial](https://img.shields.io/badge/Agent_runtime-AGPL_3.0_%2B_commercial-blue.svg)](docs/adr/0119-relicense-to-apache-2.0.md)
+[![Agent runtime: AGPL 3.0 + commercial](https://img.shields.io/badge/Agent_runtime-AGPL_3.0_%2B_commercial-blue.svg)](docs/adr/0123-relicense-to-apache-2.0.md)
 [![Status: Alpha](https://img.shields.io/badge/Status-Alpha-orange.svg)](#project-status)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-blue.svg)](CONTRIBUTING.md)
 
@@ -287,7 +287,7 @@ The platform is designed with the following regulatory frameworks in mind. None 
 
 ## License
 
-OpenBank uses a **dual-license model** (ADR-0119, superseding ADR-0012):
+OpenBank uses a **dual-license model** (ADR-0123, superseding ADR-0012):
 
 **The platform (this repository) — [Apache License 2.0](LICENSE) + DCO.**
 
@@ -307,7 +307,7 @@ its own LICENSE and a CLA** (the CLA is what makes dual-licensing possible). Thi
 Apache-2.0 code in this repo; the policy/charter config here (`openbank-agent-service`, `governance/agents.yaml`)
 stays Apache-2.0 + DCO. `rules.yaml` carries a documented carve-out so the governance gate and reality agree.
 
-See [`LICENSE`](LICENSE) for full Apache-2.0 text and [ADR-0119](docs/adr/0119-relicense-to-apache-2.0.md) for the
+See [`LICENSE`](LICENSE) for full Apache-2.0 text and [ADR-0123](docs/adr/0123-relicense-to-apache-2.0.md) for the
 relicensing rationale (and [ADR-0012](docs/adr/0012-mpl-license-and-dco.md) for the original MPL decision it supersedes).
 
 ---

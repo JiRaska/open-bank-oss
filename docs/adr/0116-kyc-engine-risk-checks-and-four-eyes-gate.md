@@ -1,4 +1,4 @@
-# 115. KYC engine — risk-based checks, ČNB four-eyes gate, sandbox straight-through mode
+# 116. KYC engine — risk-based checks, ČNB four-eyes gate, sandbox straight-through mode
 
 Date: 2026-06-25
 Author: Claude (paired with Jiří Raška)

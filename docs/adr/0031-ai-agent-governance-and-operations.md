@@ -163,7 +163,7 @@ single vendor's agent SDK** — tools via MCP, policy via Rego, models via a gat
 ### D8 — Licensing and IP strategy (deviates from Apache-2.0)
 
 The agent component is the part of OpenBank we intend to **commercialize**, so it does **not** ship under
-the repo-wide Apache-2.0 (ADR-0119, superseding ADR-0012). We will:
+the repo-wide Apache-2.0 (ADR-0123, superseding ADR-0012). We will:
 
 - License the agent component under **AGPL-3.0** — the network/SaaS copyleft is the moat: a competitor who
   runs it as a service must publish their modifications, which blocks silent strip-mining.

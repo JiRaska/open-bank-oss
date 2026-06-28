@@ -1,4 +1,4 @@
-# 112. Card issuance bounded context — virtual-first, internal lifecycle, no external processor
+# 113. Card issuance bounded context — virtual-first, internal lifecycle, no external processor
 
 Date: 2026-06-25
 Author: Claude (paired with Jiří Raška)

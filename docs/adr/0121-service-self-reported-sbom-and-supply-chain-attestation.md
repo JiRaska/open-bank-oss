@@ -69,7 +69,7 @@ generation path for each, and require the in-flight SBOM branches to conform bef
   Gradle invocation) and forks generation across two code paths.
 - **Operational SBOM only; skip attestation** — simplest. Rejected: leaves ADR-0029 D2 open, gives no
   admission-time supply-chain verification, and never sees the OS layer — insufficient for the
-  public-launch hardening (ADR-0119 oss-readiness) and DORA third-party/ICT supply-chain risk.
+  public-launch hardening (ADR-0124 oss-readiness) and DORA third-party/ICT supply-chain risk.
 - **Attested SBOM only; no live endpoint** — Rejected: loses the self-report introspection plane and the
   admin-ui live "what's running" view, which is the operational value the in-flight work delivers.
 
@@ -104,6 +104,6 @@ generation path for each, and require the in-flight SBOM branches to conform bef
 - ADR-0030 — no runtime SBOM drift (image-baked operational SBOM upholds this).
 - ADR-0071 — derived, self-reported per-service governance (the self-describing-service theme).
 - ADR-0093 — public developer portal (the cosign v2 KMS image-signing reused by Axis 2).
-- ADR-0119 — OSS readiness and public-launch hardening.
+- ADR-0124 — OSS readiness and public-launch hardening.
 - In-flight branches: `feat/libs-sbom-resource`, `build/sbom-bake-pilot`, `feat/admin-ui-sbom-live`.
 - `openbank-infra/gitops/components/kyverno/verify-images-policy.yaml` — admission gate to extend.

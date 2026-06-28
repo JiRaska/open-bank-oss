@@ -1,4 +1,4 @@
-# 117. GDPR data lifecycle — PII classification, retention periods, erasure model
+# 118. GDPR data lifecycle — PII classification, retention periods, erasure model
 
 Date: 2026-06-25
 Author: Claude (paired with Jiří Raška)
@@ -133,8 +133,8 @@ and card-issuance-service and return a structured export. This is a future imple
 - `openbank-party-service/src/main/kotlin/.../usecase/PartyService.kt` (erasure implementation)
 - `openbank-party-service/src/main/kotlin/.../port/out/PartyPorts.kt` (GDPR Art. 17 comments)
 - `openbank-party-service/src/main/kotlin/.../kafka/KafkaPartyEventPublisher.kt` (`PARTY_ERASED`)
-- ADR-0112 (card issuance — `cardholderName` PII)
-- ADR-0115 (KYC engine — sensitive PII)
+- ADR-0113 (card issuance — `cardholderName` PII)
+- ADR-0116 (KYC engine — sensitive PII)
 - ADR-0086 (customer payment non-repudiation — audit chain retention)
 - GDPR Art. 17(3)(b) — erasure exemption for legal obligations
 - AML Act No. 253/2008 §16 (Czech AML — retention after relationship end)
