@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/JiRaska/open-bank/compare/notification-service-v0.7.0...notification-service-v0.7.1) (2026-06-28)
+
+
+### Bug Fixes
+
+* **notification:** handle PARTY_ERASED event to delete PII (GDPR Art. 17) ([#2267](https://github.com/JiRaska/open-bank/issues/2267)) ([248441e](https://github.com/JiRaska/open-bank/commit/248441e5e0595fc7abcfdfd0220195d925da0610))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank/compare/notification-service-v0.6.0...notification-service-v0.7.0) (2026-06-27)
 
 
