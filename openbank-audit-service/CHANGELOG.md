@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank/compare/audit-service-v0.6.2...audit-service-v0.7.0) (2026-06-28)
+
+
+### Features
+
+* **audit:** externally-signed tamper-evidence anchors over the audit hash chain (ADR-0031 D5) ([#2383](https://github.com/JiRaska/open-bank/issues/2383)) ([29a4427](https://github.com/JiRaska/open-bank/commit/29a4427b3694ffc2cfb3e5c325ef62fa3e522b0c))
+
 ## [0.6.2](https://github.com/JiRaska/open-bank/compare/audit-service-v0.6.1...audit-service-v0.6.2) (2026-06-27)
 
 
