@@ -118,7 +118,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0107](0107-convert-pocket-balance-to-primary.md) | Convert a currency pocket's balance to the primary currency (sweep-to-close) | Accepted | Shipped |
 | [0108](0108-rail-settlement-via-transaction-service.md) | Rail settlement runs through transaction-service (ADR-0039), not settlement-service | Accepted | Shipped |
 | [0109](0109-customer-managed-currency-pockets.md) | Customer-managed currency pockets (add / remove) | Accepted | Shipped |
-| [0110](0110-same-account-fx-exchange.md) | Same-account FX pocket exchange | Accepted | Shipped |
+| [0110](0110-same-account-fx-exchange.md) | Same-account currency exchange (pocket FX swap) | Accepted | Shipped |
 | [0111](0111-payment-r-transaction-returns-pacs004.md) | SEPA R-Transaction Returns via pacs.004 | Accepted | Shipped |
 | [0112](0112-ai-finops-agent.md) | AI-FinOps Agent: proaktivní nákladová observabilita a optimalizace | Accepted | Partial |
 | [0113](0113-card-issuance-bounded-context.md) | Card issuance bounded context — virtual-first, internal lifecycle, no external processor | Accepted | Partial |
@@ -133,4 +133,4 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0122](0122-split-openbank-libs-into-domain-and-runtime.md) | Split openbank-libs into domain and runtime modules | Proposed | Planned |
 | [0123](0123-relicense-to-apache-2.0.md) | Relicense the platform from MPL-2.0 to Apache-2.0 | Accepted | Shipped |
 | [0124](0124-oss-readiness-and-public-launch-hardening.md) | OSS-readiness and public-launch hardening | Proposed | Planned |
-| [0125](0125-same-account-currency-exchange.md) | Same-account currency exchange (the app's currency swap) | Accepted | Shipped |
+| [0125](0125-same-account-currency-exchange.md) | Same-account currency exchange (the app's currency swap) | Superseded by ADR-0110 | Superseded |
