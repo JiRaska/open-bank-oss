@@ -99,7 +99,11 @@ openbank:
     poll-interval: 5s
     initial-delay: 5s
   scheduler:
-    execution-cron: "0 3 * * ?"
+    # Quarkus scheduler uses Quartz-style cron: 6 fields (sec min hour dom mon dow),
+    # not the 5-field Unix form. "0 3 * * ?" parsed as 5 parts and crashed the app at
+    # boot (IllegalArgumentException: Cron expression contains 5 parts but we expect
+    # one of [6, 7]). "0 0 3 * * ?" = 03:00:00 daily, the original intent.
+    execution-cron: "0 0 3 * * ?"
     execution-enabled: true
 
 mp:
