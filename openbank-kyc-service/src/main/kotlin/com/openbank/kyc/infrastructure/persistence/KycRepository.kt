@@ -19,8 +19,10 @@ import jakarta.inject.Inject
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Table
+import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
+import org.jboss.logging.Logger
 
 @Entity
 @Table(name = "kyc_cases")
@@ -60,6 +62,34 @@ class KycCaseEntity : PanacheEntity() {
 
     @Column(name = "updated_at", nullable = false)
     lateinit var updatedAt: Instant
+
+    // V2 EBA/FATF compliance fields — mapped here solely so GDPR Art. 17 erasure can null them.
+    @Column(name = "source_of_funds")
+    var sourceOfFunds: String? = null
+
+    @Column(name = "source_of_wealth")
+    var sourceOfWealth: String? = null
+
+    @Column(name = "business_purpose")
+    var businessPurpose: String? = null
+
+    @Column(name = "expected_turnover")
+    var expectedTurnover: BigDecimal? = null
+
+    @Column(name = "pep_declaration")
+    var pepDeclaration: Boolean = false
+
+    @Column(name = "beneficial_owner_id")
+    var beneficialOwnerId: UUID? = null
+
+    @Column(name = "screening_ref")
+    var screeningRef: String? = null
+
+    @Column(name = "escalated_to")
+    var escalatedTo: String? = null
+
+    @Column(name = "escalation_reason")
+    var escalationReason: String? = null
 }
 
 @ApplicationScoped
@@ -118,6 +148,48 @@ class KycRepository :
             }
         }.replaceWith(case)
     }.awaitSuspending()
+
+    override suspend fun anonymizeByPartyId(partyId: UUID) {
+        Panache.withTransaction {
+            find("partyId", partyId).list().map { cases ->
+                cases.forEach { c ->
+                    // V1 PII fields
+                    c.assignedTo = null
+                    c.notes = null
+                    c.reviewedBy = null
+                    c.checksJson = anonymizeChecksJson(c.checksJson, objectMapper)
+                    // V2 EBA/FATF compliance PII fields
+                    c.sourceOfFunds = null
+                    c.sourceOfWealth = null
+                    c.businessPurpose = null
+                    c.expectedTurnover = null
+                    c.pepDeclaration = false
+                    c.beneficialOwnerId = null
+                    c.screeningRef = null
+                    c.escalatedTo = null
+                    c.escalationReason = null
+                }
+            }
+        }.awaitSuspending()
+    }
+
+    companion object {
+        private val log = Logger.getLogger(KycRepository::class.java)
+
+        internal fun anonymizeChecksJson(checksJson: String, objectMapper: ObjectMapper): String = try {
+            val checks: List<KycCheck> = objectMapper.readValue(
+                checksJson,
+                objectMapper.typeFactory.constructCollectionType(List::class.java, KycCheck::class.java),
+            )
+            objectMapper.writeValueAsString(checks.map { it.copy(result = null) })
+        } catch (e: com.fasterxml.jackson.core.JacksonException) {
+            log.warnf(
+                "Corrupted checksJson during GDPR erasure for a KYC case — replacing with empty array: %s",
+                e.message,
+            )
+            "[]"
+        }
+    }
 }
 
 // Mappers kept at file scope (pure functions over an injected ObjectMapper) so the repository

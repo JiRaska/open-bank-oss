@@ -39,4 +39,6 @@ interface KycCaseRepository {
     suspend fun countByStatus(status: KycCaseStatus): Long
 
     suspend fun update(case: KycCase): KycCase
+
+    suspend fun anonymizeByPartyId(partyId: UUID)
 }

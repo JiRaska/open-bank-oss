@@ -6,6 +6,7 @@ package com.openbank.kyc.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.kyc.application.KycService
+import com.openbank.kyc.application.port.out.KycCaseRepository
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.reactive.messaging.Incoming
@@ -27,9 +28,14 @@ import java.util.UUID
 @ApplicationScoped
 class PartyEventConsumer {
 
-    @Inject lateinit var kycService: KycService
+    @Inject
+    lateinit var kycService: KycService
 
-    @Inject lateinit var objectMapper: ObjectMapper
+    @Inject
+    lateinit var kycCaseRepository: KycCaseRepository
+
+    @Inject
+    lateinit var objectMapper: ObjectMapper
 
     private val log = Logger.getLogger(PartyEventConsumer::class.java)
 
@@ -43,14 +49,19 @@ class PartyEventConsumer {
         }
 
         val eventType = node.path("eventType").asText()
-        if (eventType != "PARTY_CREATED") return // only the create event opens a case; ignore the rest
-
         val partyId = runCatching { UUID.fromString(node.path("partyId").asText()) }.getOrNull()
+
+        when (eventType) {
+            "PARTY_CREATED" -> handleCreated(partyId, payload)
+            "PARTY_ERASED" -> handleErased(partyId, payload)
+        }
+    }
+
+    private suspend fun handleCreated(partyId: UUID?, payload: String) {
         if (partyId == null) {
             log.warnf("[party-events-in] PARTY_CREATED without a valid partyId, skipping: %.200s", payload)
             return
         }
-
         try {
             val (case, created) = kycService.openCaseForParty(partyId)
             if (created) {
@@ -63,9 +74,20 @@ class PartyEventConsumer {
                 )
             }
         } catch (e: Exception) {
-            // Ack and let the party stream replay rather than wedging the consumer group;
-            // openCaseForParty is idempotent so a redelivery is safe.
             log.errorf(e, "[party-events-in] Failed to auto-open KYC case for party %s", partyId)
+        }
+    }
+
+    private suspend fun handleErased(partyId: UUID?, payload: String) {
+        if (partyId == null) {
+            log.warnf("[party-events-in] PARTY_ERASED without valid partyId, skipping: %.200s", payload)
+            return
+        }
+        try {
+            kycCaseRepository.anonymizeByPartyId(partyId)
+            log.infof("[party-events-in] GDPR Art. 17: anonymised KYC PII for erased party %s", partyId)
+        } catch (e: Exception) {
+            log.errorf(e, "[party-events-in] Failed to anonymise KYC PII for party %s", partyId)
         }
     }
 }

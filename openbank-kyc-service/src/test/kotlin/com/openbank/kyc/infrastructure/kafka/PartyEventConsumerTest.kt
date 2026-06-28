@@ -7,10 +7,12 @@ package com.openbank.kyc.infrastructure.kafka
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.kyc.application.KycCaseResult
 import com.openbank.kyc.application.KycService
+import com.openbank.kyc.application.port.out.KycCaseRepository
 import com.openbank.kyc.domain.model.KycCase
 import com.openbank.kyc.domain.model.KycCaseStatus
 import com.openbank.kyc.domain.model.RiskLevel
 import io.mockk.coEvery
+import io.mockk.coJustRun
 import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
@@ -22,12 +24,14 @@ import java.util.UUID
 class PartyEventConsumerTest {
 
     private val kycService = mockk<KycService>()
+    private val kycCaseRepository = mockk<KycCaseRepository>()
     private lateinit var consumer: PartyEventConsumer
 
     @BeforeEach
     fun setUp() {
         consumer = PartyEventConsumer().also {
             it.kycService = kycService
+            it.kycCaseRepository = kycCaseRepository
             it.objectMapper = ObjectMapper()
         }
     }
@@ -54,12 +58,34 @@ class PartyEventConsumerTest {
     }
 
     @Test
-    fun `non-create party events are ignored`(): Unit = runBlocking {
+    fun `PARTY_ERASED anonymises KYC case PII for the party`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coJustRun { kycCaseRepository.anonymizeByPartyId(partyId) }
+
+        consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""")
+
+        coVerify(exactly = 1) { kycCaseRepository.anonymizeByPartyId(partyId) }
+        coVerify(exactly = 0) { kycService.openCaseForParty(any()) }
+    }
+
+    @Test
+    fun `PARTY_ERASED anonymisation failure is swallowed to protect the consumer group`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { kycCaseRepository.anonymizeByPartyId(partyId) } throws RuntimeException("db down")
+
+        consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""")
+
+        coVerify(exactly = 1) { kycCaseRepository.anonymizeByPartyId(partyId) }
+    }
+
+    @Test
+    fun `unknown party events are ignored`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
 
         consumer.consume("""{"eventType":"PARTY_STATUS_CHANGED","partyId":"$partyId","newStatus":"VERIFIED"}""")
 
         coVerify(exactly = 0) { kycService.openCaseForParty(any()) }
+        coVerify(exactly = 0) { kycCaseRepository.anonymizeByPartyId(any()) }
     }
 
     @Test
