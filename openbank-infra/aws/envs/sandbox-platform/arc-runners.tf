@@ -226,7 +226,17 @@ locals {
     # Node-local Gradle home cache — survives pod restarts on the same Karpenter
     # node. Gradle wrapper (~150 MB) and Maven metadata are fetched once per node
     # instead of once per job. DirectoryOrCreate + chmod 777 via init container.
-    { name = "gradle-home-cache", hostPath = { path = "/var/cache/gradle-svc", type = "DirectoryOrCreate" } },
+    #
+    # MUST live on the instance-store NVMe (/mnt/k8s-disks/0, the RAID0 array, ~880
+    # GiB), NOT the 25 GiB gp3 root. instanceStorePolicy=RAID0 only relocates
+    # containerd + kubelet to the NVMe; a hostPath defaults to the ROOT EBS. Pointed
+    # at /var/cache/gradle-svc the per-node Gradle cache grew unbounded (~22 GiB) and
+    # filled the 25 GiB root, after which the CNI could not write its sandbox results
+    # (/var/lib/cni) and every new runner pod wedged in Init with
+    # "FailedCreatePodSandBox: no space left on device" (2026-06-28). Backing it with
+    # the NVMe gives ~880 GiB of headroom (node is ephemeral, expireAfter 72h, so it
+    # is naturally GC'd) and keeps the root for the OS only — so the 25 GiB root stays.
+    { name = "gradle-home-cache", hostPath = { path = "/mnt/k8s-disks/0/gradle-svc", type = "DirectoryOrCreate" } },
   ]
 }
 
