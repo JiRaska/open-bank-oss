@@ -106,6 +106,38 @@ resource "aws_vpc_endpoint" "codeartifact_repositories" {
 }
 
 # ---------------------------------------------------------------------------
+# EC2 VPC Interface endpoint — eliminates NAT for aws-node (VPC CNI) EC2 API
+# calls on every cluster node.
+#
+# Problem: aws-node (Amazon VPC CNI DaemonSet in kube-system) polls the EC2 API
+# continuously for ENI / IP-address management — IPAM attach/detach,
+# DescribeNetworkInterfaces, AssignPrivateIpAddresses, etc. Without this endpoint
+# every call leaves the VPC over the NAT gateway. With 15-23 nodes each polling
+# every few seconds this produces steady background NAT from kube-system that the
+# D1 FinOps detector flags as "NAT egress 2× rolling avg — kube-system".
+#
+# Also used by: Karpenter (DescribeInstances, CreateFleet, TerminateInstances),
+# ebs-csi-driver (DescribeVolumes, AttachVolume), EKS node bootstrap.
+#
+# Fix: once private DNS resolves ec2.eu-north-1.amazonaws.com to an in-VPC IP,
+# all these components go entirely over the private endpoint — zero NAT cost.
+# ---------------------------------------------------------------------------
+resource "aws_vpc_endpoint" "ec2" {
+  vpc_id              = local.s.vpc_id
+  service_name        = "com.amazonaws.${local.region}.ec2"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = local.s.private_subnet_ids
+  security_group_ids  = [local.s.node_security_group_id]
+  private_dns_enabled = true
+
+  tags = {
+    Name      = "openbank-sandbox-ec2"
+    Project   = "openbank"
+    ManagedBy = "tofu"
+  }
+}
+
+# ---------------------------------------------------------------------------
 # IAM: allow Karpenter nodes to create ECR repos on first pull.
 # Pull-through cache auto-creates a private repo on first use; the node role
 # needs ecr:CreateRepository + ecr:BatchImportUpstreamImage for this.
