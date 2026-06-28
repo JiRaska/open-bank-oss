@@ -5,6 +5,9 @@
 package com.openbank.party.infrastructure.rest
 
 import com.openbank.libs.api.error.ApiError
+import com.openbank.libs.audit.AuditEvent
+import com.openbank.libs.audit.AuditEventPublisher
+import com.openbank.libs.audit.AuditResult
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.flags.FeatureClient
 import com.openbank.libs.flags.FeatureFlag
@@ -62,6 +65,8 @@ class PartyResource {
 
     @Inject @io.quarkus.arc.Unremovable
     lateinit var jwt: JsonWebToken
+
+    @Inject lateinit var auditPublisher: AuditEventPublisher
 
     @GET
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_SERVICE")
@@ -166,6 +171,9 @@ class PartyResource {
     @Operation(summary = "Erase party — GDPR Art. 17 Right to Erasure (anonymizes all PII)")
     suspend fun eraseParty(@PathParam("id") id: UUID): Response {
         partyUseCase.eraseParty(ErasePartyCommand(id))
+        // ADR-0118 / ADR-0086: GDPR Art. 17 erasure is a state-changing PII operation —
+        // record who erased which subject for the Art. 30 records-of-processing trail.
+        auditGdpr(operation = "party.erase", partyId = id, gdprArticle = "17")
         return Response.noContent().build()
     }
 
@@ -173,8 +181,33 @@ class PartyResource {
     @Path("/{id}/gdpr-export")
     @RolesAllowed("ROLE_ADMIN")
     @Operation(summary = "Export all PII held for a party — GDPR Art. 15 Right of Access (ADR-0118)")
-    suspend fun exportPartyGdpr(@PathParam("id") id: UUID): Response =
-        Response.ok(partyUseCase.exportPartyData(id).toResponse()).build()
+    suspend fun exportPartyGdpr(@PathParam("id") id: UUID): Response {
+        val export = partyUseCase.exportPartyData(id)
+        // ADR-0118 / ADR-0086: a subject-access read exposes the full PII set — audit the
+        // access itself (Art. 30). Emitted only after a successful fetch; a 404 (party not
+        // found) throws before this line, so no SUCCESS event is recorded for a miss.
+        auditGdpr(operation = "party.gdpr-export", partyId = id, gdprArticle = "15")
+        return Response.ok(export.toResponse()).build()
+    }
+
+    /**
+     * Emit an [AuditEvent] for a GDPR operation onto the libs audit pipeline (ADR-0086 chain).
+     * Actor is the authenticated operator (JWT subject); no raw PII is placed in the payload —
+     * only the regulatory article reference, per the Art. 30 records-of-processing requirement.
+     */
+    private suspend fun auditGdpr(operation: String, partyId: UUID, gdprArticle: String) {
+        auditPublisher.publish(
+            AuditEvent(
+                actorId = jwt.subject ?: jwt.name ?: "unknown",
+                actorType = "HUMAN",
+                operation = operation,
+                resourceType = "party",
+                resourceId = partyId.toString(),
+                result = AuditResult.SUCCESS,
+                payload = mapOf("gdpr_article" to gdprArticle),
+            ),
+        )
+    }
 
     // ─── Mobile self-registration endpoints ───────────────────────────────────────
 

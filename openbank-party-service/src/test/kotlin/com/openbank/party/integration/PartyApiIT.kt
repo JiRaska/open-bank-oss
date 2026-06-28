@@ -272,6 +272,20 @@ class PartyApiIT {
         }
     }
 
+    @Test
+    @Order(15)
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
+    fun `GET gdpr-export with a non-ADMIN role returns 403`() {
+        // Subject-access export is ADMIN-only (GDPR Art. 15 is privileged). A read role
+        // must not be able to pull the full PII set.
+        val id = createdPartyId ?: return
+        Given { this } When {
+            get("/api/v1/parties/$id/gdpr-export")
+        } Then {
+            statusCode(403)
+        }
+    }
+
     // ── ADR-0055 name search ──────────────────────────────────────────────
 
     @Test
