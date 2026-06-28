@@ -248,6 +248,7 @@ tests for new behavior, and a threat model for money-path services (ADR-0030).
 ## Documentation
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the services fit together (bounded contexts, runtime patterns, deployment)
+- [`DEPLOYMENT.md`](DEPLOYMENT.md) — how it's built, shipped, and run (local Docker, CI/CD, GitOps, infra, runbooks)
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — milestones M1–M7
 - [`docs/adr/README.md`](docs/adr/README.md) — Architecture Decision Records index, with per-decision delivery status (governance lives in 0029–0031 and 0040)
 - [`docs/strategy/`](docs/strategy/) — BIAN mapping, security baseline, compliance matrix, resilience
