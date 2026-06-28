@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.1](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.34.0...admin-ui-v0.34.1) (2026-06-28)
+
+
+### Bug Fixes
+
+* **admin-ui:** point Temporal metrics queries at real server metric names ([1b99c66](https://github.com/JiRaska/open-bank/commit/1b99c665bc9f3fb55395634380e701ab88cb76cd))
+
 ## [0.34.0](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.33.0...admin-ui-v0.34.0) (2026-06-27)
 
 
