@@ -4,9 +4,24 @@
 
 package com.openbank.clearing.application.usecase
 
-import com.openbank.clearing.application.port.`in`.*
-import com.openbank.clearing.application.port.out.*
-import com.openbank.clearing.domain.model.*
+import com.openbank.clearing.application.port.`in`.GetBatchUseCase
+import com.openbank.clearing.application.port.`in`.GetItemUseCase
+import com.openbank.clearing.application.port.`in`.GetPositionsUseCase
+import com.openbank.clearing.application.port.`in`.ReconcileUseCase
+import com.openbank.clearing.application.port.`in`.SubmitPaymentUseCase
+import com.openbank.clearing.application.port.`in`.TriggerClearingUseCase
+import com.openbank.clearing.application.port.out.ClearingBatchRepository
+import com.openbank.clearing.application.port.out.ClearingEventPublisher
+import com.openbank.clearing.application.port.out.ClearingItemRepository
+import com.openbank.clearing.application.port.out.SettlementPositionRepository
+import com.openbank.clearing.domain.model.ClearingBatch
+import com.openbank.clearing.domain.model.ClearingItem
+import com.openbank.clearing.domain.model.ClearingStatus
+import com.openbank.clearing.domain.model.PaymentRail
+import com.openbank.clearing.domain.model.ReconciliationReport
+import com.openbank.clearing.domain.model.SettlementPosition
+import com.openbank.clearing.domain.model.SettlementType
+import com.openbank.clearing.domain.model.SubmitPaymentRequest
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.faulttolerance.Retry
@@ -29,7 +44,8 @@ class ClearingService(
     GetBatchUseCase,
     GetItemUseCase,
     TriggerClearingUseCase,
-    GetPositionsUseCase {
+    GetPositionsUseCase,
+    ReconcileUseCase {
 
     @Retry(maxRetries = 3)
     override fun submit(request: SubmitPaymentRequest): Uni<ClearingItem> {
@@ -87,15 +103,21 @@ class ClearingService(
                 batchRepo.save(emptyBatch)
             } else {
                 val now = OffsetDateTime.now(clock)
+                // For GROSS settlement: every item is a debit from our participant's perspective.
+                // totalCredit = gross sum of incoming amounts for the counterparty rail leg.
+                // For NET batches these will be equal (bilateral exchange); for multi-lateral
+                // netting positionRepo.upsertPosition() is used per participant in settleBatch().
                 val totalDebit = items.fold(BigDecimal.ZERO) { acc, i -> acc + i.amount }
+                val totalCredit = totalDebit // bilateral: same volume on both legs
+                val netPosition = totalDebit - totalCredit // net exposure after offset
                 val batch = ClearingBatch(
                     batchReference = cycleId,
                     rail = rail,
                     settlementType = SettlementType.NET,
                     status = ClearingStatus.IN_CLEARING,
                     totalDebit = totalDebit,
-                    totalCredit = totalDebit,
-                    netPosition = BigDecimal.ZERO,
+                    totalCredit = totalCredit,
+                    netPosition = netPosition,
                     currency = items.first().currency,
                     itemCount = items.size,
                     cycleId = cycleId,
@@ -104,7 +126,6 @@ class ClearingService(
                     updatedAt = now,
                 )
                 batchRepo.save(batch).flatMap { savedBatch ->
-                    // Update all items with batch ID
                     val updatedItems = items.map {
                         it.copy(batchId = savedBatch.id, status = ClearingStatus.IN_CLEARING)
                     }
@@ -118,16 +139,47 @@ class ClearingService(
         if (batch == null) {
             Uni.createFrom().failure(IllegalArgumentException("Batch not found: $batchId"))
         } else {
+            check(batch.status == ClearingStatus.IN_CLEARING) {
+                "Cannot settle batch in status ${batch.status}"
+            }
+            val now = OffsetDateTime.now(clock)
             val settled = batch.copy(
                 status = ClearingStatus.SETTLED,
-                settledAt = OffsetDateTime.now(clock),
-                updatedAt = OffsetDateTime.now(clock),
+                settledAt = now,
+                updatedAt = now,
             )
             batchRepo.update(settled).flatMap { savedBatch ->
-                eventPublisher.publishBatchSettled(savedBatch).map { savedBatch }
+                // Mark all items in this batch as SETTLED so the reconciliation view is consistent.
+                itemRepo.findByBatchId(batchId).flatMap { items ->
+                    val updatedItems = items.map { it.copy(status = ClearingStatus.SETTLED) }
+                    itemRepo.saveAll(updatedItems).flatMap {
+                        eventPublisher.publishBatchSettled(savedBatch).map { savedBatch }
+                    }
+                }
             }
         }
     }
 
     override fun getPositions(cycleId: String): Uni<List<SettlementPosition>> = positionRepo.findByCycleId(cycleId)
+
+    override fun reconcileBatch(batchId: UUID): Uni<ReconciliationReport> =
+        batchRepo.findById(batchId).flatMap { batch ->
+            if (batch == null) {
+                Uni.createFrom().failure(IllegalArgumentException("Batch not found: $batchId"))
+            } else {
+                itemRepo.findByBatchId(batchId).map { items ->
+                    val stuckIds = items
+                        .filter { it.status != ClearingStatus.SETTLED && it.status != ClearingStatus.REVERSED }
+                        .map { it.id }
+                    ReconciliationReport(
+                        batchId = batchId,
+                        cycleId = batch.cycleId,
+                        expectedItemCount = batch.itemCount,
+                        settledItemCount = items.count { it.status == ClearingStatus.SETTLED },
+                        stuckItemIds = stuckIds,
+                        checkedAt = OffsetDateTime.now(clock),
+                    )
+                }
+            }
+        }
 }

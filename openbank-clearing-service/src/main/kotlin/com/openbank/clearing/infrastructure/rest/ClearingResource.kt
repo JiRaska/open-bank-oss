@@ -35,6 +35,7 @@ class ClearingResource(
     private val getItemUseCase: GetItemUseCase,
     private val triggerUseCase: TriggerClearingUseCase,
     private val positionsUseCase: GetPositionsUseCase,
+    private val reconcileUseCase: ReconcileUseCase,
 ) {
 
     @POST
@@ -106,4 +107,19 @@ class ClearingResource(
     @Operation(summary = "Get clearing items by payment ID")
     fun getItemsByPayment(@PathParam("paymentId") paymentId: UUID): Uni<List<ClearingItem>> =
         getItemUseCase.listItemsByPayment(paymentId)
+
+    @GET
+    @Path("/batches/{id}/reconcile")
+    @RolesAllowed(Roles.PAYMENTS, Roles.ADMIN)
+    @Operation(summary = "Run internal reconciliation check for a settled batch")
+    fun reconcile(@PathParam("id") id: UUID): Uni<Response> = reconcileUseCase.reconcileBatch(id)
+        .map { report ->
+            if (report.clean) {
+                Response.ok(report).build()
+            } else {
+                Response.status(Response.Status.CONFLICT).entity(report).build()
+            }
+        }
+        .onFailure(IllegalArgumentException::class.java)
+        .recoverWithItem { e -> Response.status(Response.Status.NOT_FOUND).entity(mapOf("error" to e.message)).build() }
 }

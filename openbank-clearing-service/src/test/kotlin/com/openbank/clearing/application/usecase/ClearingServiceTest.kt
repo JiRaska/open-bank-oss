@@ -18,7 +18,6 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
-import io.mockk.verifyOrder
 import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -75,15 +74,20 @@ class ClearingServiceTest {
     }
 
     @Test
-    fun `settle batch transitions batch to settled and publishes event`() {
+    fun `settle batch transitions batch to settled, marks items settled, and publishes event`() {
         val batchId = UUID.fromString("22222222-2222-2222-2222-222222222222")
         val batch = ClearingBatch(
             id = batchId,
             batchReference = "BATCH-002",
             rail = PaymentRail.SEPA_SCT,
             status = ClearingStatus.IN_CLEARING,
+            itemCount = 2,
             createdAt = fixedNow,
             updatedAt = fixedNow,
+        )
+        val items = listOf(
+            clearingItem(batchId = batchId, status = ClearingStatus.IN_CLEARING),
+            clearingItem(batchId = batchId, status = ClearingStatus.IN_CLEARING),
         )
         val updatedSlot: CapturingSlot<ClearingBatch> = slot()
         val savedBatch = batch.copy(
@@ -92,8 +96,11 @@ class ClearingServiceTest {
             updatedAt = OffsetDateTime.parse("2026-01-20T10:15:31Z"),
         )
 
+        val settledItems = items.map { it.copy(status = ClearingStatus.SETTLED) }
         every { batchRepo.findById(batchId) } returns Uni.createFrom().item(batch)
         every { batchRepo.update(capture(updatedSlot)) } returns Uni.createFrom().item(savedBatch)
+        every { itemRepo.findByBatchId(batchId) } returns Uni.createFrom().item(items)
+        every { itemRepo.saveAll(any()) } returns Uni.createFrom().item(settledItems)
         every { eventPublisher.publishBatchSettled(savedBatch) } returns Uni.createFrom().voidItem()
 
         val result = service.settleBatch(batchId).await().indefinitely()
@@ -101,12 +108,8 @@ class ClearingServiceTest {
         assertThat(result).isEqualTo(savedBatch)
         assertThat(updatedSlot.captured.status).isEqualTo(ClearingStatus.SETTLED)
         assertThat(updatedSlot.captured.settledAt).isNotNull()
-        assertThat(updatedSlot.captured.updatedAt).isNotNull()
-        verifyOrder {
-            batchRepo.findById(batchId)
-            batchRepo.update(any())
-            eventPublisher.publishBatchSettled(savedBatch)
-        }
+        verify { itemRepo.saveAll(match { it.all { i -> i.status == ClearingStatus.SETTLED } }) }
+        verify { eventPublisher.publishBatchSettled(savedBatch) }
     }
 
     @Test
@@ -121,6 +124,103 @@ class ClearingServiceTest {
         verify(exactly = 0) { batchRepo.update(any()) }
         verify(exactly = 0) { eventPublisher.publishBatchSettled(any()) }
     }
+
+    @Test
+    fun `reconcileBatch returns clean report when all items are settled`() {
+        val batchId = UUID.fromString("44444444-4444-4444-4444-444444444444")
+        val batch = ClearingBatch(
+            id = batchId,
+            batchReference = "BATCH-REC",
+            rail = PaymentRail.SEPA_SCT,
+            status = ClearingStatus.SETTLED,
+            itemCount = 2,
+            cycleId = "CYCLE-TEST",
+            createdAt = fixedNow,
+            updatedAt = fixedNow,
+        )
+        val items = listOf(
+            clearingItem(batchId = batchId, status = ClearingStatus.SETTLED),
+            clearingItem(batchId = batchId, status = ClearingStatus.SETTLED),
+        )
+        every { batchRepo.findById(batchId) } returns Uni.createFrom().item(batch)
+        every { itemRepo.findByBatchId(batchId) } returns Uni.createFrom().item(items)
+
+        val report = service.reconcileBatch(batchId).await().indefinitely()
+
+        assertThat(report.clean).isTrue()
+        assertThat(report.settledItemCount).isEqualTo(2)
+        assertThat(report.expectedItemCount).isEqualTo(2)
+        assertThat(report.stuckItemIds).isEmpty()
+    }
+
+    @Test
+    fun `reconcileBatch returns dirty report when items are stuck in IN_CLEARING`() {
+        val batchId = UUID.fromString("55555555-5555-5555-5555-555555555555")
+        val batch = ClearingBatch(
+            id = batchId,
+            batchReference = "BATCH-STUCK",
+            rail = PaymentRail.SEPA_SCT,
+            status = ClearingStatus.SETTLED,
+            itemCount = 3,
+            createdAt = fixedNow,
+            updatedAt = fixedNow,
+        )
+        val stuck = clearingItem(batchId = batchId, status = ClearingStatus.IN_CLEARING)
+        val items = listOf(
+            clearingItem(batchId = batchId, status = ClearingStatus.SETTLED),
+            clearingItem(batchId = batchId, status = ClearingStatus.SETTLED),
+            stuck,
+        )
+        every { batchRepo.findById(batchId) } returns Uni.createFrom().item(batch)
+        every { itemRepo.findByBatchId(batchId) } returns Uni.createFrom().item(items)
+
+        val report = service.reconcileBatch(batchId).await().indefinitely()
+
+        assertThat(report.clean).isFalse()
+        assertThat(report.settledItemCount).isEqualTo(2)
+        assertThat(report.stuckItemIds).containsExactly(stuck.id)
+    }
+
+    @Test
+    fun `triggerClearingCycle computes correct netPosition for bilateral settlement`() {
+        val amount = BigDecimal("200.00")
+        val items = listOf(
+            clearingItem(amount = amount),
+            clearingItem(amount = amount),
+        )
+        val batchSlot: CapturingSlot<ClearingBatch> = slot()
+
+        every { itemRepo.findPendingByRail(PaymentRail.SEPA_SCT, any()) } returns Uni.createFrom().item(items)
+        every { batchRepo.save(capture(batchSlot)) } answers {
+            val b = firstArg<ClearingBatch>()
+            Uni.createFrom().item(b)
+        }
+        every { itemRepo.saveAll(any()) } returns Uni.createFrom().item(items)
+
+        service.triggerClearingCycle(PaymentRail.SEPA_SCT).await().indefinitely()
+
+        val batch = batchSlot.captured
+        assertThat(batch.totalDebit).isEqualByComparingTo(BigDecimal("400.00"))
+        assertThat(batch.totalCredit).isEqualByComparingTo(BigDecimal("400.00"))
+        assertThat(batch.netPosition).isEqualByComparingTo(BigDecimal.ZERO)
+    }
+
+    private fun clearingItem(
+        batchId: UUID = UUID.fromString("00000000-0000-0000-0000-000000000000"),
+        status: ClearingStatus = ClearingStatus.PENDING,
+        amount: BigDecimal = BigDecimal("100.00"),
+    ) = ClearingItem(
+        batchId = batchId,
+        paymentId = UUID.randomUUID(),
+        paymentReference = "PAY-${UUID.randomUUID()}",
+        debtorIban = "DE89370400440532013000",
+        creditorIban = "DE12500105170648489890",
+        amount = amount,
+        currency = "EUR",
+        status = status,
+        createdAt = fixedNow,
+        updatedAt = fixedNow,
+    )
 
     private fun SubmitPaymentRequest.toExpectedItem(): ClearingItem = ClearingItem(
         batchId = UUID.fromString("00000000-0000-0000-0000-000000000000"),

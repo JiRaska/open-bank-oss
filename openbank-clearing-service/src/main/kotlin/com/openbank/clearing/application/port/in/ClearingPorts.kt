@@ -4,7 +4,13 @@
 
 package com.openbank.clearing.application.port.`in`
 
-import com.openbank.clearing.domain.model.*
+import com.openbank.clearing.domain.model.ClearingBatch
+import com.openbank.clearing.domain.model.ClearingItem
+import com.openbank.clearing.domain.model.ClearingStatus
+import com.openbank.clearing.domain.model.PaymentRail
+import com.openbank.clearing.domain.model.ReconciliationReport
+import com.openbank.clearing.domain.model.SettlementPosition
+import com.openbank.clearing.domain.model.SubmitPaymentRequest
 import io.smallrye.mutiny.Uni
 import java.util.UUID
 
@@ -30,4 +36,8 @@ interface TriggerClearingUseCase {
 
 interface GetPositionsUseCase {
     fun getPositions(cycleId: String): Uni<List<SettlementPosition>>
+}
+
+interface ReconcileUseCase {
+    fun reconcileBatch(batchId: UUID): Uni<ReconciliationReport>
 }
