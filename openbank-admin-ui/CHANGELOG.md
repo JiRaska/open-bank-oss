@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.35.0](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.34.2...admin-ui-v0.35.0) (2026-06-28)
+
+
+### Features
+
+* **admin-ui:** read live SBOM from /q/openbank/sbom, fall back to baked bundle ([#2367](https://github.com/JiRaska/open-bank/issues/2367)) ([20e46fa](https://github.com/JiRaska/open-bank/commit/20e46faf0bc282dd0d74c50da20696ebb38f101b))
+* **admin-ui:** surface live audit-trail integrity on IAOps (ADR-0031 D5) ([#2398](https://github.com/JiRaska/open-bank/issues/2398)) ([a0c7bda](https://github.com/JiRaska/open-bank/commit/a0c7bdaeeed125b45ac2194e4c14943622d80a60))
+
 ## [0.34.2](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.34.1...admin-ui-v0.34.2) (2026-06-28)
 
 
