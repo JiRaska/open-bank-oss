@@ -1,0 +1,56 @@
+# Public-readiness gate.
+#
+# WHY THIS EXISTS (the gap it closes):
+#  The repo is intended to stand up to a critical open-source audit. Most of the
+#  controls that make it defensible (default-deny NetworkPolicy, ExternalSecrets,
+#  SECURITY.md-claimed scanners, per-money-path threat models) are easy to silently
+#  regress: delete one threat model, inline one k8s Secret, drop CodeQL from a
+#  workflow refactor — and nothing else fails. This gate runs the exact checks a
+#  hostile reviewer runs in the first hour, so "not low-hanging-fruit attackable"
+#  is machine-verified continuously (ADR-0029 derive -> enforce -> sign), not
+#  asserted in prose.
+#
+#  It does NOT replace the CI security suite (CodeQL/Trivy/SBOM in security.yml,
+#  gitleaks in secret-scan.yml). It is the cheap aggregate pre-flight that confirms
+#  those controls are still WIRED and the governance/disclosure surface is intact.
+#
+# Implemented by .github/scripts/public-readiness-audit.sh (bash 3.2-portable).
+
+name: Public readiness
+
+on:
+  pull_request:
+  # Belt-and-braces full sweep (includes the full-history gitleaks leg).
+  schedule:
+    - cron: "0 5 * * 1"  # weekly Monday 05:00 UTC (after secret-scan at 04:00)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-readiness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Public-readiness audit
+    # openbank-build = Hetzner + Mac Mini pool (always-online, zero AWS cost).
+    runs-on: openbank-build
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Full history only matters for the gitleaks leg (scheduled/manual runs).
+          # On PRs we SKIP_GITLEAKS (secret-scan.yml already gates gitleaks per-PR),
+          # so a shallow checkout there is fine and faster.
+          fetch-depth: ${{ github.event_name == 'pull_request' && 1 || 0 }}
+
+      - name: Run public-readiness audit
+        env:
+          # On PRs, skip the 8-minute full-history gitleaks scan — secret-scan.yml
+          # already runs gitleaks (commit-range-scoped) on every PR. The scheduled
+          # and manual runs do the full gitleaks leg as the belt-and-braces sweep.
+          SKIP_GITLEAKS: ${{ github.event_name == 'pull_request' && '1' || '' }}
+        run: bash .github/scripts/public-readiness-audit.sh
