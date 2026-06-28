@@ -4,6 +4,7 @@
 
 package com.openbank.audit.infrastructure.rest
 
+import com.openbank.audit.application.AuditAnchorService
 import com.openbank.audit.infrastructure.persistence.AuditRepository
 import com.openbank.libs.authz.Authorize
 import jakarta.annotation.security.RolesAllowed
@@ -28,6 +29,8 @@ import java.util.UUID
 class AuditResource {
 
     @Inject lateinit var repo: AuditRepository
+
+    @Inject lateinit var anchors: AuditAnchorService
 
     @GET
     @Path("/entries/{aggregateId}")
@@ -99,6 +102,35 @@ class AuditResource {
         )
         return Response.ok(body).build()
     }
+
+    /**
+     * List recent signed anchors (ADR-0031 D5). Each anchor is an externally-signed checkpoint
+     * over the chain head at a point in time.
+     */
+    @GET
+    @Path("/anchors")
+    @RolesAllowed("ROLE_AUDITOR", "ROLE_ADMIN", "ROLE_COMPLIANCE")
+    @Authorize(action = "audit.verify", resource = "")
+    @Operation(summary = "List recent signed audit anchors (ADR-0031 D5)")
+    suspend fun listAnchors(@QueryParam("limit") @DefaultValue("50") limit: Int): Response =
+        Response.ok(anchors.recent(limit)).build()
+
+    /**
+     * Verify every signed anchor: recompute each digest, check its signature, and confirm the
+     * attested chain head still matches the live chain. Detects a wholesale rewrite of the log
+     * that the internal hash-chain walk in [verifyIntegrity] alone cannot (ADR-0031 D5).
+     */
+    @GET
+    @Path("/anchors/verify")
+    @RolesAllowed("ROLE_AUDITOR", "ROLE_ADMIN", "ROLE_COMPLIANCE")
+    @Authorize(action = "audit.verify", resource = "")
+    @Operation(
+        summary = "Verify all signed audit anchors (ADR-0031 D5)",
+        description = "Recomputes each anchor digest, verifies its signature, and confirms the " +
+            "attested head hash still matches the live chain. Returns BROKEN with the first " +
+            "failing anchor if a signature is invalid or the chain was rewritten.",
+    )
+    suspend fun verifyAnchors(): Response = Response.ok(anchors.verifyAnchors()).build()
 }
 
 /**

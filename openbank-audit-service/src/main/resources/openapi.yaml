@@ -3,8 +3,8 @@
 openapi: 3.1.0
 info:
   title: Audit Service API
-  version: 1.1.0
-  description: Immutable audit trail — retrieve event history per aggregate; verify hash-chain integrity (ADR-0086).
+  version: 1.2.0
+  description: Immutable audit trail — retrieve event history per aggregate; verify hash-chain integrity (ADR-0086) and externally-signed anchors (ADR-0031 D5).
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -89,6 +89,58 @@ paths:
         '403':
           description: Caller does not have an audit-reading role
 
+  /api/v1/audit/anchors:
+    get:
+      tags: [Audit]
+      summary: List recent signed audit anchors (ADR-0031 D5)
+      operationId: listAnchors
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of anchors to return (most recent first, clamped 1..200).
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Recent signed anchors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditAnchorResponse'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Caller does not have an audit-reading role
+
+  /api/v1/audit/anchors/verify:
+    get:
+      tags: [Audit]
+      summary: Verify all signed audit anchors (ADR-0031 D5)
+      operationId: verifyAnchors
+      description: >
+        Recomputes each anchor digest, verifies its signature, and confirms the attested chain
+        head still matches the live chain. Detects a wholesale rewrite of the log that the
+        internal hash-chain walk alone cannot.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Anchor verification result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnchorVerificationResponse'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Caller does not have an audit-reading role
+
 components:
   securitySchemes:
     bearerAuth:
@@ -118,6 +170,82 @@ components:
           format: uuid
           nullable: true
           description: entry_id of the first broken link; null when chainStatus is INTACT.
+
+    AuditAnchorResponse:
+      type: object
+      required: [chainedCount, chainStatus, anchorDigest, keyId, signedAt]
+      description: An externally-signed checkpoint over the audit hash chain (ADR-0031 D5).
+      properties:
+        lastEntryId:
+          type: string
+          format: uuid
+          nullable: true
+          description: entry_id of the chain head at capture time; null only for an empty chain.
+        lastRecordHash:
+          type: string
+          nullable: true
+          description: record_hash of the attested chain head.
+        chainedCount:
+          type: integer
+          format: int64
+          description: Number of chained rows at capture time.
+        chainStatus:
+          type: string
+          enum: [INTACT, BROKEN]
+          description: Chain status observed when the anchor was captured.
+        anchorDigest:
+          type: string
+          description: SHA-256 over the attested fields; the value that was signed.
+        signature:
+          type: string
+          nullable: true
+          description: Base64 signature over anchorDigest; null when the signer was unavailable.
+        keyId:
+          type: string
+          description: Identifier of the key that produced the signature.
+        signedAt:
+          type: string
+          format: date-time
+
+    AnchorVerificationResponse:
+      type: object
+      required: [status, anchorCount, verifiedCount, unsignedCount]
+      properties:
+        status:
+          type: string
+          enum: [INTACT, BROKEN]
+          description: INTACT when every anchor's signature and attested head verify.
+        anchorCount:
+          type: integer
+          format: int64
+        verifiedCount:
+          type: integer
+          format: int64
+          description: Anchors whose signature and attested head both verified.
+        unsignedCount:
+          type: integer
+          format: int64
+          description: Anchors stored without a signature (signer unavailable at capture).
+        firstBroken:
+          nullable: true
+          description: The first anchor that failed verification; null when status is INTACT.
+          allOf:
+            - $ref: '#/components/schemas/AnchorBreak'
+
+    AnchorBreak:
+      type: object
+      required: [signatureInvalid, headHashMismatch]
+      properties:
+        lastEntryId:
+          type: string
+          format: uuid
+          nullable: true
+        signatureInvalid:
+          type: boolean
+          description: The anchor's stored signature did not verify over its recomputed digest.
+        headHashMismatch:
+          type: boolean
+          description: The attested head hash no longer matches the live chain (rewrite).
 
     AuditEntryResponse:
       type: object

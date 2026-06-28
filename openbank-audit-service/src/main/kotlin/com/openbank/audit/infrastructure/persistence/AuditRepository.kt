@@ -9,30 +9,56 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntity
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
-import kotlinx.coroutines.sync.withLock
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.persistence.*
+import jakarta.persistence.Column
+import jakarta.persistence.Entity
+import jakarta.persistence.Table
+import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 import java.util.UUID
 
 @Entity
 @Table(name = "audit_entries")
 class AuditEntryEntity : PanacheEntity() {
-    @Column(name = "entry_id", nullable = false, unique = true) lateinit var entryId: UUID
-    @Column(name = "event_type", nullable = false) lateinit var eventType: String
-    @Column(name = "aggregate_type", nullable = false) lateinit var aggregateType: String
-    @Column(name = "aggregate_id", nullable = false) lateinit var aggregateId: String
-    @Column(name = "actor_id") var actorId: String? = null
-    @Column(name = "actor_type") var actorType: String? = null
-    @Column(name = "payload", columnDefinition = "TEXT", nullable = false) lateinit var payload: String
-    @Column(name = "source_service", nullable = false) lateinit var sourceService: String
-    @Column(name = "correlation_id") var correlationId: String? = null
-    @Column(name = "occurred_at", nullable = false) lateinit var occurredAt: Instant
-    @Column(name = "recorded_at", nullable = false) lateinit var recordedAt: Instant
+    @Column(name = "entry_id", nullable = false, unique = true)
+    lateinit var entryId: UUID
+
+    @Column(name = "event_type", nullable = false)
+    lateinit var eventType: String
+
+    @Column(name = "aggregate_type", nullable = false)
+    lateinit var aggregateType: String
+
+    @Column(name = "aggregate_id", nullable = false)
+    lateinit var aggregateId: String
+
+    @Column(name = "actor_id")
+    var actorId: String? = null
+
+    @Column(name = "actor_type")
+    var actorType: String? = null
+
+    @Column(name = "payload", columnDefinition = "TEXT", nullable = false)
+    lateinit var payload: String
+
+    @Column(name = "source_service", nullable = false)
+    lateinit var sourceService: String
+
+    @Column(name = "correlation_id")
+    var correlationId: String? = null
+
+    @Column(name = "occurred_at", nullable = false)
+    lateinit var occurredAt: Instant
+
+    @Column(name = "recorded_at", nullable = false)
+    lateinit var recordedAt: Instant
 
     // ── Tamper-evidence (hash chain, ADR-0023 spirit applied to the operational log) ──
-    @Column(name = "prev_hash") var prevHash: String? = null
-    @Column(name = "record_hash") var recordHash: String? = null
+    @Column(name = "prev_hash")
+    var prevHash: String? = null
+
+    @Column(name = "record_hash")
+    var recordHash: String? = null
 }
 
 @ApplicationScoped
@@ -51,12 +77,17 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
             }.awaitSuspending()
             val prevHash = prev?.recordHash ?: GENESIS_HASH
             val e = AuditEntryEntity().also {
-                it.entryId = entry.id; it.eventType = entry.eventType
-                it.aggregateType = entry.aggregateType; it.aggregateId = entry.aggregateId
-                it.actorId = entry.actorId; it.actorType = entry.actorType
-                it.payload = entry.payload; it.sourceService = entry.sourceService
+                it.entryId = entry.id
+                it.eventType = entry.eventType
+                it.aggregateType = entry.aggregateType
+                it.aggregateId = entry.aggregateId
+                it.actorId = entry.actorId
+                it.actorType = entry.actorType
+                it.payload = entry.payload
+                it.sourceService = entry.sourceService
                 it.correlationId = entry.correlationId
-                it.occurredAt = entry.occurredAt; it.recordedAt = entry.recordedAt
+                it.occurredAt = entry.occurredAt
+                it.recordedAt = entry.recordedAt
                 it.prevHash = prevHash
                 it.recordHash = chainHash(prevHash, entry)
             }
@@ -133,6 +164,20 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
         find("aggregateId = ?1 ORDER BY occurredAt DESC", aggregateId).page(0, limit).list()
     }.awaitSuspending().map { it.toDomain() }
 
+    /** Current chain head (most-recently-inserted row) plus the total row count, for anchoring. */
+    suspend fun chainHead(): ChainHead? {
+        val head = Panache.withSession {
+            find("ORDER BY id DESC").page(0, 1).firstResult()
+        }.awaitSuspending() ?: return null
+        val total = Panache.withSession { count() }.awaitSuspending()
+        return ChainHead(head.entryId, head.recordHash, total)
+    }
+
+    /** The live `record_hash` of a single entry, used to confirm a signed anchor's attested head. */
+    suspend fun recordHashOf(entryId: UUID): String? = Panache.withSession {
+        find("entryId = ?1", entryId).firstResult()
+    }.awaitSuspending()?.recordHash
+
     private fun AuditEntryEntity.toDomain() = AuditEntry(
         entryId, eventType, aggregateType, aggregateId, actorId, actorType,
         payload, sourceService, correlationId, occurredAt, recordedAt,
@@ -169,6 +214,14 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
             .joinToString("") { "%02x".format(it) }
     }
 }
+
+/** Chain head snapshot used to capture a signed anchor (see [AuditRepository.chainHead]). */
+data class ChainHead(
+    val entryId: UUID,
+    /** Head row's `record_hash`; null only for a head written before the V5 chain migration. */
+    val recordHash: String?,
+    val count: Long,
+)
 
 /** Result of a full hash-chain walk (see [AuditRepository.verifyChain]). */
 data class ChainVerification(

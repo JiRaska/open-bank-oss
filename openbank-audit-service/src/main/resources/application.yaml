@@ -96,6 +96,10 @@ mp:
   quarkus:
     oidc:
       enabled: false
+  openbank:
+    audit:
+      anchor:
+        enabled: false
 openbank:
   rate-limit:
     enabled: true
@@ -110,3 +114,12 @@ openbank:
     audit-retention-days: 3650
   outbox:
     dispatch-enabled: true
+  audit:
+    anchor:
+      # ADR-0031 D5: externally-signed tamper-evidence checkpoints over the audit hash chain.
+      enabled: true
+      interval: 1h
+      initial-delay: 30s
+      # Held outside the audit DB (env/Vault). Production replaces the default HMAC signer with a
+      # KMS/cosign-keyed adapter (follow-up); this key is the in-cluster fallback.
+      signing-key: ${AUDIT_ANCHOR_SIGNING_KEY:CHANGE_ME_LOCAL_DEV_ONLY}

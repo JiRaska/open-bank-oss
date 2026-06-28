@@ -116,7 +116,11 @@ We will run AI agents as **governed, least-privilege workloads** whose every act
 - Events flow over the existing `audit-events-out` Kafka channel to an append-only store; the chain is
   made **tamper-evident** by hash-chaining and cosign (reusing ADR-0029/0030 signing). This populates the
   hitherto-empty `ai_attribution` field of the release evidence bundle (ADR-0029 D6). 🟡 audit envelope
-  exists; ⬜ AI fields + tamper-evidence PLANNED.
+  exists; 🟢 per-event hash chain live (`audit_entries.record_hash`/`prev_hash`, V5) **and** periodic
+  externally-signed anchors over the chain head (`audit_anchor`, V6) — `GET /api/v1/audit/anchors/verify`
+  detects a wholesale rewrite that an internal-consistency walk alone would miss; the default in-cluster
+  signer is HMAC-SHA256 with the key held outside the audit DB. ⬜ AI-attribution payload fields and the
+  production KMS/cosign-keyed anchor signer (asymmetric, third-party verifiable) remain.
 
 ### D6 — Open, model-agnostic technology stack
 
