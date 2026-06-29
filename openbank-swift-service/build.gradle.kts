@@ -92,6 +92,24 @@ tasks.withType<Test> {
         // stalling the JVM for 30+ min. Exclude in CI; pact publishing runs as a dedicated step.
         // Re-enable once the pact-publish CI step is wired per #2404.
         exclude("**/SwiftEventPactConsumerTest*")
+
+        // CI hang #4 (#2404): test JVM hangs 43+ min AFTER all tests complete, in
+        // TestWorker$3.run() → LauncherSession.close() → CustomLauncherInterceptor
+        // .launcherSessionClosed() → FacadeClassLoader.close() → URLClassLoader.close().
+        //
+        // quarkus-junit registers CustomLauncherInterceptor as a LauncherSessionListener via
+        // ServiceLoader; JUnit5 loads it for EVERY run, even without @QuarkusTest.
+        // launcherDiscoveryStarted() installs FacadeClassLoader + QuarkusForkJoinWorkerThreadFactory.
+        // At session close, FacadeClassLoader.close() calls URLClassLoader.close(), which acquires
+        // JAR locks and blocks indefinitely while ForkJoinPool threads still hold those locks.
+        //
+        // prod.mode.tests=true makes isProductionModeTests() return true in CustomLauncherInterceptor,
+        // which prevents FacadeClassLoader from being created at all → close() is never called →
+        // the test JVM exits cleanly. Safe in CI because all @QuarkusTest classes are excluded above.
+        // quarkus.devservices.enabled=false is belt-and-suspenders: suppresses any dev-service
+        // thread that could also hold resources open.
+        systemProperty("prod.mode.tests", "true")
+        jvmArgs("-Dquarkus.devservices.enabled=false")
     }
 }
 
