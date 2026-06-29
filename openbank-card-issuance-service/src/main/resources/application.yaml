@@ -133,3 +133,9 @@ openbank:
   rate-limit:
     enabled: true
     max-concurrent-requests: 200
+  retention:
+    card-pii:
+      enabled: "${RETENTION_CARD_PII_ENABLED:true}"
+      retention-years: "${RETENTION_CARD_PII_YEARS:5}"
+      cron: "${RETENTION_CARD_PII_CRON:0 0 3 * * ?}"
+      dry-run: "${RETENTION_CARD_PII_DRY_RUN:false}"

@@ -6,6 +6,7 @@ package com.openbank.cardissuance.application.port.out
 
 import com.openbank.cardissuance.domain.model.Card
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -31,4 +32,7 @@ interface CardRepository {
     suspend fun findByPartyId(partyId: UUID): List<Card>
 
     suspend fun anonymizeByPartyId(partyId: UUID)
+
+    /** Anonymises PII (cardholderName, embossedName) for cards whose expiry_date is before [cutoff]. Returns the count updated. */
+    suspend fun anonymizeExpiredCardPii(cutoff: LocalDate): Int
 }

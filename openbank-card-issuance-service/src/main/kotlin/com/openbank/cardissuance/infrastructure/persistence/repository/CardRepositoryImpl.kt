@@ -14,6 +14,7 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.LocalDate
 import java.util.UUID
 
 @ApplicationScoped
@@ -61,6 +62,17 @@ class CardRepositoryImpl(private val outboxRepository: CardOutboxRepositoryImpl)
             )
         }.awaitSuspending()
     }
+
+    override suspend fun anonymizeExpiredCardPii(cutoff: LocalDate): Int = Panache.withTransaction {
+        // Guard covers both fields: a partial failure from a prior run may leave embossedName
+        // with PII even if cardholderName was already erased, so we re-process either way.
+        update(
+            "cardholderName = '[ERASED]', embossedName = '[ERASED]'" +
+                " WHERE expiryDate < ?1" +
+                " AND (cardholderName != '[ERASED]' OR embossedName != '[ERASED]')",
+            cutoff,
+        )
+    }.awaitSuspending()
 
     /** Copy the mutable (lifecycle) fields of [card] onto a managed entity for an in-place update. */
     private fun CardEntity.applyFrom(card: Card) {
