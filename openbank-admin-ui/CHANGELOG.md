@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.0](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.36.0...admin-ui-v0.37.0) (2026-06-29)
+
+
+### Features
+
+* **admin-ui:** mark ADR-0031 D3 built — SVID CN cross-check live and enforced ([#2543](https://github.com/JiRaska/open-bank/issues/2543)) ([6539208](https://github.com/JiRaska/open-bank/commit/6539208b50855c258de2b710f66a0c57c32a5cf3))
+
 ## [0.36.0](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.35.1...admin-ui-v0.36.0) (2026-06-29)
 
 
