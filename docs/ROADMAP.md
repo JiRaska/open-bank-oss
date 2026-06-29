@@ -56,5 +56,32 @@ schemes directly — operators do. AI-driven account-opening / payment decisions
 
 ---
 
+## Known gaps (honest list)
+
+Current limitations as of the Alpha. Updated as milestones ship:
+
+- **Interbank rails do not connect to live networks.** ISO 20022 pipeline and clearing simulator are
+  wired and flags are on (ADR-0104/0108); money moves end-to-end with a simulated counterparty. Real
+  SEPA/SWIFT/CERTIS network connections and the net-settlement ledger leg are not built.
+- **Customer app is not GA.** A Kotlin Multiplatform + Compose customer app (iOS + Android) is in
+  active development in a separate repo (`JiRaska/openbank-app`); the `openbank-customer-edge` BFF is
+  deployed with OPA enforce mode on, but app stores releases are not yet public.
+- **KYC/AML vendors are stubs** — screening logic is real (sanctions uses pg_trgm fuzzy matching) but
+  runs against in-memory/seed lists, not real providers (Refinitiv, ComplyAdvantage, EBA feed).
+- **Some services are code-only, not deployed** — lending, anacredit, sdd, psd2 (separate from the
+  XS2A developer portal), and tpp-registry are implemented but not yet wired into the sandbox cluster.
+- **SCA is maturing, not complete** — passkey RP, settlement gate and non-repudiation hash chain are
+  in (ADR-0086), but full FIDO2 attestation / real OTP delivery are not finished.
+- **AI copilot is sandbox-only** — a real LLM (meta/llama-3.1-70b-instruct) runs in the sandbox
+  copilot-service; production model gateway, rate-limiting, and abuse guardrails are not hardened for
+  public traffic.
+- **Contract tests are thin** — Pact Broker is live (pact.open-bank.tech) but published pact coverage
+  across the fleet is a known gap.
+- **No DR test, no HA** — single-node sandbox, no failover; PostgreSQL is upgrading to 18 (CNPG,
+  runbook in progress).
+- **Not licensed to operate as a bank.** See the disclaimer in the README.
+
+---
+
 For acceptance criteria, verification steps, and rationale per milestone, read the full plan:
 [`docs/strategy/09-roadmap-M1-M7.md`](strategy/09-roadmap-M1-M7.md).

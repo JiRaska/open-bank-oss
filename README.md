@@ -62,17 +62,9 @@ All API calls require a Bearer token from `https://kc.open-bank.tech/realms/open
 
 > ⚠️ The public sandbox is a **best-effort demo, not a service.** Every endpoint is auth-gated (Keycloak bearer) and rate-limited at the ingress, but it may be reset, throttled, or taken offline at any time, carries **no SLA**, and must **never** receive real personal or payment data.
 
-### What is NOT there yet (honest list)
+### What is NOT there yet
 
-- **Interbank rails do not connect to live networks.** ISO 20022 pipeline and clearing simulator are wired and flags are on (ADR-0104/0108); money moves end-to-end with a simulated counterparty. Real SEPA/SWIFT/CERTIS network connections and the net-settlement ledger leg are not built.
-- **Customer app is not GA.** A Kotlin Multiplatform + Compose customer app (iOS + Android) is in active development in a **separate repo** (`JiRaska/openbank-app`); the `openbank-customer-edge` BFF is deployed with OPA enforce mode on, but app stores releases are not yet public.
-- **KYC/AML vendors are stubs** — screening logic is real (sanctions uses pg_trgm fuzzy matching) but runs against in-memory/seed lists, not real providers (Refinitiv, ComplyAdvantage, EBA feed).
-- **Some services are code-only, not deployed** — lending, anacredit, sdd, psd2 (separate from the XS2A developer portal), and tpp-registry are implemented but not yet wired into the sandbox cluster.
-- **SCA is maturing, not complete** — passkey RP, settlement gate and non-repudiation hash chain are in (ADR-0086), but full FIDO2 attestation / real OTP delivery are not finished.
-- **AI copilot is sandbox-only** — a real LLM (meta/llama-3.1-70b-instruct) runs in the sandbox copilot-service; production model gateway, rate-limiting, and abuse guardrails are not hardened for public traffic.
-- **Contract tests are thin** — Pact Broker is live (pact.open-bank.tech) but published pact coverage across the fleet is a known gap.
-- **No DR test, no HA** — single-node sandbox, no failover; PostgreSQL 16 is upgrading to 18 (CNPG, runbook in progress).
-- **Not licensed to operate as a bank.** See the disclaimer above.
+See the full list in [docs/ROADMAP.md — Known gaps](docs/ROADMAP.md#known-gaps-honest-list).
 
 ---
 
@@ -119,95 +111,14 @@ Credentials for local dev are read from your `.env` file — see [`openbank-infr
 
 ## Architecture
 
-### Hexagonal architecture per service (ADR-0002)
+OpenBank follows **hexagonal architecture** per service (ADR-0002) with an event-driven backbone
+(Apache Kafka + transactional outbox, ADR-0003), OPA-enforced authorization at every decision point
+(ADR-0034), and machine-enforced governance as code (ADR-0029). Money-path services require two
+human approvals and a threat model (ADR-0030). The API contract version is independent of the
+service release version (ADR-0048).
 
-```
-domain/          — Pure Kotlin, zero framework dependencies
-  model/         — Entities, value objects
-  event/         — Domain events
-
-application/
-  port/in/       — Use case interfaces (commands, queries)
-  port/out/      — Repository + event publisher interfaces
-  usecase/       — Use case implementations
-
-infrastructure/
-  persistence/   — JPA entities, Panache repositories
-  messaging/     — Kafka publishers (transactional outbox, ADR-0003)
-  rest/          — REST resources, DTOs, exception mappers
-```
-
-The **domain layer has zero framework imports** — enforced by CI. Shared runtime plumbing (Money, IBAN,
-idempotency, audit, outbox, service-info, API-version filter, authz) lives in `openbank-libs`.
-
-### Service catalogue
-
-| Service | Port | Description |
-|---|---|---|
-| `openbank-account-service` | 8100 | Account lifecycle (open, freeze, close) |
-| `openbank-ledger-service` | 8101 | Double-entry general ledger |
-| `openbank-transaction-service` | 8102 | Transaction posting, saga orchestration, idempotency |
-| `openbank-balance-service` | 8103 | Real-time balance projection |
-| `openbank-product-catalog` | 8104 | Banking product catalog |
-| `openbank-pid-service` | 8105 | Party identity resolution & dedup; EUDI/PID (ADR-0072/0094) |
-| `openbank-consent-service` | 8106 | PSD2 consent management |
-| `openbank-psd2-service` | 8107 | PSD2 AISP/PISP API |
-| `openbank-tpp-registry-service` | 8108 | Third-party provider registry |
-| `openbank-agent-service` | 8109 | AI agent integration (MCP, policy-gated) |
-| `openbank-sca-service` | 8110 | Strong Customer Authentication |
-| `openbank-party-service` | 8111 | Customer master data |
-| `openbank-notification-service` | 8112 | Customer notifications |
-| `openbank-audit-service` | 8113 | Audit trail aggregation |
-| `openbank-kyc-service` | 8114 | Know-Your-Customer onboarding |
-| `openbank-sepa-payment` | 8115 | SEPA Credit Transfer |
-| `openbank-domestic-payment` | 8116 | Domestic (CERTIS-style) payment processing |
-| `openbank-aml-service` | 8117 | Anti-money-laundering screening |
-| `openbank-card-issuance-service` | 8118 | Card issuance |
-| `openbank-fx-service` | 8119 | Foreign exchange |
-| `openbank-security-scanner` | 8120 | Internal security scanning |
-| `openbank-standing-order-service` | 8121 | Recurring payments (daily due-date sweep) |
-| `openbank-swift-service` | 8122 | SWIFT MT/MX messaging |
-| `openbank-sanctions-service` | 8123 | Sanctions list screening (pg_trgm fuzzy match) |
-| `openbank-clearing-service` | 8124 | Clearing & settlement |
-| `openbank-interest-service` | 8125 | Interest calculation & accrual |
-| `openbank-lending-service` | 8126 | Loan origination & servicing (four-eyes) |
-| `openbank-sepa-instant` | 8127 | SEPA Instant Credit Transfer |
-| `openbank-customer-edge` | 8128 | Customer BFF for the mobile app (OPA enforce mode) |
-| `openbank-sdd-service` | 8129 | SEPA Direct Debit mandates (debtor side) |
-| `openbank-onboarding-service` | 8130 | Onboarding funnel projection (party/KYC/SCA) |
-| `openbank-copilot-service` | 8131 | Customer AI assistant (LLM, policy-gated) |
-| `openbank-fraud-service` | 8133 | Fraud detection (velocity-counter signal plane, ADR-0084) |
-| `openbank-analytics-sink` | 8134 | Event analytics sink |
-| `openbank-dispute-service` | 8135 | Card disputes & chargebacks |
-| `openbank-statement-service` | 8136 | Account statements (camt.053 / MT940 / PDF) |
-| `openbank-anacredit-service` | 8137 | AnaCredit regulatory report builder |
-| `openbank-settlement-service` | 8138 | Net settlement & reconciliation |
-| `openbank-clearing-simulator` | 8139 | ISO 20022 clearing/settlement simulator (ADR-0104) |
-| `openbank-finrep-service` | 8140 | FINREP / COREP regulatory reporting |
-| `openbank-finops-agent` | 8141 | FinOps cost/usage agent |
-| `openbank-developer-portal` | — | PSD2 XS2A developer portal (static site, developer.open-bank.tech) |
-| `openbank-simulation` | — | Deterministic simulation harness (DST, ADR-0100) |
-| `openbank-api-gateway` | — | Kong gateway configuration |
-| `openbank-admin-ui` | 3000 | Bank operator console (Next.js) |
-| `openbank-libs` | — | Shared primitives + runtime plumbing |
-
-> `openbank-analytics-sink`, `openbank-developer-portal`, `openbank-simulation`, and `openbank-api-gateway`
-> are implemented but are not released components (no `version.txt`). Deployed-to-sandbox vs code-only
-> status is tracked in the [Project Status](#project-status) table above.
-
-### Governance, security & operations as code
-
-OpenBank treats non-functional concerns as machine-enforced, not as prose:
-
-- **Governance-as-code (ADR-0029):** per-service SemVer, release-please changelogs, and a CI-derived
-  service catalog. Rules live in [`openbank-libs/governance/rules.yaml`](openbank-libs/governance/rules.yaml)
-  — the single source of truth that **both** CI gates and the agent guide ([`CLAUDE.md`](CLAUDE.md)) read.
-- **Supply-chain & SSDLC (ADR-0030):** SBOM, container signing, SAST, dependency/CVE scanning, gitleaks,
-  OpenAPI lint — gated in CI.
-- **Fine-grained authz (ADR-0018):** Open Policy Agent runs as the policy decision point (port 8181)
-  for service authorization; a unified Kotlin enforcement API across REST and MCP is on the roadmap.
-- **AI-agent governance (ADR-0031):** policy-gated MCP tools, human-in-the-loop gates, and AI-attributed
-  audit — charters in [`openbank-libs/governance/agents.yaml`](openbank-libs/governance/agents.yaml).
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full C4-style narrative — context
+diagram, container diagram, key decisions, deployment topology, and security architecture.
 
 ---
 
@@ -251,7 +162,7 @@ tests for new behavior, and a threat model for money-path services (ADR-0030).
 
 ## Documentation
 
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the services fit together (bounded contexts, runtime patterns, deployment)
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — how the services fit together (bounded contexts, runtime patterns, deployment)
 - [`DEPLOYMENT.md`](DEPLOYMENT.md) — how it's built, shipped, and run (local Docker, CI/CD, GitOps, infra, runbooks)
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — milestones M1–M7
 - [`docs/adr/README.md`](docs/adr/README.md) — Architecture Decision Records index, with per-decision delivery status (governance lives in 0029–0031 and 0040)

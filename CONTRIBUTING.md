@@ -54,6 +54,98 @@ This adds a `Signed-off-by: Your Name <your.email@example.com>` trailer to your 
 
 PRs containing unsigned-off commits will be blocked by CI.
 
+## Local development setup
+
+### Prerequisites
+
+| Tool | Required version | Notes |
+|---|---|---|
+| JDK | **25 (temurin-25)** | NOT JDK 26 — the Gradle toolchain is pinned to 25. JDK 26 breaks mockk/Objenesis. Install via [SDKMAN](https://sdkman.io/) or [Homebrew](https://brew.sh/) and set `JAVA_HOME` explicitly. |
+| Gradle wrapper | bundled (`./gradlew`) | No global install needed. |
+| Docker Desktop | 4.x+ | Required for Testcontainers integration tests. 16 GB RAM recommended for the full fleet; 24 GB+ if building multiple services in parallel. |
+| Node.js | 22+ | Only needed for `openbank-admin-ui`. |
+
+> **JDK version matters.** Mac default JDK may be JDK 26; the Gradle toolchain is pinned to 25.
+> mockk/Objenesis fails with `ObjenesisException` on JDK 26. Symptom: tests that pass in CI fail
+> locally with reflection errors. Fix: `export JAVA_HOME=$(/usr/libexec/java_home -v 25)` (macOS)
+> or use SDKMAN: `sdk use java 25-tem`.
+
+### Build a single service
+
+```bash
+./gradlew :openbank-<service>-service:build
+# Example:
+./gradlew :openbank-ledger-service:build
+```
+
+### Run all checks (same as CI gate)
+
+```bash
+./gradlew detekt ktlintCheck koverVerify build
+```
+
+This mirrors the exact checks the CI gates enforce (ADR-0029). Run this before opening a PR. You
+can also use the `/ship-check` skill inside Claude Code — it runs the same gates and reports
+what is still missing (version bump, changelog, openapi, tests, threat model).
+
+### Validate CDI wiring (important for Quarkus services)
+
+```bash
+./gradlew :openbank-<service>-service:quarkusBuild
+```
+
+`ktlintCheck` and unit tests do **not** validate Quarkus CDI / ArC wiring. `quarkusBuild` (without
+Docker) is the earliest point where CDI failures surface. Add it to your pre-push routine when
+modifying producers, interceptors, or `@ApplicationScoped` beans.
+
+### Run admin-ui locally
+
+```bash
+cd openbank-admin-ui
+npm install
+npm run dev
+# Open http://localhost:3000
+```
+
+### Local infrastructure stack (Docker Compose)
+
+The full local infrastructure stack (Postgres, Kafka, Keycloak, OpenBao, OPA, Valkey, observability)
+is in `openbank-infra/docker/docker-compose.yml`:
+
+```bash
+cd openbank-infra
+cp .env.example .env   # adjust secrets for local dev
+make up-infra          # start Postgres, Kafka, Keycloak, Vault, OPA, Valkey
+make up-all            # build + start all application services
+make health-all        # verify health endpoints
+```
+
+Alternatively, for **a single service** you usually do not need the full stack — Quarkus DevServices
+starts the required containers automatically:
+
+```bash
+./gradlew :openbank-<service>-service:quarkusDev
+```
+
+### IDE setup
+
+- **IntelliJ IDEA** — import the root `build.gradle.kts` as a Gradle project.
+- Kotlin plugin 1.9+ (bundled in IntelliJ 2024+).
+- [Quarkus plugin](https://plugins.jetbrains.com/plugin/13234-quarkus) — optional but recommended
+  (live reload, application.yaml completion).
+
+### Common local pitfalls
+
+- **Two concurrent `./gradlew` instances stomp each other.** A second Gradle instance stops the
+  first daemon and can corrupt `~/.gradle/caches`. If you run integration tests from the IDE and
+  the CLI in parallel, isolate them:
+  `GRADLE_USER_HOME=/tmp/gradle-isolated-$$ ./gradlew :openbank-foo-service:test`
+- **Stale `build/quarkus-app/`** causes `ClassNotFoundException` at boot after interrupted builds.
+  Delete `build/quarkus-app/` and `build/classes/` before re-building if the previous build was
+  interrupted.
+- **`fun foo() = runBlocking { }` drops tests silently.** JUnit 5 requires `void`-returning test
+  methods. Always write `fun foo(): Unit = runBlocking { }` or use the Kotlin coroutine test runner.
+
 ## Workflow
 
 ```
@@ -149,7 +241,8 @@ A pull request is **ready to merge** only when ALL apply:
 
 ## Local Development
 
-See [README.md](README.md) for environment setup.
+See the [Local development setup](#local-development-setup) section above for prerequisites,
+build commands, Docker Compose stack, and common pitfalls.
 
 ## Architecture Decision Records (ADR)
 
