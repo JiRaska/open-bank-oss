@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.36.0](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.35.1...admin-ui-v0.36.0) (2026-06-29)
+
+
+### Features
+
+* **admin-ui:** surface AI-agent findings via shared AgentInsightsPanel below metrics ([#2503](https://github.com/JiRaska/open-bank/issues/2503)) ([7c4679f](https://github.com/JiRaska/open-bank/commit/7c4679f32c37f5cdb023344de95c203ab65f57ed))
+
+
+### Bug Fixes
+
+* **admin-ui:** reflect ADR-0031 phase-2 reality + correct stale CD note in CLAUDE.md ([#2498](https://github.com/JiRaska/open-bank/issues/2498)) ([fc192c5](https://github.com/JiRaska/open-bank/commit/fc192c5166bcfd269e0dfb5e1feacb48db12cf80))
+* **admin-ui:** restore AuditIntegrityTile dropped in iaops during [#2503](https://github.com/JiRaska/open-bank/issues/2503) ([#2508](https://github.com/JiRaska/open-bank/issues/2508)) ([adba25b](https://github.com/JiRaska/open-bank/commit/adba25b67a7625250214595d55bd417b2da852d2))
+
 ## [0.35.1](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.35.0...admin-ui-v0.35.1) (2026-06-29)
 
 
