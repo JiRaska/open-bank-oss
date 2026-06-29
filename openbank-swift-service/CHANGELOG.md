@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/JiRaska/open-bank/compare/swift-service-v0.6.1...swift-service-v0.6.2) (2026-06-29)
+
+
+### Bug Fixes
+
+* **swift:** stop fleet-CI hang — CI-skip boot smoke + disable Kafka devservices ([#2415](https://github.com/JiRaska/open-bank/issues/2415)) ([6eeb8c9](https://github.com/JiRaska/open-bank/commit/6eeb8c9ba802bee975ad454ac40f50f35d2bff37))
+
 ## [0.6.1](https://github.com/JiRaska/open-bank/compare/swift-service-v0.6.0...swift-service-v0.6.1) (2026-06-27)
 
 
