@@ -128,9 +128,7 @@ class SettlementAdapter(
      * and the debit lands in cash-clearing as before — best-effort, never blocks settlement).
      */
     private suspend fun resolveInternalCreditorAccountId(payment: DomesticPayment): UUID? {
-        val internal = payment.transferScope == DomesticTransferScope.INTERNAL_CLIENT ||
-            payment.transferScope == DomesticTransferScope.OWN_ACCOUNTS
-        if (!internal) return null
+        if (!isInHouse(payment)) return null
         val iban = toCzIban(payment.creditorAccountNumber, payment.creditorBankCode)
             ?: run {
                 log.warnf(
@@ -171,6 +169,11 @@ class SettlementAdapter(
         return "CZ$check$bban"
     }
 
+    /** In-house transfers (OWN_ACCOUNTS / INTERNAL_CLIENT) settle on the bank's own ledger. */
+    private fun isInHouse(payment: DomesticPayment): Boolean =
+        payment.transferScope == DomesticTransferScope.INTERNAL_CLIENT ||
+            payment.transferScope == DomesticTransferScope.OWN_ACCOUNTS
+
     private fun buildDescription(payment: DomesticPayment): String {
         val info = payment.messageForPayee
             ?: listOfNotNull(
@@ -179,7 +182,10 @@ class SettlementAdapter(
                 payment.constantSymbol?.let { "KS:$it" },
             ).joinToString(" ").ifBlank { payment.endToEndId }
             ?: payment.id.toString()
-        return "CERTIS $info".take(MAX_DESCRIPTION)
+        // CERTIS is the ČNB interbank clearing scheme — an in-house transfer never traverses it,
+        // so labelling it "CERTIS" is factually wrong. Only interbank transfers carry that prefix.
+        val scheme = if (isInHouse(payment)) "Interní převod" else "CERTIS"
+        return "$scheme $info".take(MAX_DESCRIPTION)
     }
 
     @Suppress("TooGenericExceptionCaught")

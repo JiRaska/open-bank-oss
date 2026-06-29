@@ -139,6 +139,8 @@ class SettlementAdapterTest {
         assertThat(ibanSlot.captured.substring(4)).isEqualTo("01000000009876543210")
         // The payee is credited: the booking carries the resolved target account.
         assertThat(reqSlot.captured.targetAccountId).isEqualTo(creditorId)
+        // An in-house transfer never traverses CERTIS, so it must not be labelled "CERTIS".
+        assertThat(reqSlot.captured.description).startsWith("Interní převod")
     }
 
     @Test
@@ -154,6 +156,8 @@ class SettlementAdapterTest {
 
         assertThat(reqSlot.captured.targetAccountId).isNull()
         coVerify(exactly = 0) { accountLookup.findAccountIdByIban(any()) }
+        // An interbank transfer settles through CERTIS, so it keeps the "CERTIS" prefix.
+        assertThat(reqSlot.captured.description).startsWith("CERTIS")
     }
 
     private fun payment() = DomesticPayment(
