@@ -1,7 +1,7 @@
 quarkus:
   application:
+    # version derives from version.txt — must NOT be set here (rules.yaml: release_invariant).
     name: openbank-billing-service
-    version: 0.1.0
   http:
     port: 8132
     header:
@@ -27,7 +27,39 @@ quarkus:
     always-include: true
     path: /api/docs
 
+  # Inbound resource-server: the assess endpoint requires a valid token.
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: ${OIDC_TLS_VERIFICATION:none}
+
+  # Outbound service-to-service auth (client-credentials). The PII read clients
+  # (@RegisterProvider OidcClientRequestReactiveFilter) mint an openbank-services token.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+    tls:
+      verification: ${OIDC_TLS_VERIFICATION:none}
+
+  rest-client:
+    product-catalog:
+      url: ${PRODUCT_CATALOG_SERVICE_URL:http://localhost:8104}
+    account-service:
+      url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+    balance-service:
+      url: ${BALANCE_SERVICE_URL:http://localhost:8103}
+
 "%test":
   quarkus:
     management:
+      enabled: false
+    # No Keycloak under @QuarkusTest — the boot smoke does not drive the security layer.
+    oidc:
       enabled: false

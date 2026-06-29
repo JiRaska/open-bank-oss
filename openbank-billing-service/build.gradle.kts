@@ -18,10 +18,17 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.coroutines.reactive)
 
-    // The shared fee-waiver engine (ADR-0138 phase 1b). No datastore yet — this is the
-    // ADR-0143 phase-2b skeleton; the ledger/account/balance reactive REST clients, outbox
-    // and persistence land in phase 2c.
+    // ADR-0143 phase 2c (read path): reactive REST clients to product-catalog (fees) and
+    // account/balance (FeeContext), with OIDC client-credentials propagation on the PII reads.
+    // Still no datastore / outbox / posting — assessment is read-only here.
+    implementation(libs.quarkus.rest.client.reactive)
+    implementation(libs.quarkus.rest.client.reactive.jackson)
+    implementation(libs.quarkus.oidc)
+    implementation(libs.quarkus.oidc.client.reactive.filter)
+
+    // The shared fee-waiver engine (ADR-0138 phase 1b).
     implementation(project(":openbank-libs"))
 
     testImplementation(platform(libs.junit.bom))
