@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/JiRaska/open-bank/compare/transaction-service-v1.10.1...transaction-service-v1.11.0) (2026-06-29)
+
+
+### Features
+
+* **transaction:** Temporal payment orchestration scaffolding (ADR-0120 P1) ([#2378](https://github.com/JiRaska/open-bank/issues/2378)) ([cca0818](https://github.com/JiRaska/open-bank/commit/cca0818936ec182fb9c5af709a3d240e4baeb147))
+
 ## [1.10.1](https://github.com/JiRaska/open-bank/compare/transaction-service-v1.10.0...transaction-service-v1.10.1) (2026-06-28)
 
 
