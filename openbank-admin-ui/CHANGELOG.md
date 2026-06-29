@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.35.1](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.35.0...admin-ui-v0.35.1) (2026-06-29)
+
+
+### Security
+
+* **agent:** mint per-run pki-agent SVID in the BFF + base64 cert transport (ADR-0031 D3b) ([#2439](https://github.com/JiRaska/open-bank/issues/2439)) ([e8d5c92](https://github.com/JiRaska/open-bank/commit/e8d5c927d6f19d84c8c5eef5dc0df9a20718a011))
+
 ## [0.35.0](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.34.2...admin-ui-v0.35.0) (2026-06-28)
 
 
