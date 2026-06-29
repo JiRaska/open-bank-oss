@@ -74,17 +74,18 @@ export default function ObservabilityPage() {
         return
       }
       
-      const [availability, errors, totalReqs, latency, failedPayments] = await Promise.all([
+      // Error rate is computed over a 1h window, not 5m: 5xx are sparse (single-digit
+      // counts per day on this platform), so a 5m window is almost always empty and the
+      // tile reads a misleading 0.00%. 1h captures the real ratio while staying responsive
+      // to an active incident. The ratio is divided server-side so the no-5xx case yields a
+      // true 0 (via `or vector(0)` on the numerator) rather than an empty result / N/A.
+      const [availability, errorRateVal, totalReqs, latency, failedPayments] = await Promise.all([
         queryPrometheus('avg(up) * 100', controller.signal),
-        queryPrometheus('sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) or sum(rate(http_requests_total{status=~"5.."}[5m]))', controller.signal),
+        queryPrometheus('100 * (sum(rate(http_server_requests_seconds_count{status=~"5.."}[1h])) or sum(rate(http_requests_total{status=~"5.."}[1h])) or vector(0)) / (sum(rate(http_server_requests_seconds_count[1h])) or sum(rate(http_requests_total[1h])))', controller.signal),
         queryPrometheus('sum(rate(http_server_requests_seconds_count[5m])) or sum(rate(http_requests_total[5m]))', controller.signal),
         queryPrometheus('histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket[5m])) by (le)) * 1000', controller.signal),
         queryPrometheus('sum(increase(payment_failures_total[5m])) or sum(increase(payment_failed_total[5m]))', controller.signal)
       ])
-
-      const errorRateVal = (errors !== null && totalReqs !== null && totalReqs > 0) 
-        ? (errors / totalReqs) * 100 
-        : null
 
       setMetrics({
         availability: { value: availability, label: 'Service Availability' },
@@ -194,7 +195,7 @@ export default function ObservabilityPage() {
           icon={<AlertTriangle size={18} />}
           label={t('Chybovost', 'Error Rate')}
           value={formatValue(metrics?.errorRate.value, '%', 2)}
-          sub="HTTP 5xx / total requests"
+          sub="HTTP 5xx / total requests (1h)"
           color={(metrics?.errorRate.value ?? 0) < 1 ? 'var(--success)' : (metrics?.errorRate.value ?? 0) < 5 ? 'var(--warning)' : 'var(--danger)'}
         />
         <KpiCard
