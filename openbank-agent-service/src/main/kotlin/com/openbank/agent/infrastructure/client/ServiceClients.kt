@@ -1,12 +1,19 @@
-// SPDX-License-Identifier: Apache-2.0
-// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
-// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) OpenBank contributors. Licensed under the GNU Affero General Public License v3.0 only.
+// A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
+// See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 
 package com.openbank.agent.infrastructure.client
 
 import com.fasterxml.jackson.databind.JsonNode
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
-import jakarta.ws.rs.*
+import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.GET
+import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
+import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient

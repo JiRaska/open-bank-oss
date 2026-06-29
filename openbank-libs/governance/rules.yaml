@@ -340,20 +340,32 @@ provenance:
 # ---------------------------------------------------------------------------------------
 dependencies:
   license_allowlist: [Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, EPL-2.0, MPL-2.0, ISC]
-  license_denylist: [GPL-2.0, GPL-3.0, AGPL-3.0]   # copyleft -- would contaminate the Apache-2.0 tree
-  # Carve-out (ADR-0031 D8): the AI agent RUNTIME component is AGPL-3.0 +
-  # commercial dual-license, in its OWN repo/module with a CLA -- NOT Apache-2.0. The denylist above governs
-  # the main tree; AGPL-3.0 is permitted for that isolated component only, so the gate must not flag it there.
+  license_denylist: [GPL-2.0, GPL-3.0, AGPL-3.0]   # copyleft -- denied for THIRD-PARTY deps of the Apache-2.0 platform
+  # Carve-out (ADR-0136, supersedes the ADR-0031 D8 separate-repo plan): the four AI agent
+  # services are OpenBank's open-core component and are licensed AGPL-3.0-only + a parallel
+  # commercial licence -- IN-REPO, not Apache-2.0. The denylist above governs the Apache-2.0
+  # platform tree; AGPL-3.0-only is the intended licence of the agent services, so the gate
+  # must not flag those paths.
   license_denylist_exceptions:
-    - license: AGPL-3.0
-      scope: agent-runtime-component        # separate repo/module, own LICENSE + CLA
-      reason: "commercial dual-licensing of the agent component"
-      adr: ADR-0031
+    - license: AGPL-3.0-only
+      scope: agent-services                 # in-repo open-core; own LICENSE, commercial dual-license
+      paths:
+        - openbank-agent-service/
+        - openbank-copilot-service/
+        - openbank-devops-agent/
+        - openbank-finops-agent/
+      reason: "open-core: AGPL-3.0-only + commercial dual-licensing of the AI agent services"
+      adr: ADR-0136
   license_boundary_exceptions:
-    - description: "AGPL/Apache seam — openbank-agent-runtime (external repo) implements ModelProvider port. AGPL code must not leak into the Apache-2.0 tree; only the port interface may cross the boundary."
-      allowed_at: "openbank-agent-service/src/main/kotlin/com/openbank/agent/application/ModelProvider.kt"
-      external_repo: "JiRaska/openbank-agent-runtime"
-      license: "AGPL-3.0-or-later"
+    - description: "AGPL/Apache seam (in-repo). The four agent services are AGPL-3.0-only; no Apache-2.0 module may take a build/compile dependency on them (only network/HTTP use is allowed). They depend on openbank-libs (Apache-2.0), which is permitted -- copyleft may consume permissive code."
+      agpl_modules:
+        - openbank-agent-service
+        - openbank-copilot-service
+        - openbank-devops-agent
+        - openbank-finops-agent
+      rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent') as a dependency"
+      license: "AGPL-3.0-only"
+      adr: ADR-0136
   block_on_cve_severity: [CRITICAL, HIGH]
   catalog: openbank-libs/gradle/libs.versions.toml  # version catalog is the single dependency source
 

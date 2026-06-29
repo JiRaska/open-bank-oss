@@ -9,10 +9,13 @@ You may obtain a copy of the License at
 
     http://www.apache.org/licenses/LICENSE-2.0
 
-The OpenBank AI agent runtime component is a separate, independently licensed
-work (AGPL-3.0 + a parallel commercial licence) maintained in its own
-repository; it is not covered by this NOTICE or the Apache-2.0 LICENSE in this
-repository. See docs/adr/0031-ai-agent-governance-and-operations.md.
+The OpenBank AI agent services (openbank-agent-service, openbank-copilot-service,
+openbank-devops-agent, openbank-finops-agent) are OpenBank's open-core component
+and are licensed under the GNU Affero General Public License v3.0 only
+(AGPL-3.0-only), with a parallel commercial licence available from the
+maintainer. They are NOT covered by the Apache-2.0 LICENSE/NOTICE; see each
+service's LICENSE file, LICENSES/AGPL-3.0-only.txt, and
+docs/adr/0136-agent-services-agpl-in-repo-open-core.md.
 
 "OpenBank" is the name of this independent open-source project and is not
 affiliated with, endorsed by, or connected to Santander's "Openbank" or any
