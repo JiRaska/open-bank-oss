@@ -40,5 +40,5 @@
   "openbank-sepa-payment": "0.7.3",
   "openbank-settlement-service": "0.4.1",
   "openbank-domestic-payment": "0.8.2",
-  "openbank-finops-agent": "0.2.1"
+  "openbank-finops-agent": "0.2.2"
 }
