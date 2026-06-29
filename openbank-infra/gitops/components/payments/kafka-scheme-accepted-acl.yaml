@@ -171,6 +171,31 @@ spec:
         operations: [Read]
         host: "*"
 ---
+# ── clearing-service (#2665 Tier 1) ─────────────────────────────────────────
+# Produces openbank.clearing.batch.event (net settlement obligations to ledger).
+# No incoming channels; no consumer-group ACL needed.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  name: clearing-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.clearing.batch.event
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+---
 # ── External Secrets reader (ADR-0137) ──────────────────────────────────────
 # The Strimzi User Operator writes the KafkaUser keystores (and the cluster CA
 # truststore) as Secrets in THIS namespace (messaging), but the services run in
