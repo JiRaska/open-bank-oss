@@ -1,0 +1,82 @@
+# Kafka mTLS identity + cert projection for ledger-service (ADR-0137, #2665 Tier 1).
+#
+# Pattern mirrors components/payments/kafka-scheme-accepted-acl.yaml + kafka-mtls-externalsecrets.yaml.
+# KafkaUser minted in `messaging` (where Strimzi User Operator watches); the Strimzi
+# User Operator writes a Secret of the same name there with user.crt/key/p12 + password.
+# The ExternalSecret below projects that secret from `messaging` into `ledger` via the
+# shared `kafka-messaging-certs` ClusterSecretStore (kubernetes provider, eso-kafka-cert-reader SA).
+#
+# Topic model:
+#   ledger-service WRITES openbank.ledger.journal.posted → Write+Describe ACL on that topic.
+#   No incoming channels (ledger is a pure journal producer).
+#   No consumer-group ACL needed.
+#
+# Gate: allow.everyone.if.no.acl.found=true until all ~33 clients are migrated (issue #2665).
+# `openbank.ledger.journal.posted` carries no ACL-deny-by-default until the gate flips;
+# these ACLs provision the identity for the final deny-by-default flip.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  name: ledger-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.ledger.journal.posted
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+---
+# Project the ledger-service keystore from `messaging` into `ledger` namespace.
+# The cluster-CA truststore is shared; a separate ExternalSecret in the same namespace
+# (kafka-cluster-ca-truststore) is created once per namespace — see below.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: ledger-service-kafka-keystore
+  namespace: ledger
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: ledger-service-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: ledger-service
+---
+# Shared cluster-CA truststore for all Kafka clients in `ledger`.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: ledger
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert

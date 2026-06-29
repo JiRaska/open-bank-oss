@@ -215,6 +215,11 @@ rules:
       - sepa-instant
       - domestic-payment
       - swift-service
+      # Tier 1 money-path services (#2665): ledger, balance, account, clearing
+      - ledger-service
+      - balance-service
+      - account-service
+      - clearing-service
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1

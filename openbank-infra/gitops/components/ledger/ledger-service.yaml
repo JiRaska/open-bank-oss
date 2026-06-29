@@ -65,12 +65,29 @@ spec:
                 secretKeyRef:
                   name: ledger-db-app
                   key: password
-            # Kafka producer → Strimzi bootstrap (internal plaintext). Must be the
-            # global KAFKA_BOOTSTRAP_SERVERS: the SmallRye connector ignores the
-            # quarkus.smallrye-reactive-messaging.kafka.* key, so any other leaves
-            # the producer on its localhost:9092 default.
+            # Kafka producer → Strimzi tls:9093 (mTLS, ADR-0137 #2665 Tier 1).
             - name: KAFKA_BOOTSTRAP_SERVERS
-              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka/keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ledger-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka/truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
             # OIDC resource-server: validate bearer tokens over the internal http
             # leg; discovery returns the public issuer so browser-minted user
             # tokens validate here without the edge cert.
@@ -120,6 +137,12 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka/keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka/truststore
+              readOnly: true
           resources:
             requests:
               cpu: 250m
@@ -130,6 +153,12 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: kafka-keystore
+          secret:
+            secretName: ledger-service-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
   strategy:
     canary:
       stableService: ledger-service
