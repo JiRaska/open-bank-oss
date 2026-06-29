@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank/compare/product-catalog-v0.6.0...product-catalog-v0.7.0) (2026-06-29)
+
+
+### Features
+
+* **product-catalog:** persist catalogue in Postgres with durable canonical UUIDs (ADR-0105 P1) ([#2603](https://github.com/JiRaska/open-bank/issues/2603)) ([3848c0a](https://github.com/JiRaska/open-bank/commit/3848c0a806789a2b05c97616b6718f1f0825383b))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank/compare/product-catalog-v0.5.0...product-catalog-v0.6.0) (2026-06-29)
 
 
