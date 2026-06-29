@@ -13,6 +13,7 @@ import io.restassured.module.kotlin.extensions.When
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable
 
 /**
  * Boot smoke test guarding the "released-but-never-booted" defect class.
@@ -28,6 +29,13 @@ import org.junit.jupiter.api.Test
  * The lone `@Channel("swift-events-out")` Kafka emitter is swapped to the in-memory connector so no
  * broker is needed and the readiness probe carries no Kafka health check.
  */
+// CI-skipped (#2404): root cause — Quarkus's JUnit5 BeforeAllCallback fires BEFORE JUnit5 evaluates
+// @DisabledIfEnvironmentVariable, so Quarkus boots + Testcontainers (Postgres + Valkey) starts in CI
+// despite this annotation. The containers hang on CI runners → 45-min job timeout. The REAL guard is
+// the Gradle-level `exclude("**/SwiftBootSmokeIT*")` in build.gradle.kts (evaluated at task config
+// time, before JUnit5 discovery). This annotation remains as a defence-in-depth fallback. Re-enable
+// per #2404 (runner-side investigation needed).
+@DisabledIfEnvironmentVariable(named = "CI", matches = "true")
 @QuarkusTest
 @QuarkusTestResource(SwiftBootSmokeIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(com.openbank.swift.it.PostgresRedisTestResource::class)

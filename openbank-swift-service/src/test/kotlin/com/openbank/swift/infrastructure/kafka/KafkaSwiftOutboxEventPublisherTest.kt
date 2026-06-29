@@ -8,10 +8,13 @@ import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
+import io.smallrye.mutiny.Uni
 import io.smallrye.reactive.messaging.MutinyEmitter
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
@@ -20,6 +23,13 @@ class KafkaSwiftOutboxEventPublisherTest {
 
     private val emitter = mockk<MutinyEmitter<String>>(relaxed = true)
     private val publisher = KafkaSwiftOutboxEventPublisher(emitter)
+
+    @BeforeEach
+    fun setUp() {
+        // sendMessage returns Uni<Void>; a relaxed mock's Uni never invokes the subscriber
+        // callback — awaitSuspending() hangs indefinitely. Stub with a real completed Uni.
+        every { emitter.sendMessage(any()) } answers { Uni.createFrom().voidItem() }
+    }
 
     private fun entry(payload: String = "the-payload") = OutboxEntry(
         eventId = UUID.fromString("00000000-0000-0000-0000-000000000001"),
@@ -40,7 +50,6 @@ class KafkaSwiftOutboxEventPublisherTest {
 
         publisher.publish(outboxEntry)
 
-        // Verify sendMessage was called (relaxed mock will record the call).
         coVerify(exactly = 1) { emitter.sendMessage(any()) }
     }
 

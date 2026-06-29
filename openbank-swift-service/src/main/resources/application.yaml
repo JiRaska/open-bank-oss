@@ -109,6 +109,17 @@ quarkus:
   quarkus:
     http:
       test-port: 0
+    # Kafka Dev Services starts a Redpanda Testcontainer whenever the messaging-kafka extension is
+    # present and no bootstrap server is configured — even though SwiftBootSmokeIT swaps the lone
+    # `swift-events-out` channel to the in-memory connector and needs NO broker. Disabling it is a
+    # BUILD-TIME decision, so it must live here (the `quarkus.devservices.enabled=false` that
+    # PostgresRedisTestResource injects at runtime is too late and is ignored). Without this the
+    # unnecessary Redpanda container is pulled at test time; on CI runners where the ECR pre-warm
+    # didn't seed that image it egresses via the (blocked) NAT and the boot hangs to the 45-min job
+    # timeout, cancelling the whole fleet Services CI run. (#2404)
+    kafka:
+      devservices:
+        enabled: false
     oidc:
       enabled: false
     oidc-client:
