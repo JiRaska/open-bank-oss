@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank/compare/card-issuance-service-v0.6.2...card-issuance-service-v0.7.0) (2026-06-29)
+
+
+### Features
+
+* **card-issuance:** GDPR Art.5 card PII retention expiry (ADR-0118 §5) ([#2479](https://github.com/JiRaska/open-bank/issues/2479)) ([b87f815](https://github.com/JiRaska/open-bank/commit/b87f8156d8ef2e14458b82cb20b03bc97cb714bf))
+
 ## [0.6.2](https://github.com/JiRaska/open-bank/compare/card-issuance-service-v0.6.1...card-issuance-service-v0.6.2) (2026-06-28)
 
 

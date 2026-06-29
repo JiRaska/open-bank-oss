@@ -6,7 +6,7 @@
   "openbank-anacredit-service": "0.4.1",
   "openbank-audit-service": "0.7.0",
   "openbank-balance-service": "1.7.1",
-  "openbank-card-issuance-service": "0.6.2",
+  "openbank-card-issuance-service": "0.7.0",
   "openbank-clearing-service": "0.6.2",
   "openbank-clearing-simulator": "0.3.0",
   "openbank-consent-service": "0.7.1",
