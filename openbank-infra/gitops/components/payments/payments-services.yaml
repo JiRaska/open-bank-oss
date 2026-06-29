@@ -99,6 +99,13 @@ spec:
                 secretKeyRef:
                   name: transaction-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # ADR-0137 image-independent convergence: load the scheme-accepted
+            # group.id / DLQ-topic override (transaction-service-msg-override
+            # ConfigMap, mounted below) as an external Quarkus config source so
+            # the lagging image picks up main's values without a rebuild (#2664).
+            # Optional location: if the file is absent Quarkus warns and continues.
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: /mnt/msg-config/override.properties
             # Downstream money-path dependencies. Without these the rest-clients fall back to the
             # application.yaml localhost defaults, so the payment saga's ledger posting and balance
             # credit/debit silently fail and every transaction lands in COMPENSATED/FAILED.
@@ -142,6 +149,9 @@ spec:
             - name: kafka-truststore
               mountPath: /mnt/kafka/truststore
               readOnly: true
+            - name: msg-override
+              mountPath: /mnt/msg-config
+              readOnly: true
           resources:
             requests:
               cpu: 250m
@@ -158,6 +168,9 @@ spec:
         - name: kafka-truststore
           secret:
             secretName: kafka-cluster-ca-truststore
+        - name: msg-override
+          configMap:
+            name: transaction-service-msg-override
   strategy:
     canary:
       stableService: transaction-service

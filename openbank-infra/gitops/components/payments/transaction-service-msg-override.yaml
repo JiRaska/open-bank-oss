@@ -1,0 +1,29 @@
+# Image-independent convergence of the ADR-0137 scheme-accepted consumer settings.
+#
+# The values below live in transaction-service's application.yaml on main, but the
+# deployed image lags (the auto-deploy rebuild is blocked by an unrelated Pact
+# can-i-deploy gate — #2664). Rather than wait on that, mount them as a Quarkus
+# external config source so the running (old) image picks them up.
+#
+# Why a properties FILE and not env vars: SmallRye discovers messaging channels by
+# scanning config property NAMES, and the env-var form
+# (MP_MESSAGING_INCOMING_PAYMENT_SCHEME_ACCEPTED_*) reverse-maps ambiguously →
+# a broken channel → startup crash (that was #2649, reverted). A properties file
+# carries the EXACT hyphenated keys, so discovery is unambiguous.
+#
+# config_ordinal=500 forces this source to outrank the baked application.yaml
+# (~254). Loaded via QUARKUS_CONFIG_LOCATIONS on the Rollout. Once the image is
+# finally rebuilt from main, these equal the baked values and this can be dropped.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: transaction-service-msg-override
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: transaction-service
+    app.kubernetes.io/part-of: payments
+data:
+  override.properties: |
+    config_ordinal=500
+    mp.messaging.incoming.payment-scheme-accepted.group.id=transaction-scheme-accepted-cg
+    mp.messaging.incoming.payment-scheme-accepted.dead-letter-queue.topic=payment.scheme-accepted.dlq
