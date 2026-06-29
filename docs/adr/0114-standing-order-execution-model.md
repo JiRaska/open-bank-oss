@@ -3,7 +3,7 @@
 Date: 2026-06-25
 Author: Claude (paired with Jiří Raška)
 Status: Accepted
-Delivery-Status: Partial
+Delivery-Status: Shipped
 
 ## Context
 
@@ -74,7 +74,7 @@ exemption after the first SCA-authenticated setup).
 - Temporal dependency for a relatively simple sweep use case.
 - Daily granularity only (D); sub-daily frequencies (e.g. intraday sweeps for corporate clients)
   require an hourly trigger extension.
-- `record-execution` endpoint does not exist yet — must be added to standing-order-service.
+- Sub-daily frequencies (e.g. intraday sweeps for corporate clients) require an hourly trigger extension.
 
 **Neutral**
 - The `INTERNAL` payment type (own-account transfer) bypasses the payment rail entirely; it needs

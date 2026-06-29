@@ -2,7 +2,7 @@
 
 Date: 2026-06-25
 Author: Claude (paired with Jiří Raška)
-Status: Proposed
+Status: Accepted
 Delivery-Status: Partial
 
 ## Context
@@ -11,15 +11,13 @@ GDPR Art. 17 (Right to Erasure) is partially implemented in `party-service`: `DE
 anonymises the party row in-place and deletes binary document files. `PARTY_ERASED` is published
 via `KafkaPartyEventPublisher`.
 
-However, several critical pieces are missing:
-1. No subscriber consumes `PARTY_ERASED` — `kyc-service`, `notification-service`, and other PII
-   holders do not act on the event.
-2. No retention enforcement exists — there is no cleanup job, TTL, or scheduled task for any data
-   category; retention periods are policy intent, not automated behaviour.
-3. GDPR Art. 15 (Right of Access / data export) is not implemented.
-4. The conflict between GDPR erasure and AML/accounting retention obligations is undocumented.
-
-This ADR establishes the data lifecycle policy and identifies the implementation gaps to close.
+This ADR establishes the data lifecycle policy and the implementation plan for the remaining gaps:
+1. ✅ `PARTY_ERASED` consumers implemented in `kyc-service` (`PartyEventConsumer`) and
+   `notification-service` (`PartyErasureConsumer`).
+2. ✅ GDPR Art. 15 (Right of Access / data export) implemented: `GET /api/v1/parties/{id}/gdpr-export`
+   in party-service (`PartyGdprExport`).
+3. Retention enforcement (automated cleanup) remains pending — policy intent only.
+4. The AML/accounting retention vs. GDPR erasure conflict is documented below.
 
 ## Decision
 
@@ -54,8 +52,8 @@ obligation. The AML Act and accounting law override GDPR erasure for financial r
 | Service | Action on erasure request |
 |---------|--------------------------|
 | party-service | Anonymise in-place (name → `"GDPR_ERASED"`, email → UUID tombstone); delete binary documents | ✅ Implemented |
-| kyc-service | Delete KYC documents; anonymise check results | ❌ Not implemented (no `PARTY_ERASED` subscriber) |
-| notification-service | Delete notification preferences and history | ❌ Not implemented |
+| kyc-service | Delete KYC documents; anonymise check results | ✅ Implemented (`PartyEventConsumer.handleErased`) |
+| notification-service | Delete notification preferences and history | ✅ Implemented (`PartyErasureConsumer`) |
 | audit-service | **Do NOT delete** — AML retention obligation overrides GDPR | ✅ Correct (no subscriber needed) |
 | ledger-service | **Do NOT delete** — 10-year accounting retention overrides GDPR | ✅ Correct |
 | transaction-service | **Do NOT delete** — 10-year accounting retention overrides GDPR | ✅ Correct |
@@ -63,13 +61,13 @@ obligation. The AML Act and accounting law override GDPR erasure for financial r
 The tombstone email pattern (`GDPR_ERASED_{uuid}@tombstone.openbank.internal`) preserves the
 unique-constraint on the `email` column after PII removal.
 
-**4. Cross-service erasure propagation (NOT YET IMPLEMENTED).**
+**4. Cross-service erasure propagation.**
 
-`PARTY_ERASED` is published but has no subscribers. We will implement Kafka consumers in:
-- `kyc-service` — on `PARTY_ERASED`: delete KYC documents, anonymise check result notes.
-- `notification-service` — on `PARTY_ERASED`: delete notification preferences, purge undelivered
-  queued messages.
-- `card-issuance-service` — on `PARTY_ERASED`: anonymise `cardholderName` and `embossedName`.
+`PARTY_ERASED` is published by party-service and consumed by:
+- ✅ `kyc-service` — `PartyEventConsumer.handleErased`: deletes KYC documents, anonymises check result notes.
+- ✅ `notification-service` — `PartyErasureConsumer`: deletes notification preferences, purges
+  undelivered queued messages.
+- Pending: `card-issuance-service` — anonymise `cardholderName` and `embossedName` (GDPR Art. 5(1)(e)).
 
 Services that retain data under AML/accounting obligations (`audit-service`, `ledger-service`,
 `transaction-service`) must explicitly **not** subscribe to `PARTY_ERASED`.
@@ -83,10 +81,11 @@ A scheduled Temporal workflow will enforce retention periods:
 
 Ledger and transaction records are never deleted by this workflow.
 
-**6. Right of Access — Art. 15 (NOT YET IMPLEMENTED).**
+**6. Right of Access — Art. 15.**
 
-A `GET /api/v1/parties/{id}/gdpr-export` endpoint will aggregate PII from party-service, kyc-service,
-and card-issuance-service and return a structured export. This is a future implementation.
+✅ `GET /api/v1/parties/{id}/gdpr-export` is implemented in party-service (`PartyGdprExport` aggregate,
+`PartyResource`). It aggregates PII from party-service directly. kyc-service and card-issuance-service
+export contributions remain pending.
 
 ## Alternatives considered
 
@@ -105,12 +104,12 @@ and card-issuance-service and return a structured export. This is a future imple
 - party-service erasure (anonymise + document delete) is already implemented.
 
 **Negative**
-- Cross-service `PARTY_ERASED` propagation is not implemented — erasing a party today leaves PII
-  in kyc-service, notification-service, and card-issuance-service.
-- Retention enforcement is not automated — data is not deleted when its retention period expires.
-- GDPR Art. 15 export endpoint does not exist — a data subject access request cannot be fulfilled
-  automatically.
-- These three gaps must be closed before a production go-live that processes real PII.
+- `card-issuance-service` `PARTY_ERASED` handler is not yet implemented — erasing a party today
+  leaves `cardholderName` / `embossedName` in card-issuance-service.
+- Retention enforcement is not automated — data is not deleted when its retention period expires
+  (session logs, KYC documents, card PII).
+- GDPR Art. 15 export covers party-service only; kyc-service and card-issuance-service contributions
+  are pending.
 
 **Neutral**
 - Tombstone email pattern is an established industry approach for GDPR erasure in systems with
@@ -119,8 +118,9 @@ and card-issuance-service and return a structured export. This is a future imple
 ## Compliance impact
 
 - GDPR Art. 5(1)(e): storage limitation — retention periods defined above.
-- GDPR Art. 17: right to erasure — party-service ✅ implemented; cross-service propagation ❌ TODO.
-- GDPR Art. 15: right of access — ❌ not implemented.
+- GDPR Art. 17: right to erasure — party-service ✅, kyc-service ✅, notification-service ✅;
+  card-issuance-service ❌ pending.
+- GDPR Art. 15: right of access — party-service ✅ implemented; kyc + card data export pending.
 - GDPR Art. 5(2): accountability — audit log retention (5 years) supports this.
 - AML Act No. 253/2008 §16: 5-year retention after relationship end — implemented by omission
   (audit/ledger/transaction records are not deleted).

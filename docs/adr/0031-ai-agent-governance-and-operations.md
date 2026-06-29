@@ -97,12 +97,18 @@ We will run AI agents as **governed, least-privilege workloads** whose every act
 - Segregation of duties is enforced in policy: a development agent may *open* a PR but may not *merge* or
   *approve* it; an author identity ≠ an approver identity. 🟡 enforced today by GitHub branch protection
   + CODEOWNERS; codifying it in the agent policy is planned (D3b).
-- 🟡 **Identity binding (D3a, live):** the `/mcp` surface already requires an authenticated operator
+- 🟢 **Identity binding (D3a, live):** the `/mcp` surface already requires an authenticated operator
   (Keycloak bearer, `@RolesAllowed`); `AgentIdentityBinding` now binds WHICH agent identity that
   operator may assert via `X-Agent-Id` to their **verified roles** (deny-by-default), so a
   lower-privileged operator can no longer select a higher-privileged charter. A rejected assertion is
-  audited (`agent.identity.rejected`) and discloses no tools. ⬜ **D3b (planned):** the short-TTL
-  SPIFFE/SVID per run replaces the header entirely — the binding then remains a defense-in-depth backstop.
+  audited (`agent.identity.rejected`) and discloses no tools.
+- 🟢 **D3b (live, enforced as of 2026-06-29):** `pki-agent` OpenBao PKI engine issues short-TTL X.509
+  certificates (CN=agent-id, 300 s, `no_store`). `McpEndpoint` verifies the chain against the pki-agent
+  CA, validates `SHA256withECDSA` proof-of-possession over `method|path|sha256(body)|timestamp`, and
+  cross-checks CN→charter role (`svid_cn_binding` audit). `AGENT_IDENTITY_SVID_ENFORCED=true` in gitops
+  — no header fallback. E2E verified in sandbox: T1 no-SVID→0 tools, T2 CN=ui-assistant→12 tools,
+  T3 CN=compliance-officer→0 tools + DENIED audit. The D3a binding remains defense-in-depth backstop.
+  Remaining: author≠approver GitHub branch protection rule (Free plan constraint — not addressable in code).
 
 ### D4 — Human-in-the-loop, two channels
 

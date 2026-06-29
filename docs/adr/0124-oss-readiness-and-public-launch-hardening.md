@@ -1,8 +1,8 @@
 # OSS-readiness and public-launch hardening
 
 Date: 2026-06-27
-Status: Proposed
-Delivery-Status: Planned
+Status: Accepted
+Delivery-Status: Partial
 Author(s): @JiRaska
 
 ## Context
@@ -53,6 +53,7 @@ decision and the ordering contract, not the backlog itself.
 
 **Workstream A — Hygiene & history (P0).**
 - A1: Untrack committed CI artifacts + ignore them. *(Done: PR #2281.)*
+- A3: Public-launch hardening sweep (PII filter, endpoint gating, MPL header cleanup, rod-číslo false-positive allowlisting). *(Done: PR #2514.)*
 - A2: At the cutover, run `git filter-repo --path sbom-downloads --path reports
   --invert-paths` to reclaim the ~190 MB. This rewrites every commit SHA, so it runs
   **once**, after open PRs are drained and all working clones (Mac mini / secondary

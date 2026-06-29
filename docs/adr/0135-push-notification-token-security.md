@@ -37,8 +37,8 @@ from the same device replaces the first.
 ### 2. Token invalidation on logout and uninstall
 
 - **Explicit logout** — the mobile app calls `DELETE /api/v1/notifications/devices/{deviceId}` as
-  part of the logout flow. This is best-effort (offline logout cannot call the API); the TTL below
-  covers the gap.
+  part of the logout flow. ✅ Endpoint implemented in `notification-service` (#2527). Best-effort
+  on offline devices; the TTL below covers the gap.
 - **Silent token TTL** — all tokens carry a `registeredAt` timestamp. Tokens not refreshed within
   **90 days** are marked `STALE` and excluded from delivery. The mobile app refreshes the token
   on every app foreground event.
