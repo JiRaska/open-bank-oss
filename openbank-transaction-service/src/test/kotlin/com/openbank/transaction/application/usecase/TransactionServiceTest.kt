@@ -433,6 +433,34 @@ class TransactionServiceTest {
         }
     }
 
+    @Test
+    fun `initiate transaction normalizes a wide-scale amount to currency minor units`(): Unit = runBlocking {
+        // A rail may persist and forward an over-scaled decimal (e.g. 123.000000); the booking
+        // ingest must round to the currency's minor units instead of rejecting with 400 — this is
+        // the single generic guard for all callers (domestic, SEPA, SEPA-instant, welcome-bonus).
+        val command = initiateCommand().copy(amount = BigDecimal("123.000000"), currencyCode = "CZK")
+
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        every { eventPublisher.initiatedPayload(any()) } returns "{\"event\":\"initiated\"}"
+        every { eventPublisher.completedPayload(any()) } returns "{\"event\":\"completed\"}"
+        coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
+        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
+        coEvery { sagaOrchestrator.startSaga(any()) } answers {
+            val transaction = firstArg<Transaction>()
+            PaymentSaga.start(
+                transaction.id,
+                transaction.idempotencyKey,
+                Clock.systemUTC(),
+            ).copy(state = SagaState.COMPLETED)
+        }
+
+        val result = service.initiateTransaction(command)
+
+        // Booked at scale 2 (CZK minor units), value preserved — no exception thrown.
+        assertThat(result.amount).isEqualTo(Money.of(BigDecimal("123.00"), "CZK"))
+        assertThat(result.amount.amount.scale()).isEqualTo(2)
+    }
+
     private fun initiateCommand() = InitiateTransactionCommand(
         idempotencyKey = "txn-idem-1",
         type = TransactionType.TRANSFER,

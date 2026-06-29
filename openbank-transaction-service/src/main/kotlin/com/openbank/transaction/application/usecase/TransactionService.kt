@@ -78,8 +78,16 @@ class TransactionService(
         val existing = transactionRepository.findByIdempotencyKey(command.idempotencyKey)
         if (existing != null) return existing
 
-        CurrencyCode.of(command.currencyCode)
-        val amount = Money.of(command.amount, command.currencyCode)
+        val currency = CurrencyCode.of(command.currencyCode)
+        // Normalize the principal to the currency's minor units at the booking ingest (ADR-0108).
+        // A rail may hand us a wide-scale decimal (e.g. 123.000000 persisted by domestic/SEPA) that
+        // Money's strict scale invariant would reject with 400, stranding settlement. Rounding here
+        // — the single chokepoint every REST and Kafka booking flows through — makes the API robust
+        // to ANY caller (domestic, SEPA, SEPA-instant, welcome-bonus, future rails) instead of each
+        // sender having to setScale() itself. The FX/settlement leg in resolveSettlement already
+        // normalizes its own amounts; Money's constructor invariant stays as a backstop.
+        val normalizedAmount = command.amount.setScale(currency.defaultFractionDigits, RoundingMode.HALF_UP)
+        val amount = Money.of(normalizedAmount, command.currencyCode)
         // Business-rule violation (well-formed request, value breaks an invariant) ->
         // IllegalStateException maps to 422 via openbank-libs CommonExceptionMappers, in
         // contrast to IllegalArgumentException (malformed input) which maps to 400.
