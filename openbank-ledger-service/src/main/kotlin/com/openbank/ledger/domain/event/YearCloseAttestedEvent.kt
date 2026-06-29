@@ -18,6 +18,7 @@ import java.util.UUID
 data class YearCloseAttestedEvent(
     override val aggregateId: UUID,
     override val version: Long,
+    override val occurredAt: Instant,
     val fiscalYear: Int,
     val contentHash: String,
     val totalDebits: BigDecimal,
@@ -25,7 +26,7 @@ data class YearCloseAttestedEvent(
     val accountCount: Int,
     val attestedBy: String,
     val attestedAt: Instant,
-) : DomainEvent() {
+) : DomainEvent(occurredAt) {
     override val aggregateType = "YearClose"
     override val eventType = "YearCloseAttested"
 }

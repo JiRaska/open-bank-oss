@@ -129,6 +129,7 @@ class YearCloseService(
                 YearCloseAttestedEvent(
                     aggregateId = attested.id,
                     version = 1L,
+                    occurredAt = clock.instant(),
                     fiscalYear = attested.fiscalYear,
                     contentHash = attested.contentHash,
                     totalDebits = attested.totalDebits,
