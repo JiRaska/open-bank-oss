@@ -1,7 +1,6 @@
 quarkus:
   application:
     name: devops-agent
-    version: 0.1.0
   http:
     port: 8142
     cors:

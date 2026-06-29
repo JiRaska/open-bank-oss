@@ -1,7 +1,6 @@
 quarkus:
   application:
     name: openbank-customer-edge
-    version: 0.3.0
 
   # Redis: pending-onboarding store for four-eyes auto-resume (ADR-0072).
   redis:

@@ -1,7 +1,6 @@
 quarkus:
   application:
     name: openbank-kyc-service
-    version: 0.1.0
   http:
     port: 8114
     cors:

@@ -1,7 +1,6 @@
 quarkus:
   application:
     name: openbank-party-service
-    version: 0.2.0
   http:
     port: 8111
     cors:

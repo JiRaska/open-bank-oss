@@ -1,7 +1,6 @@
 quarkus:
   application:
     name: openbank-interest-service
-    version: 0.2.0
   http:
     port: 8125
     cors:

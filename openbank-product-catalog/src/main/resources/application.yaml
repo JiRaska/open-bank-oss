@@ -1,7 +1,6 @@
 quarkus:
   application:
     name: openbank-product-catalog
-    version: 0.1.0
   http:
     port: 8104
     cors:

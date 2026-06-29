@@ -8,7 +8,6 @@
 quarkus:
   application:
     name: openbank-clearing-simulator
-    version: 0.1.0
   http:
     port: 8139
     header:

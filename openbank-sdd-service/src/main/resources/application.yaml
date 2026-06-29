@@ -1,7 +1,6 @@
 quarkus:
   application:
     name: openbank-sdd-service
-    version: 0.1.1
   http:
     port: 8129
     cors:
