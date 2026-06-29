@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.1](https://github.com/JiRaska/open-bank/compare/transaction-service-v1.12.0...transaction-service-v1.12.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* **libs,account,consent,ledger,pid,transaction:** make DomainEvent.occurredAt explicit ([#2137](https://github.com/JiRaska/open-bank/issues/2137)) ([#2662](https://github.com/JiRaska/open-bank/issues/2662)) ([9e0c2ea](https://github.com/JiRaska/open-bank/commit/9e0c2ea14a65aec227df333b83b0b7283b6c16a5))
+
 ## [1.12.0](https://github.com/JiRaska/open-bank/compare/transaction-service-v1.11.0...transaction-service-v1.12.0) (2026-06-29)
 
 
