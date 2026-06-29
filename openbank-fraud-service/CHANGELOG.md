@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.3](https://github.com/JiRaska/open-bank/compare/fraud-service-v0.4.2...fraud-service-v0.4.3) (2026-06-29)
+
+
+### Bug Fixes
+
+* **fraud:** reconcile quarkus.application.version with version.txt ([#2669](https://github.com/JiRaska/open-bank/issues/2669)) ([b9f84bd](https://github.com/JiRaska/open-bank/commit/b9f84bd26d4ed42a3d25d29fab77a93b694acb49))
+
 ## [0.4.2](https://github.com/JiRaska/open-bank/compare/fraud-service-v0.4.1...fraud-service-v0.4.2) (2026-06-29)
 
 
