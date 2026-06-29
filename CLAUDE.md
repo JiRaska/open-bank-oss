@@ -93,6 +93,11 @@ CI is path-scoped (only changed services build). Domain layer has **zero** frame
   Generic build: `openbank-infra/scripts/build-push-service.sh <service>`.
 - **Host-side build, not in-Docker Gradle.** `build-push-service.sh` runs `quarkusBuild` locally
   first; in-image Gradle hits download timeouts and can't find sub-project dirs.
+- **SBOM must be generated host-side, not in the runtime stage.** Run `:svc:cyclonedxBom` alongside
+  `quarkusBuild` (host or Docker build stage), then `COPY bom.json /app/sbom/` + `ENV OPENBANK_SBOM_PATH`.
+  Never `RUN ./gradlew cyclonedxBom` in the runtime image stage — it pulls the internet at deploy time
+  and defeats reproducibility. `build-push-service.sh` and all per-service CI Dockerfiles follow this
+  pattern (ADR-0121 Axis 1; codified in `rules.yaml: provenance.sbom_generation_pattern`).
 - **Dirty worktree = corrupted image.** Before `build-push-service.sh`, verify `git status src/main/`
   is clean. A second parallel agent can leave uncommitted edits that get baked into the image silently.
 - **Stale `build/quarkus-app/` = ClassNotFoundException at boot.** Delete `build/quarkus-app/` and

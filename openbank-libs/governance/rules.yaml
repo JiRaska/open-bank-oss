@@ -320,6 +320,13 @@ provenance:
     - test_results
     - ai_attribution        # which agent/model authored; human reviewer (ADR-0029 D6)
   vex: openvex              # accompanies SBOM; suppresses non-exploitable findings (ADR-0030 D1)
+  sbom_generation_pattern: host_side_only
+  # CycloneDX SBOM must be generated on the host (Gradle :svc:cyclonedxBom) and COPY'd into
+  # the image — never generated inside a running container (RUN ./gradlew in the runtime stage).
+  # Two compliant paths:
+  #   a) build-push-service.sh: quarkusBuild + cyclonedxBom on host → generated runtime Dockerfile COPYs bom.json
+  #   b) multi-stage Dockerfile: cyclonedxBom in the JDK build stage → COPY --from=build bom.json into runtime stage
+  # Non-compliant: any `RUN ./gradlew` or `RUN cyclonedxBom` in the RUNTIME (non-build) stage.
   gate: provenance
   # Rollout state of the deploy-time provenance gate (ADR-0030 D4), staged like the OPA-authz
   # (ADR-0034) and image-signature gates: ADVISORY now — per-release evidence bundles
