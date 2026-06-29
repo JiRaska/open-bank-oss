@@ -151,10 +151,11 @@ spec:
             # Rotate by re-running the openbao-agent-identity-sync CronJob and updating here.
             - name: AGENT_IDENTITY_SVID_CA_CERT
               value: "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJyekNDQVZXZ0F3SUJBZ0lVYjdEbXJGK2lRRElvN0lPaHdESWFMS0dPb3c0d0NnWUpLb1pJaHZjTkFRRUwKQlFBd0lqRWdNQjRHQTFVRUF4TVhUMjVsWW05a1lTQkJaMmwwYVc4Z1NXUWdWRUVnUTBFd0hoY05Nakl3Tmprwk1UUTFNRE0xTlZvWERUSTBNak14TlRBd01ETTFOVm93SWpFZ01CNEdBMVVFQXhNWFQyNWxZbTlrWVNCQgpaR2xyYVc4Z1NXUWdWRUVnUTBFd1dUQVRCZ2NxaGtqT1BRSUJCZ2dxaGtqT1BRTUJCd05DQUFSVC9aQjUKcEZXa0VkMEVCZk5ubWR5Z0lLWHpCcEpWbVcxZyt2akhDOWhMSWlvcUYvQlh3TElveFNxeTRPOFlvZk1aCm9GWllDWFBZbGo1WmhRSmxaMU8xbzJNd1lUQU9CZ05WSFE4QkFmOEVCQU1DQVFZd0R3WURWUjBUQVFILwpCQVV3QXdFQi96QWRCZ05WSFE0RUZnUVVnV1h1dm9RUWJOSnhSaVlBVG5JT0dQVzBERVl3SHdZRFZSMGkKQkJnd0ZvQVVnV1h1dm9RUWJOSnhSaVlBVG5JT0dQVzBERVl3Q2dZSUtvWklodmNOQVFNQ0EwY0FNRVFDCklCVGFEdFRrNEFMSDlRZXpSeTZ3dE54MUVhbVZBUHlMNnlteVFHVVJGbnhTQWlCa1B1bmNLSUFPOXl6TApaVU5nYTRyeUVzSlFxaUhrTXA2T0NubTZER2lpZEE9PQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg=="
-            # ADR-0031 D3b rollout: false = SVID verified if present, falls back to D3a binding
-            # if absent. Flip to true once admin-ui BFF mint is confirmed live (runbook 0007).
+            # ADR-0031 D3b enforced: callers MUST present a valid pki-agent PoP cert.
+            # No SVID → rejected; the D3a header binding remains a defense-in-depth backstop
+            # only (CN cross-check added in feat(agent) 1.12.0). Flip to false to revert.
             - name: AGENT_IDENTITY_SVID_ENFORCED
-              value: "false"
+              value: "true"
           startupProbe:
             tcpSocket:
               port: management

@@ -53,23 +53,23 @@ Trust boundaries: (a) browser→BFF (NextAuth session), (b) BFF→agent-service 
   the operator's *verified* Keycloak roles, **deny-by-default**; a rejected assertion yields no
   identity (deny-by-default at the gate), an empty `tools/list` (no disclosure), and an audited
   `agent.identity.rejected` event attributed to the OIDC subject. **D3b (verify side, this change):**
-  `AgentSvidVerifier` now accepts a per-run OpenBao-issued client cert (CN = agent id) proven via a
+  `AgentSvidVerifier` accepts a per-run OpenBao-issued client cert (CN = agent id) proven via a
   PoP signature (`X-Agent-Cert` / `X-Agent-PoP` / `-Ts` / `-Nonce`) — chain to the `pki-agent` CA
-  (#2405), cert-validity window, signature, timestamp freshness and single-use nonce. A valid SVID's
-  CN is the strongest identity, checked before the header binding. **Residual:** the SVID is verified
-  but not yet *minted/presented* (the BFF mint side is PR5b-2) and not yet *enforced*
-  (`agent.identity.svid.enforced=false` by default → falls back to the binding). When enforcement is
-  flipped, the header path is closed and the binding remains a defense-in-depth backstop.
+  (#2405), cert-validity window, signature, timestamp freshness and single-use nonce. **D3b fully
+  enforced (#2488):** `AGENT_IDENTITY_SVID_ENFORCED=true` — no SVID = rejected; the D3a header
+  binding is now %dev/%test only. **D3b hardening (#2488):** after cert-chain verify, the CN is
+  additionally cross-checked against the operator’s D3a role binding (`method=svid_cn_binding`
+  audit) — a `compliance-officer` CN is rejected even with a valid cert if the operator holds only
+  `ROLE_OPERATOR`. **Residual:** OpenBao outage → BFF mint fails → `/mcp` rejected (fail-secure;
+  GitOps break-glass: flip `SVID_ENFORCED=false` and redeploy). OpenBao is HA (Raft 3-node).
 - **T-S2 — anonymous reach.** `@RolesAllowed` blocks unauthenticated callers in prod (OIDC on); the
   binding additionally fails closed. In `%dev/%test` OIDC is off (anonymous) and the legacy header
   trust is preserved — acceptable because those profiles never touch real data or a real cluster.
-- **T-S3 — security-control off-switches.** Two env flags disable a primary identity control:
+- **T-S3 — security-control off-switches.** Two env flags:
   `AGENT_IDENTITY_BINDING_ENFORCED=false` (disables the D3a role binding) and
-  `AGENT_IDENTITY_SVID_ENFORCED` (when false, a missing/invalid SVID falls back to the binding rather
-  than being rejected). Both default to the safe value (binding on, SVID non-enforcing during rollout);
-  flipping them is a change-controlled GitOps action and is visible in the deployment manifest. They
-  exist for staged rollout, not as a runtime bypass — a production deploy must not set
-  `BINDING_ENFORCED=false`.
+  `AGENT_IDENTITY_SVID_ENFORCED` (true = SVID required; false = rollout fallback). Flipping either
+  is a change-controlled GitOps PR. `BINDING_ENFORCED=false` must never be set in production;
+  `SVID_ENFORCED=false` is the break-glass if the BFF mint path is degraded.
 
 ### Tampering
 

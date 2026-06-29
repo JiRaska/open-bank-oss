@@ -10,6 +10,7 @@ import com.openbank.agent.application.AgentPolicyGate
 import com.openbank.agent.application.AgentSvidVerifier
 import com.openbank.agent.application.CharterRegistry
 import com.openbank.agent.application.McpToolRegistry
+import com.openbank.agent.application.SvidResult
 import com.openbank.agent.domain.McpResponse
 import com.openbank.agent.domain.ToolCallResult
 import com.openbank.agent.domain.ToolDefinition
@@ -62,15 +63,27 @@ class McpEndpointIdentityTest {
         anonymous: Boolean,
         policyGate: AgentPolicyGate = mockk(),
         enforced: Boolean = true,
+        svidResult: SvidResult = SvidResult.Disabled,
+        svidEnforced: Boolean = false,
     ): McpEndpoint {
-        val headers = mockk<HttpHeaders> {
+        val hdr = mockk<HttpHeaders> {
             every { getHeaderString(any()) } returns null
             every { getHeaderString("X-Agent-Id") } returns headerAgentId
+            // When a non-Disabled SVID result is requested, stub cert headers so verify() fires.
+            if (svidResult !is SvidResult.Disabled) {
+                every { getHeaderString("X-Agent-Cert") } returns "cert"
+                every { getHeaderString("X-Agent-PoP") } returns "pop"
+                every { getHeaderString("X-Agent-PoP-Ts") } returns "1000"
+                every { getHeaderString("X-Agent-PoP-Nonce") } returns "nonce"
+            }
         }
         val ident = mockk<SecurityIdentity> {
             every { isAnonymous } returns anonymous
             every { getRoles() } returns callerRoles
             every { principal } returns Principal { "operator-1" }
+        }
+        val svidMock = mockk<AgentSvidVerifier> {
+            every { verify(any(), any(), any(), any(), any()) } returns svidResult
         }
         return McpEndpoint().apply {
             this.registry = this@McpEndpointIdentityTest.registry
@@ -83,10 +96,14 @@ class McpEndpointIdentityTest {
             )
             this.identity = ident
             this.auditPublisher = this@McpEndpointIdentityTest.auditPublisher
-            // SVID disabled (no CA) → resolveAgentId falls through to the D3a header binding,
-            // so these tests exercise the binding path unchanged.
-            this.svid = AgentSvidVerifier(caCertPem = Optional.empty(), maxSkewSeconds = 60)
-            this.headers = headers
+            this.svid = if (svidResult == SvidResult.Disabled) {
+                // Use the real disabled verifier for the existing D3a tests (unchanged).
+                AgentSvidVerifier(caCertPem = Optional.empty(), maxSkewSeconds = 60)
+            } else {
+                svidMock
+            }
+            this.svidEnforced = svidEnforced
+            this.headers = hdr
         }
     }
 
@@ -148,5 +165,69 @@ class McpEndpointIdentityTest {
         )
         val result = (ep.handle(body).entity as McpResponse).result as ToolCallResult
         assertThat(result.isError).isTrue()
+    }
+
+    // ── D3b CN→role cross-check (ADR-0031 hardening) ─────────────────────────────────────────────
+
+    @Test
+    fun `valid SVID with CN permitted by operator roles returns charter tools`() {
+        val tools = toolsOf(
+            endpoint(
+                headerAgentId = null,
+                callerRoles = setOf("ROLE_OPERATOR"),
+                anonymous = false,
+                svidResult = SvidResult.Verified("ui-assistant"),
+            ),
+        )
+        assertThat(tools.map { it.name }).containsExactly("get_account")
+    }
+
+    @Test
+    fun `valid SVID with CN NOT permitted by operator roles is rejected and audited`() {
+        val tools = toolsOf(
+            endpoint(
+                headerAgentId = null,
+                callerRoles = setOf("ROLE_OPERATOR"),
+                anonymous = false,
+                svidResult = SvidResult.Verified("compliance-officer"),
+            ),
+        )
+        assertThat(tools).isEmpty()
+        val evt = slot<AuditEvent>()
+        coVerify(exactly = 1) { auditPublisher.publish(capture(evt)) }
+        assertThat(evt.captured.operation).isEqualTo("agent.identity.rejected")
+        assertThat(evt.captured.payload).containsKey("method")
+        assertThat(evt.captured.payload["method"]).isEqualTo("svid_cn_binding")
+    }
+
+    @Test
+    fun `valid SVID in anonymous mode bypasses CN cross-check (dev-test parity)`() {
+        val tools = toolsOf(
+            endpoint(
+                headerAgentId = null,
+                callerRoles = emptySet(),
+                anonymous = true,
+                svidResult = SvidResult.Verified("compliance-officer"),
+            ),
+        )
+        assertThat(tools.map { it.name }).containsExactly("aml_list_cases")
+        coVerify(exactly = 0) { auditPublisher.publish(any()) }
+    }
+
+    @Test
+    fun `svid-enforced with no cert rejects and audits, falls back to no identity`() {
+        val tools = toolsOf(
+            endpoint(
+                headerAgentId = "ui-assistant",
+                callerRoles = setOf("ROLE_OPERATOR"),
+                anonymous = false,
+                svidResult = SvidResult.Disabled,
+                svidEnforced = true,
+            ),
+        )
+        assertThat(tools).isEmpty()
+        val evt = slot<AuditEvent>()
+        coVerify(exactly = 1) { auditPublisher.publish(capture(evt)) }
+        assertThat(evt.captured.operation).isEqualTo("agent.identity.rejected")
     }
 }

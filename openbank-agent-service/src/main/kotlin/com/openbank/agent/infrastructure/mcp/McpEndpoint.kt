@@ -203,7 +203,23 @@ class McpEndpoint {
                 now = clock.instant(),
             )
         ) {
-            is SvidResult.Verified -> return Resolution.Allowed(r.agentId)
+            is SvidResult.Verified -> {
+                // D3b hardening: cross-check the cert CN against the D3a role binding (defense-in-depth).
+                // The OpenBao agent-run role already constrains which CNs can be issued (runbook 0007);
+                // this second check ensures a misconfigured role or a compromised minter cannot widen
+                // privilege beyond what the operator's Keycloak roles allow. Guards the same way as D3a:
+                // bypass in %dev/%test (anonymous) or when the binding is disabled.
+                if (!identity.isAnonymous && binding.enforced && !binding.permits(identity.roles, r.agentId)) {
+                    auditIdentityRejected(
+                        reason = "SVID CN not permitted by operator role binding",
+                        attemptedAgent = r.agentId,
+                        method = "svid_cn_binding",
+                        roles = identity.roles,
+                    )
+                    return Resolution.Rejected
+                }
+                return Resolution.Allowed(r.agentId)
+            }
             is SvidResult.Rejected -> {
                 auditIdentityRejected(reason = r.reason, attemptedAgent = null, method = "svid")
                 return Resolution.Rejected
