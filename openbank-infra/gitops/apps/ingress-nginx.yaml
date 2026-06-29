@@ -36,6 +36,23 @@ spec:
             # re-evaluate for multi-tenant prod (prefer dropping snippets there).
             annotations-risk-level: "Critical"
           replicaCount: 1
+          # Scrape the controller so edge-level 5xx are observable. ingress-nginx
+          # records every request it proxies (nginx_ingress_controller_requests,
+          # labelled by status) — including the failures that never reach a backend
+          # pod and so never appear in any service's http_server_requests_seconds_count:
+          # pod-down 503, upstream-refused 502, upstream-timeout 504. Without this the
+          # platform error-rate is blind to exactly the customer-facing edge failures
+          # it should surface (#2677). metrics.enabled adds the 10254 port + metrics
+          # Service + --enable-metrics; serviceMonitor.enabled emits a ServiceMonitor
+          # the kube-prometheus-stack Prometheus picks up (its
+          # serviceMonitor{,Namespace}Selector are both {} = match-all, so the release
+          # label is conventional, not required).
+          metrics:
+            enabled: true
+            serviceMonitor:
+              enabled: true
+              additionalLabels:
+                release: kube-prometheus-stack
           # The admission webhook only validates Ingress objects; its Helm-hook
           # certgen Jobs deadlock ArgoCD sync (hook stuck "Pending deletion").
           # Disabled for the sandbox — re-enable in prod where Ingress is
