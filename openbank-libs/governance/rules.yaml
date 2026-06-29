@@ -152,7 +152,7 @@ change_requirements:
     require:
       - "docs/threat-models/<service>.md present/updated"   # ADR-0030 D2
     gate: threat-model
-    enforced: advisory
+    enforced: enforce                   # check-threat-models.py live in CI; all 13 money-path services have valid threat models
   new_service_with_outbox:
     # A service that extends AbstractOutboxEntity / uses OutboxDispatcher but does NOT
     # set openbank.outbox.dispatch-enabled=true silently never dispatches events —
@@ -202,7 +202,7 @@ change_requirements:
       - "injected java.time.Clock CDI bean used (centralised libs Clock producer tracked in #1612)"
       - "no Instant.now() / LocalDateTime.now() / System.currentTimeMillis() / Clock.System.now() in domain or application layer"
     gate: dst-clock-injection
-    enforced: advisory                  # advisory until openbank-simulation harness lands (ADR-0100)
+    enforced: enforce                   # ADR-0100 simulation harness live (#1725); gate clean fleet-wide
   release_please_merge:
     # A release-please merge commit that reorders the tail of .release-please-manifest.json can
     # SILENTLY drop a component line while it stays in release-please-config.json. The
