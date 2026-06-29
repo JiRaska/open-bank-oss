@@ -4,9 +4,7 @@
 
 package com.openbank.standingorder.application.port.`in`
 
-import com.openbank.standingorder.domain.model.Frequency
-import com.openbank.standingorder.domain.model.PaymentType
-import com.openbank.standingorder.domain.model.StandingOrder
+import com.openbank.standingorder.domain.model.*
 import java.time.LocalDate
 import java.util.UUID
 

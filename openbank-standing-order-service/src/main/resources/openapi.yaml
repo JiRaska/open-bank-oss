@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Standing Order Service API
   version: 1.1.0
-  description: Recurring payment orders — create, pause, resume, cancel, and execution feedback.
+  description: Recurring payment orders — create, pause, resume, cancel.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -93,30 +93,26 @@ paths:
   /api/v1/standing-orders/{id}/record-execution:
     patch:
       tags: [Standing Orders]
-      summary: Rail service confirms successful dispatch — resets consecutive failure count
+      summary: Rail confirms payment dispatched — resets consecutive failure count
       operationId: recordExecution
-      security:
-        - bearerAuth: [ROLE_SERVICE, ROLE_OPERATOR, ROLE_ADMIN]
       parameters:
         - $ref: '#/components/parameters/orderId'
       responses:
         '200':
-          description: Execution confirmed, failure count reset
+          description: Execution confirmed; failure count reset
         '404':
           $ref: '#/components/responses/NotFound'
 
   /api/v1/standing-orders/{id}/record-failure:
     patch:
       tags: [Standing Orders]
-      summary: Rail service reports dispatch failure — increments count, FAILED after 3
+      summary: Rail reports payment dispatch failed — increments failure count; transitions to FAILED after 3
       operationId: recordFailure
-      security:
-        - bearerAuth: [ROLE_SERVICE, ROLE_OPERATOR, ROLE_ADMIN]
       parameters:
         - $ref: '#/components/parameters/orderId'
       responses:
         '200':
-          description: Failure recorded; order FAILED when consecutiveFailures reaches 3
+          description: Failure recorded
         '404':
           $ref: '#/components/responses/NotFound'
 
