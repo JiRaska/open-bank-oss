@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank/compare/standing-order-service-v0.9.0...standing-order-service-v0.10.0) (2026-06-29)
+
+
+### Features
+
+* **standing-order:** add execution-callback endpoints for payment rail (record-execution / record-failure) ([#2499](https://github.com/JiRaska/open-bank/issues/2499)) ([e5731e7](https://github.com/JiRaska/open-bank/commit/e5731e72691c406164b0eba636f60f36062ca891))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank/compare/standing-order-service-v0.8.1...standing-order-service-v0.9.0) (2026-06-29)
 
 
