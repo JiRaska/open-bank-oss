@@ -41,6 +41,12 @@ class DeviceTokenEntity : PanacheEntity() {
     @Column(name = "last_used_at")
     var lastUsedAt: Instant? = null
 
+    @Column(name = "registered_at", nullable = false)
+    lateinit var registeredAt: Instant
+
+    @Column(name = "refreshed_at")
+    var refreshedAt: Instant? = null
+
     @Column(name = "created_at", nullable = false)
     lateinit var createdAt: Instant
 

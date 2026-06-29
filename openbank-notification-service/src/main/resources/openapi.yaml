@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Notification Service API
-  version: 1.2.0
+  version: 1.3.0
   description: Notification delivery management — query sent/pending notifications, manage push device tokens.
   license:
     name: Apache-2.0
@@ -340,6 +340,15 @@ components:
         status:
           type: string
           enum: [ACTIVE, INACTIVE, INVALID]
+        registeredAt:
+          type: string
+          format: date-time
+          description: When the party first bound this device (immutable; set once on initial registration).
+        refreshedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the mobile app last called POST /api/v1/devices (foreground refresh). Null for tokens migrated from V6 that have not yet been refreshed post-deploy.
         lastUsedAt:
           type: string
           format: date-time

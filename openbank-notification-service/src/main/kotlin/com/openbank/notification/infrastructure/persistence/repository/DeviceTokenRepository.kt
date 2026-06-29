@@ -51,6 +51,7 @@ class DeviceTokenRepository : PanacheRepository<DeviceTokenEntity> {
                     existing.osVersion = reg.osVersion
                     existing.status = "ACTIVE"
                     existing.lastUsedAt = now
+                    existing.refreshedAt = now
                     existing.updatedAt = now
                     Uni.createFrom().item(existing)
                 } else {
@@ -64,6 +65,8 @@ class DeviceTokenRepository : PanacheRepository<DeviceTokenEntity> {
                         it.osVersion = reg.osVersion
                         it.status = "ACTIVE"
                         it.lastUsedAt = now
+                        it.registeredAt = now
+                        it.refreshedAt = now
                         it.createdAt = now
                         it.updatedAt = now
                     }
@@ -110,14 +113,16 @@ class DeviceTokenRepository : PanacheRepository<DeviceTokenEntity> {
     }.awaitSuspending()
 
     /**
-     * Mark all tokens whose [lastUsedAt] is older than [threshold] as INACTIVE.
-     * Uses lastUsedAt (set on each re-registration) not updatedAt (which changes on any row
-     * mutation including admin deactivation) so only genuinely idle tokens are swept.
-     * Called by the nightly TTL sweep job (ADR-0135). Uni-based for reactive subscription.
+     * Mark all tokens not refreshed within the TTL window as INACTIVE (ADR-0135 §2).
+     * Prefers [refreshedAt] (explicit app-foreground refresh) when available; falls back to
+     * [lastUsedAt] for V6 rows backfilled before this column existed; falls back further to
+     * [createdAt] (always non-null) so zombie tokens that were registered but never used are
+     * swept rather than silently retained forever.
+     * Uni-based for reactive subscription inside [DeviceTokenSweepJob].
      */
     fun sweepStale(threshold: Instant): Uni<Int> = Panache.withTransaction {
         update(
-            "status = 'INACTIVE', updatedAt = ?1 where status = 'ACTIVE' and lastUsedAt < ?2",
+            "status = 'INACTIVE', updatedAt = ?1 where status = 'ACTIVE' and COALESCE(refreshedAt, lastUsedAt, createdAt) < ?2",
             Instant.now(clock),
             threshold,
         )

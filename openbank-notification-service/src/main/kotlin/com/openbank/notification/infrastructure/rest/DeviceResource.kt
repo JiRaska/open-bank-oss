@@ -117,6 +117,8 @@ class DeviceResource {
         "appVersion" to e.appVersion,
         "osVersion" to e.osVersion,
         "status" to e.status,
+        "registeredAt" to e.registeredAt,
+        "refreshedAt" to e.refreshedAt,
         "lastUsedAt" to e.lastUsedAt,
         "createdAt" to e.createdAt,
         "updatedAt" to e.updatedAt,
