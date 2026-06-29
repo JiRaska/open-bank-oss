@@ -114,6 +114,13 @@ openbank:
     # ${UPSTREAM_OIDC_CLIENT_SECRET:} expansion: a property name in ENV_VAR form is not
     # resolved reliably and silently yields "", which makes every token fetch 401.
 
+  rate-limit:
+    per-party:
+      # Maximum requests per party per minute enforced at the edge (ADR-0132).
+      # Unauthenticated traffic (e.g. POST /onboarding/start) is exempt — per-IP
+      # throttling at ingress-nginx is the first line of defence for those paths.
+      requests-per-minute: ${RATE_LIMIT_PER_PARTY_RPM:100}
+
 # OPA sidecar (ADR-0034). Advisory mode by default.
 opa:
   url: "${OPA_URL:http://localhost:8181}"
