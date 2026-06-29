@@ -5,7 +5,7 @@ info:
   title: Account Service API
   # Kept in lockstep with version.txt / quarkus.application.version
   # (ADR-0029 D2 single-source invariant).
-  version: 1.1.0
+  version: 1.2.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -250,44 +250,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/AccountResponse'
 
-  /api/v1/accounts/{accountId}/pockets/{fromCurrency}/exchange:
-    post:
-      tags: [Accounts]
-      summary: Exchange between two currency pockets on the same account (ADR-0110)
-      operationId: exchangePockets
-      security:
-        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
-      parameters:
-        - $ref: '#/components/parameters/accountId'
-        - name: fromCurrency
-          in: path
-          required: true
-          schema:
-            type: string
-            example: EUR
-        - name: Idempotency-Key
-          in: header
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ExchangePocketsRequest'
-      responses:
-        '200':
-          description: Exchange completed — returns conversion details
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ExchangeResult'
-        '400':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
 components:
   securitySchemes:
     bearerAuth:
@@ -418,37 +380,6 @@ components:
           nullable: true
         hasMore:
           type: boolean
-
-    ExchangePocketsRequest:
-      type: object
-      required: [toCurrency, fromAmountMinorUnits]
-      properties:
-        toCurrency:
-          type: string
-          example: CZK
-        fromAmountMinorUnits:
-          type: integer
-          format: int64
-          description: Amount to exchange in minor units (e.g. cents)
-
-    ExchangeResult:
-      type: object
-      properties:
-        conversionId:
-          type: string
-          format: uuid
-        fromCurrency:
-          type: string
-        toCurrency:
-          type: string
-        fromAmountMinorUnits:
-          type: integer
-          format: int64
-        toAmountMinorUnits:
-          type: integer
-          format: int64
-        appliedRate:
-          type: number
 
     ApiError:
       type: object

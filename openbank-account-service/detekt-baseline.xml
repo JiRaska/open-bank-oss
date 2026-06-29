@@ -2,7 +2,6 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>LongParameterList:AccountService.kt$AccountService$( private val accountRepository: AccountRepository, private val balancePort: BalanceQueryPort, private val eventPublisher: AccountEventPublisher, private val ibanGenerator: IbanGenerator, private val pocketRepository: CurrencyPocketRepository, private val sanctionsScreening: AccountSanctionsScreeningPort, private val metrics: DomainMetrics, private val clock: Clock, private val fxConversion: FxConversionPort, private val fxSettlement: FxSettlementPort, )</ID>
     <ID>MagicNumber:AccountOutboxDispatcher.kt$AccountOutboxDispatcher$3000</ID>
     <ID>MagicNumber:AccountOutboxDispatcher.kt$AccountOutboxDispatcher$30000</ID>
     <ID>MagicNumber:AccountResource.kt$AccountResource$201</ID>

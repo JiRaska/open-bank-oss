@@ -9,7 +9,6 @@ import com.openbank.account.application.port.`in`.AccountUseCase
 import com.openbank.account.application.port.`in`.AddPocketCommand
 import com.openbank.account.application.port.`in`.CloseAccountCommand
 import com.openbank.account.application.port.`in`.ClosePocketCommand
-import com.openbank.account.application.port.`in`.ExchangeResult
 import com.openbank.account.application.port.`in`.FreezeAccountCommand
 import com.openbank.account.application.port.`in`.GetAccountByIbanQuery
 import com.openbank.account.application.port.`in`.GetAccountQuery
@@ -302,42 +301,6 @@ class AccountResource(
         return Response.ok(pocket.toResponse()).build()
     }
 
-    @POST
-    @Path("/{accountId}/pockets/{fromCurrency}/exchange")
-    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
-    @Authorize(action = "account.exchange", resource = "#accountId")
-    @Operation(summary = "Exchange between two currency pockets on the same account (ADR-0110)")
-    suspend fun exchangePockets(
-        @PathParam("accountId") accountId: UUID,
-        @PathParam("fromCurrency") fromCurrency: String,
-        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
-        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
-        request: ExchangePocketsRequest,
-    ): Response {
-        if (idempotencyKey.isNullOrBlank()) {
-            return Response.status(400)
-                .entity(mapOf("code" to "MISSING_IDEMPOTENCY_KEY", "message" to "Idempotency-Key header is required"))
-                .build()
-        }
-        val account = accountUseCase.getAccount(GetAccountQuery(accountId))
-        customerPartyId?.let {
-            denyIfNotOwner(account.partyId, it)?.let { deny -> return deny }
-        }
-        val actingPartyId = customerPartyId ?: operatorId()
-        val result = accountUseCase.exchangePockets(
-            com.openbank.account.application.port.`in`.ExchangePocketsCommand(
-                idempotencyKey = idempotencyKey,
-                accountId = accountId,
-                partyId = actingPartyId,
-                partyName = account.partyId.toString(),
-                fromCurrency = CurrencyCode.of(fromCurrency),
-                toCurrency = CurrencyCode.of(request.toCurrency),
-                fromAmountMinorUnits = request.fromAmountMinorUnits,
-            ),
-        )
-        return Response.ok(result.toResponse()).build()
-    }
-
     @GET
     @Path("/{accountId}/pockets/resolve")
     @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
@@ -475,23 +438,3 @@ private fun com.openbank.account.domain.model.PocketResolution.toResponse(): Poc
     is com.openbank.account.domain.model.PocketResolution.Rejected ->
         PocketResolutionResponse(outcome = "REJECTED", reason = reason)
 }
-
-data class ExchangePocketsRequest(val toCurrency: String, val fromAmountMinorUnits: Long)
-
-data class ExchangeResultResponse(
-    val conversionId: java.util.UUID,
-    val fromCurrency: String,
-    val toCurrency: String,
-    val fromAmountMinorUnits: Long,
-    val toAmountMinorUnits: Long,
-    val appliedRate: java.math.BigDecimal,
-)
-
-private fun ExchangeResult.toResponse() = ExchangeResultResponse(
-    conversionId = conversionId,
-    fromCurrency = fromCurrency,
-    toCurrency = toCurrency,
-    fromAmountMinorUnits = fromAmountMinorUnits,
-    toAmountMinorUnits = toAmountMinorUnits,
-    appliedRate = appliedRate,
-)

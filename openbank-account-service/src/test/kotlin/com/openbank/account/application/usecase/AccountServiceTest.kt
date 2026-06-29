@@ -11,8 +11,6 @@ import com.openbank.account.application.port.out.AccountSanctionsScreeningPort
 import com.openbank.account.application.port.out.AccountScreeningUnavailableException
 import com.openbank.account.application.port.out.BalanceQueryPort
 import com.openbank.account.application.port.out.CurrencyPocketRepository
-import com.openbank.account.application.port.out.FxConversionPort
-import com.openbank.account.application.port.out.FxSettlementPort
 import com.openbank.account.application.port.out.SanctionsScreenResult
 import com.openbank.account.domain.event.AccountCreatedEvent
 import com.openbank.account.domain.model.Account
@@ -47,9 +45,6 @@ class AccountServiceTest {
     private lateinit var pocketRepository: CurrencyPocketRepository
     private lateinit var sanctionsScreening: AccountSanctionsScreeningPort
     private lateinit var metrics: DomainMetrics
-    private lateinit var fxConversion: FxConversionPort
-    private lateinit var fxSettlement: FxSettlementPort
-
     private lateinit var service: AccountService
 
     @BeforeEach
@@ -61,8 +56,6 @@ class AccountServiceTest {
         pocketRepository = mockk()
         sanctionsScreening = mockk()
         metrics = mockk(relaxed = true)
-        fxConversion = mockk()
-        fxSettlement = mockk()
         service =
             AccountService(
                 accountRepository,
@@ -73,8 +66,6 @@ class AccountServiceTest {
                 sanctionsScreening,
                 metrics,
                 Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC),
-                fxConversion,
-                fxSettlement,
             )
     }
 
@@ -340,74 +331,6 @@ class AccountServiceTest {
         requestedBy = UUID.randomUUID(),
         legalName = legalName,
     )
-
-    @Test
-    fun `exchangePockets calls fx-service and settles debit+credit`(): Unit = runBlocking {
-        val accountId = UUID.randomUUID()
-        val partyId = UUID.randomUUID()
-        val conversionId = UUID.randomUUID()
-        coEvery { accountRepository.findById(accountId) } returns account(accountId, partyId)
-        coEvery {
-            fxConversion.convert(
-                idempotencyKey = any(),
-                accountId = accountId,
-                partyId = partyId,
-                partyName = any(),
-                fromCurrency = "EUR",
-                toCurrency = "CZK",
-                fromAmountMinorUnits = 10000L,
-            )
-        } returns com.openbank.account.application.port.out.FxConversionResult(
-            id = conversionId,
-            fromCurrency = "EUR",
-            toCurrency = "CZK",
-            fromAmountMinorUnits = 10000L,
-            toAmountMinorUnits = 250000L,
-            appliedRate = java.math.BigDecimal("25.00"),
-        )
-        coEvery { fxSettlement.settleFxExchange(any(), any(), any(), any(), any(), any(), any()) } returns Unit
-
-        val result = service.exchangePockets(
-            com.openbank.account.application.port.`in`.ExchangePocketsCommand(
-                idempotencyKey = "idem-fx-001",
-                accountId = accountId,
-                partyId = partyId,
-                partyName = "Test Customer",
-                fromCurrency = CurrencyCode.of("EUR"),
-                toCurrency = CurrencyCode.of("CZK"),
-                fromAmountMinorUnits = 10000L,
-            ),
-        )
-
-        assertThat(result.conversionId).isEqualTo(conversionId)
-        assertThat(result.toAmountMinorUnits).isEqualTo(250000L)
-        assertThat(result.appliedRate).isEqualByComparingTo("25.00")
-        coVerify(exactly = 1) { fxSettlement.settleFxExchange(any(), accountId, "EUR", 10000L, "CZK", 250000L, any()) }
-    }
-
-    @Test
-    fun `exchangePockets rejects same-currency exchange`(): Unit = runBlocking {
-        val accountId = UUID.randomUUID()
-        val partyId = UUID.randomUUID()
-        coEvery { accountRepository.findById(accountId) } returns account(accountId, partyId)
-
-        assertThatThrownBy {
-            runBlocking {
-                service.exchangePockets(
-                    com.openbank.account.application.port.`in`.ExchangePocketsCommand(
-                        idempotencyKey = "idem-same",
-                        accountId = accountId,
-                        partyId = partyId,
-                        partyName = "Test Customer",
-                        fromCurrency = CurrencyCode.of("EUR"),
-                        toCurrency = CurrencyCode.of("EUR"),
-                        fromAmountMinorUnits = 100L,
-                    ),
-                )
-            }
-        }.isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessageContaining("must differ")
-    }
 
     private fun account(id: UUID, partyId: UUID) = Account(
         id = id,
