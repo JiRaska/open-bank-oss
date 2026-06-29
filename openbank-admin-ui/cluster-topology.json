@@ -1,7 +1,7 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-06-29T15:06:11.353Z",
+  "generatedAt": "2026-06-29T15:57:42.354Z",
   "counts": {
     "namespaces": 51,
     "networkPolicies": 69,
