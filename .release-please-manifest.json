@@ -15,7 +15,7 @@
   "openbank-devops-agent": "0.2.0",
   "openbank-dispute-service": "0.7.1",
   "openbank-finrep-service": "0.3.0",
-  "openbank-fraud-service": "0.4.1",
+  "openbank-fraud-service": "0.4.2",
   "openbank-fx-service": "0.7.1",
   "openbank-interest-service": "0.6.1",
   "openbank-kyc-service": "0.6.0",
