@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.13.0](https://github.com/JiRaska/open-bank/compare/agent-service-v1.12.0...agent-service-v1.13.0) (2026-06-29)
+
+
+### Features
+
+* **agent:** D3b hardening — SVID CN cross-check + enforce (ADR-0031) ([#2488](https://github.com/JiRaska/open-bank/issues/2488)) ([611618b](https://github.com/JiRaska/open-bank/commit/611618b5c54f6b5d5b9dcd4387a1ff31bdb1df8a))
+* **agent:** per-run OTel span for governed agent runs (ADR-0031 D7) ([#2385](https://github.com/JiRaska/open-bank/issues/2385)) ([4423b45](https://github.com/JiRaska/open-bank/commit/4423b45f5f9ca290be3ba86dab8804ba00e8ab38))
+
+
+### Bug Fixes
+
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2344](https://github.com/JiRaska/open-bank/issues/2344)) ([b6fb6d5](https://github.com/JiRaska/open-bank/commit/b6fb6d5a86a040f0dcc5f489d0b4c8d778c6ec50))
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2358](https://github.com/JiRaska/open-bank/issues/2358)) ([fab840a](https://github.com/JiRaska/open-bank/commit/fab840aafcbc7b63782c8709f9d1bb34e3f4b0cd))
+* **agent:** suppress UnusedParameter in OversightEventConsumer ([#2232](https://github.com/JiRaska/open-bank/issues/2232)) ([52ff6d2](https://github.com/JiRaska/open-bank/commit/52ff6d2224facb013ce772c37f9d12ac6f1a9376)), closes [#2084](https://github.com/JiRaska/open-bank/issues/2084)
+* **customer-edge:** add per-party rate-limit config key (ADR-0132) ([#2501](https://github.com/JiRaska/open-bank/issues/2501)) ([213f528](https://github.com/JiRaska/open-bank/commit/213f52818238585840a7dd18ad98066aebd135bb))
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([7295494](https://github.com/JiRaska/open-bank/commit/72954940743f27bf7e49fede185ff20bc3e40060))
+* **infra:** route docker.io CI pulls through ECR pull-through cache — zero NAT ([#2221](https://github.com/JiRaska/open-bank/issues/2221)) ([52caaf2](https://github.com/JiRaska/open-bank/commit/52caaf21097311e077e6ac011d388a7256769d89))
+* **notification:** ROLE_CUSTOMER on DELETE, lastUsedAt sweep, IDOR scope ([#2485](https://github.com/JiRaska/open-bank/issues/2485) follow-up) ([#2490](https://github.com/JiRaska/open-bank/issues/2490)) ([4277222](https://github.com/JiRaska/open-bank/commit/4277222937a768f0c3890ed7f57757d726ffa8a5))
+* **release:** restore transaction-service entry in release-please manifest ([#2351](https://github.com/JiRaska/open-bank/issues/2351)) ([7694897](https://github.com/JiRaska/open-bank/commit/7694897b8f282fdd529175d24e0cb56139655839)), closes [#2342](https://github.com/JiRaska/open-bank/issues/2342)
+
+
+### Security
+
+* **agent:** bind asserted X-Agent-Id to verified operator roles (ADR-0031 D3a) ([#2403](https://github.com/JiRaska/open-bank/issues/2403)) ([132343d](https://github.com/JiRaska/open-bank/commit/132343d9abfd7bb367ce1bf7df152125686aa6d8))
+* **agent:** mint per-run pki-agent SVID in the BFF + base64 cert transport (ADR-0031 D3b) ([#2439](https://github.com/JiRaska/open-bank/issues/2439)) ([1dce3db](https://github.com/JiRaska/open-bank/commit/1dce3dbffc8b73accb902c7bef31865f0cc16402))
+* **agent:** verify a PoP-signed pki-agent cert as the per-run agent identity (ADR-0031 D3b) ([#2412](https://github.com/JiRaska/open-bank/issues/2412)) ([97e733c](https://github.com/JiRaska/open-bank/commit/97e733c02699ac69c5ec469f00f4ee2ea39f00ac))
+
 ## [1.12.0](https://github.com/JiRaska/open-bank/compare/agent-service-v1.11.1...agent-service-v1.12.0) (2026-06-29)
 
 
