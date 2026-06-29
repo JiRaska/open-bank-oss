@@ -68,7 +68,7 @@ class CardRepositoryImpl(private val outboxRepository: CardOutboxRepositoryImpl)
         // with PII even if cardholderName was already erased, so we re-process either way.
         update(
             "cardholderName = '[ERASED]', embossedName = '[ERASED]'" +
-                " WHERE expiryDate < ?1" +
+                " WHERE expiryDate <= ?1" +
                 " AND (cardholderName != '[ERASED]' OR embossedName != '[ERASED]')",
             cutoff,
         )

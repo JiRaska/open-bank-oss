@@ -21,8 +21,10 @@ class CardPiiRetentionSchedulerTest {
     private val fixedClock = Clock.fixed(Instant.parse("2031-06-15T03:00:00Z"), ZoneOffset.UTC)
 
     @Test
-    fun `anonymises card PII whose expiry date is more than retentionYears ago`(): Unit = runBlocking {
-        val expectedCutoff = LocalDate.of(2026, 6, 15) // 2031-06-15 minus 5 years
+    fun `anonymises card PII whose expiry date is more than or exactly retentionYears ago`(): Unit = runBlocking {
+        // cutoff = 2031-06-15 − 5y = 2026-06-15; cards with expiryDate <= cutoff are anonymised,
+        // including those that expired exactly on the cutoff date (GDPR Art.5 boundary inclusive).
+        val expectedCutoff = LocalDate.of(2026, 6, 15)
         coEvery { cardRepository.anonymizeExpiredCardPii(expectedCutoff) } returns 3
 
         scheduler(retentionYears = 5).enforceRetention()
