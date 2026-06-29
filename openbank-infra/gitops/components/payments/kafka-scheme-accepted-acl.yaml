@@ -1,0 +1,276 @@
+# Strimzi mTLS identities + ACLs for the `payment.scheme-accepted` money path
+# (ADR-0108 threat model §2a; re-introduced under ADR-0137 TOGETHER WITH the
+# tls:9093 listener + per-service client mTLS — the first removal in #2554 was
+# premature because no TLS listener existed, so the anonymous consumer was the
+# only thing the ACLs could deny).
+#
+# Threat (transaction-service threat model §2a): a rogue/misconfigured producer
+# publishes a forged SchemeAcceptedEvent to `payment.scheme-accepted` and drives
+# an unauthorised settlement in the money-path engine. SchemeAcceptedConsumer
+# books it with no party-level SCA (system-initiated). Mitigation = only the
+# four payment rails may Write, only transaction-service may Read.
+#
+# Identity model (ADR-0137): mTLS gives each *service* exactly one client cert =
+# one KafkaUser = one principal for ALL of its Kafka traffic, so KafkaUsers are
+# named after the service, not after a per-topic role. A KafkaUser's ACLs list
+# everything that service may do on the ACL'd resources; resources without ACLs
+# stay open under allow.everyone.if.no.acl.found=true (see kafka.yaml), so each
+# service only needs ACLs for the locked-down scheme-accepted topics — its own
+# domain-event topics need none.
+#
+# These live in `messaging` (where the Strimzi User Operator watches); the User
+# Operator mints a per-user Secret of the same name there (user.crt/key/p12 +
+# user.password + ca.crt). Those secrets are projected into the `payments`
+# namespace by External Secrets — see kafka-mtls-externalsecrets.yaml.
+---
+# ── Rail producers: Write to payment.scheme-accepted ────────────────────────
+# NOTE: today the four rails settle over HTTP (SettlementAdapter →
+# transaction-service REST), so they do not yet publish to this topic; these
+# Write grants provision the ADR-0108 event path for when it is wired, and make
+# the topic deny-by-default for everyone else in the meantime.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers→Strimzi secrets→ESO projection) must land
+    # before the payments Rollouts roll pods onto mTLS; lower waves sync first
+    # and ArgoCD blocks on the ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: sepa-payment
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: payment.scheme-accepted
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers→Strimzi secrets→ESO projection) must land
+    # before the payments Rollouts roll pods onto mTLS; lower waves sync first
+    # and ArgoCD blocks on the ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: sepa-instant
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: payment.scheme-accepted
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers→Strimzi secrets→ESO projection) must land
+    # before the payments Rollouts roll pods onto mTLS; lower waves sync first
+    # and ArgoCD blocks on the ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: domestic-payment
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: payment.scheme-accepted
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers→Strimzi secrets→ESO projection) must land
+    # before the payments Rollouts roll pods onto mTLS; lower waves sync first
+    # and ArgoCD blocks on the ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: swift-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: payment.scheme-accepted
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+---
+# ── Consumer: transaction-service ───────────────────────────────────────────
+# Reads scheme-accepted, writes its DLQ, and joins its dedicated consumer group.
+# The group name MUST match the live SmallRye channel group.id — aligned to
+# `transaction-scheme-accepted-cg` in transaction-service application.yaml under
+# this same change (it was `openbank-transaction-service`; renaming is safe
+# because the topic is empty — nothing produces to it yet).
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers→Strimzi secrets→ESO projection) must land
+    # before the payments Rollouts roll pods onto mTLS; lower waves sync first
+    # and ArgoCD blocks on the ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: transaction-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: payment.scheme-accepted
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: payment.scheme-accepted.dlq
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: transaction-scheme-accepted-cg
+          patternType: literal
+        operations: [Read]
+        host: "*"
+---
+# ── External Secrets reader (ADR-0137) ──────────────────────────────────────
+# The Strimzi User Operator writes the KafkaUser keystores (and the cluster CA
+# truststore) as Secrets in THIS namespace (messaging), but the services run in
+# `payments`. External Secrets' kubernetes provider reads them here on behalf of
+# the ExternalSecrets in `payments` (kafka-mtls-externalsecrets.yaml), using the
+# ServiceAccount below. Least privilege: `get` only, restricted by name to the
+# five user keystores + the public cluster-CA cert secret — NOT list/watch, and
+# NOT the CA *signing-key* secrets (openbank-cluster-cluster-ca /
+# -clients-ca-...). If ESO logs an RBAC list/watch error for the kubernetes
+# provider on this version, widen to list+watch on secrets (see runbook 0008).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers→Strimzi secrets→ESO projection) must land
+    # before the payments Rollouts roll pods onto mTLS; lower waves sync first
+    # and ArgoCD blocks on the ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: eso-kafka-cert-reader
+  namespace: messaging
+  labels:
+    app.kubernetes.io/part-of: payments
+    openbank.io/purpose: kafka-mtls-cert-projection
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers→Strimzi secrets→ESO projection) must land
+    # before the payments Rollouts roll pods onto mTLS; lower waves sync first
+    # and ArgoCD blocks on the ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: eso-kafka-cert-reader
+  namespace: messaging
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
+    resourceNames:
+      - transaction-service
+      - sepa-payment
+      - sepa-instant
+      - domestic-payment
+      - swift-service
+      - openbank-cluster-cluster-ca-cert
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers→Strimzi secrets→ESO projection) must land
+    # before the payments Rollouts roll pods onto mTLS; lower waves sync first
+    # and ArgoCD blocks on the ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: eso-kafka-cert-reader
+  namespace: messaging
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: eso-kafka-cert-reader
+subjects:
+  - kind: ServiceAccount
+    name: eso-kafka-cert-reader
+    namespace: messaging
+---
+# Let the External Secrets controller mint short-lived tokens for the reader SA
+# (the ClusterSecretStore authenticates via auth.serviceAccount → TokenRequest).
+# Controller SA assumed to be external-secrets/external-secrets (the Helm
+# default in apps/external-secrets.yaml) — verify before apply (runbook 0008).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers→Strimzi secrets→ESO projection) must land
+    # before the payments Rollouts roll pods onto mTLS; lower waves sync first
+    # and ArgoCD blocks on the ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: eso-kafka-cert-reader-tokenrequest
+  namespace: messaging
+rules:
+  - apiGroups: [""]
+    resources: [serviceaccounts/token]
+    verbs: [create]
+    resourceNames: [eso-kafka-cert-reader]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers→Strimzi secrets→ESO projection) must land
+    # before the payments Rollouts roll pods onto mTLS; lower waves sync first
+    # and ArgoCD blocks on the ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: eso-kafka-cert-reader-tokenrequest
+  namespace: messaging
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: eso-kafka-cert-reader-tokenrequest
+subjects:
+  - kind: ServiceAccount
+    name: external-secrets
+    namespace: external-secrets

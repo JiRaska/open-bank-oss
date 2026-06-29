@@ -139,3 +139,4 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0134](0134-business-continuity-and-dora-ictrm.md) | ADR-0134: Business continuity plan and DORA ICT risk management framework | Accepted | Planned |
 | [0135](0135-push-notification-token-security.md) | ADR-0135: Push notification token security and lifecycle | Accepted | Partial |
 | [0136](0136-agent-services-agpl-in-repo-open-core.md) | Agent services licensed AGPL-3.0-only in-repo (open-core) | Accepted | Shipped |
+| [0137](0137-kafka-mtls-scheme-accepted-migration.md) | Kafka mTLS migration — topic-scoped enforcement of payment.scheme-accepted | Accepted | Partial |

@@ -66,7 +66,32 @@ spec:
                   name: transaction-db-app
                   key: password
             - name: KAFKA_BOOTSTRAP_SERVERS
-              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            # mTLS to Strimzi (ADR-0137). Authenticates as the KafkaUser
+            # 'transaction-service'; keystore/truststore PKCS#12 are projected from
+            # messaging by External Secrets (kafka-mtls-externalsecrets.yaml)
+            # and mounted below. The app reads these env vars via ${...} in
+            # application.yaml (mp.messaging.connector.smallrye-kafka.*).
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka/keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: transaction-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka/truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: OIDC_CLIENT_SECRET
@@ -111,6 +136,12 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka/keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka/truststore
+              readOnly: true
           resources:
             requests:
               cpu: 250m
@@ -121,6 +152,12 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: kafka-keystore
+          secret:
+            secretName: transaction-service-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
   strategy:
     canary:
       stableService: transaction-service
@@ -255,7 +292,32 @@ spec:
                   name: sepa-payment-db-app
                   key: password
             - name: KAFKA_BOOTSTRAP_SERVERS
-              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            # mTLS to Strimzi (ADR-0137). Authenticates as the KafkaUser
+            # 'sepa-payment'; keystore/truststore PKCS#12 are projected from
+            # messaging by External Secrets (kafka-mtls-externalsecrets.yaml)
+            # and mounted below. The app reads these env vars via ${...} in
+            # application.yaml (mp.messaging.connector.smallrye-kafka.*).
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka/keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sepa-payment-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka/truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: OIDC_CLIENT_SECRET
@@ -332,6 +394,12 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka/keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka/truststore
+              readOnly: true
             - name: pyroscope-agent
               mountPath: /opt/pyroscope
               readOnly: true
@@ -345,6 +413,12 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: kafka-keystore
+          secret:
+            secretName: sepa-payment-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
         - name: pyroscope-agent
           emptyDir: {}
   strategy:
@@ -463,7 +537,32 @@ spec:
                   name: domestic-payment-db-app
                   key: password
             - name: KAFKA_BOOTSTRAP_SERVERS
-              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            # mTLS to Strimzi (ADR-0137). Authenticates as the KafkaUser
+            # 'domestic-payment'; keystore/truststore PKCS#12 are projected from
+            # messaging by External Secrets (kafka-mtls-externalsecrets.yaml)
+            # and mounted below. The app reads these env vars via ${...} in
+            # application.yaml (mp.messaging.connector.smallrye-kafka.*).
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka/keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: domestic-payment-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka/truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: OIDC_CLIENT_SECRET
@@ -529,6 +628,12 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka/keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka/truststore
+              readOnly: true
           resources:
             requests:
               cpu: 250m
@@ -539,6 +644,12 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: kafka-keystore
+          secret:
+            secretName: domestic-payment-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
   strategy:
     canary:
       stableService: domestic-payment
@@ -655,7 +766,32 @@ spec:
                   name: sepa-instant-db-app
                   key: password
             - name: KAFKA_BOOTSTRAP_SERVERS
-              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            # mTLS to Strimzi (ADR-0137). Authenticates as the KafkaUser
+            # 'sepa-instant'; keystore/truststore PKCS#12 are projected from
+            # messaging by External Secrets (kafka-mtls-externalsecrets.yaml)
+            # and mounted below. The app reads these env vars via ${...} in
+            # application.yaml (mp.messaging.connector.smallrye-kafka.*).
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka/keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sepa-instant-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka/truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: OIDC_CLIENT_SECRET
@@ -713,6 +849,12 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka/keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka/truststore
+              readOnly: true
           resources:
             requests:
               cpu: 250m
@@ -723,6 +865,12 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: kafka-keystore
+          secret:
+            secretName: sepa-instant-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
   strategy:
     canary:
       stableService: sepa-instant
@@ -1540,7 +1688,32 @@ spec:
                   name: swift-service-db-app
                   key: password
             - name: KAFKA_BOOTSTRAP_SERVERS
-              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            # mTLS to Strimzi (ADR-0137). Authenticates as the KafkaUser
+            # 'swift-service'; keystore/truststore PKCS#12 are projected from
+            # messaging by External Secrets (kafka-mtls-externalsecrets.yaml)
+            # and mounted below. The app reads these env vars via ${...} in
+            # application.yaml (mp.messaging.connector.smallrye-kafka.*).
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka/keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: swift-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka/truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: OIDC_CLIENT_SECRET
@@ -1587,6 +1760,12 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka/keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka/truststore
+              readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -1597,6 +1776,12 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: kafka-keystore
+          secret:
+            secretName: swift-service-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
   strategy:
     canary:
       stableService: swift-service

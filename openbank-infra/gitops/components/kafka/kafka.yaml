@@ -53,11 +53,19 @@ metadata:
     strimzi.io/kraft: enabled
 spec:
   kafka:
-    # SimpleAuthorizer for KafkaUser ACLs (ADR-0108 hardening, issue #2013).
-    # allow.everyone.if.no.acl.found=true is the migration gate: services
-    # without a KafkaUser retain full access until mTLS client auth is wired
-    # per-service in a future PR. KRaft inter-broker comms use the managed
+    # SimpleAuthorizer for KafkaUser ACLs (ADR-0108 hardening, issue #2013;
+    # ADR-0137 mTLS migration). KRaft inter-broker comms use the managed
     # controller listener and are unaffected by SimpleAuthorizer.
+    #
+    # Enforcement model (ADR-0137): SimpleAuthorizer is *deny-by-default per
+    # resource that carries any ACL*, and *allow-everyone* only for resources
+    # with NO ACL (because allow.everyone.if.no.acl.found=true below). So a
+    # single topic can be locked down — `payment.scheme-accepted` (the money
+    # path) — by attaching ACLs to it, WITHOUT touching the other ~30 topics
+    # that have none. ACLs bind to the authenticated principal, not the
+    # listener, so the plaintext listener below does not weaken a locked topic:
+    # an unauthenticated client is `User:ANONYMOUS`, which is absent from the
+    # scheme-accepted ACLs and therefore denied.
     authorization:
       type: simple
     # Broker-layer observability (Dynatrace-parity #0). Strimzi's bundled JMX
@@ -72,10 +80,27 @@ spec:
           name: kafka-metrics
           key: kafka-metrics-config.yml
     listeners:
+      # Anonymous plaintext listener — the cluster-wide default the whole fleet
+      # (~33 clients across 23 namespaces) still connects on. Kept open during
+      # the staged mTLS migration (ADR-0137); removing it / flipping the global
+      # allow-everyone gate is a separate, fleet-wide program (see ADR-0137 §
+      # "Out of scope" and runbook 0008).
       - name: plain
         port: 9092
         type: internal
         tls: false
+      # mTLS listener (ADR-0137). Clients presenting a cluster-CA-signed client
+      # cert authenticate as the matching KafkaUser principal; this is what the
+      # payment.scheme-accepted producers/consumer use so their ACLs apply.
+      # `authentication.type: tls` ⇒ mutual TLS, so a client with no client
+      # cert cannot connect on this port at all. Reachable at
+      # `openbank-cluster-kafka-bootstrap.messaging.svc:9093`.
+      - name: tls
+        port: 9093
+        type: internal
+        tls: true
+        authentication:
+          type: tls
     config:
       # Single broker ⇒ every replication factor must be 1 or topic creation
       # blocks. Raise all of these in prod alongside the 3-node pool.
@@ -84,9 +109,13 @@ spec:
       transaction.state.log.min.isr: 1
       default.replication.factor: 1
       min.insync.replicas: 1
-      # Migration gate (issue #2013): services without explicit KafkaUser ACLs
-      # retain full access. Flip to "false" once every service has mTLS +
-      # per-service ACLs wired — tracked in the follow-up of issue #2013.
+      # Cluster-wide authorization posture: resources WITHOUT any ACL stay
+      # open to everyone (incl. User:ANONYMOUS on the plaintext listener);
+      # resources WITH an ACL are deny-by-default. ADR-0137 deliberately keeps
+      # this "true" so the scheme-accepted hardening does NOT require the whole
+      # 33-client fleet to be on mTLS first. Flipping to "false" makes the
+      # entire cluster deny-by-default and is gated on migrating every client —
+      # a separate program, NOT this PR (ADR-0137 "Out of scope"; runbook 0008).
       allow.everyone.if.no.acl.found: "true"
   # Consumer-lag visibility (Dynatrace-parity #0). The Kafka Exporter is a
   # separate pod (also on `tcp-prometheus`:9404) that turns consumer group
