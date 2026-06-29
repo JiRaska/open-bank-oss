@@ -145,3 +145,4 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0140](0140-feature-store-topology.md) | Feature store topology and point-in-time correctness | Proposed | Planned |
 | [0141](0141-model-registry-provenance.md) | Model registry and provenance for ML decisioning | Proposed | Planned |
 | [0142](0142-credit-decisioning-engine.md) | Credit decisioning engine on the ML decisioning platform | Proposed | Planned |
+| [0143](0143-runtime-product-fee-posting-via-a-dedicated-billing-service.md) | Runtime product fee posting via a dedicated billing service | Accepted | Planned |
