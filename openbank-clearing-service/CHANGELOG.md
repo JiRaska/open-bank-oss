@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/JiRaska/open-bank/compare/clearing-service-v0.6.1...clearing-service-v0.6.2) (2026-06-29)
+
+
+### Bug Fixes
+
+* **clearing:** fix 3 bugs in clearing cycle and add batch reconciliation ([#2438](https://github.com/JiRaska/open-bank/issues/2438)) ([e0a388e](https://github.com/JiRaska/open-bank/commit/e0a388e6445c42beacc050ba2b4594420176b58e))
+
 ## [0.6.1](https://github.com/JiRaska/open-bank/compare/clearing-service-v0.6.0...clearing-service-v0.6.1) (2026-06-27)
 
 
