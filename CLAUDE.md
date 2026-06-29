@@ -119,7 +119,11 @@ CI is path-scoped (only changed services build). Domain layer has **zero** frame
   push to `main` that touches `openbank-admin-ui/**`, ADRs, or governance files. It builds the
   Next.js image, pushes to ECR, and opens a GitOps PR that auto-merges once CI is green — no
   human step required. `build-push-admin-ui.sh` is for **local emergency deploys only**
-  (run from a clean worktree with `AWS_PROFILE=openbank`).
+  (run from a clean worktree with `AWS_PROFILE=openbank`). A clean worktree regenerates
+  governance/catalog/DORA/cost from the repo walk, but **test-results and SBOM need build artifacts the
+  clean tree lacks** and bake empty (Coverage + SBOM viewer show "no data") — point `TEST_RESULTS_REPO` at
+  a checkout that ran `./gradlew test` and copy existing `openbank-*/build/reports/bom.json` in with
+  `--no-sbom`. (CI's `admin-ui-deploy.yml` doesn't hit this — it has the artifacts.)
 
 ### Kotlin / Quarkus code pitfalls
 - **Kotlin JUnit5 + `runBlocking` silent test drop.** `fun foo() = runBlocking { }` infers return
@@ -259,6 +263,13 @@ CI is path-scoped (only changed services build). Domain layer has **zero** frame
   rebasing / force-pushing / merging them stomps it. Safe: PR-metadata only (`gh pr edit --body`,
   hygiene fixes) without touching the git branch. Close stale deploy-snapshot PRs (image older than
   `main` HEAD) as superseded rather than merging a rollback.
+- **Never re-create a PR by copying whole files from a stale local checkout onto a fresh `origin/main`
+  branch.** The copy silently reverts everything `main` gained since your base diverged — it cost a
+  dropped `AuditIntegrityTile` (audit D5) that had shipped on `main` while a branch sat on an older base.
+  Branch from `origin/main`, re-apply your edits **surgically** (Edit, not file copy), and per-file
+  confirm divergence first — `git show origin/main:<f> | shasum` vs your base: identical ⇒ copy is safe,
+  differs ⇒ re-apply by hand. Same root cause as trusting stale memory over the repo (see *Capturing what
+  we learn*): act on the authoritative `origin/main` state, never a local/session snapshot.
 
 ### GHA / CI pitfalls
 - **`env.VAR` is unavailable in job-level `env:` inside a reusable workflow.** The `env` context is
@@ -288,6 +299,25 @@ CI is path-scoped (only changed services build). Domain layer has **zero** frame
   arch-agnostic and safe to copy into the arm64 runtime stage.
 - **Hetzner ARM (CAX) migration is pending** — Hetzner CAX capacity was exhausted on 2026-06-28;
   monitor and migrate CPX42→CAX31 when available (~40% cost saving + native arm64).
+
+## Capturing what we learn
+
+A corrected non-obvious mistake, a hard-won lesson, or a direction we've chosen to keep belongs **in the
+repo**, where every agent and contributor reads it — **never only in an assistant's session/local memory**.
+Private memory does not travel to other agents or contributors, and a stale private note actively misleads:
+trusting one over `origin/main` is exactly what made a manual admin-ui deploy redundant (the repo already
+had auto-CD). Route each lesson by kind — the authoritative spec is `rules.yaml: knowledge_capture`:
+
+- **Operational footgun** ("learned the hard way") → a one-line bullet in the matching pitfall section of
+  this file, or the relevant `<service>/CLAUDE.md` when scoped: symptom + fix, imperative.
+- **A hard, checkable rule / invariant** → encode it in `rules.yaml` (authoritative) and, where feasible, a
+  CI guard/test so it is *enforced*, not merely documented (e.g. the admin-ui agent-output rule #6 + its
+  guard). Summarize the human-readable form in CLAUDE.md.
+- **A recurring workflow** → a skill under `.claude/skills/`.
+
+Before acting on any rule, read the **authoritative source on `origin/main`** — not a local working-tree
+snapshot, a cached page, or memory. The repo is the single source of truth; session/local memory is for
+personal preferences and ephemeral context only, and may be stale.
 
 ## Where things are
 

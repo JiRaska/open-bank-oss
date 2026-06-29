@@ -706,3 +706,27 @@ finops_cost_groups:
     label_cs: "Auditní stopa"
     services: [audit-service]
     regulatory_ref: "DORA Art. 17 — immutable"
+
+# How durable knowledge is captured so it survives across agents and contributors.
+# A corrected mistake, a hard-won lesson, or a chosen direction goes INTO THE REPO —
+# never only into an assistant's session/local memory, which does not travel and goes
+# stale. Routing by kind; the human-readable form lives in CLAUDE.md ("Capturing what
+# we learn"). This is a process rule (not CI-enforced), but rules.yaml is the source
+# of truth when it and CLAUDE.md disagree.
+knowledge_capture:
+  principle: >
+    A corrected non-obvious mistake, a hard-won lesson, or a direction we keep must be
+    committed to the repo where every agent and contributor reads it. Act on the
+    authoritative origin/main state, never a local/session snapshot or private memory.
+  routing:
+    - kind: operational_footgun        # "learned the hard way"
+      home: "CLAUDE.md (root, or <service>/CLAUDE.md when scoped)"
+      form: "one-line bullet in the matching pitfall section — symptom + fix, imperative"
+    - kind: hard_rule                  # checkable invariant
+      home: "rules.yaml (authoritative)"
+      enforce: "add a CI guard/test where feasible; summarize in CLAUDE.md"
+    - kind: recurring_workflow
+      home: ".claude/skills/"
+      form: "a runnable skill that encodes the steps so they aren't re-derived each time"
+  not_a_home:
+    - "assistant session/local memory — does not travel to other agents or contributors, and may be stale"
