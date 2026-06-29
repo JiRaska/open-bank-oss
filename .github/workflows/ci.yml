@@ -327,6 +327,16 @@ jobs:
           if [ -n "$base" ]; then git fetch --depth=1 origin "$base" 2>/dev/null || true; fi
           bash .github/scripts/check-new-random-uuid.sh "$base"
 
+      # DomainEvent.occurredAt constructor guard (PR #2662 / #2709).
+      # Path-scoped CI only rebuilds changed services — a new DomainEvent subclass
+      # that calls DomainEvent() without occurredAt compiles fine locally but
+      # fails on the next full release build of that service. This grep runs on the
+      # entire source tree on every PR, independent of which services changed.
+      # ENFORCED: three simultaneous release failures (ledger+transaction+consent)
+      # prompted this gate. Fleet is clean (0 occurrences before this guard landed).
+      - name: "DomainEvent.occurredAt constructor guard (#2662)"
+        run: bash .github/scripts/check-domain-event-occuredat.sh
+
       # ADR-0100 DST harness — Layer 1 clock-injection gate (#1612).
       # Domain and application layers of money-path services must never call
       # Instant.now() / LocalDateTime.now() / LocalDate.now() /
