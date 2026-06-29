@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank/compare/standing-order-service-v0.8.1...standing-order-service-v0.9.0) (2026-06-29)
+
+
+### Features
+
+* **standing-order:** add failure tracking, execution callbacks + boot smoke test (ADR-0114) ([#2413](https://github.com/JiRaska/open-bank/issues/2413)) ([aa084c4](https://github.com/JiRaska/open-bank/commit/aa084c44e6b4ba89819151d17aa034b84a893f7c))
+
 ## [0.8.1](https://github.com/JiRaska/open-bank/compare/standing-order-service-v0.8.0...standing-order-service-v0.8.1) (2026-06-28)
 
 
