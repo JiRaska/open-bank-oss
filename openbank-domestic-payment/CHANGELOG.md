@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.8.5](https://github.com/JiRaska/open-bank/compare/domestic-payment-v0.8.4...domestic-payment-v0.8.5) (2026-06-29)
+
+
+### Bug Fixes
+
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2344](https://github.com/JiRaska/open-bank/issues/2344)) ([b6fb6d5](https://github.com/JiRaska/open-bank/commit/b6fb6d5a86a040f0dcc5f489d0b4c8d778c6ec50))
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2358](https://github.com/JiRaska/open-bank/issues/2358)) ([fab840a](https://github.com/JiRaska/open-bank/commit/fab840aafcbc7b63782c8709f9d1bb34e3f4b0cd))
+* **customer-edge:** add per-party rate-limit config key (ADR-0132) ([#2501](https://github.com/JiRaska/open-bank/issues/2501)) ([213f528](https://github.com/JiRaska/open-bank/commit/213f52818238585840a7dd18ad98066aebd135bb))
+* **domestic-payment:** credit the payee on internal transfers (two-sided settlement) ([#2682](https://github.com/JiRaska/open-bank/issues/2682)) ([4d3163e](https://github.com/JiRaska/open-bank/commit/4d3163ef319d8c01c85ca3d8c3ea02386c886732))
+* **domestic-payment:** derive transferScope server-side and apply AMLD4 SDD screening ([#2261](https://github.com/JiRaska/open-bank/issues/2261)) ([79dac9b](https://github.com/JiRaska/open-bank/commit/79dac9bc2d661e3059fed3cffdb0863435355095))
+* **domestic-payment:** extract HTTP_NOT_FOUND constant to resolve detekt MagicNumber ([#2258](https://github.com/JiRaska/open-bank/issues/2258)) ([79cb762](https://github.com/JiRaska/open-bank/commit/79cb762dbeed76d937ff4cb401b820e963d216d7)), closes [#2084](https://github.com/JiRaska/open-bank/issues/2084)
+* **domestic-payment:** resolve ktlint violations in AccountServiceClient and IdempotencyConfig ([#2260](https://github.com/JiRaska/open-bank/issues/2260)) ([a49e042](https://github.com/JiRaska/open-bank/commit/a49e04285fe08f6d9aeea1966b760ec1c76bdab0))
+* **domestic-payment:** scale settlement amount to currency minor units ([#2654](https://github.com/JiRaska/open-bank/issues/2654)) ([265039e](https://github.com/JiRaska/open-bank/commit/265039e5c14f3c0429dc34c32fd0ffdfe395a184))
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([7295494](https://github.com/JiRaska/open-bank/commit/72954940743f27bf7e49fede185ff20bc3e40060))
+* **infra:** route docker.io CI pulls through ECR pull-through cache — zero NAT ([#2221](https://github.com/JiRaska/open-bank/issues/2221)) ([52caaf2](https://github.com/JiRaska/open-bank/commit/52caaf21097311e077e6ac011d388a7256769d89))
+* **notification:** ROLE_CUSTOMER on DELETE, lastUsedAt sweep, IDOR scope ([#2485](https://github.com/JiRaska/open-bank/issues/2485) follow-up) ([#2490](https://github.com/JiRaska/open-bank/issues/2490)) ([4277222](https://github.com/JiRaska/open-bank/commit/4277222937a768f0c3890ed7f57757d726ffa8a5))
+* **release:** restore transaction-service entry in release-please manifest ([#2351](https://github.com/JiRaska/open-bank/issues/2351)) ([7694897](https://github.com/JiRaska/open-bank/commit/7694897b8f282fdd529175d24e0cb56139655839)), closes [#2342](https://github.com/JiRaska/open-bank/issues/2342)
+* **temporal:** wire MicrometerClientStatsReporter in all Temporal workers ([c61fcaf](https://github.com/JiRaska/open-bank/commit/c61fcafde76be08f716c710462be70752073aba1))
+
+
+### Security
+
+* **kafka:** mTLS + ACLs for payment.scheme-accepted, no global gate flip (ADR-0137) ([#2602](https://github.com/JiRaska/open-bank/issues/2602)) ([b143022](https://github.com/JiRaska/open-bank/commit/b143022f6ab76c4ff817ddbd4467fc578b8ee193))
+
 ## [0.8.3](https://github.com/JiRaska/open-bank/compare/domestic-payment-v0.8.2...domestic-payment-v0.8.3) (2026-06-29)
 
 
