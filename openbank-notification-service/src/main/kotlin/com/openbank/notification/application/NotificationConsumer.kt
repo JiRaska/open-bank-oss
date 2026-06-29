@@ -6,6 +6,8 @@ package com.openbank.notification.application
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.notification.application.port.out.OversightWebhookPublisher
+import io.quarkus.arc.All
+import jakarta.enterprise.inject.Instance
 import com.openbank.notification.application.port.out.PushMessage
 import com.openbank.notification.application.port.out.PushSender
 import com.openbank.notification.domain.model.NotificationChannel
@@ -37,7 +39,8 @@ class NotificationConsumer {
 
     @Inject lateinit var notificationRepo: NotificationRepository
 
-    @Inject lateinit var oversightWebhook: OversightWebhookPublisher
+    @Inject @All
+    lateinit var oversightWebhooks: Instance<OversightWebhookPublisher>
 
     @Inject lateinit var deviceTokenRepo: DeviceTokenRepository
 
@@ -126,9 +129,12 @@ class NotificationConsumer {
             status = NotificationStatus.PENDING,
             occurredAt = Instant.now(clock),
         )
-        return oversightWebhook.publish(signal)
-            .onFailure().recoverWithItem(false) // never fail dispatch on a webhook problem
-            .replaceWithVoid()
+        // Fan-out to all registered adapters (Slack, Teams, …) sequentially.
+        // Each adapter is self-guarded (disabled → no-op, failure → false) so no adapter
+        // can break dispatch for the others.
+        return oversightWebhooks.toList().fold(Uni.createFrom().voidItem() as Uni<Void>) { chain, adapter ->
+            chain.flatMap { adapter.publish(signal).replaceWithVoid() }
+        }
     }
 
     private fun sendEmail(
