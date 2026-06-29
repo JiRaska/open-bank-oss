@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank/compare/account-service-v0.10.0...account-service-v0.11.0) (2026-06-29)
+
+
+### Features
+
+* **account:** same-account FX pocket exchange (ADR-0110) ([#2425](https://github.com/JiRaska/open-bank/issues/2425)) ([e90fb73](https://github.com/JiRaska/open-bank/commit/e90fb73978b5dcaf1c167ee693de1634780d4dfe))
+
+
+### Bug Fixes
+
+* **account:** GDPR Art. 17 — handle PARTY_ERASED to nullify legalName (ADR-0118) ([#2443](https://github.com/JiRaska/open-bank/issues/2443)) ([9b52ac1](https://github.com/JiRaska/open-bank/commit/9b52ac1afaf8f0fe4e6afdf2248bb6256f639cb0))
+* **account:** sort accounts CURRENT-first in findByPartyId ([#2257](https://github.com/JiRaska/open-bank/issues/2257)) ([8176d43](https://github.com/JiRaska/open-bank/commit/8176d43f447387e3d3d8041a9bd400d569164530))
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2344](https://github.com/JiRaska/open-bank/issues/2344)) ([b6fb6d5](https://github.com/JiRaska/open-bank/commit/b6fb6d5a86a040f0dcc5f489d0b4c8d778c6ec50))
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2358](https://github.com/JiRaska/open-bank/issues/2358)) ([fab840a](https://github.com/JiRaska/open-bank/commit/fab840aafcbc7b63782c8709f9d1bb34e3f4b0cd))
+* **customer-edge:** add per-party rate-limit config key (ADR-0132) ([#2501](https://github.com/JiRaska/open-bank/issues/2501)) ([213f528](https://github.com/JiRaska/open-bank/commit/213f52818238585840a7dd18ad98066aebd135bb))
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([7295494](https://github.com/JiRaska/open-bank/commit/72954940743f27bf7e49fede185ff20bc3e40060))
+* **fleet:** resolve ktlint violations and sepa-payment compile error after ADR-0100 Clock sweep ([#2272](https://github.com/JiRaska/open-bank/issues/2272)) ([ce39af7](https://github.com/JiRaska/open-bank/commit/ce39af7c5b02ff3fef226f34e78c7e726b149ebd))
+* **infra:** route docker.io CI pulls through ECR pull-through cache — zero NAT ([#2221](https://github.com/JiRaska/open-bank/issues/2221)) ([52caaf2](https://github.com/JiRaska/open-bank/commit/52caaf21097311e077e6ac011d388a7256769d89))
+* **notification:** ROLE_CUSTOMER on DELETE, lastUsedAt sweep, IDOR scope ([#2485](https://github.com/JiRaska/open-bank/issues/2485) follow-up) ([#2490](https://github.com/JiRaska/open-bank/issues/2490)) ([4277222](https://github.com/JiRaska/open-bank/commit/4277222937a768f0c3890ed7f57757d726ffa8a5))
+* **release:** restore transaction-service entry in release-please manifest ([#2351](https://github.com/JiRaska/open-bank/issues/2351)) ([7694897](https://github.com/JiRaska/open-bank/commit/7694897b8f282fdd529175d24e0cb56139655839)), closes [#2342](https://github.com/JiRaska/open-bank/issues/2342)
+
 ## [0.10.0](https://github.com/JiRaska/open-bank/compare/account-service-v0.9.1...account-service-v0.10.0) (2026-06-29)
 
 
