@@ -671,6 +671,186 @@ class CustomerEdgeResourceTest {
         assertThat(node.get("scaExemption").asText()).isEqualTo("PSD2_RTS_ART15_OWN_ACCOUNT")
     }
 
+    // ── domestic-payment status read-path + settlement reconciliation (ADR-0108) ──
+
+    private fun statusResourceFor(
+        upstream: UpstreamClient,
+        callerParty: UUID,
+        store: PaymentSessionStore = PaymentSessionStore(),
+    ): CustomerEdgeResource = CustomerEdgeResource(
+        upstream,
+        mockk(relaxed = true),
+        store,
+        mockk(relaxed = true),
+        Clock.systemUTC(),
+    ).apply {
+        jwt = mockk {
+            every { getClaim<String>("party_id") } returns callerParty.toString()
+            every { subject } returns callerParty.toString()
+        }
+        objectMapper = ObjectMapper()
+        accountServiceUrl = "http://account"
+        domesticPaymentServiceUrl = "http://dompay"
+        sepaPaymentServiceUrl = "http://sepa"
+    }
+
+    private fun paymentJson(paymentId: UUID, debtor: UUID, status: String) =
+        Response.ok("""{"id":"$paymentId","status":"$status","debtorAccountId":"$debtor"}""").build()
+
+    @Test
+    fun `getDomesticPaymentStatus returns the status for the caller's own payment`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val pid = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/domestic-payments/$pid") }, any()) } returns
+            paymentJson(pid, acct, "SETTLED")
+        every { upstream.get(match { it.contains("/accounts/$acct") }, any()) } returns accountJson(acct, caller)
+        val resp = statusResourceFor(upstream, caller).getDomesticPaymentStatus(pid.toString())
+        assertThat(resp.status).isEqualTo(200)
+        assertThat(resp.entity.toString()).contains(""""status":"SETTLED"""")
+    }
+
+    @Test
+    fun `getDomesticPaymentStatus hides another party's payment behind a 404 (IDOR guard)`() {
+        // The payment exists upstream but its debtor account is owned by someone else: the edge must
+        // not confirm its existence (no probing oracle), so it collapses to the same 404 as a miss.
+        val caller = UUID.randomUUID()
+        val other = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val pid = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/domestic-payments/$pid") }, any()) } returns
+            paymentJson(pid, acct, "SETTLED")
+        every { upstream.get(match { it.contains("/accounts/$acct") }, any()) } returns accountJson(acct, other)
+        val resp = statusResourceFor(upstream, caller).getDomesticPaymentStatus(pid.toString())
+        assertThat(resp.status).isEqualTo(404)
+    }
+
+    @Test
+    fun `getDomesticPaymentStatus returns 404 for a malformed id and for an upstream miss`() {
+        val caller = UUID.randomUUID()
+        val pid = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>(relaxed = true)
+        every { upstream.get(any(), any()) } returns Response.status(404).build()
+        val r = statusResourceFor(upstream, caller)
+        assertThat(r.getDomesticPaymentStatus("not-a-uuid").status).isEqualTo(404)
+        assertThat(r.getDomesticPaymentStatus(pid.toString()).status).isEqualTo(404)
+    }
+
+    @Test
+    fun `getSepaPaymentStatus returns the status for the caller's own payment`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val pid = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("http://sepa/api/v1/sepa-payments/$pid") }, any()) } returns
+            paymentJson(pid, acct, "COMPLETED")
+        every { upstream.get(match { it.contains("/accounts/$acct") }, any()) } returns accountJson(acct, caller)
+        val resp = statusResourceFor(upstream, caller).getSepaPaymentStatus(pid.toString())
+        assertThat(resp.status).isEqualTo(200)
+        assertThat(resp.entity.toString()).contains(""""status":"COMPLETED"""")
+    }
+
+    @Test
+    fun `getSepaPaymentStatus hides another party's payment behind a 404 (IDOR guard)`() {
+        val caller = UUID.randomUUID()
+        val other = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val pid = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/sepa-payments/$pid") }, any()) } returns
+            paymentJson(pid, acct, "COMPLETED")
+        every { upstream.get(match { it.contains("/accounts/$acct") }, any()) } returns accountJson(acct, other)
+        val resp = statusResourceFor(upstream, caller).getSepaPaymentStatus(pid.toString())
+        assertThat(resp.status).isEqualTo(404)
+    }
+
+    @Test
+    fun `getSepaPaymentStatus returns 404 for a malformed id and for an upstream miss`() {
+        val caller = UUID.randomUUID()
+        val pid = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>(relaxed = true)
+        every { upstream.get(any(), any()) } returns Response.status(404).build()
+        val r = statusResourceFor(upstream, caller)
+        assertThat(r.getSepaPaymentStatus("not-a-uuid").status).isEqualTo(404)
+        assertThat(r.getSepaPaymentStatus(pid.toString()).status).isEqualTo(404)
+    }
+
+    @Test
+    fun `session status is ACTIVE before any payer has initiated (no upstream call)`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val store = PaymentSessionStore()
+        val token = store.create(acct.toString(), caller.toString(), "Jan", "250", "CZ…5399")
+        val upstream = mockk<UpstreamClient>(relaxed = true)
+        val resp = statusResourceFor(upstream, caller, store).paymentSessionStatus(token)
+        assertThat(resp.entity.toString()).contains(""""status":"ACTIVE"""")
+        verify(exactly = 0) { upstream.get(any(), any()) }
+    }
+
+    @Test
+    fun `session status is PROCESSING while the payer's payment is accepted but not settled`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val pid = UUID.randomUUID()
+        val store = PaymentSessionStore()
+        val token = store.create(acct.toString(), caller.toString(), "Jan", "250", "CZ…5399")
+        store.attachPayment(token, pid.toString())
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/domestic-payments/$pid") }, any()) } returns
+            paymentJson(pid, acct, "SENT_TO_CLEARING")
+        val resp = statusResourceFor(upstream, caller, store).paymentSessionStatus(token)
+        assertThat(resp.entity.toString()).contains(""""status":"PROCESSING"""")
+    }
+
+    @Test
+    fun `session status flips to PAID once the payment SETTLES, and stays PAID (sticky)`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val pid = UUID.randomUUID()
+        val store = PaymentSessionStore()
+        val token = store.create(acct.toString(), caller.toString(), "Jan", "250", "CZ…5399")
+        store.attachPayment(token, pid.toString())
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/domestic-payments/$pid") }, any()) } returns
+            paymentJson(pid, acct, "SETTLED")
+        val r = statusResourceFor(upstream, caller, store)
+        assertThat(r.paymentSessionStatus(token).entity.toString()).contains(""""status":"PAID"""")
+        // Sticky: even an upstream blip afterwards cannot un-pay it (and no read is needed once paid).
+        every { upstream.get(any(), any()) } returns Response.status(502).build()
+        assertThat(r.paymentSessionStatus(token).entity.toString()).contains(""""status":"PAID"""")
+    }
+
+    @Test
+    fun `session status surfaces a terminal payment failure as REJECTED`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val pid = UUID.randomUUID()
+        val store = PaymentSessionStore()
+        val token = store.create(acct.toString(), caller.toString(), "Jan", "250", "CZ…5399")
+        store.attachPayment(token, pid.toString())
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/domestic-payments/$pid") }, any()) } returns
+            paymentJson(pid, acct, "RETURNED")
+        val resp = statusResourceFor(upstream, caller, store).paymentSessionStatus(token)
+        assertThat(resp.entity.toString()).contains(""""status":"REJECTED"""")
+    }
+
+    @Test
+    fun `session status stays PROCESSING (never falsely PAID) when the upstream read fails`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val pid = UUID.randomUUID()
+        val store = PaymentSessionStore()
+        val token = store.create(acct.toString(), caller.toString(), "Jan", "250", "CZ…5399")
+        store.attachPayment(token, pid.toString())
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } returns Response.status(502).build()
+        val resp = statusResourceFor(upstream, caller, store).paymentSessionStatus(token)
+        assertThat(resp.entity.toString()).contains(""""status":"PROCESSING"""")
+    }
+
     // ── standing orders (recurring payments) ──
 
     private fun soResourceFor(upstream: UpstreamClient, callerParty: UUID): CustomerEdgeResource =

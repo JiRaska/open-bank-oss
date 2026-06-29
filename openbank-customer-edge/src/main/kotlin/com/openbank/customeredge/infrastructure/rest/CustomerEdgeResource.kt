@@ -732,35 +732,6 @@ class CustomerEdgeResource(
         return upstream.get("$transactionServiceUrl/api/v1/transactions$query", customer.partyId.toString())
     }
 
-    /**
-     * Read the status of one of the caller's own domestic payments — the poll target for the app's
-     * Send flow, so the UI can move from "accepted for processing" to a confirmed "settled" (or a
-     * failure) honestly instead of guessing. domestic-payment scopes by payment id only, so ownership
-     * is enforced HERE: resolve the payment, then confirm its debtorAccountId belongs to the JWT party
-     * (IDOR guard, same pattern as the account / transaction reads). A non-owned or unknown id returns
-     * 403, deliberately not 404, to avoid an existence oracle.
-     */
-    @GET
-    @Path("/domestic-payments/{paymentId}")
-    @Authorize(action = "customer.payments.read", resource = "#paymentId")
-    @Blocking
-    fun getDomesticPayment(@PathParam("paymentId") paymentId: UUID): Response {
-        val customer = customer()
-        val resp = upstream.get(
-            "$domesticPaymentServiceUrl/api/v1/domestic-payments/$paymentId",
-            customer.partyId.toString(),
-        )
-        if (resp.status != 200) return forbidden("Payment does not belong to caller")
-        val body = resp.entity?.toString() ?: return forbidden("Payment does not belong to caller")
-        val debtorAccountId = extractTextField(objectMapper, body, "debtorAccountId")
-            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
-            ?: return forbidden("Payment does not belong to caller")
-        if (!ownsAccount(debtorAccountId, customer.partyId)) {
-            return forbidden("Payment does not belong to caller")
-        }
-        return Response.ok(body).type(MediaType.APPLICATION_JSON).build()
-    }
-
     // Fetch an account from account-service by id (with the M2M token + party header). Returns the raw
     // JSON body on 200, or null on any non-200 / empty (not found / upstream error). The single source
     // for both the ownership check and the debtor IBAN used to enrich a payment.
@@ -927,10 +898,47 @@ class CustomerEdgeResource(
             enriched,
             idempotencyKey,
         )
+        // Receiver-side honesty (ADR-0108): a 2xx here means the instruction was ACCEPTED, not that
+        // the money settled. Bind the created payment id to the session so the receiver's status poll
+        // can reconcile true settlement, and only flip to PAID now if the create already reached the
+        // terminal SETTLED state (the synchronous happy path); otherwise the session stays PROCESSING.
         if (nearbySession != null && resp.statusInfo.family == Response.Status.Family.SUCCESSFUL) {
-            sessions.markPaid(sessionTokenRaw!!)
+            val respBody = (resp.entity as? String).orEmpty()
+            extractTextField(objectMapper, respBody, "id")?.let { sessions.attachPayment(sessionTokenRaw, it) }
+            if (extractTextField(objectMapper, respBody, "status") == "SETTLED") sessions.markPaid(sessionTokenRaw)
         }
         auditPayment(resp, customer, "payments.domestic", amount, currency, creditorRaw, scaChallengeId)
+        return resp
+    }
+
+    /**
+     * Read-only status of one of the caller's OWN domestic payments — the completion of ADR-0108 for
+     * the app (PR openbank-app#137 follow-up). The Send screen polls this after a create returns merely
+     * "accepted" (RECEIVED/VALIDATED/SENT_TO_CLEARING) so the green success screen only appears once the
+     * payment is irrevocably in clearing / credited (SETTLED), never on instruction acceptance alone.
+     * Proxies domestic-payment GET /api/v1/domestic-payments/{id}, whose DomesticPaymentResponse carries
+     * `status` (and timestamps).
+     *
+     * Ownership (IDOR guard): domestic-payment's GET is not party-scoped, so the edge enforces it HERE —
+     * the payment's debtorAccountId must belong to the JWT party. A malformed id, an upstream miss, and
+     * a payment owned by someone else all collapse to an indistinguishable 404, so a caller can never
+     * probe another party's payment ids.
+     */
+    @GET
+    @Path("/domestic-payments/{paymentId}")
+    @Authorize(action = "customer.payments.read")
+    @Blocking
+    fun getDomesticPaymentStatus(@PathParam("paymentId") paymentId: String): Response {
+        val customer = customer()
+        val id = runCatching { UUID.fromString(paymentId) }.getOrNull()
+            ?: return notFound("Payment not found")
+        val resp = upstream.get("$domesticPaymentServiceUrl/api/v1/domestic-payments/$id", customer.partyId.toString())
+        if (resp.status != 200) return notFound("Payment not found")
+        val payJson = (resp.entity as? String).orEmpty()
+        val debtorAccountId = extractTextField(objectMapper, payJson, "debtorAccountId")
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return notFound("Payment not found")
+        if (!ownsAccount(debtorAccountId, customer.partyId)) return notFound("Payment not found")
         return resp
     }
 
@@ -980,6 +988,35 @@ class CustomerEdgeResource(
             idempotencyKey,
         )
         auditPayment(resp, customer, "payments.sepa", amount, currency, creditorIban, scaChallengeId)
+        return resp
+    }
+
+    /**
+     * Read the current status of one of the caller's own SEPA payments (settlement-honest, ADR-0108).
+     * The twin of [getDomesticPaymentStatus]: the app polls this after a create returns merely accepted
+     * (RECEIVED/VALIDATED/PROCESSING) so the green success screen only appears once the payment is
+     * COMPLETED (irrevocably settled), never on instruction acceptance. Proxies sepa-payment's
+     * GET /api/v1/sepa-payments/{id}, whose SepaPaymentResponse carries `status` and `debtorAccountId`.
+     *
+     * Ownership (IDOR guard): sepa-payment's GET is not party-scoped, so the edge enforces it here —
+     * the payment's debtorAccountId must belong to the JWT party; a malformed id, an upstream miss, and
+     * another party's payment all collapse to an indistinguishable 404 (no existence oracle).
+     */
+    @GET
+    @Path("/sepa-payments/{paymentId}")
+    @Authorize(action = "customer.payments.read")
+    @Blocking
+    fun getSepaPaymentStatus(@PathParam("paymentId") paymentId: String): Response {
+        val customer = customer()
+        val id = runCatching { UUID.fromString(paymentId) }.getOrNull()
+            ?: return notFound("Payment not found")
+        val resp = upstream.get("$sepaPaymentServiceUrl/api/v1/sepa-payments/$id", customer.partyId.toString())
+        if (resp.status != 200) return notFound("Payment not found")
+        val payJson = (resp.entity as? String).orEmpty()
+        val debtorAccountId = extractTextField(objectMapper, payJson, "debtorAccountId")
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return notFound("Payment not found")
+        if (!ownsAccount(debtorAccountId, customer.partyId)) return notFound("Payment not found")
         return resp
     }
 
@@ -1626,10 +1663,15 @@ class CustomerEdgeResource(
     }
 
     /**
-     * Receiver-side session status poll (ADR-0087 phase 2). Returns "ACTIVE" while live, "PAID"
-     * once a payer has successfully settled the session payment, "EXPIRED" for a timed-out token.
-     * Only the session owner (the receiver, matched by creditorPartyId) may poll — any other
-     * caller gets 403 rather than a side-channel into someone else's session.
+     * Receiver-side session status poll (ADR-0087 phase 2, settlement-honest per ADR-0108). Returns:
+     *   - "ACTIVE"     — live token, no payer has initiated yet;
+     *   - "PROCESSING" — a payer has initiated but the payment is not yet settled (accepted, in flight);
+     *   - "PAID"       — the payer's payment actually SETTLED (money irrevocably credited);
+     *   - "REJECTED"   — the payer's payment reached a terminal failure (REJECTED/RETURNED/CANCELLED);
+     *   - "EXPIRED"    — timed-out / unknown token.
+     * Crucially PAID is no longer reported on mere instruction acceptance — it is reconciled against
+     * domestic-payment's real status. Only the session owner (the receiver, matched by creditorPartyId)
+     * may poll — any other caller gets 403 rather than a side-channel into someone else's session.
      */
     @GET
     @Path("/payment-sessions/{token}/status")
@@ -1644,8 +1686,33 @@ class CustomerEdgeResource(
         if (session.creditorPartyId != customer.partyId.toString()) {
             return forbidden("Not the session owner")
         }
-        val status = if (session.paid) "PAID" else "ACTIVE"
+        val status = when {
+            session.paid -> "PAID"
+            session.paymentId != null -> reconcileSessionStatus(session, customer.partyId, token)
+            else -> "ACTIVE"
+        }
         return Response.ok("""{"status":"$status"}""").type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
+     * Best-effort reconciliation of a session awaiting settlement against the payer's real
+     * domestic-payment status. SETTLED promotes the session to PAID (sticky, via [markPaid]); a
+     * terminal failure surfaces as REJECTED; any non-terminal state or an unreadable upstream stays
+     * PROCESSING so a transient blip never falsely reports settlement. The upstream GET is not
+     * party-scoped, so the receiver's own party header is sufficient to read the status.
+     */
+    private fun reconcileSessionStatus(session: PaymentSessionStore.Session, partyId: UUID, token: String): String {
+        val paymentId = session.paymentId ?: return "PROCESSING"
+        val resp = upstream.get("$domesticPaymentServiceUrl/api/v1/domestic-payments/$paymentId", partyId.toString())
+        if (resp.status != 200) return "PROCESSING"
+        return when (extractTextField(objectMapper, (resp.entity as? String).orEmpty(), "status")) {
+            "SETTLED" -> {
+                sessions.markPaid(token)
+                "PAID"
+            }
+            "REJECTED", "RETURNED", "CANCELLED" -> "REJECTED"
+            else -> "PROCESSING"
+        }
     }
 
     // --- Disputes (file + list on one of the caller's own accounts) ---
@@ -2204,6 +2271,11 @@ class CustomerEdgeResource(
         .build()
 
     private fun badRequest(message: String): Response = Response.status(400)
+        .entity("""{"error":"$message"}""")
+        .type(MediaType.APPLICATION_JSON)
+        .build()
+
+    private fun notFound(message: String): Response = Response.status(404)
         .entity("""{"error":"$message"}""")
         .type(MediaType.APPLICATION_JSON)
         .build()

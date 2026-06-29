@@ -297,6 +297,37 @@ paths:
         '403':
           description: Debtor account does not belong to caller
 
+  /domestic-payments/{paymentId}:
+    get:
+      tags: [Payments]
+      summary: Read the current status of one of the caller's own domestic payments (settlement-honest, ADR-0108)
+      description: >-
+        Proxies domestic-payment's status read so the app can distinguish "accepted/processing" from
+        true settlement: the client polls this after a create returns merely accepted
+        (RECEIVED/VALIDATED/SENT_TO_CLEARING) and only treats SETTLED as success — the money is then
+        irrevocably in clearing / credited. Ownership is enforced here (the payment's debtorAccountId
+        must belong to the JWT party); a malformed id, an upstream miss, and a payment owned by another
+        party all collapse to an indistinguishable 404 so a caller cannot probe foreign payment ids.
+      operationId: getDomesticPaymentStatus
+      security:
+        - customerOidc: [payments:read]
+      parameters:
+        - {name: paymentId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Current payment status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {type: string, format: uuid}
+                  status:
+                    type: string
+                    enum: [RECEIVED, VALIDATED, SENT_TO_CLEARING, SETTLED, REJECTED, RETURNED, CANCELLED]
+        '404':
+          description: Payment not found, or not owned by the caller (no existence oracle)
+
   /sepa-payments:
     post:
       tags: [Payments]
@@ -335,6 +366,36 @@ paths:
           description: Incomplete body (need creditorIban, creditorName, amount) or unresolvable debtor
         '403':
           description: Debtor account does not belong to caller
+
+  /sepa-payments/{paymentId}:
+    get:
+      tags: [Payments]
+      summary: Read the current status of one of the caller's own SEPA payments (settlement-honest, ADR-0108)
+      description: >-
+        Proxies sepa-payment's status read so the app can distinguish "accepted/processing" from true
+        settlement: the client polls this after a create returns merely accepted (RECEIVED/VALIDATED/
+        PROCESSING) and only treats COMPLETED as success. Ownership is enforced here (the payment's
+        debtorAccountId must belong to the JWT party); a malformed id, an upstream miss, and a payment
+        owned by another party all collapse to an indistinguishable 404 (no existence oracle).
+      operationId: getSepaPaymentStatus
+      security:
+        - customerOidc: [payments:read]
+      parameters:
+        - {name: paymentId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Current payment status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {type: string, format: uuid}
+                  status:
+                    type: string
+                    enum: [RECEIVED, VALIDATED, PROCESSING, COMPLETED, REJECTED, RETURNED, CANCELLED]
+        '404':
+          description: Payment not found, or not owned by the caller (no existence oracle)
 
   /sca/parties/{partyId}/devices:
     post:

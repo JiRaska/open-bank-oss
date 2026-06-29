@@ -36,6 +36,13 @@ class PaymentSessionStore {
         val creditorMasked: String,
         val expiresAt: Long,
         val paid: Boolean = false,
+        /**
+         * The payer's domestic-payment id, attached once they initiate the payment for this session.
+         * Lets the receiver-side status poll reconcile true settlement (ADR-0108) from
+         * domestic-payment rather than trusting mere instruction acceptance: [paid] is only set once
+         * that payment reaches SETTLED, not when the create call returns 2xx. Null until a payer pays.
+         */
+        val paymentId: String? = null,
     )
 
     private val sessions = ConcurrentHashMap<String, Session>()
@@ -75,9 +82,20 @@ class PaymentSessionStore {
         return session
     }
 
-    /** Mark a session as paid once the payer's domestic payment was successfully submitted. */
+    /** Mark a session as paid once the payer's domestic payment has actually SETTLED (ADR-0108). */
     fun markPaid(token: String) {
         sessions.computeIfPresent(token) { _, s -> s.copy(paid = true) }
+    }
+
+    /**
+     * Bind the payer's domestic-payment id to the session at instruction time. Idempotent and
+     * first-write-wins: a session is paid by exactly one payer, so a later token reuse must not
+     * overwrite the original payment id. Lets [paymentSessionStatus] later reconcile real settlement.
+     */
+    fun attachPayment(token: String, paymentId: String) {
+        sessions.computeIfPresent(token) { _, s ->
+            if (s.paymentId.isNullOrBlank()) s.copy(paymentId = paymentId) else s
+        }
     }
 
     private fun purgeExpired() {
