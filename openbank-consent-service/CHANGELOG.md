@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank/compare/consent-service-v0.9.0...consent-service-v0.10.0) (2026-06-29)
+
+
+### Features
+
+* **consent:** add boot smoke test and @Operation OpenAPI summaries ([#2628](https://github.com/JiRaska/open-bank/issues/2628)) ([152e9c6](https://github.com/JiRaska/open-bank/commit/152e9c6c917b78430c89dbab0638bdc2732b6370))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank/compare/consent-service-v0.8.1...consent-service-v0.9.0) (2026-06-29)
 
 
