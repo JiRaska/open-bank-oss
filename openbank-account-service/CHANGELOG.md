@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank/compare/account-service-v0.11.0...account-service-v0.11.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* **account:** retire non-atomic pocket-exchange DEBIT/CREDIT pair (ADR-0110 §3) ([#2651](https://github.com/JiRaska/open-bank/issues/2651)) ([09e479a](https://github.com/JiRaska/open-bank/commit/09e479a6d58e89f12e86818fd409523708658ad1))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank/compare/account-service-v0.10.0...account-service-v0.11.0) (2026-06-29)
 
 
