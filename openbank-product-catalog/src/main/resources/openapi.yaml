@@ -5,7 +5,7 @@ info:
   title: Product Catalog API
   # Kept in lockstep with version.txt / quarkus.application.version
   # (ADR-0029 D2 single-source invariant). The major == openbank.api.version == /api/v1.
-  version: 0.1.0
+  version: 0.2.0
   description: >-
     System of record for bank products and pricing. Owns the product master and the
     bank-wide fee schedule; the admin UI reads pricing from here instead of hardcoding
