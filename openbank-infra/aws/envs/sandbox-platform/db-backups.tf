@@ -125,6 +125,7 @@ locals {
     fx               = { namespace = "fx",               sa = "fx-db" }
     keycloak         = { namespace = "iam",              sa = "keycloak-db" }
     interest         = { namespace = "interest",         sa = "interest-db" }
+    lending          = { namespace = "lending",          sa = "lending-db" }
     apicurio         = { namespace = "messaging",        sa = "apicurio-db" }
     notifications    = { namespace = "notifications",    sa = "notifications-db" }
     onboarding       = { namespace = "onboarding",       sa = "onboarding-db" }

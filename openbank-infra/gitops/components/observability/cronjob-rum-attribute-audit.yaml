@@ -64,10 +64,15 @@ spec:
                 - |
                   set -euo pipefail
                   ATTRS="party_id x-correlation-id service.name app.version os.type os.version device.model http.route screen.name http.response.status_code"
+                  # Compute the lookback window with portable POSIX arithmetic — the
+                  # curlimages/curl image ships BusyBox `date`, which does NOT support
+                  # GNU relative dates (`date -d "-7 days"` fails: "invalid date").
+                  END="$(date +%s)"
+                  START="$(( END - ${LOOKBACK%h} * 3600 ))"
                   echo "{\"event\":\"rum-attribute-audit-start\",\"lookback\":\"${LOOKBACK}\"}"
                   for attr in $ATTRS; do
                     result=$(curl -sf --max-time 30 \
-                      "${TEMPO_URL}/api/v2/search/tag-values?tagName=${attr}&q={}&&start=$(date -d "-7 days" +%s)&end=$(date +%s)" \
+                      "${TEMPO_URL}/api/v2/search/tag-values?tagName=${attr}&q={}&start=${START}&end=${END}" \
                       2>/dev/null || echo '{"tagValues":[]}')
                     count=$(echo "$result" | grep -o '"value"' | wc -l | tr -d ' ')
                     echo "{\"event\":\"rum-attribute-audit\",\"attribute\":\"${attr}\",\"unique_value_count\":${count},\"sample\":$(echo "$result" | head -c 512)}"
