@@ -37,15 +37,6 @@ interface GovData {
   auditTrail: { capture: string[]; pipeline: string[]; live: string[]; planned: string[] }
 }
 
-// Mirrors audit-service AnchorVerification (GET /api/v1/audit/anchors/verify, ADR-0031 D5).
-interface AuditIntegrity {
-  status: 'INTACT' | 'BROKEN'
-  anchorCount: number
-  verifiedCount: number
-  unsignedCount: number
-  firstBroken: { lastEntryId: string | null; signatureInvalid: boolean; headHashMismatch: boolean } | null
-}
-
 interface AgentCostEntry {
   agentId: string
   costLast24hUsd: number
@@ -145,58 +136,6 @@ function Chips({ items, tone }: { items: string[]; tone: 'allow' | 'deny' | 'neu
   )
 }
 
-// ── Audit-trail integrity tile (ADR-0031 D5) ────────────────────────────────
-// Live tamper-evidence read from audit-service signed anchors. The per-event
-// hash chain proves internal consistency; a signed anchor additionally catches a
-// wholesale rewrite (the attested head no longer matches the live chain). Degrades
-// calmly when the service is unreachable / the operator lacks an auditor role.
-function AuditIntegrityTile({ integrity, available }: { integrity: AuditIntegrity | null; available: boolean }) {
-  const { language } = useLanguage()
-  const tt = (cs: string, en: string) => (language === 'cs' ? cs : en)
-  const ok = available && integrity != null
-  const broken = ok && integrity.status === 'BROKEN'
-  const noAnchors = ok && integrity.anchorCount === 0
-  const color = !ok ? 'var(--text-tertiary)' : broken ? '#dc2626' : noAnchors ? '#d97706' : '#16a34a'
-  const bg = !ok ? 'var(--surface-2)' : broken ? '#fee2e2' : noAnchors ? '#fef9c3' : '#dcfce7'
-  return (
-    <div style={{ marginBottom: '14px', padding: '12px 14px', borderRadius: '10px', border: `1px solid ${color}40`, background: bg }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-        <Lock size={14} style={{ color }} />
-        <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>
-          {tt('Integrita auditní stopy', 'Audit-trail integrity')}
-        </span>
-        <span style={{ fontSize: '9px', fontWeight: 700, padding: '2px 7px', borderRadius: '8px', background: '#ede9fe', color: '#6366f1', letterSpacing: '0.04em' }}>ADR-0031 D5</span>
-        <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 800, color, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-          {!ok ? tt('Nedostupné', 'Unavailable')
-            : broken ? <><AlertOctagon size={13} /> BROKEN</>
-            : noAnchors ? tt('Čeká na kotvu', 'Awaiting anchor')
-            : <><CheckCircle2 size={13} /> INTACT</>}
-        </span>
-      </div>
-      <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '8px 0 0', lineHeight: 1.5 }}>
-        {!ok
-          ? tt('Podepsané kotvy ověří, že hash-řetěz nebyl přepsán jako celek. audit-service je nedostupný (nenasazený / chybí role auditora).',
-               'Signed anchors verify the hash chain was not rewritten wholesale. audit-service is unreachable (not deployed / missing auditor role).')
-          : noAnchors
-            ? tt('Řetěz je prázdný nebo plánovač zatím nepodepsal první kotvu.',
-                 'The chain is empty or the scheduler has not signed the first anchor yet.')
-            : tt(`${integrity.verifiedCount} z ${integrity.anchorCount} kotev ověřeno · ${integrity.unsignedCount} nepodepsaných · každá kotva potvrzuje, že atestovaná hlava sedí na živý řetěz.`,
-                 `${integrity.verifiedCount} of ${integrity.anchorCount} anchors verified · ${integrity.unsignedCount} unsigned · each anchor confirms its attested head still matches the live chain.`)}
-      </p>
-      {broken && integrity.firstBroken && (
-        <p style={{ fontSize: '10px', color: '#dc2626', margin: '6px 0 0', fontFamily: 'monospace' }}>
-          {tt('První rozpor', 'First break')}:{' '}
-          {[
-            integrity.firstBroken.signatureInvalid ? tt('neplatný podpis', 'invalid signature') : null,
-            integrity.firstBroken.headHashMismatch ? tt('přepsaná hlava řetězu', 'rewritten chain head') : null,
-          ].filter(Boolean).join(' · ')}
-          {integrity.firstBroken.lastEntryId ? ` (entry ${integrity.firstBroken.lastEntryId.slice(0, 8)}…)` : ''}
-        </p>
-      )}
-    </div>
-  )
-}
-
 // ── Main ────────────────────────────────────────────────────────────────────
 function IAOpsContent() {
   const { t, language } = useLanguage()
@@ -210,20 +149,15 @@ function IAOpsContent() {
   const [rcaResult, setRcaResult] = useState<string | null>(null)
   const [rcaError, setRcaError] = useState<string | null>(null)
   const [rcaLoading, setRcaLoading] = useState(false)
-  const [integrity, setIntegrity] = useState<AuditIntegrity | null>(null)
-  const [integrityAvailable, setIntegrityAvailable] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
     setUnavailable(null)
     try {
-      const [govRes, aiCostRes, anomalyRes, integrityRes] = await Promise.all([
+      const [govRes, aiCostRes, anomalyRes] = await Promise.all([
         fetch('/api/iaops/governance',    { cache: 'no-store' }),
         fetch('/api/finops/ai-costs',     { cache: 'no-store' }),
         fetch('/api/finops/anomalies',    { cache: 'no-store' }),
-        // D5: live tamper-evidence via the generic service BFF (relays the operator's bearer).
-        // .catch keeps a secondary-data failure from blanking the whole page.
-        fetch('/api/svc/audit-service/api/v1/audit/anchors/verify', { cache: 'no-store' }).catch(() => null),
       ])
       if (!govRes.ok) { setUnavailable({ kind: 'error' }); return }
       setData(await govRes.json())
@@ -234,13 +168,6 @@ function IAOpsContent() {
       if (anomalyRes.ok) {
         const an = await anomalyRes.json() as { anomalies?: FinOpsAnomaly[] }
         setCostAnomalies(an.anomalies ?? [])
-      }
-      if (integrityRes && integrityRes.ok) {
-        setIntegrity(await integrityRes.json() as AuditIntegrity)
-        setIntegrityAvailable(true)
-      } else {
-        setIntegrity(null)
-        setIntegrityAvailable(false)
       }
     } catch {
       setUnavailable({ kind: 'unreachable' })
@@ -541,7 +468,6 @@ function IAOpsContent() {
               sub={t('Jak je za AI auditní stopa (ADR-0031 D5). Každá akce agenta = AuditEvent (actorType=AI_AGENT).', 'How AI is audited (ADR-0031 D5). Every agent action = an AuditEvent (actorType=AI_AGENT).')}>
               {t('Auditní stopa AI', 'AI audit trail')}
             </SectionTitle>
-            <AuditIntegrityTile integrity={integrity} available={integrityAvailable} />
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
               <div>
                 <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>{t('Co se zachytí', 'What is captured')}</div>
