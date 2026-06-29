@@ -1,0 +1,74 @@
+# Kafka mTLS identity + ACLs for openbank-fx-service (ADR-0137 Tier 2a, issue #2665).
+# fx-service is a pure Kafka producer: publishes openbank.fx.conversion.completed
+# (FX conversion event outbox). No topic ACLs needed for own domain-event topics
+# (allow.everyone.if.no.acl.found=true); KafkaUser provisions the mTLS client cert only.
+#
+# Keystores are projected from `messaging` into the `fx` namespace by ExternalSecrets
+# below, using the shared kafka-messaging-certs ClusterSecretStore (kubernetes provider,
+# eso-kafka-cert-reader SA — resourceNames extended in kafka-scheme-accepted-acl.yaml).
+---
+# ── KafkaUser: fx-service ───────────────────────────────────────────────────
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  name: fx-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.fx.conversion.completed
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+---
+# ── ExternalSecret: fx-service keystore → fx namespace ─────────────────────
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: fx-service-kafka-keystore
+  namespace: fx
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: fx-service-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: fx-service
+---
+# ── ExternalSecret: cluster-CA truststore → fx namespace ───────────────────
+# Shared cluster-CA truststore; same source secret as payments namespace projection.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: fx
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert
