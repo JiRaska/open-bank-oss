@@ -45,6 +45,9 @@ Metrics: `GET :8085/q/metrics` (Prometheus). Docs: `:8085/q/openbank/docs` (this
 
 ## SLO
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Indicator | Objective (proposed) |
 |---|---|
 | Ingest lag (event → persisted) | p99 < 5 s under nominal load |

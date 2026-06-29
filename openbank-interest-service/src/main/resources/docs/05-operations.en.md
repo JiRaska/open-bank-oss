@@ -71,6 +71,9 @@ Per ADR-0057 the tier is **derived from measured behaviour**, not hand-assigned;
 
 ## SLO
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Metric | Target | Measurement |
 |---|---|---|
 | Availability | 99.5% (admin/batch surface) | Prometheus `up{service="interest-service"}` |

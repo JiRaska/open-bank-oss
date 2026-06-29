@@ -58,6 +58,9 @@ Poznámka ke **screening gate**: REST klienti sanctions/AML jsou obaleni MicroPr
 
 ## SLO
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Metrika | Cíl | Měření |
 |---|---|---|
 | Dostupnost | 99,9 % | Prometheus `up{service="openbank-sepa-payment"}` |

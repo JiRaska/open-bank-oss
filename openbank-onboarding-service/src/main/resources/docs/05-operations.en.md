@@ -57,6 +57,9 @@ This service is a **read-model with bursty, operator-driven traffic** (the cockp
 
 ## SLO
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Metric | Target | Measurement |
 |---|---|---|
 | Availability (business hours) | 99.9% | Prometheus `up{service="openbank-onboarding-service"}` |

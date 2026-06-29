@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-REPO=/Users/jiri.raska/Downloads/OpenBank
+REPO="$(git rev-parse --show-toplevel)"
 
 REST_REGO=$REPO/openbank-libs/governance/policies/rest.rego
 AGENTS_REGO=$REPO/openbank-infra/opa/policies/agents.rego

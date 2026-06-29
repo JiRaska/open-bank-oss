@@ -60,6 +60,9 @@ Flyway `connect-retries: 10` / interval `2S` pokrývá DB-not-ready-at-boot.
 
 ## SLO (cíle)
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Metrika | Cíl | Měření |
 |---|---|---|
 | Dostupnost | 99,9 % | `up{service="openbank-party-service"}` |

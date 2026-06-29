@@ -51,6 +51,9 @@ sca-service je **money-path ⇒ T0** (`rules.yaml: t0_baseline = money_path_serv
 
 ## SLO (cíl)
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Metrika | Cíl |
 |---|---|
 | Dostupnost | 99,9 % (money-path, T0) |

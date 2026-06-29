@@ -40,6 +40,9 @@ SmallRye Health (`quarkus-smallrye-health`) on the management port:
 
 ## SLO (money-path, indicative)
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Indicator | Target |
 |---|---|
 | Submit→decision latency (incl. screening) | < 10 s (execution-timeout = 10 s) |

@@ -59,6 +59,9 @@ Katalog jsou **bezstavová, převážně čtecí referenční data s nárazovým
 
 ## SLO
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Metrika | Cíl | Poznámky |
 |---|---|---|
 | Dostupnost | 99,5 % | služba referenčních dat, ne money-path |

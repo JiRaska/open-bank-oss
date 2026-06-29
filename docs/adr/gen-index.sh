@@ -8,6 +8,14 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Fail loudly on duplicate ADR numbers -- a self-colliding registry is exactly the
+# "governance-as-code that cannot govern itself" footgun this index exists to prevent.
+dupes=$(ls [0-9]*.md | sed -E 's/-.*//' | sort | uniq -d)
+if [ -n "$dupes" ]; then
+  echo "ERROR: duplicate ADR number(s): $dupes" >&2
+  exit 1
+fi
+
 OUT=README.md
 {
   echo "# Architecture Decision Records — index"

@@ -59,6 +59,9 @@ PSD2 je **externě vystavený, TPP řízený** povrch s nárazovým, na latenci 
 
 ## SLO (cíle)
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Metrika | Cíl | Měření |
 |---|---|---|
 | Dostupnost | 99,9 % | `up{service="openbank-psd2-service"}` |

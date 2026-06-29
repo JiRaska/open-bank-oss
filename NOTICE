@@ -13,3 +13,13 @@ The OpenBank AI agent runtime component is a separate, independently licensed
 work (AGPL-3.0 + a parallel commercial licence) maintained in its own
 repository; it is not covered by this NOTICE or the Apache-2.0 LICENSE in this
 repository. See docs/adr/0031-ai-agent-governance-and-operations.md.
+
+"OpenBank" is the name of this independent open-source project and is not
+affiliated with, endorsed by, or connected to Santander's "Openbank" or any
+other bank or trademark holder. See TRADEMARKS.md.
+
+This repository vendors the Redoc OpenAPI renderer (MIT, Copyright (c)
+2015-present, Rebilly, Inc.) at
+openbank-developer-portal/site/api/redoc.standalone.js; its license and the
+licenses of its bundled dependencies are recorded in the accompanying
+redoc.standalone.js.LICENSE.txt.

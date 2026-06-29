@@ -15,6 +15,10 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Per-client rate limiting for the public sandbox API (auth-gated, but bound flood/cost).
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "3"
+    nginx.ingress.kubernetes.io/limit-connections: "10"
     # Payment APIs require auth — enforce at ingress level too (belt+suspenders).
     nginx.ingress.kubernetes.io/auth-response-headers: Authorization
     # Preserve the original Host header so OIDC issuer validation works correctly

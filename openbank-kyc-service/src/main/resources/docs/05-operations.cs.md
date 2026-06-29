@@ -56,6 +56,9 @@ Flyway je nakonfigurován s `connect-retries: 10` (interval 2 s), takže start t
 
 ## SLO (orientační)
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Metrika | Cíl |
 |---|---|
 | Dostupnost | 99,9 % (back-office, vážené pracovní dobou) |

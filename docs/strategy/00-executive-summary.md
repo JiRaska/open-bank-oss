@@ -14,7 +14,7 @@ OpenBank targets the gap between:
 
 ## 2. Positioning statement
 
-> OpenBank is the first cloud-native, event-sourced, BIAN-aligned core banking platform released under a permissive open-source licence, targeting European retail banking with PSD2, DORA, and 5AMLD compliance built in from day one.
+> OpenBank is a cloud-native, event-sourced, BIAN-aligned core banking platform released under a permissive open-source licence, targeting European retail banking with a PSD2-, DORA-, and 5AMLD-oriented architecture from day one (designed around these frameworks — not certified, audited, or a substitute for your own compliance review).
 
 ## 3. Strategic pillars
 

@@ -226,7 +226,7 @@ CI is path-scoped (only changed services build). Domain layer has **zero** frame
 
 ### Verified signatures (main-protection ruleset)
 - **Commit email must match the registered GPG key.** The GPG key is for `jiri@iraska.cz`;
-  commits with `jiri@iraska.cz` are `no_user` → unverified → merge blocked by ruleset.
+  commits with a non-registered personal email are `no_user` → unverified → merge blocked by ruleset.
   Global config: `git config --global user.email "jiri@iraska.cz"`. Re-sign:
   `git commit --amend --reset-author --no-edit -S`.
 

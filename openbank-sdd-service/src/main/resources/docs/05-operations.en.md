@@ -64,6 +64,9 @@ The placeholders are dev-only; production must inject real secrets via Vault (AD
 
 ## SLO (targets)
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Metric | Target | Measurement |
 |---|---|---|
 | Availability | 99.9% | Prometheus `up{service="openbank-sdd-service"}` |

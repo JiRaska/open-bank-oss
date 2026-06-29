@@ -219,7 +219,7 @@ TIER 5 (Operations — all parallel)                                      ▼
 ### 5.1 Full Cold Start (Complete Outage Recovery)
 
 ```bash
-cd /Users/jiri.raska/Downloads/OpenBank/openbank-infra
+cd "$(git rev-parse --show-toplevel)"/openbank-infra
 
 # TIER 0 — Infrastructure prerequisites
 docker compose up -d --no-build postgres valkey kafka
@@ -286,7 +286,7 @@ docker ps --format '{{.Names}}\t{{.Status}}' | grep openbank | sort
 *Use when Tier 0-2 are healthy but payment services need restart (e.g., after config change).*
 
 ```bash
-cd /Users/jiri.raska/Downloads/OpenBank/openbank-infra
+cd "$(git rev-parse --show-toplevel)"/openbank-infra
 
 # Verify compliance gate is healthy before starting payments
 for svc in openbank-aml-service openbank-sanctions-service openbank-balance-service; do
@@ -308,7 +308,7 @@ docker compose up -d --no-build \
 ### 5.3 Tier 0 Infrastructure Restart (e.g., after Docker Desktop restart)
 
 ```bash
-cd /Users/jiri.raska/Downloads/OpenBank/openbank-infra
+cd "$(git rev-parse --show-toplevel)"/openbank-infra
 
 # Step 1: Start stateful services first
 docker compose up -d --no-build postgres valkey kafka
@@ -335,7 +335,7 @@ docker ps --format '{{.Names}}\t{{.Status}}' | grep -E "postgres|kafka|keycloak|
 # Generic pattern for any service
 SERVICE=<service-name>  # e.g., transaction-service
 
-cd /Users/jiri.raska/Downloads/OpenBank/openbank-infra
+cd "$(git rev-parse --show-toplevel)"/openbank-infra
 
 # Check logs for root cause
 docker logs openbank-${SERVICE} 2>&1 | grep -E "Caused by|FATAL|ERROR" | tail -20

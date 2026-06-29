@@ -59,6 +59,9 @@ The catalog is **stateless, read-mostly reference data with bursty traffic** (ad
 
 ## SLO
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Metric | Target | Notes |
 |---|---|---|
 | Availability | 99.5% | reference-data service, not money-path |

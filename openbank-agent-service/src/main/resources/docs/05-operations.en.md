@@ -52,6 +52,9 @@ The committed config ships only the **offline `mock-echo`** provider, so build a
 
 ## SLO (proposed)
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Objective | Target |
 |---|---|
 | MCP `tools/list` / `ping` availability | 99.9% |

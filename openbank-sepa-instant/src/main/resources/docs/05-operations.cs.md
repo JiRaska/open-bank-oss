@@ -40,6 +40,9 @@ SmallRye Health (`quarkus-smallrye-health`) na management portu:
 
 ## SLO (money-path, indikativní)
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Indikátor | Cíl |
 |---|---|
 | Latence submit→rozhodnutí (vč. prověrky) | < 10 s (execution-timeout = 10 s) |

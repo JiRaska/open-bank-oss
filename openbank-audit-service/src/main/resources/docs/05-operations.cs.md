@@ -45,6 +45,9 @@ Metriky: `GET :8085/q/metrics` (Prometheus). Docs: `:8085/q/openbank/docs` (tato
 
 ## SLO
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Indikátor | Cíl (návrh) |
 |---|---|
 | Ingest lag (událost → uloženo) | p99 < 5 s při nominální zátěži |

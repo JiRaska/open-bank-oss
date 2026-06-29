@@ -57,6 +57,9 @@ curl -i http://localhost:8000/health/account/ready             # via gateway →
 
 ## SLO (target)
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Indicator | Target |
 |---|---|
 | Gateway availability | 99.9% (front door; T0 always-on) |

@@ -58,6 +58,9 @@ Note for the **screening gate**: the sanctions/AML REST clients are wrapped in M
 
 ## SLO
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Metric | Target | Measurement |
 |---|---|---|
 | Availability | 99.9% | Prometheus `up{service="openbank-sepa-payment"}` |

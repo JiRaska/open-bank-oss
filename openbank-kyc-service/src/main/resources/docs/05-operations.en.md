@@ -56,6 +56,9 @@ Flyway is configured with `connect-retries: 10` (2s interval) so startup tolerat
 
 ## SLO (indicative)
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Metric | Target |
 |---|---|
 | Availability | 99.9% (back-office, business hours weighted) |

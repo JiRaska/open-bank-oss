@@ -41,6 +41,9 @@ Lending is a **money-path service**, and money-path services are **T0** by defau
 
 ## SLO (target)
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Metric | Target |
 |---|---|
 | Availability | 99.9% (T0, always-on) |

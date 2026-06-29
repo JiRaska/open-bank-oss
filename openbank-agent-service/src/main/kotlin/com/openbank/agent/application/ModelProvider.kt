@@ -17,7 +17,7 @@ import com.openbank.agent.domain.model.ModelResponse
  * Implementations must be side-effect-free beyond the network call and must NOT log raw
  * prompt content (PII): the gateway owns audit and prompt hashing.
  *
- * This port is the MPL/AGPL seam (ADR-0031 D8): the MPL monorepo keeps only governance plumbing
+ * This port is the Apache/AGPL seam (ADR-0031 D8): the Apache-2.0 monorepo keeps only governance plumbing
  * and reference/mock adapters; the commercialised agent runtime and proprietary model adapters
  * live in the separate AGPL-3.0 repository and plug in here. Keep production-runtime logic out of
  * this module.

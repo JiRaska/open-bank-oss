@@ -42,6 +42,9 @@ SmallRye Health na management portu (`/q/health`):
 
 ## SLO (navrhováno)
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Metrika | Cíl |
 |---|---|
 | Dostupnost (read API) | 99,9 % |

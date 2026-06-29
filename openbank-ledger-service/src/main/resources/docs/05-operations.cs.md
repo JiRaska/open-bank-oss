@@ -62,6 +62,9 @@ Flyway má `connect-retries: 10` / interval `2s`, takže pod toleruje pomalou DB
 
 ## SLO
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Metrika | Cíl | Měření |
 |---|---|---|
 | Dostupnost | 99,95 % (money-path / T0) | `up{service="ledger-service"}` |

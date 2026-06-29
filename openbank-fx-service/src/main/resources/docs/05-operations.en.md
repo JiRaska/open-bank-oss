@@ -56,6 +56,9 @@ Flyway has `connect-retries: 10` / `connect-retries-interval: 2S` so the pod tol
 
 ## SLO
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Metric | Target | Measurement |
 |---|---|---|
 | Availability | 99.9% | `up{service="openbank-fx-service"}` |

@@ -42,6 +42,9 @@ SmallRye Health on the management port (`/q/health`):
 
 ## SLO (proposed)
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Metric | Target |
 |---|---|
 | Availability (read API) | 99.9% |

@@ -84,7 +84,7 @@ const DECISIONS: { id: string; title: string; status: DStatus; detail: string }[
   { id: 'D7', title: 'Observability, budgets, kill switch', status: 'partial',
     detail: 'Budget enforcement live (CharterRateLimiter: runs_per_day pre-flight + tokens_per_run). Kill switch live (KillSwitchService): config baseline (agents.yaml enabled / global_controls) + runtime break-glass (/api/v1/admin/agents), gate pre-flight DENY + audit. Per-run OTel tracing remains.' },
   { id: 'D8', title: 'Licensing & IP (AGPL agent runtime)', status: 'partial',
-    detail: 'The MPL/AGPL seam is the ModelProvider port (demonstrated in PR #216). Licensed under Apache-2.0 repo-wide (ADR-0123, superseding ADR-0012). The separate AGPL-3.0 + CLA repo and the license_denylist carve-out are planned.' },
+    detail: 'The Apache/AGPL seam is the ModelProvider port (demonstrated in PR #216). Licensed under Apache-2.0 repo-wide (ADR-0123, superseding ADR-0012). The separate AGPL-3.0 + CLA repo and the license_denylist carve-out are planned.' },
   { id: 'D9', title: 'Phasing (blast radius grows with controls)', status: 'partial',
     detail: 'Phase 1 controls live and ENFORCING (deny-by-default + block); the phase-2 HITL proposal queue is shipped. The first read-only oversight agent — HolmesGPT (rca-investigator, ADR-0088), which investigates alerts and proposes a root cause without acting — is now deployed, and the customer-facing copilot (ADR-0089) runs in its own SCA-gated regime (proposes; the bank disposes). No agent takes state-changing action yet. Phases 3–5 (dev agent → money-path → tamper-evidence) follow.' },
 ]

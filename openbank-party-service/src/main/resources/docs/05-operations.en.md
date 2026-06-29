@@ -60,6 +60,9 @@ Flyway `connect-retries: 10` / interval `2S` covers DB-not-ready-at-boot.
 
 ## SLO (targets)
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Metric | Target | Measurement |
 |---|---|---|
 | Availability | 99.9% | `up{service="openbank-party-service"}` |

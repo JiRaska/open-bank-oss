@@ -59,6 +59,9 @@ Resilience parametry (`openbank.resilience.*`): circuit breaker (volume 15, rati
 
 ## SLO (cíle)
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Metrika | Cíl | Měření |
 |---|---|---|
 | Dostupnost | 99,9 % (T0 always-on) | `up{service="openbank-domestic-payment"}` |

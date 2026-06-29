@@ -74,6 +74,9 @@ readinessProbe:
 
 ## SLO
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Metric | Target | Measurement |
 |---|---|---|
 | Availability | 99.5% (lower than money-path — not customer-facing) | `up{service="security-scanner"}` |

@@ -63,6 +63,9 @@ Poznámka: Redis NENÍ závislostí této služby (nepoužívá IdempotencyStore
 
 ## SLO
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Metrika | Cíl | Měření |
 |---|---|---|
 | Dostupnost | 99,5% (nižší než money-path — není zákaznická) | `up{service="security-scanner"}` |

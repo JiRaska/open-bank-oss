@@ -63,6 +63,9 @@ Auth (Keycloak OIDC issuer, realm) and any future datasource settings are suppli
 
 ## SLO
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Metric | Target | Note |
 |---|---|---|
 | Availability | best-effort (T1, not T0) | scale-to-zero tolerated; no continuous-service mandate |

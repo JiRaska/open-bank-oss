@@ -1,6 +1,6 @@
 # Security Policy
 
-OpenBank is open-source banking platform software. While it is **not production-ready** and **not licensed to operate as a bank**, the code is designed with banking-grade security expectations in mind. We take security reports seriously.
+OpenBank is open-source banking platform software. While it is **not production-ready** and **not licensed to operate as a bank**, the code is designed around the defence-in-depth security practices expected of banking software. We take security reports seriously.
 
 ## Supported Versions
 
@@ -66,7 +66,7 @@ The following are explicitly out of scope for this project:
 This repository enforces:
 
 - Required reviews on all PRs (`CODEOWNERS`).
-- Signed commits (GPG/SSH) on `main` (encouraged, becoming required).
+- Signed commits (GPG/SSH) required on `main` (verified by the branch-protection ruleset).
 - Branch protection: no force-push, no direct push to `main`.
 - Secret scanning (`gitleaks`) on every PR + on push + weekly full scan.
 - Dependency scanning (Dependabot, Trivy).

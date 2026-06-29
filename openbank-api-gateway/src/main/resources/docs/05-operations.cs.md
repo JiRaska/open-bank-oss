@@ -57,6 +57,9 @@ curl -i http://localhost:8000/health/account/ready             # přes bránu �
 
 ## SLO (cíl)
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Indikátor | Cíl |
 |---|---|
 | Dostupnost brány | 99,9 % (vstupní dveře; T0 always-on) |

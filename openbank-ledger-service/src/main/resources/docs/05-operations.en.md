@@ -62,6 +62,9 @@ Flyway is configured with `connect-retries: 10` / `2s` interval so the pod toler
 
 ## SLO
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Metric | Target | Measurement |
 |---|---|---|
 | Availability | 99.95% (money-path / T0) | `up{service="ledger-service"}` |

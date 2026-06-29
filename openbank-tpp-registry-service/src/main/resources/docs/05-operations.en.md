@@ -52,6 +52,9 @@ Per the scale-to-zero workload tiers and FinOps classifier (ADR-0057), tpp-regis
 
 ## SLO (proposed)
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Indicator | Target |
 |---|---|
 | `GET /check` availability | 99.9% (PSD2 hot path dependency) |

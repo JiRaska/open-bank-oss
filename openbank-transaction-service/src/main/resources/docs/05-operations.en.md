@@ -45,6 +45,9 @@ Transaction-service is a **money-path** service, therefore **T0** by the `t0_bas
 
 ## SLO
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Metric | Target (proposed) | Notes |
 |---|---|---|
 | Availability | 99.9% | money-path |

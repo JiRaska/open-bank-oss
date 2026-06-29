@@ -36,6 +36,9 @@ docker compose -f openbank-infra/docker-compose.yml up -d balance-service
 
 ## SLO
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Metric | Target |
 |---|---|
 | Availability | 99.95% |

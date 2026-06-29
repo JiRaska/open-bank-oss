@@ -41,6 +41,9 @@ Lending je **money-path služba** a money-path služby jsou ve výchozím stavu 
 
 ## SLO (cílové)
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Metrika | Cíl |
 |---|---|
 | Dostupnost | 99.9 % (T0, vždy zapnuté) |

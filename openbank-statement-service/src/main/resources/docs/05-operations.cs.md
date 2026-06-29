@@ -45,6 +45,9 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 25)
 
 ## SLO (navrhované)
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Indikátor | Cíl |
 |---|---|
 | Latence renderu (camt.053/MT940/PDF) p99 | < 2 s (on-demand, vč. přehrání položek upstreamu) |

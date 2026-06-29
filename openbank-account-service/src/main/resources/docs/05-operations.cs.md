@@ -60,6 +60,9 @@ readinessProbe:
 
 ## SLO
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Metrika | Cíl | Měření |
 |---|---|---|
 | Availability | 99.9% (8.76h/rok downtime) | Prometheus `up{service="account-service"}` |

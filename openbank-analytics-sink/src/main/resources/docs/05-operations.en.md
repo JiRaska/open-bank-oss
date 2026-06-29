@@ -50,6 +50,9 @@ All external dependencies are **opt-in** via env, defaulting to offline no-op/lo
 
 ## SLO (proposed)
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Metric | Target |
 |---|---|
 | Ingest freshness (lag) | p95 ≤ 900 s (RPO; readiness gates above this) |

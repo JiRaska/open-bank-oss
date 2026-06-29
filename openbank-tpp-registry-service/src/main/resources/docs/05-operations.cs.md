@@ -52,6 +52,9 @@ Podle tierů scale-to-zero a FinOps klasifikátoru (ADR-0057) je tpp-registry **
 
 ## SLO (návrh)
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Indikátor | Cíl |
 |---|---|
 | dostupnost `GET /check` | 99,9 % (závislost PSD2 hot path) |

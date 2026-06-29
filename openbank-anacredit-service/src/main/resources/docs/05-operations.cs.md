@@ -63,6 +63,9 @@ Auth (Keycloak OIDC issuer, realm) a případná budoucí nastavení datasource 
 
 ## SLO
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Metrika | Cíl | Poznámka |
 |---|---|---|
 | Dostupnost | best-effort (T1, ne T0) | scale-to-zero tolerováno; bez mandátu kontinuální služby |

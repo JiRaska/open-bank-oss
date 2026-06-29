@@ -57,6 +57,9 @@ Tato služba je **read-model s nárazovým, operátorem řízeným provozem** (c
 
 ## SLO
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Metrika | Cíl | Měření |
 |---|---|---|
 | Dostupnost (pracovní doba) | 99,9 % | Prometheus `up{service="openbank-onboarding-service"}` |

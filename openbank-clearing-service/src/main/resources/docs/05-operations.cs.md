@@ -66,6 +66,9 @@ Clearing je **money-path** služba. V modelu čtyř tierů ADR-0057 závisí kan
 
 ## SLO (cíle)
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Metrika | Cíl | Měření |
 |---|---|---|
 | Dostupnost | 99.9 % | Prometheus `up{service="openbank-clearing-service"}` |

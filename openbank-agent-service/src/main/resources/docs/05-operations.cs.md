@@ -52,6 +52,9 @@ Commitovaná konfigurace dodává pouze **offline `mock-echo`** provider, takže
 
 ## SLO (návrh)
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Cíl | Target |
 |---|---|
 | Dostupnost MCP `tools/list` / `ping` | 99,9 % |

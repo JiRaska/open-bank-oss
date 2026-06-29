@@ -65,6 +65,9 @@ Graceful shutdown: `quarkus.shutdown.timeout: 30s`.
 
 ## SLO (cíle)
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Metrika | Cíl | Měření |
 |---|---|---|
 | Dostupnost | 99,9 % | `up{service="swift-service"}` |

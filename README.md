@@ -3,13 +3,14 @@
 > Cloud-native, open-source retail banking platform built on Kotlin + Quarkus, Next.js, and event-driven microservices — with governance, supply-chain security, and AI-agent operations baked in as code.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-brightgreen.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Agent runtime: AGPL 3.0 + commercial](https://img.shields.io/badge/Agent_runtime-AGPL_3.0_%2B_commercial-blue.svg)](docs/adr/0123-relicense-to-apache-2.0.md)
 [![Status: Alpha](https://img.shields.io/badge/Status-Alpha-orange.svg)](#project-status)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-blue.svg)](CONTRIBUTING.md)
 
 OpenBank is an **early-stage, community-driven** banking platform reference implementation. It demonstrates how a modern retail bank can be built with domain-driven design, hexagonal microservices, double-entry ledger accounting, PSD2 compliance, machine-enforced governance, and end-to-end observability.
 
 > ⚠️ **This project is NOT production-ready and is NOT licensed to operate as a bank.** It is a software platform that someone with the appropriate banking licence and capital may deploy. Operating a real bank requires regulatory approval from your jurisdiction's central bank.
+
+> ℹ️ **Trademark notice.** "OpenBank" is used here only as the name of this independent open-source project. It is **not affiliated with, endorsed by, or connected to** Santander's "Openbank", any other bank, or any trademark holder. See [TRADEMARKS.md](TRADEMARKS.md).
 
 ---
 
@@ -52,11 +53,13 @@ OpenBank is an **early-stage, community-driven** banking platform reference impl
 | **Standing orders** | `POST https://api.open-bank.tech/api/v1/standing-orders` | Daily due-date sweep, outbox-backed |
 | **Admin UI** | https://admin.open-bank.tech | Operator backoffice (Keycloak auth) |
 | **Developer portal** | https://developer.open-bank.tech | PSD2 XS2A API explorer, TPP sandbox (WAF/ModSecurity) |
-| **AI copilot** | `POST https://api.open-bank.tech/api/v1/copilot/chat` | Customer-facing LLM, sandbox only |
+| **AI copilot** | `POST https://copilot.open-bank.tech/api/v1/copilot` | Customer-facing LLM — bearer-auth + rate-limited at the ingress, sandbox only |
 | **EUDI identity** | `GET https://api.open-bank.tech/api/v1/pid` | OpenID4VP + OpenID4VCI credential flows live |
 | **AI agent (ops)** | MCP endpoint (see agent-service docs) | Policy-gated, read-only fleet tools |
 
 All API calls require a Bearer token from `https://kc.open-bank.tech/realms/openbank`. See [docs/QUICKSTART_SANDBOX.md](docs/QUICKSTART_SANDBOX.md) for a `curl` walkthrough.
+
+> ⚠️ The public sandbox is a **best-effort demo, not a service.** Every endpoint is auth-gated (Keycloak bearer) and rate-limited at the ingress, but it may be reset, throttled, or taken offline at any time, carries **no SLA**, and must **never** receive real personal or payment data.
 
 ### What is NOT there yet (honest list)
 

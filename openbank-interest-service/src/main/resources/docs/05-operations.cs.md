@@ -71,6 +71,9 @@ Dle ADR-0057 je tier **odvozen z měřeného chování**, ne přiřazen ručně;
 
 ## SLO
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Metrika | Cíl | Měření |
 |---|---|---|
 | Dostupnost | 99,5 % (admin/dávková plocha) | Prometheus `up{service="interest-service"}` |

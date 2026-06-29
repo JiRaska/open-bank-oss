@@ -51,6 +51,9 @@ sca-service is **money-path ⇒ T0** (`rules.yaml: t0_baseline = money_path_serv
 
 ## SLO (target)
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Metric | Target |
 |---|---|
 | Availability | 99.9% (money-path, T0) |

@@ -50,6 +50,9 @@ Všechny externí závislosti jsou **opt-in** přes env, výchozí jsou offline 
 
 ## SLO (návrh)
 
+_Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v jednouzlovém sandboxu nejsou měřené, garantované ani plněné._
+
+
 | Metrika | Cíl |
 |---|---|
 | Ingest freshness (lag) | p95 ≤ 900 s (RPO; readiness blokuje nad tím) |

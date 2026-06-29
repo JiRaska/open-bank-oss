@@ -42,7 +42,7 @@ regex = '''\b(?:4\d{12}(?:\d{3})?|5[1-5]\d{14}|3[47]\d{13}|6(?:011|5\d{2})\d{12}
 [[rules]]
 id = "rod-cislo"
 description = "Possible Czech birth number (rodné číslo)"
-regex = '''\b\d{6}/?\d{3,4}\b'''
+regex = '''\b\d{2}(?:0[1-9]|1[0-2]|2[1-9]|3[0-2]|5[1-9]|6[0-2]|7[1-9]|8[0-2])\d{2}/?\d{3,4}\b'''
 
 # --- Allowlist ---
 

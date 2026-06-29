@@ -45,6 +45,9 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 25)
 
 ## SLO (proposed)
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Indicator | Target |
 |---|---|
 | Render (camt.053/MT940/PDF) latency p99 | < 2 s (on-demand, includes upstream entry replay) |

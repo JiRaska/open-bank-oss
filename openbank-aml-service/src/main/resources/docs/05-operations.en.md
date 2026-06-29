@@ -67,6 +67,9 @@ Flyway runs at start (`migrate-at-start=true`, 10 connect retries × 2s) so a co
 
 ## SLO (targets)
 
+_These are design-target SLOs for a production-shaped deployment — they are not measured, guaranteed, or met in the single-node sandbox._
+
+
 | Metric | Target | Measurement |
 |---|---|---|
 | Availability | 99.9% | Prometheus `up{service="aml-service"}` |
