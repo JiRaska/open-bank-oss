@@ -37,7 +37,7 @@
   "openbank-swift-service": "0.6.3",
   "openbank-tpp-registry-service": "0.6.1",
   "openbank-transaction-service": "1.11.0",
-  "openbank-sepa-payment": "0.7.2",
+  "openbank-sepa-payment": "0.7.3",
   "openbank-settlement-service": "0.4.1",
   "openbank-domestic-payment": "0.8.2",
   "openbank-finops-agent": "0.2.1"
