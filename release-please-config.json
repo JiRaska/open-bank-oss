@@ -61,7 +61,7 @@
       "extra-files": [
         {
           "type": "json",
-          "path": "openbank-admin-ui/package.json",
+          "path": "package.json",
           "jsonpath": "$.version"
         }
       ]
