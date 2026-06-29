@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/JiRaska/open-bank/compare/onboarding-service-v0.5.1...onboarding-service-v0.5.2) (2026-06-29)
+
+
+### Bug Fixes
+
+* **onboarding:** handle PARTY_ERASED to erase onboarding read-model (GDPR Art. 17) ([#2444](https://github.com/JiRaska/open-bank/issues/2444)) ([406cf85](https://github.com/JiRaska/open-bank/commit/406cf851fd0625f20ba90e20db451c97d15a25b1))
+
 ## [0.5.1](https://github.com/JiRaska/open-bank/compare/onboarding-service-v0.5.0...onboarding-service-v0.5.1) (2026-06-27)
 
 
