@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.4](https://github.com/JiRaska/open-bank/compare/swift-service-v0.6.3...swift-service-v0.6.4) (2026-06-29)
+
+
+### Bug Fixes
+
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2344](https://github.com/JiRaska/open-bank/issues/2344)) ([b6fb6d5](https://github.com/JiRaska/open-bank/commit/b6fb6d5a86a040f0dcc5f489d0b4c8d778c6ec50))
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2358](https://github.com/JiRaska/open-bank/issues/2358)) ([fab840a](https://github.com/JiRaska/open-bank/commit/fab840aafcbc7b63782c8709f9d1bb34e3f4b0cd))
+* **customer-edge:** add per-party rate-limit config key (ADR-0132) ([#2501](https://github.com/JiRaska/open-bank/issues/2501)) ([213f528](https://github.com/JiRaska/open-bank/commit/213f52818238585840a7dd18ad98066aebd135bb))
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([7295494](https://github.com/JiRaska/open-bank/commit/72954940743f27bf7e49fede185ff20bc3e40060))
+* **notification:** ROLE_CUSTOMER on DELETE, lastUsedAt sweep, IDOR scope ([#2485](https://github.com/JiRaska/open-bank/issues/2485) follow-up) ([#2490](https://github.com/JiRaska/open-bank/issues/2490)) ([4277222](https://github.com/JiRaska/open-bank/commit/4277222937a768f0c3890ed7f57757d726ffa8a5))
+* **release:** restore transaction-service entry in release-please manifest ([#2351](https://github.com/JiRaska/open-bank/issues/2351)) ([7694897](https://github.com/JiRaska/open-bank/commit/7694897b8f282fdd529175d24e0cb56139655839)), closes [#2342](https://github.com/JiRaska/open-bank/issues/2342)
+* **swift:** disable Quarkus JUnit FacadeClassLoader in CI ([#2404](https://github.com/JiRaska/open-bank/issues/2404)) ([#2506](https://github.com/JiRaska/open-bank/issues/2506)) ([7a6294e](https://github.com/JiRaska/open-bank/commit/7a6294e2dd1dd0470d5d3468dc170b7299089d6b))
+* **swift:** stop fleet-CI hang — CI-skip boot smoke + disable Kafka devservices ([#2415](https://github.com/JiRaska/open-bank/issues/2415)) ([fb7127e](https://github.com/JiRaska/open-bank/commit/fb7127e456a49f11bdc0b276e9293c4e3fc1c13e))
+
 ## [0.6.3](https://github.com/JiRaska/open-bank/compare/swift-service-v0.6.2...swift-service-v0.6.3) (2026-06-29)
 
 
