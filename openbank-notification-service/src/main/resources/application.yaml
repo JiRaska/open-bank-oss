@@ -107,6 +107,36 @@ mp:
       enabled: false
     mailer:
       mock: true
+"%slack-it":
+  # Activates Slack oversight webhook for OversightWebhookIT. The URL is injected at runtime
+  # by the SlackMockResource test resource, which sets SLACK_WEBHOOK_URL via System property.
+  # This profile extends the test profile (same DB / devservices / mailer overrides).
+  quarkus:
+    datasource:
+      username: openbank
+      password: openbank_secret
+      reactive:
+        url: vertx-reactive:postgresql://localhost:5432/openbank_notification_it
+      jdbc:
+        url: jdbc:postgresql://localhost:5432/openbank_notification_it
+    devservices:
+      enabled: false
+    management:
+      enabled: false
+    oidc:
+      enabled: false
+    mailer:
+      mock: true
+    scheduler:
+      enabled: false
+    arc:
+      remove-unused-beans: false
+  openbank:
+    notification:
+      webhook:
+        slack:
+          enabled: true
+          url: ${SLACK_WEBHOOK_URL:http://localhost:0/slack}
 "%test":
   quarkus:
     # Dedicated IT Postgres on the warm CI stack (ADR-0043); CI auto-creates any

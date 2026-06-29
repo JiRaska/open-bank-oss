@@ -7,6 +7,7 @@ package com.openbank.notification.infrastructure.webhook
 import com.openbank.notification.application.OversightSignal
 import com.openbank.notification.application.OversightWebhook
 import com.openbank.notification.application.port.out.OversightWebhookPublisher
+import io.quarkus.arc.Unremovable
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -29,6 +30,7 @@ import java.time.Duration
  * ever sent — the publisher has no access to the notification's variables/recipient.
  */
 @ApplicationScoped
+@Unremovable
 class SlackOversightWebhookPublisher : OversightWebhookPublisher {
 
     // Plain Boolean with a defaultValue — NOT Optional<Boolean>; combining

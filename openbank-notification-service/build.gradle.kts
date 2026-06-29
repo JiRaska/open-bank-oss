@@ -44,6 +44,7 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
 
     testImplementation(libs.pact.consumer)
+    testImplementation(libs.wiremock.standalone)
 }
 
 kover {

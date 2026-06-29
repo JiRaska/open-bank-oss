@@ -67,6 +67,10 @@ class NotificationOutboxRepositoryImpl :
         }.awaitSuspending()
     }
 
+    override fun purgeDeadBefore(threshold: Instant): Uni<Long> = Panache.withTransaction {
+        delete("status = ?1 and updatedAt < ?2", OutboxStatus.DEAD.name, threshold)
+    }
+
     private fun OutboxMessage.toEntity() = NotificationOutboxEntity().also {
         it.eventId = eventId
         it.aggregateId = aggregateId

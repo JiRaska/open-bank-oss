@@ -7,6 +7,7 @@ package com.openbank.notification.infrastructure.webhook
 import com.openbank.notification.application.OversightSignal
 import com.openbank.notification.application.OversightWebhook
 import com.openbank.notification.application.port.out.OversightWebhookPublisher
+import io.quarkus.arc.Unremovable
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
@@ -31,6 +32,7 @@ import java.time.Duration
  * used — that would be ambiguous with two implementations on the classpath.
  */
 @ApplicationScoped
+@Unremovable
 class TeamsOversightWebhookPublisher : OversightWebhookPublisher {
 
     @org.eclipse.microprofile.config.inject.ConfigProperty(

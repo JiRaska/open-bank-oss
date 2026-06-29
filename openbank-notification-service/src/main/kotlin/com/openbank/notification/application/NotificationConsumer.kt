@@ -5,10 +5,12 @@
 package com.openbank.notification.application
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.audit.AuditEvent
+import com.openbank.libs.audit.AuditEventPublisher
+import com.openbank.libs.audit.AuditResult
 import com.openbank.notification.application.port.out.OversightWebhookPublisher
-import io.quarkus.arc.All
-import jakarta.enterprise.inject.Instance
 import com.openbank.notification.application.port.out.PushMessage
+import jakarta.annotation.PostConstruct
 import com.openbank.notification.application.port.out.PushSender
 import com.openbank.notification.domain.model.NotificationChannel
 import com.openbank.notification.domain.model.NotificationRequest
@@ -24,6 +26,7 @@ import io.quarkus.mailer.reactive.ReactiveMailer
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
 import java.time.Clock
@@ -39,16 +42,33 @@ class NotificationConsumer {
 
     @Inject lateinit var notificationRepo: NotificationRepository
 
-    @Inject @All
-    lateinit var oversightWebhooks: Instance<OversightWebhookPublisher>
-
     @Inject lateinit var deviceTokenRepo: DeviceTokenRepository
 
     @Inject lateinit var pushSender: PushSender
 
     @Inject lateinit var clock: Clock
 
+    @Inject lateinit var audit: AuditEventPublisher
+
     private val log = Logger.getLogger(NotificationConsumer::class.java)
+
+    /**
+     * Cache of oversight webhook adapters resolved via CDI at startup.
+     *
+     * `@Inject @All Instance<OversightWebhookPublisher>` on a Kotlin `lateinit var` field
+     * returns an empty list in Quarkus 3.33.2 — a quirk of how ArC resolves `@All` on Kotlin
+     * property-synthesised field injection points. `CDI.current().select()` resolves all beans
+     * of the type correctly and is used as a workaround. The list is populated once at
+     * `@PostConstruct` time (CDI container is fully initialised) and is effectively immutable.
+     */
+    private var cdiOversightAdapters: List<OversightWebhookPublisher> = emptyList()
+
+    @PostConstruct
+    fun init() {
+        cdiOversightAdapters = jakarta.enterprise.inject.spi.CDI.current()
+            .select(OversightWebhookPublisher::class.java).toList()
+        log.infof("notification.consumer.init oversight_adapters=%d", cdiOversightAdapters.size)
+    }
 
     /**
      * Reactive (Mutiny `Uni`), deliberately **not** a `suspend` function.
@@ -132,8 +152,61 @@ class NotificationConsumer {
         // Fan-out to all registered adapters (Slack, Teams, …) sequentially.
         // Each adapter is self-guarded (disabled → no-op, failure → false) so no adapter
         // can break dispatch for the others.
-        return oversightWebhooks.toList().fold(Uni.createFrom().voidItem() as Uni<Void>) { chain, adapter ->
-            chain.flatMap { adapter.publish(signal).replaceWithVoid() }
+        // Note: @Inject @All Instance<OversightWebhookPublisher> returns empty on Kotlin lateinit-var
+        // fields due to a Quarkus ArC quirk; adapters are cached from CDI.current().select() at
+        // @PostConstruct time as a workaround (CDI.current().select() finds all 2 adapters correctly).
+        val adapters = cdiOversightAdapters
+        log.infof("notification.oversight.fanout template=%s adapters=%d", req.template.name, adapters.size)
+        val fanOut = adapters.fold(Uni.createFrom().item(false) as Uni<Boolean>) { chain, adapter ->
+            chain.flatMap { anyDelivered ->
+                adapter.publish(signal).map { delivered -> anyDelivered || delivered }
+            }
+        }
+        return fanOut
+            .invoke { anyDelivered ->
+                if (anyDelivered) {
+                    // Emit audit as a side-effect inside .invoke{} (still on the Vert.x context).
+                    // LoggingAuditEventPublisher is a synchronous log write — no I/O, no Vert.x
+                    // event-loop involvement. runBlocking here wraps only the `suspend fun publish`
+                    // signature; the body returns immediately after Logger.infof(). This is
+                    // intentionally NOT used for database- or Kafka-backed publishers; if the
+                    // service ever wires a Kafka audit publisher it must switch to a proper
+                    // Uni.createFrom().completionStage { coroutineScope.future { audit.publish() } }
+                    // pattern. The comment is deliberate: it makes the trade-off visible to reviewers.
+                    auditWebhookSent(req)
+                }
+            }
+            .replaceWithVoid()
+    }
+
+    /**
+     * Emits an audit event for a successful oversight webhook delivery.
+     *
+     * Calls [AuditEventPublisher.publish] (a `suspend fun`) via [runBlocking] because
+     * [publishOversight] operates inside a Mutiny [Uni] chain (not a coroutine context).
+     * This is acceptable **only** because the default [com.openbank.libs.audit.LoggingAuditEventPublisher]
+     * is a synchronous logger — it never blocks a thread or touches the Vert.x event loop.
+     * If a durable Kafka-backed publisher is wired in the future, this call site must be
+     * converted to a proper reactive/coroutine pattern.
+     */
+    private fun auditWebhookSent(req: NotificationRequest) {
+        try {
+            runBlocking {
+                audit.publish(
+                    AuditEvent(
+                        actorId = "system",
+                        actorType = "SYSTEM",
+                        operation = "notification.oversight.webhook.sent",
+                        resourceType = "notification.oversight",
+                        resourceId = req.template.name,
+                        result = AuditResult.SUCCESS,
+                        payload = mapOf("template" to req.template.name, "channel" to req.channel.name),
+                    ),
+                )
+            }
+        } catch (e: Exception) {
+            // Audit failure must never break the notification dispatch path.
+            log.warnf(e, "notification.oversight.webhook.audit FAILED template=%s", req.template.name)
         }
     }
 
