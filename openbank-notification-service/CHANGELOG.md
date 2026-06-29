@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/JiRaska/open-bank/compare/notification-service-v0.7.1...notification-service-v0.7.2) (2026-06-29)
+
+
+### Bug Fixes
+
+* **notification:** push token lifecycle — DELETE endpoint, 90-day TTL sweep, STALE status ([#2485](https://github.com/JiRaska/open-bank/issues/2485)) ([c6fa3f5](https://github.com/JiRaska/open-bank/commit/c6fa3f58e11605a97ef12cefe0fd0882033d044b))
+
 ## [0.7.1](https://github.com/JiRaska/open-bank/compare/notification-service-v0.7.0...notification-service-v0.7.1) (2026-06-28)
 
 
