@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/JiRaska/open-bank/compare/agent-service-v1.11.1...agent-service-v1.12.0) (2026-06-29)
+
+
+### Features
+
+* **agent:** D3b hardening — SVID CN cross-check + enforce (ADR-0031) ([#2488](https://github.com/JiRaska/open-bank/issues/2488)) ([25c11b1](https://github.com/JiRaska/open-bank/commit/25c11b134cc6ae4e30472424469e7a4a33533c08))
+
 ## [1.11.1](https://github.com/JiRaska/open-bank/compare/agent-service-v1.11.0...agent-service-v1.11.1) (2026-06-29)
 
 
