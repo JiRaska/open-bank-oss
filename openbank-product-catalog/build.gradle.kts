@@ -18,6 +18,18 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
 
+    // Persistence: reactive Panache + Postgres + Flyway, the fleet standard (ADR-0009/0105 P1).
+    // openbank-libs is built on reactive Panache, so a service that depends on it must use reactive
+    // too — a blocking ORM cannot index the libs reactive entities (JandexScavenger fails at build).
+    // The Mutiny results are bridged to the suspend repository port via the coroutine adapter.
+    implementation(libs.quarkus.hibernate.reactive.panache)
+    implementation(libs.quarkus.hibernate.reactive.panache.base)
+    implementation(libs.quarkus.reactive.pg.client)
+    implementation(libs.quarkus.jdbc.postgresql) // Flyway runs migrations over JDBC
+    implementation(libs.quarkus.flyway)
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.coroutines.reactive)
+
     implementation(project(":openbank-libs"))
 
     testImplementation(platform(libs.junit.bom))
@@ -26,4 +38,5 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    testImplementation(libs.testcontainers.postgresql)
 }

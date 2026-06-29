@@ -101,6 +101,24 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+  /api/v1/products/by-code/{code}:
+    get:
+      tags: [Products]
+      summary: Get a product by its semantic code or prod-NNN legacy alias (ADR-0105)
+      operationId: getProductByCode
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Product
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
   /api/v1/products/{id}/activate:
     post:
       tags: [Products]

@@ -1,4 +1,7 @@
-// SPDX-License-Identifier: Apache-2.0\n// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.\n// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.\n
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
 package com.openbank.productcatalog.infrastructure.rest
 
 import com.openbank.productcatalog.application.ProductCatalogService
@@ -14,7 +17,7 @@ import jakarta.ws.rs.core.Response
 class ProductCatalogResource(private val service: ProductCatalogService) {
 
     @GET
-    fun list(
+    suspend fun list(
         @QueryParam("type") type: String?,
         @QueryParam("status") status: String?,
         @QueryParam("currency") currency: String?,
@@ -28,12 +31,19 @@ class ProductCatalogResource(private val service: ProductCatalogService) {
 
     @GET
     @Path("/{id}")
-    fun getById(@PathParam("id") id: String): Response = service.findById(id)?.let { Response.ok(it).build() }
+    suspend fun getById(@PathParam("id") id: String): Response = service.findById(id)?.let { Response.ok(it).build() }
         ?: Response.status(404).entity(mapOf("error" to "Product $id not found")).build()
+
+    // ADR-0105: resolve a product by its semantic code (e.g. SAVINGS_STANDARD) or prod-NNN legacy alias.
+    @GET
+    @Path("/by-code/{code}")
+    suspend fun getByCode(@PathParam("code") code: String): Response =
+        service.findByCode(code)?.let { Response.ok(it).build() }
+            ?: Response.status(404).entity(mapOf("error" to "Product with code '$code' not found")).build()
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
-    fun create(req: ProductRequest): Response = try {
+    suspend fun create(req: ProductRequest): Response = try {
         val product = service.create(req)
         Response.status(201).entity(product).build()
     } catch (e: IllegalArgumentException) {
@@ -43,7 +53,7 @@ class ProductCatalogResource(private val service: ProductCatalogService) {
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    fun update(@PathParam("id") id: String, req: ProductRequest): Response = try {
+    suspend fun update(@PathParam("id") id: String, req: ProductRequest): Response = try {
         Response.ok(service.update(id, req)).build()
     } catch (e: NoSuchElementException) {
         Response.status(404).entity(mapOf("error" to e.message)).build()
@@ -53,7 +63,7 @@ class ProductCatalogResource(private val service: ProductCatalogService) {
 
     @POST
     @Path("/{id}/activate")
-    fun activate(@PathParam("id") id: String): Response = try {
+    suspend fun activate(@PathParam("id") id: String): Response = try {
         Response.ok(service.activate(id)).build()
     } catch (e: NoSuchElementException) {
         Response.status(404).entity(mapOf("error" to e.message)).build()
@@ -61,7 +71,7 @@ class ProductCatalogResource(private val service: ProductCatalogService) {
 
     @POST
     @Path("/{id}/deactivate")
-    fun deactivate(@PathParam("id") id: String): Response = try {
+    suspend fun deactivate(@PathParam("id") id: String): Response = try {
         Response.ok(service.deactivate(id)).build()
     } catch (e: NoSuchElementException) {
         Response.status(404).entity(mapOf("error" to e.message)).build()
@@ -69,6 +79,7 @@ class ProductCatalogResource(private val service: ProductCatalogService) {
 
     @GET
     @Path("/{id}/fees")
-    fun getFees(@PathParam("id") id: String): Response = service.findById(id)?.let { Response.ok(it.fees).build() }
+    suspend fun getFees(@PathParam("id") id: String): Response = service.findById(id)
+        ?.let { Response.ok(it.fees).build() }
         ?: Response.status(404).entity(mapOf("error" to "Product $id not found")).build()
 }

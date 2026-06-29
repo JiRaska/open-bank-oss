@@ -25,7 +25,7 @@ import jakarta.ws.rs.core.Response
 class FeesResource(private val service: ProductCatalogService) {
 
     @GET
-    fun list(
+    suspend fun list(
         @QueryParam("type") type: String?,
         @QueryParam("currency") currency: String?,
         @QueryParam("productCode") productCode: String?

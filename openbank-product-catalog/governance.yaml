@@ -3,7 +3,7 @@
 # derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
 # openbank-libs/governance/governance.schema.json
 dataDomain: core
-primaryDatastore: MongoDB
+primaryDatastore: PostgreSQL
 schemaName: products_schema
 dataLineageRole: producer
 dataClassification: internal
