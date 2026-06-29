@@ -31,7 +31,7 @@
   "openbank-sca-service": "0.8.3",
   "openbank-sdd-service": "0.6.0",
   "openbank-security-scanner": "0.5.0",
-  "openbank-sepa-instant": "0.6.1",
+  "openbank-sepa-instant": "0.6.2",
   "openbank-standing-order-service": "0.11.0",
   "openbank-statement-service": "0.5.2",
   "openbank-swift-service": "0.6.5",
