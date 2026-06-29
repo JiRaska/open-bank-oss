@@ -41,6 +41,10 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    testImplementation(libs.testcontainers)
+    testImplementation(libs.testcontainers.junit)
+    testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.smallrye.reactive.messaging.inmemory)
     // Consumer-driven contract test against sca-service getChallenge (ADR-0063 P2 Batch B).
     testImplementation(libs.pact.consumer)
 }
