@@ -21,6 +21,7 @@ import io.smallrye.reactive.messaging.MutinyEmitter
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -38,6 +39,7 @@ class KafkaConsentEventPublisherTest {
         val sent = captureSend()
         val event = ConsentGranted(
             aggregateId = aggregateId,
+            occurredAt = Instant.now(),
             partyId = partyId,
             granteeId = "tpp-123",
             granteeType = GranteeType.TPP,
@@ -56,7 +58,7 @@ class KafkaConsentEventPublisherTest {
     fun `publish ConsentRevoked sends the serialized event`(): Unit = runBlocking {
         val sent = captureSend()
 
-        publisher.publish(ConsentRevoked(aggregateId, partyId, "tpp-123", "customer request"))
+        publisher.publish(ConsentRevoked(aggregateId, partyId, "tpp-123", "customer request", Instant.now()))
 
         assertThat(sent.captured).contains("\"eventType\":\"ConsentRevoked\"")
         assertThat(sent.captured).contains("customer request")
@@ -66,7 +68,7 @@ class KafkaConsentEventPublisherTest {
     fun `publish ConsentExpired sends the serialized event`(): Unit = runBlocking {
         val sent = captureSend()
 
-        publisher.publish(ConsentExpired(aggregateId, partyId, "tpp-123"))
+        publisher.publish(ConsentExpired(aggregateId, partyId, "tpp-123", Instant.now()))
 
         assertThat(sent.captured).contains("\"eventType\":\"ConsentExpired\"")
     }
@@ -75,7 +77,7 @@ class KafkaConsentEventPublisherTest {
     fun `publish ConsentRejected sends the serialized event`(): Unit = runBlocking {
         val sent = captureSend()
 
-        publisher.publish(ConsentRejected(aggregateId, partyId, "tpp-123", "sca failed"))
+        publisher.publish(ConsentRejected(aggregateId, partyId, "tpp-123", "sca failed", Instant.now()))
 
         assertThat(sent.captured).contains("\"eventType\":\"ConsentRejected\"")
         assertThat(sent.captured).contains("sca failed")
