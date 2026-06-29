@@ -127,7 +127,20 @@ class ScaService(
         val idempotencyKey = buildIdempotencyKey(command, method)
 
         idempotencyStore.get(idempotencyKey)?.let { existingId ->
-            repository.findById(UUID.fromString(existingId))?.let { return it }
+            // Only replay an idempotent challenge while it is still actionable. A rapid
+            // double-submit of the SAME request (before any decision is recorded) must dedupe to
+            // one challenge — but a fresh attempt made AFTER the previous identical challenge
+            // resolved, was consumed, expired, or already carries a (write-once) device decision
+            // is a NEW authorisation and must mint a new challenge. Otherwise initiate() hands
+            // back a spent challenge and the very next recordDecision() throws
+            // ScaChallengeNotAwaitingException → 409 ("not awaiting a decision") — exactly what
+            // repeating the same payment within the TTL hit (sign succeeds once, payment fails or
+            // the challenge is consumed, every retry then 409s on the reused challenge).
+            repository.findById(UUID.fromString(existingId))?.let { existing ->
+                if (existing.isReplayable(now) && decisionStore.find(existing.id) == null) {
+                    return existing
+                }
+            }
         }
 
         val challenge = ScaChallenge(
@@ -378,6 +391,14 @@ class ScaService(
         ).joinToString(":") { it?.toString() ?: "-" }
     }
 }
+
+/**
+ * An idempotent challenge may be replayed only while it is still actionable: still PENDING,
+ * not yet consumed, and not expired. A challenge that already carries a (write-once) device
+ * decision is additionally excluded by the caller via the decision store.
+ */
+private fun ScaChallenge.isReplayable(now: OffsetDateTime): Boolean =
+    status == ScaStatus.PENDING && consumedAt == null && !isExpired(now)
 
 private fun Throwable.causedByUniqueViolation(): Boolean {
     var t: Throwable? = this

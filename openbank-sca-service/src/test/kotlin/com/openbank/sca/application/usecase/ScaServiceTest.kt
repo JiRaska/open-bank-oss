@@ -46,6 +46,7 @@ import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
 
+@Suppress("LargeClass")
 class ScaServiceTest {
 
     private val fixedInstant = Instant.parse("2024-01-01T00:00:00Z")
@@ -125,6 +126,7 @@ class ScaServiceTest {
 
         coEvery { idempotencyStore.get(any()) } returns existing.id.toString()
         coEvery { repository.findById(existing.id) } returns existing
+        coEvery { decisionStore.find(existing.id) } returns null
 
         val result = service.initiate(
             InitiateScaCommand(
@@ -140,6 +142,93 @@ class ScaServiceTest {
         coVerify(exactly = 1) { repository.findById(existing.id) }
         coVerify(exactly = 0) { repository.save(any()) }
         coVerify(exactly = 0) { idempotencyStore.save(any(), any(), any()) }
+    }
+
+    @Test
+    fun `initiate mints a fresh challenge when the idempotent one already has a decision`(): Unit = runBlocking {
+        // The first attempt signed (decision recorded, write-once) but the payment never
+        // consumed the challenge — it is still PENDING. A retry must NOT replay it, else the
+        // next recordDecision() hits the write-once guard → 409 ("sign succeeds then it fails").
+        val partyId = UUID.randomUUID()
+        val pendingDecided = challenge(partyId = partyId, status = ScaStatus.PENDING)
+
+        coEvery { idempotencyStore.get(any()) } returns pendingDecided.id.toString()
+        coEvery { repository.findById(pendingDecided.id) } returns pendingDecided
+        coEvery { decisionStore.find(pendingDecided.id) } returns
+            decision(pendingDecided.id, DeviceDecisionType.APPROVED)
+        coEvery { repository.save(any()) } answers { firstArg() }
+        coEvery { idempotencyStore.save(any(), any(), any()) } returns Unit
+        coEvery { notificationDispatchGuard.sendPushNotification(any(), any(), any()) } returns Unit
+
+        val result = service.initiate(
+            InitiateScaCommand(
+                partyId = partyId,
+                purpose = ScaPurpose.PAYMENT_INITIATION,
+                preferredMethod = ScaMethod.PUSH_NOTIFICATION,
+                dynamicLinkingData = DynamicLinkingData("123", "CZK", "CZ…5399", "Testovaci", null),
+                redirectUrl = null,
+            ),
+        )
+
+        assertThat(result.id).isNotEqualTo(pendingDecided.id)
+        assertThat(result.status).isEqualTo(ScaStatus.PENDING)
+        coVerify(exactly = 1) { repository.save(any()) }
+        coVerify(exactly = 1) { idempotencyStore.save(any(), any(), 300L) }
+    }
+
+    @Test
+    fun `initiate mints a fresh challenge when the idempotent one is already consumed`(): Unit = runBlocking {
+        // Regression: repeating the same payment within the idempotency TTL must NOT replay a
+        // terminal challenge — otherwise the next recordDecision() 409s ("not awaiting a
+        // decision") and the payment can never be re-authorised (QRlessPay retry symptom).
+        val partyId = UUID.randomUUID()
+        val consumed = challenge(partyId = partyId, status = ScaStatus.COMPLETED).copy(consumedAt = now)
+
+        coEvery { idempotencyStore.get(any()) } returns consumed.id.toString()
+        coEvery { repository.findById(consumed.id) } returns consumed
+        coEvery { repository.save(any()) } answers { firstArg() }
+        coEvery { idempotencyStore.save(any(), any(), any()) } returns Unit
+        coEvery { notificationDispatchGuard.sendPushNotification(any(), any(), any()) } returns Unit
+
+        val result = service.initiate(
+            InitiateScaCommand(
+                partyId = partyId,
+                purpose = ScaPurpose.PAYMENT_INITIATION,
+                preferredMethod = ScaMethod.PUSH_NOTIFICATION,
+                dynamicLinkingData = DynamicLinkingData("123", "CZK", "CZ…5399", "Testovaci", null),
+                redirectUrl = null,
+            ),
+        )
+
+        assertThat(result.id).isNotEqualTo(consumed.id)
+        assertThat(result.status).isEqualTo(ScaStatus.PENDING)
+        coVerify(exactly = 1) { repository.save(any()) }
+        coVerify(exactly = 1) { idempotencyStore.save(any(), any(), 300L) }
+    }
+
+    @Test
+    fun `initiate mints a fresh challenge when the idempotent one has expired`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        val expired = challenge(partyId = partyId, expiresAt = now.minusSeconds(1))
+
+        coEvery { idempotencyStore.get(any()) } returns expired.id.toString()
+        coEvery { repository.findById(expired.id) } returns expired
+        coEvery { repository.save(any()) } answers { firstArg() }
+        coEvery { idempotencyStore.save(any(), any(), any()) } returns Unit
+        coEvery { notificationDispatchGuard.sendPushNotification(any(), any(), any()) } returns Unit
+
+        val result = service.initiate(
+            InitiateScaCommand(
+                partyId = partyId,
+                purpose = ScaPurpose.PAYMENT_INITIATION,
+                preferredMethod = ScaMethod.PUSH_NOTIFICATION,
+                dynamicLinkingData = null,
+                redirectUrl = null,
+            ),
+        )
+
+        assertThat(result.id).isNotEqualTo(expired.id)
+        coVerify(exactly = 1) { repository.save(any()) }
     }
 
     @Test
