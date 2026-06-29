@@ -285,6 +285,15 @@ CI is path-scoped (only changed services build). Domain layer has **zero** frame
   confirm divergence first — `git show origin/main:<f> | shasum` vs your base: identical ⇒ copy is safe,
   differs ⇒ re-apply by hand. Same root cause as trusting stale memory over the repo (see *Capturing what
   we learn*): act on the authoritative `origin/main` state, never a local/session snapshot.
+- **Two concurrent PRs editing the same file can break `main` even when each passes CI alone**
+  (semantic merge conflict). Parallel edits to one service's import block reintroduced a ktlint
+  wildcard that only failed once both merged (#2650 × the ADR-0105 persistence PR → red `main`, fixed
+  by a follow-up). Before merging, `git worktree list` / `gh pr list` for another instance touching the
+  same file; expect a fixup PR if two land close together.
+- **Don't remove a worktree/branch until the PR is actually MERGED.** A `gh pr checks --watch` (or a
+  poll loop) exits when checks *complete* — including on a FAILURE — not when the PR merges. Verify
+  `gh pr view <n> --json state` is `MERGED` before cleanup, or you delete in-flight work you still need
+  to fix (recover with `git worktree add <path> origin/<branch>`).
 
 ### GHA / CI pitfalls
 - **`env.VAR` is unavailable in job-level `env:` inside a reusable workflow.** The `env` context is
@@ -293,6 +302,16 @@ CI is path-scoped (only changed services build). Domain layer has **zero** frame
 - **`gen-network-policies.py` ignores `@ConfigProperty` code defaults.** The generator reads only
   gitops env declarations. A port defined only as a code default is missing from the generated
   NetworkPolicy and gets silently blocked. Declare every port as an explicit SmallRye env var.
+- **Never set `quarkus.application.version` in a service `application.yaml`.** The `Validate manifests`
+  job has an *enforced* release-invariant guard that rejects it — the version derives from `version.txt`
+  (rules.yaml: `release_invariant`). A new service scaffolded with `version:` under `quarkus.application`
+  boots fine locally but fails CI the moment its `application.yaml` is touched. Set only
+  `quarkus.application.name`.
+- **`issue-hygiene` (required check) needs a real `Linked issues` entry.** The PR body's "Linked issues"
+  section must contain `Closes/Refs #<n>` (a real issue number) or an explicit `N/A — <reason>` —
+  `Refs ADR-0143` (no `#`) is rejected and blocks merge. Fix by editing the PR body (the `edited` event
+  re-triggers the check with the fresh payload); do **not** `gh run rerun` (stale payload). Or apply the
+  `skip-hygiene` label.
 
 ### 2-dot vs 3-dot git diff
 - **Always 3-dot for pre-merge review.** `git diff origin/main...origin/branch` (3-dot) = actual
