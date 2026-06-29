@@ -1,6 +1,7 @@
 # Agent services licensed AGPL-3.0-only in-repo (open-core)
 
 Date: 2026-06-29
+Status: Accepted
 Decision-Status: Accepted
 Delivery-Status: Shipped
 Author(s): Jiří Raška

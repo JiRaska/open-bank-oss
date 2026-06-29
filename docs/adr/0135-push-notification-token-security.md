@@ -1,6 +1,7 @@
 # ADR-0135: Push notification token security and lifecycle
 
 Date: 2026-06-29
+Status: Accepted
 Decision-Status: Accepted
 Delivery-Status: Partial
 Author(s): Jiri Raska

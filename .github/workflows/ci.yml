@@ -339,6 +339,13 @@ jobs:
       - name: "clock-injection gate — domain/application layers (ADR-0100, #1612)"
         run: bash .github/scripts/check-clock-injection.sh
 
+      # Every ADR in docs/adr/ must carry a Status field with a canonical value
+      # (Accepted, Proposed, Superseded, Deprecated). Enforced as part of OSS-readiness
+      # (public launch gate E2): a missing status makes it impossible to machine-read
+      # the decision registry and breaks the ADR index generator.
+      - name: ADR status check
+        run: bash .github/scripts/check-adr-status.sh
+
   # ---------------------------------------------------------------------------
   # Customer-app dossier content check (ADR-0074 invariant 5).
   #

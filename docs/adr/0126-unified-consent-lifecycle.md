@@ -2,6 +2,7 @@
 
 | Field            | Value                          |
 |------------------|--------------------------------|
+| Status           | Accepted                       |
 | Decision-Status  | Accepted                       |
 | Delivery-Status  | Partial                        |
 | Deciders         | Jiri Raska                     |

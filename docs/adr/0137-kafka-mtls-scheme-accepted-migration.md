@@ -1,6 +1,7 @@
 # Kafka mTLS migration — topic-scoped enforcement of payment.scheme-accepted
 
 Date: 2026-06-29
+Status: Accepted
 Decision-Status: Accepted
 Delivery-Status: Partial
 Author(s): Claude (paired with Jiří Raška)

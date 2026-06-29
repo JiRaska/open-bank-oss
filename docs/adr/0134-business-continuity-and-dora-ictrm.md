@@ -1,6 +1,7 @@
 # ADR-0134: Business continuity plan and DORA ICT risk management framework
 
 Date: 2026-06-29
+Status: Accepted
 Decision-Status: Accepted
 Delivery-Status: Planned
 Author(s): Jiri Raska

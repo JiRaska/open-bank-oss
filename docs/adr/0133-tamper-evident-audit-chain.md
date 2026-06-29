@@ -1,6 +1,7 @@
 # ADR-0133: Tamper-evident audit chain
 
 Date: 2026-06-29
+Status: Accepted
 Decision-Status: Accepted
 Delivery-Status: Shipped
 Author(s): Jiri Raska
