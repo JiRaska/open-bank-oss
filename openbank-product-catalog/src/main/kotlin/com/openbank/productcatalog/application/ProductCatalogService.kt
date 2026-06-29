@@ -12,9 +12,12 @@ import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.logging.Logger
 
 @ApplicationScoped
 class ProductCatalogService @Inject constructor(private val clock: Clock) {
+
+    private val log = Logger.getLogger(ProductCatalogService::class.java.name)
 
     private val store = ConcurrentHashMap<String, Product>()
 
@@ -1253,6 +1256,7 @@ class ProductCatalogService @Inject constructor(private val clock: Clock) {
             throw IllegalArgumentException("Product with code '${req.code}' already exists")
         }
         val product = req.toDomain(clock)
+        validateFeeWaivers(product, log)
         store[product.id] = product
         return product
     }
@@ -1260,6 +1264,7 @@ class ProductCatalogService @Inject constructor(private val clock: Clock) {
     fun update(id: String, req: ProductRequest): Product {
         val existing = store[id] ?: throw NoSuchElementException("Product $id not found")
         val updated = req.applyTo(existing, clock)
+        validateFeeWaivers(updated, log)
         store[id] = updated
         return updated
     }
@@ -1428,4 +1433,26 @@ data class ProductRequest(
         eligibilitySegments = eligibilitySegments ?: existing.eligibilitySegments,
         updatedAt = Instant.now(clock),
     )
+}
+
+/**
+ * Runs the fee-waiver rule engine (ADR-0138) over a product's fees on write. A fee
+ * flagged `waivable` with a blank condition is a hard data error and is rejected; a
+ * condition that is present but not yet machine-evaluable is logged so the
+ * "free text vs. executable rule" gap is visible on real data rather than silent.
+ * No money is moved here — runtime fee posting is a deferred money-path phase.
+ */
+private fun validateFeeWaivers(product: Product, log: Logger) {
+    product.fees.filter { it.waivable }.forEach { fee ->
+        require(!fee.waiveCondition.isNullOrBlank()) {
+            "Fee '${fee.name}' is marked waivable but has no waiver condition"
+        }
+        val predicate = WaiveConditionParser.parse(fee.waiveCondition)
+        if (predicate is WaivePredicate.Unparseable) {
+            log.warning(
+                "Product '${product.code}' fee '${fee.name}' has a non-evaluable waiver condition " +
+                    "(${predicate.reason}): \"${fee.waiveCondition}\" — fee will not be auto-waived (ADR-0138)",
+            )
+        }
+    }
 }

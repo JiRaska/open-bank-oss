@@ -17,7 +17,7 @@ class ProductCatalogResource(private val service: ProductCatalogService) {
     fun list(
         @QueryParam("type") type: String?,
         @QueryParam("status") status: String?,
-        @QueryParam("currency") currency: String?
+        @QueryParam("currency") currency: String?,
     ): Response {
         var results = service.findAll()
         if (!type.isNullOrBlank()) results = results.filter { it.type == type }
@@ -28,55 +28,47 @@ class ProductCatalogResource(private val service: ProductCatalogService) {
 
     @GET
     @Path("/{id}")
-    fun getById(@PathParam("id") id: String): Response =
-        service.findById(id)?.let { Response.ok(it).build() }
-            ?: Response.status(404).entity(mapOf("error" to "Product $id not found")).build()
+    fun getById(@PathParam("id") id: String): Response = service.findById(id)?.let { Response.ok(it).build() }
+        ?: Response.status(404).entity(mapOf("error" to "Product $id not found")).build()
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
-    fun create(req: ProductRequest): Response {
-        return try {
-            val product = service.create(req)
-            Response.status(201).entity(product).build()
-        } catch (e: IllegalArgumentException) {
-            Response.status(409).entity(mapOf("error" to e.message)).build()
-        }
+    fun create(req: ProductRequest): Response = try {
+        val product = service.create(req)
+        Response.status(201).entity(product).build()
+    } catch (e: IllegalArgumentException) {
+        Response.status(409).entity(mapOf("error" to e.message)).build()
     }
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    fun update(@PathParam("id") id: String, req: ProductRequest): Response {
-        return try {
-            Response.ok(service.update(id, req)).build()
-        } catch (e: NoSuchElementException) {
-            Response.status(404).entity(mapOf("error" to e.message)).build()
-        }
+    fun update(@PathParam("id") id: String, req: ProductRequest): Response = try {
+        Response.ok(service.update(id, req)).build()
+    } catch (e: NoSuchElementException) {
+        Response.status(404).entity(mapOf("error" to e.message)).build()
+    } catch (e: IllegalArgumentException) {
+        Response.status(409).entity(mapOf("error" to e.message)).build()
     }
 
     @POST
     @Path("/{id}/activate")
-    fun activate(@PathParam("id") id: String): Response {
-        return try {
-            Response.ok(service.activate(id)).build()
-        } catch (e: NoSuchElementException) {
-            Response.status(404).entity(mapOf("error" to e.message)).build()
-        }
+    fun activate(@PathParam("id") id: String): Response = try {
+        Response.ok(service.activate(id)).build()
+    } catch (e: NoSuchElementException) {
+        Response.status(404).entity(mapOf("error" to e.message)).build()
     }
 
     @POST
     @Path("/{id}/deactivate")
-    fun deactivate(@PathParam("id") id: String): Response {
-        return try {
-            Response.ok(service.deactivate(id)).build()
-        } catch (e: NoSuchElementException) {
-            Response.status(404).entity(mapOf("error" to e.message)).build()
-        }
+    fun deactivate(@PathParam("id") id: String): Response = try {
+        Response.ok(service.deactivate(id)).build()
+    } catch (e: NoSuchElementException) {
+        Response.status(404).entity(mapOf("error" to e.message)).build()
     }
 
     @GET
     @Path("/{id}/fees")
-    fun getFees(@PathParam("id") id: String): Response =
-        service.findById(id)?.let { Response.ok(it.fees).build() }
-            ?: Response.status(404).entity(mapOf("error" to "Product $id not found")).build()
+    fun getFees(@PathParam("id") id: String): Response = service.findById(id)?.let { Response.ok(it.fees).build() }
+        ?: Response.status(404).entity(mapOf("error" to "Product $id not found")).build()
 }
