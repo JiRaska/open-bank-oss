@@ -4,6 +4,8 @@
 
 package com.openbank.productcatalog.application
 
+import com.openbank.libs.product.WaiveConditionParser
+import com.openbank.libs.product.WaivePredicate
 import com.openbank.productcatalog.application.port.out.ProductRepository
 import com.openbank.productcatalog.domain.*
 import jakarta.enterprise.context.ApplicationScoped
@@ -88,6 +90,8 @@ data class FeeScheduleItem(
     val description: String?,
     val waivable: Boolean,
     val waiveCondition: String?,
+    val waiverEvaluable: Boolean,
+    val waiverRule: WaiverRuleView?,
     val productId: String,
     val productCode: String,
     val productName: String,
@@ -95,25 +99,46 @@ data class FeeScheduleItem(
     val updatedAt: Instant,
 ) {
     companion object {
-        fun of(product: Product, fee: Fee): FeeScheduleItem = FeeScheduleItem(
-            // Stable composite id: product + fee, so the UI key survives re-fetch.
-            id = "${product.id}:${fee.id}",
-            code = feeCode(product.code, fee.name),
-            name = fee.name,
-            type = fee.type,
-            amount = fee.amount,
-            currency = fee.currency,
-            frequency = fee.frequency,
-            description = fee.description,
-            waivable = fee.waivable,
-            waiveCondition = fee.waiveCondition,
-            productId = product.id,
-            productCode = product.code,
-            productName = product.name,
-            // Fee availability tracks its owning product's lifecycle.
-            status = product.status.name,
-            updatedAt = product.updatedAt,
-        )
+        fun of(product: Product, fee: Fee): FeeScheduleItem {
+            val rule = waiverRuleOf(fee)
+            return FeeScheduleItem(
+                // Stable composite id: product + fee, so the UI key survives re-fetch.
+                id = "${product.id}:${fee.id}",
+                code = feeCode(product.code, fee.name),
+                name = fee.name,
+                type = fee.type,
+                amount = fee.amount,
+                currency = fee.currency,
+                frequency = fee.frequency,
+                description = fee.description,
+                waivable = fee.waivable,
+                waiveCondition = fee.waiveCondition,
+                // ADR-0138: the executable form of the waiver, derived by the shared engine.
+                waiverEvaluable = rule != null,
+                waiverRule = rule,
+                productId = product.id,
+                productCode = product.code,
+                productName = product.name,
+                // Fee availability tracks its owning product's lifecycle.
+                status = product.status.name,
+                updatedAt = product.updatedAt,
+            )
+        }
+
+        /** Parses a fee's free-text waiver condition into its executable form, or null if not evaluable. */
+        private fun waiverRuleOf(fee: Fee): WaiverRuleView? {
+            if (!fee.waivable || fee.waiveCondition.isNullOrBlank()) return null
+            return when (val p = WaiveConditionParser.parse(fee.waiveCondition)) {
+                is WaivePredicate.Comparison -> WaiverRuleView(
+                    attribute = p.attribute.name,
+                    operator = p.operator.symbol,
+                    threshold = p.threshold?.toPlainString(),
+                    thresholdCurrency = p.currency,
+                    textValue = p.textValue,
+                )
+                is WaivePredicate.Unparseable -> null
+            }
+        }
 
         /** Derives a stable, human-readable fee code, e.g. CURRENT_PERSONAL · "FX Conversion" → CURRENT_PERSONAL_FX_CONVERSION. */
         private fun feeCode(productCode: String, feeName: String): String {
@@ -124,6 +149,20 @@ data class FeeScheduleItem(
         }
     }
 }
+
+/**
+ * The machine-executable form of a fee's waiver condition, surfaced read-only on the fee
+ * schedule (ADR-0138 phase 1b). Present only when [FeeScheduleItem.waiverEvaluable] is true;
+ * for numeric rules [threshold]/[thresholdCurrency] are set, for segment/currency rules
+ * [textValue] is set. [threshold] is a decimal string to avoid binary-float artefacts.
+ */
+data class WaiverRuleView(
+    val attribute: String,
+    val operator: String,
+    val threshold: String? = null,
+    val thresholdCurrency: String? = null,
+    val textValue: String? = null,
+)
 
 data class ProductRequest(
     val code: String,

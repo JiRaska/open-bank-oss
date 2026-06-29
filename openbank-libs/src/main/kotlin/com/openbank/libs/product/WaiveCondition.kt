@@ -2,19 +2,20 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-package com.openbank.productcatalog.domain
+package com.openbank.libs.product
 
 import java.math.BigDecimal
 
 /**
- * The executable form of a fee-waiver rule (ADR-0138).
+ * Shared, executable form of a product fee-waiver rule (ADR-0138, phase 1b).
  *
- * The catalog stores `Fee.waiveCondition` as free text (today, in two languages —
- * e.g. `"Balance > 50 000 EUR"` and `"Měsíční obrat > 25 000 CZK"`). A condition a
- * human can read but a machine cannot evaluate is, in effect, marketing copy. These
- * types turn that free text into a closed, whitelisted predicate the
- * [FeeRuleEvaluator] can actually execute. This is deliberately NOT a general
- * expression language: a fixed attribute/operator vocabulary, no scripting, no eval.
+ * A product's fee carries `waiveCondition` as free text (in practice, in more than one
+ * language — e.g. `"Balance > 50 000 EUR"` and `"Měsíční obrat > 25 000 CZK"`). A
+ * condition a human can read but a machine cannot evaluate is, in effect, marketing
+ * copy. These types turn that free text into a closed, whitelisted predicate that
+ * [WaiverEvaluator] can actually execute. This is deliberately NOT a general expression
+ * language: a fixed attribute/operator vocabulary, no scripting, no eval. It lives in
+ * `openbank-libs` so the catalog, interest, and eligibility paths share one engine.
  */
 
 /** The closed set of account attributes a waiver rule may test. */

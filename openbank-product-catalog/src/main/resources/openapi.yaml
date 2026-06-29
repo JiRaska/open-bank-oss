@@ -225,6 +225,19 @@ components:
         description: { type: string, nullable: true }
         waivable: { type: boolean }
         waiveCondition: { type: string, nullable: true }
+        waiverEvaluable:
+          type: boolean
+          description: "ADR-0138: true when waiveCondition parsed into a machine-executable rule."
+        waiverRule:
+          type: object
+          nullable: true
+          description: "ADR-0138: executable form of the waiver condition; null when not evaluable."
+          properties:
+            attribute: { type: string, description: "BALANCE | MONTHLY_TURNOVER | AGGREGATE_POCKET_BALANCE | SEGMENT | CURRENCY" }
+            operator: { type: string, description: "One of > >= < <= == !=" }
+            threshold: { type: string, nullable: true, description: "Decimal string for numeric rules." }
+            thresholdCurrency: { type: string, nullable: true }
+            textValue: { type: string, nullable: true, description: "Value for segment/currency rules." }
         productId: { type: string }
         productCode: { type: string }
         productName: { type: string }
@@ -239,6 +252,7 @@ components:
         - currency
         - frequency
         - waivable
+        - waiverEvaluable
         - productId
         - productCode
         - productName
