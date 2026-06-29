@@ -7,7 +7,16 @@ package com.openbank.productcatalog.application
 import com.openbank.libs.product.WaiveConditionParser
 import com.openbank.libs.product.WaivePredicate
 import com.openbank.productcatalog.application.port.out.ProductRepository
-import com.openbank.productcatalog.domain.*
+import com.openbank.productcatalog.domain.CardConfig
+import com.openbank.productcatalog.domain.EligibilitySegment
+import com.openbank.productcatalog.domain.Fee
+import com.openbank.productcatalog.domain.MultiCurrencyConfig
+import com.openbank.productcatalog.domain.OverdraftConfig
+import com.openbank.productcatalog.domain.Product
+import com.openbank.productcatalog.domain.ProductStatus
+import com.openbank.productcatalog.domain.SavingsConfig
+import com.openbank.productcatalog.domain.TermDepositConfig
+import com.openbank.productcatalog.domain.TermsAndConditions
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
 import java.time.Instant
@@ -22,10 +31,7 @@ import java.util.logging.Logger
  * Panache (the fleet standard) and RESTEasy Reactive supports suspend resource methods.
  */
 @ApplicationScoped
-class ProductCatalogService(
-    private val repo: ProductRepository,
-    private val clock: Clock,
-) {
+class ProductCatalogService(private val repo: ProductRepository, private val clock: Clock) {
 
     private val log = Logger.getLogger(ProductCatalogService::class.java.name)
 
