@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/JiRaska/open-bank/compare/aml-service-v0.6.0...aml-service-v0.6.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* **aml:** GDPR Art. 17 — anonymise PII on PARTY_ERASED ([#2448](https://github.com/JiRaska/open-bank/issues/2448)) ([5a90f5f](https://github.com/JiRaska/open-bank/commit/5a90f5f1fb535ea214dcf523ff6c082e641cd097))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank/compare/aml-service-v0.5.1...aml-service-v0.6.0) (2026-06-27)
 
 
