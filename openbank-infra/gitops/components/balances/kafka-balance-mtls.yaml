@@ -1,0 +1,92 @@
+# Kafka mTLS identity + cert projection for balance-service (ADR-0137, #2665 Tier 1).
+#
+# balance-service is both a producer and a consumer:
+#   Produces: openbank.balance.events (two channels: balance-events-out + balance-outbox-out)
+#   Consumes: openbank.ledger.journal.posted (group: openbank-balance-service, ADR-0039 Phase D)
+#             openbank.accounts.account.created (group: openbank-balance-service, ADR-0073)
+#
+# ACL model (ADR-0137): one KafkaUser = one mTLS identity for ALL of this service's Kafka
+# traffic. The global gate allow.everyone.if.no.acl.found=true remains until all ~33 clients
+# are migrated (issue #2665); ACLs on un-ACL'd topics are not deny-enforced yet.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  name: balance-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.balance.events
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.ledger.journal.posted
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.accounts.account.created
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: openbank-balance-service
+          patternType: literal
+        operations: [Read]
+        host: "*"
+---
+# Project balance-service keystore from `messaging` into `balances` namespace.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: balance-service-kafka-keystore
+  namespace: balances
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: balance-service-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: balance-service
+---
+# Shared cluster-CA truststore for all Kafka clients in `balances`.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: balances
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert
