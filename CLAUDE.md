@@ -115,9 +115,11 @@ CI is path-scoped (only changed services build). Domain layer has **zero** frame
 - **Parallel Docker/Gradle builds OOM on 16 GB Docker Desktop.** Running N Quarkus builds concurrently
   multiplies heap usage; the Docker VM gets OOM-killed silently. Run service builds sequentially with a
   60–90 s gap, or increase Docker Desktop memory to 24 GB+.
-- **admin-ui does NOT go through `auto-deploy.yml`.** Next.js has no `quarkusBuild`; the standard
-  auto-deploy pipeline skips or errors on it. Deploy admin-ui manually:
-  `openbank-infra/scripts/build-push-admin-ui.sh` from a clean worktree with `AWS_PROFILE=openbank`.
+- **admin-ui has its own CD pipeline: `admin-ui-deploy.yml`.** It triggers automatically on every
+  push to `main` that touches `openbank-admin-ui/**`, ADRs, or governance files. It builds the
+  Next.js image, pushes to ECR, and opens a GitOps PR that auto-merges once CI is green — no
+  human step required. `build-push-admin-ui.sh` is for **local emergency deploys only**
+  (run from a clean worktree with `AWS_PROFILE=openbank`).
 
 ### Kotlin / Quarkus code pitfalls
 - **Kotlin JUnit5 + `runBlocking` silent test drop.** `fun foo() = runBlocking { }` infers return
