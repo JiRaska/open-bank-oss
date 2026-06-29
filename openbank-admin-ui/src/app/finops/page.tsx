@@ -8,13 +8,15 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   RefreshCw, ShieldCheck, AlertTriangle, Clock, DollarSign,
   Cpu, Server, Database, Zap, Info, Calendar, PieChart, TrendingDown,
-  Bot, TrendingUp,
+  Bot,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { AgentInsightsPanel } from '@/components/agent/AgentInsightsPanel'
+import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -224,6 +226,28 @@ function HeapBar({ pct, efficiency }: { pct: number | null; efficiency: string }
   )
 }
 
+// Map a finops-agent anomaly → the shared AgentFinding view-model. The estimated
+// monthly saving becomes a success-toned tag so the rendering matches every other
+// agent surface (admin-ui agent-output rule).
+function toAgentFinding(a: FinOpsAnomaly, t: (cs: string, en: string) => string): AgentFinding {
+  const tags: AgentFinding['tags'] = []
+  if (a.estimatedMonthlySavingUsd != null) {
+    tags.push({ label: t(`Úspora $${a.estimatedMonthlySavingUsd.toFixed(0)}/mo`, `Saves $${a.estimatedMonthlySavingUsd.toFixed(0)}/mo`), tone: 'success' })
+  }
+  return {
+    id: a.id,
+    title: a.title,
+    detector: a.detector,
+    severity: a.severity,
+    status: a.status,
+    rootCause: a.rootCause,
+    detectedAt: a.detectedAt,
+    proposalUrl: a.proposalPrUrl,
+    proposalLabel: t('Zobrazit návrh →', 'View proposal →'),
+    tags,
+  }
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 function FinOpsContent() {
@@ -385,6 +409,21 @@ function FinOpsContent() {
               accent={Boolean(rightSizing?.available && rightSizing.highSavingsCount > 0)}
             />
           </div>
+
+          {/* ── FinOps agent findings (AI) — directly below the KPIs (admin-ui agent-output rule) ── */}
+          <AgentInsightsPanel
+            title={t('FinOps náhledy (AI)', 'FinOps Insights (AI)')}
+            subtitle={t(
+              'Aktivní cost anomálie z finops-agenta (D1–D5 detektory z Alertmanageru — ADR-0112). Agent navrhuje, schvaluje člověk (HITL, ADR-0112 P4).',
+              'Active cost anomalies from the finops-agent (D1–D5 detectors via Alertmanager — ADR-0112). The agent proposes; a human approves (HITL, ADR-0112 P4).',
+            )}
+            findings={anomalies.map(a => toAgentFinding(a, t))}
+            emptyMessage={t(
+              'Žádné aktivní cost anomálie — Alertmanager nedosažitelný nebo žádné finops-agent alerty.',
+              'No active cost anomalies — Alertmanager unreachable or no finops-agent alerts firing.',
+            )}
+            sourceLabel={t('Zdroj: Alertmanager (finops-agent)', 'Source: Alertmanager (finops-agent)')}
+          />
 
           {/* Cloud Cost (AWS Cost Explorer snapshot) */}
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: '20px 24px', marginBottom: '20px' }}>
@@ -858,61 +897,6 @@ function FinOpsContent() {
                   </div>
                 )}
               </>
-            )}
-
-            {/* Anomalies subsection */}
-            {(anomalies.length > 0 || !aiCosts?.available) && (
-              <div style={{ borderTop: '1px solid var(--border)', paddingTop: '16px', marginTop: '4px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                  <TrendingUp size={14} style={{ color: '#d97706' }} />
-                  <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                    {t('Cost anomálie (D1–D5 detektory)', 'Cost anomalies (D1–D5 detectors)')}
-                  </span>
-                </div>
-                {anomalies.length === 0 ? (
-                  <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', padding: '8px' }}>
-                    {t('Žádné aktivní cost anomálie.', 'No active cost anomalies.')}
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {anomalies.map(anomaly => {
-                      const sevColor = anomaly.severity === 'critical' ? '#dc2626' : '#d97706'
-                      const sevBg    = anomaly.severity === 'critical' ? '#fee2e2' : '#fef3c7'
-                      const statusCfg: Record<string, { color: string; bg: string }> = {
-                        open:     { color: '#2563eb', bg: '#dbeafe' },
-                        proposed: { color: '#d97706', bg: '#fef3c7' },
-                        approved: { color: '#16a34a', bg: '#dcfce7' },
-                        rejected: { color: '#dc2626', bg: '#fee2e2' },
-                        resolved: { color: 'var(--text-secondary)', bg: 'var(--surface-2)' },
-                      }
-                      const sc = statusCfg[anomaly.status] ?? statusCfg['open']
-                      return (
-                        <div key={anomaly.id} style={{ display: 'flex', alignItems: 'center', gap: '10px',
-                          padding: '8px 10px', borderRadius: '8px', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-                          <span style={{ fontSize: '10px', fontWeight: 800, padding: '2px 7px', borderRadius: '6px',
-                            background: '#ede9fe', color: '#6366f1', fontFamily: 'monospace', flexShrink: 0 }}>
-                            {anomaly.detector}
-                          </span>
-                          <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '6px',
-                            color: sevColor, background: sevBg, flexShrink: 0 }}>
-                            {anomaly.severity}
-                          </span>
-                          <span style={{ fontSize: '12px', color: 'var(--text-primary)', flex: 1 }}>{anomaly.title}</span>
-                          <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px',
-                            color: sc.color, background: sc.bg, flexShrink: 0 }}>
-                            {anomaly.status}
-                          </span>
-                          {anomaly.estimatedMonthlySavingUsd != null && (
-                            <span style={{ fontSize: '11px', fontWeight: 700, color: '#16a34a', fontFamily: 'monospace', flexShrink: 0 }}>
-                              ${anomaly.estimatedMonthlySavingUsd.toFixed(0)}/mo
-                            </span>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
             )}
           </div>
 

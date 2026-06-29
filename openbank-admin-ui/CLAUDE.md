@@ -110,6 +110,32 @@ own as long as a parent (`system/`) has one.
 its route subtree has no shell layout. Intentionally shell-less pages (auth screens, the `/` redirect)
 are listed in `EXEMPT`. New pages must comply from day one.
 
+### 6. Agent-output rule — AI-agent findings render through one shared panel, directly below the metrics
+
+The fleet has a growing population of AI agents (devops-agent, finops-agent, the AML/sanctions/GDPR
+oversight agents — ADR-0031/0112/0119) and **more are coming**. Each one's active output (findings,
+anomalies, proposed remediations) is operator-facing, and it was drifting into bespoke copy-pasted card
+markup on every page — DevOps, FinOps and IAOps each grew their own near-identical renderer, with the
+FinOps one buried at the bottom of an unrelated cost panel where an operator never saw it. That is the
+bug this rule prevents: an agent's output must be **consistent, recognisable, and prominent** wherever it
+appears, because acting on it (HITL approve/reject) is a governed control surface (ADR-0031 D4), not a
+decoration.
+
+**The rule:** a page that surfaces an AI agent's findings renders them through the shared
+**`AgentInsightsPanel`** (`src/components/agent/AgentInsightsPanel.tsx`), positioned **directly below the
+page's metric/KPI cards** — the first thing the operator reads after the headline numbers, mirroring the
+DevOps page (the canonical example). Do **not** hand-roll finding cards. Each page maps its native finding
+type → the shared `AgentFinding` view-model (see `toAgentFinding()` in `devops`/`finops`/`iaops/page.tsx`)
+so the data sources differ but the rendering is identical: detector chip, severity, title, status pill,
+root-cause, tags (DORA metric, est. saving…), timestamp, and optional HITL buttons. The panel is
+i18n-agnostic — pass every string already translated via `t()` (the page owns the language context). The
+panel renders an honest empty/healthy state when there are no findings (graceful-state rule #1), so it is
+always mounted, never conditionally hidden.
+
+**Enforcement:** `src/test/agent-insights.guard.test.ts` scans every `src/app/**/page.tsx` and fails CI if
+a page hand-rolls an agent-finding renderer (the HITL lifecycle `proposed/approved/rejected` status-map
+signature) instead of importing `AgentInsightsPanel`. New agent surfaces must comply from day one.
+
 ## Versioning
 
 Any change under `src/**` bumps `version.txt` **and** `package.json` `version` (kept equal; the build

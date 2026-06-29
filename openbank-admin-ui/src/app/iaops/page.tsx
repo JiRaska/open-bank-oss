@@ -8,12 +8,14 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   Bot, RefreshCw, ScrollText, GitBranch, Scale,
   Info, CheckCircle2, CircleDashed, CircleDot, Lock, Users, Search, Loader2,
-  TrendingDown, AlertOctagon,
+  AlertOctagon,
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { AgentInsightsPanel } from '@/components/agent/AgentInsightsPanel'
+import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 
 // ── Types (mirror /api/iaops/governance) ───────────────────────────────────
 type DStatus = 'built' | 'partial' | 'planned'
@@ -35,15 +37,6 @@ interface GovData {
   auditTrail: { capture: string[]; pipeline: string[]; live: string[]; planned: string[] }
 }
 
-// Mirrors audit-service AnchorVerification (GET /api/v1/audit/anchors/verify, ADR-0031 D5).
-interface AuditIntegrity {
-  status: 'INTACT' | 'BROKEN'
-  anchorCount: number
-  verifiedCount: number
-  unsignedCount: number
-  firstBroken: { lastEntryId: string | null; signatureInvalid: boolean; headHashMismatch: boolean } | null
-}
-
 interface AgentCostEntry {
   agentId: string
   costLast24hUsd: number
@@ -63,6 +56,26 @@ interface FinOpsAnomaly {
   proposalPrUrl: string | null
   status: 'open' | 'proposed' | 'approved' | 'rejected' | 'resolved'
   estimatedMonthlySavingUsd: number | null
+}
+
+// Map a finops-agent anomaly → the shared AgentFinding view-model (admin-ui agent-output rule).
+function toAgentFinding(a: FinOpsAnomaly, t: (cs: string, en: string) => string): AgentFinding {
+  const tags: AgentFinding['tags'] = []
+  if (a.estimatedMonthlySavingUsd != null) {
+    tags.push({ label: t(`Úspora $${a.estimatedMonthlySavingUsd.toFixed(0)}/mo`, `Saves $${a.estimatedMonthlySavingUsd.toFixed(0)}/mo`), tone: 'success' })
+  }
+  return {
+    id: a.id,
+    title: a.title,
+    detector: a.detector,
+    severity: a.severity,
+    status: a.status,
+    rootCause: a.rootCause,
+    detectedAt: a.detectedAt,
+    proposalUrl: a.proposalPrUrl,
+    proposalLabel: t('Zobrazit návrh →', 'View proposal →'),
+    tags,
+  }
 }
 
 // ── Status visual helpers ───────────────────────────────────────────────────
@@ -123,58 +136,6 @@ function Chips({ items, tone }: { items: string[]; tone: 'allow' | 'deny' | 'neu
   )
 }
 
-// ── Audit-trail integrity tile (ADR-0031 D5) ────────────────────────────────
-// Live tamper-evidence read from audit-service signed anchors. The per-event
-// hash chain proves internal consistency; a signed anchor additionally catches a
-// wholesale rewrite (the attested head no longer matches the live chain). Degrades
-// calmly when the service is unreachable / the operator lacks an auditor role.
-function AuditIntegrityTile({ integrity, available }: { integrity: AuditIntegrity | null; available: boolean }) {
-  const { language } = useLanguage()
-  const tt = (cs: string, en: string) => (language === 'cs' ? cs : en)
-  const ok = available && integrity != null
-  const broken = ok && integrity.status === 'BROKEN'
-  const noAnchors = ok && integrity.anchorCount === 0
-  const color = !ok ? 'var(--text-tertiary)' : broken ? '#dc2626' : noAnchors ? '#d97706' : '#16a34a'
-  const bg = !ok ? 'var(--surface-2)' : broken ? '#fee2e2' : noAnchors ? '#fef9c3' : '#dcfce7'
-  return (
-    <div style={{ marginBottom: '14px', padding: '12px 14px', borderRadius: '10px', border: `1px solid ${color}40`, background: bg }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-        <Lock size={14} style={{ color }} />
-        <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>
-          {tt('Integrita auditní stopy', 'Audit-trail integrity')}
-        </span>
-        <span style={{ fontSize: '9px', fontWeight: 700, padding: '2px 7px', borderRadius: '8px', background: '#ede9fe', color: '#6366f1', letterSpacing: '0.04em' }}>ADR-0031 D5</span>
-        <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 800, color, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-          {!ok ? tt('Nedostupné', 'Unavailable')
-            : broken ? <><AlertOctagon size={13} /> BROKEN</>
-            : noAnchors ? tt('Čeká na kotvu', 'Awaiting anchor')
-            : <><CheckCircle2 size={13} /> INTACT</>}
-        </span>
-      </div>
-      <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '8px 0 0', lineHeight: 1.5 }}>
-        {!ok
-          ? tt('Podepsané kotvy ověří, že hash-řetěz nebyl přepsán jako celek. audit-service je nedostupný (nenasazený / chybí role auditora).',
-               'Signed anchors verify the hash chain was not rewritten wholesale. audit-service is unreachable (not deployed / missing auditor role).')
-          : noAnchors
-            ? tt('Řetěz je prázdný nebo plánovač zatím nepodepsal první kotvu.',
-                 'The chain is empty or the scheduler has not signed the first anchor yet.')
-            : tt(`${integrity.verifiedCount} z ${integrity.anchorCount} kotev ověřeno · ${integrity.unsignedCount} nepodepsaných · každá kotva potvrzuje, že atestovaná hlava sedí na živý řetěz.`,
-                 `${integrity.verifiedCount} of ${integrity.anchorCount} anchors verified · ${integrity.unsignedCount} unsigned · each anchor confirms its attested head still matches the live chain.`)}
-      </p>
-      {broken && integrity.firstBroken && (
-        <p style={{ fontSize: '10px', color: '#dc2626', margin: '6px 0 0', fontFamily: 'monospace' }}>
-          {tt('První rozpor', 'First break')}:{' '}
-          {[
-            integrity.firstBroken.signatureInvalid ? tt('neplatný podpis', 'invalid signature') : null,
-            integrity.firstBroken.headHashMismatch ? tt('přepsaná hlava řetězu', 'rewritten chain head') : null,
-          ].filter(Boolean).join(' · ')}
-          {integrity.firstBroken.lastEntryId ? ` (entry ${integrity.firstBroken.lastEntryId.slice(0, 8)}…)` : ''}
-        </p>
-      )}
-    </div>
-  )
-}
-
 // ── Main ────────────────────────────────────────────────────────────────────
 function IAOpsContent() {
   const { t, language } = useLanguage()
@@ -188,20 +149,15 @@ function IAOpsContent() {
   const [rcaResult, setRcaResult] = useState<string | null>(null)
   const [rcaError, setRcaError] = useState<string | null>(null)
   const [rcaLoading, setRcaLoading] = useState(false)
-  const [integrity, setIntegrity] = useState<AuditIntegrity | null>(null)
-  const [integrityAvailable, setIntegrityAvailable] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
     setUnavailable(null)
     try {
-      const [govRes, aiCostRes, anomalyRes, integrityRes] = await Promise.all([
+      const [govRes, aiCostRes, anomalyRes] = await Promise.all([
         fetch('/api/iaops/governance',    { cache: 'no-store' }),
         fetch('/api/finops/ai-costs',     { cache: 'no-store' }),
         fetch('/api/finops/anomalies',    { cache: 'no-store' }),
-        // D5: live tamper-evidence via the generic service BFF (relays the operator's bearer).
-        // .catch keeps a secondary-data failure from blanking the whole page.
-        fetch('/api/svc/audit-service/api/v1/audit/anchors/verify', { cache: 'no-store' }).catch(() => null),
       ])
       if (!govRes.ok) { setUnavailable({ kind: 'error' }); return }
       setData(await govRes.json())
@@ -212,13 +168,6 @@ function IAOpsContent() {
       if (anomalyRes.ok) {
         const an = await anomalyRes.json() as { anomalies?: FinOpsAnomaly[] }
         setCostAnomalies(an.anomalies ?? [])
-      }
-      if (integrityRes && integrityRes.ok) {
-        setIntegrity(await integrityRes.json() as AuditIntegrity)
-        setIntegrityAvailable(true)
-      } else {
-        setIntegrity(null)
-        setIntegrityAvailable(false)
       }
     } catch {
       setUnavailable({ kind: 'unreachable' })
@@ -495,103 +444,23 @@ function IAOpsContent() {
             )}
           </Card>
 
-          {/* ── C. Cost Anomalies (ADR-0112 D1–D5) ── */}
-          <Card accent="#d97706">
-            <SectionTitle icon={<AlertOctagon size={16} />}
-              sub={t(
-                'Aktivní FinOps anomálie z Alertmanageru (D1–D5 detektory, ADR-0112). HITL schválení záplat přijde v P4.',
-                'Active FinOps anomalies from Alertmanager (D1–D5 detectors, ADR-0112). HITL patch approval coming in P4.',
-              )}>
-              {t('Cost anomálie', 'Cost Anomalies')}
-            </SectionTitle>
-
-            {costAnomalies.length === 0 ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px', borderRadius: '8px',
-                background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-                <Info size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
-                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                  {t(
-                    'Žádné aktivní cost anomálie — Alertmanager nedosažitelný nebo žádné finops-agent alerty.',
-                    'No active cost anomalies — Alertmanager unreachable or no finops-agent alerts firing.',
-                  )}
-                </span>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {costAnomalies.map(anomaly => {
-                  const sevColor = anomaly.severity === 'critical' ? '#dc2626' : '#d97706'
-                  const sevBg    = anomaly.severity === 'critical' ? '#fee2e2' : '#fef3c7'
-                  const statusCfg: Record<string, { color: string; bg: string }> = {
-                    open:     { color: '#2563eb', bg: '#dbeafe' },
-                    proposed: { color: '#d97706', bg: '#fef3c7' },
-                    approved: { color: '#16a34a', bg: '#dcfce7' },
-                    rejected: { color: '#dc2626', bg: '#fee2e2' },
-                    resolved: { color: 'var(--text-secondary)', bg: 'var(--surface-2)' },
-                  }
-                  const sc = statusCfg[anomaly.status] ?? statusCfg['open']
-                  return (
-                    <div key={anomaly.id} style={{ padding: '12px 14px', borderRadius: '10px',
-                      border: '1px solid var(--border)', background: 'var(--surface-2)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '6px' }}>
-                        <span style={{ fontSize: '10px', fontWeight: 800, padding: '2px 7px', borderRadius: '6px',
-                          background: '#ede9fe', color: '#6366f1', fontFamily: 'monospace', flexShrink: 0 }}>
-                          {anomaly.detector}
-                        </span>
-                        <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '6px',
-                          color: sevColor, background: sevBg, flexShrink: 0 }}>
-                          {anomaly.severity}
-                        </span>
-                        <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', flex: 1 }}>{anomaly.title}</span>
-                        <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px',
-                          color: sc.color, background: sc.bg }}>
-                          {anomaly.status}
-                        </span>
-                      </div>
-                      {anomaly.rootCause && (
-                        <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '0 0 8px', lineHeight: 1.5 }}>
-                          {anomaly.rootCause}
-                        </p>
-                      )}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                        {anomaly.estimatedMonthlySavingUsd != null && (
-                          <span style={{ fontSize: '11px', fontWeight: 700, color: '#16a34a', fontFamily: 'monospace' }}>
-                            {t('Odhad úspory', 'Est. saving')}: ${anomaly.estimatedMonthlySavingUsd.toFixed(0)}/mo
-                          </span>
-                        )}
-                        <span style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginLeft: 'auto' }}>
-                          {new Date(anomaly.detectedAt).toLocaleString()}
-                        </span>
-                        {/* HITL Approve/Dismiss placeholders — backend wired in ADR-0112 P4 */}
-                        <button
-                          onClick={() => console.log('HITL approve', anomaly.id)}
-                          style={{ fontSize: '11px', fontWeight: 700, padding: '4px 12px', borderRadius: '8px',
-                            border: 'none', background: '#16a34a', color: '#fff', cursor: 'pointer' }}>
-                          {t('Schválit', 'Approve')}
-                        </button>
-                        <button
-                          onClick={() => console.log('HITL dismiss', anomaly.id)}
-                          style={{ fontSize: '11px', fontWeight: 700, padding: '4px 12px', borderRadius: '8px',
-                            border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', cursor: 'pointer' }}>
-                          {t('Odmítnout', 'Dismiss')}
-                        </button>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
+          {/* ── C. Cost Anomalies (ADR-0112 D1–D5) — shared AgentInsightsPanel (admin-ui agent-output rule) ── */}
+          <AgentInsightsPanel
+            icon={<AlertOctagon size={16} />}
+            title={t('Cost anomálie', 'Cost Anomalies')}
+            subtitle={t(
+              'Aktivní FinOps anomálie z Alertmanageru (D1–D5 detektory, ADR-0112). Agent navrhuje, schvaluje člověk — HITL backend přijde v P4 (tlačítka zatím logují do konzole).',
+              'Active FinOps anomalies from Alertmanager (D1–D5 detectors, ADR-0112). The agent proposes; a human approves — HITL backend arrives in P4 (buttons currently log to console).',
             )}
-
-            <div style={{ marginTop: '14px', display: 'flex', alignItems: 'flex-start', gap: '8px', padding: '10px 14px',
-              borderRadius: '8px', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-              <TrendingDown size={13} style={{ color: 'var(--text-tertiary)', marginTop: '1px', flexShrink: 0 }} />
-              <span style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                {t(
-                  'HITL backend (schválení záplat) přijde v ADR-0112 P4. Tlačítka zatím logují do konzole.',
-                  'HITL backend (patch approval) arrives in ADR-0112 P4. Buttons currently log to console only.',
-                )}
-              </span>
-            </div>
-          </Card>
+            findings={costAnomalies.map(a => toAgentFinding(a, t))}
+            emptyMessage={t(
+              'Žádné aktivní cost anomálie — Alertmanager nedosažitelný nebo žádné finops-agent alerty.',
+              'No active cost anomalies — Alertmanager unreachable or no finops-agent alerts firing.',
+            )}
+            onApprove={id => console.log('HITL approve', id)}
+            onReject={id => console.log('HITL dismiss', id)}
+            decideLabels={{ approve: t('Schválit', 'Approve'), reject: t('Odmítnout', 'Dismiss') }}
+          />
 
           {/* ── D. AI audit trail ── */}
           <Card>
@@ -599,7 +468,6 @@ function IAOpsContent() {
               sub={t('Jak je za AI auditní stopa (ADR-0031 D5). Každá akce agenta = AuditEvent (actorType=AI_AGENT).', 'How AI is audited (ADR-0031 D5). Every agent action = an AuditEvent (actorType=AI_AGENT).')}>
               {t('Auditní stopa AI', 'AI audit trail')}
             </SectionTitle>
-            <AuditIntegrityTile integrity={integrity} available={integrityAvailable} />
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
               <div>
                 <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>{t('Co se zachytí', 'What is captured')}</div>
