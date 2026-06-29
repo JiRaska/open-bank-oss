@@ -22,7 +22,7 @@ spec:
     targetRevision: main
     path: openbank-infra/gitops/components/accounts
     directory:
-      include: '{product-catalog.yaml,product-catalog-http-scaledobject.yaml}'
+      include: '{product-catalog.yaml,product-catalog-http-scaledobject.yaml,product-catalog-db.yaml}'
   destination:
     server: https://kubernetes.default.svc
     namespace: accounts

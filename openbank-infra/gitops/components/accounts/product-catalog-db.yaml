@@ -1,0 +1,31 @@
+# Single-owner Postgres for product-catalog (cluster-wide CNPG operator, ADR-0009/0105 P1).
+# Generates the product-catalog-db-app secret (username/password for the `openbank` owner) and a
+# product-catalog-db-rw Service the Deployment uses. Must reconcile BEFORE the product-catalog
+# image that carries the datasource config deploys, else Flyway-at-start fails on a missing DB.
+# NOTE: no S3 WAL/backup here yet — that needs an EKS Pod Identity role (#863 pattern), tracked as a
+# follow-up. The catalogue is fully reconstructible from the in-code ProductSeed (idempotent first-boot
+# seeder), so a data-loss event re-seeds the canonical products on reboot rather than breaching a
+# retention obligation.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: product-catalog-db
+  namespace: accounts
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_products
+      owner: openbank

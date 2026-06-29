@@ -1,8 +1,9 @@
 # product-catalog: the system of record for bank products and the bank-wide fee
-# schedule (GET /api/v1/fees, ADR-0051 fees vertical). Stateless in this phase —
-# an in-memory seed store, no datasource — so it has no DB/Kafka/OIDC wiring.
-# DB-backing is a planned follow-up. Co-located in the `accounts` namespace so
-# the admin-ui Kubernetes discovery lists it automatically.
+# schedule (GET /api/v1/fees, ADR-0051 fees vertical). Postgres-backed (ADR-0105 P1):
+# its product-catalog-db CNPG cluster (product-catalog-db.yaml) must reconcile before
+# this Deployment rolls the datasource-carrying image, else Flyway-at-start fails.
+# Co-located in the `accounts` namespace so the admin-ui Kubernetes discovery lists it
+# automatically.
 # Quarkus management endpoints (health, metrics) bind to a separate port (8085).
 # QUARKUS_MANAGEMENT_HOST=0.0.0.0 is required so kubelet probes can reach them.
 apiVersion: apps/v1
@@ -55,6 +56,15 @@ spec:
               value: "0.1"
             - name: QUARKUS_MANAGEMENT_HOST
               value: "0.0.0.0"
+            # Datasource (ADR-0105 P1). Reactive URL for the app (Panache); JDBC URL for Flyway.
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: postgresql://product-catalog-db-rw.accounts.svc:5432/openbank_products
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://product-catalog-db-rw.accounts.svc:5432/openbank_products
+            - name: QUARKUS_DATASOURCE_USERNAME
+              valueFrom: {secretKeyRef: {name: product-catalog-db-app, key: username}}
+            - name: QUARKUS_DATASOURCE_PASSWORD
+              valueFrom: {secretKeyRef: {name: product-catalog-db-app, key: password}}
           startupProbe:
             httpGet:
               path: /q/health/ready
