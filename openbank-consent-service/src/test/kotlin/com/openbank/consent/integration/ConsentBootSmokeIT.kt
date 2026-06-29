@@ -4,7 +4,7 @@
 
 package com.openbank.consent.integration
 
-import com.openbank.consent.it.PostgresTestResource
+import com.openbank.consent.it.ConsentPostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
@@ -18,14 +18,18 @@ import org.junit.jupiter.api.Test
 /**
  * Boot smoke test guarding the "released-but-never-booted" defect class (issue #2469).
  *
- * consent-service has Postgres (Flyway V1..V4), OIDC disabled in test, and a single outgoing
- * Kafka emitter (`consent-events-out`). PostgresTestResource provides an isolated container;
- * InMemoryKafkaResource swaps the outgoing emitter to in-memory so no broker is needed.
- * The two assertions prove Flyway runs, CDI/config wires correctly, and the HTTP port is up.
+ * consent-service is a released money-path component (version.txt) that uses Hibernate Reactive
+ * (Postgres + Flyway), Redis (idempotency), and a Kafka outgoing emitter (`consent-events-out`).
+ * Boot/config defects — duplicate YAML keys, missing CDI beans, OIDC mis-wiring — only surface
+ * at first boot, not in unit tests. The two assertions prove that config, Flyway migrations,
+ * and openbank-libs wiring survive a real Quarkus boot.
+ *
+ * The `consent-events-out` emitter is switched to in-memory so no Kafka broker is required.
+ * Postgres + Redis are spun up in isolated Testcontainers by [ConsentPostgresRedisTestResource].
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
 @QuarkusTestResource(ConsentBootSmokeIT.InMemoryKafkaResource::class)
+@QuarkusTestResource(ConsentPostgresRedisTestResource::class)
 class ConsentBootSmokeIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
@@ -42,7 +46,8 @@ class ConsentBootSmokeIT {
 
     @Test
     fun `the service-info endpoint answers on the configured HTTP port`() {
-        val body = (Given { this } When { get("/api/v1/info") } Then { statusCode(200) }).extract().body().asString()
+        val body = (Given { this } When { get("/api/v1/info") } Then { statusCode(200) })
+            .extract().body().asString()
         assertThat(body).contains("openbank-consent-service")
     }
 }

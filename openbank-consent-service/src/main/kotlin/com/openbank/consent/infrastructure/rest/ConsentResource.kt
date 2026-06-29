@@ -21,6 +21,8 @@ import com.openbank.consent.infrastructure.rest.dto.RevokeConsentRequest
 import com.openbank.consent.infrastructure.rest.dto.ValidateConsentRequest
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
+import org.eclipse.microprofile.openapi.annotations.Operation
+import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.GET
@@ -36,6 +38,7 @@ import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.UriInfo
 import java.util.UUID
 
+@Tag(name = "Consents", description = "PSD2 / GDPR consent lifecycle management (ADR-0126)")
 @Path("/api/v1/consents")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -49,6 +52,7 @@ class ConsentResource(
     private val objectMapper: ObjectMapper,
 ) {
 
+    @Operation(summary = "Create a new consent (PENDING_SCA); idempotent via tppTransactionId / X-Request-ID")
     @POST
     suspend fun create(
         request: CreateConsentRequest,
@@ -96,20 +100,24 @@ class ConsentResource(
             .entity(responseBody).build()
     }
 
+    @Operation(summary = "Get consent by ID")
     @GET
     @Path("/{id}")
     suspend fun getById(@PathParam("id") id: UUID): ConsentResponse = ConsentResponse.from(getConsent.getConsent(id))
 
+    @Operation(summary = "List all consents for a party")
     @GET
     @Path("/party/{partyId}")
     suspend fun listByParty(@PathParam("partyId") partyId: UUID): List<ConsentResponse> =
         getConsent.listConsentsForParty(partyId).map { ConsentResponse.from(it) }
 
+    @Operation(summary = "List all consents granted to a TPP / grantee")
     @GET
     @Path("/grantee/{granteeId}")
     suspend fun listByGrantee(@PathParam("granteeId") granteeId: String): List<ConsentResponse> =
         getConsent.listConsentsForGrantee(granteeId).map { ConsentResponse.from(it) }
 
+    @Operation(summary = "Revoke an ACTIVE consent; transitions to REVOKED and enqueues ConsentRevoked event")
     @DELETE
     @Path("/{id}")
     @Authorize(action = "consent.revoke", resource = "#id")
@@ -122,16 +130,19 @@ class ConsentResource(
         return ConsentResponse.from(consent)
     }
 
+    @Operation(summary = "Activate a PENDING_SCA consent after SCA challenge completes")
     @POST
     @Path("/{id}/activate")
     suspend fun activate(@PathParam("id") id: UUID, @QueryParam("scaSessionId") scaSessionId: UUID): ConsentResponse =
         ConsentResponse.from(activateConsent.activateConsent(id, scaSessionId))
 
+    @Operation(summary = "Reject a PENDING_SCA consent (e.g. customer cancelled SCA); transitions to REJECTED")
     @POST
     @Path("/{id}/reject")
     suspend fun reject(@PathParam("id") id: UUID, @QueryParam("reason") reason: String): ConsentResponse =
         ConsentResponse.from(activateConsent.rejectConsent(id, reason))
 
+    @Operation(summary = "Validate whether a consent covers the requested scope and account (resource servers)")
     @POST
     @Path("/{id}/validate")
     suspend fun validate(@PathParam("id") id: UUID, request: ValidateConsentRequest): ConsentValidationResponse {

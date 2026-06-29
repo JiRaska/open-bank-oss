@@ -131,9 +131,9 @@ mp:
     datasource:
       reactive:
         url: vertx-reactive:postgresql://localhost:5433/openbank_consents_test
-    oidc:
-      enabled: false
     management:
+      enabled: false
+    oidc:
       enabled: false
 
 openbank:
