@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank/compare/notification-service-v0.7.3...notification-service-v0.8.0) (2026-06-29)
+
+
+### Features
+
+* **notification:** Teams webhook adapter + fan-out to all oversight channels ([#2521](https://github.com/JiRaska/open-bank/issues/2521)) ([60647d9](https://github.com/JiRaska/open-bank/commit/60647d939547a041f112b17a562fddf14d2c7573))
+
 ## [0.7.3](https://github.com/JiRaska/open-bank/compare/notification-service-v0.7.2...notification-service-v0.7.3) (2026-06-29)
 
 
