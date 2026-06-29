@@ -119,15 +119,7 @@ dependencies {
     // compileOnly in main (provided by the Quarkus extension at runtime) so it must be
     // added explicitly to the test classpath.
     testImplementation("io.micrometer:micrometer-core:1.14.5")
-    // TemporalBootSmoke calls TemporalWorkerConfig.onStart(StartupEvent); StartupEvent
-    // lives in quarkus-core which is not pulled in transitively by any other test dep.
-    testImplementation("io.quarkus:quarkus-core:3.33.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-
-    // Temporal workflow engine (EUDI saga orchestration). `implementation`
-    // rather than `compileOnly`: services orchestrating workflows need the client
-    // and worker APIs at runtime; the SDK is self-contained (not provided by Quarkus).
-    implementation("io.temporal:temporal-sdk:1.25.1")
 }
 
 // Build-time stamping of openbank-build-info.properties. Values come from
