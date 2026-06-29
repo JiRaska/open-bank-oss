@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank/compare/consent-service-v0.8.0...consent-service-v0.8.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* **consent:** expand wildcard imports and add trailing commas (ktlint) ([#2536](https://github.com/JiRaska/open-bank/issues/2536)) ([cc35531](https://github.com/JiRaska/open-bank/commit/cc35531cecd262a835d4d0f58226b1d7bf356d6b))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank/compare/consent-service-v0.7.1...consent-service-v0.8.0) (2026-06-29)
 
 
