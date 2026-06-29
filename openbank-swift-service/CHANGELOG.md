@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.3](https://github.com/JiRaska/open-bank/compare/swift-service-v0.6.2...swift-service-v0.6.3) (2026-06-29)
+
+
+### Bug Fixes
+
+* **swift:** disable Quarkus JUnit FacadeClassLoader in CI ([#2404](https://github.com/JiRaska/open-bank/issues/2404)) ([#2506](https://github.com/JiRaska/open-bank/issues/2506)) ([573cf7b](https://github.com/JiRaska/open-bank/commit/573cf7ba86f619269b53f23567cc21b3a776d358))
+
 ## [0.6.2](https://github.com/JiRaska/open-bank/compare/swift-service-v0.6.1...swift-service-v0.6.2) (2026-06-29)
 
 
