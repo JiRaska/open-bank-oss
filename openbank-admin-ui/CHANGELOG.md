@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.38.0](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.37.0...admin-ui-v0.38.0) (2026-06-29)
+
+
+### Features
+
+* **admin-ui:** mark ADR-0031 D3 built — SVID CN cross-check live and enforced ([#2543](https://github.com/JiRaska/open-bank/issues/2543)) ([6ab1534](https://github.com/JiRaska/open-bank/commit/6ab153439b972db3b4e066156c8f5a09a1d6949a))
+* **admin-ui:** read live SBOM from /q/openbank/sbom, fall back to baked bundle ([#2367](https://github.com/JiRaska/open-bank/issues/2367)) ([f7c2b58](https://github.com/JiRaska/open-bank/commit/f7c2b5843bf4bff25426981aa1833c29be023530))
+* **admin-ui:** surface AI-agent findings via shared AgentInsightsPanel below metrics ([#2503](https://github.com/JiRaska/open-bank/issues/2503)) ([da00df0](https://github.com/JiRaska/open-bank/commit/da00df081e63c7bafc31981bf26927d6c23f6de6))
+* **admin-ui:** surface live audit-trail integrity on IAOps (ADR-0031 D5) ([#2398](https://github.com/JiRaska/open-bank/issues/2398)) ([72f97d7](https://github.com/JiRaska/open-bank/commit/72f97d745fe249f7fa4d13dc28b5c098ab2816fa))
+* **devops:** add AI DevOps agent for SSDLC/DORA monitoring (ADR-0119) ([#2295](https://github.com/JiRaska/open-bank/issues/2295)) ([e811e4f](https://github.com/JiRaska/open-bank/commit/e811e4fd9510517f2e6fd099a2b0b7556f85b2aa))
+* **devops:** HITL approve/reject for findings (ADR-0119) ([#2308](https://github.com/JiRaska/open-bank/issues/2308)) ([b42a4c3](https://github.com/JiRaska/open-bank/commit/b42a4c3f4d75b0ff2199fc5fa9336f6fc45c21b8))
+
+
+### Bug Fixes
+
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2344](https://github.com/JiRaska/open-bank/issues/2344)) ([b6fb6d5](https://github.com/JiRaska/open-bank/commit/b6fb6d5a86a040f0dcc5f489d0b4c8d778c6ec50))
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2358](https://github.com/JiRaska/open-bank/issues/2358)) ([fab840a](https://github.com/JiRaska/open-bank/commit/fab840aafcbc7b63782c8709f9d1bb34e3f4b0cd))
+* **admin-ui:** point Temporal metrics queries at real server metric names ([a747521](https://github.com/JiRaska/open-bank/commit/a7475211094c061082f62db31e5bf7017a7b0ed8))
+* **admin-ui:** reflect ADR-0031 phase-2 reality + correct stale CD note in CLAUDE.md ([#2498](https://github.com/JiRaska/open-bank/issues/2498)) ([5908881](https://github.com/JiRaska/open-bank/commit/590888124d4af7fdf3828fde06f0ea2474a4a689))
+* **admin-ui:** restore AuditIntegrityTile dropped in iaops during [#2503](https://github.com/JiRaska/open-bank/issues/2503) ([#2508](https://github.com/JiRaska/open-bank/issues/2508)) ([d0ee740](https://github.com/JiRaska/open-bank/commit/d0ee74069a323be001b8dcbf781a09bf1600ddcf))
+* **customer-edge:** add per-party rate-limit config key (ADR-0132) ([#2501](https://github.com/JiRaska/open-bank/issues/2501)) ([213f528](https://github.com/JiRaska/open-bank/commit/213f52818238585840a7dd18ad98066aebd135bb))
+* **infra:** route docker.io CI pulls through ECR pull-through cache — zero NAT ([#2221](https://github.com/JiRaska/open-bank/issues/2221)) ([52caaf2](https://github.com/JiRaska/open-bank/commit/52caaf21097311e077e6ac011d388a7256769d89))
+* **notification:** ROLE_CUSTOMER on DELETE, lastUsedAt sweep, IDOR scope ([#2485](https://github.com/JiRaska/open-bank/issues/2485) follow-up) ([#2490](https://github.com/JiRaska/open-bank/issues/2490)) ([4277222](https://github.com/JiRaska/open-bank/commit/4277222937a768f0c3890ed7f57757d726ffa8a5))
+* **release:** restore transaction-service entry in release-please manifest ([#2351](https://github.com/JiRaska/open-bank/issues/2351)) ([7694897](https://github.com/JiRaska/open-bank/commit/7694897b8f282fdd529175d24e0cb56139655839)), closes [#2342](https://github.com/JiRaska/open-bank/issues/2342)
+
+
+### Security
+
+* **agent:** mint per-run pki-agent SVID in the BFF + base64 cert transport (ADR-0031 D3b) ([#2439](https://github.com/JiRaska/open-bank/issues/2439)) ([1dce3db](https://github.com/JiRaska/open-bank/commit/1dce3dbffc8b73accb902c7bef31865f0cc16402))
+
 ## [0.37.0](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.36.0...admin-ui-v0.37.0) (2026-06-29)
 
 
