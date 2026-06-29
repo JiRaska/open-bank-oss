@@ -185,6 +185,16 @@ CI is path-scoped (only changed services build). Domain layer has **zero** frame
   package.json `version` equal to version.txt on the release branch. The local release-please branch
   ref is usually STALE — `git reset --hard origin/<release-branch>` BEFORE editing or you regress the
   version; push with `--force-with-lease --no-verify` (branch-claiming guard, own PR).
+- **Never set `quarkus.application.version` explicitly in a service `application.yaml`.** The convention
+  plugin `openbank.quarkus-service` reads `version.txt` into the Gradle project version and the Quarkus
+  Gradle plugin propagates it into `quarkus.application.version` at build time. An explicit YAML value
+  *shadows* that build-stamped version with a stale literal (most services sat at `0.1.0`), so it desyncs
+  from `version.txt` on every release-please bump — `version.txt == quarkus.application.version`
+  (rules.yaml `release_invariant`) breaks and the version-bump gate trips on the next PR that touches the
+  service (the #2669/#2717 fraud drift → a 37-service sweep). Fix: **delete the key** — the runtime version
+  derives from `version.txt`, the single source of truth (`/api/v1/info`, `X-Service-Version`). ENFORCED by
+  `.github/scripts/check-app-version-override.sh` (CI). `openbank.api.version` (the API-contract axis) is a
+  different key and is unaffected.
 
 ### Kubernetes / ArgoCD pitfalls
 - **`strategy.type: Recreate` with Server-Side Apply = HTTP 403 Forbidden.** SSA merges the

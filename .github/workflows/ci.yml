@@ -314,6 +314,18 @@ jobs:
       - name: "admin-ui version sync guard (version.txt == package.json, enforced)"
         run: bash .github/scripts/check-admin-ui-version-sync.sh .
 
+      # quarkus.application.version override guard (ADR-0029 release_invariant).
+      # The convention plugin openbank.quarkus-service reads version.txt into the
+      # Gradle project version and the Quarkus Gradle plugin stamps it into
+      # quarkus.application.version at build time. An explicit value in a service
+      # application.yaml SHADOWS that build-stamped version with a stale literal,
+      # silently breaking version.txt == quarkus.application.version on every
+      # release-please bump (the #2669/#2717 fraud drift, then a 37-service sweep).
+      # The fleet sweep is complete (all services derive the version from version.txt),
+      # so this is a hard gate: a re-introduced override fails the build. ENFORCED.
+      - name: "quarkus.application.version override guard (release_invariant, enforced)"
+        run: bash .github/scripts/check-app-version-override.sh .
+
       # ADR-0106 identifier intent split (#1699): new code mints identifiers via
       # com.openbank.libs.domain.identifiers.Ids — Ids.newId() (UUIDv7, time-ordered,
       # for durable/indexed keys) or Ids.randomId() (UUIDv4, for idempotency keys,

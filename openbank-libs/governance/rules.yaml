@@ -65,8 +65,13 @@ versioning:
   # (the former amended ADR-0029 D2's "collapse three into one").
   release_invariant:
     # The deployable artifact's release SemVer. These MUST be equal for a released service.
+    # quarkus.application.version is DERIVED from version.txt at build time (the
+    # openbank.quarkus-service convention plugin sets the Gradle project version from
+    # version.txt; the Quarkus plugin stamps it in). It must NOT be set explicitly in a
+    # service application.yaml — an explicit value shadows the derived one and desyncs on
+    # every release-please bump. Enforced: .github/scripts/check-app-version-override.sh.
     - "version.txt"
-    - "quarkus.application.version"
+    - "quarkus.application.version"   # build-derived from version.txt; never set in application.yaml
     - "git release tag"
     - "container image tag"
   api_invariant:
