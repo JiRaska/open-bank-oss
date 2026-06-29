@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.1](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.38.0...admin-ui-v0.38.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* **admin-ui:** error-rate tile reads true 5xx ratio over 1h, not noisy 5m ([#2658](https://github.com/JiRaska/open-bank/issues/2658)) ([702eeca](https://github.com/JiRaska/open-bank/commit/702eecaf52ad80ff5afafaf0d45b0697e628fde2))
+
 ## [0.38.0](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.37.0...admin-ui-v0.38.0) (2026-06-29)
 
 
