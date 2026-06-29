@@ -1,0 +1,54 @@
+# Dependabot auto-merge (OSS-readiness D4, ADR-0119 §D4).
+#
+# Policy: auto-merge patch and minor Dependabot PRs once CI is green.
+# Major updates stay open for human review — they can introduce breaking changes.
+#
+# Allowlist: gradle, npm, github-actions, docker ecosystems (all configured in
+# .github/dependabot.yml). Excluded from auto-merge:
+#   - Major version bumps (any ecosystem)
+#   - PRs that are not authored by dependabot[bot]
+#
+# Token: GITHUB_TOKEN with `contents: write` is enough for auto-merge on a repo
+# without environment protection (GitHub Free / public repos). The workflow
+# enables native GitHub auto-merge — merges only after the required status checks
+# pass (all-green gate).
+#
+# Ref: https://docs.github.com/en/code-security/dependabot/working-with-dependabot/automating-dependabot-with-github-actions#enabling-auto-merge-on-a-pull-request
+
+name: Dependabot auto-merge
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    name: Auto-merge patch/minor Dependabot PRs
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]'
+
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@08eff52bf64351f401fb50d4972fa95b9f2c1b53 # v2.3.0
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+      # Auto-merge patch or minor updates. Major stays for human review.
+      - name: Enable auto-merge (patch / minor only)
+        if: |
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Skip — major update (requires human review)
+        if: steps.metadata.outputs.update-type == 'version-update:semver-major'
+        run: |
+          echo "::notice title=Major update::${{ github.event.pull_request.title }} is a major bump — skipping auto-merge, human review required."
