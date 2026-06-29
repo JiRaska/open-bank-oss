@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.11.1](https://github.com/JiRaska/open-bank/compare/agent-service-v1.11.0...agent-service-v1.11.1) (2026-06-29)
+
+
+### Security
+
+* **agent:** bind asserted X-Agent-Id to verified operator roles (ADR-0031 D3a) ([#2403](https://github.com/JiRaska/open-bank/issues/2403)) ([5b94bc3](https://github.com/JiRaska/open-bank/commit/5b94bc3423c9a808e3c859ee8e485cff6dd97a37))
+* **agent:** mint per-run pki-agent SVID in the BFF + base64 cert transport (ADR-0031 D3b) ([#2439](https://github.com/JiRaska/open-bank/issues/2439)) ([e8d5c92](https://github.com/JiRaska/open-bank/commit/e8d5c927d6f19d84c8c5eef5dc0df9a20718a011))
+* **agent:** verify a PoP-signed pki-agent cert as the per-run agent identity (ADR-0031 D3b) ([#2412](https://github.com/JiRaska/open-bank/issues/2412)) ([f2e3537](https://github.com/JiRaska/open-bank/commit/f2e353757fd3255f0a3ffd2453be226a52546cb0))
+
 ## [1.11.0](https://github.com/JiRaska/open-bank/compare/agent-service-v1.10.1...agent-service-v1.11.0) (2026-06-28)
 
 
