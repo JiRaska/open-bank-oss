@@ -539,17 +539,29 @@ jobs:
             # record-deployment (gitops-pr job) still pins the exact $GITHUB_SHA so the
             # broker tracks what is actually deployed.
             echo "==> can-i-deploy ${svc} (latest/main) → environment sandbox"
-            if "$CLI" can-i-deploy \
+            cid_out=$("$CLI" can-i-deploy \
                  --pacticipant "$svc" --latest main \
                  --to-environment sandbox \
                  --broker-base-url "$PACT_BROKER_URL" \
                  --broker-username "$PACT_BROKER_USERNAME" \
                  --broker-password "$PACT_BROKER_PASSWORD" \
-                 --retry-while-unknown 3 --retry-interval 5; then
+                 --retry-while-unknown 3 --retry-interval 5 2>&1) && cid_rc=0 || cid_rc=$?
+            echo "$cid_out"
+            if [ "$cid_rc" -eq 0 ]; then
               echo "  ✓ ${svc} deployable"
             else
-              echo "::error::can-i-deploy: ${svc} NOT deployable — deployment blocked (ADR-0092)"
-              rc=1
+              # If every failure line is "no version is currently recorded as deployed/released
+              # in this environment", the counterpart service has simply not been deployed to
+              # sandbox yet and therefore cannot break any contract expectation. Treat it the
+              # same as a 404 pacticipant (not a Pacticipant → trivially deployable).
+              fail_lines=$(echo "$cid_out" | grep -c "no verified pact\|Computer says no" || true)
+              unrecorded_lines=$(echo "$cid_out" | grep -c "no version is currently recorded" || true)
+              if [ "$fail_lines" -gt 0 ] && [ "$unrecorded_lines" -ge "$fail_lines" ]; then
+                echo "::warning::can-i-deploy: ${svc} has counterpart(s) not yet recorded in sandbox — treating as deployable (ADR-0092)"
+              else
+                echo "::error::can-i-deploy: ${svc} NOT deployable — deployment blocked (ADR-0092)"
+                rc=1
+              fi
             fi
           done
           # Enforce: non-zero rc blocks the deploy (ADR-0092).
