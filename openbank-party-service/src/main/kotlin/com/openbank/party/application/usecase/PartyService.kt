@@ -39,6 +39,8 @@ class PartyService : PartyUseCase {
 
     @Inject lateinit var eventPublisher: PartyEventPublisher
 
+    @Inject lateinit var gdprAggregation: GdprAggregationPort
+
     @Inject lateinit var metrics: DomainMetrics
 
     @Inject lateinit var clock: Clock
@@ -144,7 +146,9 @@ class PartyService : PartyUseCase {
     override suspend fun exportPartyData(id: UUID): PartyGdprExport {
         val party = partyRepo.findById(id) ?: throw PartyNotFoundException(id)
         val documents = documentRepo.findByPartyId(id)
-        return PartyGdprExport(party, documents, clock.instant())
+        val kycData = gdprAggregation.fetchKycData(id)
+        val cardData = gdprAggregation.fetchCardData(id)
+        return PartyGdprExport(party, documents, clock.instant(), kycData, cardData)
     }
 
     override suspend fun listParties(page: Int, size: Int, status: PartyStatus?): Map<String, Any> {
@@ -307,4 +311,6 @@ class PartyService : PartyUseCase {
 
     override suspend fun getDocumentContent(partyId: UUID, fileId: UUID): PartyDocumentFile? =
         documentFileRepo.findByIdAndPartyId(fileId, partyId)
+
+    override suspend fun getPartyKeycloakSub(id: UUID): String? = partyRepo.findById(id)?.keycloakSub
 }

@@ -117,4 +117,10 @@ interface PartyUseCase {
 
     /** ADR-0072: true when the RČ dedup pepper is configured; callers use this to distinguish 503 (pepper off) from 404 (not found). */
     fun isDedupAvailable(): Boolean
+
+    /**
+     * Returns the Keycloak subject bound to [id], or null if not found or not bound.
+     * Used by the GDPR Art. 15 export endpoint to verify subject-access self-service.
+     */
+    suspend fun getPartyKeycloakSub(id: UUID): String?
 }

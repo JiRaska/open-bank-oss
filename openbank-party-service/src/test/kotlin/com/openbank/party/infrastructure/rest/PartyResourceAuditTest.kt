@@ -41,10 +41,15 @@ class PartyResourceAuditTest {
             coEvery { it.publish(capture(events)) } returns Unit
         }
         val token = mockk<JsonWebToken>().also { every { it.subject } returns actorSub }
+        val identity = mockk<io.quarkus.security.identity.SecurityIdentity>().also {
+            every { it.hasRole("ROLE_ADMIN") } returns true
+            every { it.hasRole("ROLE_DPO") } returns false
+        }
         return PartyResource().apply {
-            partyUseCase = mockk()
+            partyUseCase = mockk(relaxed = true)
             flags = mockk(relaxed = true)
             jwt = token
+            securityIdentity = identity
             auditPublisher = publisher
         }
     }

@@ -68,6 +68,18 @@ interface PartyDocumentFileRepository {
     suspend fun deleteByPartyId(partyId: UUID)
 }
 
+/**
+ * Outbound port for GDPR Art. 15 aggregation: fetches PII from downstream services
+ * on a best-effort basis (null = service unavailable, export proceeds with party PII only).
+ */
+interface GdprAggregationPort {
+    /** Returns the latest KYC case for [partyId], or null if unavailable. */
+    suspend fun fetchKycData(partyId: java.util.UUID): Map<String, Any?>?
+
+    /** Returns all cards for [partyId], or empty list if unavailable. */
+    suspend fun fetchCardData(partyId: java.util.UUID): List<Map<String, Any?>>
+}
+
 /** Outbound port for party domain events. */
 interface PartyEventPublisher {
 

@@ -45,6 +45,7 @@ import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import io.quarkus.security.identity.SecurityIdentity
 import org.eclipse.microprofile.jwt.JsonWebToken
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
@@ -67,6 +68,9 @@ class PartyResource {
     lateinit var jwt: JsonWebToken
 
     @Inject lateinit var auditPublisher: AuditEventPublisher
+
+    @Inject @io.quarkus.arc.Unremovable
+    lateinit var securityIdentity: SecurityIdentity
 
     @GET
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_SERVICE")
@@ -179,9 +183,12 @@ class PartyResource {
 
     @GET
     @Path("/{id}/gdpr-export")
-    @RolesAllowed("ROLE_ADMIN")
     @Operation(summary = "Export all PII held for a party — GDPR Art. 15 Right of Access (ADR-0118)")
     suspend fun exportPartyGdpr(@PathParam("id") id: UUID): Response {
+        val isAdmin = securityIdentity.hasRole("ROLE_ADMIN")
+        val isDpo = securityIdentity.hasRole("ROLE_DPO")
+        val isSelf = jwt.subject != null && jwt.subject == partyUseCase.getPartyKeycloakSub(id)
+        if (!isAdmin && !isDpo && !isSelf) return Response.status(Response.Status.FORBIDDEN).build()
         val export = partyUseCase.exportPartyData(id)
         // ADR-0118 / ADR-0086: a subject-access read exposes the full PII set — audit the
         // access itself (Art. 30). Emitted only after a successful fetch; a 404 (party not
@@ -480,6 +487,8 @@ fun PartyGdprExport.toResponse() = mapOf(
             "createdAt" to it.createdAt,
         )
     },
+    "kyc" to kycData,
+    "cards" to cardData,
     "exportedAt" to exportedAt,
     "scope" to GDPR_EXPORT_SCOPE,
 )

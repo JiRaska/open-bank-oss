@@ -697,6 +697,7 @@ class PartyServiceTest {
         documentFileRepo = mockk()
         eventPublisher = mockk(relaxed = true)
         metrics = mockk(relaxed = true)
+        gdprAggregation = mockk(relaxed = true)
         rcPepper = Optional.empty()
         clock = Clock.fixed(now, ZoneOffset.UTC)
     }
