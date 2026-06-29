@@ -95,7 +95,7 @@ class ConsentTest {
             consent(
                 scopes = setOf(ConsentScope.ACCOUNTS_READ),
                 validFrom = baseValidFrom,
-                validTo = baseValidFrom.plusDays(91)
+                validTo = baseValidFrom.plusDays(91),
             )
         }
     }

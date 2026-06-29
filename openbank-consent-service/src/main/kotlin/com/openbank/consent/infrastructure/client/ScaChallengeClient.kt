@@ -18,12 +18,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.util.UUID
 
-data class ScaChallengeClientResponse(
-    val id: UUID,
-    val partyId: UUID,
-    val purpose: String,
-    val status: String
-)
+data class ScaChallengeClientResponse(val id: UUID, val partyId: UUID, val purpose: String, val status: String)
 
 @Path("/api/v1/sca/challenges")
 @RegisterRestClient(configKey = "sca-service")
@@ -34,9 +29,8 @@ interface ScaServiceRestClient {
 }
 
 @ApplicationScoped
-class ResilientScaChallengeClient @Inject constructor(
-    @RestClient private val client: ScaServiceRestClient
-) : ScaChallengeClient {
+class ResilientScaChallengeClient @Inject constructor(@RestClient private val client: ScaServiceRestClient) :
+    ScaChallengeClient {
 
     @Timeout(2000)
     @Retry(maxRetries = 2, delay = 200, jitter = 100, retryOn = [Exception::class])
@@ -47,7 +41,7 @@ class ResilientScaChallengeClient @Inject constructor(
             id = response.id,
             partyId = response.partyId,
             purpose = response.purpose,
-            status = response.status
+            status = response.status,
         )
     }
 }

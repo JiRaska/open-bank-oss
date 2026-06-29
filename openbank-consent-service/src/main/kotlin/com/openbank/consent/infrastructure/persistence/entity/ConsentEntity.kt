@@ -98,7 +98,7 @@ class ConsentEntity : PanacheEntityBase() {
         createdAt = createdAt,
         updatedAt = updatedAt,
         revokedAt = revokedAt,
-        revokedReason = revokedReason
+        revokedReason = revokedReason,
     )
 
     companion object {

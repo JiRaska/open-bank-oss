@@ -4,9 +4,9 @@
 
 package com.openbank.consent.domain.event
 
-import com.openbank.libs.domain.event.DomainEvent
 import com.openbank.consent.domain.model.ConsentScope
 import com.openbank.consent.domain.model.GranteeType
+import com.openbank.libs.domain.event.DomainEvent
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -16,7 +16,7 @@ data class ConsentGranted(
     val granteeId: String,
     val granteeType: GranteeType,
     val scopes: Set<ConsentScope>,
-    val validTo: OffsetDateTime
+    val validTo: OffsetDateTime,
 ) : DomainEvent() {
     override val aggregateType = "Consent"
     override val eventType = "ConsentGranted"
@@ -27,18 +27,14 @@ data class ConsentRevoked(
     override val aggregateId: UUID,
     val partyId: UUID,
     val granteeId: String,
-    val reason: String
+    val reason: String,
 ) : DomainEvent() {
     override val aggregateType = "Consent"
     override val eventType = "ConsentRevoked"
     override val version = 1L
 }
 
-data class ConsentExpired(
-    override val aggregateId: UUID,
-    val partyId: UUID,
-    val granteeId: String
-) : DomainEvent() {
+data class ConsentExpired(override val aggregateId: UUID, val partyId: UUID, val granteeId: String) : DomainEvent() {
     override val aggregateType = "Consent"
     override val eventType = "ConsentExpired"
     override val version = 1L
@@ -48,7 +44,7 @@ data class ConsentRejected(
     override val aggregateId: UUID,
     val partyId: UUID,
     val granteeId: String,
-    val reason: String
+    val reason: String,
 ) : DomainEvent() {
     override val aggregateType = "Consent"
     override val eventType = "ConsentRejected"

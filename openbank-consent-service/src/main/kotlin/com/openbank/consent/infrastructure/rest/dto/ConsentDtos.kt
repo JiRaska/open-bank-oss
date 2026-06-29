@@ -17,18 +17,12 @@ data class CreateConsentRequest(
     val accountIbans: List<String>?,
     val validTo: OffsetDateTime,
     val redirectUri: String?,
-    val tppTransactionId: String?
+    val tppTransactionId: String?,
 )
 
-data class RevokeConsentRequest(
-    val reason: String
-)
+data class RevokeConsentRequest(val reason: String)
 
-data class ValidateConsentRequest(
-    val granteeId: String,
-    val requiredScope: ConsentScope,
-    val accountIban: String?
-)
+data class ValidateConsentRequest(val granteeId: String, val requiredScope: ConsentScope, val accountIban: String?)
 
 data class ConsentResponse(
     val id: UUID,
@@ -41,7 +35,7 @@ data class ConsentResponse(
     val status: ConsentStatus,
     val validFrom: OffsetDateTime,
     val validTo: OffsetDateTime,
-    val createdAt: OffsetDateTime
+    val createdAt: OffsetDateTime,
 ) {
     companion object {
         fun from(c: Consent) = ConsentResponse(
@@ -55,13 +49,9 @@ data class ConsentResponse(
             status = c.status,
             validFrom = c.validFrom,
             validTo = c.validTo,
-            createdAt = c.createdAt
+            createdAt = c.createdAt,
         )
     }
 }
 
-data class ConsentValidationResponse(
-    val valid: Boolean,
-    val reason: String?,
-    val code: String?
-)
+data class ConsentValidationResponse(val valid: Boolean, val reason: String?, val code: String?)

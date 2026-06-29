@@ -22,20 +22,16 @@ data class CreateConsentCommand(
     val redirectUri: String?,
     val tppTransactionId: String?,
     val ipAddress: String?,
-    val userAgent: String?
+    val userAgent: String?,
 )
 
-data class RevokeConsentCommand(
-    val consentId: UUID,
-    val partyId: UUID,
-    val reason: String
-)
+data class RevokeConsentCommand(val consentId: UUID, val partyId: UUID, val reason: String)
 
 data class ValidateConsentCommand(
     val consentId: UUID,
     val granteeId: String,
     val requiredScope: ConsentScope,
-    val accountIban: String?
+    val accountIban: String?,
 )
 
 interface CreateConsentUseCase {

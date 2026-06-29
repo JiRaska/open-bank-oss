@@ -35,31 +35,35 @@ class ConsentAlreadyActiveMapper : ExceptionMapper<ConsentAlreadyActiveException
 
 @Provider
 class ConsentScaChallengeNotFoundMapper : ExceptionMapper<ConsentScaChallengeNotFoundException> {
-    override fun toResponse(e: ConsentScaChallengeNotFoundException): Response =
-        Response.status(422).entity(errorResponse(ErrorCode.VALIDATION_ERROR, e.message ?: "SCA challenge not found")).build()
+    override fun toResponse(e: ConsentScaChallengeNotFoundException): Response = Response.status(
+        422,
+    ).entity(errorResponse(ErrorCode.VALIDATION_ERROR, e.message ?: "SCA challenge not found")).build()
 }
 
 @Provider
 class ConsentScaVerificationUnavailableMapper : ExceptionMapper<ConsentScaVerificationUnavailableException> {
-    override fun toResponse(e: ConsentScaVerificationUnavailableException): Response =
-        Response.status(503)
-            .entity(ApiError(
+    override fun toResponse(e: ConsentScaVerificationUnavailableException): Response = Response.status(503)
+        .entity(
+            ApiError(
                 traceId = UUID.randomUUID().toString(),
                 status = 503,
                 code = "SERVICE_UNAVAILABLE",
-                message = "SCA verification is temporarily unavailable"
-            ))
-            .build()
+                message = "SCA verification is temporarily unavailable",
+            ),
+        )
+        .build()
 }
 
 @Provider
 class ConsentScaChallengeMismatchMapper : ExceptionMapper<ConsentScaChallengeMismatchException> {
-    override fun toResponse(e: ConsentScaChallengeMismatchException): Response =
-        Response.status(422).entity(errorResponse(ErrorCode.VALIDATION_ERROR, e.message ?: "SCA challenge mismatch")).build()
+    override fun toResponse(e: ConsentScaChallengeMismatchException): Response = Response.status(
+        422,
+    ).entity(errorResponse(ErrorCode.VALIDATION_ERROR, e.message ?: "SCA challenge mismatch")).build()
 }
 
 @Provider
 class ConsentScaNotCompletedMapper : ExceptionMapper<ConsentScaNotCompletedException> {
-    override fun toResponse(e: ConsentScaNotCompletedException): Response =
-        Response.status(422).entity(errorResponse(ErrorCode.VALIDATION_ERROR, e.message ?: "SCA challenge not completed")).build()
+    override fun toResponse(e: ConsentScaNotCompletedException): Response = Response.status(
+        422,
+    ).entity(errorResponse(ErrorCode.VALIDATION_ERROR, e.message ?: "SCA challenge not completed")).build()
 }
