@@ -1,7 +1,7 @@
 quarkus:
   application:
     name: openbank-fraud-service
-    version: 0.1.0
+    version: 0.4.2
   http:
     port: 8133
     cors:
