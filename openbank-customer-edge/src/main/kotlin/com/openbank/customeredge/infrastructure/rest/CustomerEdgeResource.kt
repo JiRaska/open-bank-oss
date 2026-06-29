@@ -732,6 +732,35 @@ class CustomerEdgeResource(
         return upstream.get("$transactionServiceUrl/api/v1/transactions$query", customer.partyId.toString())
     }
 
+    /**
+     * Read the status of one of the caller's own domestic payments — the poll target for the app's
+     * Send flow, so the UI can move from "accepted for processing" to a confirmed "settled" (or a
+     * failure) honestly instead of guessing. domestic-payment scopes by payment id only, so ownership
+     * is enforced HERE: resolve the payment, then confirm its debtorAccountId belongs to the JWT party
+     * (IDOR guard, same pattern as the account / transaction reads). A non-owned or unknown id returns
+     * 403, deliberately not 404, to avoid an existence oracle.
+     */
+    @GET
+    @Path("/domestic-payments/{paymentId}")
+    @Authorize(action = "customer.payments.read", resource = "#paymentId")
+    @Blocking
+    fun getDomesticPayment(@PathParam("paymentId") paymentId: UUID): Response {
+        val customer = customer()
+        val resp = upstream.get(
+            "$domesticPaymentServiceUrl/api/v1/domestic-payments/$paymentId",
+            customer.partyId.toString(),
+        )
+        if (resp.status != 200) return forbidden("Payment does not belong to caller")
+        val body = resp.entity?.toString() ?: return forbidden("Payment does not belong to caller")
+        val debtorAccountId = extractTextField(objectMapper, body, "debtorAccountId")
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return forbidden("Payment does not belong to caller")
+        if (!ownsAccount(debtorAccountId, customer.partyId)) {
+            return forbidden("Payment does not belong to caller")
+        }
+        return Response.ok(body).type(MediaType.APPLICATION_JSON).build()
+    }
+
     // Fetch an account from account-service by id (with the M2M token + party header). Returns the raw
     // JSON body on 200, or null on any non-200 / empty (not found / upstream error). The single source
     // for both the ownership check and the debtor IBAN used to enrich a payment.
