@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/JiRaska/open-bank/compare/sca-service-v0.8.1...sca-service-v0.8.2) (2026-06-29)
+
+
+### Bug Fixes
+
+* **sca:** mint fresh challenge when idempotent one is stale/spent ([#2512](https://github.com/JiRaska/open-bank/issues/2512)) ([3838f2f](https://github.com/JiRaska/open-bank/commit/3838f2f3a6fb259709735a70f25ab33ab6b474f5))
+
 ## [0.8.1](https://github.com/JiRaska/open-bank/compare/sca-service-v0.8.0...sca-service-v0.8.1) (2026-06-27)
 
 
