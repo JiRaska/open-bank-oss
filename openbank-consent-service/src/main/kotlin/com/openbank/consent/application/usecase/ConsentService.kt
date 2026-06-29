@@ -121,6 +121,7 @@ class ConsentService(
                 granteeType = saved.granteeType,
                 scopes = saved.scopes,
                 validTo = saved.validTo,
+                occurredAt = clock.instant(),
             ),
         )
 
@@ -140,6 +141,7 @@ class ConsentService(
                 partyId = saved.partyId,
                 granteeId = saved.granteeId,
                 reason = reason,
+                occurredAt = clock.instant(),
             ),
         )
 
@@ -163,6 +165,7 @@ class ConsentService(
                 partyId = saved.partyId,
                 granteeId = saved.granteeId,
                 reason = command.reason,
+                occurredAt = clock.instant(),
             ),
         )
 

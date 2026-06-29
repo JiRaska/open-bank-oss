@@ -7,6 +7,7 @@ package com.openbank.pid.domain.event
 import com.openbank.libs.domain.event.DomainEvent
 import com.openbank.pid.domain.model.CaseVerdict
 import com.openbank.pid.domain.model.VerificationTrigger
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -18,7 +19,8 @@ data class VerificationCaseOpenedEvent(
     override val aggregateId: UUID,
     val trigger: VerificationTrigger,
     val candidatePartyIds: List<UUID>,
-) : DomainEvent() {
+    override val occurredAt: Instant,
+) : DomainEvent(occurredAt) {
     override val aggregateType = "IdentityVerificationCase"
     override val eventType = "IdentityVerificationCaseOpened"
     override val version = 1L
@@ -35,7 +37,8 @@ data class VerificationCaseDecidedEvent(
     val linkPartyId: UUID?,
     val firstApprover: String,
     val secondApprover: String,
-) : DomainEvent() {
+    override val occurredAt: Instant,
+) : DomainEvent(occurredAt) {
     override val aggregateType = "IdentityVerificationCase"
     override val eventType = "IdentityVerificationCaseDecided"
     override val version = 1L

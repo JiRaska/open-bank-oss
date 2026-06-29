@@ -7,6 +7,7 @@ package com.openbank.account.domain.event
 import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
 import com.openbank.libs.domain.event.DomainEvent
+import java.time.Instant
 import java.util.UUID
 
 data class AccountCreatedEvent(
@@ -17,7 +18,8 @@ data class AccountCreatedEvent(
     val partyId: UUID,
     val productId: UUID,
     val currency: String,
-) : DomainEvent() {
+    override val occurredAt: Instant,
+) : DomainEvent(occurredAt) {
     override val aggregateType = "Account"
     override val eventType = "AccountCreated"
 }
@@ -28,13 +30,18 @@ data class AccountStatusChangedEvent(
     val previousStatus: AccountStatus,
     val newStatus: AccountStatus,
     val reason: String?,
-) : DomainEvent() {
+    override val occurredAt: Instant,
+) : DomainEvent(occurredAt) {
     override val aggregateType = "Account"
     override val eventType = "AccountStatusChanged"
 }
 
-data class AccountClosedEvent(override val aggregateId: UUID, override val version: Long, val reason: String?) :
-    DomainEvent() {
+data class AccountClosedEvent(
+    override val aggregateId: UUID,
+    override val version: Long,
+    val reason: String?,
+    override val occurredAt: Instant,
+) : DomainEvent(occurredAt) {
     override val aggregateType = "Account"
     override val eventType = "AccountClosed"
 }

@@ -73,6 +73,7 @@ class AccountEventPactProviderVerificationTest {
             partyId = UUID.randomUUID(),
             productId = UUID.randomUUID(),
             currency = "CZK",
+            occurredAt = java.time.Instant.parse("2026-01-01T00:00:00Z"),
         )
         return objectMapper.writeValueAsString(event)
     }

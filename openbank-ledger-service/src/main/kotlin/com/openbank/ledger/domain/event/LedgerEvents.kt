@@ -6,6 +6,7 @@ package com.openbank.ledger.domain.event
 
 import com.openbank.libs.domain.event.DomainEvent
 import java.math.BigDecimal
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -16,7 +17,8 @@ data class JournalPostedEvent(
     val transactionId: UUID,
     val entryDate: LocalDate,
     val lineCount: Int,
-) : DomainEvent() {
+    override val occurredAt: Instant,
+) : DomainEvent(occurredAt) {
     override val aggregateType = "JournalEntry"
     override val eventType = "JournalPosted"
 }
@@ -27,7 +29,8 @@ data class JournalReversedEvent(
     val originalJournalId: UUID,
     val transactionId: UUID,
     val reason: String,
-) : DomainEvent() {
+    override val occurredAt: Instant,
+) : DomainEvent(occurredAt) {
     override val aggregateType = "JournalEntry"
     override val eventType = "JournalReversed"
 }
@@ -46,7 +49,8 @@ data class AccountBookedChangedEvent(
     val journalEntryId: UUID,
     val transactionId: UUID,
     val entryDate: LocalDate,
-) : DomainEvent() {
+    override val occurredAt: Instant,
+) : DomainEvent(occurredAt) {
     override val aggregateType = "Account"
     override val eventType = "AccountBookedChanged"
 }

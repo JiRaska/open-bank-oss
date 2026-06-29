@@ -119,6 +119,7 @@ class AccountService(
                 partyId = saved.partyId,
                 productId = saved.productId,
                 currency = saved.currency.code,
+                occurredAt = clock.instant(),
             ),
         )
 
@@ -138,6 +139,7 @@ class AccountService(
                 aggregateId = updated.id,
                 version = updated.version,
                 reason = command.reason,
+                occurredAt = clock.instant(),
             ),
         )
 
@@ -161,6 +163,7 @@ class AccountService(
                 previousStatus = previous,
                 newStatus = updated.status,
                 reason = "KYC + AML cleared (ADR-0073)",
+                occurredAt = clock.instant(),
             ),
         )
 
@@ -182,6 +185,7 @@ class AccountService(
                 previousStatus = previous,
                 newStatus = updated.status,
                 reason = command.reason,
+                occurredAt = clock.instant(),
             ),
         )
 
@@ -203,6 +207,7 @@ class AccountService(
                 previousStatus = previous,
                 newStatus = updated.status,
                 reason = command.reason,
+                occurredAt = clock.instant(),
             ),
         )
 

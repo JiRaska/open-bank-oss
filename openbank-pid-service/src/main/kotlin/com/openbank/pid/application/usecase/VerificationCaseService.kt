@@ -68,6 +68,7 @@ class VerificationCaseService(
                     aggregateId = case.id,
                     trigger = case.trigger,
                     candidatePartyIds = case.candidatePartyIds,
+                    occurredAt = Instant.now(clock),
                 ),
             )
             case.id
@@ -110,6 +111,7 @@ class VerificationCaseService(
                     linkPartyId = updated.finalLinkPartyId,
                     firstApprover = updated.firstApprover!!,
                     secondApprover = updated.secondApprover!!,
+                    occurredAt = now,
                 ),
             )
             Log.info(

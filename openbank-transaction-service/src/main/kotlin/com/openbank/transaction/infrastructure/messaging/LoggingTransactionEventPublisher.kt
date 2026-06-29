@@ -36,6 +36,7 @@ class LoggingTransactionEventPublisher(private val objectMapper: ObjectMapper, p
             rail = transaction.rail ?: com.openbank.libs.domain.payment.PaymentRail.UNKNOWN,
             instructionType = transaction.instructionType
                 ?: com.openbank.libs.domain.payment.InstructionType.UNKNOWN,
+            occurredAt = Instant.now(clock),
         ),
     )
 
@@ -44,6 +45,7 @@ class LoggingTransactionEventPublisher(private val objectMapper: ObjectMapper, p
             aggregateId = transaction.id,
             version = transaction.version,
             referenceNumber = transaction.referenceNumber,
+            occurredAt = Instant.now(clock),
         ),
     )
 
@@ -53,18 +55,23 @@ class LoggingTransactionEventPublisher(private val objectMapper: ObjectMapper, p
             version = transaction.version,
             referenceNumber = transaction.referenceNumber,
             reason = reason,
+            occurredAt = Instant.now(clock),
         ),
     )
 
-    override fun settledPayload(transaction: Transaction, journalId: UUID): String = objectMapper.writeValueAsString(
-        TransactionSettledEvent(
-            aggregateId = transaction.id,
-            version = transaction.version,
-            referenceNumber = transaction.referenceNumber,
-            journalId = journalId,
-            originatingPaymentId = transaction.originatingPaymentId,
-            bookingDate = transaction.bookingDate,
-            settledAt = Instant.now(clock),
-        ),
-    )
+    override fun settledPayload(transaction: Transaction, journalId: UUID): String {
+        val now = Instant.now(clock)
+        return objectMapper.writeValueAsString(
+            TransactionSettledEvent(
+                aggregateId = transaction.id,
+                version = transaction.version,
+                referenceNumber = transaction.referenceNumber,
+                journalId = journalId,
+                originatingPaymentId = transaction.originatingPaymentId,
+                bookingDate = transaction.bookingDate,
+                settledAt = now,
+                occurredAt = now,
+            ),
+        )
+    }
 }

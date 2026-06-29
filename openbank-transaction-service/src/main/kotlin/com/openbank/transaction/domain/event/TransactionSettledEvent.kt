@@ -24,7 +24,8 @@ data class TransactionSettledEvent(
     val originatingPaymentId: UUID?,
     val bookingDate: LocalDate,
     val settledAt: Instant,
-) : DomainEvent() {
+    override val occurredAt: Instant,
+) : DomainEvent(occurredAt) {
     override val aggregateType = "Transaction"
     override val eventType = "TransactionSettled"
 }

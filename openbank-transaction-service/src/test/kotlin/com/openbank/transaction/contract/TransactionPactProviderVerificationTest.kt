@@ -108,6 +108,7 @@ class TransactionPactProviderVerificationTest {
             currencyCode = "CZK",
             rail = PaymentRail.INTERNAL,
             instructionType = InstructionType.ONE_OFF,
+            occurredAt = java.time.Instant.parse("2026-01-01T00:00:00Z"),
         )
         return objectMapper.writeValueAsString(event)
     }

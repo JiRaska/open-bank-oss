@@ -143,6 +143,7 @@ class PartyService(
 
         val saved = partyRepository.save(party)
 
+        val createdAt = clock.instant()
         eventPublisher.publish(
             PartyCreatedEvent(
                 aggregateId = partyId,
@@ -150,6 +151,7 @@ class PartyService(
                 verificationSource = command.verificationSource.name,
                 givenName = command.givenName,
                 familyName = command.familyName,
+                occurredAt = createdAt,
             ),
         )
         eventPublisher.publish(
@@ -160,6 +162,7 @@ class PartyService(
                 status = caseLifecycle.status,
                 actor = caseLifecycle.lastActor,
                 reasonCode = caseLifecycle.lastReasonCode,
+                occurredAt = createdAt,
             ),
         )
         eventPublisher.publish(
@@ -168,6 +171,7 @@ class PartyService(
                 relationshipId = relationshipId,
                 role = command.initialRole,
                 channel = command.onboardingChannel,
+                occurredAt = createdAt,
             ),
         )
 
@@ -221,6 +225,7 @@ class PartyService(
                 aggregateId = command.partyId,
                 verificationSource = VerificationSource.BANKID.name,
                 kycLevel = saved.kycAttributes.kycLevel,
+                occurredAt = clock.instant(),
             ),
         )
         return saved
@@ -250,6 +255,7 @@ class PartyService(
             AddressUpdatedFromRobEvent(
                 aggregateId = command.partyId,
                 syncedAt = command.syncedAt,
+                occurredAt = clock.instant(),
             ),
         )
         return saved
@@ -302,6 +308,7 @@ class PartyService(
                     aggregateId = command.partyId,
                     previousLevel = previousLevel,
                     newLevel = command.kycLevel,
+                    occurredAt = clock.instant(),
                 ),
             )
         }
@@ -327,6 +334,7 @@ class PartyService(
                 previousStatus = previousStatus,
                 newStatus = command.newStatus,
                 reason = command.reason,
+                occurredAt = clock.instant(),
             ),
         )
         return saved
@@ -379,6 +387,7 @@ class PartyService(
                         toStatus = result.newStatus,
                         reasonCode = command.reasonCode,
                         actor = command.actor.trim(),
+                        occurredAt = result.timelineEvent.occurredAt,
                     ),
                 )
                 saved
@@ -406,6 +415,7 @@ class PartyService(
                 evidenceRef = command.evidenceRef,
                 actor = command.actor.trim(),
                 linkedAt = command.linkedAt.toInstant(),
+                occurredAt = command.linkedAt.toInstant(),
             ),
         )
 
@@ -434,7 +444,13 @@ class PartyService(
             version = party.version + 1,
         )
         val saved = partyRepository.update(updated)
-        eventPublisher.publish(ExternalIdLinkedEvent(aggregateId = command.partyId, externalIdType = command.type.name))
+        eventPublisher.publish(
+            ExternalIdLinkedEvent(
+                aggregateId = command.partyId,
+                externalIdType = command.type.name,
+                occurredAt = clock.instant(),
+            ),
+        )
         return saved
     }
 
@@ -469,6 +485,7 @@ class PartyService(
                 relationshipId = saved.id,
                 role = command.role,
                 channel = command.onboardingChannel,
+                occurredAt = clock.instant(),
             ),
         )
         return saved
@@ -496,6 +513,7 @@ class PartyService(
                 relationshipId = command.relationshipId,
                 role = relationship.role,
                 reason = command.reason,
+                occurredAt = clock.instant(),
             ),
         )
         return saved

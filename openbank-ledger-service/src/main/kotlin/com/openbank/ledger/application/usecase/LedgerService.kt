@@ -128,6 +128,7 @@ class LedgerService(
                     transactionId = entry.transactionId,
                     entryDate = entry.entryDate,
                     lineCount = entry.lines.size,
+                    occurredAt = clock.instant(),
                 ),
             ),
         )
@@ -165,6 +166,7 @@ class LedgerService(
                     originalJournalId = original.id,
                     transactionId = original.transactionId,
                     reason = command.reason,
+                    occurredAt = clock.instant(),
                 ),
             ),
         )
@@ -269,6 +271,7 @@ class LedgerService(
                     journalEntryId = entry.id,
                     transactionId = entry.transactionId,
                     entryDate = entry.entryDate,
+                    occurredAt = clock.instant(),
                 ),
             ),
         )

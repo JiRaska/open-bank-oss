@@ -7,9 +7,10 @@ package com.openbank.libs.domain.event
 import java.time.Instant
 import java.util.UUID
 
-abstract class DomainEvent {
+abstract class DomainEvent(
+    open val occurredAt: Instant,
+) {
     val eventId: UUID = UUID.randomUUID()
-    val occurredAt: Instant = Instant.EPOCH
     abstract val aggregateId: UUID
     abstract val aggregateType: String
     abstract val eventType: String

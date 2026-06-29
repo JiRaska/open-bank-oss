@@ -79,6 +79,7 @@ class ConsentExpirationJob {
                                             aggregateId = consent.id,
                                             partyId = consent.partyId,
                                             granteeId = consent.granteeId,
+                                            occurredAt = threshold.toInstant(),
                                         ),
                                     ),
                                     createdAt = threshold.toInstant(),
