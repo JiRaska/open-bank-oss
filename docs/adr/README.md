@@ -144,3 +144,4 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0139](0139-ml-decisioning-platform.md) | Real-time ML decisioning platform: feature store, model serving, champion/challenger governance | Proposed | Planned |
 | [0140](0140-feature-store-topology.md) | Feature store topology and point-in-time correctness | Proposed | Planned |
 | [0141](0141-model-registry-provenance.md) | Model registry and provenance for ML decisioning | Proposed | Planned |
+| [0142](0142-credit-decisioning-engine.md) | Credit decisioning engine on the ML decisioning platform | Proposed | Planned |
