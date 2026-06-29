@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.5](https://github.com/JiRaska/open-bank/compare/swift-service-v0.6.4...swift-service-v0.6.5) (2026-06-29)
+
+
+### Security
+
+* **kafka:** mTLS + ACLs for payment.scheme-accepted, no global gate flip (ADR-0137) ([#2602](https://github.com/JiRaska/open-bank/issues/2602)) ([b143022](https://github.com/JiRaska/open-bank/commit/b143022f6ab76c4ff817ddbd4467fc578b8ee193))
+
 ## [0.6.4](https://github.com/JiRaska/open-bank/compare/swift-service-v0.6.3...swift-service-v0.6.4) (2026-06-29)
 
 
