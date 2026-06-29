@@ -142,3 +142,4 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0137](0137-kafka-mtls-scheme-accepted-migration.md) | Kafka mTLS migration — topic-scoped enforcement of payment.scheme-accepted | Accepted | Partial |
 | [0138](0138-configuration-driven-product-fee-rule-engine.md) | Configuration-driven product fee rule engine | Accepted | Partial |
 | [0139](0139-ml-decisioning-platform.md) | Real-time ML decisioning platform: feature store, model serving, champion/challenger governance | Proposed | Planned |
+| [0140](0140-feature-store-topology.md) | Feature store topology and point-in-time correctness | Proposed | Planned |
