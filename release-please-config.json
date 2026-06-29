@@ -81,6 +81,9 @@
     "openbank-balance-service": {
       "component": "balance-service"
     },
+    "openbank-billing-service": {
+      "component": "billing-service"
+    },
     "openbank-card-issuance-service": {
       "component": "card-issuance-service"
     },
