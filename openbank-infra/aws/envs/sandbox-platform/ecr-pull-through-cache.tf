@@ -44,7 +44,33 @@ resource "aws_ecr_pull_through_cache_rule" "quay" {
 resource "aws_ecr_pull_through_cache_rule" "docker" {
   ecr_repository_prefix = "docker-hub"
   upstream_registry_url = "registry-1.docker.io"
-  credential_arn        = "arn:aws:secretsmanager:eu-north-1:265175468565:secret:ecr-pullthroughcache/dockerhub-D4ZCq3"
+  credential_arn        = aws_secretsmanager_secret.dockerhub.arn
+}
+
+resource "aws_secretsmanager_secret" "dockerhub" {
+  name        = "ecr-pullthroughcache/dockerhub"
+  description = "Docker Hub PAT for ECR pull-through cache (jiraska, Public Repo Read-only)"
+}
+
+# ECR service needs GetSecretValue on the secret to fetch Docker Hub credentials.
+# This resource-based policy on the secret grants that — node IAM roles are NOT
+# involved; ECR calls Secrets Manager directly on the first pull per tag.
+resource "aws_secretsmanager_secret_policy" "dockerhub_ecr" {
+  secret_arn = aws_secretsmanager_secret.dockerhub.arn
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "AllowECRPullThroughCache"
+      Effect    = "Allow"
+      Principal = { Service = "ecr.amazonaws.com" }
+      Action    = "secretsmanager:GetSecretValue"
+      Resource  = "*"
+      Condition = {
+        StringEquals = { "aws:SourceAccount" = "265175468565" }
+        ArnLike      = { "aws:SourceArn" = "arn:aws:ecr:eu-north-1:265175468565:repository/docker-hub/*" }
+      }
+    }]
+  })
 }
 
 # ghcr.io pull-through cache — PAT stored in Secrets Manager (classic token, read:packages).
