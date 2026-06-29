@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank/compare/account-service-v0.9.1...account-service-v0.10.0) (2026-06-29)
+
+
+### Features
+
+* **account:** same-account FX pocket exchange (ADR-0110) ([#2425](https://github.com/JiRaska/open-bank/issues/2425)) ([3757160](https://github.com/JiRaska/open-bank/commit/3757160e55aaa3d1201685e95f258694b45facb2))
+
+
+### Bug Fixes
+
+* **account:** GDPR Art. 17 — handle PARTY_ERASED to nullify legalName (ADR-0118) ([#2443](https://github.com/JiRaska/open-bank/issues/2443)) ([131fb7e](https://github.com/JiRaska/open-bank/commit/131fb7e3adc20f6f4164d28460a320f6c62bfa9c))
+
 ## [0.9.1](https://github.com/JiRaska/open-bank/compare/account-service-v0.9.0...account-service-v0.9.1) (2026-06-27)
 
 
