@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/JiRaska/open-bank/compare/card-issuance-service-v0.7.0...card-issuance-service-v0.7.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* **card-issuance:** use &lt;= boundary in anonymizeExpiredCardPii (GDPR compliance) ([#2525](https://github.com/JiRaska/open-bank/issues/2525)) ([2fe35f6](https://github.com/JiRaska/open-bank/commit/2fe35f628ff46868ead5da4ea119cf314d1908d1))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank/compare/card-issuance-service-v0.6.2...card-issuance-service-v0.7.0) (2026-06-29)
 
 
