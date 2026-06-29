@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.1](https://github.com/JiRaska/open-bank/compare/customer-edge-v0.15.0...customer-edge-v0.15.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* **customer-edge:** add per-party rate-limit config key (ADR-0132) ([#2501](https://github.com/JiRaska/open-bank/issues/2501)) ([7306f85](https://github.com/JiRaska/open-bank/commit/7306f85891b7c9f440a8c376bf741523d6eef498))
+* **customer-edge:** per-party Valkey rate limit — 100 req/min, configurable ([#2492](https://github.com/JiRaska/open-bank/issues/2492)) ([fc1e8f6](https://github.com/JiRaska/open-bank/commit/fc1e8f6e42e8421e29b4f7d26ef6fe4bf41d469d))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank/compare/customer-edge-v0.14.2...customer-edge-v0.15.0) (2026-06-27)
 
 
