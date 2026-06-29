@@ -39,7 +39,8 @@ import java.util.UUID
 @Tag(name = "Devices")
 class DeviceResource {
 
-    @Inject lateinit var repo: DeviceTokenRepository
+    @Inject
+    lateinit var repo: DeviceTokenRepository
 
     data class RegisterDeviceRequest(
         val partyId: UUID? = null,
@@ -90,8 +91,11 @@ class DeviceResource {
     @RolesAllowed("ROLE_OPERATOR", "ROLE_SERVICE", "ROLE_ADMIN")
     @Authorize(action = "device.delete", resource = "")
     @Operation(summary = "Deactivate a push device token (logout / uninstall)")
-    suspend fun deactivate(@PathParam("deviceId") deviceId: UUID): Response {
-        val deactivated = repo.deactivate(deviceId)
+    suspend fun deactivate(@PathParam("deviceId") deviceId: UUID, @QueryParam("partyId") partyId: UUID?): Response {
+        // customer-edge translates the mobile app JWT to ROLE_SERVICE and injects the
+        // authoritative partyId — no direct ROLE_CUSTOMER access (prevents IDOR at the edge).
+        // When partyId is supplied the UPDATE is scoped to that party's tokens only.
+        val deactivated = repo.deactivate(deviceId, partyId)
         return if (deactivated) {
             Response.noContent().build()
         } else {

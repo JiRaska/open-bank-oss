@@ -7,6 +7,7 @@ package com.openbank.notification.infrastructure
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
 import io.quarkus.logging.Log
 import io.quarkus.scheduler.Scheduled
+import io.quarkus.scheduler.Scheduled.ConcurrentExecution.SKIP
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import java.time.Clock
@@ -31,7 +32,7 @@ class DeviceTokenSweepJob {
     @Inject
     lateinit var clock: Clock
 
-    @Scheduled(cron = "0 0 3 * * ?", identity = "device-token-stale-sweep")
+    @Scheduled(cron = "0 0 3 * * ?", identity = "device-token-stale-sweep", concurrentExecution = SKIP)
     fun sweepStaleTokens() {
         val threshold = Instant.now(clock).minus(STALE_DAYS, ChronoUnit.DAYS)
         repo.sweepStale(threshold)

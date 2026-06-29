@@ -63,6 +63,7 @@ class DeviceTokenRepository : PanacheRepository<DeviceTokenEntity> {
                         it.appVersion = reg.appVersion
                         it.osVersion = reg.osVersion
                         it.status = "ACTIVE"
+                        it.lastUsedAt = now
                         it.createdAt = now
                         it.updatedAt = now
                     }
@@ -85,24 +86,38 @@ class DeviceTokenRepository : PanacheRepository<DeviceTokenEntity> {
     }
 
     /**
-     * Deactivate a single device token on explicit logout. Returns true if the token was
-     * ACTIVE and is now INACTIVE; false if it was already inactive or not found.
+     * Deactivate a single device token on explicit logout or admin revocation.
+     * If [partyId] is provided the update is scoped to that party's tokens only —
+     * customer-edge injects the authoritative partyId from the JWT before calling this.
+     * Returns true if the token was ACTIVE and is now INACTIVE; false if not found or already inactive.
      */
-    suspend fun deactivate(deviceId: UUID): Boolean = Panache.withTransaction {
-        update(
-            "status = 'INACTIVE', updatedAt = ?1 where deviceId = ?2 and status = 'ACTIVE'",
-            Instant.now(clock),
-            deviceId,
-        ).map { it > 0 }
+    suspend fun deactivate(deviceId: UUID, partyId: UUID? = null): Boolean = Panache.withTransaction {
+        val now = Instant.now(clock)
+        if (partyId != null) {
+            update(
+                "status = 'INACTIVE', updatedAt = ?1 where deviceId = ?2 and partyId = ?3 and status = 'ACTIVE'",
+                now,
+                deviceId,
+                partyId,
+            ).map { it > 0 }
+        } else {
+            update(
+                "status = 'INACTIVE', updatedAt = ?1 where deviceId = ?2 and status = 'ACTIVE'",
+                now,
+                deviceId,
+            ).map { it > 0 }
+        }
     }.awaitSuspending()
 
     /**
-     * Mark all tokens not refreshed since [threshold] as INACTIVE. Called by the nightly
-     * TTL sweep job (ADR-0135). Uni-based so it integrates with reactive subscription.
+     * Mark all tokens whose [lastUsedAt] is older than [threshold] as INACTIVE.
+     * Uses lastUsedAt (set on each re-registration) not updatedAt (which changes on any row
+     * mutation including admin deactivation) so only genuinely idle tokens are swept.
+     * Called by the nightly TTL sweep job (ADR-0135). Uni-based for reactive subscription.
      */
     fun sweepStale(threshold: Instant): Uni<Int> = Panache.withTransaction {
         update(
-            "status = 'INACTIVE', updatedAt = ?1 where status = 'ACTIVE' and updatedAt < ?2",
+            "status = 'INACTIVE', updatedAt = ?1 where status = 'ACTIVE' and lastUsedAt < ?2",
             Instant.now(clock),
             threshold,
         )
