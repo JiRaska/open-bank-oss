@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank/compare/consent-service-v0.7.1...consent-service-v0.8.0) (2026-06-29)
+
+
+### Features
+
+* **consent:** hourly expiration sweep + ADR-0126 unified consent lifecycle ([#2522](https://github.com/JiRaska/open-bank/issues/2522)) ([df1c514](https://github.com/JiRaska/open-bank/commit/df1c5145c403a8f9a1e11641642d8e10b28c1ea8))
+
 ## [0.7.1](https://github.com/JiRaska/open-bank/compare/consent-service-v0.7.0...consent-service-v0.7.1) (2026-06-27)
 
 
