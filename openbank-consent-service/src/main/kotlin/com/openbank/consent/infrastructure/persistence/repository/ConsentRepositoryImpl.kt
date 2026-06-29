@@ -9,8 +9,10 @@ import com.openbank.consent.domain.model.Consent
 import com.openbank.consent.infrastructure.persistence.entity.ConsentEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.PanacheRepository
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.OffsetDateTime
 import java.util.UUID
 
 @ApplicationScoped
@@ -39,4 +41,16 @@ class ConsentRepositoryImpl :
             find("granteeId = ?1 and partyId = ?2 and status = 'ACTIVE'", granteeId, partyId)
                 .list<ConsentEntity>()
         }.awaitSuspending().map { it.toDomain() }
+
+    override fun findExpiredActive(threshold: OffsetDateTime): Uni<List<Consent>> = Panache.withSession {
+        find("status = 'ACTIVE' and validTo < ?1", threshold).list<ConsentEntity>()
+    }.map { list -> list.map { it.toDomain() } }
+
+    override fun markExpired(id: UUID, expiredAt: OffsetDateTime): Uni<Boolean> = Panache.withTransaction {
+        update(
+            "status = 'EXPIRED', updatedAt = ?1 where id = ?2 and status = 'ACTIVE'",
+            expiredAt,
+            id,
+        )
+    }.map { count -> count > 0L }
 }

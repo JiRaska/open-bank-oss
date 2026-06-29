@@ -5,12 +5,31 @@
 package com.openbank.consent.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.openbank.consent.application.port.`in`.*
+import com.openbank.consent.application.port.`in`.ActivateConsentUseCase
+import com.openbank.consent.application.port.`in`.CreateConsentCommand
+import com.openbank.consent.application.port.`in`.CreateConsentUseCase
+import com.openbank.consent.application.port.`in`.GetConsentUseCase
+import com.openbank.consent.application.port.`in`.RevokeConsentCommand
+import com.openbank.consent.application.port.`in`.RevokeConsentUseCase
+import com.openbank.consent.application.port.`in`.ValidateConsentCommand
+import com.openbank.consent.application.port.`in`.ValidateConsentUseCase
 import com.openbank.consent.domain.model.ConsentValidationResult
+import com.openbank.consent.infrastructure.rest.dto.ConsentResponse
+import com.openbank.consent.infrastructure.rest.dto.ConsentValidationResponse
+import com.openbank.consent.infrastructure.rest.dto.CreateConsentRequest
+import com.openbank.consent.infrastructure.rest.dto.RevokeConsentRequest
+import com.openbank.consent.infrastructure.rest.dto.ValidateConsentRequest
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
-import com.openbank.consent.infrastructure.rest.dto.*
-import jakarta.ws.rs.*
+import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DELETE
+import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
+import jakarta.ws.rs.POST
+import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
+import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
@@ -27,14 +46,14 @@ class ConsentResource(
     private val validateConsent: ValidateConsentUseCase,
     private val activateConsent: ActivateConsentUseCase,
     private val idempotencyStore: IdempotencyStore,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
 ) {
 
     @POST
     suspend fun create(
         request: CreateConsentRequest,
         @HeaderParam("X-Request-ID") xRequestId: String?,
-        @Context uriInfo: UriInfo
+        @Context uriInfo: UriInfo,
     ): Response {
         val idempotencyKey = request.tppTransactionId?.takeIf { it.isNotBlank() }
             ?: xRequestId?.takeIf { it.isNotBlank() }
@@ -61,15 +80,15 @@ class ConsentResource(
                 redirectUri = request.redirectUri,
                 tppTransactionId = request.tppTransactionId ?: xRequestId,
                 ipAddress = null,
-                userAgent = null
-            )
+                userAgent = null,
+            ),
         )
         val responseBody = ConsentResponse.from(consent)
         idempotencyKey?.let { key ->
             idempotencyStore.save(
                 consentCreateKey(request.granteeId, request.partyId, key),
                 201,
-                objectMapper.writeValueAsString(responseBody)
+                objectMapper.writeValueAsString(responseBody),
             )
         }
 
@@ -79,8 +98,7 @@ class ConsentResource(
 
     @GET
     @Path("/{id}")
-    suspend fun getById(@PathParam("id") id: UUID): ConsentResponse =
-        ConsentResponse.from(getConsent.getConsent(id))
+    suspend fun getById(@PathParam("id") id: UUID): ConsentResponse = ConsentResponse.from(getConsent.getConsent(id))
 
     @GET
     @Path("/party/{partyId}")
@@ -98,7 +116,7 @@ class ConsentResource(
     suspend fun revoke(
         @PathParam("id") id: UUID,
         @QueryParam("partyId") partyId: UUID,
-        request: RevokeConsentRequest
+        request: RevokeConsentRequest,
     ): ConsentResponse {
         val consent = revokeConsent.revokeConsent(RevokeConsentCommand(id, partyId, request.reason))
         return ConsentResponse.from(consent)
@@ -106,28 +124,19 @@ class ConsentResource(
 
     @POST
     @Path("/{id}/activate")
-    suspend fun activate(
-        @PathParam("id") id: UUID,
-        @QueryParam("scaSessionId") scaSessionId: UUID
-    ): ConsentResponse =
+    suspend fun activate(@PathParam("id") id: UUID, @QueryParam("scaSessionId") scaSessionId: UUID): ConsentResponse =
         ConsentResponse.from(activateConsent.activateConsent(id, scaSessionId))
 
     @POST
     @Path("/{id}/reject")
-    suspend fun reject(
-        @PathParam("id") id: UUID,
-        @QueryParam("reason") reason: String
-    ): ConsentResponse =
+    suspend fun reject(@PathParam("id") id: UUID, @QueryParam("reason") reason: String): ConsentResponse =
         ConsentResponse.from(activateConsent.rejectConsent(id, reason))
 
     @POST
     @Path("/{id}/validate")
-    suspend fun validate(
-        @PathParam("id") id: UUID,
-        request: ValidateConsentRequest
-    ): ConsentValidationResponse {
+    suspend fun validate(@PathParam("id") id: UUID, request: ValidateConsentRequest): ConsentValidationResponse {
         val result = validateConsent.validateConsent(
-            ValidateConsentCommand(id, request.granteeId, request.requiredScope, request.accountIban)
+            ValidateConsentCommand(id, request.granteeId, request.requiredScope, request.accountIban),
         )
         return when (result) {
             is ConsentValidationResult.Valid -> ConsentValidationResponse(true, null, null)
