@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank/compare/card-issuance-service-v0.7.1...card-issuance-service-v0.8.0) (2026-06-29)
+
+
+### Features
+
+* **card-issuance:** GDPR Art.5 card PII retention expiry (ADR-0118 §5) ([#2479](https://github.com/JiRaska/open-bank/issues/2479)) ([74ddd37](https://github.com/JiRaska/open-bank/commit/74ddd370c6ea7f15d0711bdfa318b8aa6494f657))
+
+
+### Bug Fixes
+
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2344](https://github.com/JiRaska/open-bank/issues/2344)) ([b6fb6d5](https://github.com/JiRaska/open-bank/commit/b6fb6d5a86a040f0dcc5f489d0b4c8d778c6ec50))
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2358](https://github.com/JiRaska/open-bank/issues/2358)) ([fab840a](https://github.com/JiRaska/open-bank/commit/fab840aafcbc7b63782c8709f9d1bb34e3f4b0cd))
+* **card-issuance:** handle PARTY_ERASED event to anonymise cardholder PII (GDPR Art. 17) ([#2268](https://github.com/JiRaska/open-bank/issues/2268)) ([16db236](https://github.com/JiRaska/open-bank/commit/16db236f009fa842c91660e8d59f6cbf061b366d))
+* **card-issuance:** use &lt;= boundary in anonymizeExpiredCardPii (GDPR compliance) ([#2525](https://github.com/JiRaska/open-bank/issues/2525)) ([b46e45b](https://github.com/JiRaska/open-bank/commit/b46e45bd694461a908e61d63bc4f5ddf924f39b5))
+* **customer-edge:** add per-party rate-limit config key (ADR-0132) ([#2501](https://github.com/JiRaska/open-bank/issues/2501)) ([213f528](https://github.com/JiRaska/open-bank/commit/213f52818238585840a7dd18ad98066aebd135bb))
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([7295494](https://github.com/JiRaska/open-bank/commit/72954940743f27bf7e49fede185ff20bc3e40060))
+* **fleet:** resolve ktlint violations and sepa-payment compile error after ADR-0100 Clock sweep ([#2272](https://github.com/JiRaska/open-bank/issues/2272)) ([ce39af7](https://github.com/JiRaska/open-bank/commit/ce39af7c5b02ff3fef226f34e78c7e726b149ebd))
+* **infra:** route docker.io CI pulls through ECR pull-through cache — zero NAT ([#2221](https://github.com/JiRaska/open-bank/issues/2221)) ([52caaf2](https://github.com/JiRaska/open-bank/commit/52caaf21097311e077e6ac011d388a7256769d89))
+* **notification:** ROLE_CUSTOMER on DELETE, lastUsedAt sweep, IDOR scope ([#2485](https://github.com/JiRaska/open-bank/issues/2485) follow-up) ([#2490](https://github.com/JiRaska/open-bank/issues/2490)) ([4277222](https://github.com/JiRaska/open-bank/commit/4277222937a768f0c3890ed7f57757d726ffa8a5))
+* **release:** restore transaction-service entry in release-please manifest ([#2351](https://github.com/JiRaska/open-bank/issues/2351)) ([7694897](https://github.com/JiRaska/open-bank/commit/7694897b8f282fdd529175d24e0cb56139655839)), closes [#2342](https://github.com/JiRaska/open-bank/issues/2342)
+
 ## [0.7.1](https://github.com/JiRaska/open-bank/compare/card-issuance-service-v0.7.0...card-issuance-service-v0.7.1) (2026-06-29)
 
 
