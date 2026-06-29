@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank/compare/product-catalog-v0.7.0...product-catalog-v0.8.0) (2026-06-29)
+
+
+### Features
+
+* **product-catalog:** surface machine-executable waiver rule on the fee schedule (ADR-0138 phase 1b) ([#2650](https://github.com/JiRaska/open-bank/issues/2650)) ([83bd622](https://github.com/JiRaska/open-bank/commit/83bd622433860c6b1b712d78e27907fca6033044))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank/compare/product-catalog-v0.6.0...product-catalog-v0.7.0) (2026-06-29)
 
 
