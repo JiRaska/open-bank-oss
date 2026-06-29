@@ -1,7 +1,6 @@
 quarkus:
   application:
     name: openbank-lending-service
-    version: 0.1.0
   http:
     port: 8126
     cors:

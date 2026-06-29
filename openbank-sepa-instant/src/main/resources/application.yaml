@@ -1,7 +1,6 @@
 quarkus:
   application:
     name: openbank-sepa-instant
-    version: 0.1.0
   http:
     port: 8127
     cors:

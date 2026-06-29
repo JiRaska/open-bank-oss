@@ -1,7 +1,6 @@
 quarkus:
   application:
     name: openbank-consent-service
-    version: 0.5.1
 
   http:
     port: 8106
