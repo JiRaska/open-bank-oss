@@ -6,12 +6,14 @@ package com.openbank.kyc.application.port.out
 
 import com.openbank.kyc.domain.model.KycCase
 import com.openbank.kyc.domain.model.KycCaseStatus
+import java.time.Instant
 import java.util.UUID
 
 /**
  * Outbound persistence port for the KYC case aggregate (ADR-0002 hexagonal architecture).
  * Implemented by [com.openbank.kyc.infrastructure.persistence.KycRepository].
  */
+@Suppress("TooManyFunctions")
 interface KycCaseRepository {
 
     suspend fun save(case: KycCase): KycCase
@@ -40,5 +42,8 @@ interface KycCaseRepository {
 
     suspend fun update(case: KycCase): KycCase
 
-    suspend fun anonymizeByPartyId(partyId: UUID)
+    suspend fun anonymizeByPartyId(partyId: UUID, now: Instant)
+
+    /** Deletes KYC cases whose PII was erased and the AML hold period ([cutoff]) has expired (ADR-0118 §5). */
+    suspend fun deleteErasedCasesOlderThan(cutoff: Instant): Long
 }

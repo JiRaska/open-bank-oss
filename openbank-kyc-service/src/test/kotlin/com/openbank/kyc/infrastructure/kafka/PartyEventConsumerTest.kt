@@ -27,12 +27,15 @@ class PartyEventConsumerTest {
     private val kycCaseRepository = mockk<KycCaseRepository>()
     private lateinit var consumer: PartyEventConsumer
 
+    private val fixedClock = java.time.Clock.fixed(Instant.parse("2026-01-15T03:00:00Z"), java.time.ZoneOffset.UTC)
+
     @BeforeEach
     fun setUp() {
         consumer = PartyEventConsumer().also {
             it.kycService = kycService
             it.kycCaseRepository = kycCaseRepository
             it.objectMapper = ObjectMapper()
+            it.clock = fixedClock
         }
     }
 
@@ -60,22 +63,24 @@ class PartyEventConsumerTest {
     @Test
     fun `PARTY_ERASED anonymises KYC case PII for the party`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
-        coJustRun { kycCaseRepository.anonymizeByPartyId(partyId) }
+        val now = fixedClock.instant()
+        coJustRun { kycCaseRepository.anonymizeByPartyId(partyId, now) }
 
         consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""")
 
-        coVerify(exactly = 1) { kycCaseRepository.anonymizeByPartyId(partyId) }
+        coVerify(exactly = 1) { kycCaseRepository.anonymizeByPartyId(partyId, now) }
         coVerify(exactly = 0) { kycService.openCaseForParty(any()) }
     }
 
     @Test
     fun `PARTY_ERASED anonymisation failure is swallowed to protect the consumer group`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
-        coEvery { kycCaseRepository.anonymizeByPartyId(partyId) } throws RuntimeException("db down")
+        val now = fixedClock.instant()
+        coEvery { kycCaseRepository.anonymizeByPartyId(partyId, now) } throws RuntimeException("db down")
 
         consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""")
 
-        coVerify(exactly = 1) { kycCaseRepository.anonymizeByPartyId(partyId) }
+        coVerify(exactly = 1) { kycCaseRepository.anonymizeByPartyId(partyId, now) }
     }
 
     @Test
@@ -85,7 +90,7 @@ class PartyEventConsumerTest {
         consumer.consume("""{"eventType":"PARTY_STATUS_CHANGED","partyId":"$partyId","newStatus":"VERIFIED"}""")
 
         coVerify(exactly = 0) { kycService.openCaseForParty(any()) }
-        coVerify(exactly = 0) { kycCaseRepository.anonymizeByPartyId(any()) }
+        coVerify(exactly = 0) { kycCaseRepository.anonymizeByPartyId(any(), any()) }
     }
 
     @Test

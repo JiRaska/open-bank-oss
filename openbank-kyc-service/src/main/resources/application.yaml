@@ -122,6 +122,12 @@ openbank:
     commit: "${GIT_COMMIT:unknown}"
   outbox:
     dispatch-enabled: true
+  retention:
+    kyc:
+      enabled: "${RETENTION_KYC_ENABLED:true}"
+      retention-years: "${RETENTION_KYC_YEARS:5}"
+      cron: "${RETENTION_KYC_CRON:0 30 3 * * ?}"
+      dry-run: "${RETENTION_KYC_DRY_RUN:false}"
 
 # OPA sidecar (ADR-0034). Advisory mode by default.
 opa:

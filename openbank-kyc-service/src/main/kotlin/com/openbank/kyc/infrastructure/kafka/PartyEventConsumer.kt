@@ -11,6 +11,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
+import java.time.Clock
 import java.util.UUID
 
 /**
@@ -36,6 +37,9 @@ class PartyEventConsumer {
 
     @Inject
     lateinit var objectMapper: ObjectMapper
+
+    @Inject
+    lateinit var clock: Clock
 
     private val log = Logger.getLogger(PartyEventConsumer::class.java)
 
@@ -84,7 +88,7 @@ class PartyEventConsumer {
             return
         }
         try {
-            kycCaseRepository.anonymizeByPartyId(partyId)
+            kycCaseRepository.anonymizeByPartyId(partyId, clock.instant())
             log.infof("[party-events-in] GDPR Art. 17: anonymised KYC PII for erased party %s", partyId)
         } catch (e: Exception) {
             log.errorf(e, "[party-events-in] Failed to anonymise KYC PII for party %s", partyId)

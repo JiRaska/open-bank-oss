@@ -90,8 +90,12 @@ class KycCaseEntity : PanacheEntity() {
 
     @Column(name = "escalation_reason")
     var escalationReason: String? = null
+
+    @Column(name = "erased_at")
+    var erasedAt: Instant? = null
 }
 
+@Suppress("TooManyFunctions")
 @ApplicationScoped
 class KycRepository :
     KycCaseRepository,
@@ -149,7 +153,7 @@ class KycRepository :
         }.replaceWith(case)
     }.awaitSuspending()
 
-    override suspend fun anonymizeByPartyId(partyId: UUID) {
+    override suspend fun anonymizeByPartyId(partyId: UUID, now: Instant) {
         Panache.withTransaction {
             find("partyId", partyId).list().map { cases ->
                 cases.forEach { c ->
@@ -168,10 +172,16 @@ class KycRepository :
                     c.screeningRef = null
                     c.escalatedTo = null
                     c.escalationReason = null
+                    // ADR-0118 §5: record when PII was erased so the retention job can delete after 5y
+                    if (c.erasedAt == null) c.erasedAt = now
                 }
             }
         }.awaitSuspending()
     }
+
+    override suspend fun deleteErasedCasesOlderThan(cutoff: Instant): Long = Panache.withTransaction {
+        delete("erasedAt IS NOT NULL AND erasedAt < ?1", cutoff)
+    }.awaitSuspending()
 
     companion object {
         private val log = Logger.getLogger(KycRepository::class.java)
