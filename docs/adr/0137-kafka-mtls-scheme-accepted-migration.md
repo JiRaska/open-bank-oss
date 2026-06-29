@@ -136,8 +136,20 @@ wire all five, not consumer-only.)
 Flipping `allow.everyone.if.no.acl.found=false` is a **separate, fleet-wide
 program**: migrate every Kafka client (per criticality tier — money-path, then
 compliance/audit, then peripheral) to mTLS + per-service ACLs, verify each, and
-only then flip the global gate. Tracked as its own initiative; runbook 0008
-captures the per-service recipe this ADR establishes as the template.
+only then flip the global gate. Tracked as its own initiative in **#2665**;
+runbook 0008 captures the per-service recipe this ADR establishes as the template.
+
+**Delivery note (post-merge).** mTLS + ACL enforcement landed and is e2e-verified
+live (authorized producer consumed; anonymous and read-only principals denied
+`Write`). One consistency item remains: the consumer group is baked in
+`application.yaml` as `transaction-scheme-accepted-cg` and the DLQ as
+`payment.scheme-accepted.dlq`, but the deployed image lags main, so the running
+consumer still uses the old group `openbank-transaction-service` (allowed because
+it carries no ACL while the gate is `true`) and SmallRye's default DLQ name.
+These converge on the next image rebuild — blocked by an unrelated Pact
+`can-i-deploy` gate, tracked in **#2664**. An env-var shortcut was tried and
+reverted (#2649 → #2659): SmallRye cannot take hyphenated `mp.messaging` *channel*
+config from env vars (channel discovery mis-maps the names and fails startup).
 
 ## Compliance impact
 
@@ -154,4 +166,6 @@ captures the per-service recipe this ADR establishes as the template.
 - ADR-0037 — Domain = namespace (why KafkaUsers live in `messaging`)
 - transaction-service threat model §2a
 - #2013 / #2018 (premature ACLs), #2554 (their removal), runbook 0008 (cutover)
+- #2602 (this migration), #2649 → #2659 (reverted env-convergence shortcut)
+- #2664 (Pact gate blocking the image rebuild), #2665 (fleet-wide gate flip)
 - ADR-0005 / OpenBao + External Secrets (the cross-namespace secret pattern)

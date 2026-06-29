@@ -129,3 +129,16 @@ Flipping `allow.everyone.if.no.acl.found=false` is a separate program: repeat
 the per-service recipe above for every Kafka client (money-path tier first, then
 compliance/audit, then peripheral), verify each, and only then flip the global
 flag. ~33 clients across ~23 namespaces — do not attempt as a single change.
+Tracked in **#2665**.
+
+## Known follow-up — consumer group / DLQ name not yet converged
+
+The mTLS + ACLs are live and e2e-verified, but the running transaction-service
+image lags main, so the consumer still uses group `openbank-transaction-service`
+(allowed: no ACL on it while the gate is `true`) and SmallRye's default DLQ topic
+instead of the baked `transaction-scheme-accepted-cg` / `payment.scheme-accepted.dlq`.
+This is cosmetic today (the topic carries no real traffic) and converges on the
+next image rebuild — currently blocked by the Pact `can-i-deploy` gate, **#2664**.
+Do **not** try to force it via `MP_MESSAGING_INCOMING_*` env vars: SmallRye cannot
+take hyphenated mp.messaging channel config from env and the pod fails to start
+(tried and reverted, #2649 → #2659).
