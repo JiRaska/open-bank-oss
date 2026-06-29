@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank/compare/kyc-service-v0.5.2...kyc-service-v0.6.0) (2026-06-29)
+
+
+### Features
+
+* **kyc:** GDPR Art.5 KYC case deletion after AML hold period (ADR-0118 §5) ([#2480](https://github.com/JiRaska/open-bank/issues/2480)) ([77d299f](https://github.com/JiRaska/open-bank/commit/77d299f58c33083a2f288fbea881d30989d54291))
+
 ## [0.5.2](https://github.com/JiRaska/open-bank/compare/kyc-service-v0.5.1...kyc-service-v0.5.2) (2026-06-28)
 
 
