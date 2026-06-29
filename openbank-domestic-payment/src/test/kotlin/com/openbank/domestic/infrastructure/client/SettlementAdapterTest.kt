@@ -4,11 +4,14 @@
 
 package com.openbank.domestic.infrastructure.client
 
+import com.openbank.domestic.application.port.out.AccountLookupPort
 import com.openbank.domestic.application.port.out.SettlementUnavailableException
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -33,9 +36,10 @@ class SettlementAdapterTest {
     private val client: TransactionServiceClient = mockk()
     private val oidcClient: OidcClient = mockk()
     private val oidcClientInstance: Instance<OidcClient> = mockk()
+    private val accountLookup: AccountLookupPort = mockk()
 
     private fun adapter(): SettlementAdapter =
-        SettlementAdapter(client, oidcClientInstance, Clock.systemUTC()).also { it.self = it }
+        SettlementAdapter(client, oidcClientInstance, accountLookup, Clock.systemUTC()).also { it.self = it }
 
     @BeforeEach
     fun setUp() {
@@ -43,6 +47,8 @@ class SettlementAdapterTest {
         every { tokens.accessToken } returns "test-token"
         every { oidcClient.tokens } returns Uni.createFrom().item(tokens)
         every { oidcClientInstance.get() } returns oidcClient
+        // Default: no internal creditor resolved → debit-only booking (existing behaviour).
+        coEvery { accountLookup.findAccountIdByIban(any()) } returns null
     }
 
     @Test
@@ -111,6 +117,43 @@ class SettlementAdapterTest {
         assertThat(req.sourceAccountId).isEqualTo(p.debtorAccountId)
         assertThat(req.amount).isEqualByComparingTo(p.amount)
         assertThat(req.currencyCode).isEqualTo(p.currency)
+    }
+
+    @Test
+    fun `settle resolves the payee and sends targetAccountId for an internal transfer`(): Unit = runBlocking {
+        val p = payment() // INTERNAL_CLIENT, creditor 9876543210 / bank 0100
+        val creditorId = UUID.randomUUID()
+        val ibanSlot = slot<String>()
+        coEvery { accountLookup.findAccountIdByIban(capture(ibanSlot)) } returns creditorId
+        val response = mockk<Response>()
+        every { response.status } returns 201
+        every { response.readEntity(String::class.java) } returns """{"id":"${UUID.randomUUID()}"}"""
+        val reqSlot = slot<InitiateSettlementRequest>()
+        every { client.initiateTransaction(any(), capture(reqSlot)) } returns Uni.createFrom().item(response)
+
+        adapter().settle(p)
+
+        // The constructed Czech IBAN: CZ + check + bank(0100) + 16-digit account(0000009876543210).
+        assertThat(ibanSlot.captured).hasSize(24)
+        assertThat(ibanSlot.captured).startsWith("CZ")
+        assertThat(ibanSlot.captured.substring(4)).isEqualTo("01000000009876543210")
+        // The payee is credited: the booking carries the resolved target account.
+        assertThat(reqSlot.captured.targetAccountId).isEqualTo(creditorId)
+    }
+
+    @Test
+    fun `settle books debit-only (no targetAccountId) for an external transfer`(): Unit = runBlocking {
+        val p = payment().copy(transferScope = DomesticTransferScope.EXTERNAL)
+        val response = mockk<Response>()
+        every { response.status } returns 201
+        every { response.readEntity(String::class.java) } returns """{"id":"${UUID.randomUUID()}"}"""
+        val reqSlot = slot<InitiateSettlementRequest>()
+        every { client.initiateTransaction(any(), capture(reqSlot)) } returns Uni.createFrom().item(response)
+
+        adapter().settle(p)
+
+        assertThat(reqSlot.captured.targetAccountId).isNull()
+        coVerify(exactly = 0) { accountLookup.findAccountIdByIban(any()) }
     }
 
     private fun payment() = DomesticPayment(

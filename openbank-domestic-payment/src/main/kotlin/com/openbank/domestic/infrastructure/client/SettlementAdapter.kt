@@ -4,10 +4,12 @@
 
 package com.openbank.domestic.infrastructure.client
 
+import com.openbank.domestic.application.port.out.AccountLookupPort
 import com.openbank.domestic.application.port.out.SettlementOutcome
 import com.openbank.domestic.application.port.out.SettlementPort
 import com.openbank.domestic.application.port.out.SettlementUnavailableException
 import com.openbank.domestic.domain.model.DomesticPayment
+import com.openbank.domestic.domain.model.DomesticTransferScope
 import io.quarkus.oidc.client.OidcClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -40,6 +42,7 @@ class SettlementAdapter(
     // Lazy Instance: absent when oidc-client is disabled under %test so a direct injection
     // would fail Arc validation for every @QuarkusTest. Resolved on demand in prod only.
     private val oidcClient: Instance<OidcClient>,
+    private val accountLookup: AccountLookupPort,
     private val clock: Clock,
 ) : SettlementPort {
 
@@ -75,12 +78,20 @@ class SettlementAdapter(
             .getOrDefault(2).coerceAtLeast(0)
         val settlementAmount = payment.amount.setScale(fractionDigits, RoundingMode.HALF_UP)
 
+        // Credit leg: for an in-house transfer (payer + payee both at our bank) resolve the payee's
+        // internal accountId and send it as targetAccountId, so transaction-service books a two-sided
+        // journal (debit payer + CREDIT payee) and the payee actually receives the money. Without it
+        // the debit only lands in the bank cash-clearing suspense and the payee is never credited.
+        // External transfers keep a null target (the money genuinely leaves the bank).
+        val targetAccountId = resolveInternalCreditorAccountId(payment)
+
         val response = client.initiateTransaction(
             "Bearer $token",
             InitiateSettlementRequest(
                 idempotencyKey = "domestic-settlement-${payment.id}",
                 type = "DEBIT",
                 sourceAccountId = payment.debtorAccountId,
+                targetAccountId = targetAccountId,
                 amount = settlementAmount,
                 currencyCode = payment.currency,
                 description = description,
@@ -111,6 +122,55 @@ class SettlementAdapter(
         }
     }
 
+    /**
+     * Resolve the payee's internal accountId for an in-house transfer (OWN_ACCOUNTS / INTERNAL_CLIENT),
+     * or null for external transfers / when it cannot be resolved (then the booking stays one-sided
+     * and the debit lands in cash-clearing as before — best-effort, never blocks settlement).
+     */
+    private suspend fun resolveInternalCreditorAccountId(payment: DomesticPayment): UUID? {
+        val internal = payment.transferScope == DomesticTransferScope.INTERNAL_CLIENT ||
+            payment.transferScope == DomesticTransferScope.OWN_ACCOUNTS
+        if (!internal) return null
+        val iban = toCzIban(payment.creditorAccountNumber, payment.creditorBankCode)
+            ?: run {
+                log.warnf(
+                    "Cannot derive creditor IBAN for internal payment %s (acct=%s bank=%s)",
+                    payment.id,
+                    payment.creditorAccountNumber,
+                    payment.creditorBankCode,
+                )
+                return null
+            }
+        return accountLookup.findAccountIdByIban(iban).also {
+            if (it == null) {
+                log.warnf(
+                    "Internal payment %s: creditor account %s unresolved — booking debit-only",
+                    payment.id,
+                    iban,
+                )
+            }
+        }
+    }
+
+    /**
+     * Build a Czech IBAN (CZkk BBBB + 16-digit account part) from an account number + bank code,
+     * computing the mod-97 check digits; returns the input unchanged if it is already an IBAN, or
+     * null if the inputs cannot form a valid Czech BBAN.
+     */
+    private fun toCzIban(accountNumber: String, bankCode: String): String? {
+        val raw = accountNumber.replace(" ", "").uppercase()
+        if (raw.startsWith("CZ")) return raw
+        val acct = raw.filter { it.isDigit() }
+        val bank = bankCode.filter { it.isDigit() }
+        if (acct.isEmpty() || acct.length > IBAN_ACCOUNT_DIGITS || bank.length > IBAN_BANK_DIGITS) return null
+        val bban = bank.padStart(IBAN_BANK_DIGITS, '0') + acct.padStart(IBAN_ACCOUNT_DIGITS, '0')
+        // ISO 13616 check digits: BBAN + "CZ00" with letters→numbers (C=12, Z=35), mod 97.
+        var mod = 0
+        for (ch in bban + "123500") mod = (mod * RADIX_10 + (ch - '0')) % MOD_97
+        val check = (MOD_97_COMPLEMENT - mod).toString().padStart(2, '0')
+        return "CZ$check$bban"
+    }
+
     private fun buildDescription(payment: DomesticPayment): String {
         val info = payment.messageForPayee
             ?: listOfNotNull(
@@ -138,6 +198,11 @@ class SettlementAdapter(
         const val HTTP_CONFLICT = 409
         const val MAX_DESCRIPTION = 140
         const val SETTLE_TIMEOUT_MS = 8_000L
+        const val IBAN_BANK_DIGITS = 4
+        const val IBAN_ACCOUNT_DIGITS = 16
+        const val MOD_97 = 97
+        const val MOD_97_COMPLEMENT = 98
+        const val RADIX_10 = 10
         val UUID_PATTERN =
             Regex(""""id"\s*:\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"""")
     }

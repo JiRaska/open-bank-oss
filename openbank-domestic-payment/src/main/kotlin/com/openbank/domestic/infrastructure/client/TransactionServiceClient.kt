@@ -36,6 +36,10 @@ data class InitiateSettlementRequest(
     val idempotencyKey: String,
     val type: String,
     val sourceAccountId: UUID,
+    // The internal creditor account to CREDIT. When present, transaction-service books a two-sided
+    // journal (debit source + credit target) so the payee actually receives the money; when null
+    // (external transfer) the debit goes to the bank cash-clearing suspense as before.
+    val targetAccountId: UUID? = null,
     val amount: BigDecimal,
     val currencyCode: String,
     val description: String,

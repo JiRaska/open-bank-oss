@@ -73,4 +73,19 @@ class AccountServiceClient(
         log.warnf(ex, "Account lookup for IBAN %s failed — treating as external", iban)
         null
     }
+
+    @Suppress("TooGenericExceptionCaught")
+    override suspend fun findAccountIdByIban(iban: String): UUID? = try {
+        val token = oidcClient.get().tokens.awaitSuspending().accessToken
+        val dto = httpClient.getByIban("Bearer $token", iban).awaitSuspending()
+        UUID.fromString(dto.id)
+    } catch (ex: jakarta.ws.rs.WebApplicationException) {
+        if (ex.response.status != HTTP_NOT_FOUND) {
+            log.warnf(ex, "Account id lookup for IBAN %s failed with HTTP %d", iban, ex.response.status)
+        }
+        null
+    } catch (ex: Exception) {
+        log.warnf(ex, "Account id lookup for IBAN %s failed", iban)
+        null
+    }
 }
