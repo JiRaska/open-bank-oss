@@ -92,22 +92,6 @@ spec:
                 secretKeyRef:
                   name: kafka-cluster-ca-truststore
                   key: ca.password
-            # ADR-0137 cutover convergence. The scheme-accepted consumer's group
-            # and DLQ topic live in application.yaml, but the deployed image lags
-            # main (the auto-deploy image rebuild is blocked by an unrelated Pact
-            # can-i-deploy gate, ADR-0092), so it still uses the old group
-            # `openbank-transaction-service` and SmallRye's default DLQ topic
-            # `dead-letter-topic-payment-scheme-accepted` (undeclared → on a nack
-            # the DLQ send fails UNKNOWN_TOPIC_OR_PARTITION). Drive both from env
-            # so the cutover is image-independent and deterministic: the consumer
-            # joins the ACL'd group `transaction-scheme-accepted-cg` and nacks land
-            # on the declared, ACL'd `payment.scheme-accepted.dlq`. Env wins over
-            # the baked default and equals the baked value once the image catches
-            # up, so these are safe to keep (or drop post-rebuild).
-            - name: MP_MESSAGING_INCOMING_PAYMENT_SCHEME_ACCEPTED_GROUP_ID
-              value: transaction-scheme-accepted-cg
-            - name: MP_MESSAGING_INCOMING_PAYMENT_SCHEME_ACCEPTED_DEAD_LETTER_QUEUE_TOPIC
-              value: payment.scheme-accepted.dlq
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: OIDC_CLIENT_SECRET
