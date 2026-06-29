@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank/compare/party-service-v0.5.1...party-service-v0.6.0) (2026-06-29)
+
+
+### Features
+
+* **party:** emit AuditEvent on GDPR erasure and subject-access endpoints ([#2447](https://github.com/JiRaska/open-bank/issues/2447)) ([b068b20](https://github.com/JiRaska/open-bank/commit/b068b2098af9e0d7b1b83eb6b317194a1f40b25c))
+* **party:** GDPR Art. 15 subject-access export endpoint ([#2440](https://github.com/JiRaska/open-bank/issues/2440)) ([a54e69b](https://github.com/JiRaska/open-bank/commit/a54e69b466c831e7cf4cb6d00fc51c59d802d21d))
+
 ## [0.5.1](https://github.com/JiRaska/open-bank/compare/party-service-v0.5.0...party-service-v0.5.1) (2026-06-28)
 
 
