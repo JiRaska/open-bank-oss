@@ -17,9 +17,11 @@ import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
+import java.math.RoundingMode
 import java.time.Clock
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.Currency
 import java.util.UUID
 
 /**
@@ -65,13 +67,21 @@ class SettlementAdapter(
         val valueDate = LocalDate.now(clock).format(DateTimeFormatter.ISO_LOCAL_DATE)
         val description = buildDescription(payment)
 
+        // transaction-service rejects an amount whose scale exceeds the currency's fraction digits
+        // ("Amount scale 6 exceeds currency CZK fraction digits 2") — and payment.amount is persisted
+        // with a wider scale (e.g. 123.000000), which made every settlement 400 and stick in
+        // SENT_TO_CLEARING. Normalise to the currency's minor units before booking.
+        val fractionDigits = runCatching { Currency.getInstance(payment.currency).defaultFractionDigits }
+            .getOrDefault(2).coerceAtLeast(0)
+        val settlementAmount = payment.amount.setScale(fractionDigits, RoundingMode.HALF_UP)
+
         val response = client.initiateTransaction(
             "Bearer $token",
             InitiateSettlementRequest(
                 idempotencyKey = "domestic-settlement-${payment.id}",
                 type = "DEBIT",
                 sourceAccountId = payment.debtorAccountId,
-                amount = payment.amount,
+                amount = settlementAmount,
                 currencyCode = payment.currency,
                 description = description,
                 valueDate = valueDate,
