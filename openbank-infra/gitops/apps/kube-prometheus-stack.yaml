@@ -149,10 +149,18 @@ spec:
             resources:
               requests:
                 cpu: 200m
-                memory: 512Mi
+                # 512Mi → 1Gi: steady-state head + WAL replay sits above 512Mi with the
+                # current fleet of ServiceMonitors/PodMonitors; reserve it so the pod lands
+                # on a node that can actually hold it.
+                memory: 1Gi
               limits:
                 cpu: "1"
-                memory: 1536Mi
+                # 1536Mi → 3Gi: the server was OOMKilled (exit 137) during startup TSDB
+                # WAL replay / head compaction, CrashLooping for days and starving the
+                # money-path canary AnalysisRuns (error-rate query → connection refused),
+                # which aborted every Rollout. 3Gi clears the replay peak with headroom;
+                # nodes have the capacity at 12h retention.
+                memory: 3Gi
             storageSpec:
               volumeClaimTemplate:
                 spec:
