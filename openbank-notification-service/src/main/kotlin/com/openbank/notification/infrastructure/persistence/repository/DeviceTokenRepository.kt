@@ -84,6 +84,30 @@ class DeviceTokenRepository : PanacheRepository<DeviceTokenEntity> {
         )
     }
 
+    /**
+     * Deactivate a single device token on explicit logout. Returns true if the token was
+     * ACTIVE and is now INACTIVE; false if it was already inactive or not found.
+     */
+    suspend fun deactivate(deviceId: UUID): Boolean = Panache.withTransaction {
+        update(
+            "status = 'INACTIVE', updatedAt = ?1 where deviceId = ?2 and status = 'ACTIVE'",
+            Instant.now(clock),
+            deviceId,
+        ).map { it > 0 }
+    }.awaitSuspending()
+
+    /**
+     * Mark all tokens not refreshed since [threshold] as INACTIVE. Called by the nightly
+     * TTL sweep job (ADR-0135). Uni-based so it integrates with reactive subscription.
+     */
+    fun sweepStale(threshold: Instant): Uni<Int> = Panache.withTransaction {
+        update(
+            "status = 'INACTIVE', updatedAt = ?1 where status = 'ACTIVE' and updatedAt < ?2",
+            Instant.now(clock),
+            threshold,
+        )
+    }
+
     suspend fun deleteByPartyId(partyId: UUID): Long =
         Panache.withTransaction { delete("partyId", partyId) }.awaitSuspending()
 }

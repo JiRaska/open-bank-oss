@@ -12,9 +12,11 @@ import com.openbank.notification.infrastructure.persistence.repository.DeviceTok
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
@@ -70,7 +72,7 @@ class DeviceResource {
                 osVersion = req.osVersion,
             ),
         )
-        return Response.status(201).entity(view(saved)).build()
+        return Response.status(Response.Status.CREATED).entity(view(saved)).build()
     }
 
     @GET
@@ -81,6 +83,25 @@ class DeviceResource {
         partyId ?: return badRequest("partyId query parameter is required")
         val items = repo.listByParty(partyId)
         return Response.ok(mapOf("items" to items.map { view(it) }, "total" to items.size)).build()
+    }
+
+    @DELETE
+    @Path("/{deviceId}")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_SERVICE", "ROLE_ADMIN")
+    @Authorize(action = "device.delete", resource = "")
+    @Operation(summary = "Deactivate a push device token (logout / uninstall)")
+    suspend fun deactivate(@PathParam("deviceId") deviceId: UUID): Response {
+        val deactivated = repo.deactivate(deviceId)
+        return if (deactivated) {
+            Response.noContent().build()
+        } else {
+            Response.status(Response.Status.NOT_FOUND).entity(
+                mapOf(
+                    "code" to "NOT_FOUND",
+                    "message" to "Device not found or already inactive",
+                ),
+            ).build()
+        }
     }
 
     // Deliberately omits `token` — the provider token never leaves the registry.
@@ -97,6 +118,7 @@ class DeviceResource {
         "updatedAt" to e.updatedAt,
     )
 
-    private fun badRequest(message: String): Response =
-        Response.status(400).entity(mapOf("code" to "BAD_REQUEST", "message" to message)).build()
+    private fun badRequest(message: String): Response = Response.status(
+        Response.Status.BAD_REQUEST,
+    ).entity(mapOf("code" to "BAD_REQUEST", "message" to message)).build()
 }

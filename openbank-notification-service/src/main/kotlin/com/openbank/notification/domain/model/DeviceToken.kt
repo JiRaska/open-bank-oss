@@ -13,10 +13,11 @@ enum class PushPlatform { FCM, APNS }
 /**
  * Lifecycle of a registered device token.
  * - ACTIVE   — eligible for fan-out delivery.
- * - INACTIVE — explicitly retired by the customer (logout / un-register).
+ * - INACTIVE — explicitly retired by the customer (logout / un-register) or swept by the nightly TTL job.
+ * - STALE    — not refreshed within the TTL window (90 days); excluded from fan-out, swept to INACTIVE.
  * - INVALID  — the provider rejected the token (UNREGISTERED / INVALID_TOKEN); never retried.
  */
-enum class DeviceTokenStatus { ACTIVE, INACTIVE, INVALID }
+enum class DeviceTokenStatus { ACTIVE, INACTIVE, STALE, INVALID }
 
 /**
  * A push-capable device belonging to a party. The token is provider-issued (FCM
