@@ -141,3 +141,4 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0136](0136-agent-services-agpl-in-repo-open-core.md) | Agent services licensed AGPL-3.0-only in-repo (open-core) | Accepted | Shipped |
 | [0137](0137-kafka-mtls-scheme-accepted-migration.md) | Kafka mTLS migration — topic-scoped enforcement of payment.scheme-accepted | Accepted | Partial |
 | [0138](0138-configuration-driven-product-fee-rule-engine.md) | Configuration-driven product fee rule engine | Accepted | Partial |
+| [0139](0139-ml-decisioning-platform.md) | Real-time ML decisioning platform: feature store, model serving, champion/challenger governance | Proposed | Planned |
