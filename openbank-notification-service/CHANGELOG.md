@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.3](https://github.com/JiRaska/open-bank/compare/notification-service-v0.7.2...notification-service-v0.7.3) (2026-06-29)
+
+
+### Bug Fixes
+
+* **notification:** ROLE_CUSTOMER on DELETE, lastUsedAt sweep, IDOR scope ([#2485](https://github.com/JiRaska/open-bank/issues/2485) follow-up) ([#2490](https://github.com/JiRaska/open-bank/issues/2490)) ([812d005](https://github.com/JiRaska/open-bank/commit/812d00515f5f2f932c670ce5b4d25630539e10ec))
+
 ## [0.7.2](https://github.com/JiRaska/open-bank/compare/notification-service-v0.7.1...notification-service-v0.7.2) (2026-06-29)
 
 
