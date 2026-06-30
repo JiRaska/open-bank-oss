@@ -172,6 +172,7 @@ kubeconfig
 *.tfstate
 *.tfstate.*
 # Plan files contain the full plaintext resource diff, including secret attribute values.
+tfplan-*
 *.tfplan
 tfplan
 *.tfvars
