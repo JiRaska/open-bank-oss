@@ -5,6 +5,11 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): Platform
 
+**Delivery note (updated 2026-07-01):**
+- **Phase 1 (K8s-API discovery)** — ✅ Shipped: `/api/services/discovery` BFF route queries Kubernetes API for labeled Deployments in domain namespaces; returns `{ source: "k8s", services: [...] }` with `ready`/`desired`/`healthy`; System Health screen fixed ("0 healthy" defect resolved). `openbank-discovery-reader` ClusterRole + per-namespace `RoleBinding`s deployed via `gitops/components/admin-ui/rbac.yaml` (7 namespaces). Static fallback for dev (no in-cluster SA token).
+- **Phase 2 (Kong north-south gateway)** — ⬜ Deferred: Kong Ingress Controller not yet deployed; services still reachable via existing Ingress objects and BFF proxy; 28-entry `SERVICE_MAP` not yet deleted.
+- **Phase 3 (gateway authn/z + rate-limiting)** — ⬜ Pending: blocked on Phase 2.
+
 ## Context
 
 The admin UI currently reaches the ~30 `openbank-*` services through three **hardcoded**

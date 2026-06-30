@@ -4,6 +4,12 @@ Date: 2026-05-26
 Status: Accepted
 Delivery-Status: Partial
 
+**Delivery note (updated 2026-07-01):**
+- **CI linting gate** — ✅ Shipped: AsyncAPI specs linted in CI; missing or malformed specs block release.
+- **Per-service specs** (`openbank-contracts/<service>/asyncapi.yaml`) — ⬜ Pending: specs exist for documented topics; full fleet coverage is the outstanding work.
+- **Schema Registry** (Apicurio or Confluent, runtime enforcement) — ⬜ Pending: not yet deployed; consumer-driven contract tests (ADR-0063) provide schema compatibility checks in the interim.
+- **Consumer SDK generation** from specs — ⬜ Pending.
+
 ## Context
 
 Kafka topics in a microservices system become an implicit API — services produce and consume events without a formal contract. The result:

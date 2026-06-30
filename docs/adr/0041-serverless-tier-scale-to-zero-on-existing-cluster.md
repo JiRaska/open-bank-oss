@@ -5,6 +5,12 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): Jiri Raska
 
+**Delivery note (updated 2026-07-01):**
+- **Tier 1 pilot (CronJob)** — ✅ Shipped: interest accrual and reconciliation batch jobs converted to `CronJob`/`Job`; scale-to-zero with zero new control plane.
+- **Tier 2 pilot (KEDA)** — ✅ Shipped: KEDA 2.x deployed cluster-wide; notifications and FX-refresh scaled on Kafka consumer-lag trigger; idle→0 confirmed working.
+- **Tier 3 (Knative, spiky onboarding HTTP)** — ⬜ Deferred: cold-start on JVM (no native image yet) makes the saving small; floor stays at 1 until native-image work ships. HTTP trigger pilot tracked in ADR-0083.
+- **Evidence-driven flip rule** (D3) — ⬜ Pending: idle-ratio and cold-start p99 metrics instrumented; formal evaluation for additional Tier 2/3 candidates not yet run.
+
 ## Context
 
 We are sizing for millions of customers. A fair share of the ~30-service fleet is
