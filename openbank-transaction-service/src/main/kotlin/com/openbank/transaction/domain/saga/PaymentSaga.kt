@@ -5,8 +5,6 @@
 package com.openbank.transaction.domain.saga
 
 import com.openbank.libs.domain.identifiers.Ids
-import com.openbank.libs.domain.saga.SagaStateMachine
-import com.openbank.libs.domain.saga.SagaTransitionPolicy
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -31,8 +29,8 @@ data class PaymentSaga(
     val version: Long,
 ) {
     fun transitionTo(newState: SagaState, clock: Clock): PaymentSaga {
-        STATE_MACHINE.requireValid(state, newState) { from, to ->
-            "Invalid saga transition: $from → $to for saga $id"
+        require(TRANSITIONS[state].orEmpty().contains(newState)) {
+            "Invalid saga transition: $state → $newState for saga $id"
         }
         return copy(state = newState, updatedAt = Instant.now(clock))
     }
@@ -46,7 +44,7 @@ data class PaymentSaga(
     fun compensated(clock: Clock): PaymentSaga = copy(state = SagaState.COMPENSATED, updatedAt = Instant.now(clock))
 
     val isTerminal: Boolean
-        get() = STATE_MACHINE.isTerminal(state)
+        get() = TRANSITIONS[state].orEmpty().isEmpty()
 
     companion object {
         fun start(transactionId: UUID, idempotencyKey: String, clock: Clock, id: UUID = Ids.newId()): PaymentSaga {
@@ -64,36 +62,32 @@ data class PaymentSaga(
             )
         }
 
-        // Allowed transitions for the payment saga, validated by the shared
-        // SagaStateMachine primitive (openbank-libs, ADR-0045). States with no outgoing
+        // Allowed transitions for the payment saga. States with no outgoing
         // edge (COMPLETED / COMPENSATED / FAILED) are terminal.
-        private val POLICY: SagaTransitionPolicy<SagaState> = SagaTransitionPolicy(
-            mapOf(
-                SagaState.STARTED to setOf(SagaState.PAYMENT_INITIATED, SagaState.COMPENSATING, SagaState.FAILED),
-                SagaState.PAYMENT_INITIATED to setOf(
-                    SagaState.FUNDS_RESERVED,
-                    SagaState.LEDGER_POSTING,
-                    SagaState.COMPENSATING,
-                    SagaState.FAILED,
-                ),
-                SagaState.FUNDS_RESERVED to setOf(SagaState.LEDGER_POSTING, SagaState.COMPENSATING, SagaState.FAILED),
-                SagaState.LEDGER_POSTING to setOf(
-                    SagaState.FUNDS_CAPTURED,
-                    SagaState.COMPLETED,
-                    SagaState.COMPENSATING,
-                    SagaState.FAILED,
-                ),
-                SagaState.FUNDS_CAPTURED to setOf(SagaState.COMPLETED, SagaState.COMPENSATING, SagaState.FAILED),
-                SagaState.COMPENSATING to setOf(SagaState.COMPENSATED, SagaState.FAILED),
-                SagaState.COMPLETED to emptySet(),
-                SagaState.COMPENSATED to emptySet(),
-                SagaState.FAILED to emptySet(),
+        private val TRANSITIONS: Map<SagaState, Set<SagaState>> = mapOf(
+            SagaState.STARTED to setOf(SagaState.PAYMENT_INITIATED, SagaState.COMPENSATING, SagaState.FAILED),
+            SagaState.PAYMENT_INITIATED to setOf(
+                SagaState.FUNDS_RESERVED,
+                SagaState.LEDGER_POSTING,
+                SagaState.COMPENSATING,
+                SagaState.FAILED,
             ),
+            SagaState.FUNDS_RESERVED to setOf(SagaState.LEDGER_POSTING, SagaState.COMPENSATING, SagaState.FAILED),
+            SagaState.LEDGER_POSTING to setOf(
+                SagaState.FUNDS_CAPTURED,
+                SagaState.COMPLETED,
+                SagaState.COMPENSATING,
+                SagaState.FAILED,
+            ),
+            SagaState.FUNDS_CAPTURED to setOf(SagaState.COMPLETED, SagaState.COMPENSATING, SagaState.FAILED),
+            SagaState.COMPENSATING to setOf(SagaState.COMPENSATED, SagaState.FAILED),
+            SagaState.COMPLETED to emptySet(),
+            SagaState.COMPENSATED to emptySet(),
+            SagaState.FAILED to emptySet(),
         )
 
-        private val STATE_MACHINE = SagaStateMachine(POLICY)
-
-        fun isValidTransition(from: SagaState, to: SagaState): Boolean = STATE_MACHINE.isValid(from, to)
+        fun isValidTransition(from: SagaState, to: SagaState): Boolean =
+            TRANSITIONS[from].orEmpty().contains(to)
     }
 }
 
