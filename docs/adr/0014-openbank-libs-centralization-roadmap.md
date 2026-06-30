@@ -5,6 +5,14 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): jiri.raska
 
+**Delivery note (updated 2026-07-01):**
+- **Phase 1 (house cleaning)** — ✅ Shipped: unified dependency declaration; 12 byte-identical `InfoResource.kt` deleted; Jandex plugin added to libs; `RedisIdempotencyStore` consolidated.
+- **Phase 2 (domain primitives + error contract)** — ✅ Shipped: `libs.persistence.outbox` shared entities; typesafe identifiers (`AccountId`, `TransactionId`, `PartyId`, etc. with JPA converters); `CommonExceptionMappers` returning canonical `ApiError`.
+- **Phase 3 (security + audit foundation)** — ✅ Shipped: `PiiMask`/`@MaskSensitive`; canonical `Roles.*` constants; `AuditEvent`/`AuditEventPublisher`; `ServiceTokenProvider`/`BearerTokenClientHeadersFactory` for S2S auth.
+- **Phase 4 (Gradle convention plugin)** — ✅ Shipped: `openbank.quarkus-service` convention plugin (ADR-0049) eliminates ~900 lines of duplicated build script.
+- **Phase 5 (Quarkus platform extension)** — ⬜ Deferred: revisit once libs API is stable across 2–3 minor versions.
+- **Service migration** (opportunistic) — Partial: services adopt libs primitives when touched; full fleet bespoke-code removal is ongoing.
+
 ## Context
 
 A cross-service audit (2026-05-28) measured significant duplication across the

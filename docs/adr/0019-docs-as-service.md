@@ -6,6 +6,10 @@ Delivery-Status: Partial
 Supersedes: nothing (additive)
 Implements: openbank-libs `com.openbank.libs.docs`
 
+**Delivery note (updated 2026-07-01):**
+- **Phases 1–3 + 5b** — ✅ Shipped: `DocsResource`/`DocsCatalog`/`ClasspathMarkdownLoader` in `openbank-libs`; account-service and balance-service pilot (7 sections × 2 languages + diagrams); admin-ui server-rendered docs page with i18n cookie, version chip, and Mermaid diagram viewer; `DiagramsCatalog` + `_diagrams/{slug}` endpoint.
+- **Phase 4 (fleet rollout)** — ⬜ Pending: per-service documentation content authoring for the remaining ~30 services; each service needs `src/main/resources/docs/*.md` files populated.
+
 ## Context
 
 Per-service documentation lived as Markdown files in each service repo,

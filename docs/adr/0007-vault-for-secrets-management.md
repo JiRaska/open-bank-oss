@@ -4,6 +4,12 @@ Date: 2026-05-26
 Status: Accepted
 Delivery-Status: Partial
 
+**Delivery note (updated 2026-07-01):**
+- **Vault infrastructure** — ✅ Shipped: Vault deployed via `openbank-infra/` with ArgoCD; auto-unseal via cloud KMS; External Secrets Operator reads secrets into K8s Secrets for steady-state service operation.
+- **Dynamic database credentials** (per-pod Postgres, TTL ≤ 24h) — ⬜ Pending: services consume static credentials provisioned via External Secrets; Vault database secrets engine not yet wired.
+- **cert-manager PKI integration** — ⬜ Pending: cert-manager installed; Vault PKI engine integration deferred.
+- **HSM (FIPS 140-3)** for eIDAS QSeal and regulated signing keys — ⬜ Pending: deferred until the eIDAS signing use case (ADR-0094) activates in production.
+
 ## Context
 
 A banking platform handles a lot of secrets: database credentials, Kafka SASL passwords, eIDAS QSeal private keys, JWT signing keys, third-party API tokens. Mishandling any of these is a regulatory and security catastrophe.

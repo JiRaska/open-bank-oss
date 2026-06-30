@@ -4,6 +4,11 @@ Date: 2026-05-30
 Status: Accepted
 Delivery-Status: Partial
 
+**Delivery note (updated 2026-07-01):**
+- **Phase 0 (domain primitives in libs)** — ✅ Shipped: `Amortization` (three methods: annuity, equal-principal, bullet), `Ifrs9` (three-stage ECL), `Delinquency` (DPD, CRR Art. 178 90-day trigger), typesafe identifiers (`LoanApplicationId`, `LoanId`, `CollateralId`); `LendingPrimitivesTest` green.
+- **Phase 2 (service + ledger integration)** — ✅ Shipped: `openbank-lending-service` with origination four-eyes flow (maker/checker/disburser), `RestLedgerPostingAdapter`, scheduled servicing posting, interest accrual scheduler, and write-off (`WriteOffLoanUseCase`).
+- **Phase 3 (provisioning + AnaCredit/FINREP feeds)** — ⬜ Pending: IFRS 9 staging read-model, ECL batch, AnaCredit/FINREP F-18/F-12 field-level mapping; deferred until a live loan book exists (tracked in ADR-0097).
+
 ## Context
 
 OpenBank models deposits, payments, cards, FX and the supporting compliance domains, but it has **no

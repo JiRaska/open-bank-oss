@@ -5,6 +5,13 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): jiri.raska
 
+**Delivery note (updated 2026-07-01):**
+- **`BootstrapVerifier` in `openbank-libs`** — ✅ Shipped: fails-fast at startup if any property literally equals a local-dev placeholder outside the `%dev` profile; prevents prod regression.
+- **Dev `docker-compose.yml` Vault container + `vault-seed.sh`** — ✅ Shipped: `make up` seeds KV paths; new contributors get a working dev stack with no unseal ceremony.
+- **Per-service `application.yaml` migration** (28 services) — Partial: account, transaction, ledger, and sepa-payment migrated first; remaining services migrate opportunistically when touched.
+- **CI vault-seed step** for integration tests — ⬜ Pending.
+- **Prod AppRole provisioning runbook** in `docs/strategy/` — ⬜ Pending.
+
 ## Context
 
 K1 from the 2026-05-28 audit:
