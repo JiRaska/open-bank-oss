@@ -56,7 +56,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0045](0045-saga-framework-lightweight-custom-in-libs.md) | Saga framework: lightweight custom, in openbank-libs | Accepted | Partial |
 | [0046](0046-daily-fx-revaluation-mechanics-and-cnb-rates.md) | Daily FX revaluation mechanics and ČNB rate ingestion | Accepted | Shipped |
 | [0047](0047-governed-runtime-operational-control-plane.md) | Governed runtime operational control plane | Accepted | Partial |
-| [0048](0048-decouple-api-contract-version-from-service-release-version.md) | Decouple the API contract version from the service release version: three independent version axes | Accepted | Partial |
+| [0048](0048-decouple-api-contract-version-from-service-release-version.md) | Decouple the API contract version from the service release version: three independent version axes | Accepted | Shipped |
 | [0049](0049-openbank-libs-consolidation-phase-4.md) | openbank-libs consolidation Phase 4: convention plugin, shared config profile, finished outbox abstraction, observability | Accepted | Partial |
 | [0050](0050-regulatory-grade-outbox-dispatch.md) | Regulatory-grade transactional-outbox dispatch | Accepted | Shipped |
 | [0051](0051-generic-service-discovery-and-single-admin-gateway.md) | Generic service discovery and a single north-south gateway for the admin plane | Accepted | Partial |
