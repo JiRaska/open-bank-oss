@@ -1,0 +1,82 @@
+# Kafka mTLS identity + ACLs for openbank-psd2-service (ADR-0137 #2665 Tier 2c).
+#
+# PSD2 publishes outbox events to openbank.psd2.events (consent/AIS/PIS lifecycle);
+# no locked-down ACL topics are consumed, so no consumer-group ACL is needed —
+# the KafkaUser exists purely to establish the mTLS client identity (TLS:9093).
+#
+# Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one
+# principal for all of this service's Kafka traffic. ACLs are only needed for
+# topics under locked-down ACL control; own domain-event topics need none.
+#
+# These resources live in `messaging` (where the Strimzi User Operator watches);
+# the Strimzi User Operator mints a per-user Secret of the same name there
+# (user.crt/key/p12 + user.password + ca.crt). Those secrets are projected into
+# the `psd2` namespace by External Secrets below.
+---
+# ── KafkaUser: psd2-service ─────────────────────────────────────────────────
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers→Strimzi secrets→ESO projection) must land
+    # before the psd2 Deployment rolls pods onto mTLS; lower waves sync first
+    # and ArgoCD blocks on ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: psd2-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls: []
+---
+# ── ExternalSecret: psd2-service keystore ───────────────────────────────────
+# Projects the Strimzi-minted psd2-service Secret from `messaging` into `psd2`.
+# `dataFrom.extract` copies every key verbatim, preserving the binary PKCS#12
+# payload byte-for-byte. deletionPolicy: Retain so a transient store/RBAC blip
+# never deletes a live keystore out from under a running pod.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: psd2-service-kafka-keystore
+  namespace: psd2
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: psd2-service-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: psd2-service
+---
+# ── ExternalSecret: cluster CA truststore ───────────────────────────────────
+# Shared cluster-CA truststore projected into `psd2` — identical pattern to
+# every other namespace (payments, kyc, etc.).
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: psd2
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert
