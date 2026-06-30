@@ -4,7 +4,7 @@
 
 [![Platform: Apache 2.0](https://img.shields.io/badge/Platform-Apache_2.0-brightgreen.svg)](https://opensource.org/licenses/Apache-2.0)
 [![AI agents: AGPL-3.0 + commercial](https://img.shields.io/badge/AI_agents-AGPL--3.0--only_%2B_commercial-blue.svg)](docs/adr/0136-agent-services-agpl-in-repo-open-core.md)
-[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-orange.svg)](#project-status)
+[![Status: Beta](https://img.shields.io/badge/Status-Beta-blue.svg)](#project-status)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-blue.svg)](CONTRIBUTING.md)
 
 OpenBank is an **early-stage, community-driven** banking platform reference implementation. It demonstrates how a modern retail bank can be built with domain-driven design, hexagonal microservices, double-entry ledger accounting, PSD2 compliance, machine-enforced governance, and end-to-end observability.
@@ -17,7 +17,7 @@ OpenBank is an **early-stage, community-driven** banking platform reference impl
 
 ## Project Status
 
-**Alpha — M1 complete, M2/M3/M5 in progress.** 26 backend services + customer-edge + admin-UI run in the AWS sandbox. The intra-bank money path is end-to-end; the ISO 20022 pipeline and clearing simulator are wired; live interbank network connections and multi-region are later milestones. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full M1–M7 plan.
+**Beta — M1 complete, M2/M3/M5 in progress.** 33 backend microservices in the repo (28 deployed to the AWS sandbox, 5 code-only/deploy-gated); customer-edge + admin-UI + developer portal deployed. The intra-bank money path is end-to-end; the ISO 20022 pipeline and clearing simulator are wired; live interbank network connections and multi-region are later milestones. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full M1–M7 plan.
 
 | Area | Status |
 |---|---|
@@ -29,7 +29,9 @@ OpenBank is an **early-stage, community-driven** banking platform reference impl
 | KYC / AML / Sanctions screening | 🟡 Real screening logic (pg_trgm), deployed; vendor feeds are stubs |
 | GDPR Art. 17 right-to-erasure | 🟢 PARTY_ERASED event handled fleet-wide (kyc, notification, card-issuance) |
 | Cards, disputes, interest, standing orders, statements, onboarding | 🟢 Implemented + deployed; standing-order daily scheduler live |
-| Lending, AnaCredit, SDD, SWIFT | 🟡 Implemented, code-only (not deployed) |
+| Lending | 🟢 Deployed to sandbox (four-eyes KYC gate, ADR-0028); no live credit bureau integration |
+| SWIFT messaging | 🟡 Deployed (ISO 20022 MT/MX pipeline wired); no live SWIFT network connection |
+| AnaCredit, SDD, FINREP, TPP registry | 🟡 Implemented, code-only (not deployed to sandbox) |
 | Product catalog | 🟢 Implemented, deployed |
 | Customer edge (BFF) + mobile app | 🟡 BFF deployed (OPA enforce mode on); KMP/Compose app in active dev (separate repo) |
 | AI agent service (MCP, policy-gated) | 🟡 Fleet read tools + audit (ADR-0031); **copilot-service with LLM deployed in sandbox** |
@@ -40,7 +42,7 @@ OpenBank is an **early-stage, community-driven** banking platform reference impl
 | Supply-chain security (SBOM, signing, SAST, pen-test P0–P2) | 🟢 CI-enforced (ADR-0030); external pen-test P0–P2 findings remediated |
 | CI/CD | 🟢 Self-hosted runners + path-scoped gates + GitOps auto-deploy (ADR-0040) |
 | Observability (OTel, Grafana, Prometheus, Loki, Tempo, Pyroscope) | 🟢 Live; GoAlert on-call, Pyrra SLO-as-code, GlitchTip errors, DomainMetrics fleet-wide |
-| Cloud substrate (AWS, OpenTofu, ArgoCD GitOps) | 🟢 Sandbox live (EKS + ArgoCD), 26 backend services + customer-edge + admin-UI deployed |
+| Cloud substrate (AWS, OpenTofu, ArgoCD GitOps) | 🟢 Sandbox live (EKS + ArgoCD) — 33 backend microservices in repo, 28 deployed (lending / anacredit / sdd / swift / billing code-only or deploy-gated) |
 
 ### What works right now (sandbox at open-bank.tech)
 
@@ -153,10 +155,11 @@ diagram, container diagram, key decisions, deployment topology, and security arc
 ./gradlew detekt ktlintCheck koverVerify build     # the local gate before a PR
 ```
 
-CI is path-scoped — only changed services build (ADR-0040). Before opening a PR, run the ship-checklist
-(`/ship-check`), which mirrors the exact CI gates: PR (no direct `main` commits), per-service version bump,
-Conventional-Commit message, `openapi.yaml` + contract test for API changes, Flyway migration for DB changes,
-tests for new behavior, and a threat model for money-path services (ADR-0030).
+CI is path-scoped — only changed services build (ADR-0040). Before opening a PR, verify the same gates
+CI enforces (ADR-0029): PR (no direct `main` commits), per-service version bump, Conventional-Commit message,
+`openapi.yaml` + contract test for API changes, Flyway migration for DB changes, tests for new behavior,
+and a threat model for money-path services (ADR-0030). See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+full checklist. Maintainers with Claude Code can also run `/ship-check` — it mirrors the same gates.
 
 ---
 

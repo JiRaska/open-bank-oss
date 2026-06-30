@@ -2,9 +2,9 @@
 
 ## Current status (as of 2026)
 
-OpenBank is in a pre-public, single-maintainer phase. All decisions and merge rights are held by
-[@JiRaska](https://github.com/JiRaska). This document is a living record of the interim governance
-model and the path to a distributed one.
+OpenBank is now public (Apache-2.0, launched June 2026) and in a **single-maintainer beta phase**.
+All decisions and merge rights are held by [@JiRaska](https://github.com/JiRaska). This document is
+a living record of the interim governance model and the path to a distributed one.
 
 ## Roles
 

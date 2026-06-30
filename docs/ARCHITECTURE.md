@@ -114,10 +114,11 @@ software that an organisation with the appropriate banking licence may deploy.
 | `openbank-card-issuance-service` | 8118 | Card issuance |
 | `openbank-fx-service` | 8119 | Foreign exchange, multi-currency revaluation |
 | `openbank-interest-service` | 8125 | Interest calculation & accrual |
-| `openbank-lending-service` | 8126 | Loan origination & servicing (four-eyes gate) |
+| `openbank-lending-service` | 8126 | Loan origination & servicing (four-eyes gate; code-only) |
+| `openbank-billing-service` | 8132 | Fee posting to ledger, product fee assessment (ADR-0143; deploy-gated) |
 | `openbank-dispute-service` | 8135 | Card disputes & chargebacks |
 | `openbank-statement-service` | 8136 | Account statements (camt.053 / MT940 / PDF) |
-| `openbank-anacredit-service` | 8137 | AnaCredit regulatory report builder |
+| `openbank-anacredit-service` | 8137 | AnaCredit regulatory report builder (code-only) |
 | `openbank-finrep-service` | 8140 | FINREP / COREP regulatory reporting |
 | `openbank-analytics-sink` | 8134 | Event analytics sink |
 | `openbank-security-scanner` | 8120 | Internal security scanning |
@@ -127,7 +128,9 @@ software that an organisation with the appropriate banking licence may deploy.
 
 | Component | Role |
 |---|---|
-| `openbank-libs` | Shared Kotlin primitives: Money, IBAN, idempotency key, transactional outbox, audit event, `ServiceInfoResource`, `ApiVersionResponseFilter`, OPA authz client |
+| `openbank-libs-domain` | Pure-Kotlin domain primitives: Money, IBAN, calendar, ISO 20022, lending & identity types — **zero framework imports** (ADR-0122 Phase 1) |
+| `openbank-libs-runtime` | Quarkus/Jakarta runtime plumbing: outbox, idempotency, audit, OPA authz, `ServiceInfoResource`, `ApiVersionResponseFilter`, observability, flags (ADR-0122 Phase 1) |
+| `openbank-libs` | Legacy composite wrapper — transitional; being retired as services repoint to the split modules above |
 | `openbank-api-gateway` | Kong gateway configuration (rate limiting, auth, routing) |
 
 ---

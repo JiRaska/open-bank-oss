@@ -4,7 +4,7 @@ Thank you for your interest in contributing! OpenBank is an open-source banking 
 
 ## Code of Conduct
 
-This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). By participating, you agree to uphold its terms. Report unacceptable behaviour by opening a confidential issue via GitHub Security Advisories.
+This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). By participating, you agree to uphold its terms. Report unacceptable behaviour by contacting the maintainer privately via the [@JiRaska GitHub profile](https://github.com/JiRaska) (not via public issues or GitHub Security Advisories — those are for security vulnerabilities only).
 
 ## TL;DR
 
@@ -84,9 +84,11 @@ PRs containing unsigned-off commits will be blocked by CI.
 ./gradlew detekt ktlintCheck koverVerify build
 ```
 
-This mirrors the exact checks the CI gates enforce (ADR-0029). Run this before opening a PR. You
-can also use the `/ship-check` skill inside Claude Code — it runs the same gates and reports
-what is still missing (version bump, changelog, openapi, tests, threat model).
+This mirrors the exact checks the CI gates enforce (ADR-0029). Run this before opening a PR.
+
+> **Maintainers only:** the `/ship-check` Claude Code skill runs the same gates interactively and
+> reports what is still missing (version bump, changelog, openapi, tests, threat model). It is not
+> available to external contributors — the `./gradlew` command above is the equivalent.
 
 ### Validate CDI wiring (important for Quarkus services)
 
@@ -256,6 +258,6 @@ By contributing to OpenBank, you agree that your contributions will be licensed 
 
 - **General questions:** open a GitHub Discussion (when enabled) or an issue with the `question` label.
 - **Security issues:** [SECURITY.md](SECURITY.md).
-- **Code of conduct concerns:** confidential GitHub Security Advisory.
+- **Code of conduct concerns:** contact the maintainer privately via the [@JiRaska GitHub profile](https://github.com/JiRaska) (not via public issues or GitHub Security Advisories).
 
 Thank you for helping make OpenBank better!

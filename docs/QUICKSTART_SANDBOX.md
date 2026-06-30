@@ -12,8 +12,8 @@ TOKEN=$(curl -s -X POST \
   https://kc.open-bank.tech/realms/openbank/protocol/openid-connect/token \
   -d "grant_type=password" \
   -d "client_id=openbank-admin-ui" \
-  -d "username=admin" \
-  -d "password=<ask maintainers>" \
+  -d "username=demo" \
+  -d "password=<sandbox demo password — open a GitHub Discussion or ping @JiRaska to request access>" \
   | jq -r '.access_token')
 
 echo $TOKEN | cut -c1-20  # should print a JWT prefix

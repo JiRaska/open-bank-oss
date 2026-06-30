@@ -27,6 +27,13 @@
 /openbank-swift-service/                @JiRaska
 /openbank-fx-service/                   @JiRaska
 
+# --- Lending & billing (money-path per rules.yaml) ---
+/openbank-lending-service/              @JiRaska
+/openbank-billing-service/              @JiRaska
+
+# --- Fraud detection (money-path per rules.yaml: ADR-0084) ---
+/openbank-fraud-service/                @JiRaska
+
 # --- Compliance & risk ---
 /openbank-aml-service/                  @JiRaska
 /openbank-kyc-service/                  @JiRaska
