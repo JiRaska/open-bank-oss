@@ -1,0 +1,89 @@
+# Kafka mTLS identity + cert projection for dispute-service (ADR-0137 Tier 2c).
+# KafkaUser is created in `messaging` (where Strimzi User Operator watches).
+# ExternalSecrets project the keystore and cluster-CA truststore into `dispute`.
+#
+# dispute-service publishes to two outgoing channels:
+#   - openbank.disputes.dispute.event  (dispute-events-out)
+#   - openbank.dispute.events          (dispute-outbox-out)
+# No incoming channels → no consumer-group ACL needed.
+#
+# allow.everyone.if.no.acl.found=true (kafka.yaml) keeps all other topics open;
+# ACLs here only list what dispute-service needs Write access on.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers→Strimzi secrets→ESO projection) must land
+    # before the dispute Deployment rolls pods onto mTLS; lower waves sync first
+    # and ArgoCD blocks on the ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: dispute-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.disputes.dispute.event
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dispute.events
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+---
+# ExternalSecret: dispute-service keystore projected from messaging → dispute.
+# Source secret is minted by Strimzi User Operator under name 'dispute-service'
+# in the messaging namespace; read via kafka-messaging-certs ClusterSecretStore.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    # ADR-0137: must land before the Deployment rolls onto mTLS.
+    argocd.argoproj.io/sync-wave: "-1"
+  name: dispute-service-kafka-keystore
+  namespace: dispute
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: dispute-service-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: dispute-service
+---
+# ExternalSecret: shared cluster-CA truststore projected from messaging → dispute.
+# Same source secret used by all namespaces; one projection per namespace.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    # ADR-0137: must land before the Deployment rolls onto mTLS.
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: dispute
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert

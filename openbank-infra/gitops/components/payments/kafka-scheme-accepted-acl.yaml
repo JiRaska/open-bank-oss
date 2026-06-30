@@ -248,6 +248,8 @@ rules:
       # Tier 2a (#2665): sca-service
       - sca-service
       - fx-service
+      # Tier 2c (#2665): dispute-service
+      - dispute-service
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1
