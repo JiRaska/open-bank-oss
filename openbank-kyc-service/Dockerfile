@@ -4,7 +4,7 @@ COPY gradle /build/gradle
 COPY gradlew build.gradle.kts settings.gradle.kts /build/
 COPY openbank-libs /build/openbank-libs
 COPY openbank-kyc-service /build/openbank-kyc-service
-RUN chmod +x gradlew && ./gradlew :openbank-kyc-service:quarkusBuild -Dquarkus.package.jar.type=fast-jar --no-daemon --console=plain
+RUN chmod +x gradlew && ./gradlew :openbank-kyc-service:quarkusBuild :openbank-kyc-service:cyclonedxBom -Dquarkus.package.jar.type=fast-jar --no-daemon --console=plain
 
 FROM eclipse-temurin:25-jre-alpine
 WORKDIR /app
@@ -14,5 +14,11 @@ COPY --from=build /build/openbank-kyc-service/build/quarkus-app/lib/ /app/lib/
 COPY --from=build /build/openbank-kyc-service/build/quarkus-app/*.jar /app/
 COPY --from=build /build/openbank-kyc-service/build/quarkus-app/app/ /app/app/
 COPY --from=build /build/openbank-kyc-service/build/quarkus-app/quarkus/ /app/quarkus/
+# CycloneDX SBOM baked into the image; served live by libs SbomResource at
+# /q/openbank/sbom (admin-ui Tech Inventory reads it). Travels with the image,
+# so what the service reports is exactly what was built.
+COPY --from=build /build/openbank-kyc-service/build/reports/bom.json /app/sbom/bom.json
+ENV OPENBANK_SBOM_PATH=/app/sbom/bom.json
+
 EXPOSE 8114
 ENTRYPOINT ["java", "-XX:+UseZGC", "-Djava.util.logging.manager=org.jboss.logmanager.LogManager", "-jar", "/app/quarkus-run.jar"]

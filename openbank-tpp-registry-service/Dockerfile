@@ -7,7 +7,7 @@ COPY openbank-libs /build/openbank-libs
 COPY openbank-tpp-registry-service /build/openbank-tpp-registry-service
 
 RUN chmod +x gradlew && \
-    ./gradlew :openbank-tpp-registry-service:quarkusBuild \
+    ./gradlew :openbank-tpp-registry-service:quarkusBuild :openbank-tpp-registry-service:cyclonedxBom \
       -Dquarkus.package.jar.type=fast-jar \
       --no-daemon \
       --console=plain
@@ -22,6 +22,12 @@ COPY --from=build /build/openbank-tpp-registry-service/build/quarkus-app/lib/ /a
 COPY --from=build /build/openbank-tpp-registry-service/build/quarkus-app/*.jar /app/
 COPY --from=build /build/openbank-tpp-registry-service/build/quarkus-app/app/ /app/app/
 COPY --from=build /build/openbank-tpp-registry-service/build/quarkus-app/quarkus/ /app/quarkus/
+
+# CycloneDX SBOM baked into the image; served live by libs SbomResource at
+# /q/openbank/sbom (admin-ui Tech Inventory reads it). Travels with the image,
+# so what the service reports is exactly what was built.
+COPY --from=build /build/openbank-tpp-registry-service/build/reports/bom.json /app/sbom/bom.json
+ENV OPENBANK_SBOM_PATH=/app/sbom/bom.json
 
 EXPOSE 8108
 ENTRYPOINT ["java", "-XX:+UseZGC", "-Djava.util.logging.manager=org.jboss.logmanager.LogManager", "-jar", "/app/quarkus-run.jar"]
