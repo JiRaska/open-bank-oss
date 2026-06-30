@@ -740,7 +740,7 @@ jobs:
               create_code="$(curl -s -o /tmp/pact-ver.json -w '%{http_code}' \
                 -X PUT \
                 -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
-                -H "Content-Type: application/merge-patch+json" \
+                -H "Content-Type: application/json" \
                 -d '{}' \
                 "${PACT_BROKER_URL}/pacticipants/${svc}/versions/${GITHUB_SHA}")"
               echo "  PUT /pacticipants/${svc}/versions/${GITHUB_SHA} → HTTP ${create_code}"
