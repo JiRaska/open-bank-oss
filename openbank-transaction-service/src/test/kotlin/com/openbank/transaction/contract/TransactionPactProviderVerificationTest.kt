@@ -50,7 +50,6 @@ import java.util.UUID
  */
 @QuarkusTest
 @QuarkusTestResource(com.openbank.transaction.it.PostgresRedpandaTestResource::class)
-@QuarkusTestResource(com.openbank.transaction.it.TemporalTestResource::class)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR"])
 @Provider("openbank-transaction-service")
 @PactBroker(enablePendingPacts = "true")
