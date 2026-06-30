@@ -36,7 +36,7 @@ labels:
     description: "Documentation, ADRs, runbooks, process specs."
   - name: fleet-health
     color: "b60205"
-    description: "Umbrella: any fleet-wide health alert (build or lint). Filter by this; dedupe by the source-specific label."
+    description: "Umbrella: fleet-wide health alert (build or lint). Dedupe by source-specific label."
   - name: fleet-health-build
     color: "b60205"
     description: "Dedup marker for the nightly full-fleet BUILD alert (services-ci). One open issue at a time."
