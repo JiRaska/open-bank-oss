@@ -49,9 +49,14 @@ class KycResource {
     @GET
     @Path("/cases")
     @RolesAllowed(
-        Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN,
-        Roles.KYC, Roles.KYC_OPENER, Roles.KYC_REVIEWER,
-        Roles.COMPLIANCE, Roles.SERVICE,
+        Roles.VIEWER,
+        Roles.OPERATOR,
+        Roles.ADMIN,
+        Roles.KYC,
+        Roles.KYC_OPENER,
+        Roles.KYC_REVIEWER,
+        Roles.COMPLIANCE,
+        Roles.SERVICE,
     )
     @Operation(
         summary = "List KYC cases. Optional ?status= filter for the onboarding cockpit funnel (ADR-0068).",
@@ -87,9 +92,14 @@ class KycResource {
     @GET
     @Path("/cases/{id}")
     @RolesAllowed(
-        Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN,
-        Roles.KYC, Roles.KYC_OPENER, Roles.KYC_REVIEWER,
-        Roles.COMPLIANCE, Roles.SERVICE,
+        Roles.VIEWER,
+        Roles.OPERATOR,
+        Roles.ADMIN,
+        Roles.KYC,
+        Roles.KYC_OPENER,
+        Roles.KYC_REVIEWER,
+        Roles.COMPLIANCE,
+        Roles.SERVICE,
     )
     @Operation(summary = "Get KYC case by ID")
     suspend fun getCase(@PathParam("id") id: UUID): Response = Response.ok(kycService.getCase(id)).build()
@@ -97,9 +107,14 @@ class KycResource {
     @GET
     @Path("/cases/party/{partyId}")
     @RolesAllowed(
-        Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN,
-        Roles.KYC, Roles.KYC_OPENER, Roles.KYC_REVIEWER,
-        Roles.COMPLIANCE, Roles.SERVICE,
+        Roles.VIEWER,
+        Roles.OPERATOR,
+        Roles.ADMIN,
+        Roles.KYC,
+        Roles.KYC_OPENER,
+        Roles.KYC_REVIEWER,
+        Roles.COMPLIANCE,
+        Roles.SERVICE,
     )
     @Operation(summary = "Get latest KYC case for a party")
     suspend fun getCaseByParty(@PathParam("partyId") partyId: UUID): Response {
