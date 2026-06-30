@@ -117,6 +117,17 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # ADR-0120 Phase 1: Temporal payment orchestration — flag ON.
+            # Worker connects to temporal-frontend.temporal.svc:7233 (namespace=openbank-payments,
+            # queue=openbank-payment-execution). NetworkPolicy allows payments→temporal:7233.
+            - name: OPENBANK_TRANSACTION_ORCHESTRATION_TEMPORAL_ENABLED
+              value: "true"
+            - name: OPENBANK_TRANSACTION_ORCHESTRATION_TEMPORAL_SERVER_URL
+              value: temporal-frontend.temporal.svc.cluster.local:7233
+            - name: OPENBANK_TRANSACTION_ORCHESTRATION_TEMPORAL_NAMESPACE
+              value: openbank-payments
+            - name: OPENBANK_TRANSACTION_ORCHESTRATION_TEMPORAL_TASK_QUEUE
+              value: openbank-payment-execution
           startupProbe:
             tcpSocket:
               port: management
