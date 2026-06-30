@@ -36,6 +36,18 @@ object Roles {
     /** KYC officer: onboarding, periodic review, documentation. */
     const val KYC = "ROLE_KYC"
 
+    /**
+     * KYC case opener — initiates cases, submits documents, updates check results.
+     * May NOT approve or reject cases (four-eyes / maker-checker, ADR-0116).
+     */
+    const val KYC_OPENER = "ROLE_KYC_OPENER"
+
+    /**
+     * KYC case reviewer — approves or rejects cases in UNDER_REVIEW state.
+     * Must be a different identity than the case opener (four-eyes / maker-checker, ADR-0116).
+     */
+    const val KYC_REVIEWER = "ROLE_KYC_REVIEWER"
+
     /** Payment ops: initiation, recall, return, clearing reconciliation. */
     const val PAYMENTS = "ROLE_PAYMENTS"
 
@@ -43,5 +55,17 @@ object Roles {
     const val SERVICE = "ROLE_SERVICE"
 
     /** All canonical roles, in declaration order. Use for policy/audit enumeration. */
-    val ALL: List<String> = listOf(ADMIN, OPERATOR, VIEWER, COMPLIANCE, AUDITOR, SUPERVISOR, KYC, PAYMENTS, SERVICE)
+    val ALL: List<String> = listOf(
+        ADMIN,
+        OPERATOR,
+        VIEWER,
+        COMPLIANCE,
+        AUDITOR,
+        SUPERVISOR,
+        KYC,
+        KYC_OPENER,
+        KYC_REVIEWER,
+        PAYMENTS,
+        SERVICE,
+    )
 }
