@@ -1,8 +1,8 @@
 # ADR-0140 — Feature store topology and point-in-time correctness
 
 Date: 2026-06-29
-Decision-Status: Proposed   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only -->
+Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
+Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only -->
 Author(s): Jiri Raska
 
 ## Context
