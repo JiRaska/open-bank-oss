@@ -120,11 +120,20 @@ locals {
     # serialised by max-parallel. The init-gradle-home init container ensures
     # the directory exists and is world-writable before the runner starts.
     { name = "GRADLE_USER_HOME_NODE_CACHE", value = "/var/cache/gradle-svc" },
+    # FinOps (2026-06-30): RUNNER_TOOL_CACHE on the same NVMe hostPath so
+    # actions/setup-java downloads JDK 21 + JDK 25 (~380 MB) at most ONCE per
+    # Karpenter node lifecycle instead of once per job. Root-cause analysis of
+    # the 790 GB/day NAT spike (June 20-29, $250 cumulative) confirmed GitHub
+    # CDN (185.199.x.x, 57.150.x.x) as the dominant source: each ephemeral
+    # runner pod re-downloaded both JDKs from GitHub on every build. With 30
+    # service builds × 380 MB = 11.4 GB NAT per CI run, cached to 380 MB/node.
+    { name = "RUNNER_TOOL_CACHE", value = "/mnt/k8s-disks/0/runner-tool-cache" },
   ]
   runner_docker_volume_mounts = [
     { name = "work", mountPath = "/home/runner/_work" },
     { name = "dind-sock", mountPath = "/var/run" },
     { name = "gradle-home-cache", mountPath = "/var/cache/gradle-svc" },
+    { name = "runner-tool-cache", mountPath = "/mnt/k8s-disks/0/runner-tool-cache" },
   ]
 
   # Copies the runner's baked-in externals into the shared volume (chart parity).
@@ -157,11 +166,18 @@ locals {
   # with cache-enabled: false in _service-ci.yml (eliminates 74 GB/day GitHub
   # Actions cache upload) this drives CI NAT download cost toward the floor.
   gradle_home_init_container = {
-    name            = "init-gradle-home"
-    image           = "public.ecr.aws/docker/library/busybox:1.36"
-    command         = ["sh", "-c", "mkdir -p /var/cache/gradle-svc && chmod 777 /var/cache/gradle-svc && echo 'gradle-home-cache ready'"]
+    name  = "init-gradle-home"
+    image = "public.ecr.aws/docker/library/busybox:1.36"
+    # Chowns both node-local caches in a single init container:
+    # - gradle-home-cache: Gradle wrapper + Maven metadata (~150 MB per node)
+    # - runner-tool-cache: JDK 21 + JDK 25 (~380 MB per node) — fixes the
+    #   790 GB/day GitHub CDN NAT spike (2026-06-30 root cause analysis).
+    command         = ["sh", "-c", "mkdir -p /mnt/k8s-disks/0/gradle-svc /mnt/k8s-disks/0/runner-tool-cache && chmod 777 /mnt/k8s-disks/0/gradle-svc /mnt/k8s-disks/0/runner-tool-cache && echo 'caches ready'"]
     securityContext = { privileged = true }
-    volumeMounts    = [{ name = "gradle-home-cache", mountPath = "/var/cache/gradle-svc" }]
+    volumeMounts = [
+      { name = "gradle-home-cache", mountPath = "/mnt/k8s-disks/0/gradle-svc" },
+      { name = "runner-tool-cache", mountPath = "/mnt/k8s-disks/0/runner-tool-cache" },
+    ]
   }
 
   # The dind daemon — chart-parity args PLUS the pinned default address pool.
@@ -237,6 +253,12 @@ locals {
     # the NVMe gives ~880 GiB of headroom (node is ephemeral, expireAfter 72h, so it
     # is naturally GC'd) and keeps the root for the OS only — so the 25 GiB root stays.
     { name = "gradle-home-cache", hostPath = { path = "/mnt/k8s-disks/0/gradle-svc", type = "DirectoryOrCreate" } },
+    # Node-local GitHub Actions tool cache — JDK 21 + 25 (~380 MB) downloaded
+    # once per node lifecycle. Root cause of 790 GB/day NAT (June 20-29): each
+    # ephemeral runner pod re-downloaded both JDKs from GitHub CDN (185.199.x.x,
+    # 57.150.x.x) on every build. Shared hostPath on NVMe is safe: setup-java
+    # uses atomic rename to the final tool dir so concurrent pods don't corrupt.
+    { name = "runner-tool-cache", hostPath = { path = "/mnt/k8s-disks/0/runner-tool-cache", type = "DirectoryOrCreate" } },
   ]
 }
 
