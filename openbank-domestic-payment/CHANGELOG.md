@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.6](https://github.com/JiRaska/open-bank/compare/domestic-payment-v0.8.5...domestic-payment-v0.8.6) (2026-06-30)
+
+
+### Bug Fixes
+
+* **domestic:** label in-house transfers correctly, not "CERTIS" ([#2737](https://github.com/JiRaska/open-bank/issues/2737)) ([d00e4de](https://github.com/JiRaska/open-bank/commit/d00e4dee9b6cff4147261722a360c443cea82b1c))
+
 ## [0.8.5](https://github.com/JiRaska/open-bank/compare/domestic-payment-v0.8.4...domestic-payment-v0.8.5) (2026-06-29)
 
 
