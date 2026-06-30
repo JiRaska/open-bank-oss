@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.3](https://github.com/JiRaska/open-bank/compare/account-service-v0.11.2...account-service-v0.11.3) (2026-06-30)
+
+
+### Security
+
+* **account:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 1) ([#2729](https://github.com/JiRaska/open-bank/issues/2729)) ([d192966](https://github.com/JiRaska/open-bank/commit/d192966f8488389fc2a1f5706789d2a3160a4781))
+
 ## [0.11.2](https://github.com/JiRaska/open-bank/compare/account-service-v0.11.1...account-service-v0.11.2) (2026-06-29)
 
 
