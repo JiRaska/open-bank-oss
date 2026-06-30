@@ -168,67 +168,6 @@ resource "aws_cloudfront_response_headers_policy" "sec" {
   }
 }
 
-# --- WAF Web ACL (CloudFront scope must live in us-east-1) -----------------
-# AWS Managed Core Rule Set (CRS) blocks OWASP Top 10 attack patterns.
-# CloudWatch metrics and request sampling are disabled to avoid log costs for a
-# static landing page; re-enable if you need traffic visibility.
-resource "aws_wafv2_web_acl" "cdn" {
-  provider    = aws.us_east_1
-  name        = "${replace(var.domain, ".", "-")}-waf"
-  description = "WAF for ${var.domain} CloudFront distribution (CRS + AmazonIP)"
-  scope       = "CLOUDFRONT"
-
-  default_action { allow {} }
-
-  rule {
-    name     = "AWSManagedRulesCommonRuleSet"
-    priority = 1
-
-    override_action { none {} }
-
-    statement {
-      managed_rule_group_statement {
-        name        = "AWSManagedRulesCommonRuleSet"
-        vendor_name = "AWS"
-      }
-    }
-
-    visibility_config {
-      cloudwatch_metrics_enabled = false
-      metric_name                = "AWSManagedRulesCommonRuleSet"
-      sampled_requests_enabled   = false
-    }
-  }
-
-  rule {
-    name     = "AWSManagedRulesAmazonIpReputationList"
-    priority = 2
-
-    override_action { none {} }
-
-    statement {
-      managed_rule_group_statement {
-        name        = "AWSManagedRulesAmazonIpReputationList"
-        vendor_name = "AWS"
-      }
-    }
-
-    visibility_config {
-      cloudwatch_metrics_enabled = false
-      metric_name                = "AWSManagedRulesAmazonIpReputationList"
-      sampled_requests_enabled   = false
-    }
-  }
-
-  visibility_config {
-    cloudwatch_metrics_enabled = false
-    metric_name                = "${replace(var.domain, ".", "-")}-waf"
-    sampled_requests_enabled   = false
-  }
-
-  tags = var.tags
-}
-
 # --- CDN -------------------------------------------------------------------
 resource "aws_cloudfront_distribution" "cdn" {
   enabled             = true
@@ -238,7 +177,6 @@ resource "aws_cloudfront_distribution" "cdn" {
   aliases             = var.aliases
   price_class         = "PriceClass_100" # NA + EU edges only = cheapest
   http_version        = "http2and3"
-  web_acl_id          = aws_wafv2_web_acl.cdn.arn
   tags                = var.tags
 
   origin {
