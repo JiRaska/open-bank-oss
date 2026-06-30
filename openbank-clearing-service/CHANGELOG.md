@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.4](https://github.com/JiRaska/open-bank/compare/clearing-service-v0.6.3...clearing-service-v0.6.4) (2026-06-30)
+
+
+### Security
+
+* **clearing:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 1) ([#2732](https://github.com/JiRaska/open-bank/issues/2732)) ([84b5d43](https://github.com/JiRaska/open-bank/commit/84b5d432d5b36e94628f6bda250456ec7c5c7748))
+
 ## [0.6.3](https://github.com/JiRaska/open-bank/compare/clearing-service-v0.6.2...clearing-service-v0.6.3) (2026-06-29)
 
 
