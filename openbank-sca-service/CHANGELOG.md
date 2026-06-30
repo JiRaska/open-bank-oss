@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.4](https://github.com/JiRaska/open-bank/compare/sca-service-v0.8.3...sca-service-v0.8.4) (2026-06-30)
+
+
+### Security
+
+* **sca:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2a) ([#2744](https://github.com/JiRaska/open-bank/issues/2744)) ([b0e4de1](https://github.com/JiRaska/open-bank/commit/b0e4de14e77874f8e87ce97bcebded152b85a52e))
+
 ## [0.8.3](https://github.com/JiRaska/open-bank/compare/sca-service-v0.8.2...sca-service-v0.8.3) (2026-06-29)
 
 
