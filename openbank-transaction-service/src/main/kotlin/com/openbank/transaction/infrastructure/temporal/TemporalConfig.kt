@@ -9,19 +9,14 @@ import io.smallrye.config.WithDefault
 import jakarta.enterprise.context.ApplicationScoped
 
 /**
- * Configuration for the ADR-0120 Phase 1 Temporal-backed payment orchestration.
+ * Configuration for the Temporal-backed payment orchestration (ADR-0120 Phase 5: always-on).
  *
  * `@ConfigMapping` (interface), NOT flat `@ConfigProperty`, so a missing optional key resolves to its
- * `@WithDefault` instead of throwing `SRCFG00040` at boot. The whole block is opt-in: with
- * `enabled=false` (the default) `TransactionService` keeps using `PaymentSagaOrchestrator` and no
- * `:7233` dial happens at startup.
+ * `@WithDefault` instead of throwing `SRCFG00040` at boot.
  */
 @ConfigMapping(prefix = "openbank.transaction.orchestration.temporal")
 @ApplicationScoped
 interface TemporalConfig {
-    @WithDefault("false")
-    fun enabled(): Boolean
-
     @WithDefault("localhost:7233")
     fun serverUrl(): String
 

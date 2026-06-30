@@ -86,8 +86,8 @@ class TransactionPactProviderVerificationTest {
 
     @State("the transaction service is available")
     fun stateServiceAvailable() {
-        // No DB seeding needed: CREDIT initiation with a new idempotency key always succeeds
-        // — the saga validates nothing synchronously before accepting the command.
+        // TemporalTestResource provides an in-process Temporal server with NoOpPaymentWorkflow
+        // registered to return COMPLETED — no per-interaction setup needed here.
     }
 
     @State("transaction-service has initiated a payment transaction")

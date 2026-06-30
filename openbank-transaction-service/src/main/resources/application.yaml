@@ -141,12 +141,10 @@ openbank:
   rate-limit:
     enabled: true
     max-concurrent-requests: 150
-  # ADR-0120 Phase 1: Temporal-backed payment orchestration. Flag defaults OFF — TransactionService
-  # keeps using PaymentSagaOrchestrator until this is flipped. No :7233 dial happens while disabled.
+  # ADR-0120 Phase 5: Temporal is the sole payment orchestrator (saga retired).
   transaction:
     orchestration:
       temporal:
-        enabled: false
         server-url: ${TEMPORAL_SERVER_URL:localhost:7233}
         namespace: ${TEMPORAL_NAMESPACE:openbank-payments}
         task-queue: ${TEMPORAL_TASK_QUEUE:openbank-payment-execution}
@@ -180,7 +178,7 @@ openbank:
     transaction:
       orchestration:
         temporal:
-          enabled: false
+          server-url: localhost:7233
 
 opa:
   url: "${OPA_URL:http://localhost:8181}"
