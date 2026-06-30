@@ -44,7 +44,6 @@ dependencies {
     implementation(project(":openbank-libs"))
 
     testImplementation(libs.quarkus.junit5)
-    testImplementation("io.quarkus:quarkus-junit5-mockito")
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)

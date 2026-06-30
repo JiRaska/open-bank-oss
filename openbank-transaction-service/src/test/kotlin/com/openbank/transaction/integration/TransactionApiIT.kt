@@ -22,6 +22,7 @@ import java.util.UUID
 
 @QuarkusTest
 @QuarkusTestResource(com.openbank.transaction.it.PostgresRedpandaTestResource::class)
+@QuarkusTestResource(com.openbank.transaction.it.TemporalTestResource::class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class TransactionApiIT {
 
