@@ -551,13 +551,18 @@ jobs:
             if [ "$cid_rc" -eq 0 ]; then
               echo "  ✓ ${svc} deployable"
             else
+              # "No version with tag main exists": new service that has been registered as a
+              # Pacticipant (via record-deployment) but has never published a pact or been
+              # verified against one. Has the same semantics as a 404 Pacticipant — it cannot
+              # break any consumer/provider expectation. Treat as deployable.
+              if echo "$cid_out" | grep -q "No version with tag"; then
+                echo "::warning::can-i-deploy: ${svc} has no 'main'-tagged version yet (new service, no pacts) — treating as deployable (ADR-0092)"
               # If every failure line is "no version is currently recorded as deployed/released
               # in this environment", the counterpart service has simply not been deployed to
               # sandbox yet and therefore cannot break any contract expectation. Treat it the
               # same as a 404 pacticipant (not a Pacticipant → trivially deployable).
-              fail_lines=$(echo "$cid_out" | grep -c "no verified pact\|Computer says no" || true)
-              unrecorded_lines=$(echo "$cid_out" | grep -c "no version is currently recorded" || true)
-              if [ "$fail_lines" -gt 0 ] && [ "$unrecorded_lines" -ge "$fail_lines" ]; then
+              elif [ "$(echo "$cid_out" | grep -c "no verified pact\|Computer says no" || true)" -gt 0 ] && \
+                   [ "$(echo "$cid_out" | grep -c "no version is currently recorded" || true)" -ge "$(echo "$cid_out" | grep -c "no verified pact\|Computer says no" || true)" ]; then
                 echo "::warning::can-i-deploy: ${svc} has counterpart(s) not yet recorded in sandbox — treating as deployable (ADR-0092)"
               else
                 echo "::error::can-i-deploy: ${svc} NOT deployable — deployment blocked (ADR-0092)"
