@@ -1,102 +1,102 @@
 # Changelog
 
-## [0.6.5](https://github.com/JiRaska/open-bank/compare/swift-service-v0.6.4...swift-service-v0.6.5) (2026-06-29)
+## [0.6.5](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.6.4...swift-service-v0.6.5) (2026-06-29)
 
 
 ### Security
 
-* **kafka:** mTLS + ACLs for payment.scheme-accepted, no global gate flip (ADR-0137) ([#2602](https://github.com/JiRaska/open-bank/issues/2602)) ([b143022](https://github.com/JiRaska/open-bank/commit/b143022f6ab76c4ff817ddbd4467fc578b8ee193))
+* **kafka:** mTLS + ACLs for payment.scheme-accepted, no global gate flip (ADR-0137) ([#2602](https://github.com/JiRaska/open-bank-oss/issues/2602)) ([b143022](https://github.com/JiRaska/open-bank-oss/commit/b143022f6ab76c4ff817ddbd4467fc578b8ee193))
 
-## [0.6.4](https://github.com/JiRaska/open-bank/compare/swift-service-v0.6.3...swift-service-v0.6.4) (2026-06-29)
-
-
-### Bug Fixes
-
-* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2344](https://github.com/JiRaska/open-bank/issues/2344)) ([b6fb6d5](https://github.com/JiRaska/open-bank/commit/b6fb6d5a86a040f0dcc5f489d0b4c8d778c6ec50))
-* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2358](https://github.com/JiRaska/open-bank/issues/2358)) ([fab840a](https://github.com/JiRaska/open-bank/commit/fab840aafcbc7b63782c8709f9d1bb34e3f4b0cd))
-* **customer-edge:** add per-party rate-limit config key (ADR-0132) ([#2501](https://github.com/JiRaska/open-bank/issues/2501)) ([213f528](https://github.com/JiRaska/open-bank/commit/213f52818238585840a7dd18ad98066aebd135bb))
-* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([7295494](https://github.com/JiRaska/open-bank/commit/72954940743f27bf7e49fede185ff20bc3e40060))
-* **notification:** ROLE_CUSTOMER on DELETE, lastUsedAt sweep, IDOR scope ([#2485](https://github.com/JiRaska/open-bank/issues/2485) follow-up) ([#2490](https://github.com/JiRaska/open-bank/issues/2490)) ([4277222](https://github.com/JiRaska/open-bank/commit/4277222937a768f0c3890ed7f57757d726ffa8a5))
-* **release:** restore transaction-service entry in release-please manifest ([#2351](https://github.com/JiRaska/open-bank/issues/2351)) ([7694897](https://github.com/JiRaska/open-bank/commit/7694897b8f282fdd529175d24e0cb56139655839)), closes [#2342](https://github.com/JiRaska/open-bank/issues/2342)
-* **swift:** disable Quarkus JUnit FacadeClassLoader in CI ([#2404](https://github.com/JiRaska/open-bank/issues/2404)) ([#2506](https://github.com/JiRaska/open-bank/issues/2506)) ([7a6294e](https://github.com/JiRaska/open-bank/commit/7a6294e2dd1dd0470d5d3468dc170b7299089d6b))
-* **swift:** stop fleet-CI hang — CI-skip boot smoke + disable Kafka devservices ([#2415](https://github.com/JiRaska/open-bank/issues/2415)) ([fb7127e](https://github.com/JiRaska/open-bank/commit/fb7127e456a49f11bdc0b276e9293c4e3fc1c13e))
-
-## [0.6.3](https://github.com/JiRaska/open-bank/compare/swift-service-v0.6.2...swift-service-v0.6.3) (2026-06-29)
+## [0.6.4](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.6.3...swift-service-v0.6.4) (2026-06-29)
 
 
 ### Bug Fixes
 
-* **swift:** disable Quarkus JUnit FacadeClassLoader in CI ([#2404](https://github.com/JiRaska/open-bank/issues/2404)) ([#2506](https://github.com/JiRaska/open-bank/issues/2506)) ([573cf7b](https://github.com/JiRaska/open-bank/commit/573cf7ba86f619269b53f23567cc21b3a776d358))
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2344](https://github.com/JiRaska/open-bank-oss/issues/2344)) ([b6fb6d5](https://github.com/JiRaska/open-bank-oss/commit/b6fb6d5a86a040f0dcc5f489d0b4c8d778c6ec50))
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2358](https://github.com/JiRaska/open-bank-oss/issues/2358)) ([fab840a](https://github.com/JiRaska/open-bank-oss/commit/fab840aafcbc7b63782c8709f9d1bb34e3f4b0cd))
+* **customer-edge:** add per-party rate-limit config key (ADR-0132) ([#2501](https://github.com/JiRaska/open-bank-oss/issues/2501)) ([213f528](https://github.com/JiRaska/open-bank-oss/commit/213f52818238585840a7dd18ad98066aebd135bb))
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank-oss/issues/2237)) ([7295494](https://github.com/JiRaska/open-bank-oss/commit/72954940743f27bf7e49fede185ff20bc3e40060))
+* **notification:** ROLE_CUSTOMER on DELETE, lastUsedAt sweep, IDOR scope ([#2485](https://github.com/JiRaska/open-bank-oss/issues/2485) follow-up) ([#2490](https://github.com/JiRaska/open-bank-oss/issues/2490)) ([4277222](https://github.com/JiRaska/open-bank-oss/commit/4277222937a768f0c3890ed7f57757d726ffa8a5))
+* **release:** restore transaction-service entry in release-please manifest ([#2351](https://github.com/JiRaska/open-bank-oss/issues/2351)) ([7694897](https://github.com/JiRaska/open-bank-oss/commit/7694897b8f282fdd529175d24e0cb56139655839)), closes [#2342](https://github.com/JiRaska/open-bank-oss/issues/2342)
+* **swift:** disable Quarkus JUnit FacadeClassLoader in CI ([#2404](https://github.com/JiRaska/open-bank-oss/issues/2404)) ([#2506](https://github.com/JiRaska/open-bank-oss/issues/2506)) ([7a6294e](https://github.com/JiRaska/open-bank-oss/commit/7a6294e2dd1dd0470d5d3468dc170b7299089d6b))
+* **swift:** stop fleet-CI hang — CI-skip boot smoke + disable Kafka devservices ([#2415](https://github.com/JiRaska/open-bank-oss/issues/2415)) ([fb7127e](https://github.com/JiRaska/open-bank-oss/commit/fb7127e456a49f11bdc0b276e9293c4e3fc1c13e))
 
-## [0.6.2](https://github.com/JiRaska/open-bank/compare/swift-service-v0.6.1...swift-service-v0.6.2) (2026-06-29)
+## [0.6.3](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.6.2...swift-service-v0.6.3) (2026-06-29)
 
 
 ### Bug Fixes
 
-* **swift:** stop fleet-CI hang — CI-skip boot smoke + disable Kafka devservices ([#2415](https://github.com/JiRaska/open-bank/issues/2415)) ([6eeb8c9](https://github.com/JiRaska/open-bank/commit/6eeb8c9ba802bee975ad454ac40f50f35d2bff37))
+* **swift:** disable Quarkus JUnit FacadeClassLoader in CI ([#2404](https://github.com/JiRaska/open-bank-oss/issues/2404)) ([#2506](https://github.com/JiRaska/open-bank-oss/issues/2506)) ([573cf7b](https://github.com/JiRaska/open-bank-oss/commit/573cf7ba86f619269b53f23567cc21b3a776d358))
 
-## [0.6.1](https://github.com/JiRaska/open-bank/compare/swift-service-v0.6.0...swift-service-v0.6.1) (2026-06-27)
+## [0.6.2](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.6.1...swift-service-v0.6.2) (2026-06-29)
 
 
 ### Bug Fixes
 
-* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+* **swift:** stop fleet-CI hang — CI-skip boot smoke + disable Kafka devservices ([#2415](https://github.com/JiRaska/open-bank-oss/issues/2415)) ([6eeb8c9](https://github.com/JiRaska/open-bank-oss/commit/6eeb8c9ba802bee975ad454ac40f50f35d2bff37))
 
-## [0.6.0](https://github.com/JiRaska/open-bank/compare/swift-service-v0.5.0...swift-service-v0.6.0) (2026-06-25)
+## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.6.0...swift-service-v0.6.1) (2026-06-27)
+
+
+### Bug Fixes
+
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank-oss/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank-oss/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.5.0...swift-service-v0.6.0) (2026-06-25)
 
 
 ### Features
 
-* **swift:** inject Clock for DST determinism (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2095](https://github.com/JiRaska/open-bank/issues/2095)) ([192d157](https://github.com/JiRaska/open-bank/commit/192d1573c4b3e9bbeb7ad58f90554dddecf68dfe))
+* **swift:** inject Clock for DST determinism (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank-oss/issues/1612)) ([#2095](https://github.com/JiRaska/open-bank-oss/issues/2095)) ([192d157](https://github.com/JiRaska/open-bank-oss/commit/192d1573c4b3e9bbeb7ad58f90554dddecf68dfe))
 
-## [0.5.0](https://github.com/JiRaska/open-bank/compare/swift-service-v0.4.0...swift-service-v0.5.0) (2026-06-25)
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.4.0...swift-service-v0.5.0) (2026-06-25)
 
 
 ### Features
 
-* **domestic-payment,swift,libs:** ADR-0104 D4 — SchemeGateway fan-out to domestic & swift rails ([331e7dd](https://github.com/JiRaska/open-bank/commit/331e7ddb148c021d951521f570cc39c75aec5a3c))
-* **fraud,swift:** add Pact consumer contracts for transaction + SWIFT events (ADR-0092, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2024](https://github.com/JiRaska/open-bank/issues/2024)) ([2cb470b](https://github.com/JiRaska/open-bank/commit/2cb470bb18db463d9707ca85ed3913ef9c03712e))
-* **swift-service:** trigger transaction-service settlement after scheme ACSC (ADR-0108) ([#1872](https://github.com/JiRaska/open-bank/issues/1872)) ([d3fcf2c](https://github.com/JiRaska/open-bank/commit/d3fcf2c18b8771f105481016f4ea241d01aea4ab))
-* **swift,transaction:** add Pact provider verification for message contracts (ADR-0092) ([#2063](https://github.com/JiRaska/open-bank/issues/2063)) ([9d0ead6](https://github.com/JiRaska/open-bank/commit/9d0ead608fb576b78cd17f93da5c35232f328d64))
-* **transaction,payment:** ADR-0103 D2 — stamp rail + instructionType at settlement (transaction-service + 4 rails) ([#1940](https://github.com/JiRaska/open-bank/issues/1940)) ([785ca02](https://github.com/JiRaska/open-bank/commit/785ca024d434c845dadade0190551fdd18da17a9))
+* **domestic-payment,swift,libs:** ADR-0104 D4 — SchemeGateway fan-out to domestic & swift rails ([331e7dd](https://github.com/JiRaska/open-bank-oss/commit/331e7ddb148c021d951521f570cc39c75aec5a3c))
+* **fraud,swift:** add Pact consumer contracts for transaction + SWIFT events (ADR-0092, Refs [#1612](https://github.com/JiRaska/open-bank-oss/issues/1612)) ([#2024](https://github.com/JiRaska/open-bank-oss/issues/2024)) ([2cb470b](https://github.com/JiRaska/open-bank-oss/commit/2cb470bb18db463d9707ca85ed3913ef9c03712e))
+* **swift-service:** trigger transaction-service settlement after scheme ACSC (ADR-0108) ([#1872](https://github.com/JiRaska/open-bank-oss/issues/1872)) ([d3fcf2c](https://github.com/JiRaska/open-bank-oss/commit/d3fcf2c18b8771f105481016f4ea241d01aea4ab))
+* **swift,transaction:** add Pact provider verification for message contracts (ADR-0092) ([#2063](https://github.com/JiRaska/open-bank-oss/issues/2063)) ([9d0ead6](https://github.com/JiRaska/open-bank-oss/commit/9d0ead608fb576b78cd17f93da5c35232f328d64))
+* **transaction,payment:** ADR-0103 D2 — stamp rail + instructionType at settlement (transaction-service + 4 rails) ([#1940](https://github.com/JiRaska/open-bank-oss/issues/1940)) ([785ca02](https://github.com/JiRaska/open-bank-oss/commit/785ca024d434c845dadade0190551fdd18da17a9))
 
 
 ### Bug Fixes
 
-* **swift-service,domestic-payment,sepa-instant:** ADR-0104 D4 remaining — port extraction, repo fix, tests, threat models ([fbce147](https://github.com/JiRaska/open-bank/commit/fbce1475004a90d816aeadf5f049783ffc086e04))
-* **swift-service:** add @Version optimistic lock to SwiftMessageEntity (issue [#1833](https://github.com/JiRaska/open-bank/issues/1833)) ([a023932](https://github.com/JiRaska/open-bank/commit/a023932abd351e5150a501826e3d05e4862c885e))
-* **swift-service:** migrate value_date to date type and validate YYYYMMDD format ([#1857](https://github.com/JiRaska/open-bank/issues/1857)) ([e4549e3](https://github.com/JiRaska/open-bank/commit/e4549e33b675b91f451e1204409e5a767d4ea291))
+* **swift-service,domestic-payment,sepa-instant:** ADR-0104 D4 remaining — port extraction, repo fix, tests, threat models ([fbce147](https://github.com/JiRaska/open-bank-oss/commit/fbce1475004a90d816aeadf5f049783ffc086e04))
+* **swift-service:** add @Version optimistic lock to SwiftMessageEntity (issue [#1833](https://github.com/JiRaska/open-bank-oss/issues/1833)) ([a023932](https://github.com/JiRaska/open-bank-oss/commit/a023932abd351e5150a501826e3d05e4862c885e))
+* **swift-service:** migrate value_date to date type and validate YYYYMMDD format ([#1857](https://github.com/JiRaska/open-bank-oss/issues/1857)) ([e4549e3](https://github.com/JiRaska/open-bank-oss/commit/e4549e33b675b91f451e1204409e5a767d4ea291))
 
-## [0.4.0](https://github.com/JiRaska/open-bank/compare/swift-service-v0.3.0...swift-service-v0.4.0) (2026-06-12)
-
-
-### Features
-
-* **domestic-payment:** wire DomainMetrics counters (ADR-0077 Phase 2 sweep) ([#684](https://github.com/JiRaska/open-bank/issues/684)) ([7bc6633](https://github.com/JiRaska/open-bank/commit/7bc663347fd81e5fe0f49076e7eb64055b4baa5e))
-* **swift:** outbox backlog gauge + countProcessable (ADR-0077/0079) ([#808](https://github.com/JiRaska/open-bank/issues/808)) ([d3e5a26](https://github.com/JiRaska/open-bank/commit/d3e5a2675e3a23a5e76f43bec54cbcc011940ddf))
-
-## [0.3.0](https://github.com/JiRaska/open-bank/compare/swift-service-v0.2.0...swift-service-v0.3.0) (2026-06-10)
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.3.0...swift-service-v0.4.0) (2026-06-12)
 
 
 ### Features
 
-* **admin-ui:** derive governance manifest from governance.yaml (ADR-0071 phase 2) ([#498](https://github.com/JiRaska/open-bank/issues/498)) ([46c85e9](https://github.com/JiRaska/open-bank/commit/46c85e98fe1e887eb82e2110efb5286fe0220d12))
+* **domestic-payment:** wire DomainMetrics counters (ADR-0077 Phase 2 sweep) ([#684](https://github.com/JiRaska/open-bank-oss/issues/684)) ([7bc6633](https://github.com/JiRaska/open-bank-oss/commit/7bc663347fd81e5fe0f49076e7eb64055b4baa5e))
+* **swift:** outbox backlog gauge + countProcessable (ADR-0077/0079) ([#808](https://github.com/JiRaska/open-bank-oss/issues/808)) ([d3e5a26](https://github.com/JiRaska/open-bank-oss/commit/d3e5a2675e3a23a5e76f43bec54cbcc011940ddf))
+
+## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.2.0...swift-service-v0.3.0) (2026-06-10)
+
+
+### Features
+
+* **admin-ui:** derive governance manifest from governance.yaml (ADR-0071 phase 2) ([#498](https://github.com/JiRaska/open-bank-oss/issues/498)) ([46c85e9](https://github.com/JiRaska/open-bank-oss/commit/46c85e98fe1e887eb82e2110efb5286fe0220d12))
 
 
 ### Bug Fixes
 
-* **gitops:** single-owner ArgoCD apps for product-catalog and audit-oidc ([#609](https://github.com/JiRaska/open-bank/issues/609)) ([48959b1](https://github.com/JiRaska/open-bank/commit/48959b1459fe696b05f0ec983a4daec3fce24207))
+* **gitops:** single-owner ArgoCD apps for product-catalog and audit-oidc ([#609](https://github.com/JiRaska/open-bank-oss/issues/609)) ([48959b1](https://github.com/JiRaska/open-bank-oss/commit/48959b1459fe696b05f0ec983a4daec3fce24207))
 
-## [0.2.0](https://github.com/JiRaska/open-bank/compare/swift-service-v0.1.0...swift-service-v0.2.0) (2026-06-06)
+## [0.2.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.1.0...swift-service-v0.2.0) (2026-06-06)
 
 
 ### Features
 
-* **build-logic:** convention plugin openbank.quarkus-service (ADR-0049 D1) ([#344](https://github.com/JiRaska/open-bank/issues/344)) ([da71b7e](https://github.com/JiRaska/open-bank/commit/da71b7e1705649c453b252c32fa06dc098210d63))
-* **coverage:** enforce kover 40% floor on all 13 money-path services ([#338](https://github.com/JiRaska/open-bank/issues/338)) ([6e5f132](https://github.com/JiRaska/open-bank/commit/6e5f132ab1f0c3723104276d373307f76076d483))
+* **build-logic:** convention plugin openbank.quarkus-service (ADR-0049 D1) ([#344](https://github.com/JiRaska/open-bank-oss/issues/344)) ([da71b7e](https://github.com/JiRaska/open-bank-oss/commit/da71b7e1705649c453b252c32fa06dc098210d63))
+* **coverage:** enforce kover 40% floor on all 13 money-path services ([#338](https://github.com/JiRaska/open-bank-oss/issues/338)) ([6e5f132](https://github.com/JiRaska/open-bank-oss/commit/6e5f132ab1f0c3723104276d373307f76076d483))
 
 
 ### Bug Fixes
 
-* **gitops:** add Kafka value.deserializer env vars for payment services ([#366](https://github.com/JiRaska/open-bank/issues/366)) ([b578775](https://github.com/JiRaska/open-bank/commit/b57877557a04f6d4b7fe19bba90db3494eb6d6de))
-* **infra:** restore Keycloak login theme to dark blue/cyan ([#358](https://github.com/JiRaska/open-bank/issues/358)) ([2e56cbc](https://github.com/JiRaska/open-bank/commit/2e56cbc39dab44a2a7c6ed66edea533aebdca317))
+* **gitops:** add Kafka value.deserializer env vars for payment services ([#366](https://github.com/JiRaska/open-bank-oss/issues/366)) ([b578775](https://github.com/JiRaska/open-bank-oss/commit/b57877557a04f6d4b7fe19bba90db3494eb6d6de))
+* **infra:** restore Keycloak login theme to dark blue/cyan ([#358](https://github.com/JiRaska/open-bank-oss/issues/358)) ([2e56cbc](https://github.com/JiRaska/open-bank-oss/commit/2e56cbc39dab44a2a7c6ed66edea533aebdca317))

@@ -41,5 +41,5 @@ if it could cause confusion.
 
 If you believe any use of a name or mark in this repository is inappropriate or
 infringing, please open a private report via
-[GitHub Security Advisories](https://github.com/JiRaska/open-bank/security/advisories/new)
+[GitHub Security Advisories](https://github.com/JiRaska/open-bank-oss/security/advisories/new)
 or contact the maintainers, and we will address it promptly.

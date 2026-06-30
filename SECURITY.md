@@ -21,7 +21,7 @@ Only the `main` branch and the latest tagged release receive security fixes duri
 Report privately via:
 
 **GitHub Security Advisories** (preferred):
-https://github.com/JiRaska/open-bank/security/advisories/new
+https://github.com/JiRaska/open-bank-oss/security/advisories/new
 
 GitHub Security Advisories provide a private collaboration space where maintainers and reporters can discuss, develop, and publish coordinated fixes.
 

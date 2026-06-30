@@ -7,5 +7,5 @@ variable "region" {
 variable "github_repo" {
   description = "owner/repo the runner registers against."
   type        = string
-  default     = "JiRaska/open-bank"
+  default     = "JiRaska/open-bank-oss"
 }

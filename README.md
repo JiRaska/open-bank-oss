@@ -248,4 +248,4 @@ OpenBank stands on the shoulders of giants:
 ---
 
 **Maintainer:** [@JiRaska](https://github.com/JiRaska)
-**Repository:** https://github.com/JiRaska/open-bank
+**Repository:** https://github.com/JiRaska/open-bank-oss

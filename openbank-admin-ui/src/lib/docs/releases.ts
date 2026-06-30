@@ -28,7 +28,7 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { componentFolder } from '@/lib/services/bff'
 
-const REPO = process.env.GITHUB_DOCS_REPO ?? 'JiRaska/open-bank'
+const REPO = process.env.GITHUB_DOCS_REPO ?? 'JiRaska/open-bank-oss'
 const REF = process.env.GITHUB_DOCS_REF ?? 'main'
 
 // Fixed vocabulary (lowercase, digits, single dashes). Validating here keeps the

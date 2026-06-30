@@ -34,7 +34,7 @@
 #                                                (default: current user)
 set -euo pipefail
 
-REPO_URL="https://github.com/JiRaska/open-bank"
+REPO_URL="https://github.com/JiRaska/open-bank-oss"
 RUNNER_DIR="${RUNNER_DIR:-$HOME/actions-runner}"
 RUNNER_NAME="${RUNNER_NAME:-$(hostname -s 2>/dev/null || hostname)}"
 # Pool labels for a persistent accelerator host. `openbank-build` and
@@ -75,7 +75,7 @@ if [ -z "$TOKEN" ]; then
     exit 1
   }
   echo "==> minting registration token via gh"
-  TOKEN="$(gh api -X POST repos/JiRaska/open-bank/actions/runners/registration-token -q .token)"
+  TOKEN="$(gh api -X POST repos/JiRaska/open-bank-oss/actions/runners/registration-token -q .token)"
 fi
 [ -n "$TOKEN" ] || { echo "empty registration token" >&2; exit 1; }
 

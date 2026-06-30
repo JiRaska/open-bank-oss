@@ -25,13 +25,13 @@ import { parseChangelogReleases, fetchChangelog, fetchReleaseNotes } from '@/lib
 
 const SAMPLE = `# Changelog
 
-## [1.5.0](https://github.com/JiRaska/open-bank/compare/balance-service-v1.4.0...balance-service-v1.5.0) (2026-06-12)
+## [1.5.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.4.0...balance-service-v1.5.0) (2026-06-12)
 
 ### Features
 
-* **balance:** add currency pockets ([#590](https://github.com/JiRaska/open-bank/issues/590))
+* **balance:** add currency pockets ([#590](https://github.com/JiRaska/open-bank-oss/issues/590))
 
-## [1.4.0](https://github.com/JiRaska/open-bank/compare/balance-service-v1.3.0...balance-service-v1.4.0) (2026-05-30)
+## [1.4.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.3.0...balance-service-v1.4.0) (2026-05-30)
 
 ### Bug Fixes
 

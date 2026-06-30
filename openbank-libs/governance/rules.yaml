@@ -496,8 +496,8 @@ infra_apply:
     apply: workflow_dispatch            # manual "Run workflow" on main (deploy lane); see gate
   auth: github-oidc                     # NO static AWS keys; short-lived STS creds
   roles:
-    plan: { name: openbank-ci-tofu-plan, permissions: ReadOnlyAccess, sub: "repo:JiRaska/open-bank:{ref:refs/*,pull_request}", eks_access: admin-view }
-    apply: { name: openbank-ci-tofu-apply, permissions: AdministratorAccess, pin: "job_workflow_ref=JiRaska/open-bank/.github/workflows/platform-tofu.yml@refs/heads/main", eks_access: cluster-admin }
+    plan: { name: openbank-ci-tofu-plan, permissions: ReadOnlyAccess, sub: "repo:JiRaska/open-bank-oss:{ref:refs/*,pull_request}", eks_access: admin-view }
+    apply: { name: openbank-ci-tofu-apply, permissions: AdministratorAccess, pin: "job_workflow_ref=JiRaska/open-bank-oss/.github/workflows/platform-tofu.yml@refs/heads/main", eks_access: cluster-admin }
   gate: manual-dispatch                 # human presses Run-workflow after reading PR plan preview; apply role pinned to this one workflow file on main
   gate_upgrade: environment-reviewer    # stronger gate (reviewer-gated Environment) blocked on GitHub plan (Free has no env protection); follow-up #282
   broad_role_rationale: "security boundary is the OIDC job_workflow_ref pin + manual dispatch, not an ever-drifting action list; a trimmed policy fails applies on each new resource type (ADR-0060)"

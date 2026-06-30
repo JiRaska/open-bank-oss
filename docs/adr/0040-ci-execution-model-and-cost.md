@@ -7,7 +7,7 @@ Author(s): Jiri Raska
 
 ## Context
 
-CI on the (private) `JiRaska/open-bank` repository has repeatedly stalled because
+CI on the (private) `JiRaska/open-bank-oss` repository has repeatedly stalled because
 GitHub-hosted runners are billing-blocked: jobs abort at startup with "recent
 account payments have failed or your spending limit needs to be increased" (see
 the recurring incidents — a plan upgrade did not durably fix it). The requirement

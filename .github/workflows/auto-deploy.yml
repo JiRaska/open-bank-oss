@@ -190,7 +190,7 @@ jobs:
       # into a freshly-scheduled ARC runner pod, leaving it with NO AWS creds, so ECR login fails
       # "Could not load credentials from any providers". GitHub OIDC mints a token this job
       # exchanges for the build runner role directly via STS (the role trusts
-      # token.actions.githubusercontent.com for repo:JiRaska/open-bank:*) — no per-pod webhook
+      # token.actions.githubusercontent.com for repo:JiRaska/open-bank-oss:*) — no per-pod webhook
       # dependency, deterministic. configure-aws-credentials exports the creds to the job env.
       - name: Configure AWS credentials (GitHub OIDC)
         uses: aws-actions/configure-aws-credentials@254c19bd240aabef8777f48595e9d2d7b972184b # v5.0.0

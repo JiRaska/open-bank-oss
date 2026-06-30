@@ -17,7 +17,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: git@github.com:JiRaska/open-bank.git
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
     targetRevision: main
     path: openbank-infra/gitops/components/security-scanner
   destination:

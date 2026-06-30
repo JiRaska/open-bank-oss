@@ -12,7 +12,7 @@
 #      once the repo upgrades to GitHub Pro/Team.
 #
 # Token: `var.governance_gh_pat` (TF_VAR_governance_gh_pat in CI) — fine-grained
-# PAT with Administration:write + Environments:write on JiRaska/open-bank.
+# PAT with Administration:write + Environments:write on JiRaska/open-bank-oss.
 # Never stored in state.
 # ===========================================================================
 

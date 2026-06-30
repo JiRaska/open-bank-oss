@@ -62,7 +62,7 @@ variable "arc_runner_enabled" {
 variable "github_config_url" {
   description = "GitHub repo the ARC runners register against."
   type        = string
-  default     = "https://github.com/JiRaska/open-bank"
+  default     = "https://github.com/JiRaska/open-bank-oss"
 }
 
 variable "arc_min_runners" {
@@ -128,7 +128,7 @@ variable "arc_reaper_schedule" {
 }
 
 variable "governance_gh_pat" {
-  description = "Fine-grained GitHub PAT used by the github provider to manage branch protection and environments (issue #282). Pass via TF_VAR_governance_gh_pat in CI; never stored in state. Required scopes: Contents:read + Administration:write + Environments:write on JiRaska/open-bank."
+  description = "Fine-grained GitHub PAT used by the github provider to manage branch protection and environments (issue #282). Pass via TF_VAR_governance_gh_pat in CI; never stored in state. Required scopes: Contents:read + Administration:write + Environments:write on JiRaska/open-bank-oss."
   type        = string
   sensitive   = true
 }

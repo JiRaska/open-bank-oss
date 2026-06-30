@@ -117,7 +117,7 @@ const GROUP_LABELS_CS: Record<string, string> = {
   'Other':        'Ostatní',
 }
 
-const SPEC_BASE_URL = 'https://raw.githubusercontent.com/JiRaska/open-bank/main'
+const SPEC_BASE_URL = 'https://raw.githubusercontent.com/JiRaska/open-bank-oss/main'
 
 const GROUP_COLORS: Record<string, string> = {
   'Core Banking': '#2563eb',

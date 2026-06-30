@@ -129,4 +129,4 @@ Agent je **control-plane agent** (ADR-0031):
 - [ADR-0062](0062-finops-cost-allocation-showback.md) — Cost allocation
 - [ADR-0058](0058-fck-nat-egress-cost-sandbox.md) — NAT egress optimization
 - [ADR-0101](0101-temporal-durable-execution.md) — Temporal orchestration
-- [Issue #2137](https://github.com/JiRaska/open-bank/issues/2137) — tracking issue
+- [Issue #2137](https://github.com/JiRaska/open-bank-oss/issues/2137) — tracking issue

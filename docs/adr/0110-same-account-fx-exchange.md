@@ -98,7 +98,7 @@ Both ports are injected into `AccountService` per the hexagonal mandate (ADR-000
 customer app takes — the edge settles directly through transaction-service (§1). The two settlement
 mechanisms for one logical operation are a known divergence; **converging the account-service
 endpoint onto the single ledger-authoritative cross-currency `TRANSFER` of §1 is a follow-up
-([#2433](https://github.com/JiRaska/open-bank/issues/2433))** (so the dangling-debit failure mode and
+([#2433](https://github.com/JiRaska/open-bank-oss/issues/2433))** (so the dangling-debit failure mode and
 the extra fx-service coupling are eliminated). Until then this
 endpoint remains for operator/admin use and is documented in the account-service threat model.
 
@@ -117,7 +117,7 @@ endpoint remains for operator/admin use and is documented in the account-service
   and CREDIT leaves a dangling debit. The idempotent retry path recovers it only if the caller
   retries with the same `Idempotency-Key`; a monitoring alert on `debit`-without-matching-`credit`
   within 60 s is a follow-up. This failure mode does not exist on the edge path (§1), which is the
-  reason §3 is slated to converge onto it ([#2433](https://github.com/JiRaska/open-bank/issues/2433)).
+  reason §3 is slated to converge onto it ([#2433](https://github.com/JiRaska/open-bank-oss/issues/2433)).
 
 ## Alternatives considered
 

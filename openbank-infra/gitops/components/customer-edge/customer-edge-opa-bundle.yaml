@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: customer-edge
     app.kubernetes.io/part-of: customer-edge
   annotations:
-    openbank.tech/policy-checksum: "89694e6eaff1b228"
+    openbank.tech/policy-checksum: "4d5aaf8e2b40bfd9"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -346,8 +346,13 @@ data:
       # (the former amended ADR-0029 D2's "collapse three into one").
       release_invariant:
         # The deployable artifact's release SemVer. These MUST be equal for a released service.
+        # quarkus.application.version is DERIVED from version.txt at build time (the
+        # openbank.quarkus-service convention plugin sets the Gradle project version from
+        # version.txt; the Quarkus plugin stamps it in). It must NOT be set explicitly in a
+        # service application.yaml — an explicit value shadows the derived one and desyncs on
+        # every release-please bump. Enforced: .github/scripts/check-app-version-override.sh.
         - "version.txt"
-        - "quarkus.application.version"
+        - "quarkus.application.version"   # build-derived from version.txt; never set in application.yaml
         - "git release tag"
         - "container image tag"
       api_invariant:
@@ -383,6 +388,14 @@ data:
           - "api contract bump per OpenAPI diff"
           - "api_invariant holds: major(openapi.yaml:info.version) == openbank.api.version == URL /api/v{N}"
           - "consumer-driven contract test updated (Pact)"   # ADR-0029 D3
+          # Pact provider verification: ONE @Provider test per provider. Separate HTTP and message
+          # test classes that share @Provider + @PactBroker (no interaction-type filter) BOTH pull every
+          # pact the broker holds for that provider — the HTTP class then tries to verify the message pact
+          # via HttpTestTarget and fails the state-change callback (UnsupportedOperationException). Use one
+          # class that picks the target per interaction (context.interaction.isAsynchronousMessage() ?
+          # MessageTestTarget(listOf("<pkg>")) : HttpTestTarget(...)). Package-scope MessageTestTarget
+          # (classpath-wide ClassGraph scan throws on JDK 25). Latent: ktlint runs before tests.
+          - "single @Provider verification test per provider; per-interaction target for mixed HTTP+message"
         contract_diff_tool: oasdiff
         gate: api-contract
         enforced: advisory
@@ -425,6 +438,15 @@ data:
         require:
           - "docs/threat-models/<service>.md present/updated"   # ADR-0030 D2
         gate: threat-model
+        enforced: enforce                   # check-threat-models.py live in CI; all 13 money-path services have valid threat models
+      new_service_with_outbox:
+        # A service that extends AbstractOutboxEntity / uses OutboxDispatcher but does NOT
+        # set openbank.outbox.dispatch-enabled=true silently never dispatches events —
+        # no error, no log, attempt_count stays 0. This is the #1 new-service silent failure.
+        detect: ["new <service>/ directory", "AbstractOutboxEntity subclass in src/main/**"]
+        require:
+          - "openbank.outbox.dispatch-enabled: true in <service>/src/main/resources/application.yaml"
+        gate: outbox-dispatch-enabled
         enforced: advisory
       admin_ui_code_change:
         # admin-ui is a released component (scope `admin-ui`); the version-bump discipline that
@@ -466,7 +488,22 @@ data:
           - "injected java.time.Clock CDI bean used (centralised libs Clock producer tracked in #1612)"
           - "no Instant.now() / LocalDateTime.now() / System.currentTimeMillis() / Clock.System.now() in domain or application layer"
         gate: dst-clock-injection
-        enforced: advisory                  # advisory until openbank-simulation harness lands (ADR-0100)
+        enforced: enforce                   # ADR-0100 simulation harness live (#1725); gate clean fleet-wide
+      release_please_merge:
+        # A release-please merge commit that reorders the tail of .release-please-manifest.json can
+        # SILENTLY drop a component line while it stays in release-please-config.json. The
+        # release-registration gate (rule #3, ADR-0029) runs against repo STATE, not the diff, so it then
+        # fails on EVERY open PR; release-please also loses the version baseline and proposes a REGRESSED
+        # version (observed: transaction-service 1.10.0 -> a fresh 1.0.0, #2342/#2351). After ANY RP merge,
+        # config and manifest MUST stay in lockstep (same component set). Restore a dropped line with its
+        # version.txt value (= latest git tag) as baseline.
+        detect: ["release-please merge to main", ".release-please-manifest.json change"]
+        require:
+          - "release-please-config.json and .release-please-manifest.json list the SAME components (lockstep)"
+          - "check-release-registration.py reports equal counts (modules==config==manifest)"
+          - "no released component proposes a version BELOW its latest git tag"
+        gate: release-registration                            # openbank-infra/scripts/check-release-registration.py
+        enforced: enforce
 
     # ---------------------------------------------------------------------------------------
     # Money-path services (from CODEOWNERS critical paths) — stricter rules apply.
@@ -487,6 +524,7 @@ data:
       - openbank-sca-service
       - openbank-consent-service
       - openbank-fraud-service                # ADR-0084: first executable landed (Phase 1 skeleton)
+      - openbank-billing-service              # ADR-0143: fee posting to the ledger (Phase 2b skeleton)
     review:
       default_approvals: 1
       money_path_approvals: 2               # CONTRIBUTING.md + branch protection
@@ -569,6 +607,13 @@ data:
         - test_results
         - ai_attribution        # which agent/model authored; human reviewer (ADR-0029 D6)
       vex: openvex              # accompanies SBOM; suppresses non-exploitable findings (ADR-0030 D1)
+      sbom_generation_pattern: host_side_only
+      # CycloneDX SBOM must be generated on the host (Gradle :svc:cyclonedxBom) and COPY'd into
+      # the image — never generated inside a running container (RUN ./gradlew in the runtime stage).
+      # Two compliant paths:
+      #   a) build-push-service.sh: quarkusBuild + cyclonedxBom on host → generated runtime Dockerfile COPYs bom.json
+      #   b) multi-stage Dockerfile: cyclonedxBom in the JDK build stage → COPY --from=build bom.json into runtime stage
+      # Non-compliant: any `RUN ./gradlew` or `RUN cyclonedxBom` in the RUNTIME (non-build) stage.
       gate: provenance
       # Rollout state of the deploy-time provenance gate (ADR-0030 D4), staged like the OPA-authz
       # (ADR-0034) and image-signature gates: ADVISORY now — per-release evidence bundles
@@ -589,20 +634,32 @@ data:
     # ---------------------------------------------------------------------------------------
     dependencies:
       license_allowlist: [Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, EPL-2.0, MPL-2.0, ISC]
-      license_denylist: [GPL-2.0, GPL-3.0, AGPL-3.0]   # copyleft -- would contaminate the Apache-2.0 tree
-      # Carve-out (ADR-0031 D8): the AI agent RUNTIME component is AGPL-3.0 +
-      # commercial dual-license, in its OWN repo/module with a CLA -- NOT Apache-2.0. The denylist above governs
-      # the main tree; AGPL-3.0 is permitted for that isolated component only, so the gate must not flag it there.
+      license_denylist: [GPL-2.0, GPL-3.0, AGPL-3.0]   # copyleft -- denied for THIRD-PARTY deps of the Apache-2.0 platform
+      # Carve-out (ADR-0136, supersedes the ADR-0031 D8 separate-repo plan): the four AI agent
+      # services are OpenBank's open-core component and are licensed AGPL-3.0-only + a parallel
+      # commercial licence -- IN-REPO, not Apache-2.0. The denylist above governs the Apache-2.0
+      # platform tree; AGPL-3.0-only is the intended licence of the agent services, so the gate
+      # must not flag those paths.
       license_denylist_exceptions:
-        - license: AGPL-3.0
-          scope: agent-runtime-component        # separate repo/module, own LICENSE + CLA
-          reason: "commercial dual-licensing of the agent component"
-          adr: ADR-0031
+        - license: AGPL-3.0-only
+          scope: agent-services                 # in-repo open-core; own LICENSE, commercial dual-license
+          paths:
+            - openbank-agent-service/
+            - openbank-copilot-service/
+            - openbank-devops-agent/
+            - openbank-finops-agent/
+          reason: "open-core: AGPL-3.0-only + commercial dual-licensing of the AI agent services"
+          adr: ADR-0136
       license_boundary_exceptions:
-        - description: "AGPL/Apache seam — openbank-agent-runtime (external repo) implements ModelProvider port. AGPL code must not leak into the Apache-2.0 tree; only the port interface may cross the boundary."
-          allowed_at: "openbank-agent-service/src/main/kotlin/com/openbank/agent/application/ModelProvider.kt"
-          external_repo: "JiRaska/openbank-agent-runtime"
-          license: "AGPL-3.0-or-later"
+        - description: "AGPL/Apache seam (in-repo). The four agent services are AGPL-3.0-only; no Apache-2.0 module may take a build/compile dependency on them (only network/HTTP use is allowed). They depend on openbank-libs (Apache-2.0), which is permitted -- copyleft may consume permissive code."
+          agpl_modules:
+            - openbank-agent-service
+            - openbank-copilot-service
+            - openbank-devops-agent
+            - openbank-finops-agent
+          rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent') as a dependency"
+          license: "AGPL-3.0-only"
+          adr: ADR-0136
       block_on_cve_severity: [CRITICAL, HIGH]
       catalog: openbank-libs/gradle/libs.versions.toml  # version catalog is the single dependency source
 
@@ -633,6 +690,25 @@ data:
       model: ephemeral-scale-to-zero        # ADR-0053; per-job ARC pods, NOT persistent
       platform: arc-on-eks                  # actions-runner-controller; Karpenter spot nodes
       scale_to_zero: true                   # minRunners=0 idle; spend -> $0 when no CI
+      # FinOps dispatch order — AGENTS MUST ENFORCE THIS, never bypass:
+      #   1. Hetzner (x86, CPX42) + Mac mini (arm64) = primary; zero AWS cost; always-on
+      #   2. ARC on EKS Spot = overflow only; scales to zero when idle
+      # Consequence: if a build FAILS on Hetzner/Mac due to an arch/platform issue, fix the
+      # root cause (e.g. Dockerfile --platform=$BUILDPLATFORM on build-only stages so x86
+      # runners can build arm64 images without QEMU). NEVER "fix" it by removing Hetzner/Mac
+      # from the runner label pool — that silently routes work to expensive ARC.
+      # Removing openbank-build from a Hetzner runner to avoid a crash is a FinOps violation.
+      static_hosts:
+        hetzner:
+          type: cpx42                        # x86_64, 8 vCPU, 16 GB; pending migration to CAX31 ARM (~40% saving)
+          labels: [openbank-build, openbank-batch, openbank-sandbox, hetzner]
+          count: 2
+          role: primary_build_and_batch      # first pick for ALL jobs; never remove from pool to work around a build failure
+        mac_mini:
+          arch: arm64
+          labels: [openbank-build, openbank-sandbox]
+          count: 1
+          role: primary_build_arm64          # native arm64 fallback; offline = ARC takes over
       spot:
         provider: karpenter                 # diversified Graviton spot, price-capacity-optimized
         interruption: karpenter-managed     # no persistent spot request; node replaced on reclaim
@@ -701,8 +777,8 @@ data:
         apply: workflow_dispatch            # manual "Run workflow" on main (deploy lane); see gate
       auth: github-oidc                     # NO static AWS keys; short-lived STS creds
       roles:
-        plan: { name: openbank-ci-tofu-plan, permissions: ReadOnlyAccess, sub: "repo:JiRaska/open-bank:{ref:refs/*,pull_request}", eks_access: admin-view }
-        apply: { name: openbank-ci-tofu-apply, permissions: AdministratorAccess, pin: "job_workflow_ref=JiRaska/open-bank/.github/workflows/platform-tofu.yml@refs/heads/main", eks_access: cluster-admin }
+        plan: { name: openbank-ci-tofu-plan, permissions: ReadOnlyAccess, sub: "repo:JiRaska/open-bank-oss:{ref:refs/*,pull_request}", eks_access: admin-view }
+        apply: { name: openbank-ci-tofu-apply, permissions: AdministratorAccess, pin: "job_workflow_ref=JiRaska/open-bank-oss/.github/workflows/platform-tofu.yml@refs/heads/main", eks_access: cluster-admin }
       gate: manual-dispatch                 # human presses Run-workflow after reading PR plan preview; apply role pinned to this one workflow file on main
       gate_upgrade: environment-reviewer    # stronger gate (reviewer-gated Environment) blocked on GitHub plan (Free has no env protection); follow-up #282
       broad_role_rationale: "security boundary is the OIDC job_workflow_ref pin + manual dispatch, not an ever-drifting action list; a trimmed policy fails applies on each new resource type (ADR-0060)"
@@ -815,6 +891,7 @@ data:
       # t0_baseline and need no explicit entry.
       declared:
         openbank-notification-service: T2     # proven pilot, live in sandbox (ADR-0057 best-first target, #228)
+        openbank-product-catalog: T1          # ADR-0083 pilot: HTTPScaledObject minReplicas:0 live; native cold-start SLO gate passed in sandbox (#2083)
 
       # Keep-honest classifier: reads measured signals (HTTP rate/idle ratio, Kafka lag +
       # active fraction, CPU/replica utilisation), emits a recommended tier + realised
@@ -924,6 +1001,30 @@ data:
         label_cs: "Auditní stopa"
         services: [audit-service]
         regulatory_ref: "DORA Art. 17 — immutable"
+
+    # How durable knowledge is captured so it survives across agents and contributors.
+    # A corrected mistake, a hard-won lesson, or a chosen direction goes INTO THE REPO —
+    # never only into an assistant's session/local memory, which does not travel and goes
+    # stale. Routing by kind; the human-readable form lives in CLAUDE.md ("Capturing what
+    # we learn"). This is a process rule (not CI-enforced), but rules.yaml is the source
+    # of truth when it and CLAUDE.md disagree.
+    knowledge_capture:
+      principle: >
+        A corrected non-obvious mistake, a hard-won lesson, or a direction we keep must be
+        committed to the repo where every agent and contributor reads it. Act on the
+        authoritative origin/main state, never a local/session snapshot or private memory.
+      routing:
+        - kind: operational_footgun        # "learned the hard way"
+          home: "CLAUDE.md (root, or <service>/CLAUDE.md when scoped)"
+          form: "one-line bullet in the matching pitfall section — symptom + fix, imperative"
+        - kind: hard_rule                  # checkable invariant
+          home: "rules.yaml (authoritative)"
+          enforce: "add a CI guard/test where feasible; summarize in CLAUDE.md"
+        - kind: recurring_workflow
+          home: ".claude/skills/"
+          form: "a runnable skill that encodes the steps so they aren't re-derived each time"
+      not_a_home:
+        - "assistant session/local memory — does not travel to other agents or contributors, and may be stale"
   agents-data.yaml: |
     # SPDX-License-Identifier: Apache-2.0
     # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
@@ -980,9 +1081,10 @@ data:
       observability: langfuse           # on top of OTel (ADR-0008); tracks approval-without-edit rate
       identity:      spiffe-spire       # short-TTL SVID per run; signing root stays in Vault (ADR-0017)
 
-    # Licensing note (ADR-0031 D8): the agent RUNTIME component is AGPL-3.0 + commercial dual-license,
-    # in a SEPARATE repo with a CLA -- NOT this Apache-2.0 governance file. rules.yaml license_denylist gets
-    # a documented carve-out for it. This charter config itself stays Apache-2.0.
+    # Licensing note (ADR-0136, supersedes the ADR-0031 D8 separate-repo plan): the AI agent SERVICES are
+    # AGPL-3.0-only + a parallel commercial licence, IN-REPO (not a separate repo); the rest of the platform is
+    # Apache-2.0. rules.yaml carries the denylist carve-out + the AGPL/Apache build-dependency boundary. This
+    # charter config itself stays Apache-2.0.
 
     # ---------------------------------------------------------------------------------------
     # Model strategy -- hybrid, model-agnostic via an open LLM gateway (ADR-0031 D6).
@@ -1185,5 +1287,58 @@ data:
         compliance:
           eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency (all proposals logged)"
           dora: "continuous monitoring; operational resilience cost controls"
+
+      - id: devops-agent
+        plane: control
+        charter: "ADR-0119"
+        description: >
+          Proactive SSDLC, CI/CD and DORA reliability agent — the delivery-pipeline twin of the
+          finops-agent (ADR-0112). Watches build/lint health, the four DORA metrics (deployment
+          frequency, lead time, change failure rate, time-to-restore), runner-pool capacity,
+          deploy/rollout health, SSDLC hygiene and recurring incidents. Diagnoses the root cause
+          and proposes a DURABLE fix (a code/IaC PR, a runbook update, a tracking ticket) through
+          the HITL queue. Never merges, applies or executes anything.
+        enabled: true
+        enforcement: block
+        schedule:
+          daily: "04:00 UTC"
+          reactive: goalert-webhook       # triggered by GoAlert on a CI / deploy / runner anomaly alert
+        data_scope:
+          read:
+            - prometheus-query-readonly   # ARC runner metrics, Argo Rollouts alerts, 5xx CFR proxy, ALERTS
+            - github-actions-readonly     # workflow run conclusions/durations (exporter is the follow-up)
+            - kubernetes-events-readonly  # deploy / rollout lifecycle events
+            - read.governance             # rules.yaml, ADRs, runbooks — grounding for the proposal
+          pii: none                       # pipeline / infra metadata only; no customer data in scope
+        tools:
+          allow:
+            - tier: read
+              resources: [prometheus, github-actions, kubernetes-events, governance, runbooks]
+            - tier: write_proposal
+              resources: [github-pr]      # opens code/IaC/runbook diff PRs only; no write, no merge
+          deny:
+            - tier: write
+              resources: ["*"]            # explicit: no direct repo / infra writes ever
+            - tier: execute
+              resources: ["*"]
+        requires_human:
+          - any_pipeline_or_infra_change  # HITL mandatory; a human merges every proposal
+          - every: proposal               # segregation of duties: agent proposes, human disposes
+        limits:
+          tokens_per_run: 50000
+          runs_per_day: 6
+          kill_switch: true
+        audit:
+          capture:
+            - model_id
+            - prompt_hash
+            - tool_calls
+            - policy_decision
+            - findings_detected
+            - dora_metric_impacted
+            - human_approved_by
+        compliance:
+          eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
+          dora: "ICT change management (Art. 8–10); operational resilience via proactive pipeline monitoring"
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}

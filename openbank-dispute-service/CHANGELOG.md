@@ -1,99 +1,99 @@
 # Changelog
 
-## [0.7.3](https://github.com/JiRaska/open-bank/compare/dispute-service-v0.7.2...dispute-service-v0.7.3) (2026-06-30)
+## [0.7.3](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.7.2...dispute-service-v0.7.3) (2026-06-30)
 
 
 ### Security
 
-* **dispute:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2c) ([#2757](https://github.com/JiRaska/open-bank/issues/2757)) ([6e39055](https://github.com/JiRaska/open-bank/commit/6e39055070c7f1824ea2c00856fb7803f3196077))
+* **dispute:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank-oss/issues/2665) Tier 2c) ([#2757](https://github.com/JiRaska/open-bank-oss/issues/2757)) ([6e39055](https://github.com/JiRaska/open-bank-oss/commit/6e39055070c7f1824ea2c00856fb7803f3196077))
 
-## [0.7.2](https://github.com/JiRaska/open-bank/compare/dispute-service-v0.7.1...dispute-service-v0.7.2) (2026-06-29)
-
-
-### Bug Fixes
-
-* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2344](https://github.com/JiRaska/open-bank/issues/2344)) ([b6fb6d5](https://github.com/JiRaska/open-bank/commit/b6fb6d5a86a040f0dcc5f489d0b4c8d778c6ec50))
-* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2358](https://github.com/JiRaska/open-bank/issues/2358)) ([fab840a](https://github.com/JiRaska/open-bank/commit/fab840aafcbc7b63782c8709f9d1bb34e3f4b0cd))
-* **customer-edge:** add per-party rate-limit config key (ADR-0132) ([#2501](https://github.com/JiRaska/open-bank/issues/2501)) ([213f528](https://github.com/JiRaska/open-bank/commit/213f52818238585840a7dd18ad98066aebd135bb))
-* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([7295494](https://github.com/JiRaska/open-bank/commit/72954940743f27bf7e49fede185ff20bc3e40060))
-* **infra:** route docker.io CI pulls through ECR pull-through cache — zero NAT ([#2221](https://github.com/JiRaska/open-bank/issues/2221)) ([52caaf2](https://github.com/JiRaska/open-bank/commit/52caaf21097311e077e6ac011d388a7256769d89))
-* **notification:** ROLE_CUSTOMER on DELETE, lastUsedAt sweep, IDOR scope ([#2485](https://github.com/JiRaska/open-bank/issues/2485) follow-up) ([#2490](https://github.com/JiRaska/open-bank/issues/2490)) ([4277222](https://github.com/JiRaska/open-bank/commit/4277222937a768f0c3890ed7f57757d726ffa8a5))
-* **release:** restore transaction-service entry in release-please manifest ([#2351](https://github.com/JiRaska/open-bank/issues/2351)) ([7694897](https://github.com/JiRaska/open-bank/commit/7694897b8f282fdd529175d24e0cb56139655839)), closes [#2342](https://github.com/JiRaska/open-bank/issues/2342)
-
-## [0.7.1](https://github.com/JiRaska/open-bank/compare/dispute-service-v0.7.0...dispute-service-v0.7.1) (2026-06-27)
+## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.7.1...dispute-service-v0.7.2) (2026-06-29)
 
 
 ### Bug Fixes
 
-* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank/commit/98f4e502b116027bb12525b9c853044c39d30c53))
-* **interest,dispute,lending:** complete Clock injection (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2136](https://github.com/JiRaska/open-bank/issues/2136)) ([41a2921](https://github.com/JiRaska/open-bank/commit/41a2921b9b89cc06025cc71a4b428cb019fb499f))
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2344](https://github.com/JiRaska/open-bank-oss/issues/2344)) ([b6fb6d5](https://github.com/JiRaska/open-bank-oss/commit/b6fb6d5a86a040f0dcc5f489d0b4c8d778c6ec50))
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2358](https://github.com/JiRaska/open-bank-oss/issues/2358)) ([fab840a](https://github.com/JiRaska/open-bank-oss/commit/fab840aafcbc7b63782c8709f9d1bb34e3f4b0cd))
+* **customer-edge:** add per-party rate-limit config key (ADR-0132) ([#2501](https://github.com/JiRaska/open-bank-oss/issues/2501)) ([213f528](https://github.com/JiRaska/open-bank-oss/commit/213f52818238585840a7dd18ad98066aebd135bb))
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank-oss/issues/2237)) ([7295494](https://github.com/JiRaska/open-bank-oss/commit/72954940743f27bf7e49fede185ff20bc3e40060))
+* **infra:** route docker.io CI pulls through ECR pull-through cache — zero NAT ([#2221](https://github.com/JiRaska/open-bank-oss/issues/2221)) ([52caaf2](https://github.com/JiRaska/open-bank-oss/commit/52caaf21097311e077e6ac011d388a7256769d89))
+* **notification:** ROLE_CUSTOMER on DELETE, lastUsedAt sweep, IDOR scope ([#2485](https://github.com/JiRaska/open-bank-oss/issues/2485) follow-up) ([#2490](https://github.com/JiRaska/open-bank-oss/issues/2490)) ([4277222](https://github.com/JiRaska/open-bank-oss/commit/4277222937a768f0c3890ed7f57757d726ffa8a5))
+* **release:** restore transaction-service entry in release-please manifest ([#2351](https://github.com/JiRaska/open-bank-oss/issues/2351)) ([7694897](https://github.com/JiRaska/open-bank-oss/commit/7694897b8f282fdd529175d24e0cb56139655839)), closes [#2342](https://github.com/JiRaska/open-bank-oss/issues/2342)
 
-## [0.7.0](https://github.com/JiRaska/open-bank/compare/dispute-service-v0.6.0...dispute-service-v0.7.0) (2026-06-25)
-
-
-### Features
-
-* **dispute:** inject Clock for DST determinism (ADR-0100 Layer 1) ([#2077](https://github.com/JiRaska/open-bank/issues/2077)) ([53115f3](https://github.com/JiRaska/open-bank/commit/53115f3e3b16596c9d60d4c707d9013976afcfdd)), closes [#1612](https://github.com/JiRaska/open-bank/issues/1612)
-
-## [0.6.0](https://github.com/JiRaska/open-bank/compare/dispute-service-v0.5.0...dispute-service-v0.6.0) (2026-06-25)
-
-
-### Features
-
-* **c2-kover:** Kover coverage gate + anacredit oidc boot fix + AML FT interceptor fix (18 services) ([ad26ca7](https://github.com/JiRaska/open-bank/commit/ad26ca7d58e62c8822e11f66f346926acc453058))
+## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.7.0...dispute-service-v0.7.1) (2026-06-27)
 
 
 ### Bug Fixes
 
-* **customer-edge:** fix SCA challenge 400 — switch body from String to JsonNode ([213e577](https://github.com/JiRaska/open-bank/commit/213e577b9fb53a83f2fe8a28d294c5380381c0bf))
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank-oss/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank-oss/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+* **interest,dispute,lending:** complete Clock injection (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank-oss/issues/1612)) ([#2136](https://github.com/JiRaska/open-bank-oss/issues/2136)) ([41a2921](https://github.com/JiRaska/open-bank-oss/commit/41a2921b9b89cc06025cc71a4b428cb019fb499f))
 
-## [0.5.0](https://github.com/JiRaska/open-bank/compare/dispute-service-v0.4.0...dispute-service-v0.5.0) (2026-06-15)
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.6.0...dispute-service-v0.7.0) (2026-06-25)
 
 
 ### Features
 
-* **dispute:** complaint aggregate + statutory deadline clock (ADR-0085 §1-2) ([#989](https://github.com/JiRaska/open-bank/issues/989)) ([66698a9](https://github.com/JiRaska/open-bank/commit/66698a90995a294d189d639895b8c8e9c77ee946)), closes [#851](https://github.com/JiRaska/open-bank/issues/851)
-* **dispute:** complaint statutory-deadline metrics (ADR-0085 §2) ([#1100](https://github.com/JiRaska/open-bank/issues/1100)) ([9906a9a](https://github.com/JiRaska/open-bank/commit/9906a9a2b134725e0a4b04edc894295b8fb3a2f1)), closes [#851](https://github.com/JiRaska/open-bank/issues/851)
+* **dispute:** inject Clock for DST determinism (ADR-0100 Layer 1) ([#2077](https://github.com/JiRaska/open-bank-oss/issues/2077)) ([53115f3](https://github.com/JiRaska/open-bank-oss/commit/53115f3e3b16596c9d60d4c707d9013976afcfdd)), closes [#1612](https://github.com/JiRaska/open-bank-oss/issues/1612)
+
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.5.0...dispute-service-v0.6.0) (2026-06-25)
+
+
+### Features
+
+* **c2-kover:** Kover coverage gate + anacredit oidc boot fix + AML FT interceptor fix (18 services) ([ad26ca7](https://github.com/JiRaska/open-bank-oss/commit/ad26ca7d58e62c8822e11f66f346926acc453058))
 
 
 ### Bug Fixes
 
-* **dispute:** assign unique HTTP port 8135 (resolve collision with lending) ([#1045](https://github.com/JiRaska/open-bank/issues/1045)) ([b219e93](https://github.com/JiRaska/open-bank/commit/b219e93ac044ee2d7c4b8e352bbba17265c624dc))
+* **customer-edge:** fix SCA challenge 400 — switch body from String to JsonNode ([213e577](https://github.com/JiRaska/open-bank-oss/commit/213e577b9fb53a83f2fe8a28d294c5380381c0bf))
 
-## [0.4.0](https://github.com/JiRaska/open-bank/compare/dispute-service-v0.3.0...dispute-service-v0.4.0) (2026-06-12)
-
-
-### Features
-
-* **dispute:** outbox backlog gauge + countProcessable (ADR-0077/0079) ([#798](https://github.com/JiRaska/open-bank/issues/798)) ([aef5bc7](https://github.com/JiRaska/open-bank/commit/aef5bc702c6ac7402b1f186b8f926d9c918bf387))
-* **domestic-payment:** wire DomainMetrics counters (ADR-0077 Phase 2 sweep) ([#684](https://github.com/JiRaska/open-bank/issues/684)) ([7bc6633](https://github.com/JiRaska/open-bank/commit/7bc663347fd81e5fe0f49076e7eb64055b4baa5e))
-
-## [0.3.0](https://github.com/JiRaska/open-bank/compare/dispute-service-v0.2.0...dispute-service-v0.3.0) (2026-06-10)
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.4.0...dispute-service-v0.5.0) (2026-06-15)
 
 
 ### Features
 
-* **admin-ui:** derive governance manifest from governance.yaml (ADR-0071 phase 2) ([#498](https://github.com/JiRaska/open-bank/issues/498)) ([46c85e9](https://github.com/JiRaska/open-bank/commit/46c85e98fe1e887eb82e2110efb5286fe0220d12))
+* **dispute:** complaint aggregate + statutory deadline clock (ADR-0085 §1-2) ([#989](https://github.com/JiRaska/open-bank-oss/issues/989)) ([66698a9](https://github.com/JiRaska/open-bank-oss/commit/66698a90995a294d189d639895b8c8e9c77ee946)), closes [#851](https://github.com/JiRaska/open-bank-oss/issues/851)
+* **dispute:** complaint statutory-deadline metrics (ADR-0085 §2) ([#1100](https://github.com/JiRaska/open-bank-oss/issues/1100)) ([9906a9a](https://github.com/JiRaska/open-bank-oss/commit/9906a9a2b134725e0a4b04edc894295b8fb3a2f1)), closes [#851](https://github.com/JiRaska/open-bank-oss/issues/851)
 
 
 ### Bug Fixes
 
-* **gitops:** single-owner ArgoCD apps for product-catalog and audit-oidc ([#609](https://github.com/JiRaska/open-bank/issues/609)) ([48959b1](https://github.com/JiRaska/open-bank/commit/48959b1459fe696b05f0ec983a4daec3fce24207))
+* **dispute:** assign unique HTTP port 8135 (resolve collision with lending) ([#1045](https://github.com/JiRaska/open-bank-oss/issues/1045)) ([b219e93](https://github.com/JiRaska/open-bank-oss/commit/b219e93ac044ee2d7c4b8e352bbba17265c624dc))
 
-## [0.2.0](https://github.com/JiRaska/open-bank/compare/dispute-service-v0.1.1...dispute-service-v0.2.0) (2026-06-06)
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.3.0...dispute-service-v0.4.0) (2026-06-12)
 
 
 ### Features
 
-* **build-logic:** convention plugin openbank.quarkus-service (ADR-0049 D1) ([#344](https://github.com/JiRaska/open-bank/issues/344)) ([da71b7e](https://github.com/JiRaska/open-bank/commit/da71b7e1705649c453b252c32fa06dc098210d63))
+* **dispute:** outbox backlog gauge + countProcessable (ADR-0077/0079) ([#798](https://github.com/JiRaska/open-bank-oss/issues/798)) ([aef5bc7](https://github.com/JiRaska/open-bank-oss/commit/aef5bc702c6ac7402b1f186b8f926d9c918bf387))
+* **domestic-payment:** wire DomainMetrics counters (ADR-0077 Phase 2 sweep) ([#684](https://github.com/JiRaska/open-bank-oss/issues/684)) ([7bc6633](https://github.com/JiRaska/open-bank-oss/commit/7bc663347fd81e5fe0f49076e7eb64055b4baa5e))
+
+## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.2.0...dispute-service-v0.3.0) (2026-06-10)
+
+
+### Features
+
+* **admin-ui:** derive governance manifest from governance.yaml (ADR-0071 phase 2) ([#498](https://github.com/JiRaska/open-bank-oss/issues/498)) ([46c85e9](https://github.com/JiRaska/open-bank-oss/commit/46c85e98fe1e887eb82e2110efb5286fe0220d12))
 
 
 ### Bug Fixes
 
-* **gitops:** add Kafka value.deserializer env vars for payment services ([#366](https://github.com/JiRaska/open-bank/issues/366)) ([b578775](https://github.com/JiRaska/open-bank/commit/b57877557a04f6d4b7fe19bba90db3494eb6d6de))
-* **infra:** restore Keycloak login theme to dark blue/cyan ([#358](https://github.com/JiRaska/open-bank/issues/358)) ([2e56cbc](https://github.com/JiRaska/open-bank/commit/2e56cbc39dab44a2a7c6ed66edea533aebdca317))
+* **gitops:** single-owner ArgoCD apps for product-catalog and audit-oidc ([#609](https://github.com/JiRaska/open-bank-oss/issues/609)) ([48959b1](https://github.com/JiRaska/open-bank-oss/commit/48959b1459fe696b05f0ec983a4daec3fce24207))
+
+## [0.2.0](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.1.1...dispute-service-v0.2.0) (2026-06-06)
+
+
+### Features
+
+* **build-logic:** convention plugin openbank.quarkus-service (ADR-0049 D1) ([#344](https://github.com/JiRaska/open-bank-oss/issues/344)) ([da71b7e](https://github.com/JiRaska/open-bank-oss/commit/da71b7e1705649c453b252c32fa06dc098210d63))
+
+
+### Bug Fixes
+
+* **gitops:** add Kafka value.deserializer env vars for payment services ([#366](https://github.com/JiRaska/open-bank-oss/issues/366)) ([b578775](https://github.com/JiRaska/open-bank-oss/commit/b57877557a04f6d4b7fe19bba90db3494eb6d6de))
+* **infra:** restore Keycloak login theme to dark blue/cyan ([#358](https://github.com/JiRaska/open-bank-oss/issues/358)) ([2e56cbc](https://github.com/JiRaska/open-bank-oss/commit/2e56cbc39dab44a2a7c6ed66edea533aebdca317))
 
 
 ### Security
 
-* **libs:** harden shared config + DB constraints + logging (beta pentest) ([#342](https://github.com/JiRaska/open-bank/issues/342)) ([e368296](https://github.com/JiRaska/open-bank/commit/e3682965a4f7df3b7328e8a741e4809604706390))
+* **libs:** harden shared config + DB constraints + logging (beta pentest) ([#342](https://github.com/JiRaska/open-bank-oss/issues/342)) ([e368296](https://github.com/JiRaska/open-bank-oss/commit/e3682965a4f7df3b7328e8a741e4809604706390))

@@ -71,7 +71,7 @@ Bring the repo from "code dump" to "audit-grade reference implementation". A new
 
 ### Acceptance criteria
 
-- [x] `git init` + push to `github.com/JiRaska/open-bank` (private repo, ready to flip public).
+- [x] `git init` + push to `github.com/JiRaska/open-bank-oss` (private repo, ready to flip public).
 - [~] All 27 modules build green via `./gradlew build`. *(compileKotlin green across all 28 + libs tests 80/80; full `build` with every service's test task not yet gated in CI.)*
 - [~] CI configured: GitHub Actions with build, test, lint, SAST, dependency scan, SBOM, license-check, gitleaks, OpenAPI lint. *(Have: CodeQL, Trivy, Syft+CycloneDX SBOM, gitleaks, Dependabot, UI tsc, per-service pipeline, SHA-pinned actions. Missing: OpenAPI lint, license-check gate.)*
 - [~] Branch protection on `main`: required reviews, required checks, signed commits, no force push, no deletion. *(Idempotent ruleset script committed; not all rules verified active.)*

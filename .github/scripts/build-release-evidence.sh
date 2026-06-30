@@ -19,7 +19,7 @@ set -uo pipefail
 COMPONENT="${1:?component}"; VERSION="${2:?version}"; TAG="${3:?tag}"
 MODULE_DIR="${4:?module_dir}"; SBOM_FILE="${5:?sbom_file}"
 
-REPO="${GITHUB_REPOSITORY:-JiRaska/open-bank}"
+REPO="${GITHUB_REPOSITORY:-JiRaska/open-bank-oss}"
 SERVER="${GITHUB_SERVER_URL:-https://github.com}"
 SHA="${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}"
 RUN_ID="${GITHUB_RUN_ID:-local}"

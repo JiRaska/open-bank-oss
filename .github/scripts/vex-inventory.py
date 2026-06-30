@@ -8,14 +8,14 @@ CVE -> {component: status}. Surfaces the human-triage queue: anything still
 `not_affected`/`fixed` are already triaged.
 
 Usage: GH_TOKEN=$(gh auth token) python3 .github/scripts/vex-inventory.py [--json]
-Env: GH_TOKEN (required), GITHUB_REPOSITORY (default JiRaska/open-bank).
+Env: GH_TOKEN (required), GITHUB_REPOSITORY (default JiRaska/open-bank-oss).
 """
 import json
 import os
 import sys
 import urllib.request
 
-REPO = os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank")
+REPO = os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss")
 TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
 API = "https://api.github.com"
 

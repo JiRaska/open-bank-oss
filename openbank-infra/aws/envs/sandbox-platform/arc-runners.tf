@@ -786,7 +786,7 @@ data "aws_iam_policy_document" "arc_build_assume" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:JiRaska/open-bank:*"]
+      values   = ["repo:JiRaska/open-bank-oss:*"]
     }
   }
 }

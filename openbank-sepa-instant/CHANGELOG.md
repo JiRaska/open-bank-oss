@@ -1,90 +1,90 @@
 # Changelog
 
-## [0.6.2](https://github.com/JiRaska/open-bank/compare/sepa-instant-v0.6.1...sepa-instant-v0.6.2) (2026-06-29)
+## [0.6.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.6.1...sepa-instant-v0.6.2) (2026-06-29)
 
 
 ### Bug Fixes
 
-* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2344](https://github.com/JiRaska/open-bank/issues/2344)) ([b6fb6d5](https://github.com/JiRaska/open-bank/commit/b6fb6d5a86a040f0dcc5f489d0b4c8d778c6ec50))
-* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2358](https://github.com/JiRaska/open-bank/issues/2358)) ([fab840a](https://github.com/JiRaska/open-bank/commit/fab840aafcbc7b63782c8709f9d1bb34e3f4b0cd))
-* **customer-edge:** add per-party rate-limit config key (ADR-0132) ([#2501](https://github.com/JiRaska/open-bank/issues/2501)) ([213f528](https://github.com/JiRaska/open-bank/commit/213f52818238585840a7dd18ad98066aebd135bb))
-* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([7295494](https://github.com/JiRaska/open-bank/commit/72954940743f27bf7e49fede185ff20bc3e40060))
-* **notification:** ROLE_CUSTOMER on DELETE, lastUsedAt sweep, IDOR scope ([#2485](https://github.com/JiRaska/open-bank/issues/2485) follow-up) ([#2490](https://github.com/JiRaska/open-bank/issues/2490)) ([4277222](https://github.com/JiRaska/open-bank/commit/4277222937a768f0c3890ed7f57757d726ffa8a5))
-* **release:** restore transaction-service entry in release-please manifest ([#2351](https://github.com/JiRaska/open-bank/issues/2351)) ([7694897](https://github.com/JiRaska/open-bank/commit/7694897b8f282fdd529175d24e0cb56139655839)), closes [#2342](https://github.com/JiRaska/open-bank/issues/2342)
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2344](https://github.com/JiRaska/open-bank-oss/issues/2344)) ([b6fb6d5](https://github.com/JiRaska/open-bank-oss/commit/b6fb6d5a86a040f0dcc5f489d0b4c8d778c6ec50))
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2358](https://github.com/JiRaska/open-bank-oss/issues/2358)) ([fab840a](https://github.com/JiRaska/open-bank-oss/commit/fab840aafcbc7b63782c8709f9d1bb34e3f4b0cd))
+* **customer-edge:** add per-party rate-limit config key (ADR-0132) ([#2501](https://github.com/JiRaska/open-bank-oss/issues/2501)) ([213f528](https://github.com/JiRaska/open-bank-oss/commit/213f52818238585840a7dd18ad98066aebd135bb))
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank-oss/issues/2237)) ([7295494](https://github.com/JiRaska/open-bank-oss/commit/72954940743f27bf7e49fede185ff20bc3e40060))
+* **notification:** ROLE_CUSTOMER on DELETE, lastUsedAt sweep, IDOR scope ([#2485](https://github.com/JiRaska/open-bank-oss/issues/2485) follow-up) ([#2490](https://github.com/JiRaska/open-bank-oss/issues/2490)) ([4277222](https://github.com/JiRaska/open-bank-oss/commit/4277222937a768f0c3890ed7f57757d726ffa8a5))
+* **release:** restore transaction-service entry in release-please manifest ([#2351](https://github.com/JiRaska/open-bank-oss/issues/2351)) ([7694897](https://github.com/JiRaska/open-bank-oss/commit/7694897b8f282fdd529175d24e0cb56139655839)), closes [#2342](https://github.com/JiRaska/open-bank-oss/issues/2342)
 
 
 ### Security
 
-* **kafka:** mTLS + ACLs for payment.scheme-accepted, no global gate flip (ADR-0137) ([#2602](https://github.com/JiRaska/open-bank/issues/2602)) ([b143022](https://github.com/JiRaska/open-bank/commit/b143022f6ab76c4ff817ddbd4467fc578b8ee193))
+* **kafka:** mTLS + ACLs for payment.scheme-accepted, no global gate flip (ADR-0137) ([#2602](https://github.com/JiRaska/open-bank-oss/issues/2602)) ([b143022](https://github.com/JiRaska/open-bank-oss/commit/b143022f6ab76c4ff817ddbd4467fc578b8ee193))
 
-## [0.6.1](https://github.com/JiRaska/open-bank/compare/sepa-instant-v0.6.0...sepa-instant-v0.6.1) (2026-06-27)
-
-
-### Bug Fixes
-
-* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank/commit/98f4e502b116027bb12525b9c853044c39d30c53))
-* **sepa-instant,balance,audit,security-scanner,copilot,customer-edge,sca:** inject Clock via CDI (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2145](https://github.com/JiRaska/open-bank/issues/2145)) ([d680007](https://github.com/JiRaska/open-bank/commit/d68000775625cc423c95d8a27db29ff25a708f9f))
-
-## [0.6.0](https://github.com/JiRaska/open-bank/compare/sepa-instant-v0.5.0...sepa-instant-v0.6.0) (2026-06-25)
-
-
-### Features
-
-* **sepa-instant:** inject Clock for DST determinism (ADR-0100 Layer 1) ([#2087](https://github.com/JiRaska/open-bank/issues/2087)) ([7db610a](https://github.com/JiRaska/open-bank/commit/7db610a70e1b74b6b64dac09760c1160acdeb57b)), closes [#1612](https://github.com/JiRaska/open-bank/issues/1612)
-
-## [0.5.0](https://github.com/JiRaska/open-bank/compare/sepa-instant-v0.4.0...sepa-instant-v0.5.0) (2026-06-25)
-
-
-### Features
-
-* **domestic-payment,swift,libs:** ADR-0104 D4 — SchemeGateway fan-out to domestic & swift rails ([331e7dd](https://github.com/JiRaska/open-bank/commit/331e7ddb148c021d951521f570cc39c75aec5a3c))
-* **sepa-instant:** submit real pacs.008 to the scheme gateway (ADR-0104 D4) ([#1732](https://github.com/JiRaska/open-bank/issues/1732)) ([c4f96d0](https://github.com/JiRaska/open-bank/commit/c4f96d08b29bc450bcfb06c644c4f73e845db4ef))
-* **sepa-instant:** trigger transaction-service settlement after scheme ACSC (ADR-0108) ([#1923](https://github.com/JiRaska/open-bank/issues/1923)) ([58cdfd0](https://github.com/JiRaska/open-bank/commit/58cdfd0b738d94edf6c1586044f30c44cab50b24))
-* **transaction,payment:** ADR-0103 D2 — stamp rail + instructionType at settlement (transaction-service + 4 rails) ([#1940](https://github.com/JiRaska/open-bank/issues/1940)) ([785ca02](https://github.com/JiRaska/open-bank/commit/785ca024d434c845dadade0190551fdd18da17a9))
+## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.6.0...sepa-instant-v0.6.1) (2026-06-27)
 
 
 ### Bug Fixes
 
-* **sepa-instant:** configure the OIDC client so service tokens are minted (ADR-0104 D3) ([#1823](https://github.com/JiRaska/open-bank/issues/1823)) ([0c85ffb](https://github.com/JiRaska/open-bank/commit/0c85ffb5387310b04c7523a5df6a1b633aebcecb))
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank-oss/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank-oss/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+* **sepa-instant,balance,audit,security-scanner,copilot,customer-edge,sca:** inject Clock via CDI (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank-oss/issues/1612)) ([#2145](https://github.com/JiRaska/open-bank-oss/issues/2145)) ([d680007](https://github.com/JiRaska/open-bank-oss/commit/d68000775625cc423c95d8a27db29ff25a708f9f))
 
-## [0.4.0](https://github.com/JiRaska/open-bank/compare/sepa-instant-v0.3.0...sepa-instant-v0.4.0) (2026-06-12)
-
-
-### Features
-
-* **domestic-payment:** wire DomainMetrics counters (ADR-0077 Phase 2 sweep) ([#684](https://github.com/JiRaska/open-bank/issues/684)) ([7bc6633](https://github.com/JiRaska/open-bank/commit/7bc663347fd81e5fe0f49076e7eb64055b4baa5e))
-* **sepa-instant:** outbox backlog gauge + countProcessable (ADR-0077/0079) ([#815](https://github.com/JiRaska/open-bank/issues/815)) ([0d16e7b](https://github.com/JiRaska/open-bank/commit/0d16e7ba83ec42d27ec83746917ca99bf0f2112f))
-* **sepa-instant:** wire DomainMetrics counters (ADR-0077 Phase 2 sweep) ([#685](https://github.com/JiRaska/open-bank/issues/685)) ([de3124e](https://github.com/JiRaska/open-bank/commit/de3124eb125755c33a35d21c8bdee3208b539c69))
-
-
-### Bug Fixes
-
-* **sepa-instant:** add @RolesAllowed guards to SCT Inst endpoints ([#785](https://github.com/JiRaska/open-bank/issues/785)) ([57e6ec0](https://github.com/JiRaska/open-bank/commit/57e6ec0fe7efcfd1c17bd54ca80790622b4bb6ae))
-
-## [0.3.0](https://github.com/JiRaska/open-bank/compare/sepa-instant-v0.2.0...sepa-instant-v0.3.0) (2026-06-10)
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.5.0...sepa-instant-v0.6.0) (2026-06-25)
 
 
 ### Features
 
-* **admin-ui:** derive governance manifest from governance.yaml (ADR-0071 phase 2) ([#498](https://github.com/JiRaska/open-bank/issues/498)) ([46c85e9](https://github.com/JiRaska/open-bank/commit/46c85e98fe1e887eb82e2110efb5286fe0220d12))
+* **sepa-instant:** inject Clock for DST determinism (ADR-0100 Layer 1) ([#2087](https://github.com/JiRaska/open-bank-oss/issues/2087)) ([7db610a](https://github.com/JiRaska/open-bank-oss/commit/7db610a70e1b74b6b64dac09760c1160acdeb57b)), closes [#1612](https://github.com/JiRaska/open-bank-oss/issues/1612)
 
-
-### Bug Fixes
-
-* **gitops:** single-owner ArgoCD apps for product-catalog and audit-oidc ([#609](https://github.com/JiRaska/open-bank/issues/609)) ([48959b1](https://github.com/JiRaska/open-bank/commit/48959b1459fe696b05f0ec983a4daec3fce24207))
-
-## [0.2.0](https://github.com/JiRaska/open-bank/compare/sepa-instant-v0.1.0...sepa-instant-v0.2.0) (2026-06-06)
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.4.0...sepa-instant-v0.5.0) (2026-06-25)
 
 
 ### Features
 
-* **build-logic:** convention plugin openbank.quarkus-service (ADR-0049 D1) ([#344](https://github.com/JiRaska/open-bank/issues/344)) ([da71b7e](https://github.com/JiRaska/open-bank/commit/da71b7e1705649c453b252c32fa06dc098210d63))
-* **coverage:** enforce kover 40% floor on all 13 money-path services ([#338](https://github.com/JiRaska/open-bank/issues/338)) ([6e5f132](https://github.com/JiRaska/open-bank/commit/6e5f132ab1f0c3723104276d373307f76076d483))
+* **domestic-payment,swift,libs:** ADR-0104 D4 — SchemeGateway fan-out to domestic & swift rails ([331e7dd](https://github.com/JiRaska/open-bank-oss/commit/331e7ddb148c021d951521f570cc39c75aec5a3c))
+* **sepa-instant:** submit real pacs.008 to the scheme gateway (ADR-0104 D4) ([#1732](https://github.com/JiRaska/open-bank-oss/issues/1732)) ([c4f96d0](https://github.com/JiRaska/open-bank-oss/commit/c4f96d08b29bc450bcfb06c644c4f73e845db4ef))
+* **sepa-instant:** trigger transaction-service settlement after scheme ACSC (ADR-0108) ([#1923](https://github.com/JiRaska/open-bank-oss/issues/1923)) ([58cdfd0](https://github.com/JiRaska/open-bank-oss/commit/58cdfd0b738d94edf6c1586044f30c44cab50b24))
+* **transaction,payment:** ADR-0103 D2 — stamp rail + instructionType at settlement (transaction-service + 4 rails) ([#1940](https://github.com/JiRaska/open-bank-oss/issues/1940)) ([785ca02](https://github.com/JiRaska/open-bank-oss/commit/785ca024d434c845dadade0190551fdd18da17a9))
 
 
 ### Bug Fixes
 
-* **gitops:** add Kafka value.deserializer env vars for payment services ([#366](https://github.com/JiRaska/open-bank/issues/366)) ([b578775](https://github.com/JiRaska/open-bank/commit/b57877557a04f6d4b7fe19bba90db3494eb6d6de))
-* **infra:** restore Keycloak login theme to dark blue/cyan ([#358](https://github.com/JiRaska/open-bank/issues/358)) ([2e56cbc](https://github.com/JiRaska/open-bank/commit/2e56cbc39dab44a2a7c6ed66edea533aebdca317))
-* **payments:** remove dead incoming Kafka channels — no @Incoming consumer ([#377](https://github.com/JiRaska/open-bank/issues/377)) ([5fbdda7](https://github.com/JiRaska/open-bank/commit/5fbdda796d4201b9ef1f57d41c76a00b18a5216b))
-* **payments:** use property expression in Kafka channel bootstrap.servers ([#373](https://github.com/JiRaska/open-bank/issues/373)) ([32507ee](https://github.com/JiRaska/open-bank/commit/32507eeda72bec17c92f85169d72759ed02f1c4a))
+* **sepa-instant:** configure the OIDC client so service tokens are minted (ADR-0104 D3) ([#1823](https://github.com/JiRaska/open-bank-oss/issues/1823)) ([0c85ffb](https://github.com/JiRaska/open-bank-oss/commit/0c85ffb5387310b04c7523a5df6a1b633aebcecb))
+
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.3.0...sepa-instant-v0.4.0) (2026-06-12)
+
+
+### Features
+
+* **domestic-payment:** wire DomainMetrics counters (ADR-0077 Phase 2 sweep) ([#684](https://github.com/JiRaska/open-bank-oss/issues/684)) ([7bc6633](https://github.com/JiRaska/open-bank-oss/commit/7bc663347fd81e5fe0f49076e7eb64055b4baa5e))
+* **sepa-instant:** outbox backlog gauge + countProcessable (ADR-0077/0079) ([#815](https://github.com/JiRaska/open-bank-oss/issues/815)) ([0d16e7b](https://github.com/JiRaska/open-bank-oss/commit/0d16e7ba83ec42d27ec83746917ca99bf0f2112f))
+* **sepa-instant:** wire DomainMetrics counters (ADR-0077 Phase 2 sweep) ([#685](https://github.com/JiRaska/open-bank-oss/issues/685)) ([de3124e](https://github.com/JiRaska/open-bank-oss/commit/de3124eb125755c33a35d21c8bdee3208b539c69))
+
+
+### Bug Fixes
+
+* **sepa-instant:** add @RolesAllowed guards to SCT Inst endpoints ([#785](https://github.com/JiRaska/open-bank-oss/issues/785)) ([57e6ec0](https://github.com/JiRaska/open-bank-oss/commit/57e6ec0fe7efcfd1c17bd54ca80790622b4bb6ae))
+
+## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.2.0...sepa-instant-v0.3.0) (2026-06-10)
+
+
+### Features
+
+* **admin-ui:** derive governance manifest from governance.yaml (ADR-0071 phase 2) ([#498](https://github.com/JiRaska/open-bank-oss/issues/498)) ([46c85e9](https://github.com/JiRaska/open-bank-oss/commit/46c85e98fe1e887eb82e2110efb5286fe0220d12))
+
+
+### Bug Fixes
+
+* **gitops:** single-owner ArgoCD apps for product-catalog and audit-oidc ([#609](https://github.com/JiRaska/open-bank-oss/issues/609)) ([48959b1](https://github.com/JiRaska/open-bank-oss/commit/48959b1459fe696b05f0ec983a4daec3fce24207))
+
+## [0.2.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.1.0...sepa-instant-v0.2.0) (2026-06-06)
+
+
+### Features
+
+* **build-logic:** convention plugin openbank.quarkus-service (ADR-0049 D1) ([#344](https://github.com/JiRaska/open-bank-oss/issues/344)) ([da71b7e](https://github.com/JiRaska/open-bank-oss/commit/da71b7e1705649c453b252c32fa06dc098210d63))
+* **coverage:** enforce kover 40% floor on all 13 money-path services ([#338](https://github.com/JiRaska/open-bank-oss/issues/338)) ([6e5f132](https://github.com/JiRaska/open-bank-oss/commit/6e5f132ab1f0c3723104276d373307f76076d483))
+
+
+### Bug Fixes
+
+* **gitops:** add Kafka value.deserializer env vars for payment services ([#366](https://github.com/JiRaska/open-bank-oss/issues/366)) ([b578775](https://github.com/JiRaska/open-bank-oss/commit/b57877557a04f6d4b7fe19bba90db3494eb6d6de))
+* **infra:** restore Keycloak login theme to dark blue/cyan ([#358](https://github.com/JiRaska/open-bank-oss/issues/358)) ([2e56cbc](https://github.com/JiRaska/open-bank-oss/commit/2e56cbc39dab44a2a7c6ed66edea533aebdca317))
+* **payments:** remove dead incoming Kafka channels — no @Incoming consumer ([#377](https://github.com/JiRaska/open-bank-oss/issues/377)) ([5fbdda7](https://github.com/JiRaska/open-bank-oss/commit/5fbdda796d4201b9ef1f57d41c76a00b18a5216b))
+* **payments:** use property expression in Kafka channel bootstrap.servers ([#373](https://github.com/JiRaska/open-bank-oss/issues/373)) ([32507ee](https://github.com/JiRaska/open-bank-oss/commit/32507eeda72bec17c92f85169d72759ed02f1c4a))

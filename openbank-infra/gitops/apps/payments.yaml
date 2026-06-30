@@ -12,7 +12,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: git@github.com:JiRaska/open-bank.git
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
     path: openbank-infra/gitops/components/payments
     targetRevision: main
   destination:

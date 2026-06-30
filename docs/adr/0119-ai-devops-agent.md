@@ -221,4 +221,4 @@ the SSDLC-drift feed (D5).
 - `openbank-infra/scripts/reregister-runner.sh` — the durable `RUNNER_LABELS` the D3 incident exposed (PR #2284).
 - `openbank-infra/gitops/components/devops-agent/` — gitops manifests.
 - `openbank-admin-ui/src/app/devops/page.tsx` — the "DevOps Insights (AI)" panel.
-- [Issue #2284](https://github.com/JiRaska/open-bank/issues/2284) — the motivating `openbank-batch` fix.
+- [Issue #2284](https://github.com/JiRaska/open-bank-oss/issues/2284) — the motivating `openbank-batch` fix.

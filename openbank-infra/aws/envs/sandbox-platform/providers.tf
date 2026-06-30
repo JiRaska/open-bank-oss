@@ -86,7 +86,7 @@ provider "kubectl" {
 
 # GitHub governance provider (ADR-0059 / issue #282).
 # Token is passed via TF_VAR_governance_gh_pat env var in CI — never stored in state.
-# Requires a fine-grained PAT with Contents:read + Administration:write on JiRaska/open-bank
+# Requires a fine-grained PAT with Contents:read + Administration:write on JiRaska/open-bank-oss
 # (for branch protection) and Environments:write (for the platform-apply environment).
 # Store as the GOVERNANCE_GH_PAT secret in the open-bank repo settings.
 provider "github" {

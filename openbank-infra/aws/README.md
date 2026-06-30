@@ -56,7 +56,7 @@ Each runner reads its own one-shot token, so stage **both** before applying
 ```bash
 cd ../envs/sandbox
 
-mint() { gh api -X POST repos/JiRaska/open-bank/actions/runners/registration-token -q .token; }
+mint() { gh api -X POST repos/JiRaska/open-bank-oss/actions/runners/registration-token -q .token; }
 
 # arm64 runner token:
 mint | xargs -I{} aws ssm put-parameter --profile openbank --region eu-north-1 \

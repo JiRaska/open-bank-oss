@@ -1,77 +1,77 @@
 # Changelog
 
-## [0.6.2](https://github.com/JiRaska/open-bank/compare/sdd-service-v0.6.1...sdd-service-v0.6.2) (2026-06-30)
+## [0.6.2](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.6.1...sdd-service-v0.6.2) (2026-06-30)
 
 
 ### Security
 
-* **card-issuance,sdd:** Kafka mTLS code-side prep — SSL defaults + RBAC pre-registration (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2c) ([#2765](https://github.com/JiRaska/open-bank/issues/2765)) ([4ae04fd](https://github.com/JiRaska/open-bank/commit/4ae04fd8bbaf771ca696732b5bea6fd72048c5c6))
+* **card-issuance,sdd:** Kafka mTLS code-side prep — SSL defaults + RBAC pre-registration (ADR-0137 [#2665](https://github.com/JiRaska/open-bank-oss/issues/2665) Tier 2c) ([#2765](https://github.com/JiRaska/open-bank-oss/issues/2765)) ([4ae04fd](https://github.com/JiRaska/open-bank-oss/commit/4ae04fd8bbaf771ca696732b5bea6fd72048c5c6))
 
-## [0.6.1](https://github.com/JiRaska/open-bank/compare/sdd-service-v0.6.0...sdd-service-v0.6.1) (2026-06-29)
-
-
-### Bug Fixes
-
-* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2344](https://github.com/JiRaska/open-bank/issues/2344)) ([b6fb6d5](https://github.com/JiRaska/open-bank/commit/b6fb6d5a86a040f0dcc5f489d0b4c8d778c6ec50))
-* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2358](https://github.com/JiRaska/open-bank/issues/2358)) ([fab840a](https://github.com/JiRaska/open-bank/commit/fab840aafcbc7b63782c8709f9d1bb34e3f4b0cd))
-* **customer-edge:** add per-party rate-limit config key (ADR-0132) ([#2501](https://github.com/JiRaska/open-bank/issues/2501)) ([213f528](https://github.com/JiRaska/open-bank/commit/213f52818238585840a7dd18ad98066aebd135bb))
-* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([7295494](https://github.com/JiRaska/open-bank/commit/72954940743f27bf7e49fede185ff20bc3e40060))
-* **notification:** ROLE_CUSTOMER on DELETE, lastUsedAt sweep, IDOR scope ([#2485](https://github.com/JiRaska/open-bank/issues/2485) follow-up) ([#2490](https://github.com/JiRaska/open-bank/issues/2490)) ([4277222](https://github.com/JiRaska/open-bank/commit/4277222937a768f0c3890ed7f57757d726ffa8a5))
-* **release:** restore transaction-service entry in release-please manifest ([#2351](https://github.com/JiRaska/open-bank/issues/2351)) ([7694897](https://github.com/JiRaska/open-bank/commit/7694897b8f282fdd529175d24e0cb56139655839)), closes [#2342](https://github.com/JiRaska/open-bank/issues/2342)
-
-## [0.6.0](https://github.com/JiRaska/open-bank/compare/sdd-service-v0.5.0...sdd-service-v0.6.0) (2026-06-27)
-
-
-### Features
-
-* **tpp-registry,statement,onboarding,agent,settlement,sdd:** inject Clock (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank/issues/1612)) ([#2138](https://github.com/JiRaska/open-bank/issues/2138)) ([baa0d03](https://github.com/JiRaska/open-bank/commit/baa0d03bcef7a1cd48cb7e115410ab625a26acde))
+## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.6.0...sdd-service-v0.6.1) (2026-06-29)
 
 
 ### Bug Fixes
 
-* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank/commit/98f4e502b116027bb12525b9c853044c39d30c53))
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2344](https://github.com/JiRaska/open-bank-oss/issues/2344)) ([b6fb6d5](https://github.com/JiRaska/open-bank-oss/commit/b6fb6d5a86a040f0dcc5f489d0b4c8d778c6ec50))
+* **admin-ui:** build deps+build stages on native arch to avoid QEMU SIGILL on x86 ([#2358](https://github.com/JiRaska/open-bank-oss/issues/2358)) ([fab840a](https://github.com/JiRaska/open-bank-oss/commit/fab840aafcbc7b63782c8709f9d1bb34e3f4b0cd))
+* **customer-edge:** add per-party rate-limit config key (ADR-0132) ([#2501](https://github.com/JiRaska/open-bank-oss/issues/2501)) ([213f528](https://github.com/JiRaska/open-bank-oss/commit/213f52818238585840a7dd18ad98066aebd135bb))
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank-oss/issues/2237)) ([7295494](https://github.com/JiRaska/open-bank-oss/commit/72954940743f27bf7e49fede185ff20bc3e40060))
+* **notification:** ROLE_CUSTOMER on DELETE, lastUsedAt sweep, IDOR scope ([#2485](https://github.com/JiRaska/open-bank-oss/issues/2485) follow-up) ([#2490](https://github.com/JiRaska/open-bank-oss/issues/2490)) ([4277222](https://github.com/JiRaska/open-bank-oss/commit/4277222937a768f0c3890ed7f57757d726ffa8a5))
+* **release:** restore transaction-service entry in release-please manifest ([#2351](https://github.com/JiRaska/open-bank-oss/issues/2351)) ([7694897](https://github.com/JiRaska/open-bank-oss/commit/7694897b8f282fdd529175d24e0cb56139655839)), closes [#2342](https://github.com/JiRaska/open-bank-oss/issues/2342)
 
-## [0.5.0](https://github.com/JiRaska/open-bank/compare/sdd-service-v0.4.0...sdd-service-v0.5.0) (2026-06-25)
-
-
-### Features
-
-* **c2-kover:** Kover coverage gate + anacredit oidc boot fix + AML FT interceptor fix (18 services) ([ad26ca7](https://github.com/JiRaska/open-bank/commit/ad26ca7d58e62c8822e11f66f346926acc453058))
-
-## [0.4.0](https://github.com/JiRaska/open-bank/compare/sdd-service-v0.3.0...sdd-service-v0.4.0) (2026-06-12)
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.5.0...sdd-service-v0.6.0) (2026-06-27)
 
 
 ### Features
 
-* **domestic-payment:** wire DomainMetrics counters (ADR-0077 Phase 2 sweep) ([#684](https://github.com/JiRaska/open-bank/issues/684)) ([7bc6633](https://github.com/JiRaska/open-bank/commit/7bc663347fd81e5fe0f49076e7eb64055b4baa5e))
+* **tpp-registry,statement,onboarding,agent,settlement,sdd:** inject Clock (ADR-0100 Layer 1, Refs [#1612](https://github.com/JiRaska/open-bank-oss/issues/1612)) ([#2138](https://github.com/JiRaska/open-bank-oss/issues/2138)) ([baa0d03](https://github.com/JiRaska/open-bank-oss/commit/baa0d03bcef7a1cd48cb7e115410ab625a26acde))
 
 
 ### Bug Fixes
 
-* **sdd:** align openapi info.version with version.txt (0.3.0) ([#791](https://github.com/JiRaska/open-bank/issues/791)) ([d128449](https://github.com/JiRaska/open-bank/commit/d128449c4d66bbaeb33b5e23de690e3daaefd218))
+* **domestic-payment:** use ISO_LOCAL_DATE for valueDate in settlement ([#2237](https://github.com/JiRaska/open-bank-oss/issues/2237)) ([98f4e50](https://github.com/JiRaska/open-bank-oss/commit/98f4e502b116027bb12525b9c853044c39d30c53))
 
-## [0.3.0](https://github.com/JiRaska/open-bank/compare/sdd-service-v0.2.0...sdd-service-v0.3.0) (2026-06-10)
-
-
-### Features
-
-* **admin-ui:** derive governance manifest from governance.yaml (ADR-0071 phase 2) ([#498](https://github.com/JiRaska/open-bank/issues/498)) ([46c85e9](https://github.com/JiRaska/open-bank/commit/46c85e98fe1e887eb82e2110efb5286fe0220d12))
-* **libs:** add party-self-service and operator-read-any OPA rules for device.list ([#418](https://github.com/JiRaska/open-bank/issues/418)) ([a4499b6](https://github.com/JiRaska/open-bank/commit/a4499b605d640caa1b6b269ffb0388bf07fd98a8))
-
-
-### Bug Fixes
-
-* **gitops:** single-owner ArgoCD apps for product-catalog and audit-oidc ([#609](https://github.com/JiRaska/open-bank/issues/609)) ([48959b1](https://github.com/JiRaska/open-bank/commit/48959b1459fe696b05f0ec983a4daec3fce24207))
-
-## [0.2.0](https://github.com/JiRaska/open-bank/compare/sdd-service-v0.1.2...sdd-service-v0.2.0) (2026-06-06)
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.4.0...sdd-service-v0.5.0) (2026-06-25)
 
 
 ### Features
 
-* **build-logic:** convention plugin openbank.quarkus-service (ADR-0049 D1) ([#344](https://github.com/JiRaska/open-bank/issues/344)) ([da71b7e](https://github.com/JiRaska/open-bank/commit/da71b7e1705649c453b252c32fa06dc098210d63))
+* **c2-kover:** Kover coverage gate + anacredit oidc boot fix + AML FT interceptor fix (18 services) ([ad26ca7](https://github.com/JiRaska/open-bank-oss/commit/ad26ca7d58e62c8822e11f66f346926acc453058))
+
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.3.0...sdd-service-v0.4.0) (2026-06-12)
+
+
+### Features
+
+* **domestic-payment:** wire DomainMetrics counters (ADR-0077 Phase 2 sweep) ([#684](https://github.com/JiRaska/open-bank-oss/issues/684)) ([7bc6633](https://github.com/JiRaska/open-bank-oss/commit/7bc663347fd81e5fe0f49076e7eb64055b4baa5e))
 
 
 ### Bug Fixes
 
-* **gitops:** add Kafka value.deserializer env vars for payment services ([#366](https://github.com/JiRaska/open-bank/issues/366)) ([b578775](https://github.com/JiRaska/open-bank/commit/b57877557a04f6d4b7fe19bba90db3494eb6d6de))
-* **infra:** restore Keycloak login theme to dark blue/cyan ([#358](https://github.com/JiRaska/open-bank/issues/358)) ([2e56cbc](https://github.com/JiRaska/open-bank/commit/2e56cbc39dab44a2a7c6ed66edea533aebdca317))
+* **sdd:** align openapi info.version with version.txt (0.3.0) ([#791](https://github.com/JiRaska/open-bank-oss/issues/791)) ([d128449](https://github.com/JiRaska/open-bank-oss/commit/d128449c4d66bbaeb33b5e23de690e3daaefd218))
+
+## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.2.0...sdd-service-v0.3.0) (2026-06-10)
+
+
+### Features
+
+* **admin-ui:** derive governance manifest from governance.yaml (ADR-0071 phase 2) ([#498](https://github.com/JiRaska/open-bank-oss/issues/498)) ([46c85e9](https://github.com/JiRaska/open-bank-oss/commit/46c85e98fe1e887eb82e2110efb5286fe0220d12))
+* **libs:** add party-self-service and operator-read-any OPA rules for device.list ([#418](https://github.com/JiRaska/open-bank-oss/issues/418)) ([a4499b6](https://github.com/JiRaska/open-bank-oss/commit/a4499b605d640caa1b6b269ffb0388bf07fd98a8))
+
+
+### Bug Fixes
+
+* **gitops:** single-owner ArgoCD apps for product-catalog and audit-oidc ([#609](https://github.com/JiRaska/open-bank-oss/issues/609)) ([48959b1](https://github.com/JiRaska/open-bank-oss/commit/48959b1459fe696b05f0ec983a4daec3fce24207))
+
+## [0.2.0](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.1.2...sdd-service-v0.2.0) (2026-06-06)
+
+
+### Features
+
+* **build-logic:** convention plugin openbank.quarkus-service (ADR-0049 D1) ([#344](https://github.com/JiRaska/open-bank-oss/issues/344)) ([da71b7e](https://github.com/JiRaska/open-bank-oss/commit/da71b7e1705649c453b252c32fa06dc098210d63))
+
+
+### Bug Fixes
+
+* **gitops:** add Kafka value.deserializer env vars for payment services ([#366](https://github.com/JiRaska/open-bank-oss/issues/366)) ([b578775](https://github.com/JiRaska/open-bank-oss/commit/b57877557a04f6d4b7fe19bba90db3494eb6d6de))
+* **infra:** restore Keycloak login theme to dark blue/cyan ([#358](https://github.com/JiRaska/open-bank-oss/issues/358)) ([2e56cbc](https://github.com/JiRaska/open-bank-oss/commit/2e56cbc39dab44a2a7c6ed66edea533aebdca317))

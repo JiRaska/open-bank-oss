@@ -31,10 +31,10 @@
 locals {
   # The repository whose GitHub Actions may assume these roles. Matches the
   # `githubConfigUrl` the runners register against (var.github_config_url).
-  ci_github_repo = "JiRaska/open-bank"
+  ci_github_repo = "JiRaska/open-bank-oss"
   ci_oidc_host   = "token.actions.githubusercontent.com"
   # The exact workflow file (on main) allowed to assume the admin apply role.
-  ci_apply_workflow_ref = "JiRaska/open-bank/.github/workflows/platform-tofu.yml@refs/heads/main"
+  ci_apply_workflow_ref = "JiRaska/open-bank-oss/.github/workflows/platform-tofu.yml@refs/heads/main"
 }
 
 # GitHub Actions OIDC identity provider. Distinct from the EKS IRSA provider

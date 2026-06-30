@@ -174,7 +174,7 @@ jobs:
       # self-hosted pool has NONE — so `aws ecr get-login-password` failed there ("ECR login
       # failed"), and even on ARC the build-runner role lacked pull-through import rights so the
       # first uncached pull 403'd (transaction-service). Fix both with GitHub OIDC: assume
-      # openbank-arc-build-runner (which already trusts repo:JiRaska/open-bank:* — arc-runners.tf)
+      # openbank-arc-build-runner (which already trusts repo:JiRaska/open-bank-oss:* — arc-runners.tf)
       # and let the ECR-login action docker-login the runner. Keyless and host-agnostic: the
       # amazon-ecr-login action needs no awscli on the host (absent on Hetzner). Both steps soft-
       # fail so a runner without OIDC still falls through to the in-cluster registry-cache below.

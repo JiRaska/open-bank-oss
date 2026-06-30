@@ -199,8 +199,8 @@ export default function QrlessPayPage() {
       <Section title={t('Dokumenty', 'Documents')}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <Link href="/docs/adr/0095-qrlesspay-ble-proximity-spayd-payments" style={linkBtn}>ADR-0095 — {t('rozhodnutí', 'decision')}</Link>
-          <a href="https://github.com/JiRaska/open-bank/blob/main/docs/specs/qrlesspay-v1.md" target="_blank" rel="noopener noreferrer" style={linkBtn}>{t('Wire spec v1', 'Wire spec v1')}</a>
-          <a href="https://github.com/JiRaska/open-bank/blob/main/docs/threat-models/qrlesspay.md" target="_blank" rel="noopener noreferrer" style={linkBtn}>{t('Threat model', 'Threat model')}</a>
+          <a href="https://github.com/JiRaska/open-bank-oss/blob/main/docs/specs/qrlesspay-v1.md" target="_blank" rel="noopener noreferrer" style={linkBtn}>{t('Wire spec v1', 'Wire spec v1')}</a>
+          <a href="https://github.com/JiRaska/open-bank-oss/blob/main/docs/threat-models/qrlesspay.md" target="_blank" rel="noopener noreferrer" style={linkBtn}>{t('Threat model', 'Threat model')}</a>
           <Link href="/docs/customer-app" style={linkBtn}>{t('Customer App dossier', 'Customer App dossier')}</Link>
         </div>
       </Section>

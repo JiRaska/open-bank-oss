@@ -53,9 +53,10 @@ runtime:
   observability: langfuse           # on top of OTel (ADR-0008); tracks approval-without-edit rate
   identity:      spiffe-spire       # short-TTL SVID per run; signing root stays in Vault (ADR-0017)
 
-# Licensing note (ADR-0031 D8): the agent RUNTIME component is AGPL-3.0 + commercial dual-license,
-# in a SEPARATE repo with a CLA -- NOT this Apache-2.0 governance file. rules.yaml license_denylist gets
-# a documented carve-out for it. This charter config itself stays Apache-2.0.
+# Licensing note (ADR-0136, supersedes the ADR-0031 D8 separate-repo plan): the AI agent SERVICES are
+# AGPL-3.0-only + a parallel commercial licence, IN-REPO (not a separate repo); the rest of the platform is
+# Apache-2.0. rules.yaml carries the denylist carve-out + the AGPL/Apache build-dependency boundary. This
+# charter config itself stays Apache-2.0.
 
 # ---------------------------------------------------------------------------------------
 # Model strategy -- hybrid, model-agnostic via an open LLM gateway (ADR-0031 D6).
