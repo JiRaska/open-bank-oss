@@ -85,9 +85,20 @@ kafka:
 
 mp:
   messaging:
+    # mTLS to Strimzi (ADR-0137). These connector-wide Kafka client props apply to every
+    # smallrye-kafka channel. Defaults keep local dev/test on PLAINTEXT (empty keystore paths
+    # are ignored when protocol=PLAINTEXT); the sanctions Deployment sets the KAFKA_* env in prod
+    # to switch to mTLS.
     connector:
       smallrye-kafka:
         bootstrap.servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+        ssl.keystore.location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+        ssl.keystore.type: ${KAFKA_SSL_KEYSTORE_TYPE:PKCS12}
+        ssl.keystore.password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+        ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+        ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
+        ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     outgoing:
       sanctions-events-out:
         connector: smallrye-kafka

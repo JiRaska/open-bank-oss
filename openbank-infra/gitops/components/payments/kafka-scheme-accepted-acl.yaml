@@ -253,6 +253,7 @@ rules:
       - pid-service
       - interest-service
       - psd2-service
+      - sanctions-service
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1
