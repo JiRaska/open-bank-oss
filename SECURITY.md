@@ -4,7 +4,7 @@ OpenBank is open-source banking platform software. While it is **not production-
 
 ## Supported Versions
 
-Only the `main` branch and the latest tagged release receive security fixes during the pre-alpha phase.
+Only the `main` branch and the latest tagged release receive security fixes during the beta / early-access phase.
 
 | Version | Supported |
 |---------|-----------|
@@ -42,7 +42,7 @@ GitHub Security Advisories provide a private collaboration space where maintaine
 | Medium   | 14 days | 30 days | 120 days |
 | Low      | 30 days | 60 days | next release |
 
-> SLAs reflect the pre-alpha, community-maintained nature of the project. Once OpenBank reaches a production-ready release, SLAs will tighten significantly.
+> SLAs are best-effort and reflect the beta, community-maintained nature of the project (single maintainer). Once OpenBank reaches a production-ready release and gains additional maintainers, SLAs will tighten significantly.
 
 ### Coordinated Disclosure
 

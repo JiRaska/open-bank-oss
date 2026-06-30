@@ -79,8 +79,9 @@ infrastructure/
 Why it matters for contributors: business logic is testable without a container (fast unit
 tests with mocked ports), and a framework swap never reaches the domain. Shared runtime
 plumbing — `Money`, IBAN, idempotency, audit, outbox base entity, `ServiceInfo`,
-API-version filter, authz — lives in **`openbank-libs`** so the 30 services don't
-re-implement it (ADR-0013, ADR-0014, ADR-0049).
+API-version filter, authz — lives in **`openbank-libs`** (being split into `openbank-libs-domain`
+and `openbank-libs-runtime` per ADR-0122) so the 33 services don't re-implement it
+(ADR-0013, ADR-0014, ADR-0049).
 
 Each service owns its **own Postgres database** (ADR-0009) — no shared schema, no
 cross-service joins. Services integrate only via **synchronous REST** (queries / commands)
