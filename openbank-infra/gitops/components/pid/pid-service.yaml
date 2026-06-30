@@ -71,9 +71,29 @@ spec:
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
             # Kafka broker for the outbox dispatcher (party-events-out → topic party.events,
-            # pid-events-out → topic openbank.pid.events). Strimzi bootstrap, same as party-service.
+            # pid-events-out → topic openbank.pid.events). Strimzi bootstrap, mTLS port (ADR-0137).
             - name: KAFKA_BOOTSTRAP_SERVERS
-              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka-keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pid-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka-truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
             # birth-number-pepper (ADR-0072 tier-1 RČ blind index), from OpenBao via the
             # pid-service-pepper ExternalSecret. Activates the deterministic RČ dedup tier
             # (HMAC-SHA256(pepper, RČ)); without it tier-1 is skipped with a WARN.
@@ -123,6 +143,12 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka-keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka-truststore
+              readOnly: true
           resources:
             requests:
               cpu: 200m
@@ -211,6 +237,12 @@ spec:
         - name: opa-bundle
           configMap:
             name: pid-opa-bundle
+        - name: kafka-keystore
+          secret:
+            secretName: pid-service-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
 ---
 apiVersion: v1
 kind: Service
