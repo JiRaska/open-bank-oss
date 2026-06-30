@@ -1,0 +1,88 @@
+# Strimzi mTLS identity + ACLs for fraud-service (ADR-0137, #2665 Tier 2a).
+#
+# fraud-service subscribes to openbank.transactions.transaction.initiated
+# (velocity aggregates, ADR-0084 Phase 2) and writes processing failures to
+# its DLQ topic. KafkaUser `fraud-service` in `messaging` covers both plus
+# the consumer group. ESO ExternalSecrets in `fraud` project the keystore
+# and cluster CA truststore into the pod.
+---
+# ── KafkaUser: fraud-service ────────────────────────────────────────────────
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs must land before the fraud Rollout rolls pods onto mTLS.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: fraud-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.transactions.transaction.initiated
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.transactions.transaction.initiated.fraud.dlq
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: openbank-fraud-service-velocity
+          patternType: literal
+        operations: [Read]
+        host: "*"
+---
+# ── ExternalSecret: fraud-service keystore ──────────────────────────────────
+# Projects the Strimzi-minted KafkaUser secret (user.p12 + user.password)
+# from `messaging` into `fraud` via the ClusterSecretStore.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: fraud-service-kafka-keystore
+  namespace: fraud
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: fraud-service-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: fraud-service
+---
+# ── ExternalSecret: cluster CA truststore ───────────────────────────────────
+# Projects the cluster CA truststore from `messaging` into `fraud`.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: fraud
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert
