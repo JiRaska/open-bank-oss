@@ -1,0 +1,105 @@
+# Kafka mTLS identity + ACLs for the `party` service namespace (ADR-0137 Tier 2c).
+#
+# Identity model (ADR-0137): one KafkaUser = one mTLS principal for ALL of the
+# service's Kafka traffic. ACLs cover only topics/groups that need explicit access
+# control; domain-event topics without ACLs stay open under allow.everyone.if.no.acl.found=true.
+#
+# party-service ACL surface:
+#   Write + Describe: openbank.party.events  (own domain event output + outbox relay)
+#   Read  + Describe: openbank.kyc.events    (KYC case-lifecycle gate, ADR-0073)
+#   Read  + Describe: openbank.aml.events    (AML case-lifecycle gate, ADR-0073)
+#   Read:             group openbank-party-service
+#
+# Cert projection: Strimzi User Operator mints the keystore Secret in `messaging`;
+# the ExternalSecrets below project it into `party` via the kafka-messaging-certs
+# ClusterSecretStore (kubernetes provider, RBAC in kafka-scheme-accepted-acl.yaml).
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers→Strimzi secrets→ESO projection) must land
+    # before the party Rollout rolls pods onto mTLS; lower waves sync first
+    # and ArgoCD blocks on the ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: party-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.party.events
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.kyc.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.aml.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: openbank-party-service
+          patternType: literal
+        operations: [Read]
+        host: "*"
+---
+# Keystore for party-service projected from `messaging` into `party`.
+# Source: Strimzi User Operator secret `party-service` in namespace `messaging`.
+# `dataFrom.extract` preserves binary PKCS#12 (`user.p12`) byte-for-byte.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    # ADR-0137: must land before the party Rollout rolls onto mTLS.
+    argocd.argoproj.io/sync-wave: "-1"
+  name: party-service-kafka-keystore
+  namespace: party
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: party-service-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: party-service
+---
+# Shared cluster-CA truststore projected from `messaging` into `party`.
+# Source: Strimzi Cluster Operator secret `openbank-cluster-cluster-ca-cert`.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    # ADR-0137: must land before the party Rollout rolls onto mTLS.
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: party
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert
