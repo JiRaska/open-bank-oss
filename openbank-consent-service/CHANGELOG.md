@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/JiRaska/open-bank/compare/consent-service-v0.10.1...consent-service-v0.10.2) (2026-06-30)
+
+
+### Security
+
+* **consent:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2a) ([#2740](https://github.com/JiRaska/open-bank/issues/2740)) ([0d0d1f4](https://github.com/JiRaska/open-bank/commit/0d0d1f48f4285783bf4497ac8d288c3bb4447526))
+
 ## [0.10.1](https://github.com/JiRaska/open-bank/compare/consent-service-v0.10.0...consent-service-v0.10.1) (2026-06-29)
 
 
