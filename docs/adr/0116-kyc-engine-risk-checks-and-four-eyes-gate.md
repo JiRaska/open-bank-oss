@@ -3,7 +3,17 @@
 Date: 2026-06-25
 Author: Claude (paired with Jiří Raška)
 Status: Accepted
-Delivery-Status: Partial
+Delivery-Status: Shipped
+
+**Delivery note (updated 2026-06-30):**
+- **Role-split** — ✅ Shipped: `ROLE_KYC_OPENER` (case opener, check updates) and
+  `ROLE_KYC_REVIEWER` (approve/reject) introduced in `openbank-libs-domain` `Roles.kt`.
+  `KycResource.kt` updated: `openCase` + `updateCheck` require `KYC_OPENER`; `approveCase` +
+  `rejectCase` require `KYC_REVIEWER`. Legacy `ROLE_KYC` kept on read-only endpoints and in
+  the realm template (marked legacy) for backwards compat during Keycloak migration. Operator
+  step: reassign existing `ROLE_KYC` users to the appropriate sub-role in Keycloak.
+- **Periodic re-KYC** (§5) — Planned: requires a Temporal scheduled workflow.
+- **External watchlist** — Planned (pre-production): `SANCTIONS_SCREENING` uses internal watchlist.
 
 ## Context
 

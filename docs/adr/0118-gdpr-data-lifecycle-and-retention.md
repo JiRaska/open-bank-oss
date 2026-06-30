@@ -54,6 +54,7 @@ obligation. The AML Act and accounting law override GDPR erasure for financial r
 | party-service | Anonymise in-place (name → `"GDPR_ERASED"`, email → UUID tombstone); delete binary documents | ✅ Implemented |
 | kyc-service | Delete KYC documents; anonymise check results | ✅ Implemented (`PartyEventConsumer.handleErased`) |
 | notification-service | Delete notification preferences and history | ✅ Implemented (`PartyErasureConsumer`) |
+| card-issuance-service | Anonymise `cardholderName`, `embossedName`, `deliveryAddress`; retain card aggregate | ✅ Implemented (`PartyEventConsumer`) |
 | audit-service | **Do NOT delete** — AML retention obligation overrides GDPR | ✅ Correct (no subscriber needed) |
 | ledger-service | **Do NOT delete** — 10-year accounting retention overrides GDPR | ✅ Correct |
 | transaction-service | **Do NOT delete** — 10-year accounting retention overrides GDPR | ✅ Correct |
@@ -67,7 +68,7 @@ unique-constraint on the `email` column after PII removal.
 - ✅ `kyc-service` — `PartyEventConsumer.handleErased`: deletes KYC documents, anonymises check result notes.
 - ✅ `notification-service` — `PartyErasureConsumer`: deletes notification preferences, purges
   undelivered queued messages.
-- Pending: `card-issuance-service` — anonymise `cardholderName` and `embossedName` (GDPR Art. 5(1)(e)).
+- ✅ `card-issuance-service` — `PartyEventConsumer` anonymises `cardholderName`, `embossedName`, and `deliveryAddress`; card aggregate (status, limits, expiry) retained under AML/banking record-retention obligations.
 
 Services that retain data under AML/accounting obligations (`audit-service`, `ledger-service`,
 `transaction-service`) must explicitly **not** subscribe to `PARTY_ERASED`.
@@ -104,8 +105,6 @@ export contributions remain pending.
 - party-service erasure (anonymise + document delete) is already implemented.
 
 **Negative**
-- `card-issuance-service` `PARTY_ERASED` handler is not yet implemented — erasing a party today
-  leaves `cardholderName` / `embossedName` in card-issuance-service.
 - Retention enforcement is not automated — data is not deleted when its retention period expires
   (session logs, KYC documents, card PII).
 - GDPR Art. 15 export covers party-service only; kyc-service and card-issuance-service contributions
@@ -118,8 +117,7 @@ export contributions remain pending.
 ## Compliance impact
 
 - GDPR Art. 5(1)(e): storage limitation — retention periods defined above.
-- GDPR Art. 17: right to erasure — party-service ✅, kyc-service ✅, notification-service ✅;
-  card-issuance-service ❌ pending.
+- GDPR Art. 17: right to erasure — party-service ✅, kyc-service ✅, notification-service ✅, card-issuance-service ✅.
 - GDPR Art. 15: right of access — party-service ✅ implemented; kyc + card data export pending.
 - GDPR Art. 5(2): accountability — audit log retention (5 years) supports this.
 - AML Act No. 253/2008 §16: 5-year retention after relationship end — implemented by omission
