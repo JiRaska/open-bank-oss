@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank/compare/copilot-service-v0.4.2...copilot-service-v0.5.0) (2026-06-30)
+
+
+### Features
+
+* **copilot:** D4 router + narrator — OPA gate wiring + rego name sync (ADR-0089) ([#2798](https://github.com/JiRaska/open-bank/issues/2798)) ([7d5b1e0](https://github.com/JiRaska/open-bank/commit/7d5b1e00a2bb929636979d57ba3d7271849b38af))
+
 ## [0.4.2](https://github.com/JiRaska/open-bank/compare/copilot-service-v0.4.1...copilot-service-v0.4.2) (2026-06-29)
 
 
