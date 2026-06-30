@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.0](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.38.1...admin-ui-v0.39.0) (2026-06-30)
+
+
+### Features
+
+* **admin-ui:** add Edge Error Rate tile (nginx 5xx) alongside service error rate ([#2716](https://github.com/JiRaska/open-bank/issues/2716)) ([3316f9e](https://github.com/JiRaska/open-bank/commit/3316f9ea5704d87b80d36673249816f01a4662fa)), closes [#2677](https://github.com/JiRaska/open-bank/issues/2677)
+
 ## [0.38.1](https://github.com/JiRaska/open-bank/compare/admin-ui-v0.38.0...admin-ui-v0.38.1) (2026-06-29)
 
 
