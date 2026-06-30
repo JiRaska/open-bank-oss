@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.4](https://github.com/JiRaska/open-bank/compare/statement-service-v0.5.3...statement-service-v0.5.4) (2026-06-30)
+
+
+### Security
+
+* **statement:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2c) ([#2762](https://github.com/JiRaska/open-bank/issues/2762)) ([033abec](https://github.com/JiRaska/open-bank/commit/033abec81770ccf09333bd102d56c676ad2a171b))
+
 ## [0.5.3](https://github.com/JiRaska/open-bank/compare/statement-service-v0.5.2...statement-service-v0.5.3) (2026-06-29)
 
 
