@@ -41,8 +41,9 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "site" {
 }
 
 # Static site files are replaced atomically on each deploy; noncurrent versions
-# (old file revisions) have no rollback value beyond a short window. 30 days is
-# ample for a "we just broke the site" revert and avoids indefinite storage growth.
+# (old file revisions) have no rollback value beyond a short window. Transition to
+# STANDARD_IA after 30 days and expire at 60 days: covers the "we broke the site"
+# revert window (Standard), then moves to cheaper storage until final expiry.
 resource "aws_s3_bucket_lifecycle_configuration" "site" {
   bucket = aws_s3_bucket.site.id
 
@@ -50,8 +51,12 @@ resource "aws_s3_bucket_lifecycle_configuration" "site" {
     id     = "expire-old-revisions"
     status = "Enabled"
     filter {}
-    noncurrent_version_expiration {
+    noncurrent_version_transition {
       noncurrent_days = 30
+      storage_class   = "STANDARD_IA"
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 60
     }
     abort_incomplete_multipart_upload {
       days_after_initiation = 7
@@ -209,7 +214,7 @@ resource "aws_cloudfront_distribution" "cdn" {
   }
 }
 
-# --- bucket policy: only this CloudFront distribution may read -------------
+# --- bucket policy: only this CloudFront distribution may read + TLS-only ----
 data "aws_iam_policy_document" "s3_oac" {
   statement {
     sid       = "AllowCloudFrontOAC"
@@ -225,11 +230,33 @@ data "aws_iam_policy_document" "s3_oac" {
       values   = [aws_cloudfront_distribution.cdn.arn]
     }
   }
+
+  # Block any non-HTTPS access (defence-in-depth; CloudFront already enforces
+  # redirect-to-https, but belt-and-suspenders at the bucket level).
+  statement {
+    sid    = "DenyInsecureTransport"
+    effect = "Deny"
+    actions = ["s3:*"]
+    resources = [
+      aws_s3_bucket.site.arn,
+      "${aws_s3_bucket.site.arn}/*",
+    ]
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
 }
 
 resource "aws_s3_bucket_policy" "site" {
-  bucket = aws_s3_bucket.site.id
-  policy = data.aws_iam_policy_document.s3_oac.json
+  bucket     = aws_s3_bucket.site.id
+  policy     = data.aws_iam_policy_document.s3_oac.json
+  depends_on = [aws_s3_bucket_public_access_block.site]
 }
 
 # --- DNS: apex + www -> CloudFront ----------------------------------------

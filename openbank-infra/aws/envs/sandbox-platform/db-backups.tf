@@ -39,6 +39,33 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "db_backups" {
   }
 }
 
+data "aws_iam_policy_document" "db_backups_policy" {
+  statement {
+    sid    = "DenyInsecureTransport"
+    effect = "Deny"
+    actions = ["s3:*"]
+    resources = [
+      aws_s3_bucket.db_backups.arn,
+      "${aws_s3_bucket.db_backups.arn}/*",
+    ]
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "db_backups" {
+  bucket     = aws_s3_bucket.db_backups.id
+  policy     = data.aws_iam_policy_document.db_backups_policy.json
+  depends_on = [aws_s3_bucket_public_access_block.db_backups]
+}
+
 resource "aws_s3_bucket_lifecycle_configuration" "db_backups" {
   bucket = aws_s3_bucket.db_backups.id
   rule {

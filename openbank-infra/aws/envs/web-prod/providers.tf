@@ -4,10 +4,12 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project   = "openbank"
-      ManagedBy = "opentofu"
-      Env       = "prod"
-      Component = "web-landing"
+      Project     = "openbank"
+      ManagedBy   = "opentofu"
+      Env         = "prod"
+      Environment = "prod"
+      Service     = "openbank"
+      Component   = "web-landing"
     }
   }
 }
@@ -19,10 +21,12 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project   = "openbank"
-      ManagedBy = "opentofu"
-      Env       = "prod"
-      Component = "web-landing"
+      Project     = "openbank"
+      ManagedBy   = "opentofu"
+      Env         = "prod"
+      Environment = "prod"
+      Service     = "openbank"
+      Component   = "web-landing"
     }
   }
 }
