@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/JiRaska/open-bank/compare/ledger-service-v1.9.1...ledger-service-v1.10.0) (2026-06-30)
+
+
+### Features
+
+* **libs,ledger,balance:** ADR-0077 Tier C — ledger posting amount + balance revaluation metrics ([#2797](https://github.com/JiRaska/open-bank/issues/2797)) ([609cee4](https://github.com/JiRaska/open-bank/commit/609cee4975b2e7066da327c58722b8fb0f3882f4))
+
 ## [1.9.1](https://github.com/JiRaska/open-bank/compare/ledger-service-v1.9.0...ledger-service-v1.9.1) (2026-06-30)
 
 
