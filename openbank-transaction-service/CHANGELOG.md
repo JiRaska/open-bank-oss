@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.2](https://github.com/JiRaska/open-bank/compare/transaction-service-v1.12.1...transaction-service-v1.12.2) (2026-06-30)
+
+
+### Bug Fixes
+
+* **transaction:** normalize booking amount to currency minor units at ingest ([#2735](https://github.com/JiRaska/open-bank/issues/2735)) ([fe90019](https://github.com/JiRaska/open-bank/commit/fe90019fbe7a82fe9c7c93de0012950ef1e88207))
+
 ## [1.12.1](https://github.com/JiRaska/open-bank/compare/transaction-service-v1.12.0...transaction-service-v1.12.1) (2026-06-29)
 
 
