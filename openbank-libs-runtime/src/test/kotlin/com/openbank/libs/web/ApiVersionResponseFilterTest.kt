@@ -31,9 +31,7 @@ class ApiVersionResponseFilterTest {
     private fun makeReqResp(path: String): Pair<ContainerRequestContext, MultivaluedHashMap<String, Any>> {
         val headers = MultivaluedHashMap<String, Any>()
         val uriInfo = mockk<UriInfo> { every { this@mockk.path } returns path }
-        val req = mockk<ContainerRequestContext> {
-            every { getHeaderString(any()) } returns null
-            every { getProperty(any()) } returns null
+        val req = mockk<ContainerRequestContext>(relaxed = true) {
             every { this@mockk.uriInfo } returns uriInfo
         }
         val resp = mockk<ContainerResponseContext> { every { this@mockk.headers } returns headers }
@@ -62,9 +60,7 @@ class ApiVersionResponseFilterTest {
     fun `deprecation headers on matching path with sunset and successor link`() {
         val headers = MultivaluedHashMap<String, Any>()
         val uriInfo = mockk<UriInfo> { every { path } returns "/api/v1/accounts/123" }
-        val req = mockk<ContainerRequestContext> {
-            every { getHeaderString(any()) } returns null
-            every { getProperty(any()) } returns null
+        val req = mockk<ContainerRequestContext>(relaxed = true) {
             every { this@mockk.uriInfo } returns uriInfo
         }
         val resp = mockk<ContainerResponseContext> { every { this@mockk.headers } returns headers }
@@ -85,9 +81,7 @@ class ApiVersionResponseFilterTest {
     fun `no deprecation headers when path does not match configured prefix`() {
         val headers = MultivaluedHashMap<String, Any>()
         val uriInfo = mockk<UriInfo> { every { path } returns "/api/v1/parties/abc" }
-        val req = mockk<ContainerRequestContext> {
-            every { getHeaderString(any()) } returns null
-            every { getProperty(any()) } returns null
+        val req = mockk<ContainerRequestContext>(relaxed = true) {
             every { this@mockk.uriInfo } returns uriInfo
         }
         val resp = mockk<ContainerResponseContext> { every { this@mockk.headers } returns headers }
@@ -101,9 +95,7 @@ class ApiVersionResponseFilterTest {
     fun `deprecation headers without sunset when sunset-date not configured`() {
         val headers = MultivaluedHashMap<String, Any>()
         val uriInfo = mockk<UriInfo> { every { path } returns "/api/v1/accounts/99" }
-        val req = mockk<ContainerRequestContext> {
-            every { getHeaderString(any()) } returns null
-            every { getProperty(any()) } returns null
+        val req = mockk<ContainerRequestContext>(relaxed = true) {
             every { this@mockk.uriInfo } returns uriInfo
         }
         val resp = mockk<ContainerResponseContext> { every { this@mockk.headers } returns headers }
