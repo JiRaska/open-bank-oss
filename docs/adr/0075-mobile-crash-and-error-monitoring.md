@@ -9,6 +9,10 @@ tracked in the app repo.)
 Delivery-Status: Partial
 Author(s): Jiří Raška
 
+**Delivery note (updated 2026-06-30):**
+- **Backend/infra** — ✅ Shipped: GlitchTip deployed via GitOps (`openbank-infra/gitops/apps/glitchtip.yaml`), ExternalSecrets wired, Sentry KMP SDK landed in `openbank-app` with off-by-default gate + PII redaction allowlist.
+- **Client-side wiring** — Partial: full client-side wiring beyond `CrashMonitor` seam and app-of-apps helm scoping ongoing in app repo; release-health versioning axis pending.
+
 ## Context
 
 The backend has a complete observability posture (ADR-0008): every service emits

@@ -2,10 +2,14 @@
 
 Date: 2026-06-16
 Status: Accepted
-Delivery-Status: Partial
+Delivery-Status: Planned
 
 Phase 1 implemented: openbank-finrep-service derives F01.01+F02.00 from ledger trial balance. Phase 2 (COREP+XBRL transmission) tracked separately.
 Author(s): @JiRaska
+
+**Delivery note (updated 2026-06-30):**
+- **Phase 1 (FINREP core)** — ✅ Designed: F 01.01 balance sheet and F 02.00 P&L templates sourced from attested close; tie-out to statements designed; ready to ship once ADR-0096 entity-level close lands.
+- **Phase 2 (COREP)** — ⬜ Deferred: C 01.00 own funds, capital adequacy, risk-weighting data, EBA XBRL/DPM taxonomy mapping, and ČNB transmission channel depend on ADR-0096 close; Phase 2 explicitly deferred.
 
 Depends on: ADR-0096 (entity-level statutory close — the attested source of truth).
 Relates to: ADR-0037 (AnaCredit render-only — the reporting-service template + its transmission gap),

@@ -5,6 +5,10 @@ Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | 
 Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only; phase 1a shipped, phases 1b/2/3 deferred -->
 Author(s): Jiri Raska
 
+**Delivery note (updated 2026-06-30):**
+- **Phase 1a (parser/evaluator)** — ✅ Shipped: structured whitelisted predicate model (`WaiveConditionParser`/`WaiverEvaluator`) in `product-catalog` domain layer with tests.
+- **Phase 1b and Phase 2** — ⬜ Pending: promoting to `openbank-libs` (Phase 1b) and billing-service fee posting with four-eyes ledger verb (Phase 2) are phased; money-path posting deploy-gated.
+
 ## Context
 
 OpenBank has a rich product **catalog** (`openbank-product-catalog`) — the

@@ -5,6 +5,10 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): OpenBank platform
 
+**Delivery note (updated 2026-06-30):**
+- **Governance primitives** — ✅ Ready: read-model projection, four-eyes maker-checker stage functions, `AuditEvent` trail, COMPLIANCE-role `PiiMask`, and OPA advisory/enforce ladders designed and tested in domain layer.
+- **Admin-UI and SCA step-up** — ⬜ Pending: cockpit UI (party/KYC/SCA stage funnel, drill-down timeline), operator step-up SCA, and admin surface not yet shipped.
+
 ## Context
 
 Customer onboarding is a **distributed state machine with no orchestrator**. It is

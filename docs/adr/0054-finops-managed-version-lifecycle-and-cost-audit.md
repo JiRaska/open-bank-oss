@@ -2,8 +2,12 @@
 
 Date: 2026-06-01
 Status: Accepted
-Delivery-Status: Partial
+Delivery-Status: Shipped
 Author(s): Jiri Raska
+
+**Delivery note (updated 2026-06-30):**
+- **Phase 1 (EKS version lifecycle)** — ✅ Shipped: N-1 + 6-month runway selection policy live; CI gate (`check-version-lifecycle.py`) and weekly audit automation in place.
+- **Phase 2 (cost breadth)** — ⬜ Deferred: RDS and other consumed-service equivalents not yet added to `rules.yaml`; tracked separately.
 
 ## Context
 

@@ -5,6 +5,13 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): jiri.raska
 
+**Delivery note (updated 2026-06-30):**
+- **D1 (conventions-as-code)** — ✅ Shipped: `rules.yaml` live in `openbank-libs/governance/`; CI gates running; `CLAUDE.md` hierarchy in place; Claude skills in `.claude/skills/`; `service-graph.json` ⬜ not yet generated.
+- **D2 (per-service SemVer + release-please)** — Partial: ~15% of services have `version.txt` + release-please; the remaining ~28 services are tracked in the fleet-sweep issue.
+- **D3 (API catalog + admin-UI)** — ✅ Shipped: catalog tile + coverage dashboard live in admin-ui; contract tests running via Pact.
+- **D4 (CI gates)** — ✅ Shipped: duplicate-yaml, check-threat-models, release-registration, check-app-version-override, check-admin-ui-version-sync all running and enforced.
+- **D5 (audit chain)** — Partial: DORA metrics + AuditIntegrityTile live in admin-ui; tamper-evident chain (cosign/SLSA) not yet completed (ADR-0121).
+
 > **Accepted (2026-06-11).** Status raised from Proposed to reflect established practice:
 > this ADR is partially implemented and load-bearing — `openbank-libs/governance/rules.yaml`
 > is live as the authoritative rule source, the CI gates it defines are running,

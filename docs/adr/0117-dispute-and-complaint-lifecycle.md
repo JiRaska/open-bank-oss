@@ -5,6 +5,10 @@ Author: Claude (paired with Jiří Raška)
 Status: Accepted
 Delivery-Status: Partial
 
+**Delivery note (updated 2026-06-30):**
+- **Core domain logic** — ✅ Shipped: `Dispute` + `Complaint` aggregates in `openbank-dispute-service`; PSD2 deadline mechanics (15/35 BD), `BusinessCalendar` domain logic, breach derivation (lazy per-read), and `DomainMetrics` live.
+- **Hardening** — ⬜ Pending: evidence chain storage, Financial Arbitrator escalation endpoint, deterministic complaint reference (currently timestamp-based), and FK constraint on dispute-transaction linkage not yet hardened.
+
 ## Context
 
 `openbank-dispute-service` contains two separate domain models:

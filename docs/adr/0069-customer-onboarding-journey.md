@@ -5,6 +5,10 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): OpenBank platform
 
+**Delivery note (updated 2026-06-30):**
+- **Phase 1 (operator-assisted)** — ✅ Live: customer-edge M2M `POST /onboarding/start` → party-service → Keycloak user creation (manual operator step); KYC gate at account-opening logic working.
+- **Phase 2 (self-service)** — ⬜ Deferred: self-service without operator, Keycloak user auto-provision, and pre-auth identity leg not yet implemented.
+
 ## Context
 
 ADR-0065 established the customer-facing edge and the `openbank-customers` Keycloak realm.

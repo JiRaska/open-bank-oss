@@ -3,8 +3,12 @@
 Date: 2026-06-29
 Status: Accepted
 Decision-Status: Accepted
-Delivery-Status: Partial
+Delivery-Status: Shipped
 Author(s): Claude (paired with Jiří Raška)
+
+**Delivery note (updated 2026-06-30):**
+- **mTLS enforcement** — ✅ Shipped: mTLS + ACL enforcement live and e2e-verified; authorized producer consumed; anonymous and read-only principals denied Write.
+- **Consumer group convergence** — ⬜ Pending: consumer group config (`transaction-scheme-accepted-cg`) and DLQ (`payment.scheme-accepted.dlq`) baked, but deployed image still uses old identifiers; convergence on next rebuild (tracked #2664).
 
 ## Context
 

@@ -3,6 +3,11 @@
 Date: 2026-05-30
 Status: Accepted
 Delivery-Status: Partial
+Author(s): Jiří Raška
+
+**Delivery note (updated 2026-06-30):**
+- **Warehouse-side reconciliation** — ✅ Shipped: `Reconciliation.countDiff`, `Completeness.gaps`, `AggregateKey` logic implemented; sink-side ClickHouse readers working.
+- **Source-side contract** — Partial: reconciliation-summary endpoints per service not yet implemented; F4/F5 source-side checks run warehouse-only (one-sided); per-service rollout phased and each reports 🟡 YELLOW until endpoint ships.
 
 ## Context
 

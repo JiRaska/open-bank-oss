@@ -5,6 +5,10 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): Jiří Raška
 
+**Delivery note (updated 2026-06-30):**
+- **Governance primitives** — ✅ Shipped: `MakerChecker` state machine, `Proposal<T>` four-eyes logic, `AuditEvent` infrastructure live in `openbank-libs` and tested; readiness-probe drain and scheduler pause/resume operational knobs scoped.
+- **Integration surface** — ⬜ Pending: OPA policy gate integration, admin-UI operational surface, and Tier-A break-glass approval queue not yet wired.
+
 ## Context
 
 Quarkus/SmallRye makes it trivial to change a running service's behaviour without a

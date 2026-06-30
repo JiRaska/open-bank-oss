@@ -6,6 +6,10 @@ Delivery-Status: Partial
 Extends: ADR-0011 (Layer 3 contract tests; pitest mutation section)
 Relates to: ADR-0029 (governance-as-code), ADR-0030 (SSDLC D3)
 
+**Delivery note (updated 2026-06-30):**
+- **Phase 1 pilot** — ✅ Shipped: Pact JVM consumer test on `balance-service → ledger-service` REST (`GET /api/v1/journals/trial-balance`) committed to `pacts/`; provider verification in ledger CI; pitest weekly job (`pitest.yml`) live for `ledger-service` and `balance-service` with 70% advisory threshold; admin-ui quality dashboard tabs (Contract, Mutation, Quality Score) added.
+- **Fleet rollout** — ⬜ Pending: Phase 2 (all 13 money-path REST contracts + drift check on `pacts/`) and Phase 3 (Kafka message contracts via AsyncAPI + Pact message) are deferred; pitest gate is advisory-only until baseline scores are established across all 13 money-path services.
+
 ## Context
 
 ADR-0011 defines a six-layer testing pyramid. Layer 3 (Pact consumer-driven contracts) and the

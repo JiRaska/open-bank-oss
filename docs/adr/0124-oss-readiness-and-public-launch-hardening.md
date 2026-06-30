@@ -2,7 +2,15 @@
 
 Date: 2026-06-27
 Status: Accepted
-Delivery-Status: Partial
+Delivery-Status: Planned
+
+**Delivery note (updated 2026-06-30):**
+Engineering practice is production-quality (hexagonal arch, CI gates, threat models, release-please,
+signed commits). Pre-cutover work done: CI artifact tracking cleaned (A1), PII filter applied (A3),
+SECURITY.md + GOVERNANCE.md + ARCHITECTURE.md + CONTRIBUTING.md + onboarding docs live. Blocking
+cutover work not yet started: git filter-repo history rewrite (A2, ~190 MB CI artifacts), GitHub
+Dependabot/CodeQL/secret-scanning enablement (B), OSS discoverability metadata + Discussions (C),
+OpenSSF Scorecard wiring (D1-D4). Move to Planned until cutover window is scheduled.
 Author(s): @JiRaska
 
 ## Context

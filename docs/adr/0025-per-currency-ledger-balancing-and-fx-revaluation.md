@@ -3,6 +3,11 @@
 Date: 2026-05-29
 Status: Accepted
 Delivery-Status: Partial
+Author(s): Jiří Raška
+
+**Delivery note (updated 2026-06-30):**
+- **Design** — ✅ Complete: per-currency `validateBalance()` logic and FX position/exchange-difference GL structure designed and documented.
+- **Implementation** — ⬜ Pending: revaluation batch job, ČNB rate dependency, and cross-currency entry posting helper not yet deployed; gated on ledger-service deployment window.
 
 ## Context
 

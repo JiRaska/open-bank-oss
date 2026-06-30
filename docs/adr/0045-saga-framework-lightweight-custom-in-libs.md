@@ -1,8 +1,16 @@
 # 45. Saga framework: lightweight custom, in openbank-libs
 
 Date: 2026-05-29
-Status: Accepted
+Status: Superseded by [ADR-0120](0120-migrate-transaction-payment-orchestration-to-temporal.md)
 Delivery-Status: Partial
+
+**Delivery note (updated 2026-06-30):**
+The one saga this ADR covered (`PaymentSagaOrchestrator` in transaction-service) was migrated
+to Temporal in ADR-0120 Phase 5+6 (2026-06-30). The custom `AbstractSaga` extraction to
+`openbank-libs` (pending deliverable 1) and the second-saga implementation (pending deliverable 2)
+were never undertaken; ADR-0120's Temporal adoption supersedes the need for a custom primitive.
+Future multi-service workflows should adopt Temporal per ADR-0120.
+- **Pending deliverables 1–3** — Closed without implementation (superseded).
 
 ## Context
 

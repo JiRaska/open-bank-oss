@@ -5,6 +5,10 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): OpenBank platform
 
+**Delivery note (updated 2026-06-30):**
+- **Architecture** — ✅ Settled: eIDAS 2.0 / EUDI Wallet positioning confirmed; `pid-service` + Splink probabilistic linkage + Temporal orchestration + four-eyes decision primitives designed.
+- **Implementation** — ⬜ Pending: OpenID4VP/OpenID4VCI endpoints, EUDI PID credential acceptance, document-analysis LLM integration (Track C), and Temporal flow orchestration not yet coded; identity-hub onboarding phased.
+
 ## Context
 
 ADR-0072 made `pid-service` the identity golden record and defined a three-tier dedup

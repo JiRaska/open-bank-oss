@@ -5,6 +5,10 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): OpenBank platform
 
+**Delivery note (updated 2026-06-30):**
+- **Phase 1 (library contract)** — ✅ Shipped: `SearchRequest` + `CursorPage`/`CursorEncoder` in `openbank-libs`; page-size clamping [1,100], wildcard semantics, LIKE escaping, and comprehensive tests present (Amendment 2026-06-19).
+- **Integration phases (2–4)** — ⬜ Pending: account-service `pg_trgm` GIN endpoint, product-catalog pagination/auth, admin-UI unification not yet done.
+
 > **Amendment 2026-06-19 — Phase 1 complete.** `SearchRequest` + `CursorPage`/`CursorEncoder`
 > ship in `openbank-libs` at `com.openbank.libs.api.search` and
 > `com.openbank.libs.api.pagination`. Guardrails enforced centrally: page-size clamping

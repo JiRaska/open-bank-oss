@@ -9,6 +9,10 @@ explicitly out of scope per this ADR.)
 Delivery-Status: Partial
 Author(s): jiri.raska
 
+**Delivery note (updated 2026-06-30):**
+- **Operational closes** — ✅ Shipped: End-of-Day, End-of-Month, End-of-Year closes live with period lock + re-verify endpoint, four-eyes maker≠checker attestation, statement-close hardening, and trial-balance attestation.
+- **Statutory close** — ⬜ Deferred: entity-level statutory close (rozvaha/VZZ/EoY) explicitly deferred to ADR-0096; completeness alerting partial (runs but alert routing off).
+
 ## Context
 
 "Závěrka" (close) is an overloaded word in this platform. A single operational question —
