@@ -267,6 +267,7 @@ rules:
       - sdd-service
       - standing-order-service
       - tpp-registry-service
+      - audit-service
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1
