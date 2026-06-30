@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.3](https://github.com/JiRaska/open-bank/compare/dispute-service-v0.7.2...dispute-service-v0.7.3) (2026-06-30)
+
+
+### Security
+
+* **dispute:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2c) ([#2757](https://github.com/JiRaska/open-bank/issues/2757)) ([6e39055](https://github.com/JiRaska/open-bank/commit/6e39055070c7f1824ea2c00856fb7803f3196077))
+
 ## [0.7.2](https://github.com/JiRaska/open-bank/compare/dispute-service-v0.7.1...dispute-service-v0.7.2) (2026-06-29)
 
 
