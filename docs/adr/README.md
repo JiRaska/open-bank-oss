@@ -124,13 +124,13 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0113](0113-card-issuance-bounded-context.md) | Card issuance bounded context — virtual-first, internal lifecycle, no external processor | Accepted | Partial |
 | [0114](0114-standing-order-execution-model.md) | Standing order execution model — outbox-driven daily sweep | Accepted | Shipped |
 | [0115](0115-deterministic-simulation-harness.md) | Deterministic simulation harness — seed-driven money-path invariant checker (ADR-0100 Layer 2/3) | Accepted | Shipped |
-| [0116](0116-kyc-engine-risk-checks-and-four-eyes-gate.md) | KYC engine — risk-based checks, ČNB four-eyes gate, sandbox straight-through mode | Accepted | Partial |
+| [0116](0116-kyc-engine-risk-checks-and-four-eyes-gate.md) | KYC engine — risk-based checks, ČNB four-eyes gate, sandbox straight-through mode | Accepted | Shipped |
 | [0117](0117-dispute-and-complaint-lifecycle.md) | Dispute and complaint handling — PSD2 statutory deadlines, evidence chain, breach detection | Accepted | Partial |
 | [0118](0118-gdpr-data-lifecycle-and-retention.md) | GDPR data lifecycle — PII classification, retention periods, erasure model | Accepted | Partial |
 | [0119](0119-ai-devops-agent.md) | AI DevOps Agent: proactive SSDLC / DORA observability and durable-fix proposals | Accepted | Partial |
 | [0120](0120-migrate-transaction-payment-orchestration-to-temporal.md) | Migrate transaction-service payment orchestration to Temporal | Accepted | Partial |
 | [0121](0121-service-self-reported-sbom-and-supply-chain-attestation.md) | Service self-reported SBOM and supply-chain attestation | Proposed | Partial |
-| [0122](0122-split-openbank-libs-into-domain-and-runtime.md) | Split openbank-libs into domain and runtime modules | Proposed | Planned |
+| [0122](0122-split-openbank-libs-into-domain-and-runtime.md) | Split openbank-libs into domain and runtime modules | Accepted | Partial |
 | [0123](0123-relicense-to-apache-2.0.md) | Relicense the platform from MPL-2.0 to Apache-2.0 | Accepted | Shipped |
 | [0124](0124-oss-readiness-and-public-launch-hardening.md) | OSS-readiness and public-launch hardening | Accepted | Partial |
 | [0125](0125-same-account-currency-exchange.md) | Same-account currency exchange (the app's currency swap) | Superseded by ADR-0110 | Superseded |

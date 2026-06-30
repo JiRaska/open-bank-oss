@@ -69,11 +69,13 @@ The `Consent` aggregate root enforces these caps in its `init` block.
 
 `DELETE /api/v1/consents/{id}` (customer-initiated) or `POST /api/v1/consents/{id}/reject` (SCA failure) publishes `ConsentRevoked` / `ConsentRejected` via the transactional outbox to the `consent.events` Kafka topic. Idempotency key prevents duplicate processing.
 
-### D4 — Scheduled expiration sweep (Partial — ConsentExpirationJob pending)
+### D4 — Scheduled expiration sweep (✅ Shipped)
 
 A cron job (`ConsentExpirationJob`) runs hourly at minute 5. It finds all `ACTIVE` consents where `valid_to < now`, transitions them to `EXPIRED`, and persists a `ConsentExpired` outbox entry per consent in the same Hibernate Reactive transaction. The outbox dispatcher then publishes to `consent.events`.
 
 Without this job, expired consents remain `ACTIVE` in the DB — `isActive(now)` returns `false` correctly for in-process validation, but downstream consumers never receive the expiration event. D4 closes that gap.
+
+**Implemented** in `openbank-consent-service/src/main/kotlin/com/openbank/consent/infrastructure/ConsentExpirationJob.kt` — reactive Uni pipeline, `Clock`-injected for testability, logs `consent.expiration.sweep expired=%d` on each sweep.
 
 ### D5 — OPA enforcement (Planned)
 
