@@ -5,6 +5,10 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): Jiří Raška
 
+**Delivery note (updated 2026-06-30):**
+- **Model and deadline logic** — ✅ Architected: `Complaint` aggregate + taxonomy (PAYMENT_SERVICE/FEES/etc.), statutory deadline clock (15/35 BD), `BusinessCalendar` domain logic, breach derivation, and `DomainMetrics` (open gauge, breach counters) all designed.
+- **Queue and reporting** — ⬜ Pending: admin-UI complaints queue, quarterly ČNB reporting endpoint, arbiter-referral step, and register/analytics view not yet implemented.
+
 ## Context
 
 A bank is legally required to operate a **complaints-handling process** — not a support inbox,

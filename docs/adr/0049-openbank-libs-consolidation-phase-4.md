@@ -5,6 +5,13 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): jiri.raska
 
+**Delivery note (updated 2026-06-30):**
+- **D3 (outbox abstraction)** — ✅ Shipped: all 29 services migrated to `AbstractOutboxDispatcher`; 20 PRs merged.
+- **D4 (exception-mapper cleanup)** — ✅ Shipped: duplicate generic mappers removed; 2 intentional overrides documented.
+- **D1 (convention plugin rollout)** — ⬜ Pending: `build-logic/` convention plugin exists; rollout to 33 services not yet done.
+- **D2 (`version.txt` adoption)** — Partial: ~15% of services; unblocked by D1 rollout.
+- **D5 (observability/metrics in libs)** — ⬜ Not started.
+
 > **Amendment 2026-06-19 — D3 outbox abstraction sweep complete; D4 exception-mapper sweep complete.**
 >
 > **D3** — All 29 hand-rolled outbox dispatchers migrated to `AbstractOutboxDispatcher`. Every service

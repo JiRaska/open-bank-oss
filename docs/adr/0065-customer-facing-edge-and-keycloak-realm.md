@@ -5,6 +5,10 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): OpenBank platform
 
+**Delivery note (updated 2026-06-30):**
+- **Decision and boundaries** — ✅ Complete: ADR records the decision; `openbank-customers` realm design (PKCE public client, party-scoped roles, WebAuthn), deny-by-default route allow-list, device attestation hook (advisory mode behind feature flag), and staff/customer trust-boundary separation are all specified.
+- **Implementation** — ⬜ Pending: concrete artifacts (realm export, customer edge deployment manifests, OPA ownership policies per route, edge service code) are deferred as follow-up issues per ADR-0052; no customer-facing edge or `openbank-customers` realm exists in the cluster today.
+
 ## Context
 
 The retail customer app (ADR-0064, Kotlin Multiplatform) needs a way to reach the cluster.

@@ -5,6 +5,10 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): Jiri Raska
 
+**Delivery note (updated 2026-06-30):**
+- **Phase 1 (Deployment Frequency)** — ✅ Shipped: `scripts/collect-dora.mjs` derives Deployment Frequency from `git log --first-parent`; `dora.json` baked and served read-only.
+- **Lead Time / CFR / MTTR** — ⬜ Pending: Phase 2 (Lead Time via deploy-event log), Phase 3 (MTTR from ICT incident register), and CFR (reverts/incidents) not yet implemented; require deploy-event and incident data sources.
+
 ## Context
 
 The DevOps page shows the four DORA metrics (Deployment Frequency, Lead Time for

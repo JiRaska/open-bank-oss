@@ -3,6 +3,11 @@
 Date: 2026-05-29
 Status: Accepted
 Delivery-Status: Partial
+Author(s): Jiří Raška
+
+**Delivery note (updated 2026-06-30):**
+- **Orchestration/decision logic** — ✅ Shipped: bronze/silver medallion views, PII masking, as-of/SCD2 reporting, reconciliation diffs, date-travel for regulatory snapshots all working and tested.
+- **External integrations** — ⬜ Deferred: ClickHouse client, outbox/export BackfillSource reader, OLTP/warehouse reconciliation readers remain `@Default` no-op stubs; ClickHouse infra tracked separately.
 
 ## Context
 

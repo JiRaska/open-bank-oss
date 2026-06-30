@@ -4,6 +4,10 @@ Date: 2026-05-29
 Status: Accepted
 Delivery-Status: Partial
 
+**Delivery note (updated 2026-06-30):**
+- **`openbank-libs` coverage gate** — ✅ Shipped: Kover plugin applied to `openbank-libs` with a 39% line-coverage floor; `SecurityContextExtensions` unit test added, raising `libs/security` from 50% to ~59%; gate wired into `check` and enforced per-PR with no new workflow YAML.
+- **Per-service rollout** — ⬜ Pending: applying the plugin + floor to the ~28 `openbank-*` services via a shared convention plugin in `build-logic/` is deferred to the build-logic consolidation (roadmap Fáze 4); no service outside `openbank-libs` has a Kover gate today.
+
 ## Context
 
 The project had **no code-coverage tooling configured in any module**. "Saga coverage"

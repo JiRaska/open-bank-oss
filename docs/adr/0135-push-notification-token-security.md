@@ -6,6 +6,10 @@ Decision-Status: Accepted
 Delivery-Status: Partial
 Author(s): Jiri Raska
 
+**Delivery note (updated 2026-06-30):**
+- **Security model** — ✅ Complete: token binding to SCA session, 90-day TTL refresh, explicit logout `DELETE` endpoint (PR #2527), payload minimisation (title/template only, no PII), and per-platform registration limit designed.
+- **Token migration** — ⬜ Pending: APNs/FCM feedback loop integration (token revocation callbacks) and migration of existing plain-text tokens to encrypted columns + `registeredAt`/`refreshedAt`/`status` schema not yet done.
+
 ## Context
 
 OpenBank's mobile app (iOS + Android, ADR-0064) sends push notifications for payment confirmations,

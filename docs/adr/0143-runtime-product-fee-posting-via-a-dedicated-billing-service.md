@@ -5,6 +5,10 @@ Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | 
 Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only; phases 1a/1b/2a/2b/2c-i merged; 2c-ii (ledger posting) deploy-gated; billing-service Dockerfile + GitOps added PR #2813 -->
 Author(s): Jiri Raska
 
+**Delivery note (updated 2026-06-30):**
+- **Service skeleton and logic** — ✅ Shipped: `openbank-billing-service` Dockerfile + GitOps added (PR #2813); phases 1a/1b/2a/2b/2c-i merged; four-eyes `post` verb, `@RestClient` ledger posting, idempotency, balance/account context reads designed.
+- **Money-path go-live** — ⬜ Deploy-gated: Phase 2c-ii (ledger posting itself) and Phase 2d (DST invariant) behind money-path controls; fee reversal/refund flow (Phase 2e) required before production.
+
 ## Context
 
 ADR-0138 made the product fee **waiver** machine-executable: phase 1a added the parser/evaluator,

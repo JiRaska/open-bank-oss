@@ -2,8 +2,12 @@
 
 Date: 2026-06-29
 Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only -->
+Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only -->
 Author(s): Jiri Raska
+
+**Delivery note (updated 2026-06-30):**
+- **Foundation** — ✅ Ready: governance substrate (ADR-0031 extended by ADR-0141) in place; feature-store topology and model-serving architecture sketched.
+- **Implementation** — ⬜ Pending: feature definition whitelisting, velocity aggregates (H1/H24/D7 windows), online/offline parity enforcement, model registry/cards, and fraud-service integration not yet started; Phase 1 phased pending ADR-0140/0141.
 
 ## Context
 

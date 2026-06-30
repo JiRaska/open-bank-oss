@@ -2,8 +2,12 @@
 
 Date: 2026-06-02
 Status: Accepted
-Delivery-Status: Partial
+Delivery-Status: Shipped
 Author(s): Jiri Raska
+
+**Delivery note (updated 2026-06-30):**
+- **Phase 1 (manual-dispatch)** — ✅ Shipped: GitHub OIDC → IAM, two roles split by blast radius (plan/apply), manual-dispatch safety valve implemented and tested; live since 2026-06.
+- **Environment-gated upgrade** — ⬜ Deferred: reviewer-gated GitHub Environment requires a plan upgrade (GitHub Pro/Team); tracked as follow-up.
 
 ## Context
 

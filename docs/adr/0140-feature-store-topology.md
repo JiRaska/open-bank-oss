@@ -2,8 +2,12 @@
 
 Date: 2026-06-29
 Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only -->
+Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only -->
 Author(s): Jiri Raska
+
+**Delivery note (updated 2026-06-30):**
+- **Specification** — ✅ Complete: dual-store feature design (online + offline, single computation) and point-in-time correctness guarantees architected; Kafka outbox + velocity aggregates designated as first feature source.
+- **Implementation** — ⬜ Pending: feature definition registry, online store, offline ClickHouse snapshot, training-set reproducibility, and label-leakage guard not yet coded; blocked on ADR-0139; no stream-processing cluster per ADR-0027.
 
 ## Context
 

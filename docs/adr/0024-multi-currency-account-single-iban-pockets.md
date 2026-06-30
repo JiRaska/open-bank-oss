@@ -3,6 +3,11 @@
 Date: 2026-05-29
 Status: Accepted
 Delivery-Status: Partial
+Author(s): Jiří Raška
+
+**Delivery note (updated 2026-06-30):**
+- **Model decision** — ✅ Complete: one IBAN + N currency pockets per account, pocket-level balance/overdraft; architecture settled and documented.
+- **Implementation** — ⬜ Pending: account/CurrencyPocket schema + routing logic, per-pocket statement dates, deposit-insurance aggregation, AnaCredit exposure tie-out not yet coded; sequenced in multicurrency-implementation-plan.
 
 ## Context
 

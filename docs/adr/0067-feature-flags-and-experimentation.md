@@ -6,7 +6,14 @@ ships the OpenFeature-aligned surface (`FeatureClient`, `FlagdProvider`,
 `@FeatureFlag` + interceptor, `FlagDefinition`/`FlagExposure`) merged to `main`.
 Remaining tail is tracked as a follow-up issue, not a blocker: four-eyes
 enforcement on money-path flag flips — issue #419.)
-Delivery-Status: Partial
+Delivery-Status: Shipped
+
+**Delivery note (updated 2026-06-30):**
+Core feature-flag infrastructure shipped: `FeatureClient`, `FlagdProvider`, `@FeatureFlag`
+interceptor, `FlagDefinition`/`FlagExposure` in `openbank-libs/flags`; flagd OFREP sidecar
+integration; fast-path Kafka kill-switch (`feature-control` topic); flag definitions as code
+in Git + ConfigMap. Four-eyes enforcement on money-path flag flips (issue #419) is a
+tracked follow-up governed by ADR-0034 MakerChecker — not a blocker for non-money-path use.
 Author(s): Jiří Raška
 
 ## Context

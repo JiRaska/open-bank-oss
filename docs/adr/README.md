@@ -53,7 +53,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0042](0042-enforce-branch-protection-on-main.md) | Enforce branch protection on `main` (server-side governance gate) | Accepted | Shipped |
 | [0043](0043-ci-performance-model.md) | CI performance model — warm-reuse the persistent runner | Accepted | Shipped |
 | [0044](0044-single-canonical-trunk-retire-parallel-pipeline.md) | Single canonical trunk — retire the parallel `ci/per-service-pipeline` branch | Accepted | Shipped |
-| [0045](0045-saga-framework-lightweight-custom-in-libs.md) | Saga framework: lightweight custom, in openbank-libs | Accepted | Partial |
+| [0045](0045-saga-framework-lightweight-custom-in-libs.md) | Saga framework: lightweight custom, in openbank-libs | Superseded by [ADR-0120] | Partial |
 | [0046](0046-daily-fx-revaluation-mechanics-and-cnb-rates.md) | Daily FX revaluation mechanics and ČNB rate ingestion | Accepted | Shipped |
 | [0047](0047-governed-runtime-operational-control-plane.md) | Governed runtime operational control plane | Accepted | Partial |
 | [0048](0048-decouple-api-contract-version-from-service-release-version.md) | Decouple the API contract version from the service release version: three independent version axes | Accepted | Shipped |
@@ -62,20 +62,20 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0051](0051-generic-service-discovery-and-single-admin-gateway.md) | Generic service discovery and a single north-south gateway for the admin plane | Accepted | Partial |
 | [0052](0052-github-issues-as-the-actionable-backlog.md) | GitHub Issues as the actionable backlog | Accepted | Shipped |
 | [0053](0053-ephemeral-scale-to-zero-arc-runners.md) | Ephemeral scale-to-zero ARC runners — supersedes ADR-0082 | Accepted | Shipped |
-| [0054](0054-finops-managed-version-lifecycle-and-cost-audit.md) | FinOps guardrails: managed-service version lifecycle + periodic cost audit | Accepted | Partial |
+| [0054](0054-finops-managed-version-lifecycle-and-cost-audit.md) | FinOps guardrails: managed-service version lifecycle + periodic cost audit | Accepted | Shipped |
 | [0055](0055-cross-service-search-contract.md) | Cross-service search contract (bounded fulltext + keyset pagination) | Accepted | Partial |
 | [0056](0056-admin-ui-bff-sole-browser-to-cluster-path.md) | Admin-UI BFF as the sole browser→cluster path | Accepted | Shipped |
 | [0057](0057-scale-to-zero-workload-tiers-and-finops-classifier.md) | Scale-to-zero workload tiers and a FinOps classifier | Accepted | Shipped |
 | [0058](0058-fck-nat-egress-cost-sandbox.md) | Replace the managed NAT Gateway with fck-nat in the sandbox | Accepted | Shipped |
 | [0059](0059-outbound-oversight-webhooks-slack-teams.md) | Outbound oversight webhooks (Slack/Teams): anonymized, allow-listed, opt-in egress | Accepted | Partial |
-| [0060](0060-ci-applies-platform-tofu.md) | CI applies the platform OpenTofu (OIDC, manual-dispatch) | Accepted | Partial |
+| [0060](0060-ci-applies-platform-tofu.md) | CI applies the platform OpenTofu (OIDC, manual-dispatch) | Accepted | Shipped |
 | [0061](0061-dora-metrics-from-in-house-sources.md) | DORA metrics from in-house sources, derived + snapshotted | Accepted | Partial |
 | [0062](0062-finops-cost-allocation-showback.md) | FinOps cost allocation: requests-weighted showback by service, domain and business flow | Accepted | Shipped |
 | [0063](0063-consumer-driven-contract-testing-pact-git-pact.md) | Consumer-driven contract testing with Pact (git-pact) and pitest mutation testing | Accepted | Partial |
 | [0064](0064-customer-app-kotlin-multiplatform.md) | Customer-facing app: Kotlin Multiplatform + Compose Multiplatform | Accepted | Planned |
 | [0065](0065-customer-facing-edge-and-keycloak-realm.md) | Customer-facing edge (BFF + gateway) and a dedicated Keycloak customer realm | Accepted | Partial |
 | [0066](0066-passwordless-customer-authentication.md) | Passwordless customer authentication — passkey-first onboarding and login | Accepted | Shipped |
-| [0067](0067-feature-flags-and-experimentation.md) | Feature flags and experimentation (flag-as-code, OpenFeature-aligned) | Accepted | Partial |
+| [0067](0067-feature-flags-and-experimentation.md) | Feature flags and experimentation (flag-as-code, OpenFeature-aligned) | Accepted | Shipped |
 | [0068](0068-onboarding-operations-cockpit.md) | Onboarding operations cockpit — a read-model and four-eyes workflow over the onboarding state machine | Accepted | Partial |
 | [0069](0069-customer-onboarding-journey.md) | Customer onboarding journey — operator-assisted Phase 1, self-service Phase 2 | Accepted | Partial |
 | [0070](0070-in-app-diagnostics-debug-surface.md) | In-app diagnostics / debug surface (customer app) | Accepted | Partial |
@@ -89,7 +89,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0078](0078-accounting-close-model.md) | Accounting close model: period-end taxonomy, completeness over atomicity | Accepted | Partial |
 | [0079](0079-infra-lifecycle-and-vulnerability-intelligence.md) | Infrastructure lifecycle & vulnerability intelligence | Accepted | Shipped |
 | [0080](0080-pentest-remediation-p0-p2.md) | Pentest remediation (admin.open-bank.tech) — P0/P1/P2 | Accepted | Partial |
-| [0081](0081-cluster-segmentation-and-container-hardening-baseline.md) | Cluster segmentation & container hardening baseline | Accepted | Partial |
+| [0081](0081-cluster-segmentation-and-container-hardening-baseline.md) | Cluster segmentation & container hardening baseline | Accepted | Shipped |
 | [0082](0082-ci-runner-governance.md) | CI runner governance — trust-tiered persistent pools, no human in the merge path | Superseded by ADR-0053 | N/A |
 | [0083](0083-t1-http-scale-to-zero-native-pilot.md) | T1 (HTTP → 0): native-image + KEDA HTTP add-on pilot on product-catalog | Accepted | Shipped |
 | [0084](0084-fraud-detection-bounded-context.md) | Fraud detection bounded context — real-time transaction risk scoring | Accepted | Shipped |
@@ -105,12 +105,12 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0094](0094-eudi-native-identity-hub.md) | EUDI-native identity hub — eIDAS 2.0 wallet onboarding, probabilistic record linkage, and durable orchestration | Accepted | Partial |
 | [0095](0095-qrlesspay-ble-proximity-spayd-payments.md) | QRlessPay — BLE proximity SPAYD payments | Accepted | Planned |
 | [0096](0096-entity-level-statutory-accounting-close.md) | Entity-level statutory accounting close (GL period freeze, attested trial balance, financial statements, EoY) | Accepted | Planned |
-| [0097](0097-supervisory-prudential-returns-finrep-corep.md) | Supervisory / prudential returns (FINREP / COREP) derived from the attested close | Accepted | Partial |
+| [0097](0097-supervisory-prudential-returns-finrep-corep.md) | Supervisory / prudential returns (FINREP / COREP) derived from the attested close | Accepted | Planned |
 | [0098](0098-progressive-delivery-argo-rollouts.md) | Progressive Delivery for Money-Path Services via Argo Rollouts | Accepted | Shipped |
 | [0099](0099-automated-secret-rotation.md) | Automated secret rotation: OpenBao dynamic credentials + CronJob rotator | Accepted | Partial |
 | [0100](0100-deterministic-simulation-testing.md) | Deterministic Simulation Testing for the banking core | Accepted | Partial |
 | [0101](0101-temporal-durable-execution.md) | Temporal durable execution for money-path workflows | Accepted | Shipped |
-| [0102](0102-agentic-ai-differentiation.md) | Agentic AI differentiation — tool-use banking agent, ML fraud, and LLM-assisted KYC | Accepted | Partial |
+| [0102](0102-agentic-ai-differentiation.md) | Agentic AI differentiation — tool-use banking agent, ML fraud, and LLM-assisted KYC | Accepted | Planned |
 | [0103](0103-transaction-rail-and-instruction-type-at-origination.md) | Transaction rail & instruction type captured at origination | Accepted | Shipped |
 | [0104](0104-production-faithful-payment-rails-iso-20022-and-scheme-simulator.md) | Production-faithful payment rails: real ISO 20022 messages + scheme simulator | Accepted | Shipped |
 | [0105](0105-unified-product-identity.md) | Unified product identity across product-catalog and account-service | Accepted | Complete |
@@ -132,17 +132,17 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0121](0121-service-self-reported-sbom-and-supply-chain-attestation.md) | Service self-reported SBOM and supply-chain attestation | Proposed | Partial |
 | [0122](0122-split-openbank-libs-into-domain-and-runtime.md) | Split openbank-libs into domain and runtime modules | Accepted | Partial |
 | [0123](0123-relicense-to-apache-2.0.md) | Relicense the platform from MPL-2.0 to Apache-2.0 | Accepted | Shipped |
-| [0124](0124-oss-readiness-and-public-launch-hardening.md) | OSS-readiness and public-launch hardening | Accepted | Partial |
+| [0124](0124-oss-readiness-and-public-launch-hardening.md) | OSS-readiness and public-launch hardening | Accepted | Planned |
 | [0125](0125-same-account-currency-exchange.md) | Same-account currency exchange (the app's currency swap) | Superseded by ADR-0110 | Superseded |
 | [0126](0126-unified-consent-lifecycle.md) | Unified Consent Lifecycle and GDPR Linkage | Accepted | Partial |
 | [0133](0133-tamper-evident-audit-chain.md) | ADR-0133: Tamper-evident audit chain | Accepted | Shipped |
 | [0134](0134-business-continuity-and-dora-ictrm.md) | ADR-0134: Business continuity plan and DORA ICT risk management framework | Accepted | Complete |
 | [0135](0135-push-notification-token-security.md) | ADR-0135: Push notification token security and lifecycle | Accepted | Partial |
 | [0136](0136-agent-services-agpl-in-repo-open-core.md) | Agent services licensed AGPL-3.0-only in-repo (open-core) | Accepted | Shipped |
-| [0137](0137-kafka-mtls-scheme-accepted-migration.md) | Kafka mTLS migration — topic-scoped enforcement of payment.scheme-accepted | Accepted | Partial |
+| [0137](0137-kafka-mtls-scheme-accepted-migration.md) | Kafka mTLS migration — topic-scoped enforcement of payment.scheme-accepted | Accepted | Shipped |
 | [0138](0138-configuration-driven-product-fee-rule-engine.md) | Configuration-driven product fee rule engine | Accepted | Partial |
-| [0139](0139-ml-decisioning-platform.md) | Real-time ML decisioning platform: feature store, model serving, champion/challenger governance | Accepted | Partial |
-| [0140](0140-feature-store-topology.md) | Feature store topology and point-in-time correctness | Accepted | Partial |
+| [0139](0139-ml-decisioning-platform.md) | Real-time ML decisioning platform: feature store, model serving, champion/challenger governance | Accepted | Planned |
+| [0140](0140-feature-store-topology.md) | Feature store topology and point-in-time correctness | Accepted | Planned |
 | [0141](0141-model-registry-provenance.md) | Model registry and provenance for ML decisioning | Proposed | Planned |
 | [0142](0142-credit-decisioning-engine.md) | Credit decisioning engine on the ML decisioning platform | Proposed | Planned |
 | [0143](0143-runtime-product-fee-posting-via-a-dedicated-billing-service.md) | Runtime product fee posting via a dedicated billing service | Accepted | Partial |

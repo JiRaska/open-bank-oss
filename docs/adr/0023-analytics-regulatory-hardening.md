@@ -3,6 +3,11 @@
 Date: 2026-05-29
 Status: Accepted
 Delivery-Status: Partial
+Author(s): Jiří Raška
+
+**Delivery note (updated 2026-06-30):**
+- **Five in-code controls (F1/F2/F3/F6/F7)** — ✅ Shipped: integrity hash (F1), Merkle-root tamper-evidence (F2), maker-checker (F3), crypto-erasure (F6), schema governance (F7) are build-time gated and tested.
+- **External adapter controls (F4/F5/F8/F9)** — ⬜ Pending: WORM S3 Object Lock adapter, KMS-backed erasure `@Alternative`, and Apicurio registry integration not yet implemented; assurance levels remain 🟡 YELLOW for those findings.
 
 ## Context
 

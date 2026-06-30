@@ -2,8 +2,12 @@
 
 Date: 2026-06-19
 Status: Accepted
-Delivery-Status: Partial
+Delivery-Status: Planned
 Author(s): OpenBank platform
+
+**Delivery note (updated 2026-06-30):**
+- **Governance foundation** — ✅ Ready: MCP + OPA policy gate, AI-attributed audit trail, model-proposes/bank-disposes invariant, and governance substrate all in place from ADR-0031; feature-flag gating (ADR-0067) available.
+- **Capability tracks** — ⬜ Pending: tool-use banking agent, ML fraud detector (gradient boosted trees), and LLM-assisted KYC document processing not yet wired; three tracks phased requiring ADR-0139/0140.
 
 ## Context
 

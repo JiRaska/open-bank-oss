@@ -5,6 +5,10 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): jiri.raska
 
+**Delivery note (updated 2026-06-30):**
+- **Security design** — ✅ Complete: allow-list schema (`OversightSignal`), `PiiMask` integration, fail-closed egress, off-by-default + Vault secret pattern all designed.
+- **Renderers and delivery** — ⬜ Pending: Slack/Teams renderers, webhook delivery binding, and outbox janitor for failed rows not yet coded.
+
 ## Context
 
 Operators want operational/risk signals from the running bank pushed to their existing chat tools

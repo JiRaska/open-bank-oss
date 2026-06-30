@@ -5,6 +5,13 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): jiri.raska
 
+**Delivery note (updated 2026-06-30):**
+- **D1 (agents-as-code)** — ✅ Shipped: `agents.yaml` charter registry; `CharterRegistry` + `CharterRateLimiter` in `agent-service`.
+- **D2 (policy-gated MCP)** — Partial: `OpaPolicyDecisionPoint` + `agents.rego` deny-by-default logic shipped; sidecar enforcement pending (PR #638, D9 phase 1 advisory).
+- **D4 (human-in-the-loop)** — ✅ Shipped: proposal queue + admin-UI approvals (#657); read-only MCP oversight tools across 7 domains (#639).
+- **D5 (AI-attributed audit)** — ⬜ Skeleton present; model-id + prompt-hash enforcement pending.
+- **D8 (AGPL agent-runtime public repo)** — ⬜ Planned (issue #224).
+
 > **Ratification (2026-06-10).** The load-bearing controls are in place and deployed, so the
 > decision is ratified and the phasing (D9) becomes the execution plan:
 > - **D1** — agents-as-code: canonical `openbank-libs/governance/agents.yaml` charters consumed by

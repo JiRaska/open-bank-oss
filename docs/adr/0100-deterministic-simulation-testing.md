@@ -5,6 +5,11 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): OpenBank platform
 
+**Delivery note (updated 2026-06-30):**
+- **Layer 2 (DST harness — Pure JVM)** — ✅ Shipped: `openbank-simulation` module with deterministic scheduler, fault injector, in-memory adapters, payment scenario DSL, and Layer 3 invariants (double-entry balance, no-negative, idempotency, compensation completeness, audit completeness). Updated in ADR-0120 Phase 5+6 to work without the retired `PaymentSaga` aggregate.
+- **Layer 1 (architectural constraints)** — Partial: clock injection in place for money-path services; governance rule mandating it in `rules.yaml` not yet enforced; deterministic `Random` CDI bean not yet required.
+- **Full-service adoption (ledger, balance, sepa-payment, settlement)** — ⬜ Pending: simulation currently covers the payment saga / Temporal workflow path; binding to each service's exact domain classes is tracked in #1612.
+
 ## Context
 
 The test programme (ADR-0029 layer B, expanded by the coverage roadmap from 2026-06) follows

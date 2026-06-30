@@ -5,6 +5,10 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): Jiří Raška
 
+**Delivery note (updated 2026-06-30):**
+- **Core build-gating** — ✅ Shipped: `DebugGate.isDebugBuild` compilation-out for release binaries, 7-tap activation gesture, build-info/edge `/api/v1/info` panel live in `openbank-app`.
+- **UI panels (F2+)** — ⬜ Pending: feature-flag variant panel, session-state panel, and network-throttling/deep-link-launcher panels are tracked follow-ups.
+
 ## Context
 
 The KMP customer app (ADR-0064) talks to the customer-facing edge (ADR-0065)

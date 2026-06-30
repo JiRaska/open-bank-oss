@@ -5,6 +5,10 @@ Status: Proposed
 Delivery-Status: Partial
 Author(s): jiri.raska
 
+**Delivery note (updated 2026-06-30):**
+- **Axis 1 (operational SBOM)** — ✅ Specification complete and rule codified: host-side-only `cyclonedxBom` generation in `build-push-service.sh`, `COPY`-only in Dockerfiles, `/q/openbank/sbom` serving contract (`openbank.sbom.v1`) and admin-ui Tech Inventory consumer are designed; in-Docker `cyclonedxBom` path on `build/sbom-bake-pilot` Dockerfile rejected and the fix rule added to `CLAUDE.md` and `rules.yaml`; branches (`feat/libs-sbom-resource`, `build/sbom-bake-pilot`, `feat/admin-ui-sbom-live`) are in-flight and not yet merged to `main`.
+- **Axis 2 (attested supply-chain SBOM)** — ⬜ Pending: `syft`-on-image full SBOM generation, `cosign attest` OCI referrer attachment reusing the existing `awskms` signing key (ADR-0093), and Kyverno `verify-images-policy` extension to enforce SBOM attestation at admission (closing ADR-0029 D2) are not yet implemented.
+
 ## Context
 
 OpenBank services are converging on a **self-describing** model: each service reports its own
