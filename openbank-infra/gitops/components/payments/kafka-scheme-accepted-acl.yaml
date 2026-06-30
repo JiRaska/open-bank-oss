@@ -262,6 +262,9 @@ rules:
       - fraud-service
       - lending-service
       - onboarding-service
+      # Tier 2c (#2665): no-gitops services — RBAC pre-registered for when gitops is added
+      - card-issuance-service
+      - sdd-service
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1
