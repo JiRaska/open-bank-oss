@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/JiRaska/open-bank/compare/kyc-service-v0.7.0...kyc-service-v0.7.1) (2026-06-30)
+
+
+### Security
+
+* **kyc:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2c) ([#2751](https://github.com/JiRaska/open-bank/issues/2751)) ([89a246d](https://github.com/JiRaska/open-bank/commit/89a246d0218a0cae15c441270bcaf9f5d512ffcc))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank/compare/kyc-service-v0.6.0...kyc-service-v0.7.0) (2026-06-29)
 
 
