@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank/compare/card-issuance-service-v0.8.0...card-issuance-service-v0.8.1) (2026-06-30)
+
+
+### Security
+
+* **card-issuance,sdd:** Kafka mTLS code-side prep — SSL defaults + RBAC pre-registration (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2c) ([#2765](https://github.com/JiRaska/open-bank/issues/2765)) ([4ae04fd](https://github.com/JiRaska/open-bank/commit/4ae04fd8bbaf771ca696732b5bea6fd72048c5c6))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank/compare/card-issuance-service-v0.7.1...card-issuance-service-v0.8.0) (2026-06-29)
 
 
