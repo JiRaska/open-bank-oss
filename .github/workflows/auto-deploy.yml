@@ -500,7 +500,8 @@ jobs:
           set -uo pipefail
           SERVICES='${{ needs.changes.outputs.services }}'
           arch="$(uname -m)"; case "$arch" in aarch64|arm64) a=arm64 ;; *) a=x86_64 ;; esac
-          tgz="pact-${PACT_STANDALONE_VERSION}-linux-${a}.tar.gz"
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"; case "$os" in darwin) o=osx ;; *) o=linux ;; esac
+          tgz="pact-${PACT_STANDALONE_VERSION}-${o}-${a}.tar.gz"
           url="https://github.com/pact-foundation/pact-ruby-standalone/releases/download/v${PACT_STANDALONE_VERSION}/${tgz}"
           if ! curl -fsSL -o /tmp/pact.tgz "$url"; then
             echo "::error::could not download pact standalone ($url) — cannot run contract gate"
@@ -704,7 +705,8 @@ jobs:
           set -uo pipefail
           SERVICES='${{ needs.changes.outputs.services }}'
           arch="$(uname -m)"; case "$arch" in aarch64|arm64) a=arm64 ;; *) a=x86_64 ;; esac
-          tgz="pact-${PACT_STANDALONE_VERSION}-linux-${a}.tar.gz"
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"; case "$os" in darwin) o=osx ;; *) o=linux ;; esac
+          tgz="pact-${PACT_STANDALONE_VERSION}-${o}-${a}.tar.gz"
           url="https://github.com/pact-foundation/pact-ruby-standalone/releases/download/v${PACT_STANDALONE_VERSION}/${tgz}"
           # record-deployment MUST be reliable: a silent skip here lets the broker's
           # deployed-version matrix drift from reality, which then makes can-i-deploy
