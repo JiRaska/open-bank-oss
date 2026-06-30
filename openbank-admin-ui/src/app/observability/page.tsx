@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { Activity, AlertTriangle, RefreshCw, Zap, Server, Clock, Database, XCircle, GitBranch } from 'lucide-react'
+import { Activity, AlertTriangle, RefreshCw, Zap, Server, Clock, Database, XCircle, GitBranch, Globe } from 'lucide-react'
 import { useAuth } from '@/lib/auth/useAuth'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
@@ -20,6 +20,7 @@ interface MetricResult {
 interface MetricsData {
   availability: MetricResult
   errorRate: MetricResult
+  edgeErrorRate: MetricResult
   p99Latency: MetricResult
   throughput: MetricResult
   failedPayments: MetricResult
@@ -63,6 +64,7 @@ export default function ObservabilityPage() {
         setMetrics({
           availability: { value: null, label: 'Service Availability' },
           errorRate: { value: null, label: 'Error Rate' },
+          edgeErrorRate: { value: null, label: 'Edge Error Rate' },
           p99Latency: { value: null, label: 'p99 Latency' },
           throughput: { value: null, label: 'Throughput' },
           failedPayments: { value: null, label: 'Failed Payments' },
@@ -79,9 +81,19 @@ export default function ObservabilityPage() {
       // tile reads a misleading 0.00%. 1h captures the real ratio while staying responsive
       // to an active incident. The ratio is divided server-side so the no-5xx case yields a
       // true 0 (via `or vector(0)` on the numerator) rather than an empty result / N/A.
-      const [availability, errorRateVal, totalReqs, latency, failedPayments] = await Promise.all([
+      // Edge error rate (edgeErrorRateVal) is computed separately from the app error
+      // rate. The app ratio uses http_server_requests_seconds_count — it sees 5xx that a
+      // backend (incl. customer-edge) actually recorded, but is blind to failures nginx
+      // returns for requests that never reach a pod (pod-down 503, upstream-refused 502,
+      // upstream-timeout 504). The edge ratio uses nginx_ingress_controller_requests,
+      // which is what the customer actually receives at the edge. They are deliberately
+      // NOT summed: every external request is counted by both nginx and its backend, so a
+      // sum would double-count backend-origin 5xx. Same 1h window + server-side division
+      // with `or vector(0)` as the app tile (see comment above).
+      const [availability, errorRateVal, edgeErrorRateVal, totalReqs, latency, failedPayments] = await Promise.all([
         queryPrometheus('avg(up) * 100', controller.signal),
         queryPrometheus('100 * (sum(rate(http_server_requests_seconds_count{status=~"5.."}[1h])) or sum(rate(http_requests_total{status=~"5.."}[1h])) or vector(0)) / (sum(rate(http_server_requests_seconds_count[1h])) or sum(rate(http_requests_total[1h])))', controller.signal),
+        queryPrometheus('100 * (sum(rate(nginx_ingress_controller_requests{status=~"5.."}[1h])) or vector(0)) / sum(rate(nginx_ingress_controller_requests[1h]))', controller.signal),
         queryPrometheus('sum(rate(http_server_requests_seconds_count[5m])) or sum(rate(http_requests_total[5m]))', controller.signal),
         queryPrometheus('histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket[5m])) by (le)) * 1000', controller.signal),
         queryPrometheus('sum(increase(payment_failures_total[5m])) or sum(increase(payment_failed_total[5m]))', controller.signal)
@@ -90,6 +102,7 @@ export default function ObservabilityPage() {
       setMetrics({
         availability: { value: availability, label: 'Service Availability' },
         errorRate: { value: errorRateVal, label: 'Error Rate' },
+        edgeErrorRate: { value: edgeErrorRateVal, label: 'Edge Error Rate' },
         p99Latency: { value: latency, label: 'p99 Latency' },
         throughput: { value: totalReqs, label: 'Throughput' },
         failedPayments: { value: failedPayments, label: 'Failed Payments (5m)' },
@@ -193,9 +206,9 @@ export default function ObservabilityPage() {
         />
         <KpiCard
           icon={<AlertTriangle size={18} />}
-          label={t('Chybovost', 'Error Rate')}
+          label={t('Chybovost služeb', 'Service Error Rate')}
           value={formatValue(metrics?.errorRate.value, '%', 2)}
-          sub="HTTP 5xx / total requests (1h)"
+          sub={t('Aplikační 5xx / požadavky (1h)', 'App-recorded 5xx / requests (1h)')}
           color={(metrics?.errorRate.value ?? 0) < 1 ? 'var(--success)' : (metrics?.errorRate.value ?? 0) < 5 ? 'var(--warning)' : 'var(--danger)'}
         />
         <KpiCard
@@ -215,6 +228,13 @@ export default function ObservabilityPage() {
       </div>
 
       <div className="grid-4" style={{ marginBottom: '28px' }}>
+        <KpiCard
+          icon={<Globe size={18} />}
+          label={t('Chybovost na edge', 'Edge Error Rate')}
+          value={formatValue(metrics?.edgeErrorRate.value, '%', 2)}
+          sub={t('Co vidí klient: nginx 5xx / 1h', 'Customer-facing: nginx 5xx / total (1h)')}
+          color={(metrics?.edgeErrorRate.value ?? 0) < 1 ? 'var(--success)' : (metrics?.edgeErrorRate.value ?? 0) < 5 ? 'var(--warning)' : 'var(--danger)'}
+        />
         <KpiCard
           icon={<Zap size={18} />}
           label={t('Neúspěšné platby', 'Failed Payments')}
