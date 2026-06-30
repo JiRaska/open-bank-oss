@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.5](https://github.com/JiRaska/open-bank/compare/pid-service-v0.8.4...pid-service-v0.8.5) (2026-06-30)
+
+
+### Security
+
+* **pid:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2c) ([#2758](https://github.com/JiRaska/open-bank/issues/2758)) ([b850595](https://github.com/JiRaska/open-bank/commit/b8505950ea883026999a132eb604307adb8880b8))
+
 ## [0.8.4](https://github.com/JiRaska/open-bank/compare/pid-service-v0.8.3...pid-service-v0.8.4) (2026-06-29)
 
 
