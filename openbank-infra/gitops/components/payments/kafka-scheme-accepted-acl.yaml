@@ -261,6 +261,7 @@ rules:
       - consent-service
       - fraud-service
       - lending-service
+      - onboarding-service
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1
