@@ -38,7 +38,12 @@ RAG `search_help` over the bundled help corpus (D4 grounding, with citations).
 `propose_dispute` (`ActionProposalTool`). Each produces a structured `ActionProposal` on the reply —
 **propose-only, never executes** (the interface has no execute path). Execution boundary (ADR-0089 D2):
 the app routes the proposal into the **existing edge payment / card / dispute + SCA flow**; this service
-never touches money or SCA. Remaining: OPA-enforced action gate (advisory→enforce), deployment (#998).
+never touches money or SCA.
+
+**D4 router + narrator rollout (done):** `CopilotPolicyGate` now wires `OpaToolGate` as a second
+layer (advisory by default, `copilot.opa.enforce=false`; flip via `COPILOT_OPA_ENFORCE=true` in gitops
+once `copilot-opa-bundle.yaml` is deployed). OPA rego tool names synced to actual Kotlin `name` values.
+`ScheduledPaymentsTool` capability corrected to `account.scheduled-payments.read`.
 
 ## Build
 

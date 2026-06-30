@@ -3,36 +3,104 @@
 // A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
 package com.openbank.copilot.application
 
+import com.openbank.copilot.infrastructure.authz.OpaToolGate
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.WebApplicationException
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 
 /**
- * Deny-by-default authorization for every tool call (ADR-0089 D3; ADR-0034). Phase 1 enforces a
- * closed whitelist of READ-only capabilities; an OPA-backed decision point
- * (`data.openbank.copilot.allow`) is the enforce-phase follow-up (#998). Customer-scoping is
- * additionally enforced downstream (the call runs as the customer), so this gate bounds WHICH
- * capabilities the assistant may use at all — action capabilities are deliberately absent until the
- * HITL + SCA path lands (Phase 2, ADR-0089 D2). Every decision is audited (ADR-0031 D5).
+ * Deny-by-default authorization for every tool call (ADR-0089 D3; ADR-0034 D1).
+ *
+ * Two-layer gate (D4 router + narrator enforcement):
+ *   1. **Application whitelist** — capability-based allow/deny. Runs first, always.
+ *   2. **OPA sidecar** — per-tool, per-amount, per-customer policy evaluation
+ *      (`data.openbank.copilot.tool.allow`). Runs when [opaEnforce] is `true`; advisory-only
+ *      (logs but allows through) when `false` (default — ADR-0067 staged rollout, issue #998).
+ *
+ * The whitelist enforces that ONLY the router + narrator tools reachable by the model are
+ * the closed set declared here (D3 closed whitelist). OPA enforcement wires the per-session
+ * amount ceiling and future per-customer policy (D5 least-privilege). Both layers must allow
+ * for the tool to proceed — a whitelist deny short-circuits before OPA.
+ *
+ * Every decision is audited (ADR-0031 D5): capability, OPA verdict, reason.
  */
 @ApplicationScoped
-class CopilotPolicyGate(private val auditPublisher: AuditEventPublisher) {
+class CopilotPolicyGate(
+    private val auditPublisher: AuditEventPublisher,
+    private val opaGate: OpaToolGate,
+    @ConfigProperty(name = "copilot.opa.enforce", defaultValue = "false")
+    private val opaEnforce: Boolean,
+) {
     private val log = Logger.getLogger(CopilotPolicyGate::class.java)
 
     data class Decision(val allow: Boolean, val reason: String)
 
     suspend fun authorize(customerId: String, tool: String, capability: String?): Decision {
-        val allow = capability != null && (capability in READ_WHITELIST || capability in ACTION_WHITELIST)
-        val reason = when {
+        // Layer 1: application-level whitelist (deny-by-default).
+        val whitelisted = capability != null && (capability in READ_WHITELIST || capability in ACTION_WHITELIST)
+        val whitelistReason = when {
             capability == null -> "not-permitted (deny-by-default)"
             capability in READ_WHITELIST -> "read-whitelist"
             capability in ACTION_WHITELIST -> "action-whitelist (propose-only; HITL + SCA downstream)"
             else -> "not-permitted (deny-by-default)"
         }
-        val decision = Decision(allow, reason)
-        if (!allow) log.warnf("policy denied tool=%s capability=%s", tool, capability)
+        if (!whitelisted) {
+            log.warnf("policy denied tool=%s capability=%s reason=%s", tool, capability, whitelistReason)
+            audit(customerId, tool, capability, AuditResult.DENIED, whitelistReason, opaVerdict = null)
+            return Decision(allow = false, reason = whitelistReason)
+        }
+
+        // Layer 2: OPA sidecar — per-tool, per-amount policy (advisory or enforce mode).
+        val opaResult = runCatching { opaGate.authorize(tool, customerId) }
+        val opaVerdict = when {
+            opaResult.isSuccess -> "allow"
+            else -> "deny"
+        }
+        if (opaResult.isFailure) {
+            val ex = opaResult.exceptionOrNull()
+            if (opaEnforce) {
+                log.warnf(
+                    ex,
+                    "OPA gate denied tool=%s customer=%s (enforce mode)",
+                    tool,
+                    customerId,
+                )
+                val reason = if (ex is WebApplicationException) {
+                    "opa-denied: ${ex.message ?: "policy"}"
+                } else {
+                    "opa-unreachable"
+                }
+                audit(customerId, tool, capability, AuditResult.DENIED, reason, opaVerdict = "deny")
+                return Decision(allow = false, reason = reason)
+            } else {
+                // Advisory mode: log and pass through.
+                log.warnf(
+                    ex,
+                    "OPA advisory-denied (allowing) tool=%s cust=%s — flip copilot.opa.enforce=true to block",
+                    tool,
+                    customerId,
+                )
+            }
+        }
+
+        val finalReason = "$whitelistReason; opa=$opaVerdict"
+        audit(customerId, tool, capability, AuditResult.SUCCESS, finalReason, opaVerdict = opaVerdict)
+        return Decision(allow = true, reason = finalReason)
+    }
+
+    @Suppress("LongParameterList")
+    private suspend fun audit(
+        customerId: String,
+        tool: String,
+        capability: String?,
+        result: AuditResult,
+        reason: String,
+        opaVerdict: String?,
+    ) {
         auditPublisher.publish(
             AuditEvent(
                 actorId = customerId,
@@ -40,28 +108,33 @@ class CopilotPolicyGate(private val auditPublisher: AuditEventPublisher) {
                 operation = "copilot.tool.authorize",
                 resourceType = "copilot.tool",
                 resourceId = tool,
-                result = if (allow) AuditResult.SUCCESS else AuditResult.DENIED,
-                payload = mapOf("capability" to capability, "reason" to decision.reason),
+                result = result,
+                payload = buildMap {
+                    put("capability", capability)
+                    put("reason", reason)
+                    if (opaVerdict != null) put("opa_verdict", opaVerdict)
+                    put("opa_enforce", opaEnforce)
+                },
             ),
         )
-        return decision
     }
 
     private companion object {
-        // READ-only capabilities (own data only).
+        // READ-only capabilities — tool narrates figures from results, never invents them (ADR-0089 D4).
         val READ_WHITELIST = setOf(
             "account.read",
             "account.balance.read",
             "account.transactions.read",
             "account.statements.read",
+            "account.scheduled-payments.read",
             "fx.rates.read",
             "card.status.read",
             "help.search.read",
         )
 
-        // Money-path ACTION capabilities (Phase 2). These authorise a *proposal* only — the action is
-        // never executed by the assistant; HITL + SCA (dynamic linking) enforce execution downstream
-        // in the existing edge flow (ADR-0089 D2). A capability absent here is denied by default.
+        // Money-path ACTION capabilities (ADR-0089 D2, Phase 2). These authorise a *proposal* only —
+        // the action is never executed by the assistant; HITL + SCA (dynamic linking) enforce
+        // execution downstream in the existing edge flow.
         val ACTION_WHITELIST = setOf(
             "payment.propose",
             "card.freeze.propose",

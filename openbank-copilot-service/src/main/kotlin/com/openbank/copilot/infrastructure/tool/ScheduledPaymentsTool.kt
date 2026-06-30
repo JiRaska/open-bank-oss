@@ -25,7 +25,7 @@ class ScheduledPaymentsTool(@RestClient private val client: CustomerEdgeRestClie
         "List the customer's standing orders (trvalé příkazy / scheduled payments): payee IBAN, " +
             "amount, currency, frequency and next execution date. Use for questions about recurring " +
             "payments, who money is sent to regularly, or when the next payment goes out."
-    override val capability = "account.transactions.read"
+    override val capability = "account.scheduled-payments.read"
     override val inputSchema = mapOf(
         "type" to "object",
         "properties" to emptyMap<String, Any>(),

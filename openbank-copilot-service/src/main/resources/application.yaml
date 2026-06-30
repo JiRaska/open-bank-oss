@@ -85,6 +85,10 @@ copilot:
     # Backend API key for the openai-compat provider. Empty in dev; ESO/OpenBao in deploy.
     # Shared across backends — update OpenBao copilot-service/MODEL_API_KEY when switching providers.
     api-key: ${COPILOT_MODEL_API_KEY:}
+  # OPA per-tool gate (ADR-0089 D3, ADR-0034). Off by default (advisory); flip to true in gitops
+  # once copilot-opa-bundle.yaml is deployed and the sidecar is live (issue #998 advisory→enforce).
+  opa:
+    enforce: ${COPILOT_OPA_ENFORCE:false}
 
 # OPA sidecar (ADR-0034). Advisory mode by default.
 opa:

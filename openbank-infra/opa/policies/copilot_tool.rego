@@ -50,26 +50,27 @@ amount_within_limit if {
 # Tool classifications
 # ---------------------------------------------------------------------------
 
-# Read-only tools (no money movement)
+# Read-only tools (no money movement).
+# Names MUST match the `override val name` in each CopilotTool implementation (ADR-0089 D3).
 read_only_tools := {
-	"get_balance",
-	"get_transactions",
-	"get_statement",
-	"get_accounts",
-	"get_accounts_with_balances",
+	"get_my_accounts",
+	"get_my_balances",
+	"get_account_balance",
+	"list_transactions",
+	"get_account_statement",
 	"get_card_status",
 	"get_fx_rates",
 	"get_scheduled_payments",
-	"help_search",
+	"search_help",
 }
 
-# Proposal tools (create ProposalToken, require SCA confirm)
+# Proposal tools (create ProposalToken, require SCA confirm).
+# Names MUST match the `override val name` in each ActionProposalTool implementation (ADR-0089 D2).
 proposal_tools := {
-	"initiate_transfer",
-	"card_freeze_proposal",
-	"dispute_proposal",
-	"fx_conversion_proposal",
-	"payment_proposal",
+	"propose_payment",
+	"propose_card_freeze",
+	"propose_dispute",
+	"propose_fx_conversion",
 }
 
 # EUR 5 000 per-proposal ceiling (hard-coded; override via OPA bundle data if needed)
