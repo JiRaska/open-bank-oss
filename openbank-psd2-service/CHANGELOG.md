@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.3](https://github.com/JiRaska/open-bank/compare/psd2-service-v0.8.2...psd2-service-v0.8.3) (2026-06-30)
+
+
+### Security
+
+* **psd2:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2c) ([#2760](https://github.com/JiRaska/open-bank/issues/2760)) ([5dda851](https://github.com/JiRaska/open-bank/commit/5dda851fa5443998f9f17581c1ec193479d673fa))
+
 ## [0.8.2](https://github.com/JiRaska/open-bank/compare/psd2-service-v0.8.1...psd2-service-v0.8.2) (2026-06-29)
 
 
