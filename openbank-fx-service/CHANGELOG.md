@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.3](https://github.com/JiRaska/open-bank/compare/fx-service-v0.7.2...fx-service-v0.7.3) (2026-06-30)
+
+
+### Security
+
+* **fx:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2a) ([#2742](https://github.com/JiRaska/open-bank/issues/2742)) ([bb1aacd](https://github.com/JiRaska/open-bank/commit/bb1aacd1a446d8fe43edd8c5ed4a83540a758aa5))
+
 ## [0.7.2](https://github.com/JiRaska/open-bank/compare/fx-service-v0.7.1...fx-service-v0.7.2) (2026-06-29)
 
 
