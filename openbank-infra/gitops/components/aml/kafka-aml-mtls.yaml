@@ -1,0 +1,103 @@
+# Strimzi mTLS identity + ACLs for aml-service (ADR-0137 #2665 Tier 2c).
+#
+# aml-service publishes openbank.aml.events (outbox egress, ADR-0050) and
+# consumes openbank.party.events to auto-open onboarding screenings (ADR-0073).
+#
+# Identity model (ADR-0137): one KafkaUser = one client cert = one mTLS
+# principal for ALL Kafka traffic from this service. The KafkaUser ACLs list
+# only the explicitly locked-down topics; everything else remains open under
+# allow.everyone.if.no.acl.found=true (kafka.yaml).
+#
+# The KafkaUser secret is minted by the Strimzi User Operator in `messaging`,
+# then projected into the `aml` namespace by the ExternalSecrets below.
+---
+# ── KafkaUser: aml-service ────────────────────────────────────────────────
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: KafkaUser (wave -2) must land before ExternalSecrets (wave -1)
+    # so the source secret exists when ESO tries to extract it.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: aml-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      # Outbox egress: publish AML screening results consumed by party-service
+      - resource:
+          type: topic
+          name: openbank.aml.events
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      # Onboarding trigger: consume PARTY_CREATED to auto-open screenings (ADR-0073)
+      - resource:
+          type: topic
+          name: openbank.party.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # Consumer group for openbank.party.events (group.id in application.yaml)
+      - resource:
+          type: group
+          name: openbank-aml-service
+          patternType: literal
+        operations: [Read]
+        host: "*"
+---
+# ── ExternalSecret: aml-service keystore ─────────────────────────────────
+# Projects the Strimzi-minted per-user keystore (user.p12 + user.password)
+# from `messaging` into `aml`. dataFrom.extract copies every key verbatim
+# (binary PKCS#12 byte-for-byte — per-key data mapping risks mangling binaries).
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    # ADR-0137: ExternalSecrets (wave -1) after KafkaUser (wave -2).
+    argocd.argoproj.io/sync-wave: "-1"
+  name: aml-service-kafka-keystore
+  namespace: aml
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: aml-service-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: aml-service
+---
+# ── ExternalSecret: cluster CA truststore ────────────────────────────────
+# Projects the shared cluster-CA truststore (ca.p12 + ca.password) from
+# `messaging` into `aml`. Same secret is shared across all namespaces;
+# deletionPolicy: Retain guards against a transient store/RBAC blip deleting
+# a live truststore out from under a running pod.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    # ADR-0137: ExternalSecrets (wave -1) after KafkaUser (wave -2).
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: aml
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert

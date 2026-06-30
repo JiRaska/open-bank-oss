@@ -47,9 +47,33 @@ spec:
                   name: aml-db-app
                   key: password
             - name: KAFKA_BOOTSTRAP_SERVERS
-              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
             - name: QUARKUS_SMALLRYE_REACTIVE_MESSAGING_KAFKA_BOOTSTRAP_SERVERS
-              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            # mTLS to Strimzi (ADR-0137). Authenticates as KafkaUser 'aml-service';
+            # keystore/truststore PKCS#12 are projected from messaging by External Secrets
+            # (kafka-aml-mtls.yaml) and mounted below. The app reads these via ${...} in
+            # application.yaml (mp.messaging.connector.smallrye-kafka.*).
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: "SSL"
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka/keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aml-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka/truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
             - name: QUARKUS_HTTP_PORT
               value: "8117"
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
@@ -98,6 +122,12 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka/keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka/truststore
+              readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -108,6 +138,12 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: kafka-keystore
+          secret:
+            secretName: aml-service-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
 ---
 apiVersion: v1
 kind: Service
