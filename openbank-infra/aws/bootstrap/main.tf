@@ -18,8 +18,9 @@ resource "aws_s3_bucket" "state" {
   }
 }
 
-# Noncurrent versions accumulate indefinitely without this rule. 90 days keeps
-# the last ~3 months of state history for rollback while bounding storage cost.
+# Noncurrent versions accumulate indefinitely without this rule. Transition to
+# STANDARD_IA after 30 days (cheaper while still instantly accessible), then
+# expire at 90 days — keeps ~3 months of state history for rollback.
 resource "aws_s3_bucket_lifecycle_configuration" "state" {
   bucket = aws_s3_bucket.state.id
 
@@ -27,6 +28,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "state" {
     id     = "expire-noncurrent-versions"
     status = "Enabled"
     filter {}
+    noncurrent_version_transition {
+      noncurrent_days = 30
+      storage_class   = "STANDARD_IA"
+    }
     noncurrent_version_expiration {
       noncurrent_days = 90
     }
@@ -59,6 +64,33 @@ resource "aws_s3_bucket_public_access_block" "state" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+}
+
+data "aws_iam_policy_document" "state_policy" {
+  statement {
+    sid    = "DenyInsecureTransport"
+    effect = "Deny"
+    actions = ["s3:*"]
+    resources = [
+      aws_s3_bucket.state.arn,
+      "${aws_s3_bucket.state.arn}/*",
+    ]
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "state" {
+  bucket     = aws_s3_bucket.state.id
+  policy     = data.aws_iam_policy_document.state_policy.json
+  depends_on = [aws_s3_bucket_public_access_block.state]
 }
 
 output "state_bucket" {

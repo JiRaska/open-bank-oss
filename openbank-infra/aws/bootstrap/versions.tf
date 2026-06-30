@@ -14,10 +14,13 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project   = "openbank"
-      ManagedBy = "opentofu"
-      Layer     = "bootstrap"
-      Adr       = "0027"
+      Project     = "openbank"
+      ManagedBy   = "opentofu"
+      Env         = "bootstrap"
+      Environment = "bootstrap"
+      Service     = "openbank"
+      Layer       = "bootstrap"
+      Adr         = "0027"
     }
   }
 }

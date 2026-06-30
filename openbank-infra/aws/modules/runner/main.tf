@@ -38,7 +38,7 @@ resource "aws_internet_gateway" "this" {
 resource "aws_subnet" "public" {
   vpc_id                  = aws_vpc.this.id
   cidr_block              = cidrsubnet(var.vpc_cidr, 1, 0)
-  map_public_ip_on_launch = true
+  map_public_ip_on_launch = false # runner instance sets associate_public_ip_address = true explicitly
   tags                    = merge(var.tags, { Name = "${var.name}-public" })
 }
 
@@ -138,6 +138,9 @@ resource "aws_instance" "runner" {
   subnet_id              = aws_subnet.public.id
   vpc_security_group_ids = [aws_security_group.runner.id]
   iam_instance_profile   = aws_iam_instance_profile.runner.name
+  # EC2.9: public IP is intentional — the runner needs outbound to GitHub and
+  # has no NAT gateway (saves ~€32/mo). No inbound rules; egress-only SG.
+  associate_public_ip_address = true # trivy-ignore:AVD-AWS-0130
 
   user_data = templatefile("${path.module}/user-data.sh.tftpl", {
     github_repo     = var.github_repo

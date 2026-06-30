@@ -28,10 +28,12 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project   = "openbank"
-      ManagedBy = "opentofu"
-      Env       = "sandbox"
-      Adr       = "0027"
+      Project     = "openbank"
+      ManagedBy   = "opentofu"
+      Env         = "sandbox"
+      Environment = "sandbox"
+      Service     = "openbank"
+      Adr         = "0027"
     }
   }
 }
@@ -44,10 +46,12 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project   = "openbank"
-      ManagedBy = "opentofu"
-      Env       = "sandbox"
-      Adr       = "0027"
+      Project     = "openbank"
+      ManagedBy   = "opentofu"
+      Env         = "sandbox"
+      Environment = "sandbox"
+      Service     = "openbank"
+      Adr         = "0027"
     }
   }
 }

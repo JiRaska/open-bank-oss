@@ -50,7 +50,10 @@ resource "aws_subnet" "public" {
   vpc_id                  = aws_vpc.this.id
   cidr_block              = local.public_cidrs[count.index]
   availability_zone       = local.azs[count.index]
-  map_public_ip_on_launch = true
+  # Do NOT auto-assign public IPs to every instance launched here (EC2.25).
+  # The fck-nat instance sets associate_public_ip_address = true explicitly;
+  # ALBs and NLBs allocate their own IPs independently of this flag.
+  map_public_ip_on_launch = false
 
   tags = merge(var.tags, {
     Name                     = "${var.name}-public-${local.azs[count.index]}"

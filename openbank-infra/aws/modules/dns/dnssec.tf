@@ -23,6 +23,10 @@ resource "aws_kms_key" "dnssec" {
   customer_master_key_spec = "ECC_NIST_P256"
   key_usage                = "SIGN_VERIFY"
   deletion_window_in_days  = 7
+  # AWS KMS does not support automatic key rotation for asymmetric keys (ECC/RSA).
+  # DNSSEC KSK rollover is a manual, DNS-coordinated procedure (RFC 6781 §4.1).
+  # checkov:skip=CKV2_AWS_64:asymmetric signing key — rotation not supported by AWS KMS
+  enable_key_rotation     = false
   policy                   = data.aws_iam_policy_document.dnssec_kms.json
   tags                     = var.tags
 }
