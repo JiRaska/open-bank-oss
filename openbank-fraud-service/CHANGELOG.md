@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank/compare/fraud-service-v0.4.3...fraud-service-v0.5.0) (2026-06-30)
+
+
+### Features
+
+* **fraud:** online feature store + shadow ML scoring (ADR-0139/0140 phase 1) ([#2738](https://github.com/JiRaska/open-bank/issues/2738)) ([3e280ea](https://github.com/JiRaska/open-bank/commit/3e280ea18cc5073256816ab66f88ed96aa3628d6))
+
+
+### Bug Fixes
+
+* **fraud:** derive quarkus.application.version from version.txt ([#2717](https://github.com/JiRaska/open-bank/issues/2717)) ([9e003f8](https://github.com/JiRaska/open-bank/commit/9e003f8729f2ffa2492cacf6b084d3a4215e8636))
+
 ## [0.4.3](https://github.com/JiRaska/open-bank/compare/fraud-service-v0.4.2...fraud-service-v0.4.3) (2026-06-29)
 
 
