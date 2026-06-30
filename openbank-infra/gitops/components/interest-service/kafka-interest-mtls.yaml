@@ -1,0 +1,88 @@
+# Kafka mTLS identity + ACLs for openbank-interest-service (ADR-0137 #2665 Tier 2c).
+#
+# Interest-service publishes accrual lifecycle events to
+# openbank.interest.accrual.event via the outbox relay. It has no incoming
+# Kafka consumers (accrual and capitalisation are scheduler-driven, not
+# event-driven), so no consumer-group ACL is needed.
+#
+# Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one
+# principal for all of this service's Kafka traffic.
+#
+# These resources live in `messaging` (where the Strimzi User Operator watches);
+# the Strimzi User Operator mints a per-user Secret of the same name there
+# (user.crt/key/p12 + user.password + ca.crt). Those secrets are projected into
+# the `interest` namespace by External Secrets below.
+---
+# ── KafkaUser: interest-service ─────────────────────────────────────────────
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers→Strimzi secrets→ESO projection) must land
+    # before the interest Rollout rolls pods onto mTLS; lower waves sync first
+    # and ArgoCD blocks on ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: interest-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.interest.accrual.event
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+---
+# ── ExternalSecret: interest-service keystore ────────────────────────────────
+# Projects the Strimzi-minted interest-service Secret from `messaging` into
+# `interest`. `dataFrom.extract` copies every key verbatim, preserving the
+# binary PKCS#12 payload byte-for-byte. deletionPolicy: Retain so a transient
+# store/RBAC blip never deletes a live keystore out from under a running pod.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: interest-service-kafka-keystore
+  namespace: interest
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: interest-service-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: interest-service
+---
+# ── ExternalSecret: cluster CA truststore ───────────────────────────────────
+# Shared cluster-CA truststore projected into `interest` — identical pattern to
+# every other namespace (payments, clearing, etc.).
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: interest
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert
