@@ -4,7 +4,6 @@
 
 package com.openbank.simulation.model
 
-import com.openbank.transaction.domain.saga.PaymentSaga
 import com.openbank.transaction.domain.saga.SagaState
 import java.math.BigDecimal
 import java.util.UUID
@@ -13,18 +12,26 @@ import java.util.UUID
 typealias SimSagaState = SagaState
 
 /**
- * Simulation wrapper around the real [PaymentSaga] domain aggregate from
- * `openbank-transaction-service` (ADR-0100 Layer 2). The domain object carries state-machine
- * correctness; this wrapper carries simulation bookkeeping fields that have no equivalent
- * in the production aggregate.
+ * Simulation-layer payment saga record (ADR-0100 Layer 2, ADR-0120 Phase 5).
+ *
+ * After the production `PaymentSagaOrchestrator` was retired in favour of Temporal, this class no
+ * longer wraps the domain aggregate — it carries only the fields the simulation needs: identity,
+ * current state, and bookkeeping (journal id, hold amount, source account).
  */
 data class SimPaymentSaga(
-    val saga: PaymentSaga,
+    val id: UUID,
+    val transactionId: UUID,
+    val state: SagaState,
     val journalId: UUID? = null,
     val reservedAmount: BigDecimal? = null,
     val sourceAccount: AccountCurrency? = null,
 ) {
-    val id: UUID get() = saga.id
-    val state: SagaState get() = saga.state
-    val isTerminal: Boolean get() = saga.isTerminal
+    val isTerminal: Boolean
+        get() = state in TERMINAL_STATES
+
+    fun transitionTo(newState: SagaState): SimPaymentSaga = copy(state = newState)
+
+    companion object {
+        private val TERMINAL_STATES = setOf(SagaState.COMPLETED, SagaState.COMPENSATED, SagaState.FAILED)
+    }
 }

@@ -14,7 +14,6 @@ import com.openbank.simulation.engine.SimulatedWriteFailure
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.model.SimPaymentSaga
 import com.openbank.simulation.runner.World
-import com.openbank.transaction.domain.saga.PaymentSaga
 import com.openbank.transaction.domain.saga.SagaState
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -22,18 +21,15 @@ import java.time.ZoneId
 import java.util.UUID
 
 /**
- * One step of the money path: a single internal transfer driven through the payment saga,
- * faithful to `PaymentSagaOrchestrator` — reserve funds on the source, post a balanced
+ * One step of the money path: a single internal transfer modelled as a saga execution
+ * (ADR-0100 Layer 2, ADR-0120 Phase 5). Reserves funds on the source, posts a balanced
  * double-entry journal **as the real `openbank-ledger-service` `JournalEntry` aggregate**,
- * project the booked movement onto balances via the real `bookedDeltas()`, release the hold;
- * and on an injected fault, compensate (reverse the journal via the real `reverse()`, release
- * the hold) so the saga always reaches a terminal state.
+ * projects the booked movement onto balances via the real `bookedDeltas()`, releases the hold;
+ * and on an injected fault, compensates (reverses the journal, releases the hold) so the saga
+ * always reaches a terminal state.
  *
  * Every choice (accounts, amount, which faults fire) is drawn from the run's seeded RNG, so a
- * step is a pure function of the seed and the step index. (The real `JournalEntry.reverse()` no
- * longer reads the wall clock — its booking time is now injected by the application layer, ADR-0100
- * Layer 1; it still mints random line ids, a separate ADR-0106 concern — but neither affects the
- * booked money math the invariants assert, so the run's verdict stays reproducible from the seed.)
+ * step is a pure function of the seed and the step index.
  */
 object PaymentScenario {
 
@@ -59,15 +55,16 @@ object PaymentScenario {
         val target = AccountCurrency(accounts[targetIdx], world.currency)
 
         val index = world.sagas.size
-        val clock = world.context.clock
         var saga = SimPaymentSaga(
-            saga = PaymentSaga.start(random.nextUuid(), "sim-$index", clock, id = random.nextUuid()),
+            id = random.nextUuid(),
+            transactionId = random.nextUuid(),
+            state = SagaState.STARTED,
             sourceAccount = source,
         )
         world.sagas.add(saga)
 
         fun advance(to: SagaState) {
-            saga = saga.copy(saga = saga.saga.transitionTo(to, clock))
+            saga = saga.transitionTo(to)
             world.sagas[index] = saga
             world.audit.append("saga ${saga.id} -> ${saga.state}")
         }
@@ -140,7 +137,7 @@ object PaymentScenario {
         return JournalEntry(
             id = journalId,
             entryNumber = null,
-            transactionId = saga.saga.transactionId,
+            transactionId = saga.transactionId,
             entryDate = today,
             valueDate = today,
             description = "transfer $journalId",
