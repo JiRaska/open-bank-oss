@@ -76,7 +76,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0065](0065-customer-facing-edge-and-keycloak-realm.md) | Customer-facing edge (BFF + gateway) and a dedicated Keycloak customer realm | Accepted | Partial |
 | [0066](0066-passwordless-customer-authentication.md) | Passwordless customer authentication — passkey-first onboarding and login | Accepted | Shipped |
 | [0067](0067-feature-flags-and-experimentation.md) | Feature flags and experimentation (flag-as-code, OpenFeature-aligned) | Accepted | Partial |
-| [0068](0068-onboarding-operations-cockpit.md) | Onboarding operations cockpit — a read-model and four-eyes workflow over the onboarding state machine | Accepted | Planned |
+| [0068](0068-onboarding-operations-cockpit.md) | Onboarding operations cockpit — a read-model and four-eyes workflow over the onboarding state machine | Accepted | Partial |
 | [0069](0069-customer-onboarding-journey.md) | Customer onboarding journey — operator-assisted Phase 1, self-service Phase 2 | Accepted | Partial |
 | [0070](0070-in-app-diagnostics-debug-surface.md) | In-app diagnostics / debug surface (customer app) | Accepted | Partial |
 | [0071](0071-governance-manifest-as-derived-data.md) | Governance manifest as derived data (per-service governance.yaml) | Accepted | Shipped |
