@@ -80,11 +80,9 @@ spec:
           name: kafka-metrics
           key: kafka-metrics-config.yml
     listeners:
-      # Anonymous plaintext listener — the cluster-wide default the whole fleet
-      # (~33 clients across 23 namespaces) still connects on. Kept open during
-      # the staged mTLS migration (ADR-0137); removing it / flipping the global
-      # allow-everyone gate is a separate, fleet-wide program (see ADR-0137 §
-      # "Out of scope" and runbook 0008).
+      # Anonymous plaintext listener — retained for backward compatibility.
+      # All 33 deployed Kafka clients migrated to mTLS:9093 (ADR-0137 fleet
+      # sweep complete). Removing the listener is a follow-up step (runbook 0008).
       - name: plain
         port: 9092
         type: internal
@@ -109,14 +107,13 @@ spec:
       transaction.state.log.min.isr: 1
       default.replication.factor: 1
       min.insync.replicas: 1
-      # Cluster-wide authorization posture: resources WITHOUT any ACL stay
-      # open to everyone (incl. User:ANONYMOUS on the plaintext listener);
-      # resources WITH an ACL are deny-by-default. ADR-0137 deliberately keeps
-      # this "true" so the scheme-accepted hardening does NOT require the whole
-      # 33-client fleet to be on mTLS first. Flipping to "false" makes the
-      # entire cluster deny-by-default and is gated on migrating every client —
-      # a separate program, NOT this PR (ADR-0137 "Out of scope"; runbook 0008).
-      allow.everyone.if.no.acl.found: "true"
+      # Cluster-wide authorization posture: deny-by-default for ALL topics.
+      # All 33 deployed Kafka clients migrated to mTLS:9093 (ADR-0137 fleet
+      # sweep complete). User:ANONYMOUS (plaintext) is now denied on every topic
+      # including those without explicit ACLs. Non-deployed services
+      # (card-issuance, sdd, standing-order, tpp-registry) are RBAC pre-registered
+      # and will receive gitops mTLS manifests before their first deploy.
+      allow.everyone.if.no.acl.found: "false"
   # Consumer-lag visibility (Dynatrace-parity #0). The Kafka Exporter is a
   # separate pod (also on `tcp-prometheus`:9404) that turns consumer group
   # offsets into `kafka_consumergroup_lag` — the single most useful event-bus
