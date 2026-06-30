@@ -175,10 +175,13 @@ jobs:
       # Hetzner hosts default to 65536; at max-parallel=8 all 8 Redpanda containers
       # race to claim async-I/O contexts simultaneously and exhaust the pool
       # (balance/ledger/lending flakes observed in the 2026-06-23 full-fleet run).
-      # Set 4: safe for both runner pools; the TC pre-warm step already serialises
-      # the registry-cache cold-start window, so the NAT benefit is preserved.
+      # Set 4 for PR/push: safe for both runner pools; the TC pre-warm step already
+      # serialises the registry-cache cold-start window, so the NAT benefit is preserved.
       # Raise back to 8 once runner-tune-hetzner runs and persists aio-max-nr=1048576.
-      max-parallel: 4
+      # Set 2 for nightly schedule: keeps the full-fleet build within Hetzner+Mac mini
+      # capacity (3 always-on self-hosted runners) so the nightly cron never spills onto
+      # ARC spot nodes. FinOps rule: ARC is overflow-only, not a guaranteed daily cost.
+      max-parallel: ${{ github.event_name == 'schedule' && 2 || 4 }}
       matrix:
         service: ${{ fromJSON(needs.changes.outputs.services) }}
     uses: ./.github/workflows/_service-ci.yml
