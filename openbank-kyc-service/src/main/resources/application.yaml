@@ -1,6 +1,7 @@
 quarkus:
   application:
     name: openbank-kyc-service
+    version: 0.1.0
   http:
     port: 8114
     cors:
@@ -75,6 +76,15 @@ quarkus:
 
 mp:
   messaging:
+    connector:
+      smallrye-kafka:
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+        ssl.keystore.location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+        ssl.keystore.type: ${KAFKA_SSL_KEYSTORE_TYPE:PKCS12}
+        ssl.keystore.password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+        ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+        ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
+        ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     incoming:
       # PARTY_CREATED → auto-open a KYC case (ADR-0068). earliest so a case is opened even
       # for parties created before this consumer first joined the group; openCaseForParty is
