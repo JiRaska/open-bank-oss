@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/JiRaska/open-bank/compare/party-service-v0.7.0...party-service-v0.7.1) (2026-06-30)
+
+
+### Security
+
+* **party:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2a) ([#2750](https://github.com/JiRaska/open-bank/issues/2750)) ([f4e1a41](https://github.com/JiRaska/open-bank/commit/f4e1a4176783f8671fe0d0ede3df7d31df3ecac8))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank/compare/party-service-v0.6.0...party-service-v0.7.0) (2026-06-29)
 
 
