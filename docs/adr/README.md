@@ -121,7 +121,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0110](0110-same-account-fx-exchange.md) | Same-account currency exchange (pocket FX swap) | Accepted | Shipped |
 | [0111](0111-payment-r-transaction-returns-pacs004.md) | SEPA R-Transaction Returns via pacs.004 | Accepted | Shipped |
 | [0112](0112-ai-finops-agent.md) | AI-FinOps Agent: proaktivní nákladová observabilita a optimalizace | Accepted | Partial |
-| [0113](0113-card-issuance-bounded-context.md) | Card issuance bounded context — virtual-first, internal lifecycle, no external processor | Accepted | Partial |
+| [0113](0113-card-issuance-bounded-context.md) | Card issuance bounded context — virtual-first, internal lifecycle, no external processor | Accepted | Shipped |
 | [0114](0114-standing-order-execution-model.md) | Standing order execution model — outbox-driven daily sweep | Accepted | Shipped |
 | [0115](0115-deterministic-simulation-harness.md) | Deterministic simulation harness — seed-driven money-path invariant checker (ADR-0100 Layer 2/3) | Accepted | Shipped |
 | [0116](0116-kyc-engine-risk-checks-and-four-eyes-gate.md) | KYC engine — risk-based checks, ČNB four-eyes gate, sandbox straight-through mode | Accepted | Shipped |
