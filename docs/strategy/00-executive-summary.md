@@ -14,7 +14,7 @@ OpenBank targets the gap between:
 
 ## 2. Positioning statement
 
-> OpenBank is a cloud-native, event-sourced, BIAN-aligned core banking platform released under a permissive open-source licence, targeting European retail banking with a PSD2-, DORA-, and 5AMLD-oriented architecture from day one (designed around these frameworks — not certified, audited, or a substitute for your own compliance review).
+> OpenBank is a cloud-native, event-sourced, BIAN-aligned core banking platform released under a permissive open-source licence, targeting European retail banking with a PSD2-, DORA-, and 5AMLD-oriented architecture from the outset (designed around these frameworks — not certified, audited, or a substitute for your own compliance review).
 
 ## 3. Strategic pillars
 
@@ -50,7 +50,7 @@ See `02-competitor-analysis.md` for the full matrix. Headline differentiators:
 | Language | Kotlin | Java (legacy EE) | Java/Scala (closed) | Python smart-contracts |
 | Architecture | Event-sourced microservices | Modular monolith | Microservices (SaaS-only) | Smart-contracts on Vault |
 | BIAN alignment | Yes (v13) | Partial | Partial | Partial |
-| Event sourcing in ledger | Yes (planned M1) | No | No | Yes |
+| Event sourcing in ledger | Yes (shipped) | No | No | Yes |
 | PSD2 out-of-the-box | Yes | No | Partial | Partial |
 | DORA-ready | Yes (by design) | No | Partial | Partial |
 | Self-hosted | Yes | Yes | No (SaaS-only) | Yes (private cloud) |
@@ -65,10 +65,10 @@ See `02-competitor-analysis.md` for the full matrix. Headline differentiators:
 ```
 
 - **Architectural intent**: ★★★★ (BIAN-aligned, event-driven, hex architecture, K8s-native)
-- **Implementation depth**: ★★ (skeleton across 26 services, 18 682 LOC Kotlin, 1 outbox, 0 sagas, 0 tests)
+- **Implementation depth**: ★★★★ (services implemented + deployed across the fleet; hexagonal; fleet-wide outbox + saga/Temporal orchestration; test suites with a ratchet-only coverage gate)
 - **Operational maturity**: ★★★ (Docker stack, observability, K8s/Helm/ArgoCD scaffolds)
 - **Compliance-readiness**: ★ (the work is ahead, not behind)
-- **Security hygiene**: ★★★★★ (0 leaks, MPL headers, signed commits required, branch protection planned)
+- **Security hygiene**: ★★★★★ (0 leaks, Apache-2.0 SPDX headers, signed commits required, branch protection enforced)
 - **OSS-readiness**: ★★★★★ (LICENSE, README, CONTRIBUTING, CoC, SECURITY all in place)
 
 ## 6. Roadmap headline

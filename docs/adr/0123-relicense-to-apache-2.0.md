@@ -19,8 +19,8 @@ proprietary code in *new* files. In practice that protection has cost more adopt
   in is overwhelmingly Apache-2.0. Matching the ecosystem default removes a class of compatibility
   questions for downstream integrators.
 - **The anti-extraction moat was already moved.** The part of OpenBank actually intended for
-  commercialization — the AI agent **runtime** — is AGPL-3.0 + commercial in a separate repo with a CLA
-  ([ADR-0031](0031-ai-agent-governance-and-operations.md) D8). The copyleft moat lives *there*, not in the
+  commercialization — the AI agent **runtime** — is AGPL-3.0-only + commercial, now shipped in-repo as the AGPL-3.0-only agent
+  services ([ADR-0136](0136-agent-services-agpl-in-repo-open-core.md), superseding the ADR-0031 D8 separate-repo plan). The copyleft moat lives *there*, not in the
   repo-wide baseline. MPL on the open core was therefore protecting against a threat the open core does not
   actually need protection from.
 - **Patent grant is preserved.** Apache-2.0 carries an explicit patent grant and a patent-retaliation
@@ -39,8 +39,8 @@ copyleft). For a reference implementation optimising for adoption and trust, tha
   `scripts/add-license-headers.sh`). OpenAPI/AsyncAPI `info.license` blocks change `name` to `Apache-2.0`.
 - **Contribution mechanism is unchanged: DCO v1.1** (`git commit -s`). Apache-2.0 + DCO is a standard,
   well-understood pairing; no CLA is introduced for the platform.
-- **The agent-runtime carve-out is unchanged.** The AGPL-3.0 + commercial agent runtime stays in its own
-  repo/module with its own LICENSE + CLA. `rules.yaml`'s `license_denylist` carve-out is retained; its
+- **The agent-runtime carve-out is unchanged.** The AGPL-3.0 + commercial agent code is now in-repo as the AGPL-3.0-only agent
+  services ([ADR-0136](0136-agent-services-agpl-in-repo-open-core.md)), superseding the separate-repo plan. `rules.yaml`'s `license_denylist` carve-out is retained; its
   rationale wording moves from "incompatible with MPL-2.0" to "would contaminate the Apache-2.0 tree".
   AGPL consuming the Apache-2.0 `ModelProvider` port is one-directional and remains acceptable.
 - Third-party facts are **not** rewritten: OpenBao is genuinely MPL-2.0 (runbook 0002, `openbao.yaml`),

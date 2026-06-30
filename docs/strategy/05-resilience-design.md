@@ -194,4 +194,4 @@ Never break customer money flows in production chaos. Tier 0 services are exclud
 
 ## Disclaimer
 
-These are target resilience patterns. The reference implementation today has only 1 outbox (sepa-payment), zero sagas, and no chaos programme. Closing this gap is the substance of milestones M2-M5.
+These are target resilience patterns. The reference implementation now has fleet-wide outbox dispatch and live saga/Temporal orchestration (ADR-0101); the remaining gap is a formal chaos-engineering programme (milestones M2-M5).

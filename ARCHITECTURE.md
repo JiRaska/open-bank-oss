@@ -5,12 +5,12 @@ Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 
 
 # OpenBank — Architecture
 
-This is the contributor-facing technical map of OpenBank: how ~30 microservices, two
+This is the contributor-facing technical map of OpenBank: how ~34 microservices, two
 front-ends, and a shared library fit into one banking platform, and which patterns you
 must follow when you add to it.
 
-It **complements** the [`README.md`](README.md) (which has the flat service catalogue,
-ports, tech stack, and quick-start) and the **Architecture Decision Records**
+It **complements** the [`README.md`](README.md) (which has the project-status overview,
+tech stack, and quick-start) and the **Architecture Decision Records**
 ([`docs/adr/README.md`](docs/adr/README.md) — the index, with a per-decision
 *Decision-Status* and *Delivery-Status*). When this document and an ADR disagree, the ADR
 wins; when an ADR and [`openbank-libs/governance/rules.yaml`](openbank-libs/governance/rules.yaml)
@@ -37,7 +37,7 @@ flowchart LR
   tpp["TPP / fintech<br/>(PSD2 XS2A)"] --> psd2["psd2-service<br/>+ developer-portal"]
   agent["AI agent<br/>(MCP client)"] --> agentsvc["agent-service<br/>(policy-gated MCP)"]
 
-  edge --> mesh[" Domain services<br/>(~30 Quarkus/Kotlin) "]
+  edge --> mesh[" Domain services<br/>(~34 Quarkus/Kotlin) "]
   admin --> mesh
   psd2 --> mesh
   agentsvc --> mesh
@@ -91,7 +91,7 @@ or **asynchronous Kafka events** (facts), never by reaching into another service
 ## 3. Bounded contexts
 
 The fleet groups into coherent domains. The flat list with ports lives in the README
-[service catalogue](README.md#service-catalogue); here is the *mental model* and where the
+[service catalogue](README.md#project-status); here is the *mental model* and where the
 governance weight sits.
 
 | Context | Services | Anchoring ADRs |

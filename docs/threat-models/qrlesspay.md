@@ -6,7 +6,7 @@ Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 
 
 - **Date:** 2026-06-16
 - **Status:** Lightweight STRIDE/DFD (ADR-0030 D2). **Money-path** capability — stub, to be completed before enforcement rollout.
-- **ADR:** [ADR-0095](adr/0095-qrlesspay-ble-proximity-spayd-payments.md) · **Spec:** [qrlesspay-v1](specs/qrlesspay-v1.md)
+- **ADR:** [ADR-0095](../adr/0095-qrlesspay-ble-proximity-spayd-payments.md) · **Spec:** [qrlesspay-v1](../specs/qrlesspay-v1.md)
 
 ## 1. Scope & purpose
 

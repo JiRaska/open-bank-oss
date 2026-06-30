@@ -214,8 +214,8 @@ the SSDLC-drift feed (D5).
 - [ADR-0112](0112-ai-finops-agent.md) — the cost-axis twin this agent mirrors 1:1.
 - [ADR-0061](0061-dora-metrics-from-in-house-sources.md) — DORA snapshot + the `/devops` page + phasing.
 - [ADR-0101](0101-temporal-durable-execution.md) — Temporal durable orchestration.
-- [ADR-0002](0002-hexagonal-architecture.md) — hexagonal architecture (ports/adapters).
-- [ADR-0053](0053-deploy-pipeline.md) / [ADR-0082](0082-arc-runner-capacity.md) — the deploy pipeline + ARC runner pools.
+- [ADR-0002](0002-hexagonal-architecture-per-service.md) — hexagonal architecture (ports/adapters).
+- [ADR-0053](0053-ephemeral-scale-to-zero-arc-runners.md) / [ADR-0082](0082-ci-runner-governance.md) — the deploy pipeline + ARC runner pools.
 - `openbank-devops-agent/` — the service (workflow, 5 collect activities, 6 detectors, STUB adapters, in-memory repo).
 - `openbank-libs/governance/agents.yaml` — the `devops-agent` charter.
 - `openbank-infra/scripts/reregister-runner.sh` — the durable `RUNNER_LABELS` the D3 incident exposed (PR #2284).

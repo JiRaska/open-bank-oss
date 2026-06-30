@@ -57,7 +57,7 @@ make health-all                          # verify
 
 Key local endpoints (full list in the README): Admin UI `:3000`, Keycloak `:8080`,
 Apicurio `:8081`, OPA `:8181`, Grafana `:3001`, Prometheus `:9090`, OpenBao `:8200`;
-services on `:8100+` (see the [service catalogue](README.md#service-catalogue)).
+services on `:8100+` (see the [service catalogue](README.md#project-status)).
 
 > **Footgun:** running the full fleet + N Quarkus/Docker builds concurrently can OOM a
 > 16 GB Docker Desktop. Build services sequentially or raise Docker's memory to 24 GB+.

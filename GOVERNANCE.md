@@ -15,7 +15,7 @@ model and the path to a distributed one.
 
 ## How the 2-approval rule is satisfied today
 
-[ADR-0030](docs/adr/0030-money-path-threat-modelling.md) and
+[ADR-0030](docs/adr/0030-supply-chain-security-and-ssdlc-hardening.md) and
 [`openbank-libs/governance/rules.yaml`](openbank-libs/governance/rules.yaml) require **two distinct
 reviewers** for every money-path change (the services listed under `money_path_services`). With a
 single full-time maintainer this cannot be met structurally by GitHub's branch-protection alone.
@@ -53,7 +53,7 @@ The target model (to be formalized in a future governance ADR):
 - **Security issues** must be reported via GitHub's private Security Advisory flow, not as public
   issues. See [SECURITY.md](SECURITY.md) for the disclosure policy.
 - **Feature requests and bugs** are tracked in GitHub Issues (see
-  [CONTRIBUTING.md](CONTRIBUTING.md#issues)).
+  [CONTRIBUTING.md](CONTRIBUTING.md#how-to-contribute)).
 
 ## Release process
 

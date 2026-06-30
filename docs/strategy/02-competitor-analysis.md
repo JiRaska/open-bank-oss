@@ -54,7 +54,7 @@ OpenBank competes primarily with segment 4 (OSS), positions adjacent to segment 
 - API-only — provides a PSD2 facade over an existing core, not a core itself.
 - AGPL-3.0 is restrictive for embedded/proprietary use cases.
 
-**OpenBank fills the clear gap: EU-retail-focused, cloud-native, OSS, MPL-permissive, BIAN-aligned, PSD2/DORA-ready from day one.** No competitor occupies this position.
+**OpenBank fills the clear gap: EU-retail-focused, cloud-native, OSS, Apache-2.0-permissive, BIAN-aligned, PSD2/DORA-oriented from the outset (designed for these frameworks, not certified).** No competitor occupies this position.
 
 ### Adjacent commercial competitors
 
@@ -87,7 +87,7 @@ These moats erode over time for OSS challengers that build community.
 
 ## Positioning statement
 
-> OpenBank is a cloud-native, event-sourced, BIAN-aligned core banking platform released under a permissive open-source licence (Apache-2.0), targeting European retail banking with a PSD2-, DORA-, and 5AMLD-oriented architecture from day one (designed around these frameworks — not certified or audited). We do not compete with Temenos or Mambu in the enterprise sales motion — we obsolete the question by giving you the core for free, transparently, with no vendor between you and your regulator.
+> OpenBank is a cloud-native, event-sourced, BIAN-aligned core banking platform released under a permissive open-source licence (Apache-2.0), targeting European retail banking with a PSD2-, DORA-, and 5AMLD-oriented architecture from the outset (designed around these frameworks — not certified or audited). We do not compete with Temenos or Mambu in the enterprise sales motion — we obsolete the question by giving you the core for free, transparently, with no vendor between you and your regulator.
 
 ## Realistic threats
 
@@ -98,7 +98,7 @@ These moats erode over time for OSS challengers that build community.
 | Cloud-native commercial cores cut prices drastically | Low | Medium | TCO advantage shrinks but transparency advantage remains |
 | Regulator bans OSS for licensed banking | Very low | Catastrophic | Maintain operator-friendly licence; engage early with regulators |
 | Maintainer burnout / bus factor 1 | Medium | Critical | Recruit co-maintainers; transparent governance |
-| AGPL fanatics fork to AGPL with hostility | Low | Low | MPL allows downstream forks; ignore noise |
+| AGPL fanatics fork to AGPL with hostility | Low | Low | Apache-2.0 allows downstream forks; ignore noise |
 
 ## Annual market sizing (rough order of magnitude)
 
