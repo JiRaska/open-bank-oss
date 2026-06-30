@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank/compare/audit-service-v0.8.0...audit-service-v0.8.1) (2026-06-30)
+
+
+### Security
+
+* **audit:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2c) ([#2749](https://github.com/JiRaska/open-bank/issues/2749)) ([ddba9c1](https://github.com/JiRaska/open-bank/commit/ddba9c17ff22624b17e4b28e60837b29352ad384))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank/compare/audit-service-v0.7.0...audit-service-v0.8.0) (2026-06-29)
 
 
