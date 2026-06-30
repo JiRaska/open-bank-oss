@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/JiRaska/open-bank/compare/billing-service-v0.2.0...billing-service-v0.3.0) (2026-06-30)
+
+
+### Features
+
+* **billing:** Dockerfile + GitOps manifests — sandbox deploy (ADR-0143 phase 2c) ([#2813](https://github.com/JiRaska/open-bank/issues/2813)) ([8c00ef9](https://github.com/JiRaska/open-bank/commit/8c00ef9c4e806ead755bc59c42080a9c870541a4))
+
 ## [0.2.0](https://github.com/JiRaska/open-bank/compare/billing-service-v0.1.0...billing-service-v0.2.0) (2026-06-30)
 
 
