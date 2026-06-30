@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.7.1...kyc-service-v0.8.0) (2026-06-30)
+
+
+### Features
+
+* **kyc:** enforce maker-checker via ROLE_KYC_OPENER / ROLE_KYC_REVIEWER (ADR-0116) ([#13](https://github.com/JiRaska/open-bank-oss/issues/13)) ([6f24b9f](https://github.com/JiRaska/open-bank-oss/commit/6f24b9f8deb8da8b367052c3952666a16e13d496))
+
 ## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.7.0...kyc-service-v0.7.1) (2026-06-30)
 
 
