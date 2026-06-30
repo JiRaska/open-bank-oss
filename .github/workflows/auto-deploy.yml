@@ -726,6 +726,28 @@ jobs:
           rec_failed=0
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
             echo "==> record-deployment ${svc} @ ${GITHUB_SHA::8} → sandbox"
+            # record-deployment requires the version to exist in the broker. For a brand-new
+            # service (no prior pact publications), the version entry may be missing and the
+            # CLI returns 404 "not found" — not a contract failure, just a missing version row.
+            # Create the version via the REST API first (idempotent PUT; body is intentionally
+            # minimal — no tags needed here since can-i-deploy uses --latest main which comes
+            # from the CI test publication, not from this step).
+            ver_code="$(curl -s -o /dev/null -w '%{http_code}' \
+              -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
+              "${PACT_BROKER_URL}/pacticipants/${svc}/versions/${GITHUB_SHA}")"
+            if [ "$ver_code" = "404" ]; then
+              echo "  version not found in broker (new pacticipant?) — creating it via REST"
+              create_code="$(curl -s -o /tmp/pact-ver.json -w '%{http_code}' \
+                -X PUT \
+                -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
+                -H "Content-Type: application/merge-patch+json" \
+                -d '{}' \
+                "${PACT_BROKER_URL}/pacticipants/${svc}/versions/${GITHUB_SHA}")"
+              echo "  PUT /pacticipants/${svc}/versions/${GITHUB_SHA} → HTTP ${create_code}"
+              if [ "$create_code" -ge 400 ]; then
+                echo "::warning::could not create version for ${svc} (HTTP ${create_code}); record-deployment may fail"
+              fi
+            fi
             ok=0
             for attempt in 1 2 3; do
               if "$CLI" record-deployment \
