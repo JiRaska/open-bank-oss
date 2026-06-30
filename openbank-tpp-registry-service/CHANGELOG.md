@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.3](https://github.com/JiRaska/open-bank/compare/tpp-registry-service-v0.6.2...tpp-registry-service-v0.6.3) (2026-06-30)
+
+
+### Security
+
+* **standing-order,tpp-registry:** Kafka mTLS code-side prep — SSL defaults + RBAC pre-registration (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2c) ([#2764](https://github.com/JiRaska/open-bank/issues/2764)) ([96189bd](https://github.com/JiRaska/open-bank/commit/96189bd19e44370bbfe6584d0a7bd6bec38dac10))
+
 ## [0.6.2](https://github.com/JiRaska/open-bank/compare/tpp-registry-service-v0.6.1...tpp-registry-service-v0.6.2) (2026-06-29)
 
 
