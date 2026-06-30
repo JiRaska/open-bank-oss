@@ -610,6 +610,7 @@ finops_tiers:
   # t0_baseline and need no explicit entry.
   declared:
     openbank-notification-service: T2     # proven pilot, live in sandbox (ADR-0057 best-first target, #228)
+    openbank-product-catalog: T1          # ADR-0083 pilot: HTTPScaledObject minReplicas:0 live; native cold-start SLO gate passed in sandbox (#2083)
 
   # Keep-honest classifier: reads measured signals (HTTP rate/idle ratio, Kafka lag +
   # active fraction, CPU/replica utilisation), emits a recommended tier + realised

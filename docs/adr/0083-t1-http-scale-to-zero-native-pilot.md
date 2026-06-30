@@ -46,8 +46,9 @@ cloud-agnostic intact — no FaaS). Success = a repeatable recipe for the rest o
 read/HTTP fleet; failure = revert to `min>0` with no harm.
 
 KEDA is deployed cluster-wide (ADR-0041 P1 confirmed).
-Next step: install KEDA HTTP add-on in the sandbox cluster and create an HTTPScaledObject
-for the nominated T1 HTTP pilot service. Implementation tracked separately.
+KEDA HTTP add-on is installed (tofu/sandbox-platform, HA interceptor 2 replicas).
+`HTTPScaledObject` for `product-catalog` is live (minReplicas: 0) and the tier is declared
+T1 in `rules.yaml: finops_tiers.declared` — pilot complete.
 
 ### Enabler 1 — native image build
 
