@@ -1,4 +1,7 @@
-// SPDX-License-Identifier: Apache-2.0\n// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.\n// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.\n
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
 package com.openbank.transaction.application.usecase
 
 import com.openbank.libs.api.pagination.CursorEncoder
@@ -17,7 +20,6 @@ import com.openbank.transaction.application.workflow.PaymentWorkflow
 import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionStatus
 import com.openbank.transaction.domain.model.TransactionType
-import com.openbank.transaction.domain.saga.PaymentSaga
 import com.openbank.transaction.domain.saga.SagaState
 import com.openbank.transaction.infrastructure.temporal.TemporalConfig
 import io.mockk.coEvery
@@ -32,7 +34,6 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
-import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -40,10 +41,10 @@ import java.util.UUID
 class TransactionServiceTest {
     private lateinit var transactionRepository: TransactionRepository
     private lateinit var eventPublisher: TransactionEventPublisher
-    private lateinit var sagaOrchestrator: PaymentSagaOrchestrator
     private lateinit var fxRatePort: FxRatePort
     private lateinit var temporalConfig: TemporalConfig
     private lateinit var workflowClient: WorkflowClient
+    private lateinit var workflowStub: PaymentWorkflow
 
     private lateinit var service: TransactionService
 
@@ -51,16 +52,17 @@ class TransactionServiceTest {
     fun setUp() {
         transactionRepository = mockk()
         eventPublisher = mockk()
-        sagaOrchestrator = mockk()
         fxRatePort = mockk()
         temporalConfig = mockk()
         workflowClient = mockk()
-        // Default: Temporal orchestration OFF — TransactionService uses PaymentSagaOrchestrator.
-        every { temporalConfig.enabled() } returns false
+        workflowStub = mockk()
+        every { temporalConfig.taskQueue() } returns "openbank-payment-execution"
+        every {
+            workflowClient.newWorkflowStub(PaymentWorkflow::class.java, any<WorkflowOptions>())
+        } returns workflowStub
         service = TransactionService(
             transactionRepository,
             eventPublisher,
-            sagaOrchestrator,
             fxRatePort,
             temporalConfig,
             workflowClient,
@@ -77,14 +79,12 @@ class TransactionServiceTest {
         val result = service.initiateTransaction(command)
 
         assertThat(result).isEqualTo(existing)
-        coVerify(exactly = 0) {
-            transactionRepository.save(any(), any())
-            sagaOrchestrator.startSaga(any())
-        }
+        coVerify(exactly = 0) { transactionRepository.save(any(), any()) }
+        verify(exactly = 0) { workflowClient.newWorkflowStub(any<Class<*>>(), any<WorkflowOptions>()) }
     }
 
     @Test
-    fun `initiate transaction completes when saga succeeds and emits completed event`(): Unit = runBlocking {
+    fun `initiate transaction completes when workflow succeeds and emits completed event`(): Unit = runBlocking {
         val command = initiateCommand()
 
         coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
@@ -92,14 +92,7 @@ class TransactionServiceTest {
         every { eventPublisher.completedPayload(any()) } returns "{\"event\":\"completed\"}"
         coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
         coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
-        coEvery { sagaOrchestrator.startSaga(any()) } answers {
-            val transaction = firstArg<Transaction>()
-            PaymentSaga.start(
-                transaction.id,
-                transaction.idempotencyKey,
-                Clock.systemUTC(),
-            ).copy(state = SagaState.COMPLETED)
-        }
+        every { workflowStub.execute(any()) } returns SagaState.COMPLETED
 
         val result = service.initiateTransaction(command)
 
@@ -121,7 +114,6 @@ class TransactionServiceTest {
                         it.payload.contains("initiated")
                 },
             )
-            sagaOrchestrator.startSaga(match { it.id == result.id && it.idempotencyKey == command.idempotencyKey })
             transactionRepository.update(
                 match { it.id == result.id && it.status == TransactionStatus.COMPLETED },
                 match<OutboxMessage> {
@@ -131,39 +123,12 @@ class TransactionServiceTest {
                 },
             )
         }
+        verify(exactly = 1) { workflowStub.execute(result.id) }
     }
 
     @Test
-    fun `flag off dispatches to the saga orchestrator and not the workflow`(): Unit = runBlocking {
+    fun `initiate transaction drives through Temporal payment workflow`(): Unit = runBlocking {
         val command = initiateCommand()
-
-        // temporalConfig.enabled() = false from setUp().
-        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
-        every { eventPublisher.initiatedPayload(any()) } returns "{}"
-        every { eventPublisher.completedPayload(any()) } returns "{}"
-        coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
-        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
-        coEvery { sagaOrchestrator.startSaga(any()) } answers {
-            val tx = firstArg<Transaction>()
-            PaymentSaga.start(tx.id, tx.idempotencyKey, Clock.systemUTC()).copy(state = SagaState.COMPLETED)
-        }
-
-        val result = service.initiateTransaction(command)
-
-        assertThat(result.status).isEqualTo(TransactionStatus.COMPLETED)
-        coVerify(exactly = 1) { sagaOrchestrator.startSaga(any()) }
-        verify(exactly = 0) { workflowClient.newWorkflowStub(any<Class<*>>(), any<WorkflowOptions>()) }
-    }
-
-    @Test
-    fun `flag on dispatches to the payment workflow and not the orchestrator`(): Unit = runBlocking {
-        val command = initiateCommand()
-        every { temporalConfig.enabled() } returns true
-        every { temporalConfig.taskQueue() } returns "openbank-payment-execution"
-        val workflowStub = mockk<PaymentWorkflow>()
-        every {
-            workflowClient.newWorkflowStub(PaymentWorkflow::class.java, any<WorkflowOptions>())
-        } returns workflowStub
         every { workflowStub.execute(any()) } returns SagaState.COMPLETED
 
         coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
@@ -175,7 +140,6 @@ class TransactionServiceTest {
         val result = service.initiateTransaction(command)
 
         assertThat(result.status).isEqualTo(TransactionStatus.COMPLETED)
-        coVerify(exactly = 0) { sagaOrchestrator.startSaga(any()) }
         verify(exactly = 1) { workflowStub.execute(result.id) }
     }
 
@@ -195,14 +159,7 @@ class TransactionServiceTest {
         every { eventPublisher.completedPayload(any()) } returns "{\"event\":\"completed\"}"
         coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
         coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
-        coEvery { sagaOrchestrator.startSaga(any()) } answers {
-            val transaction = firstArg<Transaction>()
-            PaymentSaga.start(
-                transaction.id,
-                transaction.idempotencyKey,
-                Clock.systemUTC(),
-            ).copy(state = SagaState.COMPLETED)
-        }
+        every { workflowStub.execute(any()) } returns SagaState.COMPLETED
 
         val result = service.initiateTransaction(command)
 
@@ -228,14 +185,7 @@ class TransactionServiceTest {
         every { eventPublisher.completedPayload(any()) } returns "{}"
         coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
         coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
-        coEvery { sagaOrchestrator.startSaga(any()) } answers {
-            val transaction = firstArg<Transaction>()
-            PaymentSaga.start(
-                transaction.id,
-                transaction.idempotencyKey,
-                Clock.systemUTC(),
-            ).copy(state = SagaState.COMPLETED)
-        }
+        every { workflowStub.execute(any()) } returns SagaState.COMPLETED
 
         val result = service.initiateTransaction(command)
 
@@ -254,14 +204,7 @@ class TransactionServiceTest {
         every { eventPublisher.completedPayload(any()) } returns "{}"
         coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
         coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
-        coEvery { sagaOrchestrator.startSaga(any()) } answers {
-            val transaction = firstArg<Transaction>()
-            PaymentSaga.start(
-                transaction.id,
-                transaction.idempotencyKey,
-                Clock.systemUTC(),
-            ).copy(state = SagaState.COMPLETED)
-        }
+        every { workflowStub.execute(any()) } returns SagaState.COMPLETED
 
         val result = service.initiateTransaction(command)
 
@@ -271,7 +214,7 @@ class TransactionServiceTest {
     }
 
     @Test
-    fun `initiate transaction fails when saga does not complete and emits failed event`(): Unit = runBlocking {
+    fun `initiate transaction fails when workflow does not complete and emits failed event`(): Unit = runBlocking {
         val command = initiateCommand()
 
         coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
@@ -279,17 +222,13 @@ class TransactionServiceTest {
         every { eventPublisher.failedPayload(any(), any()) } returns "{\"event\":\"failed\"}"
         coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
         coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
-        coEvery { sagaOrchestrator.startSaga(any()) } answers {
-            val transaction = firstArg<Transaction>()
-            PaymentSaga.start(transaction.id, transaction.idempotencyKey, Clock.systemUTC())
-                .copy(state = SagaState.FAILED, failureReason = "Ledger posting failed: boom")
-        }
+        every { workflowStub.execute(any()) } returns SagaState.FAILED
 
         val result = service.initiateTransaction(command)
 
         assertThat(result.status).isEqualTo(TransactionStatus.FAILED)
         assertThat(result.failedAt).isNotNull()
-        assertThat(result.failureReason).contains("boom")
+        assertThat(result.failureReason).contains("FAILED")
 
         coVerify {
             transactionRepository.update(
@@ -348,10 +287,7 @@ class TransactionServiceTest {
         every { eventPublisher.completedPayload(any()) } returns "{}"
         coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
         coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
-        coEvery { sagaOrchestrator.startSaga(any()) } answers {
-            val tx = firstArg<Transaction>()
-            PaymentSaga.start(tx.id, tx.idempotencyKey, Clock.systemUTC()).copy(state = SagaState.COMPLETED)
-        }
+        every { workflowStub.execute(any()) } returns SagaState.COMPLETED
 
         val result = service.reverseTransaction(command)
 
@@ -412,10 +348,7 @@ class TransactionServiceTest {
         every { eventPublisher.completedPayload(any()) } returns "{}"
         coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
         coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
-        coEvery { sagaOrchestrator.startSaga(any()) } answers {
-            val tx = firstArg<Transaction>()
-            PaymentSaga.start(tx.id, tx.idempotencyKey, Clock.systemUTC()).copy(state = SagaState.COMPLETED)
-        }
+        every { workflowStub.execute(any()) } returns SagaState.COMPLETED
 
         val result = service.initiateTransaction(command)
 
@@ -445,14 +378,7 @@ class TransactionServiceTest {
         every { eventPublisher.completedPayload(any()) } returns "{\"event\":\"completed\"}"
         coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
         coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
-        coEvery { sagaOrchestrator.startSaga(any()) } answers {
-            val transaction = firstArg<Transaction>()
-            PaymentSaga.start(
-                transaction.id,
-                transaction.idempotencyKey,
-                Clock.systemUTC(),
-            ).copy(state = SagaState.COMPLETED)
-        }
+        every { workflowStub.execute(any()) } returns SagaState.COMPLETED
 
         val result = service.initiateTransaction(command)
 

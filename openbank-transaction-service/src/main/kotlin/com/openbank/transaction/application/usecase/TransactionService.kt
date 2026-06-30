@@ -39,7 +39,6 @@ import java.util.UUID
 class TransactionService(
     private val transactionRepository: TransactionRepository,
     private val eventPublisher: TransactionEventPublisher,
-    private val sagaOrchestrator: PaymentSagaOrchestrator,
     private val fxRatePort: FxRatePort,
     private val temporalConfig: TemporalConfig,
     private val workflowClient: WorkflowClient,
@@ -50,14 +49,12 @@ class TransactionService(
     constructor(
         transactionRepository: TransactionRepository,
         eventPublisher: TransactionEventPublisher,
-        sagaOrchestrator: PaymentSagaOrchestrator,
         fxRatePort: FxRatePort,
         temporalConfig: TemporalConfig,
         workflowClient: WorkflowClient,
     ) : this(
         transactionRepository,
         eventPublisher,
-        sagaOrchestrator,
         fxRatePort,
         temporalConfig,
         workflowClient,
@@ -147,31 +144,20 @@ class TransactionService(
             ),
         )
 
-        // ADR-0120 Phase 1 (flag-gated, default off): when Temporal orchestration is enabled, drive the
-        // payment through the durable PaymentWorkflow; otherwise keep the synchronous PaymentSagaOrchestrator
-        // path UNCHANGED. Both produce a terminal SagaState; only the source of the state changes.
-        val state: SagaState
-        var failureReason: String? = null
-        if (temporalConfig.enabled()) {
-            // stub.execute(...) is a blocking Temporal client call; this method runs on a reactive
-            // (suspend) thread, so offload the blocking wait to the IO dispatcher.
-            state = withContext(Dispatchers.IO) {
-                val stub = workflowClient.newWorkflowStub(
-                    PaymentWorkflow::class.java,
-                    WorkflowOptions.newBuilder()
-                        .setTaskQueue(temporalConfig.taskQueue())
-                        .setWorkflowId("payment-${saved.id}")
-                        .build(),
-                )
-                stub.execute(saved.id)
-            }
-        } else {
-            val saga = sagaOrchestrator.startSaga(saved)
-            state = saga.state
-            failureReason = saga.failureReason
+        // ADR-0120 Phase 5: Temporal is the sole orchestrator — PaymentSagaOrchestrator removed.
+        // stub.execute(...) is a blocking Temporal client call; offload the blocking wait to the IO dispatcher.
+        val state: SagaState = withContext(Dispatchers.IO) {
+            val stub = workflowClient.newWorkflowStub(
+                PaymentWorkflow::class.java,
+                WorkflowOptions.newBuilder()
+                    .setTaskQueue(temporalConfig.taskQueue())
+                    .setWorkflowId("payment-${saved.id}")
+                    .build(),
+            )
+            stub.execute(saved.id)
         }
 
-        // The orchestration runs to a terminal state synchronously: COMPLETED on a successful
+        // The workflow runs to a terminal state synchronously: COMPLETED on a successful
         // ledger posting, otherwise COMPENSATED/FAILED. Close the transaction lifecycle to match
         // and emit the corresponding domain event through the outbox.
         return if (state == SagaState.COMPLETED) {
@@ -185,7 +171,7 @@ class TransactionService(
                 ),
             )
         } else {
-            val reason = failureReason ?: "Payment saga did not complete (state=$state)"
+            val reason = "Payment workflow did not complete (state=$state)"
             val failed = saved.fail(reason, clock)
             transactionRepository.update(
                 transaction = failed,
