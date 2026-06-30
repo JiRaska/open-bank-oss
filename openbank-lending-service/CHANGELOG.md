@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.4](https://github.com/JiRaska/open-bank/compare/lending-service-v0.6.3...lending-service-v0.6.4) (2026-06-30)
+
+
+### Security
+
+* **lending:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2a) ([#2746](https://github.com/JiRaska/open-bank/issues/2746)) ([b96cc8a](https://github.com/JiRaska/open-bank/commit/b96cc8a139f786c9e426122934d4a68293565c03))
+
 ## [0.6.3](https://github.com/JiRaska/open-bank/compare/lending-service-v0.6.2...lending-service-v0.6.3) (2026-06-29)
 
 
