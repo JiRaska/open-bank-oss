@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.3](https://github.com/JiRaska/open-bank/compare/balance-service-v1.7.2...balance-service-v1.7.3) (2026-06-30)
+
+
+### Security
+
+* **balance:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 1) ([#2728](https://github.com/JiRaska/open-bank/issues/2728)) ([e4cb565](https://github.com/JiRaska/open-bank/commit/e4cb5657c7a9a857aae045ba9917494d18d4669d))
+
 ## [1.7.2](https://github.com/JiRaska/open-bank/compare/balance-service-v1.7.1...balance-service-v1.7.2) (2026-06-29)
 
 
