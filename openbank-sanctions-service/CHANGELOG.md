@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/JiRaska/open-bank/compare/sanctions-service-v0.6.0...sanctions-service-v0.6.1) (2026-06-30)
+
+
+### Security
+
+* **sanctions:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2c) ([#2761](https://github.com/JiRaska/open-bank/issues/2761)) ([9e7ee7b](https://github.com/JiRaska/open-bank/commit/9e7ee7b2b79182019aa005bc2c7df3aa2a82fcd2))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank/compare/sanctions-service-v0.5.1...sanctions-service-v0.6.0) (2026-06-29)
 
 
