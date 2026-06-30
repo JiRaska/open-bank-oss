@@ -1,0 +1,96 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+plugins {
+    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.jandex)
+    alias(libs.plugins.kover)
+    id("openbank.static-analysis")
+    `java-library`
+    `maven-publish`
+}
+
+group = "com.openbank"
+version = "0.1.0-SNAPSHOT"
+
+repositories {
+    maven("https://maven-central.storage-download.googleapis.com/maven2/")
+    mavenCentral()
+}
+
+dependencies {
+    // Domain module — pure Kotlin/JVM; re-exported as api() so dependents on runtime
+    // also see domain types without an explicit dependency.
+    api(project(":openbank-libs-domain"))
+
+    // EXCEPTION: BearerTokenClientHeadersFactory implements microprofile-rest-client's
+    // ClientHeadersFactory. Shipped transitively as api() — see openbank-libs build.gradle.kts
+    // for the full rationale (NoClassDefFoundError on services without rest-client extension).
+    api("org.eclipse.microprofile.rest.client:microprofile-rest-client-api:4.0")
+
+    // Framework APIs — compileOnly (services provide impls via Quarkus platform BOM).
+    // Versions MUST equal what quarkus-bom:3.33.2 ships.
+    compileOnly("jakarta.ws.rs:jakarta.ws.rs-api:3.1.0")
+    compileOnly("jakarta.annotation:jakarta.annotation-api:3.0.0")
+    compileOnly("jakarta.enterprise:jakarta.enterprise.cdi-api:4.1.0")
+    compileOnly("jakarta.inject:jakarta.inject-api:2.0.1")
+    compileOnly("org.eclipse.microprofile.config:microprofile-config-api:3.1")
+    compileOnly("org.jboss.logging:jboss-logging:3.6.2.Final")
+    compileOnly("io.quarkus:quarkus-redis-client:3.33.2")
+    compileOnly("io.smallrye.reactive:mutiny-kotlin:3.1.1")
+    compileOnly("jakarta.persistence:jakarta.persistence-api:3.2.0")
+    compileOnly("org.eclipse.microprofile.rest.client:microprofile-rest-client-api:4.0")
+    compileOnly("io.quarkus:quarkus-hibernate-reactive-panache-kotlin:3.33.2")
+    compileOnly("io.quarkus:quarkus-scheduler:3.33.2")
+    compileOnly("org.eclipse.microprofile.fault-tolerance:microprofile-fault-tolerance-api:4.1.1")
+    compileOnly("io.micrometer:micrometer-core:1.14.5")
+    compileOnly("io.quarkus:quarkus-security:3.33.2")
+    compileOnly("io.quarkus:quarkus-arc:3.33.2")
+
+    testImplementation(platform(libs.junit.bom))
+    testImplementation(libs.junit.jupiter)
+    testImplementation(libs.assertj)
+    testImplementation(libs.mockk)
+    testImplementation("jakarta.ws.rs:jakarta.ws.rs-api:3.1.0")
+    testImplementation("io.quarkus:quarkus-security:3.33.2")
+    testImplementation("org.jboss.resteasy:resteasy-core:6.2.12.Final")
+    testImplementation("org.jboss.logging:jboss-logging:3.6.2.Final")
+    testImplementation("jakarta.enterprise:jakarta.enterprise.cdi-api:4.1.0")
+    testImplementation("io.micrometer:micrometer-core:1.14.5")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.test {
+    useJUnitPlatform()
+    jvmArgs("-Dnet.bytebuddy.experimental=true")
+}
+
+tasks.named("check") {
+    dependsOn(tasks.named("koverVerify"))
+}
+
+kover {
+    reports {
+        filters {
+            excludes {
+                classes("com.openbank.libs.web.ServiceInfoResource")
+                classes("com.openbank.libs.persistence.outbox.PanacheOutboxEntity")
+                classes("com.openbank.libs.persistence.outbox.AbstractOutboxEntity")
+            }
+        }
+        verify {
+            rule {
+                bound {
+                    minValue = 20
+                    coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
+                }
+            }
+        }
+    }
+}
+
+kotlin {
+    jvmToolchain(25)
+    compilerOptions { freeCompilerArgs.addAll("-Xjsr305=strict", "-Xannotation-default-target=param-property") }
+}

@@ -44,6 +44,12 @@ AVD-AWS-0164
 # WAF (ModSecurity/OWASP CRS, ADR-0093) protects the API plane.
 AVD-AWS-0011
 
+# SNS topic KMS encryption: the CloudWatch NAT budget alarm (finops-budget.tf)
+# uses a SNS notification topic without a customer-managed KMS key. The topic
+# carries only operational alerts (no PII), and CMK encryption is a prod
+# go-live condition (ADR-0027 C5). Sandbox cost-only scope.
+AVD-AWS-0095
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Kubernetes — hardening follow-ups (tracked in issue #854 and related issues)
 # ──────────────────────────────────────────────────────────────────────────────

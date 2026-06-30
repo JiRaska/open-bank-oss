@@ -1,0 +1,30 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>FunctionOnlyReturningConstant:ApiVersionResponseFilter.kt$ApiVersionResponseFilter$private fun isDeprecatedPath(path: String): Boolean</ID>
+    <ID>FunctionOnlyReturningConstant:FeatureFlagInterceptorTest.kt$FeatureFlagInterceptorTest.Sample$@FeatureFlag(flag = "new-router") fun gated(): String</ID>
+    <ID>FunctionOnlyReturningConstant:FeatureFlagInterceptorTest.kt$FeatureFlagInterceptorTest.Sample$@FeatureFlag(flag = "split-flag", targetingKey = "#partyId") fun targeted(partyId: String): String</ID>
+    <ID>FunctionOnlyReturningConstant:FeatureFlagInterceptorTest.kt$FeatureFlagInterceptorTest.Sample$fun ungated(): String</ID>
+    <ID>MagicNumber:AuthorizeInterceptor.kt$AuthorizeInterceptor$100</ID>
+    <ID>MagicNumber:CommonExceptionMappers.kt$GenericExceptionMapper$500</ID>
+    <ID>MagicNumber:CommonExceptionMappers.kt$IllegalArgumentExceptionMapper$400</ID>
+    <ID>MagicNumber:CommonExceptionMappers.kt$IllegalStateExceptionMapper$422</ID>
+    <ID>MagicNumber:CommonExceptionMappers.kt$NoSuchElementExceptionMapper$404</ID>
+    <ID>MagicNumber:CommonExceptionMappers.kt$WebApplicationExceptionMapper$401</ID>
+    <ID>MagicNumber:CommonExceptionMappers.kt$WebApplicationExceptionMapper$403</ID>
+    <ID>MagicNumber:CommonExceptionMappers.kt$WebApplicationExceptionMapper$404</ID>
+    <ID>MagicNumber:CommonExceptionMappers.kt$WebApplicationExceptionMapper$409</ID>
+    <ID>MagicNumber:CommonExceptionMappers.kt$WebApplicationExceptionMapper$500</ID>
+    <ID>MagicNumber:DomainMetrics.kt$DomainMetrics$0.5</ID>
+    <ID>MagicNumber:DomainMetrics.kt$DomainMetrics$0.95</ID>
+    <ID>MagicNumber:DomainMetrics.kt$DomainMetrics$0.99</ID>
+    <ID>MagicNumber:FeatureFlagInterceptor.kt$FeatureFlagInterceptor$110</ID>
+    <ID>MagicNumber:RateLimitFilter.kt$RateLimitFilter$429</ID>
+    <ID>MagicNumber:RedisIdempotencyStore.kt$RedisIdempotencyStore$3</ID>
+    <ID>ThrowsCount:AuthorizeInterceptor.kt$AuthorizeInterceptor$@AroundInvoke fun authorize(ctx: InvocationContext): Any?</ID>
+    <ID>TooManyFunctions:DomainMetrics.kt$DomainMetrics</ID>
+    <ID>UnusedParameter:ApiVersionResponseFilter.kt$ApiVersionResponseFilter$path: String</ID>
+    <ID>UnusedParameter:DocsResourceSchemaGuardTest.kt$DocsResourceSchemaGuardTest$lang: String = "en"</ID>
+  </CurrentIssues>
+</SmellBaseline>
