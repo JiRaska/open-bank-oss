@@ -3,7 +3,7 @@
 Date: 2026-06-29
 Status: Accepted
 Decision-Status: Accepted
-Delivery-Status: Planned
+Delivery-Status: Complete
 Author(s): Jiri Raska
 
 ## Context

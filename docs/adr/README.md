@@ -136,7 +136,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0125](0125-same-account-currency-exchange.md) | Same-account currency exchange (the app's currency swap) | Superseded by ADR-0110 | Superseded |
 | [0126](0126-unified-consent-lifecycle.md) | Unified Consent Lifecycle and GDPR Linkage | Accepted | Partial |
 | [0133](0133-tamper-evident-audit-chain.md) | ADR-0133: Tamper-evident audit chain | Accepted | Shipped |
-| [0134](0134-business-continuity-and-dora-ictrm.md) | ADR-0134: Business continuity plan and DORA ICT risk management framework | Accepted | Planned |
+| [0134](0134-business-continuity-and-dora-ictrm.md) | ADR-0134: Business continuity plan and DORA ICT risk management framework | Accepted | Complete |
 | [0135](0135-push-notification-token-security.md) | ADR-0135: Push notification token security and lifecycle | Accepted | Partial |
 | [0136](0136-agent-services-agpl-in-repo-open-core.md) | Agent services licensed AGPL-3.0-only in-repo (open-core) | Accepted | Shipped |
 | [0137](0137-kafka-mtls-scheme-accepted-migration.md) | Kafka mTLS migration — topic-scoped enforcement of payment.scheme-accepted | Accepted | Partial |
