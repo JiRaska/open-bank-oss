@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.4](https://github.com/JiRaska/open-bank/compare/onboarding-service-v0.5.3...onboarding-service-v0.5.4) (2026-06-30)
+
+
+### Security
+
+* **onboarding:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2c) ([#2754](https://github.com/JiRaska/open-bank/issues/2754)) ([852d2e2](https://github.com/JiRaska/open-bank/commit/852d2e22c3d96ff5557c767c80a6f2aeae8ebf2c))
+
 ## [0.5.3](https://github.com/JiRaska/open-bank/compare/onboarding-service-v0.5.2...onboarding-service-v0.5.3) (2026-06-29)
 
 
