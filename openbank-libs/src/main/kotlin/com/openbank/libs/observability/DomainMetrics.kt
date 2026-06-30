@@ -5,12 +5,14 @@
 package com.openbank.libs.observability
 
 import io.micrometer.core.instrument.Counter
+import io.micrometer.core.instrument.DistributionSummary
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
+import java.math.BigDecimal
 import java.time.Duration
 
 /**
@@ -183,6 +185,34 @@ class DomainMetrics {
         counter("openbank.ledger.postings", "currency", currency, "type", type)
     }
 
+    /**
+     * Record the absolute monetary amount of a single ledger posting line (ADR-0077 Tier C).
+     *
+     * Uses a DistributionSummary (histogram) so Prometheus/Grafana can derive p50/p95/p99 posting
+     * sizes and total posted volume per scrape interval without storing individual amounts as tags
+     * (cardinality contract).
+     *
+     * @param currency    ISO-4217 currency code of the posting line
+     * @param debitCredit `debit` | `credit`
+     * @param amount      absolute (non-negative) monetary value
+     */
+    fun ledgerPostingAmount(currency: String, debitCredit: String, amount: BigDecimal) {
+        summary("openbank.ledger.posting.amount", "currency", currency, "debit_credit", debitCredit)
+            ?.record(amount.toDouble())
+    }
+
+    // ── Balance ───────────────────────────────────────────────────────────────
+
+    /**
+     * Increment when a balance position receives a booked delta from the ledger projection
+     * (ADR-0039 Phase D / ADR-0077 Tier C). Covers all projection sources including FX revaluation.
+     *
+     * @param currency ISO-4217 currency code of the revalued position
+     */
+    fun balanceRevaluated(currency: String) {
+        counter("openbank.balances.revaluations", "currency", currency)
+    }
+
     // ── AML / Sanctions ───────────────────────────────────────────────────────
 
     /**
@@ -275,6 +305,14 @@ class DomainMetrics {
 
     private fun timer(name: String, vararg tags: String): Timer? = reg()?.let {
         Timer.builder(name)
+            .tags(*tags)
+            .publishPercentiles(0.5, 0.95, 0.99)
+            .publishPercentileHistogram()
+            .register(it)
+    }
+
+    private fun summary(name: String, vararg tags: String): DistributionSummary? = reg()?.let {
+        DistributionSummary.builder(name)
             .tags(*tags)
             .publishPercentiles(0.5, 0.95, 0.99)
             .publishPercentileHistogram()

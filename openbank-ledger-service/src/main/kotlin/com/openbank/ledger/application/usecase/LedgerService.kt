@@ -135,6 +135,7 @@ class LedgerService(
 
         val saved = journalRepository.save(entry, command.idempotencyKey, listOf(outbox) + bookedChangedMessages(entry))
         recordPostings(entry, POSTING, metrics)
+        recordPostingAmounts(entry, metrics)
         return saved
     }
 
@@ -178,6 +179,7 @@ class LedgerService(
             listOf(outbox) + bookedChangedMessages(reversal),
         )
         recordPostings(reversal, REVERSAL, metrics)
+        recordPostingAmounts(reversal, metrics)
 
         return original.copy(status = JournalStatus.REVERSED, version = original.version + 1)
     }
@@ -302,6 +304,23 @@ class LedgerService(
 private fun recordPostings(entry: JournalEntry, type: String, metrics: DomainMetrics) {
     entry.lines.map { it.baseAmount.currency.code }.toSet().forEach { currency ->
         metrics.ledgerPosting(currency, type)
+    }
+}
+
+/**
+ * Record monetary amount of each posting line on the `openbank.ledger.posting.amount` histogram
+ * (ADR-0077 Tier C). Uses [JournalLine.baseAmount] (settlement in the account's base currency) to
+ * keep amounts comparable across cross-currency journals. The absolute value is recorded; the
+ * `debit_credit` tag carries the direction. Kept at file scope alongside [recordPostings] to stay
+ * within detekt's per-class budget.
+ */
+private fun recordPostingAmounts(entry: JournalEntry, metrics: DomainMetrics) {
+    entry.lines.forEach { line ->
+        metrics.ledgerPostingAmount(
+            currency = line.baseAmount.currency.code,
+            debitCredit = line.side.name.lowercase(),
+            amount = line.baseAmount.amount.abs(),
+        )
     }
 }
 

@@ -20,6 +20,8 @@ import com.openbank.balance.domain.model.Balance
 import com.openbank.balance.domain.model.BalanceEvent
 import com.openbank.balance.domain.model.BalanceEventType
 import com.openbank.balance.domain.model.BalanceHold
+import com.openbank.libs.observability.DomainMetrics
+import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -68,6 +70,7 @@ class LedgerProjectionServiceTest {
             FakeHoldRepo(),
             NoopBalanceUseCase(),
             publisher,
+            mockk<DomainMetrics>(relaxed = true),
             java.time.Clock.systemUTC(),
         )
 
@@ -89,6 +92,7 @@ class LedgerProjectionServiceTest {
             FakeHoldRepo(),
             NoopBalanceUseCase(),
             publisher,
+            mockk<DomainMetrics>(relaxed = true),
             java.time.Clock.systemUTC(),
         )
 
@@ -119,6 +123,7 @@ class LedgerProjectionServiceTest {
             holdRepo,
             balanceUseCase,
             RecordingPublisher(),
+            mockk<DomainMetrics>(relaxed = true),
             java.time.Clock.systemUTC(),
         )
 

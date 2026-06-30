@@ -13,6 +13,7 @@ import com.openbank.balance.application.port.out.HoldRepository
 import com.openbank.balance.application.port.out.LedgerProjectionPort
 import com.openbank.balance.domain.model.BalanceEvent
 import com.openbank.balance.domain.model.BalanceEventType
+import com.openbank.libs.observability.DomainMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
 import java.time.Clock
@@ -34,6 +35,7 @@ class LedgerProjectionService(
     private val holdRepo: HoldRepository,
     private val balanceUseCase: BalanceUseCase,
     private val eventPublisher: BalanceEventPublisher,
+    private val metrics: DomainMetrics,
     private val clock: Clock,
 ) : LedgerProjectionUseCase {
 
@@ -64,6 +66,8 @@ class LedgerProjectionService(
         releaseCoverHolds(change.transactionId)
 
         if (applied != null) {
+            // ADR-0077 Tier C: count each revaluation (booked delta from ledger projection).
+            metrics.balanceRevaluated(change.currency)
             eventPublisher.publish(
                 BalanceEvent(
                     eventId = UUID.randomUUID(),
