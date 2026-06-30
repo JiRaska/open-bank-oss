@@ -2,8 +2,18 @@
 
 Date: 2026-05-31
 Status: Accepted
-Delivery-Status: Partial
+Delivery-Status: Shipped
 Author(s): jiri.raska
+
+**Delivery note (updated 2026-06-30):**
+- **D3** — ✅ Shipped: `ApiVersionResponseFilter` emits `X-API-Version: v{N}` (contract major) and
+  `X-Service-Version: {semver}` (release axis). `ServiceInfoResource` body + headers both correct.
+- **D5** — ✅ Documented: `rules.yaml` `change_requirements.api_change` specifies OpenAPI-diff
+  classification. Gate is `advisory` until `oasdiff` CI enforcement lands (acknowledged in Consequences).
+- **D6** — ✅ Shipped: `ApiVersionResponseFilter.isDeprecatedPath()` reads
+  `openbank.api.deprecated-paths` (optional list, empty by default). `Sunset` reads
+  `openbank.api.sunset-date`. Link header derives successor URL from current `openbank.api.version`.
+  Hardcoded `false` and stale 2025-12-31 sunset removed. Configure in gitops when `/v{N+1}` ships.
 
 ## Context
 
