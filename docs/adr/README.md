@@ -113,7 +113,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0102](0102-agentic-ai-differentiation.md) | Agentic AI differentiation — tool-use banking agent, ML fraud, and LLM-assisted KYC | Accepted | Partial |
 | [0103](0103-transaction-rail-and-instruction-type-at-origination.md) | Transaction rail & instruction type captured at origination | Accepted | Shipped |
 | [0104](0104-production-faithful-payment-rails-iso-20022-and-scheme-simulator.md) | Production-faithful payment rails: real ISO 20022 messages + scheme simulator | Accepted | Shipped |
-| [0105](0105-unified-product-identity.md) | Unified product identity across product-catalog and account-service | Accepted | Planned |
+| [0105](0105-unified-product-identity.md) | Unified product identity across product-catalog and account-service | Accepted | Complete |
 | [0106](0106-postgresql-18-uuidv7-and-platform-feature-adoption.md) | PostgreSQL 18 — UUIDv7 as the identifier convention and low-cost platform wins | Accepted | Shipped |
 | [0107](0107-convert-pocket-balance-to-primary.md) | Convert a currency pocket's balance to the primary currency (sweep-to-close) | Accepted | Shipped |
 | [0108](0108-rail-settlement-via-transaction-service.md) | Rail settlement runs through transaction-service (ADR-0039), not settlement-service | Accepted | Shipped |
