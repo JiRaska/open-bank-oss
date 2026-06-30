@@ -1,0 +1,12 @@
+# billing namespace (ADR-0037: domain = namespace). App plane.
+# Holds billing-service. No database — fee assessment is stateless; the ledger
+# and balance-service carry the authoritative account state.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: billing
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

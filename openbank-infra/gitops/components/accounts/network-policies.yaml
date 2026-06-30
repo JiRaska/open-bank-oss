@@ -40,6 +40,9 @@ spec:
               kubernetes.io/metadata.name: balances
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: billing
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: customer-edge
         - namespaceSelector:
             matchLabels:
@@ -99,6 +102,9 @@ spec:
     - from:
         - podSelector: {}
     - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: billing
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: customer-edge

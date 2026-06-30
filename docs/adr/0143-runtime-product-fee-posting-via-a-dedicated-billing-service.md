@@ -2,7 +2,7 @@
 
 Date: 2026-06-29
 Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only; design accepted, implementation is the money-path milestone below -->
+Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only; phases 1a/1b/2a/2b/2c-i merged; 2c-ii (ledger posting) deploy-gated; billing-service Dockerfile + GitOps added PR #2813 -->
 Author(s): Jiri Raska
 
 ## Context
