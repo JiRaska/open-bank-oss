@@ -38,17 +38,6 @@ metadata:
     openbank.io/description: "ADR-0099 Tier 1: re-asserts OpenBao database engine config weekly"
     openbank.io/runbook: "docs/runbooks/0006-openbao-dynamic-db.md"
 spec:
-  # SUSPENDED — Tier 1 dynamic DB secrets is unfinished feature work (ADR-0099).
-  # The k8s-auth role `db-admin` now exists (runbook 0006), so login succeeds, but
-  # configure.sh still cannot configure any service because three prerequisites are
-  # missing (verified 2026-06-29 against notifications-db):
-  #   1. connection_url host is wrong — uses `<svc>-service-rw` but the CNPG primary
-  #      Service is `<svc>-db-rw` (e.g. notifications-db-rw, not notifications-service-rw).
-  #   2. no `vault_admin` Postgres role exists in the target DBs (CREATEROLE user).
-  #   3. database/config is written with username=vault_admin but no password.
-  # No ExternalSecret consumes database/creds/* yet, so nothing depends on this.
-  # Re-enable (remove suspend) once the above land. Tracking: runbook 0006.
-  suspend: true
   # Sunday 02:00 UTC — outside banking hours, within PCI DSS 90-day window.
   schedule: "0 2 * * 0"
   # Keep the last 3 successful and 1 failed job for post-mortem inspection.
@@ -96,6 +85,53 @@ spec:
                 # BAO_TOKEN is intentionally left unset; configure.sh authenticates
                 # via the Kubernetes auth method using the pod's projected SA token.
                 # This avoids any long-lived token secret (ADR-0034 zero-standing-token).
+                #
+                # vault_admin passwords — one per Phase 1 service.
+                # The Secret `openbao-db-admin-passwords` is created by runbook 0006 §3
+                # (operator writes passwords after creating vault_admin roles in each DB).
+                # Secret never lands in git — only this reference does.
+                - name: VAULT_ADMIN_PASS_NOTIFICATIONS
+                  valueFrom:
+                    secretKeyRef:
+                      name: openbao-db-admin-passwords
+                      key: notifications
+                - name: VAULT_ADMIN_PASS_PUSH_NOTIFICATIONS
+                  valueFrom:
+                    secretKeyRef:
+                      name: openbao-db-admin-passwords
+                      key: push-notifications
+                      optional: true
+                - name: VAULT_ADMIN_PASS_AUDIT
+                  valueFrom:
+                    secretKeyRef:
+                      name: openbao-db-admin-passwords
+                      key: audit
+                - name: VAULT_ADMIN_PASS_BALANCE
+                  valueFrom:
+                    secretKeyRef:
+                      name: openbao-db-admin-passwords
+                      key: balance
+                - name: VAULT_ADMIN_PASS_FX
+                  valueFrom:
+                    secretKeyRef:
+                      name: openbao-db-admin-passwords
+                      key: fx
+                      optional: true
+                - name: VAULT_ADMIN_PASS_ACCOUNT
+                  valueFrom:
+                    secretKeyRef:
+                      name: openbao-db-admin-passwords
+                      key: account
+                - name: VAULT_ADMIN_PASS_TRANSACTION
+                  valueFrom:
+                    secretKeyRef:
+                      name: openbao-db-admin-passwords
+                      key: transaction
+                - name: VAULT_ADMIN_PASS_LEDGER
+                  valueFrom:
+                    secretKeyRef:
+                      name: openbao-db-admin-passwords
+                      key: ledger
               resources:
                 requests:
                   cpu: 50m

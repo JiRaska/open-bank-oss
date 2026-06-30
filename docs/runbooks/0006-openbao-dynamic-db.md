@@ -9,9 +9,13 @@ overlay. This runbook is that step. It mirrors the `eso` role setup in
 runbook 0005 (Vault→OpenBao) and the `agent-identity-admin` recipe in
 runbook 0007.
 
-> Status: applied to **sandbox** 2026-06-29. Both roles + policies exist live.
-> `openbao-agent-identity-sync` runs green. The two rotation CronJobs remain
-> **suspended** pending feature completion (see "Remaining work" below).
+> Status (2026-06-29): roles `db-admin` + `agent-identity-admin` applied to sandbox.
+> `openbao-agent-identity-sync` runs green.
+>
+> Status (2026-06-30): Tier 1 + Tier 2 `suspend: true` removed from gitops manifests.
+> All script path bugs fixed (connection_url, KV mount). `suspend` will be re-added
+> only if the out-of-band prerequisites below (§3 vault_admin bootstrap) are not met
+> before the next Sunday 02:00 UTC run. Track completion with §4 ESO policy extension.
 
 ## Why it was missing
 
@@ -81,23 +85,96 @@ bao "bao write auth/kubernetes/role/agent-identity-admin \
 ```sh
 # auth as the rotation SA succeeds and has the expected caps
 kubectl create job -n vault verify-agent --from=cronjob/openbao-agent-identity-sync   # → Complete
+
+# Verify Tier 1 CronJob auth (once §3 is done, trigger manually):
+kubectl create job -n vault verify-db-rotation --from=cronjob/openbao-db-rotation-sync
+kubectl logs -n vault job/verify-db-rotation
+# Expected: "[openbao-db] all services configured."
+
+# Verify Tier 2 CronJob auth (OIDC/JWT paths will WARN+skip until §4 provisioned):
+kubectl create job -n vault verify-secret-rotator --from=cronjob/secret-rotator
+kubectl logs -n vault job/verify-secret-rotator
+# Expected: "[rotator] Tier 2 rotation complete" with WARNs for missing paths.
 ```
 
-## Remaining work — why the two rotation jobs are still suspended
+## §3 — vault_admin role bootstrap (Tier 1 prerequisite — OUT-OF-BAND, OPERATOR ACTION)
 
-Creating `db-admin` removes the auth blocker, but both rotation jobs have
-unfinished prerequisites (all verified 2026-06-29). They are `suspend: true`
-in gitops so they stop firing `KubeJobFailed`; remove `suspend` once fixed.
+For each Phase 1 service, create the `vault_admin` Postgres role with `CREATEROLE` privilege
+and record its password in a Kubernetes Secret in the `vault` namespace:
 
-**Tier 1 — `openbao-db-rotation-sync` (`dynamic-db-credentials.yaml`):**
-1. `connection_url` host is wrong: `<svc>-service-rw` → the CNPG primary Service
-   is `<svc>-db-rw` (e.g. `notifications-db-rw`).
-2. No `vault_admin` Postgres role exists in the target DBs (needs a CREATEROLE
-   user, password stored for OpenBao's `database/config`).
-3. `database/config` is written with `username=vault_admin` but no password.
-4. No ExternalSecret consumes `database/creds/*` yet.
+```sh
+# For each service: notifications, audit, balance, fx-service, accounts, transaction, ledger
+# Replace <service>, <cluster>, <namespace>, <dbname>, <password> appropriately.
+kubectl exec -n <namespace> <cluster>-1 -- psql -U postgres -c \
+  "CREATE ROLE vault_admin WITH LOGIN PASSWORD '<password>' CREATEROLE;"
+kubectl exec -n <namespace> <cluster>-1 -- psql -U postgres -c \
+  "GRANT ALL ON DATABASE <dbname> TO vault_admin;"
 
-**Tier 2 — `secret-rotator` (`secret-rotator-cronjob.yaml`):**
-1. Script reads `secret/...`; the real KV mount is `openbank/`.
-2. No `keycloak/*` (admin creds, client_id mappings) or `jwt-signing/*` KV tree
-   exists — there is nothing to rotate until it is provisioned.
+# Collect all passwords into the Secret the CronJob reads:
+kubectl create secret generic openbao-db-admin-passwords -n vault \
+  --from-literal=notifications='<pass>' \
+  --from-literal=audit='<pass>' \
+  --from-literal=balance='<pass>' \
+  --from-literal=fx='<pass>' \
+  --from-literal=account='<pass>' \
+  --from-literal=transaction='<pass>' \
+  --from-literal=ledger='<pass>'
+# push-notifications is optional: only add if the cluster exists.
+```
+
+CNPG primary pod name: `<cluster-name>-1` (e.g. `notifications-db-1`). Use
+`kubectl get pods -n <namespace> -l cnpg.io/instanceRole=primary` to confirm.
+
+## §4 — ESO `eso` policy extension (Tier 1 prerequisite — OUT-OF-BAND)
+
+The ESO ClusterSecretStore `vault-kv` uses OpenBao role `eso` (runbook 0005). That role's
+policy currently covers only `openbank/*` (KV v2). To allow ESO to read dynamic credentials,
+extend the `eso` policy to include `database/creds/*`:
+
+```sh
+bao "bao policy write eso -" <<'EOF'
+# KV v2 (existing)
+path "openbank/data/*"     { capabilities = ["read"] }
+path "openbank/metadata/*" { capabilities = ["read","list"] }
+# database secrets engine — dynamic credentials (ADR-0099 Tier 1)
+path "database/creds/*"    { capabilities = ["read"] }
+EOF
+```
+
+Once this is applied, the `db-dynamic-externalsecret.yaml` resources in each service
+namespace will begin syncing (status: `SecretSynced`). Validate with:
+```sh
+kubectl get externalsecret notifications-db-dynamic -n notifications
+# Expected: READY True, STATUS SecretSynced
+```
+
+## §5 — Keycloak/JWT KV tree provisioning (Tier 2 prerequisite — OUT-OF-BAND)
+
+To activate full OIDC rotation, provision the `openbank/keycloak/*` tree:
+
+```sh
+# Keycloak admin creds (for the rotator to call the KC Admin API):
+bao "bao kv put openbank/keycloak/admin username=admin password='<kc-admin-pass>'"
+
+# For each service with a KC confidential client:
+bao "bao kv put openbank/keycloak/<service> client_id='<uuid-from-keycloak>'"
+```
+
+To activate JWT key rotation, bootstrap initial keys:
+```sh
+INITIAL_KEY="$(bao 'bao write -field=random_bytes sys/tools/random/32 format=hex')"
+NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+bao "bao kv put openbank/jwt-signing/<service> current_key='${INITIAL_KEY}' previous_key='' rotated_at='${NOW}'"
+```
+
+## Fixed items (2026-06-30 — all addressed in this PR)
+
+~~**Tier 1 — `openbao-db-rotation-sync` (`dynamic-db-credentials.yaml`):**~~
+- ~~`connection_url` host wrong: `<svc>-service-rw` → corrected to `<svc>-db-rw`~~ FIXED
+- ~~`database/config` written with `username=vault_admin` but no password~~ FIXED (§3 Secret ref)
+- ~~No ExternalSecret consumes `database/creds/*` yet~~ FIXED (per-service db-dynamic-externalsecret.yaml)
+- `vault_admin` Postgres role not yet created → complete §3 above before next run
+
+~~**Tier 2 — `secret-rotator` (`secret-rotator-cronjob.yaml`):**~~
+- ~~Script reads `secret/...`; KV mount is `openbank/`~~ FIXED (all paths corrected)
+- No `openbank/keycloak/*` or `openbank/jwt-signing/*` KV tree yet → complete §5 above

@@ -6,20 +6,29 @@
 **Accepted:** 2026-06-25
 **Author:** @JiRaska
 
-**Implementation note (Tier 1 — shipped 2026-06-25):**
-OpenBao database engine configured via GitOps:
-- `openbank-infra/gitops/components/openbao/dynamic-db-credentials.yaml` — ConfigMap
-  with idempotent `configure.sh` (8 services: notifications → ledger, lowest-risk-first).
-- `openbank-infra/gitops/components/openbao/db-rotation-job.yaml` — weekly CronJob
-  (`openbao-db-rotation-sync`, Sundays 02:00 UTC) + dedicated `openbao-db-admin` SA.
-- Auth: Kubernetes auth method, role `db-admin` (runbook 0006, no standing token).
-- TTL: 24h default / 72h max per ADR-0099 §Tier 1.
-- ESO `ExternalSecret` resources should be updated per-service to reference
-  `database/creds/<service>-db-vault-role` with `refreshInterval: 1h`.
+**Implementation note (Tier 1 + Tier 2 scripts — shipped 2026-06-30, PR feat/secret-rotation):**
+All script and configuration bugs fixed; CronJobs un-suspended. One out-of-band
+operator step remains before Tier 1 fires successfully: §3 in runbook 0006 (create
+`vault_admin` Postgres role per-service and populate the `openbao-db-admin-passwords`
+Secret). Tier 2 rotates OIDC/JWT gracefully (WARN+skip) until §5 (KV tree bootstrap)
+is complete. ESO extension to `database/creds/*` (runbook 0006 §4) is also required.
 
-Tier 2 (Kafka SASL rotation + OIDC client secrets + JWT key overlap) and
-Tier 3 / Phase 3 (audit outbox + admin-UI Credential Hygiene panel) are tracked
-as follow-up enhancements.
+Changes shipped in this PR:
+- `dynamic-db-credentials.yaml` — fixed `connection_url` host (`<svc>-service-rw` →
+  `<svc>-db-rw`, verified from CNPG manifests); added `password` parameter via
+  per-service env var from `openbao-db-admin-passwords` Secret; corrected DB names.
+- `db-rotation-job.yaml` — removed `suspend: true`; added `envFrom` Secret refs for
+  `vault_admin` passwords (one key per service).
+- `secret-rotator-cronjob.yaml` — removed `suspend: true`; fixed all 4 `secret/`
+  KV path references to `openbank/` (KV v2 mount, verified from clustersecretstore.yaml).
+- Per-service `db-dynamic-externalsecret.yaml` created for all 7 Phase 1 services
+  (notifications, audit, balances, fx-service, accounts, payments/transaction, ledger)
+  with `refreshInterval: 1h` and `secret.reloader.stakater.com/match: "true"`.
+- `docs/runbooks/0006-openbao-dynamic-db.md` — extended with §3 (vault_admin bootstrap),
+  §4 (ESO policy extension), §5 (KC/JWT KV tree), and verify commands.
+
+Tier 3 / Phase 3 (audit outbox + admin-UI Credential Hygiene panel) tracked as
+follow-up. Tier 2 Kafka SASL rotation is deferred (Kafka uses mTLS per ADR-0137).
 
 **Relates to:** ADR-0034 (OPA unified authz, covers the OpenBao trust model), ADR-0037 (audit
 outbox), ADR-0027 (cloud-agnostic substrate), ADR-0029 (governance as code), ADR-0059 (gated CD)
