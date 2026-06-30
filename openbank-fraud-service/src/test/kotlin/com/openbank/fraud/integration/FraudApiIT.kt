@@ -15,7 +15,7 @@ import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.Test
 
 @QuarkusTest
-@QuarkusTestResource(com.openbank.fraud.it.PostgresTestResource::class)
+@QuarkusTestResource(com.openbank.fraud.it.PostgresRedisTestResource::class)
 class FraudApiIT {
 
     @Test

@@ -7,13 +7,21 @@ package com.openbank.fraud.application.usecase
 import com.openbank.fraud.application.port.`in`.ScoreFraudUseCase
 import com.openbank.fraud.application.port.out.FraudMetricsPort
 import com.openbank.fraud.application.port.out.FraudScoreRepository
+import com.openbank.fraud.application.port.out.MlModelPort
 import com.openbank.fraud.application.port.out.VelocityAggregateRepository
 import com.openbank.fraud.domain.model.FraudScore
 import com.openbank.fraud.domain.model.ScoreRequest
 import com.openbank.fraud.domain.model.VelocityWindow
 import com.openbank.fraud.domain.rules.FraudRuleEngine
+import com.openbank.libs.domain.feature.FeatureValue
+import com.openbank.libs.domain.feature.OnlineFeatureStore
+import com.openbank.libs.domain.feature.PHASE1_FEATURES
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.jboss.logging.Logger
+import java.time.Clock
+import java.time.Instant
 
 /**
  * Real-time scoring use case (ADR-0084 §1/§2). Enriches the payment context with per-account
@@ -37,14 +45,55 @@ class FraudScoringService @Inject constructor(
     private val repository: FraudScoreRepository,
     private val metrics: FraudMetricsPort,
     private val velocityRepo: VelocityAggregateRepository,
+    private val featureStore: OnlineFeatureStore,
+    private val mlModel: MlModelPort,
+    private val clock: Clock,
+    @ConfigProperty(name = "openbank.ml.shadow.enabled", defaultValue = "true")
+    private val shadowEnabled: Boolean,
 ) : ScoreFraudUseCase {
+
+    private val log = Logger.getLogger(FraudScoringService::class.java)
 
     override suspend fun score(request: ScoreRequest): FraudScore {
         val enriched = enrichWithVelocity(request)
-        val result = FraudRuleEngine.score(enriched)
+        val result = FraudRuleEngine.score(enriched) // the ONLY thing that determines the verdict
         repository.save(enriched, result)
         metrics.recordVerdict(result.verdict, enriched.rail)
-        return result
+        runShadow(enriched, result) // logs + metrics only; its outcome is discarded
+        return result // byte-identical to rules-only
+    }
+
+    /**
+     * ADR-0139 phase-1 shadow plane: compute the ML score from the online feature store and log it
+     * alongside the rule verdict. It changes nothing — the returned [FraudScore] is the pure rule
+     * engine's output. Stale/missing features are omitted (never a confident stale value, ADR-0140),
+     * and any failure here is swallowed so the rule verdict always returns (fail-open for shadow).
+     */
+    private suspend fun runShadow(enriched: ScoreRequest, ruleResult: FraudScore) {
+        if (!shadowEnabled) return
+        val accountId = enriched.accountId ?: return
+        @Suppress("TooGenericExceptionCaught") // feature-store / model failures have no common base
+        try {
+            val now = Instant.now(clock)
+            val features = PHASE1_FEATURES.mapNotNull { feature ->
+                when (val value = featureStore.read(feature, accountId.toString(), now)) {
+                    is FeatureValue.Fresh -> feature.name to value.value
+                    else -> null // Stale / Missing -> omit (treated as missing, ADR-0140)
+                }
+            }.toMap()
+            val mlScore = mlModel.scoreShadow(features) ?: return // model unavailable -> rules-only
+            metrics.recordShadowScore(mlScore)
+            log.infof(
+                "fraud-ml-shadow account=%s features=%s mlScore=%.4f ruleVerdict=%s ruleScore=%d",
+                accountId,
+                features,
+                mlScore,
+                ruleResult.verdict,
+                ruleResult.score,
+            )
+        } catch (ex: Exception) {
+            log.debugf(ex, "shadow scoring failed for account %s (rules verdict unaffected)", accountId)
+        }
     }
 
     private suspend fun enrichWithVelocity(request: ScoreRequest): ScoreRequest {

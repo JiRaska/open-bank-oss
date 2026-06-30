@@ -7,12 +7,14 @@ package com.openbank.fraud.infrastructure.messaging
 import com.fasterxml.jackson.core.JacksonException
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.fraud.application.port.out.VelocityAggregateRepository
+import com.openbank.fraud.application.usecase.FeatureOnlineUpdater
 import io.smallrye.common.annotation.Blocking
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
 import java.math.BigDecimal
+import java.time.Instant
 import java.util.UUID
 
 /** Payload shape of openbank.transactions.transaction.initiated Kafka event. */
@@ -21,6 +23,8 @@ private data class TransactionInitiatedSignal(
     val sourceAccountId: UUID? = null,
     val amount: BigDecimal? = null,
     val currencyCode: String? = null,
+    // Business event time (required on TransactionInitiatedEvent) — the ADR-0140 as-of source.
+    val occurredAt: Instant? = null,
 )
 
 private const val PAYLOAD_PREVIEW_LENGTH = 200
@@ -34,6 +38,7 @@ private const val PAYLOAD_PREVIEW_LENGTH = 200
 @ApplicationScoped
 class TransactionSignalConsumer(
     private val velocityRepo: VelocityAggregateRepository,
+    private val featureUpdater: FeatureOnlineUpdater,
     private val objectMapper: ObjectMapper,
 ) {
     private val log = Logger.getLogger(TransactionSignalConsumer::class.java)
@@ -61,6 +66,14 @@ class TransactionSignalConsumer(
                 log.debugf("Velocity aggregate updated for account %s amount=%s %s", accountId, amount, currency)
             } catch (ex: Exception) {
                 log.warnf(ex, "Failed to record velocity aggregate for account %s", accountId)
+            }
+            // ADR-0140 online feature store (shadow plane). Best-effort: a feature-store failure must
+            // never break the velocity path. Skip silently when the event carries no business time.
+            val occurredAt = signal.occurredAt ?: return@runBlocking
+            try {
+                featureUpdater.onTransactionInitiated(accountId.toString(), occurredAt)
+            } catch (ex: Exception) {
+                log.warnf(ex, "Failed to update online feature store for account %s", accountId)
             }
         }
     }

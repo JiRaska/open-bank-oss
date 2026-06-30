@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.kotlinModule
 import com.openbank.fraud.application.port.out.VelocityAggregateRepository
+import com.openbank.fraud.application.usecase.FeatureOnlineUpdater
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -15,16 +16,18 @@ import io.mockk.slot
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Instant
 import java.util.UUID
 
 class TransactionSignalConsumerTest {
 
     private val velocityRepo = mockk<VelocityAggregateRepository>(relaxed = true)
+    private val featureUpdater = mockk<FeatureOnlineUpdater>(relaxed = true)
     private val objectMapper = ObjectMapper()
         .registerModule(kotlinModule())
         .registerModule(JavaTimeModule())
 
-    private val consumer = TransactionSignalConsumer(velocityRepo, objectMapper)
+    private val consumer = TransactionSignalConsumer(velocityRepo, featureUpdater, objectMapper)
 
     @Test
     fun `happy path records velocity for valid signal`() {
@@ -41,6 +44,34 @@ class TransactionSignalConsumerTest {
         consumer.onTransactionInitiated(payload)
 
         coVerify(exactly = 1) { velocityRepo.recordTransaction(accountId, BigDecimal("250.00"), "CZK") }
+    }
+
+    @Test
+    fun `updates the online feature store when the event carries occurredAt`() {
+        val accountId = UUID.randomUUID()
+        val occurredAt = Instant.parse("2026-06-29T10:30:00Z")
+        val payload = """
+            {
+              "sourceAccountId": "$accountId",
+              "amount": "250.00",
+              "currencyCode": "CZK",
+              "occurredAt": "$occurredAt"
+            }
+        """.trimIndent()
+
+        consumer.onTransactionInitiated(payload)
+
+        coVerify(exactly = 1) { featureUpdater.onTransactionInitiated(accountId.toString(), occurredAt) }
+    }
+
+    @Test
+    fun `skips the feature store when occurredAt is absent`() {
+        val accountId = UUID.randomUUID()
+        val payload = """{"sourceAccountId": "$accountId", "amount": "10.00", "currencyCode": "CZK"}"""
+
+        consumer.onTransactionInitiated(payload)
+
+        coVerify(exactly = 0) { featureUpdater.onTransactionInitiated(any(), any()) }
     }
 
     @Test

@@ -24,6 +24,7 @@ dependencies {
     implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.smallrye.kafka)
+    implementation(libs.quarkus.redis.client)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
     implementation(libs.jackson.module.kotlin)

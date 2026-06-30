@@ -39,6 +39,8 @@ quarkus:
   hibernate-orm:
     database:
       generation: none
+  redis:
+    hosts: ${QUARKUS_REDIS_HOSTS:redis://localhost:6379}
   oidc:
     auth-server-url: http://localhost:8080/realms/openbank
     client-id: openbank-services
@@ -111,6 +113,11 @@ openbank:
     max-concurrent-requests: 100
   api:
     version: "1"
+  # ADR-0139/0140 phase-1 ML decisioning — shadow plane only (no verdict is affected).
+  # Operational kill-switch: set false to stop the shadow read/score path without a redeploy.
+  ml:
+    shadow:
+      enabled: ${ML_SHADOW_ENABLED:true}
   build:
     time: "${BUILD_TIME:unknown}"
   git:

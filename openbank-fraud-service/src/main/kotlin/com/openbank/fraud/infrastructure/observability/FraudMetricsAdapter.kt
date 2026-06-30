@@ -7,6 +7,7 @@ package com.openbank.fraud.infrastructure.observability
 import com.openbank.fraud.application.port.out.FraudMetricsPort
 import com.openbank.fraud.domain.model.FraudVerdict
 import io.micrometer.core.instrument.Counter
+import io.micrometer.core.instrument.DistributionSummary
 import io.micrometer.core.instrument.MeterRegistry
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Instance
@@ -42,6 +43,15 @@ class FraudMetricsAdapter(private val registry: MeterRegistry?) : FraudMetricsPo
                 .tag("rail", rail)
                 .register(r)
                 .increment()
+        }
+    }
+
+    override fun recordShadowScore(score: Double) {
+        registry?.let { r ->
+            DistributionSummary.builder("openbank.fraud.shadow.score")
+                .tag("service", SERVICE)
+                .register(r)
+                .record(score)
         }
     }
 

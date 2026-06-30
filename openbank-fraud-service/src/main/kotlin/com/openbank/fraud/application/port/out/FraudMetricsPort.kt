@@ -19,4 +19,10 @@ interface FraudMetricsPort {
 
     /** Record one scoring decision, tagged by its [verdict] and the payment [rail]. */
     fun recordVerdict(verdict: FraudVerdict, rail: String)
+
+    /**
+     * Record one ADR-0139 phase-1 **shadow** ML score (`[0,1]`). This is the series that proves the
+     * model is calibrated and safe before any enforce phase — it never reflects a honoured decision.
+     */
+    fun recordShadowScore(score: Double)
 }

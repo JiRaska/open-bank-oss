@@ -6,11 +6,13 @@ package com.openbank.fraud.application.usecase
 
 import com.openbank.fraud.application.port.out.FraudMetricsPort
 import com.openbank.fraud.application.port.out.FraudScoreRepository
+import com.openbank.fraud.application.port.out.MlModelPort
 import com.openbank.fraud.application.port.out.VelocityAggregateRepository
 import com.openbank.fraud.domain.model.FraudVerdict
 import com.openbank.fraud.domain.model.ScoreRequest
 import com.openbank.fraud.domain.model.VelocityAggregate
 import com.openbank.fraud.domain.model.VelocityWindow
+import com.openbank.libs.domain.feature.OnlineFeatureStore
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -28,7 +30,21 @@ class FraudScoringServiceTest {
     private val repository = mockk<FraudScoreRepository>()
     private val metrics = mockk<FraudMetricsPort>(relaxed = true)
     private val velocityRepo = mockk<VelocityAggregateRepository>()
-    private val service = FraudScoringService(repository, metrics, velocityRepo)
+    private val featureStore = mockk<OnlineFeatureStore>(relaxed = true)
+    private val mlModel = mockk<MlModelPort>(relaxed = true)
+
+    // shadowEnabled = false: these tests assert the rules behaviour; the shadow plane is covered by
+    // FraudScoringShadowZeroDriftTest. With it off, featureStore/mlModel are never touched.
+    private val service =
+        FraudScoringService(
+            repository,
+            metrics,
+            velocityRepo,
+            featureStore,
+            mlModel,
+            java.time.Clock.systemUTC(),
+            false,
+        )
 
     private fun request(accountId: UUID = UUID.randomUUID()) = ScoreRequest(
         amount = BigDecimal("99.99"),
