@@ -1,8 +1,8 @@
 # Migrate transaction-service payment orchestration to Temporal
 
 Date: 2026-06-28
-Status: Proposed
-Delivery-Status: Planned
+Status: Accepted
+Delivery-Status: Partial
 Author(s): jiri.raska
 
 ## Context
@@ -140,3 +140,14 @@ orchestrates *when* an activity runs; the outbox guarantees the event is publish
 - ADR-0100 / ADR-0115 — Deterministic simulation harness (the `openbank-simulation` models to update).
 - ADR-0122 — Split openbank-libs (removal of `libs/domain/saga` is gated on this migration).
 - `payments-temporal-canary-abort` (PR #1600) — the `temporal-platform-ingress` NetworkPolicy boot trap.
+
+## Delivery log
+
+| Phase | Description | Status | PR / commit |
+|-------|-------------|--------|-------------|
+| 1 | Introduce `PaymentWorkflow` + activities, `openbank.transaction.orchestration.temporal=false` | ✓ Done | on `main` |
+| 2 | `transaction` namespace added to `temporal-platform-ingress` NetworkPolicy | ✓ Done | on `main` |
+| 3 | `openbank-simulation` `PaymentSagaModel` updated to track workflow | ✓ Done | on `main` |
+| 4 | Enable flag in sandbox gitops (`openbank.transaction.orchestration.temporal=true`) | ✓ Done | #2793 |
+| 5 | Retire `PaymentSagaOrchestrator`; Flyway tombstone for `payment_sagas` write path | ○ Pending | — |
+| 6 | Remove `libs/domain/saga` (ADR-0122 prereq satisfied) | ○ Pending | — |
