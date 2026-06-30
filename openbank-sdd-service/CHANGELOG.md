@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/JiRaska/open-bank/compare/sdd-service-v0.6.1...sdd-service-v0.6.2) (2026-06-30)
+
+
+### Security
+
+* **card-issuance,sdd:** Kafka mTLS code-side prep — SSL defaults + RBAC pre-registration (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2c) ([#2765](https://github.com/JiRaska/open-bank/issues/2765)) ([4ae04fd](https://github.com/JiRaska/open-bank/commit/4ae04fd8bbaf771ca696732b5bea6fd72048c5c6))
+
 ## [0.6.1](https://github.com/JiRaska/open-bank/compare/sdd-service-v0.6.0...sdd-service-v0.6.1) (2026-06-29)
 
 
