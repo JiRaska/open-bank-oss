@@ -1,0 +1,86 @@
+# Kafka mTLS identity + ACLs for lending-service (ADR-0137 Tier 2a, #2665)
+#
+# lending-service is a pure Kafka producer: it publishes domain events to
+# `openbank.lending.events` via the outbox relay. The KafkaUser below grants
+# exactly Write + Describe on that topic; no consumer-group or DLQ ACL needed.
+#
+# allow.everyone.if.no.acl.found=true means only ACL-protected topics need
+# explicit grants — openbank.lending.events is not yet ACL-restricted, but
+# the KafkaUser is required regardless so the service authenticates with a
+# client cert on the mTLS listener (9093) at all.
+#
+# The Strimzi User Operator mints a Secret named `lending-service` in
+# `messaging` (user.crt / user.key / user.p12 / user.password + ca.crt).
+# That secret is projected into the `lending` namespace by the ExternalSecrets
+# below, using the shared kafka-messaging-certs ClusterSecretStore and the
+# eso-kafka-cert-reader SA (defined in
+# openbank-infra/gitops/components/payments/kafka-scheme-accepted-acl.yaml —
+# lending-service is added to its resourceNames list in the same PR).
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs must land before the Rollout rolls pods onto mTLS;
+    # lower wave syncs first, ArgoCD blocks on ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: lending-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.lending.events
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+---
+# Keystore ExternalSecret: projects the `lending-service` Strimzi secret
+# (PKCS#12 keystore + password) from `messaging` into `lending`.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: lending-service-kafka-keystore
+  namespace: lending
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: lending-service-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: lending-service
+---
+# Truststore ExternalSecret: projects the cluster-CA cert bundle
+# from `messaging` into `lending` (same source as payments namespace).
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: lending
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert
