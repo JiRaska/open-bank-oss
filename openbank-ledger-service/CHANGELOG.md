@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1](https://github.com/JiRaska/open-bank/compare/ledger-service-v1.9.0...ledger-service-v1.9.1) (2026-06-30)
+
+
+### Security
+
+* **ledger:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 1) ([#2722](https://github.com/JiRaska/open-bank/issues/2722)) ([784b418](https://github.com/JiRaska/open-bank/commit/784b4181a9120a0d4ecafd90c4b9fab3afe8d786))
+
 ## [1.9.0](https://github.com/JiRaska/open-bank/compare/ledger-service-v1.8.1...ledger-service-v1.9.0) (2026-06-29)
 
 
