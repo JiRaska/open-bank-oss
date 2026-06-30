@@ -20,14 +20,19 @@ import com.openbank.libs.domain.payment.InstructionType
 import com.openbank.libs.domain.payment.PaymentRail
 import com.openbank.transaction.domain.event.TransactionInitiatedEvent
 import com.openbank.transaction.domain.model.TransactionType
+import io.quarkus.test.InjectMock
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.temporal.client.WorkflowClient
+import io.temporal.client.WorkflowOptions
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
+import org.mockito.ArgumentMatchers
+import org.mockito.Mockito
 import java.math.BigDecimal
 import java.util.UUID
 
@@ -60,6 +65,12 @@ class TransactionPactProviderVerificationTest {
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
 
+    // ADR-0120 Phase 5: TransactionService blocks on workflowClient.newWorkflowStub(...).execute(id).
+    // The Pact provider environment has no Temporal server, so inject a mock and stub it to return
+    // COMPLETED so the HTTP interaction can be verified without a gRPC connection.
+    @InjectMock
+    lateinit var workflowClient: WorkflowClient
+
     private val objectMapper = jacksonObjectMapper()
         .registerModule(JavaTimeModule())
         .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
@@ -86,8 +97,14 @@ class TransactionPactProviderVerificationTest {
 
     @State("the transaction service is available")
     fun stateServiceAvailable() {
-        // No DB seeding needed: CREDIT initiation with a new idempotency key always succeeds
-        // — the saga validates nothing synchronously before accepting the command.
+        val stub: com.openbank.transaction.application.workflow.PaymentWorkflow =
+            Mockito.mock(com.openbank.transaction.application.workflow.PaymentWorkflow::class.java)
+        Mockito.doReturn(com.openbank.transaction.domain.saga.SagaState.COMPLETED)
+            .`when`(stub).execute(ArgumentMatchers.any(UUID::class.java))
+        Mockito.doReturn(stub).`when`(workflowClient).newWorkflowStub(
+            ArgumentMatchers.any(Class::class.java),
+            ArgumentMatchers.any(WorkflowOptions::class.java),
+        )
     }
 
     @State("transaction-service has initiated a payment transaction")
