@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank/compare/standing-order-service-v0.11.0...standing-order-service-v0.11.1) (2026-06-30)
+
+
+### Security
+
+* **standing-order,tpp-registry:** Kafka mTLS code-side prep — SSL defaults + RBAC pre-registration (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2c) ([#2764](https://github.com/JiRaska/open-bank/issues/2764)) ([96189bd](https://github.com/JiRaska/open-bank/commit/96189bd19e44370bbfe6584d0a7bd6bec38dac10))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank/compare/standing-order-service-v0.10.0...standing-order-service-v0.11.0) (2026-06-29)
 
 
