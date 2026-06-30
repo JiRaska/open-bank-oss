@@ -55,5 +55,17 @@ object Roles {
     const val SERVICE = "ROLE_SERVICE"
 
     /** All canonical roles, in declaration order. Use for policy/audit enumeration. */
-    val ALL: List<String> = listOf(ADMIN, OPERATOR, VIEWER, COMPLIANCE, AUDITOR, SUPERVISOR, KYC, KYC_OPENER, KYC_REVIEWER, PAYMENTS, SERVICE)
+    val ALL: List<String> = listOf(
+        ADMIN,
+        OPERATOR,
+        VIEWER,
+        COMPLIANCE,
+        AUDITOR,
+        SUPERVISOR,
+        KYC,
+        KYC_OPENER,
+        KYC_REVIEWER,
+        PAYMENTS,
+        SERVICE,
+    )
 }
