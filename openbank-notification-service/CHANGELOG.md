@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/JiRaska/open-bank/compare/notification-service-v0.12.0...notification-service-v0.12.1) (2026-06-30)
+
+
+### Security
+
+* **notification:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2c) ([#2752](https://github.com/JiRaska/open-bank/issues/2752)) ([c39a798](https://github.com/JiRaska/open-bank/commit/c39a7987bbc6852a622ec5afbd22b1002cb604b2))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank/compare/notification-service-v0.11.0...notification-service-v0.12.0) (2026-06-29)
 
 
