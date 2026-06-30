@@ -48,7 +48,7 @@ class KycResource {
 
     @GET
     @Path("/cases")
-    @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN, Roles.KYC, Roles.COMPLIANCE, Roles.SERVICE)
+    @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN, Roles.KYC, Roles.KYC_OPENER, Roles.KYC_REVIEWER, Roles.COMPLIANCE, Roles.SERVICE)
     @Operation(
         summary = "List KYC cases. Optional ?status= filter for the onboarding cockpit funnel (ADR-0068).",
     )
@@ -73,7 +73,7 @@ class KycResource {
 
     @POST
     @Path("/cases")
-    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC_OPENER)
     @Operation(summary = "Open a new KYC case for a party")
     suspend fun openCase(req: OpenCaseRequest): Response {
         val case = kycService.openCase(req.partyId)
@@ -82,13 +82,13 @@ class KycResource {
 
     @GET
     @Path("/cases/{id}")
-    @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN, Roles.KYC, Roles.COMPLIANCE, Roles.SERVICE)
+    @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN, Roles.KYC, Roles.KYC_OPENER, Roles.KYC_REVIEWER, Roles.COMPLIANCE, Roles.SERVICE)
     @Operation(summary = "Get KYC case by ID")
     suspend fun getCase(@PathParam("id") id: UUID): Response = Response.ok(kycService.getCase(id)).build()
 
     @GET
     @Path("/cases/party/{partyId}")
-    @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN, Roles.KYC, Roles.COMPLIANCE, Roles.SERVICE)
+    @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN, Roles.KYC, Roles.KYC_OPENER, Roles.KYC_REVIEWER, Roles.COMPLIANCE, Roles.SERVICE)
     @Operation(summary = "Get latest KYC case for a party")
     suspend fun getCaseByParty(@PathParam("partyId") partyId: UUID): Response {
         val case = kycService.getCaseByParty(partyId)
@@ -98,7 +98,7 @@ class KycResource {
 
     @PUT
     @Path("/cases/{id}/checks/{checkType}")
-    @RolesAllowed(Roles.ADMIN, Roles.KYC)
+    @RolesAllowed(Roles.ADMIN, Roles.KYC_OPENER)
     @Authorize(action = "kycCase.updateCheck", resource = "#id")
     @Operation(summary = "Update result of a specific KYC check")
     suspend fun updateCheck(
@@ -125,7 +125,7 @@ class KycResource {
      */
     @POST
     @Path("/cases/{caseId}/approve")
-    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC_REVIEWER)
     @Authorize(action = "kyc.case.approve", resource = "#caseId")
     @Operation(
         summary = "Approve KYC case — triggers party activation (four-eyes enforced, ADR-0068).",
@@ -152,7 +152,7 @@ class KycResource {
      */
     @POST
     @Path("/cases/{caseId}/reject")
-    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC_REVIEWER)
     @Authorize(action = "kyc.case.reject", resource = "#caseId")
     @Operation(
         summary = "Reject KYC case (four-eyes enforced, ADR-0068).",

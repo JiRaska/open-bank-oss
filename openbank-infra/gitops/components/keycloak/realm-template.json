@@ -41,6 +41,34 @@
       {
         "name": "ROLE_API",
         "description": "Machine-to-machine API access"
+      },
+      {
+        "name": "ROLE_KYC",
+        "description": "KYC officer (legacy — use KYC_OPENER or KYC_REVIEWER for new assignments)"
+      },
+      {
+        "name": "ROLE_KYC_OPENER",
+        "description": "KYC case opener: initiates cases, submits documents, updates checks. Cannot approve/reject (four-eyes, ADR-0116)"
+      },
+      {
+        "name": "ROLE_KYC_REVIEWER",
+        "description": "KYC case reviewer: approves or rejects cases in UNDER_REVIEW. Must be different identity than opener (four-eyes, ADR-0116)"
+      },
+      {
+        "name": "ROLE_COMPLIANCE",
+        "description": "AML/KYC analyst: reads all PII unmasked, raises alerts, freezes accounts"
+      },
+      {
+        "name": "ROLE_AUDITOR",
+        "description": "Read-only access to audit trail (SOX/DORA evidence)"
+      },
+      {
+        "name": "ROLE_SUPERVISOR",
+        "description": "Approves limit overrides, large payments, board-level escalations"
+      },
+      {
+        "name": "ROLE_PAYMENTS",
+        "description": "Payment ops: initiation, recall, return, clearing reconciliation"
       }
     ]
   },
