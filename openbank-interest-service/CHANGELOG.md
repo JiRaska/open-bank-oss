@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.3](https://github.com/JiRaska/open-bank/compare/interest-service-v0.6.2...interest-service-v0.6.3) (2026-06-30)
+
+
+### Security
+
+* **interest:** Kafka mTLS migration — tls:9093 + KafkaUser + cert projection (ADR-0137 [#2665](https://github.com/JiRaska/open-bank/issues/2665) Tier 2c) ([#2759](https://github.com/JiRaska/open-bank/issues/2759)) ([9abc058](https://github.com/JiRaska/open-bank/commit/9abc058f9a7f2309df5d633057c87feb9f798ef9))
+
 ## [0.6.2](https://github.com/JiRaska/open-bank/compare/interest-service-v0.6.1...interest-service-v0.6.2) (2026-06-29)
 
 
