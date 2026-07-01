@@ -18,7 +18,8 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
 
-    implementation(project(":openbank-libs"))
+    implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-runtime"))
     implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)

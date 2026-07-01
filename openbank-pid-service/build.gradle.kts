@@ -35,7 +35,8 @@ dependencies {
     // coordinate (not the shared catalog) so adding it does not trigger a fleet-wide rebuild.
     implementation("com.upokecenter:cbor:4.5.2")
 
-    implementation(project(":openbank-libs"))
+    implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-runtime"))
 
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.assertj)

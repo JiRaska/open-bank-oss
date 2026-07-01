@@ -30,7 +30,8 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(libs.quarkus.smallrye.fault.tolerance)
-    implementation(project(":openbank-libs"))
+    implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-runtime"))
 
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.rest.assured.kotlin)
