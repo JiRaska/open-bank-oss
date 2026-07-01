@@ -100,23 +100,6 @@ function CurrencyCell({ code, meta }: { code: string; meta?: CurrencyMetaType })
   )
 }
 
-function BuySellCell({ buy, sell, symbol }: { buy: number; sell: number; symbol?: string }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-        <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--success-text)', background: 'var(--success-bg)', border: '1px solid var(--success-border)', borderRadius: '3px', padding: '0 4px', letterSpacing: '0.05em' }}>BUY</span>
-        {symbol && <span style={{ fontSize: '9px', color: 'var(--text-tertiary)' }}>{symbol}</span>}
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 700, color: 'var(--success-text)' }}>{buy.toFixed(4)}</span>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-        <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: '3px', padding: '0 4px', letterSpacing: '0.05em' }}>SELL</span>
-        {symbol && <span style={{ fontSize: '9px', color: 'var(--text-tertiary)' }}>{symbol}</span>}
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 700, color: 'var(--danger-text)' }}>{sell.toFixed(4)}</span>
-      </div>
-    </div>
-  )
-}
-
 function MidCell({ mid, symbol }: { mid: number; symbol?: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>

@@ -7,7 +7,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { Activity, AlertTriangle, RefreshCw, Zap, Server, Clock, Database, XCircle, GitBranch, Globe } from 'lucide-react'
-import { useAuth } from '@/lib/auth/useAuth'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 import { AuthGuard } from '@/components/auth/AuthGuard'
@@ -28,7 +27,6 @@ interface MetricsData {
 }
 
 export default function ObservabilityPage() {
-  const { user } = useAuth()
   const { t } = useLanguage()
   const [metrics, setMetrics] = useState<MetricsData | null>(null)
   const [loading, setLoading] = useState(true)

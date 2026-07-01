@@ -5,7 +5,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { CreditCard, Plus, Search, Filter, RefreshCw, CheckCircle2, XCircle, Clock, Shield, Zap } from 'lucide-react'
+import { CreditCard, Plus, Search, RefreshCw, CheckCircle2, XCircle, Clock } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 
 interface Card {

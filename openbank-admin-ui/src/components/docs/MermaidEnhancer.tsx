@@ -5,6 +5,7 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
+import DOMPurify from 'dompurify'
 
 // Tiny client-side enhancer. Wraps server-rendered markdown content and,
 // after mount, scans for the `<pre data-mermaid>` placeholders the
@@ -60,7 +61,11 @@ export function MermaidEnhancer({ children, contentKey }: { children: React.Reac
             const { svg } = await m.render(id, src)
             const wrap = document.createElement('div')
             wrap.className = 'mermaid-svg'
-            wrap.innerHTML = svg
+            // Mermaid's flowchart htmlLabels:true lets diagram source embed raw
+            // HTML in node labels, which ends up in the rendered `svg` string —
+            // sanitize before innerHTML so a crafted diagram source can't smuggle
+            // a <script>/event-handler payload into the page.
+            wrap.innerHTML = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } })
             block.replaceWith(wrap)
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err)
