@@ -18,6 +18,18 @@
 > - ADR-0087 (Correlation & Profiling Layer) and ADR-0088 (Extension: on-call, SLO-as-code, durable
 >   retention, mobile RUM) extend this ADR for the operational edges not covered here.
 
+> **Amendment 2026-07-01 — Phase 3 structured logging shipped.**
+>
+> - **Phase 3 (structured JSON logs):** ✅ Shipped — `META-INF/microprofile-config.properties`
+>   added to `openbank-libs-runtime` (PR #31) with shared JSON log format; fields: `traceId`,
+>   `spanId` (OTel), `correlationId`, `requestId` (CorrelationIdRequestFilter). SmallRye Config
+>   picks this up from the library JAR at lower priority than service-level `application.yaml`,
+>   so the ~29 services without any log format automatically get structured JSON logging; the 4
+>   services with a custom format (`account`, `psd2`, `sca`, `agent`) keep their own value.
+>   Dev-profile override (plain text) also centralised in the same file.
+> - **Remaining:** Phase 4 alerting (Alertmanager already wired per ADR-0088 D1); money-path
+>   domain metrics (issue #787, 2-approval gate).
+
 ---
 
 ## Context
