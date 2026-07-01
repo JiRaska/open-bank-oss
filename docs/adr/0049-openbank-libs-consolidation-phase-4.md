@@ -8,8 +8,8 @@ Author(s): jiri.raska
 **Delivery note (updated 2026-06-30):**
 - **D3 (outbox abstraction)** — ✅ Shipped: all 29 services migrated to `AbstractOutboxDispatcher`; 20 PRs merged.
 - **D4 (exception-mapper cleanup)** — ✅ Shipped: duplicate generic mappers removed; 2 intentional overrides documented.
-- **D1 (convention plugin rollout)** — ⬜ Pending: `build-logic/` convention plugin exists; rollout to 33 services not yet done.
-- **D2 (`version.txt` adoption)** — Partial: ~15% of services; unblocked by D1 rollout.
+- **D1 (convention plugin rollout)** — ✅ Shipped: all 37 modules with a `build.gradle.kts` apply `openbank.quarkus-service` or `openbank.static-analysis`; rollout complete.
+- **D2 (`version.txt` adoption)** — ✅ Shipped: all 43 releasable components enrolled in release-please with `version.txt` + manifest entry (see ADR-0029 D2); 4 modules excluded by design.
 - **D5 (observability/metrics in libs)** — ⬜ Not started.
 
 > **Amendment 2026-06-19 — D3 outbox abstraction sweep complete; D4 exception-mapper sweep complete.**
