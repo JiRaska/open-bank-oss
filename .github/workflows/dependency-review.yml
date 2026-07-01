@@ -1,0 +1,26 @@
+# Dependency Review — blocks PRs that introduce vulnerable dependencies.
+# Compares the dependency graph before/after and fails if new CVEs are added.
+# Free for public repos; no GitHub Advanced Security required.
+name: Dependency Review
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  dependency-review:
+    runs-on: openbank-batch
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@da24556e9d3d57aa2e6e8c7e84be13e3df8df0b6 # v4.7.1
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: always
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
