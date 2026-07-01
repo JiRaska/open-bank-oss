@@ -156,10 +156,16 @@ spec:
               kubernetes.io/metadata.name: sca
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: sdd
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: security-scanner
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: statements
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tpp-registry
       ports:
         - protocol: TCP
           port: 9092

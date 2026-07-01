@@ -43,6 +43,9 @@ spec:
               kubernetes.io/metadata.name: aml
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: anacredit
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: audit
         - namespaceSelector:
             matchLabels:
@@ -115,7 +118,13 @@ spec:
               kubernetes.io/metadata.name: sca
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: sdd
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: statements
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tpp-registry
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: admin-ui
