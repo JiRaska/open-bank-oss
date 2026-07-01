@@ -81,7 +81,7 @@ cd openbank-infra
 cp .env.example .env
 $EDITOR .env
 
-# 2. Start infrastructure (Postgres, Kafka, Apicurio, Keycloak, Vault, Valkey, OPA, observability)
+# 2. Start infrastructure (Postgres, Kafka, Apicurio, Keycloak, OpenBao, Valkey, OPA, observability)
 make up-infra
 
 # 3. Build and start all application services + Admin UI
@@ -105,7 +105,7 @@ Key endpoints:
 | OPA (policy decision point) | http://localhost:8181 |
 | Grafana | http://localhost:3001 |
 | Prometheus | http://localhost:9090 |
-| Vault | http://localhost:8200 |
+| OpenBao | http://localhost:8200 |
 
 Credentials for local dev are read from your `.env` file — see [`openbank-infra/.env.example`](openbank-infra/.env.example).
 
@@ -246,7 +246,7 @@ OpenBank stands on the shoulders of giants:
 - [Apache Fineract](https://github.com/apache/fineract) — pioneering open-source core banking
 - [Apache Mifos](https://mifos.org/) — community-driven banking platform
 - [Open Bank Project](https://www.openbankproject.com/) — open banking API standard
-- All maintainers of Kotlin, Quarkus, Next.js, Kafka, PostgreSQL, Keycloak, Vault, and OPA
+- All maintainers of Kotlin, Quarkus, Next.js, Kafka, PostgreSQL, Keycloak, OpenBao, and OPA
 
 ---
 

@@ -155,12 +155,25 @@ jobs:
       # it can only run once the repo is public — same gate as the CodeQL job. The
       # fs/config scans above already gate the job; this step is purely for the
       # code-scanning UI, so skipping it while private loses no enforcement.
-      - name: Upload Trivy SARIF
+      #
+      # Two separate uploads, one per file: `sarif_file: .` picked up BOTH
+      # trivy-fs.sarif and trivy-config.sarif under the single category "trivy",
+      # which GitHub's SARIF ingestion now rejects outright ("does not support
+      # uploading multiple SARIF runs with the same category" — every run since
+      # this repo went public failed here). Distinct categories per file fixes it.
+      - name: Upload Trivy fs SARIF
         if: always() && github.event.repository.private == false
         uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
         with:
-          sarif_file: .
-          category: trivy
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+      - name: Upload Trivy config SARIF
+        if: always() && github.event.repository.private == false
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        with:
+          sarif_file: trivy-config.sarif
+          category: trivy-config
 
   # ---------------------------------------------------------------------------
   # SBOM (CycloneDX) — repo-wide via Syft (filesystem scan)
