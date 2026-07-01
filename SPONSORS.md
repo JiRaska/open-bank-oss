@@ -20,7 +20,7 @@ If it saved you hours of architecture work — cheers, and thank you!
 
 <img src="docs/assets/czech-payment-qr.png" width="190" alt="Czech QR payment — scan with George, Smart Banka, Raiffeisen…" />
 
-Scan with **George, Smart Banka, Raiffeisen**<br>or any Czech banking app
+Scan with your \*\*Partners, George, Smart Banka, Raiffeisen\*\*<br>or any Czech banking app
 
 <br>
 
