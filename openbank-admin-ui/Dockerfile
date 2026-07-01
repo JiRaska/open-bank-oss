@@ -158,7 +158,7 @@ RUN set -e; \
 # node_modules contains only JS/JSON — no arch-specific binaries — so it
 # is safe to copy into the arm64 runtime stage unchanged.
 # ──────────────────────────────────────────────────────────────────────
-FROM --platform=$BUILDPLATFORM node:20-alpine AS deps
+FROM --platform=$BUILDPLATFORM node:26-alpine AS deps
 WORKDIR /app
 COPY openbank-admin-ui/package.json openbank-admin-ui/package-lock.json* ./
 # Resilient install: the registry/network can flake (ECONNRESET mid-download) and a bare
@@ -183,7 +183,7 @@ RUN npm config set fetch-retries 5 \
 # copy into the arm64 runtime stage. Running on the native arch avoids
 # QEMU overhead (~10× slower) and SIGILL crashes on x86 hosts.
 # ──────────────────────────────────────────────────────────────────────
-FROM --platform=$BUILDPLATFORM node:20-alpine AS build
+FROM --platform=$BUILDPLATFORM node:26-alpine AS build
 WORKDIR /app
 
 # BuildInfo — passed in via docker-compose build args, stamped into the bundle.
@@ -206,7 +206,7 @@ RUN npm run build
 # ──────────────────────────────────────────────────────────────────────
 # Stage 4: Runtime image — minimal surface, non-root.
 # ──────────────────────────────────────────────────────────────────────
-FROM node:20-alpine AS runtime
+FROM node:26-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
