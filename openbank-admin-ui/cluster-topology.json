@@ -1,11 +1,11 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-07-01T04:03:50.454Z",
+  "generatedAt": "2026-07-01T19:13:33.842Z",
   "counts": {
-    "namespaces": 52,
-    "networkPolicies": 70,
-    "externalSecrets": 102,
+    "namespaces": 55,
+    "networkPolicies": 74,
+    "externalSecrets": 109,
     "clusterPolicies": 3
   },
   "groups": [
@@ -59,6 +59,12 @@
       "name": "aml",
       "group": "domain",
       "role": "AML — praní špinavých peněz",
+      "declared": true
+    },
+    {
+      "name": "anacredit",
+      "group": "domain",
+      "role": "anacredit",
       "declared": true
     },
     {
@@ -326,6 +332,12 @@
       "declared": true
     },
     {
+      "name": "sdd",
+      "group": "domain",
+      "role": "sdd",
+      "declared": true
+    },
+    {
       "name": "security-scanner",
       "group": "platform",
       "role": "Bezpečnostní skener",
@@ -341,6 +353,12 @@
       "name": "temporal",
       "group": "domain",
       "role": "temporal",
+      "declared": true
+    },
+    {
+      "name": "tpp-registry",
+      "group": "domain",
+      "role": "tpp-registry",
       "declared": true
     },
     {
@@ -380,9 +398,9 @@
       "icon": "network",
       "status": "planned",
       "analogy": "Zamčené dveře mezi patry — bez propustky se mezi odděleními neprojde.",
-      "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 70 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
+      "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 74 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
       "controls": [
-        "NetworkPolicy (70 / 52)",
+        "NetworkPolicy (74 / 55)",
         "per-namespace deny-by-default (cíl)"
       ],
       "adr": [
@@ -450,10 +468,10 @@
       "icon": "key",
       "status": "live",
       "analogy": "Trezor s časovým zámkem — hesla nikdy neleží v kódu.",
-      "summary": "OpenBao drží tajemství; 102 ExternalSecret je sype do k8s. Žádný secret v gitu.",
+      "summary": "OpenBao drží tajemství; 109 ExternalSecret je sype do k8s. Žádný secret v gitu.",
       "controls": [
         "OpenBao",
-        "External Secrets (102)",
+        "External Secrets (109)",
         "KMS unseal"
       ],
       "adr": [
@@ -540,13 +558,13 @@
     {
       "item": "Namespace segmentace",
       "plan": "Doménová izolace, 1 ns / doména",
-      "reality": "52 namespaců",
+      "reality": "55 namespaců",
       "status": "live"
     },
     {
       "item": "NetworkPolicy (east-west)",
       "plan": "deny-by-default v každém ns",
-      "reality": "70 / 52 ns má NetworkPolicy → většina provozu otevřená",
+      "reality": "74 / 55 ns má NetworkPolicy → většina provozu otevřená",
       "status": "planned"
     },
     {
@@ -558,7 +576,7 @@
     {
       "item": "Tajemství",
       "plan": "OpenBao + ESO, nic v gitu",
-      "reality": "102 ExternalSecret",
+      "reality": "109 ExternalSecret",
       "status": "live"
     },
     {
