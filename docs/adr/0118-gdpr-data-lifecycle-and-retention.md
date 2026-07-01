@@ -5,6 +5,11 @@ Author: Claude (paired with Jiří Raška)
 Status: Accepted
 Delivery-Status: Partial
 
+**Delivery note (updated 2026-07-01):**
+- **Art. 17 erasure cascade** — ✅ Shipped: `party-service` anonymises in-place + deletes binary documents; `kyc-service` deletes documents and anonymises check results (`PartyEventConsumer.handleErased`); `notification-service` deletes preferences and history (`PartyErasureConsumer`); `card-issuance-service` anonymises `cardholderName`, `embossedName`, `deliveryAddress` (`PartyEventConsumer`). `audit-service`, `ledger-service`, `transaction-service` correctly retain data (AML/accounting override, Art. 17(3)(b)).
+- **Art. 15 data export** — ✅ Partial: `GET /api/v1/parties/{id}/gdpr-export` in `party-service` covers direct PII. kyc-service (sensitive PII) and card-issuance-service (card PII) contributions are ⬜ pending.
+- **Automated retention enforcement** — ⬜ Pending: TTL-based cleanup for session logs (90 d), KYC documents (5 y), and card PII after card expiry is policy intent only — no scheduler or batch job exists yet.
+
 ## Context
 
 GDPR Art. 17 (Right to Erasure) is partially implemented in `party-service`: `DELETE /api/v1/parties/{id}`
