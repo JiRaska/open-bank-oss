@@ -38,7 +38,8 @@ dependencies {
     // The harness is built on the REAL shared domain primitives so the simulated
     // semantics track production (Money arithmetic + scale rules, the saga transition
     // engine). openbank-libs exposes kotlin-stdlib/coroutines/jackson transitively (api).
-    implementation(project(":openbank-libs"))
+    implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-runtime"))
 
     // The harness drives the REAL ledger domain aggregate (JournalEntry.validateBalance /
     // bookedDeltas / reverse) rather than a re-model, so the simulated postings exercise

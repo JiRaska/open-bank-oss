@@ -40,7 +40,8 @@ dependencies {
     implementation(libs.quarkus.agroal)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.flyway)
-    implementation(project(":openbank-libs"))
+    implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-runtime"))
 
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)

@@ -37,7 +37,8 @@ dependencies {
 
     // Shared runtime plumbing: model gateway seam (ADR-0031), OPA authz (ADR-0034),
     // feature flags (ADR-0067), AI-attributed audit (ADR-0031 D5).
-    implementation(project(":openbank-libs"))
+    implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-runtime"))
 
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.assertj)
