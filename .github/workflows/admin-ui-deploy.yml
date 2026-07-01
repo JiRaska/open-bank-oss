@@ -137,6 +137,19 @@ jobs:
           # docker logout clears ~/.docker/config.json but leaves the osxkeychain entry;
           # the subsequent docker login then fails with "already exists in the keychain".
           security delete-internet-password -s "$ECR_REGISTRY" 2>/dev/null || true
+          # Remove credsStore=osxkeychain from Docker config so amazon-ecr-login stores
+          # credentials in the config file rather than the macOS Keychain. The Keychain
+          # requires interactive unlocking (-25308: errSecInteractionNotAllowed) which
+          # fails in non-interactive CI sessions. File-based credentials are safe here:
+          # the runner is ephemeral per-job and ECR tokens expire in 12 h anyway.
+          python3 -c "
+import json, os, pathlib
+cfg = pathlib.Path.home() / '.docker' / 'config.json'
+data = json.loads(cfg.read_text()) if cfg.exists() else {}
+data.pop('credsStore', None)
+cfg.parent.mkdir(parents=True, exist_ok=True)
+cfg.write_text(json.dumps(data))
+"
 
       - name: ECR login
         uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
