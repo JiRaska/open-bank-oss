@@ -29,7 +29,9 @@ jobs:
   # dependency-affecting file changed; schedule/manual always run (audit posture).
   detect-deps:
     name: Detect dependency changes
-    runs-on: openbank-batch
+    # Pure checkout + git diff, no self-hosted-specific tooling. The repo is public, so
+    # GitHub-hosted minutes are free/unlimited — offload this off the Hetzner/ARC pool.
+    runs-on: ubuntu-latest
     outputs:
       run_sbom: ${{ steps.f.outputs.run_sbom }}
     steps:
@@ -75,7 +77,10 @@ jobs:
     # cover vulnerable-dependency detection. (Aside: the CodeQL CLI also does not
     # support linux/arm64, so it could not run on the arm64 sandbox runner anyway.)
     if: github.event.repository.private == false
-    runs-on: openbank-batch
+    # Standard github/codeql-action usage targets ubuntu-latest; no self-hosted-specific
+    # dependency here (setup-java/setup-node are already used to work around the Hetzner
+    # pool lacking those toolchains). Public repo = free GitHub-hosted minutes.
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -180,7 +185,8 @@ jobs:
   # ---------------------------------------------------------------------------
   sbom:
     name: SBOM (repo-wide)
-    runs-on: openbank-batch
+    # anchore/sbom-action is a container action with no self-hosted-pool dependency.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     # Runs on schedule/manual, and on main pushes only when dependencies changed
     # (see detect-deps). Never on PRs. The authoritative, signed, release-attached
