@@ -6,22 +6,24 @@
 # so the go-public readiness program has a tracked, improving number instead of a
 # guess. ADR-0124 §5 flagged its absence.
 #
-# PRIVATE-REPO ADAPTATION (this repo is not public yet):
-#   - `publish_results: false` — publishing to the public OpenSSF API requires a
-#     public repo. Flip to `true` at the go-public cutover.
-#   - The score is rendered to the run's job SUMMARY (JSON → markdown table), not
-#     uploaded to GitHub code-scanning — the code-scanning upload needs GitHub
-#     Advanced Security on a private repo (CodeQL/code-scanning is OFF today,
-#     ADR-0124 §2) and the Actions artifact quota is routinely full. At go-public,
-#     switch to SARIF + the commented `upload-sarif` step + `security-events: write`.
-#   - NOT triggered on `pull_request`: this is a posture gauge, not a PR gate, so
-#     it never blocks a contributor's PR (and never lands on the hot CI path).
+# PUBLIC REPO: results publish to the public OpenSSF API (badge + weekly re-scan)
+# and the score uploads as SARIF to GitHub code-scanning — both need a public repo
+# (or paid GHAS on private), so the whole job is gated on
+# `github.event.repository.private == false`, same idiom as the `codeql` job and
+# the Trivy SARIF uploads in security.yml: it skips automatically if this repo
+# ever goes private again, no manual secret/flag to flip.
 #
-# TOKEN NOTE: on a PRIVATE repo the default GITHUB_TOKEN cannot run Scorecard's
-# GraphQL commit/review queries ("Resource not accessible by integration"), so the
-# action needs a classic PAT (`repo` read) passed as `repo_token`. This workflow is
-# token-gated: until the SCORECARD_TOKEN secret exists, the analysis is SKIPPED (the
-# job stays green with a notice) — it auto-activates once the secret is added.
+# TOKEN NOTE: Scorecard's own docs recommend the default GITHUB_TOKEN for public
+# repos ("Scorecard can run successfully with the workflow's default GITHUB_TOKEN,
+# which is our recommended approach") — a PAT is only needed for private repos
+# (extra GraphQL scopes) or to read classic branch-protection settings, which this
+# repo doesn't use (main is protected by a modern ruleset, ADR-0124). So no
+# `repo_token` input is set here; the action falls back to `${{ github.token }}`.
+# The formerly-required `SCORECARD_TOKEN` PAT secret is no longer read by this
+# workflow — safe to revoke once nothing else depends on it.
+#
+# NOT triggered on `pull_request`: this is a posture gauge, not a PR gate, so it
+# never blocks a contributor's PR (and never lands on the hot CI path).
 #
 # Runs on ubuntu-latest: the repo went public, so GitHub-hosted Actions minutes are
 # free/unlimited — the Actions-minutes-budget constraint that used to pin this to the
@@ -50,63 +52,33 @@ concurrency:
 jobs:
   analysis:
     name: scorecard
+    # Mirrors the `codeql` job in security.yml: publish_results + the SARIF
+    # code-scanning upload both need a public repo (or paid GHAS), so skip cleanly
+    # while private instead of failing red.
+    if: github.event.repository.private == false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
-      # security-events: write  # enable at go-public — upload SARIF to code-scanning (needs GHAS / public repo)
-      # id-token: write         # enable at go-public — OIDC for publish_results
-    env:
-      # Scorecard needs a PAT to query a PRIVATE repo: the default GITHUB_TOKEN can't run
-      # the GraphQL commit/review queries ("Resource not accessible by integration"). Until
-      # the secret is provisioned (a classic PAT with `repo` read, stored as SCORECARD_TOKEN)
-      # — or the repo goes public — the analysis step is SKIPPED so this gauge never fails
-      # red. To enable: add the SCORECARD_TOKEN repo secret; the step auto-activates.
-      SCORECARD_TOKEN: ${{ secrets.SCORECARD_TOKEN }}
+      security-events: write # upload SARIF to code-scanning
+      id-token: write        # OIDC for publish_results
     steps:
       - name: Checkout
-        if: ${{ env.SCORECARD_TOKEN != '' }}
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
       - name: Run Scorecard analysis
-        if: ${{ env.SCORECARD_TOKEN != '' }}
         uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
         with:
-          # JSON (not SARIF) so the score renders directly in the run summary below.
-          # At go-public, switch to `sarif` + the code-scanning upload step.
-          results_file: scorecard.json
-          results_format: json
-          repo_token: ${{ secrets.SCORECARD_TOKEN }}
-          # Private repo: publishing requires public. Flip to true at go-public (ADR-0124).
-          publish_results: false
+          results_file: results.sarif
+          results_format: sarif
+          # No repo_token: the action defaults to `${{ github.token }}`, which
+          # Scorecard's own docs recommend for public repos.
+          publish_results: true
 
-      # Render the score to the run's Summary page instead of an artifact: the repo's
-      # Actions artifact storage quota is routinely full (SBOM/evidence bundles), so an
-      # artifact upload is fragile. The job summary is always available and human-readable.
-      - name: Publish score to job summary
-        if: ${{ env.SCORECARD_TOKEN != '' }}
-        run: |
-          {
-            echo "## OpenSSF Scorecard"
-            echo
-            echo "**Aggregate score: $(jq -r '.score // "n/a"' scorecard.json) / 10**"
-            echo
-            echo "| Check | Score | Reason |"
-            echo "|---|---:|---|"
-            jq -r '.checks[] | "| \(.name) | \(.score // "—") | \((.reason // "") | gsub("\\|";"/") | .[0:90]) |"' scorecard.json
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Scorecard disabled (no token)
-        if: ${{ env.SCORECARD_TOKEN == '' }}
-        run: |
-          echo "::notice title=Scorecard skipped::OpenSSF Scorecard needs a PAT on a private repo. \
-          Add a repo secret SCORECARD_TOKEN (classic PAT, 'repo' read scope) to enable; the analysis \
-          auto-activates. At go-public, switch to publish_results + code-scanning upload (ADR-0124)."
-
-      # --- enable at go-public (needs public repo or GitHub Advanced Security) ---
-      # - name: Upload SARIF to code-scanning
-      #   uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
-      #   with:
-      #     sarif_file: results.sarif
+      - name: Upload SARIF to code-scanning
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        with:
+          sarif_file: results.sarif
+          category: scorecard
