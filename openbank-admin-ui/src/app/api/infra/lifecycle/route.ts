@@ -157,7 +157,7 @@ export async function GET() {
   const components = await Promise.all(snap.components.map(async c => {
     // 1. running version
     let running: string | null = null
-    let versionSource: string = c.versionSource
+    let versionSource: string
     if (c.versionSource === 'gitops') {
       running = c.gitopsVersion
       versionSource = 'gitops-image-tag'

@@ -4,8 +4,8 @@
 
 'use client'
 
-import { useEffect, useState } from 'react'
-import { Building2, RefreshCw, TrendingUp, TrendingDown } from 'lucide-react'
+import { useState } from 'react'
+import { Building2, TrendingUp, TrendingDown } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 interface TechnicalAccount {
@@ -67,8 +67,6 @@ export default function TechnicalAccountsPage() {
 
   const groups = ['all', ...Array.from(new Set(accounts.map(a => a.accountType)))]
   const filtered = filter === 'all' ? accounts : accounts.filter(a => a.accountType === filter)
-
-  const totalBalance = accounts.reduce((sum, a) => sum + (a.normalBalance === 'CREDIT' ? a.balance : -a.balance), 0)
 
   return (
     <div>

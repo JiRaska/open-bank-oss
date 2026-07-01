@@ -4,7 +4,7 @@
 
 'use client'
 import { useState, useEffect } from 'react'
-import { Network, Info, RefreshCw, CheckCircle2, XCircle, HelpCircle, Database, GitBranch, ArrowRight, ArrowLeft, Layers, BookOpen } from 'lucide-react'
+import { Network, RefreshCw, CheckCircle2, XCircle, HelpCircle, Database, ArrowRight, ArrowLeft, Layers, BookOpen } from 'lucide-react'
 import type { GovernanceManifestEntry } from '@/lib/governance/manifest'
 import { svcUrl } from '@/lib/services/bff'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
