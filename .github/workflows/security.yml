@@ -82,6 +82,14 @@ jobs:
     # pool lacking those toolchains). Public repo = free GitHub-hosted minutes.
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The java-kotlin leg's autobuild shells out to its own `./gradlew testClasses`
+    # (whole-fleet dependency resolution, ~30 modules + quarkus-bom) without picking up
+    # any GRADLE_OPTS we'd set in a step — it needs the env var at the job level. Without
+    # this, Gradle's auto-detected 3 GiB default heap OOMs on that resolution (first seen
+    # moving this job off the 16 GB Hetzner host to ubuntu-latest). Same fix pattern as
+    # fleet-lint.yml's GRADLE_OPTS.
+    env:
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
     strategy:
       fail-fast: false
       matrix:
