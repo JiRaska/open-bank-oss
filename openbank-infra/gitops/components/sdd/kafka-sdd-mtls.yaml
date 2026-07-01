@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: Apache-2.0
+# Strimzi mTLS identity + ACLs for sdd-service (ADR-0137 Tier 2c).
+#
+# sdd-service publishes openbank.sdd.event (outbox egress, ADR-0050).
+# No incoming channels — no consumer-group ACL needed.
+#
+# Identity model (ADR-0137): one KafkaUser = one client cert = one mTLS principal
+# for ALL Kafka traffic from this service. allow.everyone.if.no.acl.found=true
+# (kafka.yaml) keeps all other topics open; ACLs here only lock down what
+# sdd-service needs Write access on.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: KafkaUser (wave -2) must land before ExternalSecrets (wave -1)
+    # so the source secret exists when ESO tries to extract it.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: sdd-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.sdd.event
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+---
+# ExternalSecret: sdd-service keystore projected from messaging → sdd.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: sdd-service-kafka-keystore
+  namespace: sdd
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: sdd-service-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: sdd-service
+---
+# ExternalSecret: shared cluster-CA truststore projected from messaging → sdd.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: sdd
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert

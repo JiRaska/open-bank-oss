@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+# Single-owner Postgres for tpp-registry-service, reconciled by the CNPG operator.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: tpp-registry-db
+  namespace: tpp-registry
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_tpp_registry
+      owner: openbank
+
+  # WAL archiving + daily base backups to S3 (ADR-0035). Credentials via EKS Pod
+  # Identity on the tpp-registry-db ServiceAccount — barman reads the SDK chain, no secret.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/tpp-registry-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: tpp-registry-db-daily
+  namespace: tpp-registry
+spec:
+  schedule: "0 31 2 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: tpp-registry-db

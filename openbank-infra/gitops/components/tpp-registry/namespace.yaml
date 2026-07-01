@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tpp-registry
+  labels:
+    app.kubernetes.io/part-of: openbank
+    openbank.io/component: tpp-registry
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

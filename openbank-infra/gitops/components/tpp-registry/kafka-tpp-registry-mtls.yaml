@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: Apache-2.0
+# Strimzi mTLS identity + ACLs for tpp-registry-service (ADR-0137 Tier 2c).
+#
+# tpp-registry-service publishes openbank.tpp.registry.event (outbox egress, ADR-0050).
+# No incoming channels — no consumer-group ACL needed.
+#
+# Identity model (ADR-0137): one KafkaUser = one client cert = one mTLS principal
+# for ALL Kafka traffic from this service.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: KafkaUser (wave -2) must land before ExternalSecrets (wave -1)
+    # so the source secret exists when ESO tries to extract it.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: tpp-registry-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.tpp.registry.event
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+---
+# ExternalSecret: tpp-registry-service keystore projected from messaging → tpp-registry.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: tpp-registry-service-kafka-keystore
+  namespace: tpp-registry
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: tpp-registry-service-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: tpp-registry-service
+---
+# ExternalSecret: shared cluster-CA truststore projected from messaging → tpp-registry.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: tpp-registry
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert
