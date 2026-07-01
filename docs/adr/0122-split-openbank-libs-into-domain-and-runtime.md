@@ -5,12 +5,14 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): jiri.raska
 
-**Delivery note (updated 2026-06-30):**
+**Delivery note (updated 2026-07-01):**
 - **Phase 0** — ✅ Shipped (PR #2821 predecessor, dead `libs/temporal/` skeleton removed).
 - **Phase 1** — ✅ Shipped (PR #2821 `refactor(libs)`: `openbank-libs-domain` and
   `openbank-libs-runtime` modules created; packages moved per-file; composite build updated).
-- **Phase 2** — Fleet sweep pending: each service's `build.gradle.kts` still depends on the
-  monolithic `openbank-libs` wrapper rather than the split modules. One PR per service.
+- **Phase 2** — 🔄 In progress (issue #32): non-money-path batch (22 services + simulation, PR #33)
+  open; money-path batch (12 services, PR #34) open, awaiting 2 approvals per ADR-0030. The
+  monolithic `openbank-libs` acts as a backward-compat umbrella (`api()` re-export) until
+  both batches merge.
 - **Phase 3** — Not started (evaluate publish-versioned; separate ADR revision of ADR-0014).
 
 ## Context
