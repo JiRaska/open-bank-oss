@@ -94,9 +94,13 @@ updates:
           - "minor"
           - "patch"
 
-  # Docker
+  # Docker — infra tooling images (nested, not directly under /openbank-infra)
   - package-ecosystem: "docker"
-    directory: "/openbank-infra"
+    directories:
+      - "/openbank-infra/docker/pyroscope-agent"
+      - "/openbank-infra/docker/kong"
+      - "/openbank-infra/docker/keycloak"
+      - "/openbank-infra/aws/envs/sandbox-platform/runner-image"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -108,6 +112,62 @@ updates:
     groups:
       # One PR for base-image minor/patch bumps; majors stay separate.
       docker-minor:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Docker — per-service runtime images (eclipse-temurin, node, alpine base bumps)
+  - package-ecosystem: "docker"
+    directories:
+      - "/openbank-*"
+      - "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore(docker-svc)"
+    groups:
+      # One PR per week for base-image minor/patch bumps across the whole
+      # fleet; majors (e.g. JDK 25 -> 26) stay separate — they need a
+      # coordinated bump per CLAUDE.md's JDK toolchain pin.
+      docker-svc-minor:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Terraform / OpenTofu — provider and module version constraints
+  - package-ecosystem: "terraform"
+    directories:
+      - "/openbank-infra/aws/bootstrap"
+      - "/openbank-infra/aws/envs/sandbox"
+      - "/openbank-infra/aws/envs/sandbox-platform"
+      - "/openbank-infra/aws/envs/sandbox-substrate"
+      - "/openbank-infra/aws/envs/web-prod"
+      - "/openbank-infra/aws/modules/audit-baseline"
+      - "/openbank-infra/aws/modules/dns"
+      - "/openbank-infra/aws/modules/eks"
+      - "/openbank-infra/aws/modules/karpenter-iam"
+      - "/openbank-infra/aws/modules/network"
+      - "/openbank-infra/aws/modules/runner"
+      - "/openbank-infra/aws/modules/static-site"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "terraform"
+    commit-message:
+      prefix: "chore(tofu)"
+    groups:
+      tofu-minor:
         patterns:
           - "*"
         update-types:
