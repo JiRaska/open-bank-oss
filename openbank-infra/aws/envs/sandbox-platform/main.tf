@@ -25,33 +25,34 @@ resource "helm_release" "cert_manager" {
   chart            = "cert-manager"
   version          = var.cert_manager_version
 
-  set {
-    name  = "crds.enabled"
-    value = "true"
-  }
-
-  # Keep controller off Spot churn: it tolerates the bootstrap on-demand pool.
-  set {
-    name  = "extraArgs[0]"
-    value = "--enable-certificate-owner-ref=true"
-  }
-
-  # DNS-01 self-check via public recursive resolvers, not the authoritative-NS
-  # walk. open-bank.tech was freshly un-delegated from serverHold (2026-06); the
-  # default authoritative self-check (determineAuthoritativeNameservers) stalls
-  # on the just-changed delegation chain and reports "not yet propagated" forever
-  # even though the _acme-challenge TXT is verifiably live on Route53 and every
-  # public resolver. Pinning recursive-only + Google/Cloudflare makes cert-manager
-  # confirm propagation the same way Let's Encrypt will, and issuance proceeds.
-  set {
-    name  = "extraArgs[1]"
-    value = "--dns01-recursive-nameservers-only=true"
-  }
-  set {
-    name = "extraArgs[2]"
-    # commas escaped so Helm --set keeps this one list element, not three.
-    value = "--dns01-recursive-nameservers=8.8.8.8:53\\,1.1.1.1:53"
-  }
+  # helm provider v3: set{} blocks -> a single set=[...] list argument.
+  set = [
+    {
+      name  = "crds.enabled"
+      value = "true"
+    },
+    # Keep controller off Spot churn: it tolerates the bootstrap on-demand pool.
+    {
+      name  = "extraArgs[0]"
+      value = "--enable-certificate-owner-ref=true"
+    },
+    # DNS-01 self-check via public recursive resolvers, not the authoritative-NS
+    # walk. open-bank.tech was freshly un-delegated from serverHold (2026-06); the
+    # default authoritative self-check (determineAuthoritativeNameservers) stalls
+    # on the just-changed delegation chain and reports "not yet propagated" forever
+    # even though the _acme-challenge TXT is verifiably live on Route53 and every
+    # public resolver. Pinning recursive-only + Google/Cloudflare makes cert-manager
+    # confirm propagation the same way Let's Encrypt will, and issuance proceeds.
+    {
+      name  = "extraArgs[1]"
+      value = "--dns01-recursive-nameservers-only=true"
+    },
+    {
+      name = "extraArgs[2]"
+      # commas escaped so Helm --set keeps this one list element, not three.
+      value = "--dns01-recursive-nameservers=8.8.8.8:53\\,1.1.1.1:53"
+    },
+  ]
 }
 
 # ---------------------------------------------------------------------------
@@ -66,44 +67,42 @@ resource "helm_release" "karpenter" {
   chart      = "karpenter"
   version    = var.karpenter_version
 
-  # Single replica for sandbox FinOps; prod should run 2 for HA.
-  set {
-    name  = "replicas"
-    value = "1"
-  }
-
-  set {
-    name  = "serviceAccount.name"
-    value = "karpenter"
-  }
-
-  set {
-    name  = "settings.clusterName"
-    value = local.cluster_name
-  }
-
-  set {
-    name  = "settings.interruptionQueue"
-    value = local.karpenter_queue_name
-  }
-
-  # Controller must run on the bootstrap managed nodes, never on nodes it owns.
-  set {
-    name  = "controller.resources.requests.cpu"
-    value = "500m"
-  }
-  set {
-    name  = "controller.resources.requests.memory"
-    value = "512Mi"
-  }
-  set {
-    name  = "controller.resources.limits.cpu"
-    value = "1"
-  }
-  set {
-    name  = "controller.resources.limits.memory"
-    value = "1Gi"
-  }
+  set = [
+    # Single replica for sandbox FinOps; prod should run 2 for HA.
+    {
+      name  = "replicas"
+      value = "1"
+    },
+    {
+      name  = "serviceAccount.name"
+      value = "karpenter"
+    },
+    {
+      name  = "settings.clusterName"
+      value = local.cluster_name
+    },
+    {
+      name  = "settings.interruptionQueue"
+      value = local.karpenter_queue_name
+    },
+    # Controller must run on the bootstrap managed nodes, never on nodes it owns.
+    {
+      name  = "controller.resources.requests.cpu"
+      value = "500m"
+    },
+    {
+      name  = "controller.resources.requests.memory"
+      value = "512Mi"
+    },
+    {
+      name  = "controller.resources.limits.cpu"
+      value = "1"
+    },
+    {
+      name  = "controller.resources.limits.memory"
+      value = "1Gi"
+    },
+  ]
 }
 
 # ---------------------------------------------------------------------------
@@ -223,31 +222,32 @@ resource "helm_release" "argocd" {
   chart            = "argo-cd"
   version          = var.argocd_version
 
-  # Sandbox: keep it lean. No HA, no dex (SSO wired later via ADR-0031).
-  set {
-    name  = "dex.enabled"
-    value = "false"
-  }
-  set {
-    name  = "notifications.enabled"
-    value = "false"
-  }
-
-  # Server-Side Diff, cluster-wide. ServerSideApply=true (our default sync
-  # option) otherwise triggers ArgoCD's *Structured-Merge* diff, which builds a
-  # typed value from the live object using ArgoCD's BUNDLED OpenAPI schema. On
-  # k8s >=1.33 that schema lacks fields the API server adds (e.g. Deployment
-  # `.status.terminatingReplicas`) → "field not declared in schema" →
-  # ComparisonError → auto-sync/selfHeal silently stop for every SSA app.
-  # Server-Side Diff instead computes the diff from an SSA dry-run against the
-  # LIVE API server, so it uses the cluster's own (current) schema and the field
-  # is known. Successor strategy to structured-merge; same trick `vault` already
-  # uses per-app via the ServerSideDiff=true compare-option. Avoids a major
-  # ArgoCD upgrade and keeps ServerSideApply for the sync step.
-  set {
-    name  = "configs.params.controller\\.diff\\.server\\.side"
-    value = "true"
-  }
+  set = [
+    # Sandbox: keep it lean. No HA, no dex (SSO wired later via ADR-0031).
+    {
+      name  = "dex.enabled"
+      value = "false"
+    },
+    {
+      name  = "notifications.enabled"
+      value = "false"
+    },
+    # Server-Side Diff, cluster-wide. ServerSideApply=true (our default sync
+    # option) otherwise triggers ArgoCD's *Structured-Merge* diff, which builds a
+    # typed value from the live object using ArgoCD's BUNDLED OpenAPI schema. On
+    # k8s >=1.33 that schema lacks fields the API server adds (e.g. Deployment
+    # `.status.terminatingReplicas`) → "field not declared in schema" →
+    # ComparisonError → auto-sync/selfHeal silently stop for every SSA app.
+    # Server-Side Diff instead computes the diff from an SSA dry-run against the
+    # LIVE API server, so it uses the cluster's own (current) schema and the field
+    # is known. Successor strategy to structured-merge; same trick `vault` already
+    # uses per-app via the ServerSideDiff=true compare-option. Avoids a major
+    # ArgoCD upgrade and keeps ServerSideApply for the sync step.
+    {
+      name  = "configs.params.controller\\.diff\\.server\\.side"
+      value = "true"
+    },
+  ]
 }
 
 # ---------------------------------------------------------------------------
@@ -338,30 +338,31 @@ resource "helm_release" "keda" {
   chart            = "keda"
   version          = var.keda_version
 
-  # Single replica each for sandbox FinOps; prod should raise both to 2 for HA.
-  set {
-    name  = "operator.replicaCount"
-    value = "1"
-  }
-  set {
-    name  = "metricsServer.replicaCount"
-    value = "1"
-  }
-
-  # Keep the controller modest: it watches CRs and pokes HPAs, it is not a
-  # data-plane component. Requests sized to co-tenant the bootstrap pool.
-  set {
-    name  = "resources.operator.requests.cpu"
-    value = "100m"
-  }
-  set {
-    name  = "resources.operator.requests.memory"
-    value = "128Mi"
-  }
-  set {
-    name  = "resources.operator.limits.memory"
-    value = "512Mi"
-  }
+  set = [
+    # Single replica each for sandbox FinOps; prod should raise both to 2 for HA.
+    {
+      name  = "operator.replicaCount"
+      value = "1"
+    },
+    {
+      name  = "metricsServer.replicaCount"
+      value = "1"
+    },
+    # Keep the controller modest: it watches CRs and pokes HPAs, it is not a
+    # data-plane component. Requests sized to co-tenant the bootstrap pool.
+    {
+      name  = "resources.operator.requests.cpu"
+      value = "100m"
+    },
+    {
+      name  = "resources.operator.requests.memory"
+      value = "128Mi"
+    },
+    {
+      name  = "resources.operator.limits.memory"
+      value = "512Mi"
+    },
+  ]
 }
 
 # ---------------------------------------------------------------------------
@@ -390,43 +391,43 @@ resource "helm_release" "keda_http_add_on" {
 
   depends_on = [helm_release.keda]
 
-  # Two interceptor replicas: if the single interceptor pod is evicted the first
-  # request to a scaled-to-zero workload fails; HA here is cheap (tiny pod).
-  set {
-    name  = "interceptor.replicaCount"
-    value = "2"
-  }
-
-  set {
-    name  = "scaler.replicaCount"
-    value = "1"
-  }
-
-  # Resource sizing follows the same lean sandbox pattern as KEDA core.
-  set {
-    name  = "interceptor.resources.requests.cpu"
-    value = "50m"
-  }
-  set {
-    name  = "interceptor.resources.requests.memory"
-    value = "64Mi"
-  }
-  set {
-    name  = "interceptor.resources.limits.memory"
-    value = "128Mi"
-  }
-  set {
-    name  = "scaler.resources.requests.cpu"
-    value = "25m"
-  }
-  set {
-    name  = "scaler.resources.requests.memory"
-    value = "32Mi"
-  }
-  set {
-    name  = "scaler.resources.limits.memory"
-    value = "64Mi"
-  }
+  set = [
+    # Two interceptor replicas: if the single interceptor pod is evicted the first
+    # request to a scaled-to-zero workload fails; HA here is cheap (tiny pod).
+    {
+      name  = "interceptor.replicaCount"
+      value = "2"
+    },
+    {
+      name  = "scaler.replicaCount"
+      value = "1"
+    },
+    # Resource sizing follows the same lean sandbox pattern as KEDA core.
+    {
+      name  = "interceptor.resources.requests.cpu"
+      value = "50m"
+    },
+    {
+      name  = "interceptor.resources.requests.memory"
+      value = "64Mi"
+    },
+    {
+      name  = "interceptor.resources.limits.memory"
+      value = "128Mi"
+    },
+    {
+      name  = "scaler.resources.requests.cpu"
+      value = "25m"
+    },
+    {
+      name  = "scaler.resources.requests.memory"
+      value = "32Mi"
+    },
+    {
+      name  = "scaler.resources.limits.memory"
+      value = "64Mi"
+    },
+  ]
 }
 
 # ---------------------------------------------------------------------------
