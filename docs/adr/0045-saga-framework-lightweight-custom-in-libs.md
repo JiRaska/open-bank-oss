@@ -2,15 +2,15 @@
 
 Date: 2026-05-29
 Status: Superseded by [ADR-0120](0120-migrate-transaction-payment-orchestration-to-temporal.md)
-Delivery-Status: Partial
+Delivery-Status: Shipped
 
-**Delivery note (updated 2026-06-30):**
+**Delivery note (updated 2026-07-01):**
 The one saga this ADR covered (`PaymentSagaOrchestrator` in transaction-service) was migrated
-to Temporal in ADR-0120 Phase 5+6 (2026-06-30). The custom `AbstractSaga` extraction to
+to Temporal in ADR-0120 Phase 5+6 (merged 2026-07-01, PR #17). The custom `AbstractSaga` extraction to
 `openbank-libs` (pending deliverable 1) and the second-saga implementation (pending deliverable 2)
 were never undertaken; ADR-0120's Temporal adoption supersedes the need for a custom primitive.
 Future multi-service workflows should adopt Temporal per ADR-0120.
-- **Pending deliverables 1–3** — Closed without implementation (superseded).
+- **Pending deliverables 1–3** — ✅ Closed without implementation (superseded by ADR-0120).
 
 ## Context
 

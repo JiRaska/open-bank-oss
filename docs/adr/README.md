@@ -53,7 +53,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0042](0042-enforce-branch-protection-on-main.md) | Enforce branch protection on `main` (server-side governance gate) | Accepted | Shipped |
 | [0043](0043-ci-performance-model.md) | CI performance model — warm-reuse the persistent runner | Accepted | Shipped |
 | [0044](0044-single-canonical-trunk-retire-parallel-pipeline.md) | Single canonical trunk — retire the parallel `ci/per-service-pipeline` branch | Accepted | Shipped |
-| [0045](0045-saga-framework-lightweight-custom-in-libs.md) | Saga framework: lightweight custom, in openbank-libs | Superseded by [ADR-0120] | Partial |
+| [0045](0045-saga-framework-lightweight-custom-in-libs.md) | Saga framework: lightweight custom, in openbank-libs | Superseded by [ADR-0120] | Shipped |
 | [0046](0046-daily-fx-revaluation-mechanics-and-cnb-rates.md) | Daily FX revaluation mechanics and ČNB rate ingestion | Accepted | Shipped |
 | [0047](0047-governed-runtime-operational-control-plane.md) | Governed runtime operational control plane | Accepted | Partial |
 | [0048](0048-decouple-api-contract-version-from-service-release-version.md) | Decouple the API contract version from the service release version: three independent version axes | Accepted | Shipped |
