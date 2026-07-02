@@ -48,6 +48,11 @@ class ErasureService {
 
     private val log = Logger.getLogger(ErasureService::class.java)
 
+    // CodeQL java/log-injection: aggregateType/aggregateId/requestedBy are caller-supplied and
+    // flow straight into log lines below. Strip CR/LF so an attacker can't forge additional
+    // log lines (log forging, CWE-117).
+    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+
     suspend fun erase(aggregateType: String, aggregateId: String, requestedBy: String): ErasureDecision {
         val category = RetentionPolicies.categoryForAggregateType(aggregateType)
         val policy = RetentionPolicies.of(category)
@@ -56,11 +61,11 @@ class ErasureService {
         if (!policy.erasable) {
             log.infof(
                 "erasure REFUSED %s/%s category=%s basis=%s by=%s",
-                aggregateType,
-                aggregateId,
+                aggregateType.sanitizeForLog(),
+                aggregateId.sanitizeForLog(),
                 category,
                 policy.basis,
-                requestedBy,
+                requestedBy.sanitizeForLog(),
             )
             return ErasureDecision(
                 aggregateType = aggregateType,
@@ -79,11 +84,11 @@ class ErasureService {
         val rows = cryptoErasure.erase(AggregateKey(aggregateType, aggregateId))
         log.infof(
             "erasure PERFORMED %s/%s category=%s rows=%d by=%s",
-            aggregateType,
-            aggregateId,
+            aggregateType.sanitizeForLog(),
+            aggregateId.sanitizeForLog(),
             category,
             rows,
-            requestedBy,
+            requestedBy.sanitizeForLog(),
         )
         return ErasureDecision(
             aggregateType = aggregateType,
