@@ -1,7 +1,7 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-07-02T06:25:05.230Z",
+  "generatedAt": "2026-07-02T08:57:53.394Z",
   "counts": {
     "namespaces": 55,
     "networkPolicies": 74,
@@ -482,22 +482,22 @@
   ],
   "imageAnatomy": {
     "multiStage": true,
-    "buildBase": "eclipse-temurin:25-jdk-alpine",
-    "runtimeBase": "eclipse-temurin:25-jre-alpine",
+    "buildBase": "eclipse-temurin:25-jdk-alpine@sha256:5ecfde8e5ecde5954ea3721155b345ef56c1d579b940c761318ad4c05959a151",
+    "runtimeBase": "eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0",
     "steps": [
       {
         "id": "build",
         "label": "Build stage (JDK)",
         "status": "live",
         "adr": [],
-        "detail": "Plný JDK (eclipse-temurin:25-jdk-alpine) zkompiluje a sestaví aplikaci. Tento stage se NEDISTRIBUUJE — zůstává v něm jen nářadí."
+        "detail": "Plný JDK (eclipse-temurin:25-jdk-alpine@sha256:5ecfde8e5ecde5954ea3721155b345ef56c1d579b940c761318ad4c05959a151) zkompiluje a sestaví aplikaci. Tento stage se NEDISTRIBUUJE — zůstává v něm jen nářadí."
       },
       {
         "id": "runtime",
         "label": "Runtime stage (JRE-only)",
         "status": "live",
         "adr": [],
-        "detail": "Distribuuje se jen štíhlý JRE (eclipse-temurin:25-jre-alpine) + aplikace. Menší image = menší útočná plocha, žádný kompilátor/shell nářadí navíc."
+        "detail": "Distribuuje se jen štíhlý JRE (eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0) + aplikace. Menší image = menší útočná plocha, žádný kompilátor/shell nářadí navíc."
       },
       {
         "id": "nonroot",
