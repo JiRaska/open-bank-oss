@@ -28,6 +28,11 @@ class Pacs004Reader {
         val factory = DocumentBuilderFactory.newInstance()
         factory.isNamespaceAware = true
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+        factory.setFeature("http://xml.org/sax/features/external-general-entities", false)
+        factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+        factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
+        factory.isXIncludeAware = false
+        factory.isExpandEntityReferences = false
         factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
         factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
         // Wrap the XML parse: the document comes off the wire, so malformed input
