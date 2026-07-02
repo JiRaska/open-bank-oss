@@ -62,10 +62,15 @@ provider "kubernetes" {
 }
 
 provider "helm" {
-  kubernetes {
+  # helm provider v3 turned `kubernetes` from a nested block into an
+  # object-typed argument (`kubernetes = { ... }`, incl. its `exec` child) —
+  # the old block syntax now fails with "Unsupported block type". The
+  # standalone `kubernetes` provider above is unaffected: its own `exec`
+  # stays a block in v3.
+  kubernetes = {
     host                   = local.cluster_host
     cluster_ca_certificate = local.cluster_ca
-    exec {
+    exec = {
       api_version = "client.authentication.k8s.io/v1beta1"
       command     = "aws"
       args        = ["eks", "get-token", "--cluster-name", local.cluster_name, "--region", local.region]

@@ -13,7 +13,7 @@ import {
   HeartPulse, SlidersHorizontal, Bot, Users, ShieldCheck, Banknote,
   ScrollText, Bell, Map, FileCode, Shield, Library, Building2, FileText, Flag,
   DollarSign, Globe, Repeat, Zap, AlertOctagon, ScanLine,
-  Layers, TrendingUp, MessageSquareWarning, Package, Receipt, HardDrive, Server, ShieldAlert, FlaskConical, Cloud,
+  Layers, TrendingUp, MessageSquareWarning, Package, Receipt, Server, ShieldAlert, FlaskConical, Cloud,
   PiggyBank, GitBranch, Lock, ClipboardList, Scale, Smartphone,
   ClipboardCheck, Activity, Boxes, Bluetooth, Fingerprint,
 } from 'lucide-react'
