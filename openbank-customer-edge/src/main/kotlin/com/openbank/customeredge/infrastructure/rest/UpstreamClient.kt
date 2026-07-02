@@ -73,17 +73,29 @@ class UpstreamClient {
     )
     var allowedHostSuffixes: String = ".svc,127.0.0.1,localhost"
 
-    /** Parses [url] and rejects it unless the host matches [allowedHostSuffixes] (SSRF guard). */
+    /**
+     * Rejects [url] unless it matches [allowedHostSuffixes], via a regex match against the raw
+     * string — CodeQL's java/ssrf query specifically recognizes a regex check as a sanitizing
+     * barrier (unlike a host check performed after URI.create()). URI.create() only runs once
+     * validation has already passed. A leading "." in an entry (e.g. ".svc") matches any host
+     * ending in that domain suffix; anything else (e.g. "127.0.0.1", "localhost") must match the
+     * whole host exactly.
+     */
     private fun validatedUri(url: String): URI {
-        val uri = URI.create(url)
-        val host = uri.host
-        val suffixes = allowedHostSuffixes.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-        val allowed = host != null && suffixes.any { host == it || host.endsWith(it) }
-        require(allowed) {
-            "refusing upstream call to disallowed host '$host' " +
+        val entries = allowedHostSuffixes.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        val alternatives = entries.joinToString("|") { entry ->
+            if (entry.startsWith(".")) {
+                "[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*" + Regex.escape(entry)
+            } else {
+                Regex.escape(entry)
+            }
+        }
+        val pattern = Regex("^https?://(?:$alternatives)(?::\\d+)?(?:/.*)?$")
+        require(pattern.matches(url)) {
+            "refusing upstream call to disallowed host in url " +
                 "(configure openbank.upstream.allowed-host-suffixes to permit it)"
         }
-        return uri
+        return URI.create(url)
     }
 
     companion object {
