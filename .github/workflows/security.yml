@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 # Cancel superseded runs on the same ref so Dependabot/PR pushes don't stack up
 # expensive CodeQL/Trivy/SBOM runs and drain the Free-tier minute budget.
@@ -81,6 +80,9 @@ jobs:
     # dependency here (setup-java/setup-node are already used to work around the Hetzner
     # pool lacking those toolchains). Public repo = free GitHub-hosted minutes.
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload-sarif
     timeout-minutes: 30
     # The java-kotlin leg's autobuild shells out to its own `./gradlew testClasses`
     # (whole-fleet dependency resolution, ~30 modules + quarkus-bom) without picking up
@@ -141,6 +143,9 @@ jobs:
   trivy:
     name: Trivy
     runs-on: openbank-batch
+    permissions:
+      contents: read
+      security-events: write # upload-sarif
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

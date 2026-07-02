@@ -21,15 +21,14 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
   auto-merge:
     name: Auto-merge patch/minor Dependabot PRs
     runs-on: ubuntu-latest
     if: github.actor == 'dependabot[bot]'
+    permissions:
+      contents: write
+      pull-requests: write
 
     steps:
       - name: Fetch Dependabot metadata
@@ -50,5 +49,10 @@ jobs:
 
       - name: Skip — major update (requires human review)
         if: steps.metadata.outputs.update-type == 'version-update:semver-major'
+        # PR_TITLE via env, not `${{ }}` interpolated straight into the script: the title is
+        # attacker-influenceable and direct interpolation is a script-injection vector
+        # (Scorecard Dangerous-Workflow). Env-var passing is not subject to shell expansion.
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          echo "::notice title=Major update::${{ github.event.pull_request.title }} is a major bump — skipping auto-merge, human review required."
+          echo "::notice title=Major update::${PR_TITLE} is a major bump — skipping auto-merge, human review required."

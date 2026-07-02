@@ -53,12 +53,6 @@ on:
         required: false
         default: "manual"
 
-permissions:
-  contents: write
-  pull-requests: write
-  id-token: write  # GitHub OIDC → openbank-arc-build-runner
-  actions: read    # gh run list / gh run download for SBOM staging
-
 concurrency:
   # One admin-ui deploy at a time — a second push while a deploy PR is open would
   # produce conflicting image tags. Cancel the in-flight run; the newer commit wins.
@@ -73,6 +67,11 @@ jobs:
     # touches cluster-topology.json / infra-lifecycle.json which match the path filter.
     if: "!startsWith(github.event.head_commit.message, 'chore(admin-ui): deploy')"
     runs-on: openbank-build
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write  # GitHub OIDC → openbank-arc-build-runner
+      actions: read    # gh run list / gh run download for SBOM staging
     timeout-minutes: 30
     env:
       ECR_REGISTRY: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
