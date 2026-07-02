@@ -23,6 +23,10 @@ import javax.xml.validation.SchemaFactory
  * Uses only the JDK's built-in JAXP ([SchemaFactory] / W3C XML Schema), so the library carries
  * no XML-binding dependency. Schemas are loaded once from the classpath and cached — [Schema] is
  * thread-safe, so a single validator instance is safe to share.
+ *
+ * [validate] parses XML that arrives over the wire, so both the [SchemaFactory] ([forSchema]) and
+ * the per-call [javax.xml.validation.Validator] ([validate]) have external DTD/schema access
+ * disabled — XXE-hardened, mirroring [Pacs008Reader]/[Pacs004Reader].
  */
 class Iso20022Validator(private val schema: Schema) {
     /**
@@ -35,6 +39,11 @@ class Iso20022Validator(private val schema: Schema) {
     fun validate(xml: String): Iso20022ValidationResult {
         val errors = mutableListOf<String>()
         val validator = schema.newValidator()
+        // XXE hardening: xml is untrusted wire input. Disabling external DTD/schema access on the
+        // Validator itself (not just the SchemaFactory that built schema) is the belt-and-suspenders
+        // fix — it is the object CodeQL's java/xxe sink actually flags (validate() below).
+        validator.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "")
+        validator.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
         validator.errorHandler = object : ErrorHandler {
             override fun warning(exception: SAXParseException) = Unit
             override fun error(exception: SAXParseException) {
@@ -72,6 +81,10 @@ class Iso20022Validator(private val schema: Schema) {
             val url = Iso20022Validator::class.java.classLoader.getResource(path)
                 ?: error("ISO 20022 schema not found on classpath: $path")
             val factory = SchemaFactory.newInstance(XMLConstants.W3C_XML_SCHEMA_NS_URI)
+            // XXE hardening: no vendored schema uses xs:import/xs:include, so external
+            // resolution is never legitimately needed — disable it outright.
+            factory.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "")
+            factory.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
             val schema = try {
                 factory.newSchema(url)
             } catch (e: org.xml.sax.SAXException) {

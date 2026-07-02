@@ -37,12 +37,13 @@ class Pacs008ParseException(message: String) : RuntimeException(message)
  */
 class Pacs008Reader {
     fun read(xml: String): ReceivedCreditTransfer {
-        val factory = DocumentBuilderFactory.newInstance().apply {
-            isNamespaceAware = true
-            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-            setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
-            setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
-        }
+        // XXE hardening as plain imperative calls (not `.apply {}`) so static analysis can trace
+        // the sanitizing calls straight to the factory that builds the parser below.
+        val factory = DocumentBuilderFactory.newInstance()
+        factory.isNamespaceAware = true
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
+        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
         val doc = factory.newDocumentBuilder()
             .parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))
         doc.documentElement.normalize()

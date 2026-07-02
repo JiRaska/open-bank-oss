@@ -23,12 +23,13 @@ class Pacs004ParseException(message: String) : RuntimeException(message)
  */
 class Pacs004Reader {
     fun read(xml: String): PaymentReturn {
-        val factory = DocumentBuilderFactory.newInstance().apply {
-            isNamespaceAware = true
-            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-            setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
-            setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
-        }
+        // XXE hardening as plain imperative calls (not `.apply {}`) so static analysis can trace
+        // the sanitizing calls straight to the factory that builds the parser below.
+        val factory = DocumentBuilderFactory.newInstance()
+        factory.isNamespaceAware = true
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
+        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
         // Wrap the XML parse: the document comes off the wire, so malformed input
         // (SAXParseException, IOException) must surface as the reader's own
         // Pacs004ParseException rather than leaking a raw parser exception to callers.
