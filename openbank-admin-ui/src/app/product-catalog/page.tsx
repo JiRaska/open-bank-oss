@@ -7,7 +7,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Package, Search, RefreshCw, AlertCircle, Edit, Play, Square, Plus, X,
-  ChevronDown, ChevronUp, Eye, EyeOff, CreditCard, Globe, TrendingDown,
+  Eye, EyeOff, CreditCard, Globe, TrendingDown,
   Clock, FileText, Tag, Users, ExternalLink, History, CheckCircle2,
   Layers, Banknote, Shield,
 } from 'lucide-react'
@@ -67,8 +67,8 @@ async function apiFetch(path: string, opts?: RequestInit) {
   const res = await fetch(`${PROXY}${path}`, { cache: 'no-store', signal: AbortSignal.timeout(8000), ...opts })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    let msg = res.statusText
-    try { msg = JSON.parse(text)?.message ?? JSON.parse(text)?.error ?? text } catch { msg = text || res.statusText }
+    let msg: string
+    try { const parsed = JSON.parse(text); msg = parsed?.message ?? parsed?.error ?? text } catch { msg = text || res.statusText }
     throw new Error(`${res.status} ${msg}`)
   }
   return res.json()

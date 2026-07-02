@@ -36,7 +36,7 @@ import java.nio.charset.StandardCharsets
  * A missing key (404) means already-shredded → idempotent no-op (returns 0).
  *
  * Why Vault and not AWS KMS: Vault is already provisioned in `openbank-infra` (dev), so this adapter
- * is runnable end-to-end there once the Transit engine is enabled (see `docker/vault/init/init.sh`).
+ * is runnable end-to-end there once the Transit engine is enabled (see `docker/openbao/init/init.sh`).
  * It is the `@Alternative @Priority(100)` binding behind the `@Default`
  * [NoOpCryptoErasure], gated at build time by `openbank.analytics.erasure.backend=vault`, so the
  * default profile keeps the offline no-op. Key-name derivation is pure and unit-tested; the HTTP calls

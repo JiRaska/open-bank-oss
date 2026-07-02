@@ -91,17 +91,15 @@ export default function InfrastructurePage() {
   const [kafkaCluster, setKafkaCluster] = useState<string>('')
   const [kafkaUnavailable, setKafkaUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [lifecycle, setLifecycle] = useState<Record<string, CompLifecycle>>({})
-  const [lcMeta, setLcMeta] = useState<{ lifecycleGeneratedAt: string | null; vulnScannedAt: string | null } | null>(null)
 
   const loadLifecycle = useCallback(async () => {
     try {
       const res = await fetch('/api/infra/lifecycle', { cache: 'no-store' })
       if (!res.ok) return
-      const data = await res.json() as { components: CompLifecycle[]; lifecycleGeneratedAt: string | null; vulnScannedAt: string | null }
+      const data = await res.json() as { components: CompLifecycle[] }
       const map: Record<string, CompLifecycle> = {}
       for (const c of data.components ?? []) map[c.id] = c
       setLifecycle(map)
-      setLcMeta({ lifecycleGeneratedAt: data.lifecycleGeneratedAt, vulnScannedAt: data.vulnScannedAt })
     } catch { /* lifecycle is additive; health view stands without it */ }
   }, [])
 

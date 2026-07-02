@@ -8,7 +8,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { fetchAllServiceSnapshots } from '@/lib/api'
 import type { ServiceSnapshot, ServiceStack } from '@/types'
-import { Package, RefreshCw, CheckCircle2, AlertTriangle, XCircle, Clock, Download, ShieldAlert } from 'lucide-react'
+import { Package, RefreshCw, CheckCircle2, AlertTriangle, XCircle, Clock, ShieldAlert } from 'lucide-react'
 import { SbomViewer } from '@/components/sbom/SbomViewer'
 
 const POLL = 30_000
