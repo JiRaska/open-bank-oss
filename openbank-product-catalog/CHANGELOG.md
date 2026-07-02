@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.8.0...product-catalog-v0.8.1) (2026-07-02)
+
+
+### Security
+
+* **docker-svc:** pin all Dockerfile base images to digest (Scorecard Pinned-Dependencies) ([#103](https://github.com/JiRaska/open-bank-oss/issues/103)) ([27c2dab](https://github.com/JiRaska/open-bank-oss/commit/27c2dabe6b9f9440532edf29a73c6e48e677206b))
+* **product-catalog:** sanitize fee-waiver diagnostics before logging (CodeQL java/log-injection) ([#151](https://github.com/JiRaska/open-bank-oss/issues/151)) ([90ed38f](https://github.com/JiRaska/open-bank-oss/commit/90ed38f5bf887354fd8e033523366ea4b5e6db17))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.7.0...product-catalog-v0.8.0) (2026-06-29)
 
 
