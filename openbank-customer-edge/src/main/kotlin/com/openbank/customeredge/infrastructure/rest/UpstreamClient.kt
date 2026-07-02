@@ -59,6 +59,33 @@ class UpstreamClient {
     @ConfigProperty(name = "openbank.upstream.client-secret", defaultValue = "")
     var clientSecret: String = ""
 
+    // SSRF hardening: every public method below takes a caller-supplied `url` and hands it to
+    // URI.create() with no host check of its own — it relies entirely on callers building `url`
+    // from a fixed @ConfigProperty base + a validated path segment (true today, per review, but
+    // not enforced). This allowlist is the defense-in-depth backstop: reject any target whose
+    // host doesn't match a known-safe suffix before a request ever leaves the process.
+    // ".svc" covers every in-cluster upstream base URL (Kubernetes Service DNS, e.g.
+    // account-service.accounts.svc); 127.0.0.1/localhost cover UpstreamClientTest's throwaway
+    // loopback HTTP server. Adjust via config, not by loosening the check in code.
+    @ConfigProperty(
+        name = "openbank.upstream.allowed-host-suffixes",
+        defaultValue = ".svc,127.0.0.1,localhost",
+    )
+    var allowedHostSuffixes: String = ".svc,127.0.0.1,localhost"
+
+    /** Parses [url] and rejects it unless the host matches [allowedHostSuffixes] (SSRF guard). */
+    private fun validatedUri(url: String): URI {
+        val uri = URI.create(url)
+        val host = uri.host
+        val suffixes = allowedHostSuffixes.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        val allowed = host != null && suffixes.any { host == it || host.endsWith(it) }
+        require(allowed) {
+            "refusing upstream call to disallowed host '$host' " +
+                "(configure openbank.upstream.allowed-host-suffixes to permit it)"
+        }
+        return uri
+    }
+
     companion object {
         const val PARTY_HEADER = "X-Customer-Party-Id"
         private const val TOKEN_REFRESH_BUFFER_SECONDS = 60L
@@ -117,7 +144,7 @@ class UpstreamClient {
 
     fun get(url: String, partyId: String): Response = try {
         val request = HttpRequest.newBuilder()
-            .uri(URI.create(url))
+            .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken()}")
             .header(PARTY_HEADER, partyId)
             .header("Accept", "application/json")
@@ -144,7 +171,7 @@ class UpstreamClient {
      */
     fun getRaw(url: String, partyId: String, accept: String): Response = try {
         val request = HttpRequest.newBuilder()
-            .uri(URI.create(url))
+            .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken()}")
             .header(PARTY_HEADER, partyId)
             .header("Accept", accept)
@@ -170,7 +197,7 @@ class UpstreamClient {
      */
     fun postAnonymous(url: String, body: String): Response = try {
         val request = HttpRequest.newBuilder()
-            .uri(URI.create(url))
+            .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken()}")
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
@@ -190,7 +217,7 @@ class UpstreamClient {
     /** DELETE with the M2M operator token + party header (e.g. cancel a standing order). */
     fun delete(url: String, partyId: String): Response = try {
         val request = HttpRequest.newBuilder()
-            .uri(URI.create(url))
+            .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken()}")
             .header(PARTY_HEADER, partyId)
             .header("Accept", "application/json")
@@ -209,7 +236,7 @@ class UpstreamClient {
     // falls back to a generated one so the upstream contract is always satisfied.
     fun post(url: String, partyId: String, body: String, idempotencyKey: String?): Response = try {
         val request = HttpRequest.newBuilder()
-            .uri(URI.create(url))
+            .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken()}")
             .header(PARTY_HEADER, partyId)
             .header("Content-Type", "application/json")
@@ -236,7 +263,7 @@ class UpstreamClient {
         extraHeaders: Map<String, String>,
     ): Response = try {
         val builder = HttpRequest.newBuilder()
-            .uri(URI.create(url))
+            .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken()}")
             .header(PARTY_HEADER, partyId)
             .header("Content-Type", "application/json")
