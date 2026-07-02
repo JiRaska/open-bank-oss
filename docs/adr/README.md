@@ -155,3 +155,14 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0150](0150-internationalization-and-language-support-strategy.md) | Internationalization and language-support strategy | Proposed | Planned |
 | [0151](0151-chaos-engineering-and-infrastructure-failure-injection-policy.md) | Chaos engineering and infrastructure failure-injection policy | Proposed | Planned |
 | [0152](0152-single-tenancy-boundary-statement.md) | Single-tenancy boundary statement | Proposed | N/A — decision-only |
+
+---
+
+**Numbering gaps:** 0015 0127 0128 0129 0130 0131 0132 do not correspond to a file in this repo's history —
+confirmed by `git log --diff-filter=A` across all branches, not just an absent
+current file. One of them, ADR-0132, is named in a 2026-06 commit message
+("fix(customer-edge): add per-party rate-limit config key (ADR-0132)") with no
+corresponding merged ADR file, which does not by itself explain the other five.
+No decision record in this repo accounts for the gap; treat it as an open
+question for whoever holds the pre-public-launch history, not a deliberate
+reservation.
