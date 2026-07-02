@@ -1,0 +1,6 @@
+# Allowlist for ADR front-matter `Delivery-Repos:` (ADR-0147). One repo name per
+# line, no `openbank-` prefix stripping — use the exact GitHub repo name. Add a
+# repo here the same PR that first references it in an ADR's Delivery-Repos field.
+# check-adr-registry.sh rejects any Delivery-Repos value not listed here — it
+# catches a typo'd repo name, not the target repo's actual state (out of scope).
+openbank-app

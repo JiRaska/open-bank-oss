@@ -2,8 +2,17 @@
 
 Date: 2026-07-02
 Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only -->
+Delivery-Status: Shipped    <!-- Planned | Partial | Shipped | N/A — decision-only -->
 Author(s): jiri.raska
+
+**Delivery note (2026-07-02):** `docs/adr/known-repos.txt` (allowlist,
+`openbank-app` listed), `TEMPLATE.md` documents the optional
+`Delivery-Repos:` field, `gen-index.sh` renders a Repos column,
+`check-adr-registry.sh` validates any declared value against the
+allowlist. Applied to the concrete motivating case: ADR-0095 now carries
+`Delivery-Repos: openbank-app` and its Delivery-Status corrected to
+Partial (verified, not inferred). ADR-0064 carries the pointer only —
+its own Delivery-Status is left unverified rather than guessed.
 
 ## Context
 
