@@ -29,7 +29,8 @@ dependencies {
     implementation(libs.quarkus.oidc.client.reactive.filter)
 
     // The shared fee-waiver engine (ADR-0138 phase 1b).
-    implementation(project(":openbank-libs"))
+    implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-runtime"))
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)

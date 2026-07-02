@@ -149,36 +149,37 @@ services:
       - openbank-net
 
   # ─────────────────────────────────────────────
-  # HashiCorp Vault (dev mode for local)
+  # OpenBao (dev mode for local) — same LF/MPL-2.0 fork production runs
+  # (runbook 0005, openbank-infra/gitops/apps/openbao.yaml pins quay.io/openbao/openbao:2.5.4).
   # ─────────────────────────────────────────────
-  vault:
-    image: hashicorp/vault:1.17.2
-    container_name: openbank-vault
+  openbao:
+    image: quay.io/openbao/openbao:2.5.4
+    container_name: openbank-openbao
     restart: unless-stopped
     environment:
-      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN}
+      BAO_DEV_ROOT_TOKEN_ID: ${BAO_DEV_ROOT_TOKEN}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       VALKEY_PASSWORD: ${VALKEY_PASSWORD}
-      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
-      VAULT_ADDR: http://0.0.0.0:8200
+      BAO_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+      BAO_ADDR: http://0.0.0.0:8200
     ports:
       - "8200:8200"
     cap_add:
       - IPC_LOCK
     volumes:
-      - vault_data:/vault/data
-      - ./docker/vault/init:/vault/init:ro
+      - openbao_data:/openbao/data
+      - ./docker/openbao/init:/openbao/init:ro
     command: >
-      sh -c "vault server -dev &
+      sh -c "bao server -dev &
              sleep 3 &&
-             export VAULT_ADDR=http://127.0.0.1:8200 &&
-             export VAULT_TOKEN=${VAULT_DEV_ROOT_TOKEN} &&
-             export VAULT_DEV_ROOT_TOKEN=${VAULT_DEV_ROOT_TOKEN} &&
-             sh /vault/init/init.sh &&
+             export BAO_ADDR=http://127.0.0.1:8200 &&
+             export BAO_TOKEN=${BAO_DEV_ROOT_TOKEN} &&
+             export BAO_DEV_ROOT_TOKEN=${BAO_DEV_ROOT_TOKEN} &&
+             sh /openbao/init/init.sh &&
              wait"
     healthcheck:
-      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      test: ["CMD", "bao", "status", "-address=http://127.0.0.1:8200"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -568,10 +569,12 @@ services:
       CLICKHOUSE_DB: openbank_analytics
       CLICKHOUSE_USER: analytics
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-CHANGE_ME_LOCAL_DEV_ONLY}
-      # F6 — crypto-shred via Vault Transit (engine + analytics-* policy provisioned in vault/init).
+      # F6 — crypto-shred via Vault Transit API (engine + analytics-* policy provisioned in
+      # openbao/init). ANALYTICS_VAULT_* are the analytics-sink's own config property names
+      # (VaultCryptoErasure adapter) — unchanged; only the backing service is OpenBao now.
       ANALYTICS_ERASURE_BACKEND: vault
-      ANALYTICS_VAULT_URL: http://vault:8200
-      ANALYTICS_VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN}
+      ANALYTICS_VAULT_URL: http://openbao:8200
+      ANALYTICS_VAULT_TOKEN: ${BAO_DEV_ROOT_TOKEN}
       ANALYTICS_VAULT_TRANSIT_MOUNT: transit
       ANALYTICS_VAULT_KEY_PREFIX: analytics
       # F7 — schema governance catalogue loaded from the Apicurio registry.
@@ -596,7 +599,7 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
-      vault:
+      openbao:
         condition: service_healthy
       schema-registry:
         condition: service_started
@@ -1989,7 +1992,7 @@ volumes:
   postgres_data:
   kafka_data:
   valkey_data:
-  vault_data:
+  openbao_data:
   clickhouse_data:
   prometheus_data:
   grafana_data:

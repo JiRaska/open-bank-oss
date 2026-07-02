@@ -157,7 +157,7 @@ openbank:
     vault:
       # Vault coordinates for crypto-shredding (used only when erasure.backend=vault). Provisioned in
       # openbank-infra as service vault:8200 (dev). The Transit engine must be enabled (see
-      # docker/vault/init/init.sh) and the token must allow transit key config + delete.
+      # docker/openbao/init/init.sh) and the token must allow transit key config + delete.
       url: ${ANALYTICS_VAULT_URL:http://localhost:8200}
       token: ${ANALYTICS_VAULT_TOKEN:}
       transit-mount: ${ANALYTICS_VAULT_TRANSIT_MOUNT:transit}
