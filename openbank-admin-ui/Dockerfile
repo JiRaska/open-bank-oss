@@ -18,7 +18,7 @@
 # Stage 1a: Collect docs trees into a single bundle/ directory.
 # Lightweight alpine, no node, just shell + cp.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.20 AS docs-collector
+FROM alpine:3.24 AS docs-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -42,7 +42,7 @@ RUN set -e; \
 # Re-uses the root .dockerignore exception added for SBOM coverage:
 #   !openbank-*/build/reports/bom.json
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.20 AS sbom-collector
+FROM alpine:3.24 AS sbom-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -69,7 +69,7 @@ RUN set -e; \
 # catalog work for ALL services regardless of deploy state, with no external
 # GitHub dependency. Mirrors the docs/sbom collectors above.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.20 AS openapi-collector
+FROM alpine:3.24 AS openapi-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -93,7 +93,7 @@ RUN set -e; \
 # exceptions added for these two trees (!docs/adr/**, !docs/threat-models/**);
 # the rest of docs/ + *.md stays excluded.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.20 AS governance-collector
+FROM alpine:3.24 AS governance-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -110,7 +110,7 @@ RUN set -e; \
 # (read-only) at /docs/flags (ADR-0067). Mirrors the collectors above; the loader
 # (src/lib/governance/flags.ts) parses the ConfigMap YAML + embedded flags.json.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.20 AS flags-collector
+FROM alpine:3.24 AS flags-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
@@ -134,7 +134,7 @@ RUN set -e; \
 # Release notes are derived from these same files. Re-uses the root .dockerignore
 # exception (!openbank-*/CHANGELOG.md). Mirrors the docs/sbom/openapi collectors.
 # ──────────────────────────────────────────────────────────────────────
-FROM alpine:3.20 AS changelog-collector
+FROM alpine:3.24 AS changelog-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \

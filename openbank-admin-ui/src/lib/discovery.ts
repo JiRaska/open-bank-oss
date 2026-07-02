@@ -117,6 +117,11 @@ function k8sGet<T>(path: string): Promise<T> {
     '443'
 
   return new Promise<T>((resolve, reject) => {
+    // The projected ServiceAccount token is meant to travel exactly here: it
+    // authenticates this in-cluster request to the Kubernetes API server
+    // itself (host/port from the standard KUBERNETES_SERVICE_* env, verified
+    // against the same pod's CA bundle) — not a leak, the intended auth flow.
+    // codeql[js/file-access-to-http]
     const req = https.request(
       {
         host,
