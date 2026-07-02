@@ -1,7 +1,7 @@
 # ADR-0144 — Gate graduation — advisory rules carry an enforcement deadline
 
 Date: 2026-07-02
-Decision-Status: Proposed   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
+Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
 Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only -->
 Author(s): jiri.raska
 
