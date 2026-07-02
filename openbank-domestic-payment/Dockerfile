@@ -1,4 +1,4 @@
-FROM eclipse-temurin:20-jdk AS build
+FROM eclipse-temurin:25-jdk AS build
 WORKDIR /build
 COPY openbank-libs /build/openbank-libs
 COPY openbank-domestic-payment /build/openbank-domestic-payment
