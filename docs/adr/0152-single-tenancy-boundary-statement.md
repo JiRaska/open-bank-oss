@@ -1,7 +1,7 @@
 # ADR-0152 — Single-tenancy boundary statement
 
 Date: 2026-07-02
-Decision-Status: Proposed   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
+Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
 Delivery-Status: N/A — decision-only
 Author(s): jiri.raska
 

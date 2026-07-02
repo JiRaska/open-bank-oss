@@ -1,7 +1,7 @@
 # ADR-0149 — Digital accessibility standard (WCAG 2.2 AA / EN 301 549)
 
 Date: 2026-07-02
-Decision-Status: Proposed   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
+Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
 Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only -->
 Author(s): jiri.raska
 
