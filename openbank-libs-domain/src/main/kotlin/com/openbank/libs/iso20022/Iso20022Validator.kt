@@ -8,7 +8,8 @@ import org.xml.sax.ErrorHandler
 import org.xml.sax.SAXParseException
 import java.io.ByteArrayInputStream
 import javax.xml.XMLConstants
-import javax.xml.transform.stream.StreamSource
+import javax.xml.parsers.DocumentBuilderFactory
+import javax.xml.transform.dom.DOMSource
 import javax.xml.validation.Schema
 import javax.xml.validation.SchemaFactory
 
@@ -24,9 +25,13 @@ import javax.xml.validation.SchemaFactory
  * no XML-binding dependency. Schemas are loaded once from the classpath and cached — [Schema] is
  * thread-safe, so a single validator instance is safe to share.
  *
- * [validate] parses XML that arrives over the wire, so both the [SchemaFactory] ([forSchema]) and
- * the per-call [javax.xml.validation.Validator] ([validate]) have external DTD/schema access
- * disabled — XXE-hardened, mirroring [Pacs008Reader]/[Pacs004Reader].
+ * [validate] parses XML that arrives over the wire. Rather than handing the raw untrusted bytes
+ * to [javax.xml.validation.Validator.validate] directly (a [SchemaFactory]/[Schema]-based sink
+ * CodeQL's java/xxe query does not reliably recognize as sanitized even with external-access
+ * properties disabled), [validate] first parses with the same XXE-hardened
+ * [DocumentBuilderFactory] (`disallow-doctype-decl`) used by [Pacs008Reader]/[Pacs004Reader], then
+ * validates the already-parsed, entity-free DOM tree. The Validator itself additionally has
+ * external DTD/schema access disabled too, belt-and-suspenders.
  */
 class Iso20022Validator(private val schema: Schema) {
     /**
@@ -39,9 +44,6 @@ class Iso20022Validator(private val schema: Schema) {
     fun validate(xml: String): Iso20022ValidationResult {
         val errors = mutableListOf<String>()
         val validator = schema.newValidator()
-        // XXE hardening: xml is untrusted wire input. Disabling external DTD/schema access on the
-        // Validator itself (not just the SchemaFactory that built schema) is the belt-and-suspenders
-        // fix — it is the object CodeQL's java/xxe sink actually flags (validate() below).
         validator.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "")
         validator.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
         validator.errorHandler = object : ErrorHandler {
@@ -54,7 +56,22 @@ class Iso20022Validator(private val schema: Schema) {
             }
         }
         return try {
-            validator.validate(StreamSource(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8))))
+            // XXE hardening: xml is untrusted wire input. Parse it with a locked-down
+            // DocumentBuilder (no DOCTYPE at all — the OWASP-recommended primary XXE defense)
+            // before the Validator ever sees it.
+            val docFactory = DocumentBuilderFactory.newInstance()
+            docFactory.isNamespaceAware = true
+            docFactory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+            docFactory.setFeature("http://xml.org/sax/features/external-general-entities", false)
+            docFactory.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+            docFactory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
+            docFactory.isXIncludeAware = false
+            docFactory.isExpandEntityReferences = false
+            docFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
+            docFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
+            val doc = docFactory.newDocumentBuilder()
+                .parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))
+            validator.validate(DOMSource(doc))
             if (errors.isEmpty()) {
                 Iso20022ValidationResult.Valid
             } else {
