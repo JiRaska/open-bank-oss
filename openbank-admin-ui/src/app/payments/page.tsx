@@ -9,7 +9,7 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
   Banknote, Search, RefreshCw, Plus, Zap, Globe, CheckCircle2, XCircle,
-  Clock, AlertTriangle, Timer, ChevronDown, ChevronRight, Users, ShieldCheck, AlertCircle
+  Clock, AlertTriangle, Timer, ShieldCheck, AlertCircle
 } from 'lucide-react'
 
 // ADR-0080 P1 (pentest FIND-S3-03/04): all backend access goes through same-origin BFF
@@ -228,7 +228,6 @@ function PaymentsContent() {
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'SEPA' | 'DOMESTIC'>('ALL')
 
   const [showCreate, setShowCreate] = useState<'payment-type' | 'domestic-form' | 'sepa-form' | null>(null)
-  const [createType, setCreateType] = useState<CreateType | null>(null)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [createSuccess, setCreateSuccess] = useState<string | null>(null)
@@ -266,7 +265,7 @@ function PaymentsContent() {
   const loadSct = useCallback(async () => {
     setSctLoading(true)
     try {
-      const [health, data] = await Promise.all([
+      await Promise.all([
         fetch(`${SEPA_INSTANT_API}/q/health/ready`).then(r => setSctServiceUp(r.ok)).catch(() => setSctServiceUp(false)),
         fetch(`${SEPA_INSTANT_API}/api/v1/sepa-instant`).then(r => r.json())
           .then(d => setSctPayments(Array.isArray(d) ? d : d.payments ?? []))
@@ -280,7 +279,6 @@ function PaymentsContent() {
   useEffect(() => { if (activeTab === 'sct-inst') loadSct() }, [activeTab, loadSct])
 
   const selectPaymentType = (t: CreateType) => {
-    setCreateType(t)
     setCreateError(null)
     setCreateSuccess(null)
     if (t === 'domestic-standard' || t === 'domestic-instant') {
