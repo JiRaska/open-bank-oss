@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.3](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.10.2...consent-service-v0.10.3) (2026-07-02)
+
+
+### Security
+
+* **docker-svc:** pin all Dockerfile base images to digest (Scorecard Pinned-Dependencies) ([#103](https://github.com/JiRaska/open-bank-oss/issues/103)) ([27c2dab](https://github.com/JiRaska/open-bank-oss/commit/27c2dabe6b9f9440532edf29a73c6e48e677206b))
+
 ## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.10.1...consent-service-v0.10.2) (2026-06-30)
 
 
