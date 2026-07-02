@@ -29,6 +29,10 @@ const ISSUE_PATH = process.env.OPENBAO_PKI_ISSUE_PATH ?? 'pki-agent/issue/agent-
 
 async function loginToken(): Promise<string> {
   const jwt = readFileSync(SA_TOKEN_PATH, 'utf-8').trim()
+  // The projected SA token is the intended Kubernetes-auth JWT for OpenBao's
+  // own /auth/kubernetes/login — OpenBao validates it against the K8s API via
+  // TokenReview. Not a leak — this is the designed in-cluster auth flow.
+  // codeql[js/file-access-to-http]
   const res = await fetch(`${BAO_ADDR}/v1/auth/kubernetes/login`, {
     method: 'POST',
     body: JSON.stringify({ role: BAO_ROLE, jwt }),

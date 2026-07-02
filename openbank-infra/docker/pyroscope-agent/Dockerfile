@@ -16,7 +16,7 @@
 #   openbank-infra/scripts/build-push-pyroscope-agent.sh
 
 # ── Stage 1: fetch + verify the pinned agent jar (build-time only) ────────────
-FROM alpine:3.20 AS fetch
+FROM alpine:3.24 AS fetch
 ARG PYROSCOPE_VERSION=2.5.4
 ARG PYROSCOPE_SHA256=ea53924454a65af9ecd3c683350b113c397eace7a35f2c165e129a312db2e0ad
 RUN apk add --no-cache curl \
@@ -27,7 +27,7 @@ RUN apk add --no-cache curl \
 # ── Stage 2: minimal carrier. The init container runs `cp` out of this image ──
 # busybox provides /bin/cp; the jar is arch-agnostic (async-profiler natives for
 # both linux-x86-64 and linux-arm64 are bundled and self-extract at attach time).
-FROM busybox:1.36
+FROM busybox:1.38
 COPY --from=fetch /pyroscope.jar /pyroscope.jar
 # Documented, no entrypoint needed: the init container overrides command with
 #   ["/bin/cp", "/pyroscope.jar", "/opt/pyroscope/pyroscope.jar"]

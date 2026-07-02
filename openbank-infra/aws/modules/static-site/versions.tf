@@ -6,7 +6,7 @@ terraform {
       source = "hashicorp/aws"
       # CloudFront + ACM (us-east-1) need a second, aliased AWS provider.
       # The root passes both the default (regional) and us_east_1 aliases.
-      version               = "~> 5.80"
+      version               = "~> 6.53"
       configuration_aliases = [aws.us_east_1]
     }
   }
