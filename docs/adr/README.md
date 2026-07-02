@@ -146,9 +146,9 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0141](0141-model-registry-provenance.md) | Model registry and provenance for ML decisioning | Proposed | Planned |
 | [0142](0142-credit-decisioning-engine.md) | Credit decisioning engine on the ML decisioning platform | Proposed | Planned |
 | [0143](0143-runtime-product-fee-posting-via-a-dedicated-billing-service.md) | Runtime product fee posting via a dedicated billing service | Accepted | Partial |
-| [0144](0144-gate-graduation-advisory-rules-carry-an-enforcement-deadline.md) | Gate graduation — advisory rules carry an enforcement deadline | Accepted | Planned |
+| [0144](0144-gate-graduation-advisory-rules-carry-an-enforcement-deadline.md) | Gate graduation — advisory rules carry an enforcement deadline | Accepted | Shipped |
 | [0145](0145-api-deprecation-and-sunset-policy.md) | API deprecation and sunset policy | Accepted | Planned |
-| [0146](0146-incident-response-and-security-operations-framework.md) | Incident response and security-operations framework | Accepted | Planned |
+| [0146](0146-incident-response-and-security-operations-framework.md) | Incident response and security-operations framework | Accepted | Partial |
 | [0147](0147-cross-repo-governance-delivery-status-beyond-the-monorepo.md) | Cross-repo governance — delivery status beyond the monorepo | Accepted | Planned |
 | [0148](0148-ai-assurance-prompt-registry-evals-gate-and-eu-ai-act-mapping.md) | AI assurance — prompt registry, evals gate, and EU AI Act mapping | Accepted | Planned |
 | [0149](0149-digital-accessibility-standard-wcag-2-2-aa-en-301-549.md) | Digital accessibility standard (WCAG 2.2 AA / EN 301 549) | Accepted | Planned |

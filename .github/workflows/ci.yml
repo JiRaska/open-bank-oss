@@ -326,6 +326,13 @@ jobs:
       - name: "quarkus.application.version override guard (release_invariant, enforced)"
         run: bash .github/scripts/check-app-version-override.sh .
 
+      # Gate graduation (ADR-0144): every advisory/planned rule in rules.yaml
+      # must carry a live target_enforce_date, or CI fails once that date
+      # passes — the forcing function ADR-0034 Phase 5 (money-path OPA
+      # enforce) needed and never had. ENFORCED.
+      - name: "gate graduation guard (ADR-0144, enforced)"
+        run: bash .github/scripts/check-gate-graduation.sh
+
       # openbank.outbox.dispatch-enabled guard (the CLAUDE.md "outbox footgun":
       # a service whose OutboxDispatcher actually gates on this flag silently
       # never dispatches if it's left at its false default — no error,

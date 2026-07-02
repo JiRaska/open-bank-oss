@@ -2,8 +2,17 @@
 
 Date: 2026-07-02
 Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only -->
+Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only -->
 Author(s): jiri.raska
+
+**Delivery note (2026-07-02):** `docs/bcp/incident-response.md` ships the
+policy half — severity tiers, declaration timing, the ICT register field
+list, and an honest (not fabricated) escalation section naming the
+bus-factor-1 gap directly per this ADR's own review note. **Not yet
+built:** the register itself is a documented field list, not a running
+system (no storage, no CI wiring, no admin-UI surface); the key-ceremony
+runbooks under `docs/runbooks/key-ceremonies/` referenced in section 5 are
+not yet written. Partial, not Shipped.
 
 ## Context
 
