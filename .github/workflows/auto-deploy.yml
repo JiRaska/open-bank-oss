@@ -42,11 +42,6 @@ on:
         required: false
         default: ""
 
-permissions:
-  contents: write
-  pull-requests: write
-  id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
-
 concurrency:
   # One deploy pipeline at a time — a second push while a deploy PR is open would
   # update the same gitops lines, causing a merge conflict. Cancel the in-flight run
@@ -59,6 +54,10 @@ jobs:
   changes:
     name: Detect changed services
     runs-on: openbank-build
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
     timeout-minutes: 5
     outputs:
       services: ${{ steps.detect.outputs.services }}
@@ -154,6 +153,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.any == 'true'
     runs-on: openbank-build
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
     timeout-minutes: 90
     env:
       GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"
@@ -492,6 +495,10 @@ jobs:
     needs: [changes, build-push]
     if: needs.changes.outputs.any == 'true'
     runs-on: openbank-build
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
     timeout-minutes: 10
     env:
       PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
@@ -587,6 +594,10 @@ jobs:
     needs: [changes, build-push, can-i-deploy]
     if: needs.changes.outputs.any == 'true'
     runs-on: openbank-build
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
     timeout-minutes: 10
     env:
       ECR_REGISTRY: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"

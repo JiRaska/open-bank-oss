@@ -19,14 +19,13 @@ on:
         required: true
         type: string
 
-permissions:
-  contents: write   # upload release assets
-  id-token: write   # OIDC → assume the build-runner role for KMS cosign
-
 jobs:
   backfill:
     name: Backfill ${{ inputs.tag }}
     runs-on: openbank-batch
+    permissions:
+      contents: write   # upload release assets
+      id-token: write   # OIDC → assume the build-runner role for KMS cosign
     timeout-minutes: 30
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
