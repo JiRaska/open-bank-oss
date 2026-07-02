@@ -45,6 +45,11 @@ class AgentPolicyGate {
 
     private val log = Logger.getLogger(AgentPolicyGate::class.java)
 
+    // CodeQL java/log-injection: tool/agent/reason ultimately trace back to the MCP caller
+    // (tool name) or the OPA policy response (reason text, which can echo caller input back).
+    // Strip CR/LF so an attacker can't forge additional log lines (log forging, CWE-117).
+    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+
     /**
      * Authorize a tool call. Always emits an audit event; never throws on a DENY (the caller
      * inspects [GateOutcome.proceed]). A backing-engine failure is fail-closed (DENY) inside the PDP.
@@ -67,8 +72,8 @@ class AgentPolicyGate {
                 log.warnf(
                     "agent policy BLOCK but PDP errored — falling back to ADVISORY for tool=%s; " +
                         "fix the OPA sidecar to restore enforcement. reason=%s",
-                    tool,
-                    decision.reason,
+                    tool.sanitizeForLog(),
+                    decision.reason.sanitizeForLog(),
                 )
                 true
             }
@@ -80,17 +85,17 @@ class AgentPolicyGate {
             if (!proceed) {
                 log.warnf(
                     "agent policy BLOCK: DENIED — agent=%s tool=%s reason=%s",
-                    decision.agent,
-                    tool,
-                    decision.reason,
+                    decision.agent.sanitizeForLog(),
+                    tool.sanitizeForLog(),
+                    decision.reason.sanitizeForLog(),
                 )
             } else {
                 log.infof(
                     "agent policy %s: agent=%s tool=%s decision=DENY reason=%s proceed=%s pdpError=%s",
                     mode,
-                    decision.agent,
-                    tool,
-                    decision.reason,
+                    decision.agent.sanitizeForLog(),
+                    tool.sanitizeForLog(),
+                    decision.reason.sanitizeForLog(),
                     proceed,
                     decision.pdpError,
                 )

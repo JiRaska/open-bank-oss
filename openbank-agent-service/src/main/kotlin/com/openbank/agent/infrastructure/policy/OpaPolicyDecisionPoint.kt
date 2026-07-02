@@ -29,6 +29,10 @@ class OpaPolicyDecisionPoint : PolicyDecisionPoint {
 
     private val log = Logger.getLogger(OpaPolicyDecisionPoint::class.java)
 
+    // CodeQL java/log-injection: query.tool/query.agent trace back to the MCP caller. Strip
+    // CR/LF so an attacker can't forge additional log lines (log forging, CWE-117).
+    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+
     override fun evaluate(query: PolicyQuery): PolicyDecision {
         val input = buildMap<String, Any?> {
             put("agent", query.agent)
@@ -48,7 +52,12 @@ class OpaPolicyDecisionPoint : PolicyDecisionPoint {
                 reason = result.reason ?: if (result.allow) "allowed by policy" else "denied by policy",
             )
         } catch (e: Exception) {
-            log.warnf(e, "OPA decision query failed for tool=%s agent=%s; failing closed", query.tool, query.agent)
+            log.warnf(
+                e,
+                "OPA decision query failed for tool=%s agent=%s; failing closed",
+                query.tool.sanitizeForLog(),
+                query.agent.sanitizeForLog(),
+            )
             // pdpError=true signals AgentPolicyGate that the PDP itself errored (not a policy DENY),
             // so BLOCK mode can safely fall back to advisory without being exploited by rules whose
             // reason text happens to contain "unavailable".

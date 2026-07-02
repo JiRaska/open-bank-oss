@@ -52,6 +52,12 @@ import java.time.Clock
  * %dev/%test profile (no inbound auth there), so the unit/contract tests are unaffected.
  */
 @Path("/mcp")
+// CodeQL java/log-injection: reason/attemptedAgent/method below trace back to the request
+// (an identity claim asserted by the caller). Strip CR/LF so an attacker can't forge
+// additional log lines (log forging, CWE-117). Top-level, not a class member, so it doesn't
+// count against McpEndpoint's detekt TooManyFunctions budget.
+private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE")
@@ -265,10 +271,10 @@ class McpEndpoint {
         val operator = identity.principal?.name?.takeIf { it.isNotBlank() } ?: "unknown"
         log.warnf(
             "D3: operator=%s method=%s identity rejected: %s (attempted=%s)",
-            operator,
-            method,
-            reason,
-            attemptedAgent,
+            operator.sanitizeForLog(),
+            method.sanitizeForLog(),
+            reason.sanitizeForLog(),
+            attemptedAgent.sanitizeForLog(),
         )
         val payload = buildMap<String, Any?> {
             put("method", method)
