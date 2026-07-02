@@ -22,7 +22,7 @@
 // Usage: node scripts/generate-catalog.mjs [--repo <path>] [--out <file>]
 // Defaults: repo = parent of admin-ui, out = ./catalog.json
 
-import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from 'fs'
+import { readdirSync, statSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { parse as parseYaml } from 'yaml'
@@ -84,7 +84,6 @@ const entries = readdirSync(REPO)
 const services = []
 for (const name of entries) {
   const dir = path.join(REPO, name)
-  const hasVersionTxt = existsSync(path.join(dir, 'version.txt'))
   // admin-ui's release version lives in package.json; everything else in version.txt.
   let releaseVersion = readText(path.join(dir, 'version.txt'))?.trim() || null
   if (!releaseVersion && name === 'openbank-admin-ui') {

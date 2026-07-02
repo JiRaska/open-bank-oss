@@ -79,6 +79,10 @@ async function fetchEol(product) {
   for (let attempt = 0; attempt < 4; attempt++) {
     if (attempt > 0) await sleep(400 * attempt)
     try {
+      // `product` traces back to the statically-committed component registry
+      // JSON (openbank.eolProduct), not attacker input — a fixed catalog string
+      // like "node" or "postgresql" sent to a public, read-only lookup API.
+      // codeql[js/file-access-to-http]
       const res = await fetch(`https://endoflife.date/api/${product}.json`, {
         headers: { Accept: 'application/json' },
         signal: AbortSignal.timeout(15000),

@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
   Boxes, Box, Lock, Network, Cpu, Globe, Shield, Key, CheckCircle2, CircleDashed, Circle,
-  ChevronRight, RefreshCw, Layers, FileText, BadgeCheck, AlertTriangle, Building2, Server,
+  ChevronRight, RefreshCw, FileText, BadgeCheck, AlertTriangle, Building2, Server,
 } from 'lucide-react'
 
 type Status = 'live' | 'partial' | 'planned'
