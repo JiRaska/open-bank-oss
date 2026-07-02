@@ -5,6 +5,7 @@
 package com.openbank.billing.infrastructure.rest
 
 import com.openbank.billing.application.usecase.FeeAssessmentService
+import com.openbank.libs.authz.Authorize
 import io.quarkus.security.Authenticated
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.POST
@@ -19,6 +20,12 @@ import jakarta.ws.rs.core.Response
  * an account's fee assessment for a cycle from live account/balance/catalog reads and returns it —
  * it **does not post** anything to the ledger (a dry run). The posting leg (outbox + ledger client)
  * and the four-eyes `ledger.post` authorization land in phase 2c-ii.
+ *
+ * `action = "billing.read"` (not `"billing.assess"`) is deliberate (ADR-0034 D5): naming it a
+ * `.read` verb lets it fall under the existing generic `operator-read-any` / `compliance-read-any`
+ * rest.rego rules with no new policy needed, and correctly keeps it OUT of the four-eyes gate
+ * (`rules.yaml: four_eyes.verbs` doesn't include `read`) — matching the fact that this endpoint
+ * cannot move money.
  */
 @ApplicationScoped
 @Path("/api/v1/fees")
@@ -28,6 +35,7 @@ class BillingResource(private val service: FeeAssessmentService) {
     @POST
     @Path("/assess")
     @Authenticated
+    @Authorize(action = "billing.read", resource = "#accountId")
     suspend fun assess(
         @QueryParam("cycleId") cycleId: String?,
         @QueryParam("accountId") accountId: String?,

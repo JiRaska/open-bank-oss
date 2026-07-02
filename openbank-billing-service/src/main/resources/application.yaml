@@ -56,6 +56,13 @@ quarkus:
     balance-service:
       url: ${BALANCE_SERVICE_URL:http://localhost:8103}
 
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:false}"
+
 "%test":
   quarkus:
     management:
