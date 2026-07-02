@@ -327,15 +327,14 @@ jobs:
         run: bash .github/scripts/check-app-version-override.sh .
 
       # openbank.outbox.dispatch-enabled guard (the CLAUDE.md "outbox footgun":
-      # a service with a working OutboxDispatcher class silently never dispatches
-      # if this key is left at its false default — no error, attempt_count stays 0).
-      # ADVISORY for now, not enforced: openbank-sepa-instant (money-path) still has
-      # the violation as of this check's introduction and its fix needs its own
-      # 2-approval money-path review + a human watching the deploy, not a blanket
-      # fleet fix bundled into the CI-gate PR. Flip continue-on-error to false once
-      # that fix (and any other outstanding violation this step reports) merges.
-      - name: "outbox dispatch-enabled guard (footgun check, advisory)"
-        continue-on-error: true
+      # a service whose OutboxDispatcher actually gates on this flag silently
+      # never dispatches if it's left at its false default — no error,
+      # attempt_count stays 0). Scoped to dispatchers that reference the flag
+      # at all; openbank-sepa-instant and openbank-security-scanner ship an
+      # older unconditional @Scheduled dispatcher that never reads it and are
+      # correctly out of scope, not exempted violations. 0 violations on
+      # origin/main at introduction — this is a regression guard. ENFORCED.
+      - name: "outbox dispatch-enabled guard (footgun check, enforced)"
         run: bash .github/scripts/check-outbox-dispatch-enabled.sh .
 
       # ADR-0106 identifier intent split (#1699): new code mints identifiers via

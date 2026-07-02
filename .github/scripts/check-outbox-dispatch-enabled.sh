@@ -1,27 +1,36 @@
 #!/usr/bin/env bash
-# Guard: a service that ships an OutboxDispatcher class must explicitly set
-# openbank.outbox.dispatch-enabled: true in application.yaml.
+# Guard: a service whose *OutboxDispatcher class actually GATES dispatch on
+# openbank.outbox.dispatch-enabled must set it to true in application.yaml.
 #
-# openbank.outbox.dispatch-enabled defaults to false in the shared outbox
-# relay (openbank-libs). A service can have a fully working outbox entity,
-# a working *OutboxDispatcher class, and correct tests — and still never
-# actually publish an event in a real deployment, silently, with no error
-# and attempt_count stuck at 0, because nobody added one line to
-# application.yaml. This footgun is documented in CLAUDE.md but was, until
-# this script, purely tribal knowledge: nothing caught it. Confirmed live
-# on origin/main at the time this script was written: openbank-sepa-instant
-# (money-path), openbank-psd2-service, and openbank-security-scanner all
-# have a dispatcher class and no dispatch-enabled key.
+# openbank.outbox.dispatch-enabled defaults to false in the shared dispatch
+# pattern (a dispatcher extending AbstractOutboxDispatcher, reading the flag
+# via @ConfigProperty). A service using that pattern can have a fully working
+# outbox entity and correct tests — and still never actually publish an event
+# in a real deployment, silently, with no error and attempt_count stuck at 0,
+# because nobody added one line to application.yaml. This footgun is
+# documented in CLAUDE.md but was, until this script, purely tribal
+# knowledge: nothing caught it.
+#
+# NOT every dispatcher uses the gated pattern: openbank-sepa-instant and
+# openbank-security-scanner ship a hand-rolled @Scheduled dispatcher that
+# runs unconditionally and never reads the flag at all — for them, a
+# missing/false config key is a no-op, not a bug, and flagging it would be a
+# false positive (confirmed by reading both classes directly, not just their
+# application.yaml). So this script only checks a service whose dispatcher
+# source references the config property in the first place; the two
+# unconditional dispatchers above are correctly out of scope, not "skipped
+# because non-compliant."
 #
 # Scope: any RELEASED component (sibling version.txt present, same scoping rule
 # as check-app-version-override.sh) that has at least one *OutboxDispatcher.kt
-# under src/main/kotlin. A module without a dispatcher class has nothing to
-# guard; a module without version.txt (e.g. openbank-libs-runtime, a shared
-# library consumed via Gradle project dependency, never independently deployed)
-# has no application.yaml of its own and is skipped, not flagged.
+# under src/main/kotlin REFERENCING dispatch-enabled/dispatchEnabled/
+# AbstractOutboxDispatcher. A module without such a dispatcher (no gated
+# outbox, or no outbox at all) has nothing to guard and is skipped.
 #
 # stdlib-only (awk); no PyYAML/yamllint dependency, matching
-# check-app-version-override.sh. ENFORCED.
+# check-app-version-override.sh. ENFORCED — as of this script's introduction,
+# every in-scope service already sets dispatch-enabled: true (0 violations on
+# origin/main), so this is a regression guard, not a fleet-sweep-in-waiting.
 # Usage: check-outbox-dispatch-enabled.sh [root]   (default root: .)
 set -euo pipefail
 root="${1:-.}"
@@ -33,10 +42,14 @@ while IFS= read -r moddir; do
   if [ ! -f "$moddir/version.txt" ]; then
     skipped=$((skipped + 1)); continue
   fi
+  disp=$(find "$moddir/src/main/kotlin" -iname '*OutboxDispatcher.kt' -not -path '*/build/*' 2>/dev/null | head -1)
+  if [ -z "$disp" ] || ! grep -qE 'dispatch-enabled|dispatchEnabled|AbstractOutboxDispatcher' "$disp"; then
+    skipped=$((skipped + 1)); continue
+  fi
   yml="$moddir/src/main/resources/application.yaml"
   if [ ! -f "$yml" ]; then
     fail=1
-    echo "::error file=$moddir::is a released component with an OutboxDispatcher but no src/main/resources/application.yaml — cannot verify dispatch-enabled."
+    echo "::error file=$moddir::has a dispatch-gated OutboxDispatcher ($(basename "$disp")) but no src/main/resources/application.yaml — cannot verify dispatch-enabled."
     continue
   fi
   checked=$((checked + 1))
@@ -56,8 +69,7 @@ while IFS= read -r moddir; do
 
   if [ "$value" != "true" ] && [ "$value" != "\"true\"" ]; then
     fail=1
-    disp=$(find "$moddir/src/main/kotlin" -iname '*OutboxDispatcher.kt' | head -1)
-    echo "::error file=$yml::$moddir has $(basename "$disp") but openbank.outbox.dispatch-enabled is '$value', not true — this service will never dispatch outbox events at runtime (no error, attempt_count stays 0). Set 'openbank: outbox: dispatch-enabled: true' in application.yaml."
+    echo "::error file=$yml::$moddir has a dispatch-gated $(basename "$disp") but openbank.outbox.dispatch-enabled is '$value', not true — this service will never dispatch outbox events at runtime (no error, attempt_count stays 0). Set 'openbank: outbox: dispatch-enabled: true' in application.yaml."
   fi
 done < <(
   find "$root" -maxdepth 1 -type d -name 'openbank-*' -not -path '*/.claude/*' \
@@ -67,5 +79,5 @@ done < <(
     | sort
 )
 
-echo "check-outbox-dispatch-enabled: $checked service(s) with an OutboxDispatcher checked, $skipped skipped, $( [ "$fail" -eq 0 ] && echo "all set dispatch-enabled: true." || echo "VIOLATIONS above." )"
+echo "check-outbox-dispatch-enabled: $checked dispatch-gated service(s) checked, $skipped skipped (no gated dispatcher), $( [ "$fail" -eq 0 ] && echo "all set dispatch-enabled: true." || echo "VIOLATIONS above." )"
 exit "$fail"

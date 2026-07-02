@@ -73,7 +73,6 @@ openbank:
   outbox:
     poll-interval: 5s
     initial-delay: 5s
-    dispatch-enabled: true
   security-scanner:
     scan-interval-minutes: 30
     # URLs use full Kubernetes in-cluster DNS (<name>.<namespace>.svc:<port>)
