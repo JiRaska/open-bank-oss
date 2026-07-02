@@ -29,7 +29,9 @@ jobs:
   # dependency-affecting file changed; schedule/manual always run (audit posture).
   detect-deps:
     name: Detect dependency changes
-    runs-on: openbank-batch
+    # Pure checkout + git diff, no self-hosted-specific tooling. The repo is public, so
+    # GitHub-hosted minutes are free/unlimited — offload this off the Hetzner/ARC pool.
+    runs-on: ubuntu-latest
     outputs:
       run_sbom: ${{ steps.f.outputs.run_sbom }}
     steps:
@@ -75,8 +77,19 @@ jobs:
     # cover vulnerable-dependency detection. (Aside: the CodeQL CLI also does not
     # support linux/arm64, so it could not run on the arm64 sandbox runner anyway.)
     if: github.event.repository.private == false
-    runs-on: openbank-batch
+    # Standard github/codeql-action usage targets ubuntu-latest; no self-hosted-specific
+    # dependency here (setup-java/setup-node are already used to work around the Hetzner
+    # pool lacking those toolchains). Public repo = free GitHub-hosted minutes.
+    runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The java-kotlin leg's autobuild shells out to its own `./gradlew testClasses`
+    # (whole-fleet dependency resolution, ~30 modules + quarkus-bom) without picking up
+    # any GRADLE_OPTS we'd set in a step — it needs the env var at the job level. Without
+    # this, Gradle's auto-detected 3 GiB default heap OOMs on that resolution (first seen
+    # moving this job off the 16 GB Hetzner host to ubuntu-latest). Same fix pattern as
+    # fleet-lint.yml's GRADLE_OPTS.
+    env:
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
     strategy:
       fail-fast: false
       matrix:
@@ -180,7 +193,8 @@ jobs:
   # ---------------------------------------------------------------------------
   sbom:
     name: SBOM (repo-wide)
-    runs-on: openbank-batch
+    # anchore/sbom-action is a container action with no self-hosted-pool dependency.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     # Runs on schedule/manual, and on main pushes only when dependencies changed
     # (see detect-deps). Never on PRs. The authoritative, signed, release-attached

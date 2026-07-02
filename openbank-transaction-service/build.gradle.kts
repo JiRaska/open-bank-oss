@@ -41,7 +41,8 @@ dependencies {
     // ADR-0120 Phase 1: Temporal-backed payment orchestration (flag-gated, default off). Inline
     // version matching openbank-settlement-service so enabling it stays path-scoped to this service.
     implementation("io.temporal:temporal-sdk:1.25.1")
-    implementation(project(":openbank-libs"))
+    implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-runtime"))
 
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)

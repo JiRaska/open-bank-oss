@@ -23,11 +23,10 @@
 # token-gated: until the SCORECARD_TOKEN secret exists, the analysis is SKIPPED (the
 # job stays green with a notice) — it auto-activates once the secret is added.
 #
-# Runs on the self-hosted pool, pinned to Linux x86. GitHub-hosted runners
-# (ubuntu-latest) are blocked by the Actions-minutes budget on this repo — which is
-# the whole point of the Hetzner/ARC fleet (ADR-0040 / ADR-0053). The scorecard
-# binary is linux/amd64 and the `openbank-build` label also spans the Mac ARM host,
-# so runs-on pins `Linux` + `X64` to land on a Hetzner/ARC x86 runner, never the Mac.
+# Runs on ubuntu-latest: the repo went public, so GitHub-hosted Actions minutes are
+# free/unlimited — the Actions-minutes-budget constraint that used to pin this to the
+# Hetzner/ARC x86 pool (ADR-0040 / ADR-0053) no longer applies. ubuntu-latest is also
+# linux/amd64, matching what the scorecard binary needs.
 # -----------------------------------------------------------------------------
 name: OpenSSF Scorecard
 
@@ -51,7 +50,7 @@ concurrency:
 jobs:
   analysis:
     name: scorecard
-    runs-on: [openbank-build, Linux, X64]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read

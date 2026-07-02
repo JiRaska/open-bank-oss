@@ -32,7 +32,8 @@ concurrency:
 jobs:
   verify:
     name: build + verify bundle, check ConfigMap sync
-    runs-on: openbank-build
+    # Installs OPA to $HOME/bin itself (no sudo needed) — no self-hosted-pool dependency.
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
