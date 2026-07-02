@@ -7,10 +7,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { CreditCard, ArrowLeftRight, Users, Activity, TrendingUp, TrendingDown,
-  ShieldCheck, AlertTriangle, CheckCircle2, XCircle, RefreshCw, Zap,
-  DollarSign, Globe, Lock, BarChart3, Clock, Server, HardDrive } from 'lucide-react'
+  ShieldCheck, AlertTriangle, RefreshCw, Zap,
+  DollarSign, Globe, BarChart3, Clock, Server, HardDrive } from 'lucide-react'
 import Link from 'next/link'
-import { useAuth } from '@/lib/auth/useAuth'
 
 // Tri-state per fleet member. `deployed=false` is NEUTRAL (planned, not an outage) —
 // it must never be counted as an error, or the 23 not-yet-deployed services in the
@@ -39,7 +38,6 @@ const GROUP_COLORS: Record<string, string> = {
 }
 
 export default function DashboardPage() {
-  const { user, roles } = useAuth()
   const { t } = useLanguage()
   const [statuses, setStatuses] = useState<SvcStatus[]>([])
   const [loading, setLoading] = useState(true)

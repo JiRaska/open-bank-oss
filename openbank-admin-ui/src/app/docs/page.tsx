@@ -4,7 +4,7 @@
 
 'use client'
 import Link from 'next/link'
-import { Map, GitBranch, BookOpen, Network, FileCode, Shield, ShieldAlert, Cloud, ScrollText, ShieldCheck, LayoutGrid, Smartphone, Bluetooth, Fingerprint } from 'lucide-react'
+import { GitBranch, BookOpen, Network, FileCode, Shield, ShieldAlert, Cloud, ScrollText, ShieldCheck, LayoutGrid, Smartphone, Bluetooth, Fingerprint } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 // Each section's title/desc is a [cs, en] tuple, spread into t(...) at render.

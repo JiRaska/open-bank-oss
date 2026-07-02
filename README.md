@@ -6,6 +6,10 @@
 [![AI agents: AGPL-3.0 + commercial](https://img.shields.io/badge/AI_agents-AGPL--3.0--only_%2B_commercial-blue.svg)](docs/adr/0136-agent-services-agpl-in-repo-open-core.md)
 [![Status: Beta](https://img.shields.io/badge/Status-Beta-blue.svg)](#project-status)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-blue.svg)](CONTRIBUTING.md)
+[![Website](https://img.shields.io/badge/Website-open--bank.tech-1f6feb.svg)](https://open-bank.tech/)
+[![Admin Portal](https://img.shields.io/badge/Admin_Portal-admin.open--bank.tech-1f6feb.svg)](https://admin.open-bank.tech/)
+
+**🌐 [open-bank.tech](https://open-bank.tech/)** — project site & live sandbox · **🖥️ [admin.open-bank.tech](https://admin.open-bank.tech/)** — operator backoffice (Keycloak auth)
 
 OpenBank is an **early-stage, community-driven** banking platform reference implementation. It demonstrates how a modern retail bank can be built with domain-driven design, hexagonal microservices, double-entry ledger accounting, PSD2 compliance, machine-enforced governance, and end-to-end observability.
 
