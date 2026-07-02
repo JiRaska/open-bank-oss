@@ -190,8 +190,10 @@ async function loadSbom(name: string): Promise<{ raw: string; parsed: CycloneDxS
   ]
   for (const file of candidates) {
     try {
-      const stat = await fs.stat(file)
-      if (!stat.isFile()) continue
+      // Read directly rather than stat-then-read: a separate existence/type
+      // check followed by a read is a TOCTOU race (the path could be replaced
+      // between the two calls). readFile fails the same way on ENOENT/EISDIR,
+      // so the fallback-to-next-candidate behavior is unchanged.
       const raw = await fs.readFile(file, 'utf-8')
       return { raw, parsed: JSON.parse(raw) as CycloneDxSbom }
     } catch {

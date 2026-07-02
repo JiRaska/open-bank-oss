@@ -96,7 +96,7 @@ class VaultCryptoErasureIT {
 
     @Test
     fun `erase destroys a real Transit key and a repeat is an idempotent no-op`() = runBlocking<Unit> {
-        // Enable the Transit secrets engine (mirrors docker/vault/init/init.sh).
+        // Enable the Transit secrets engine (mirrors docker/openbao/init/init.sh).
         assertThat(vault("POST", "sys/mounts/transit", """{"type":"transit"}""").statusCode()).isIn(200, 204)
 
         val key = AggregateKey("PARTY", "party-erase-me")

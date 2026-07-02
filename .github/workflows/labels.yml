@@ -28,14 +28,10 @@ concurrency:
 jobs:
   sync:
     name: Sync labels
-    # Sandbox maintenance pool, same as the scans (ADR-0027 phase 0 / ADR-0040). This job
-    # deliberately depends on only ONE host binary — `curl` — which is present on every host
-    # in the pool. The earlier `gh`-based design was abandoned: `gh` is NOT uniformly
-    # available across the heterogeneous (darwin/linux x amd64/arm64) self-hosted fleet — it
-    # is absent on the Linux sandbox hosts and, on the macOS hosts, lives on a Homebrew PATH
-    # the runner service does not expose. So we talk to the GitHub REST API directly with
-    # `curl` and parse the manifest with a version-pinned `yq` fetched into RUNNER_TEMP.
-    runs-on: openbank-batch
+    # Only depends on `curl` (present everywhere, incl. ubuntu-latest) and a version-pinned
+    # `yq` fetched into RUNNER_TEMP — no self-hosted-pool-specific tooling. Public repo =
+    # free GitHub-hosted minutes, so this comes off the Hetzner/ARC pool.
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Checkout

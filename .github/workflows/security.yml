@@ -29,7 +29,9 @@ jobs:
   # dependency-affecting file changed; schedule/manual always run (audit posture).
   detect-deps:
     name: Detect dependency changes
-    runs-on: openbank-batch
+    # Pure checkout + git diff, no self-hosted-specific tooling. The repo is public, so
+    # GitHub-hosted minutes are free/unlimited — offload this off the Hetzner/ARC pool.
+    runs-on: ubuntu-latest
     outputs:
       run_sbom: ${{ steps.f.outputs.run_sbom }}
     steps:
@@ -75,12 +77,27 @@ jobs:
     # cover vulnerable-dependency detection. (Aside: the CodeQL CLI also does not
     # support linux/arm64, so it could not run on the arm64 sandbox runner anyway.)
     if: github.event.repository.private == false
-    runs-on: openbank-batch
+    # Standard github/codeql-action usage targets ubuntu-latest; no self-hosted-specific
+    # dependency here (setup-java/setup-node are already used to work around the Hetzner
+    # pool lacking those toolchains). Public repo = free GitHub-hosted minutes.
+    runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The java-kotlin leg's autobuild shells out to its own `./gradlew testClasses`
+    # (whole-fleet dependency resolution, ~30 modules + quarkus-bom) without picking up
+    # any GRADLE_OPTS we'd set in a step — it needs the env var at the job level. Without
+    # this, Gradle's auto-detected 3 GiB default heap OOMs on that resolution (first seen
+    # moving this job off the 16 GB Hetzner host to ubuntu-latest). Same fix pattern as
+    # fleet-lint.yml's GRADLE_OPTS.
+    env:
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
     strategy:
       fail-fast: false
       matrix:
-        language: [java-kotlin, javascript-typescript]
+        include:
+          - language: java-kotlin
+            build-mode: autobuild
+          - language: javascript-typescript
+            build-mode: none
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-java@1bcf9fb12cf4aa7d266a90ae39939e61372fe520 # v5
@@ -89,12 +106,30 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      # The javascript-typescript extractor needs Node.js on PATH even in
+      # build-mode: none — it shells out to autobuild.sh internally to verify a
+      # Node install before parsing .ts files for type info. Our self-hosted
+      # Hetzner runners have no system Node, so this step was missing and every
+      # javascript-typescript run failed with "TypeScriptParser.verifyNodeInstallation
+      # ... Exit status 1" regardless of build-mode.
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        if: matrix.language == 'javascript-typescript'
+        with:
+          node-version: "20"
+
       - uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
         with:
           languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
           queries: security-extended,security-and-quality
 
+      # JS/TS needs no build step (build-mode: none — source-only extraction);
+      # autobuild is only meaningful for the compiled java-kotlin matrix leg.
+      # Running it unconditionally for JS/TS caused intermittent
+      # "unsuccessful execution, exit code: 0" SARIF upload failures when
+      # autobuild's heuristic misdetected/mis-ran the admin-ui build.
       - uses: github/codeql-action/autobuild@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        if: matrix.build-mode == 'autobuild'
 
       - uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
         with:
@@ -133,19 +168,33 @@ jobs:
       # it can only run once the repo is public — same gate as the CodeQL job. The
       # fs/config scans above already gate the job; this step is purely for the
       # code-scanning UI, so skipping it while private loses no enforcement.
-      - name: Upload Trivy SARIF
+      #
+      # Two separate uploads, one per file: `sarif_file: .` picked up BOTH
+      # trivy-fs.sarif and trivy-config.sarif under the single category "trivy",
+      # which GitHub's SARIF ingestion now rejects outright ("does not support
+      # uploading multiple SARIF runs with the same category" — every run since
+      # this repo went public failed here). Distinct categories per file fixes it.
+      - name: Upload Trivy fs SARIF
         if: always() && github.event.repository.private == false
         uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
         with:
-          sarif_file: .
-          category: trivy
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+      - name: Upload Trivy config SARIF
+        if: always() && github.event.repository.private == false
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        with:
+          sarif_file: trivy-config.sarif
+          category: trivy-config
 
   # ---------------------------------------------------------------------------
   # SBOM (CycloneDX) — repo-wide via Syft (filesystem scan)
   # ---------------------------------------------------------------------------
   sbom:
     name: SBOM (repo-wide)
-    runs-on: openbank-batch
+    # anchore/sbom-action is a container action with no self-hosted-pool dependency.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     # Runs on schedule/manual, and on main pushes only when dependencies changed
     # (see detect-deps). Never on PRs. The authoritative, signed, release-attached
