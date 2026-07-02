@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.4](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.8.3...psd2-service-v0.8.4) (2026-07-02)
+
+
+### Security
+
+* **docker-svc:** pin all Dockerfile base images to digest (Scorecard Pinned-Dependencies) ([#103](https://github.com/JiRaska/open-bank-oss/issues/103)) ([27c2dab](https://github.com/JiRaska/open-bank-oss/commit/27c2dabe6b9f9440532edf29a73c6e48e677206b))
+* **psd2:** sanitize request-derived values before logging (CodeQL java/log-injection) ([#108](https://github.com/JiRaska/open-bank-oss/issues/108)) ([71e6211](https://github.com/JiRaska/open-bank-oss/commit/71e6211d37f5823285aba0c1235fd703a9f9fdb4))
+
 ## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.8.2...psd2-service-v0.8.3) (2026-06-30)
 
 
