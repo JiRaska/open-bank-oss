@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.12.1...notification-service-v0.12.2) (2026-07-02)
+
+
+### Security
+
+* **docker-svc:** pin all Dockerfile base images to digest (Scorecard Pinned-Dependencies) ([#103](https://github.com/JiRaska/open-bank-oss/issues/103)) ([27c2dab](https://github.com/JiRaska/open-bank-oss/commit/27c2dabe6b9f9440532edf29a73c6e48e677206b))
+* **notification:** clarify DER-parsing operator precedence with explicit parens ([#107](https://github.com/JiRaska/open-bank-oss/issues/107)) ([e5f9cf2](https://github.com/JiRaska/open-bank-oss/commit/e5f9cf27b774f1bf726ba8d938612903c9ce1f71))
+
 ## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.12.0...notification-service-v0.12.1) (2026-06-30)
 
 
