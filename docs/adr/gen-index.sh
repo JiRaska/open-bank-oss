@@ -51,6 +51,36 @@ OUT=README.md
     decision_short=$(echo "$decision" | sed -E 's/ *\(.*$//; s/ on [0-9].*$//' | cut -c1-40)
     printf '| [%s](%s) | %s | %s | %s |\n' "$num" "$f" "$h1" "$decision_short" "$delivery"
   done
+
+  # Numbering gaps: computed from the actual file list, not hand-typed, so this
+  # note can't rot into a stale claim if a gap is ever filled or a new one opens.
+  numbers=$(ls [0-9]*.md | sed -E 's/-.*//' | sort -n)
+  gaps=""
+  prev=""
+  for n in $numbers; do
+    n10=$((10#$n))
+    if [ -n "$prev" ] && [ "$n10" -gt "$((prev + 1))" ]; then
+      g=$((prev + 1))
+      while [ "$g" -lt "$n10" ]; do
+        gaps="$gaps $(printf '%04d' "$g")"
+        g=$((g + 1))
+      done
+    fi
+    prev=$n10
+  done
+  if [ -n "$gaps" ]; then
+    echo
+    echo "---"
+    echo
+    echo "**Numbering gaps:**$gaps do not correspond to a file in this repo's history —"
+    echo "confirmed by \`git log --diff-filter=A\` across all branches, not just an absent"
+    echo "current file. One of them, ADR-0132, is named in a 2026-06 commit message"
+    echo "(\"fix(customer-edge): add per-party rate-limit config key (ADR-0132)\") with no"
+    echo "corresponding merged ADR file, which does not by itself explain the other five."
+    echo "No decision record in this repo accounts for the gap; treat it as an open"
+    echo "question for whoever holds the pre-public-launch history, not a deliberate"
+    echo "reservation."
+  fi
 } > "$OUT"
 
 echo "Wrote $OUT ($(grep -c '^| \[' "$OUT") ADRs indexed)."
