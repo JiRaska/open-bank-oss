@@ -99,8 +99,14 @@ data "aws_ami" "fck_nat" {
   owners      = ["568608671756"] # fck-nat publisher account
 
   filter {
+    # Publisher's naming convention now inserts hvm-<fck-nat version>-<build date>
+    # between "al2023" and "arm64" (e.g. fck-nat-al2023-hvm-1.4.0-20260701-arm64-ebs).
+    # The old "fck-nat-al2023-arm64-*" pattern stopped matching anything, which
+    # broke every tofu plan/apply for this module ("query returned no results").
+    # This pattern is deliberately anchored right after "al2023" so it does NOT
+    # also match the "fck-nat-nat64-al2023-hvm-*" NAT64 variant.
     name   = "name"
-    values = ["fck-nat-al2023-arm64-*"]
+    values = ["fck-nat-al2023-hvm-*-arm64-*"]
   }
 
   filter {
@@ -140,9 +146,11 @@ resource "aws_security_group" "fck_nat" {
 }
 
 resource "aws_instance" "fck_nat" {
-  count         = var.egress_mode == "fck_nat" ? 1 : 0
-  ami           = data.aws_ami.fck_nat[0].id
-  instance_type = "t4g.nano"
+  count = var.egress_mode == "fck_nat" ? 1 : 0
+  ami   = data.aws_ami.fck_nat[0].id
+  # t4g.nano/micro hit InsufficientInstanceCapacity in eu-north-1a; t4g.small
+  # is reliably available and still comfortably sized for NAT-instance traffic.
+  instance_type = "t4g.small"
 
   subnet_id = aws_subnet.public[0].id
   # tfsec/infracost EC2.9/EC2.25: public IP is intentional — this IS the NAT.
