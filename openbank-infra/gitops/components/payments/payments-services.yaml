@@ -99,6 +99,11 @@ spec:
                 secretKeyRef:
                   name: transaction-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # OPA sidecar is deployed (ADR-0034). AUTHZ_ENFORCE=true enables the
+            # money-path enforcement fleet rollout (Phase 5) — deployed behind the
+            # existing canary Rollout, which aborts automatically on elevated error rate.
+            - name: AUTHZ_ENFORCE
+              value: "true"
             # ADR-0137 image-independent convergence: load the scheme-accepted
             # group.id / DLQ-topic override (transaction-service-msg-override
             # ConfigMap, mounted below) as an external Quarkus config source so
@@ -349,6 +354,11 @@ spec:
                 secretKeyRef:
                   name: sepa-payment-oidc
                   key: OIDC_CLIENT_SECRET
+            # OPA sidecar is deployed (ADR-0034). AUTHZ_ENFORCE=true enables the
+            # money-path enforcement fleet rollout (Phase 5) — deployed behind the
+            # existing canary Rollout, which aborts automatically on elevated error rate.
+            - name: AUTHZ_ENFORCE
+              value: "true"
             # createPayment dedupes on the Idempotency-Key header via Redis (in-namespace, see
             # redis.yaml) and screens via sanctions/aml — all defaulted to localhost, so the REST
             # path 500'd. Wire them to the in-cluster services (mirrors domestic-payment below).
@@ -594,6 +604,11 @@ spec:
                 secretKeyRef:
                   name: domestic-payment-oidc
                   key: OIDC_CLIENT_SECRET
+            # OPA sidecar is deployed (ADR-0034). AUTHZ_ENFORCE=true enables the
+            # money-path enforcement fleet rollout (Phase 5) — deployed behind the
+            # existing canary Rollout, which aborts automatically on elevated error rate.
+            - name: AUTHZ_ENFORCE
+              value: "true"
             # createPayment dedupes on the Idempotency-Key header via Redis (in-namespace, see
             # redis.yaml) and screens via sanctions/aml — all defaulted to localhost, so the REST
             # path 500'd / held in RECEIVED. Wire them to the in-cluster services.
@@ -823,6 +838,11 @@ spec:
                 secretKeyRef:
                   name: sepa-instant-oidc
                   key: OIDC_CLIENT_SECRET
+            # OPA sidecar is deployed (ADR-0034). AUTHZ_ENFORCE=true enables the
+            # money-path enforcement fleet rollout (Phase 5) — deployed behind the
+            # existing canary Rollout, which aborts automatically on elevated error rate.
+            - name: AUTHZ_ENFORCE
+              value: "true"
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -1037,6 +1057,11 @@ spec:
                 secretKeyRef:
                   name: clearing-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # OPA sidecar is deployed (ADR-0034). AUTHZ_ENFORCE=true enables the
+            # money-path enforcement fleet rollout (Phase 5) — deployed behind the
+            # existing canary Rollout, which aborts automatically on elevated error rate.
+            - name: AUTHZ_ENFORCE
+              value: "true"
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -1778,6 +1803,11 @@ spec:
                 secretKeyRef:
                   name: swift-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # OPA sidecar is deployed (ADR-0034). AUTHZ_ENFORCE=true enables the
+            # money-path enforcement fleet rollout (Phase 5) — deployed behind the
+            # existing canary Rollout, which aborts automatically on elevated error rate.
+            - name: AUTHZ_ENFORCE
+              value: "true"
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
