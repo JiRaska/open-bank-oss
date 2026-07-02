@@ -55,10 +55,10 @@ internal object PushCrypto {
     internal fun derToP1363(der: ByteArray, partLen: Int): ByteArray {
         // SEQUENCE
         var offset = 0
-        require(der[offset++].toInt() and 0xff == 0x30) { "Invalid DER: not a SEQUENCE" }
+        require((der[offset++].toInt() and 0xff) == 0x30) { "Invalid DER: not a SEQUENCE" }
         // length (skip; may be short or long form)
         var len = der[offset++].toInt() and 0xff
-        if (len and 0x80 != 0) {
+        if ((len and 0x80) != 0) {
             val numBytes = len and 0x7f
             len = 0
             repeat(numBytes) { len = (len shl 8) or (der[offset++].toInt() and 0xff) }
@@ -73,7 +73,7 @@ internal object PushCrypto {
 
     private fun readDerInteger(der: ByteArray, start: Int): Pair<ByteArray, Int> {
         var offset = start
-        require(der[offset++].toInt() and 0xff == 0x02) { "Invalid DER: not an INTEGER" }
+        require((der[offset++].toInt() and 0xff) == 0x02) { "Invalid DER: not an INTEGER" }
         val length = der[offset++].toInt() and 0xff
         val value = der.copyOfRange(offset, offset + length)
         return value to (offset + length)
