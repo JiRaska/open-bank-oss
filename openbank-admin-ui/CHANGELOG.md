@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.39.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.39.0...admin-ui-v0.39.1) (2026-07-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** pin postcss to 8.5.16 via npm overrides (CVE-2026-41305) ([#45](https://github.com/JiRaska/open-bank-oss/issues/45)) ([ae96248](https://github.com/JiRaska/open-bank-oss/commit/ae96248f07c087b1e81cb091aeb3129de249dc04))
+* **admin-ui:** resolve all 32 open CodeQL findings ([#81](https://github.com/JiRaska/open-bank-oss/issues/81)) ([171790e](https://github.com/JiRaska/open-bank-oss/commit/171790e2ebb8bf7610adda864b410ac6630bf8a4))
+
 ## [0.39.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.38.1...admin-ui-v0.39.0) (2026-06-30)
 
 
