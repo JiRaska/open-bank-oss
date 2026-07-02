@@ -140,7 +140,7 @@ jobs:
           OPENBANK_REPO_ROOT: "${{ github.workspace }}"
 
       - name: Upload Playwright report
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
           name: playwright-report
@@ -250,10 +250,10 @@ jobs:
       # (pip/pip3 not in PATH). Fall back to checking if pyyaml is already present.
       - name: gen-network-policies drift gate (ADR-0081, issue #854)
         run: |
-          python3 -m pip install --quiet pyyaml --break-system-packages 2>/dev/null \
-            || python3 -m pip install --quiet pyyaml 2>/dev/null \
-            || pip3 install --quiet pyyaml --break-system-packages 2>/dev/null \
-            || pip3 install --quiet pyyaml 2>/dev/null \
+          python3 -m pip install --quiet "pyyaml==6.0.2" --break-system-packages 2>/dev/null \
+            || python3 -m pip install --quiet "pyyaml==6.0.2" 2>/dev/null \
+            || pip3 install --quiet "pyyaml==6.0.2" --break-system-packages 2>/dev/null \
+            || pip3 install --quiet "pyyaml==6.0.2" 2>/dev/null \
             || python3 -c "import yaml" 2>/dev/null \
             || { echo "::error::pyyaml unavailable — add it to the runner base image"; exit 1; }
           python3 openbank-infra/scripts/gen-network-policies.py

@@ -374,7 +374,9 @@ jobs:
           if command -v trivy >/dev/null 2>&1; then
             echo "Using pre-baked trivy: $(trivy --version 2>/dev/null | head -1)"; exit 0
           fi
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+          # Pinned to the v0.63.0 tag (not `main`) so the installer script itself is
+          # immutable, matching the trivy version it installs.
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/v0.63.0/contrib/install.sh \
             | sh -s -- -b /usr/local/bin v0.63.0
 
       - name: Prune Docker build cache before scan
