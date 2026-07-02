@@ -38,6 +38,11 @@ class SensitiveReloadService {
 
     private val log = Logger.getLogger(SensitiveReloadService::class.java)
 
+    // CodeQL java/log-injection: source/requestedBy/reason/checker are operator-supplied
+    // strings that flow straight into log lines below. Strip CR/LF so an attacker (or a
+    // careless operator) can't forge additional audit-trail log lines (log forging, CWE-117).
+    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+
     suspend fun propose(request: BackfillRequest): Proposal<BackfillRequest> {
         val proposal = Proposal(
             id = UUID.randomUUID().toString(),
@@ -49,9 +54,9 @@ class SensitiveReloadService {
         log.infof(
             "reload proposed id=%s source=%s by=%s reason=%s",
             proposal.id,
-            request.source,
-            request.requestedBy,
-            request.reason,
+            request.source, // IngestSource enum — fixed values, no sanitization needed
+            request.requestedBy.sanitizeForLog(),
+            request.reason.sanitizeForLog(),
         )
         return proposal
     }
@@ -60,14 +65,19 @@ class SensitiveReloadService {
         val proposal = require(id)
         val approved = proposal.approve(checker, Instant.now(clock), reason)
         store.save(approved)
-        log.infof("reload approved id=%s by=%s (proposer=%s)", id, checker, proposal.proposedBy)
+        log.infof(
+            "reload approved id=%s by=%s (proposer=%s)",
+            id.sanitizeForLog(),
+            checker.sanitizeForLog(),
+            proposal.proposedBy.sanitizeForLog(),
+        )
         return approved
     }
 
     suspend fun reject(id: String, checker: String, reason: String?): Proposal<BackfillRequest> {
         val rejected = require(id).reject(checker, Instant.now(clock), reason)
         store.save(rejected)
-        log.infof("reload rejected id=%s by=%s", id, checker)
+        log.infof("reload rejected id=%s by=%s", id.sanitizeForLog(), checker.sanitizeForLog())
         return rejected
     }
 
@@ -81,7 +91,12 @@ class SensitiveReloadService {
         val executing = proposal.markExecuted(Instant.now(clock))
         val report = backfill.run(proposal.action)
         store.save(executing)
-        log.infof("reload executed id=%s batchId=%s ingested=%d", id, report.batchId, report.ingested)
+        log.infof(
+            "reload executed id=%s batchId=%s ingested=%d",
+            id.sanitizeForLog(),
+            report.batchId.sanitizeForLog(),
+            report.ingested,
+        )
         return report
     }
 
