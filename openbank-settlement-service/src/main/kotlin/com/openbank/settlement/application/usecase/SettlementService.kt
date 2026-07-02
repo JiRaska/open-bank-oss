@@ -48,6 +48,10 @@ class SettlementService(
 
     private val log = Logger.getLogger(SettlementService::class.java)
 
+    // CodeQL java/log-injection: idempotencyKey is caller-supplied and flows straight into the
+    // log line below. Strip CR/LF so an attacker can't forge additional log lines (CWE-117).
+    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+
     override suspend fun originate(command: OriginateSettlementCommand): Settlement {
         // Idempotency: derive the settlement id deterministically from the caller's key, so a
         // retried request resolves to the same row (the UUID primary key is the hard duplicate
@@ -90,7 +94,7 @@ class SettlementService(
             settlementRepository.findById(id)?.also {
                 log.infof(
                     "Concurrent create for idempotencyKey '%s' (%s); using the winner's row",
-                    command.idempotencyKey,
+                    command.idempotencyKey.sanitizeForLog(),
                     id,
                 )
             } ?: throw ex
