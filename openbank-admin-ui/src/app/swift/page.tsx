@@ -42,8 +42,6 @@ export default function SwiftPage() {
     m.messageType?.includes(search.toUpperCase())
   )
 
-  const totalAmount = messages.reduce((s, m) => s + (m.amount ?? 0), 0)
-
   return (
     <AuthGuard>
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>

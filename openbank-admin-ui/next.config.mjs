@@ -14,7 +14,6 @@ const securityHeaders = [
 const nextConfig = {
   poweredByHeader: false,
   output: process.env.NEXT_STANDALONE === 'true' ? 'standalone' : undefined,
-  poweredByHeader: false,
   // `pg` (node-postgres) uses dynamic requires (pg-native, connection-string).
   // If webpack bundles it into a route, those requires break in the standalone
   // image and the route module fails to load — Next then serves a bare 404 for
