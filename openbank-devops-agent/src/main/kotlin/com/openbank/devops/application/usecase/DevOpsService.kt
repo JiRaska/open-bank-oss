@@ -31,6 +31,10 @@ class DevOpsService(
 
     private val log = Logger.getLogger(DevOpsService::class.java)
 
+    // CodeQL java/log-injection: id is caller-supplied and flows straight into the log line
+    // below. Strip CR/LF so an attacker can't forge additional log lines (CWE-117).
+    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+
     override suspend fun run(trigger: RunTrigger): DevOpsRunReport {
         log.infof("Starting DevOps analysis workflow (trigger=%s)", trigger)
         val options = WorkflowOptions.newBuilder()
@@ -51,7 +55,7 @@ class DevOpsService(
 
     private suspend fun transition(id: String, status: FindingStatus): DevOpsFinding? {
         val finding = findingRepository.findById(id) ?: return null
-        log.infof("HITL %s on finding %s by operator", status, id)
+        log.infof("HITL %s on finding %s by operator", status, id.sanitizeForLog())
         return findingRepository.update(finding.copy(status = status))
     }
 }
