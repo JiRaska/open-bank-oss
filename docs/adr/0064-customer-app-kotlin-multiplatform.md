@@ -4,6 +4,7 @@ Date: 2026-06-05
 Status: Accepted
 Delivery-Status: Planned
 Author(s): OpenBank platform
+Delivery-Repos: openbank-app
 
 ## Context
 
