@@ -20,6 +20,11 @@ class EidasMtlsFilter(private val tppAuthorizationGuard: TppAuthorizationGuard) 
 
     private val log = Logger.getLogger(EidasMtlsFilter::class.java)
 
+    // CodeQL java/log-injection: path and tppId come straight off the request (URI segment /
+    // X-TPP-ID / SSL-CLIENT-S-DN header) and are logged verbatim below. Strip CR/LF so an
+    // attacker can't forge additional log lines (log forging, CWE-117).
+    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+
     @Suppress("LongMethod")
     override fun filter(ctx: ContainerRequestContext) {
         val path = ctx.uriInfo.path
@@ -33,7 +38,7 @@ class EidasMtlsFilter(private val tppAuthorizationGuard: TppAuthorizationGuard) 
             ?: ctx.getHeaderString("SSL-CLIENT-S-DN")
 
         if (tppId.isNullOrBlank()) {
-            log.warnf("Missing TPP identification on path: %s", path)
+            log.warnf("Missing TPP identification on path: %s", path.sanitizeForLog())
             ctx.abortWith(
                 Response.status(401)
                     .entity(
@@ -59,17 +64,27 @@ class EidasMtlsFilter(private val tppAuthorizationGuard: TppAuthorizationGuard) 
         val authorization = try {
             tppAuthorizationGuard.requireAuthorized(tppId, requiredRole)
         } catch (e: CircuitBreakerOpenException) {
-            log.errorf("TPP registry circuit open for tppId=%s path=%s", tppId, path)
+            log.errorf("TPP registry circuit open for tppId=%s path=%s", tppId.sanitizeForLog(), path.sanitizeForLog())
             ctx.abortWith(serviceUnavailable())
             return
         } catch (e: Exception) {
-            log.errorf(e, "TPP registry authorization failed for tppId=%s path=%s", tppId, path)
+            log.errorf(
+                e,
+                "TPP registry authorization failed for tppId=%s path=%s",
+                tppId.sanitizeForLog(),
+                path.sanitizeForLog(),
+            )
             ctx.abortWith(serviceUnavailable())
             return
         }
 
         if (!authorization.authorized) {
-            log.warnf("TPP %s rejected for role=%s path=%s", tppId, requiredRole, path)
+            log.warnf(
+                "TPP %s rejected for role=%s path=%s",
+                tppId.sanitizeForLog(),
+                requiredRole,
+                path.sanitizeForLog(),
+            )
             ctx.abortWith(
                 Response.status(401)
                     .entity(

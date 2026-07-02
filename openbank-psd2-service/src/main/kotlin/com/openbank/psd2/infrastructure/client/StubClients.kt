@@ -24,12 +24,16 @@ import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.UUID
 
+// CodeQL java/log-injection: several IDs logged below ultimately trace back to caller/request
+// input. Strip CR/LF so an attacker can't forge additional log lines (log forging, CWE-117).
+private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+
 @ApplicationScoped
 class StubAccountServiceClient(private val clock: Clock) : AccountServiceClient {
     private val log = Logger.getLogger(StubAccountServiceClient::class.java)
 
     override suspend fun getAccountsByParty(partyId: String): List<ObAccount> {
-        log.infof("getAccountsByParty partyId=%s", partyId)
+        log.infof("getAccountsByParty partyId=%s", partyId.sanitizeForLog())
         return listOf(
             ObAccount("acc-001", "CZ6508000000192000145399", "CZK", "Jan Novák", "Běžný účet", "CURRENT", "CACC"),
         )
@@ -87,12 +91,12 @@ class StubConsentServiceClient : ConsentServiceClient {
     override suspend fun getConsentStatus(consentId: String): String = "ACTIVE"
 
     override suspend fun validateConsent(consentId: String, granteeId: String, scope: String, iban: String?): Boolean {
-        log.infof("validateConsent consentId=%s scope=%s", consentId, scope)
+        log.infof("validateConsent consentId=%s scope=%s", consentId.sanitizeForLog(), scope.sanitizeForLog())
         return true
     }
 
     override suspend fun revokeConsent(consentId: String, granteeId: String) {
-        log.infof("revokeConsent consentId=%s granteeId=%s", consentId, granteeId)
+        log.infof("revokeConsent consentId=%s granteeId=%s", consentId.sanitizeForLog(), granteeId.sanitizeForLog())
     }
 }
 
@@ -113,8 +117,8 @@ class StubTransactionServiceClient : TransactionServiceClient {
         val id = UUID.randomUUID().toString()
         log.debugf(
             "initiatePayment debtor=****%s creditor=****%s id=%s",
-            debtorIban.takeLast(4),
-            creditorIban.takeLast(4),
+            debtorIban.takeLast(4).sanitizeForLog(),
+            creditorIban.takeLast(4).sanitizeForLog(),
             id,
         )
         return id

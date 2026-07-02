@@ -36,6 +36,10 @@ class QsealSignatureFilter(
 
     private val log = Logger.getLogger(QsealSignatureFilter::class.java)
 
+    // CodeQL java/log-injection: path is a raw request URI segment, logged verbatim below.
+    // Strip CR/LF so an attacker can't forge additional log lines (log forging, CWE-117).
+    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+
     override fun filter(ctx: ContainerRequestContext) {
         val path = ctx.uriInfo.path
         // Only the Berlin write surface carries a body to sign; reads rely on QWAC transport auth.
@@ -49,13 +53,13 @@ class QsealSignatureFilter(
         if (outcome == Outcome.VALID) return
 
         if (enforce) {
-            log.warnf("QSEAL %s on %s — rejecting (enforce)", outcome, path)
+            log.warnf("QSEAL %s on %s — rejecting (enforce)", outcome, path.sanitizeForLog())
             val err = mapOf(
                 "tppMessages" to listOf(mapOf("category" to "ERROR", "code" to "SIGNATURE_INVALID")),
             )
             ctx.abortWith(Response.status(Response.Status.UNAUTHORIZED).entity(err).build())
         } else {
-            log.debugf("QSEAL %s on %s — allowing (advisory)", outcome, path)
+            log.debugf("QSEAL %s on %s — allowing (advisory)", outcome, path.sanitizeForLog())
         }
     }
 
