@@ -152,9 +152,9 @@ resource "aws_budgets_budget" "nat_daily" {
   }
   notification {
     comparison_operator        = "GREATER_THAN"
-    threshold                  = 100 # $5/day forecast
+    threshold                  = 100 # $5/day actual (DAILY budgets only support ACTUAL, not FORECASTED)
     threshold_type             = "PERCENTAGE"
-    notification_type          = "FORECASTED"
+    notification_type          = "ACTUAL"
     subscriber_email_addresses = [var.finops_alert_email]
   }
 }
