@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.8](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.8.7...domestic-payment-v0.8.8) (2026-07-03)
+
+
+### Bug Fixes
+
+* **libs-domain:** carry interbank settlement date through to pacs.008 (IntrBkSttlmDt) ([#195](https://github.com/JiRaska/open-bank-oss/issues/195)) ([62eef5e](https://github.com/JiRaska/open-bank-oss/commit/62eef5ef21626a56099ccfe9ebc6f6e5387a85b6))
+
 ## [0.8.7](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.8.6...domestic-payment-v0.8.7) (2026-07-02)
 
 
