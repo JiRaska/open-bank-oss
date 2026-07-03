@@ -98,6 +98,7 @@ class SchemeGatewayAdapter(@RestClient private val client: ClearingSimulatorClie
         return CreditTransferInstruction(
             messageId = "SWIFT-${msg.transactionReference}".take(MAX_35),
             creationDateTime = OffsetDateTime.now(ZoneOffset.UTC),
+            interbankSettlementDate = valueDate,
             endToEndId = msg.transactionReference.take(MAX_35),
             transactionId = null,
             amount = BigDecimal.valueOf(msg.amountMinorUnits).movePointLeft(2),

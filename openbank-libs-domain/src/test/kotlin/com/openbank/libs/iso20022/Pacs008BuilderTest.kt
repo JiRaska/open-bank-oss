@@ -25,6 +25,7 @@ class Pacs008BuilderTest {
     ) = CreditTransferInstruction(
         messageId = "OB-MSG-0001",
         creationDateTime = OffsetDateTime.of(2026, 6, 22, 10, 15, 30, 0, ZoneOffset.UTC),
+        interbankSettlementDate = OffsetDateTime.of(2026, 6, 22, 10, 15, 30, 0, ZoneOffset.UTC),
         endToEndId = "E2E-0001",
         transactionId = "TX-0001",
         amount = amount,
@@ -49,6 +50,7 @@ class Pacs008BuilderTest {
         assertThat(xml).contains("<EndToEndId>E2E-0001</EndToEndId>")
         assertThat(xml).contains("Ccy=\"EUR\"")
         assertThat(xml).contains(">12.34<")
+        assertThat(xml).contains("<IntrBkSttlmDt>2026-06-22</IntrBkSttlmDt>")
         assertThat(xml).contains("<BICFI>COBADEFFXXX</BICFI>")
         assertThat(xml).contains("<IBAN>FR1420041010050500013M02606</IBAN>")
         assertThat(xml).contains("<Ustrd>Invoice 2026-0042</Ustrd>")

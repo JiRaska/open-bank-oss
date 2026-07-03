@@ -67,23 +67,29 @@ class SchemeGatewayAdapter(
             .onFailure().transform { SchemeGatewayUnavailableException(it) }
     }
 
-    private fun instruction(payment: SctInstPayment, creditorAgentBic: String) = CreditTransferInstruction(
-        messageId = "MSG-${payment.endToEndId}".take(MAX_35),
-        creationDateTime = OffsetDateTime.now(ZoneOffset.UTC),
-        endToEndId = payment.endToEndId,
-        transactionId = null,
-        amount = payment.amount,
-        currency = payment.currency,
-        chargeBearer = ChargeBearer.SLEV,
-        settlementMethod = SettlementMethod.CLRG,
-        debtorName = payment.debtorName,
-        debtorIban = payment.debtorIban,
-        debtorAgentBic = ownBankBic,
-        creditorAgentBic = creditorAgentBic,
-        creditorName = payment.creditorName,
-        creditorIban = payment.creditorIban,
-        remittanceInfo = payment.remittanceInfo,
-    )
+    private fun instruction(payment: SctInstPayment, creditorAgentBic: String): CreditTransferInstruction {
+        // SEPA Instant settles same-day via the clearing system (SttlmMtd CLRG) — there is no
+        // scheme-supplied value date to carry, unlike SWIFT MT103's field 32A.
+        val now = OffsetDateTime.now(ZoneOffset.UTC)
+        return CreditTransferInstruction(
+            messageId = "MSG-${payment.endToEndId}".take(MAX_35),
+            creationDateTime = now,
+            interbankSettlementDate = now,
+            endToEndId = payment.endToEndId,
+            transactionId = null,
+            amount = payment.amount,
+            currency = payment.currency,
+            chargeBearer = ChargeBearer.SLEV,
+            settlementMethod = SettlementMethod.CLRG,
+            debtorName = payment.debtorName,
+            debtorIban = payment.debtorIban,
+            debtorAgentBic = ownBankBic,
+            creditorAgentBic = creditorAgentBic,
+            creditorName = payment.creditorName,
+            creditorIban = payment.creditorIban,
+            remittanceInfo = payment.remittanceInfo,
+        )
+    }
 
     private companion object {
         const val MAX_35 = 35
