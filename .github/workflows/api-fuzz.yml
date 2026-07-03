@@ -148,14 +148,22 @@ jobs:
               OVERALL=1
             else
               echo "==> [${svc}] fuzzing http://localhost:${PORT}"
+              # schemathesis 4.x CLI (bumped from 3.39.16 to close 6 Dependabot alerts on
+              # transitive starlette/pytest — schemathesis 3.x hard-caps pytest<9 and
+              # starlette<1, so the vulnerable pins couldn't be bumped without this jump):
+              #   --base-url        -> --url (same semantics)
+              #   --hypothesis-max-examples -> --max-examples (dropped hypothesis- prefix)
+              #   --hypothesis-deadline     -> removed; no CLI equivalent in 4.x (deadline
+              #                                is no longer user-configurable this way)
+              #   --request-timeout unit changed ms -> seconds (5000ms was the old value)
+              #   --experimental=openapi-3.1 -> removed; OpenAPI 3.1 support is now default
+              #   --junit-xml       -> --report junit --report-junit-path
               schemathesis run "$SPEC" \
-                --base-url "http://localhost:${PORT}" \
+                --url "http://localhost:${PORT}" \
                 --checks not_a_server_error \
-                --hypothesis-max-examples "${MAX_EXAMPLES}" \
-                --hypothesis-deadline=None \
-                --request-timeout 5000 \
-                --experimental=openapi-3.1 \
-                --junit-xml "fuzz-reports/${svc}-junit.xml" \
+                --max-examples "${MAX_EXAMPLES}" \
+                --request-timeout 5 \
+                --report junit --report-junit-path "fuzz-reports/${svc}-junit.xml" \
                 | tee "fuzz-reports/${svc}-fuzz.log" || OVERALL=1
             fi
 
