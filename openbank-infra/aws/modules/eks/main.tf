@@ -193,7 +193,15 @@ resource "aws_eks_node_group" "bootstrap" {
   ]
 
   lifecycle {
-    ignore_changes = [scaling_config[0].desired_size]
+    # min/max size are handed off to aws_autoscaling_schedule (sandbox-substrate
+    # bootstrap-schedule.tf) for the overnight scale-down. Ignoring them here,
+    # same as desired_size, stops `tofu apply` from fighting the scheduled
+    # action and reverting it back to the Terraform-declared values mid-window.
+    ignore_changes = [
+      scaling_config[0].desired_size,
+      scaling_config[0].min_size,
+      scaling_config[0].max_size,
+    ]
   }
 }
 
