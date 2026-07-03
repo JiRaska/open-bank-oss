@@ -131,6 +131,19 @@ allowed_reasons contains "customer-self-action" if {
 	startswith(input.action, "customer.")
 }
 
+# The customer-edge's M2M identity (ROLE_SERVICE) calling notification-service on a
+# customer's behalf. The edge authenticates the CUSTOMER itself (customer-self-action
+# above + per-handler IDOR guards) and injects the authoritative partyId query param the
+# downstream handlers scope by — so this check only needs to recognise the edge principal.
+# Deliberately narrow: just the notification/device families notification-service exposes;
+# a blanket SERVICE allow would open every @Authorize endpoint to any M2M client.
+allowed_reasons contains "edge-service-notification" if {
+	input.principal.type == "SERVICE"
+	"ROLE_SERVICE" in input.principal.roles
+	some family in {"notification.", "device."}
+	startswith(input.action, family)
+}
+
 # ---------------------------------------------------------------------------------------
 # Money-path actions get the four-eyes gate from rules.yaml. This rule does NOT grant
 # access on its own — it AUGMENTS allow with a flag the interceptor surfaces back to

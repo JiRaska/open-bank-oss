@@ -327,3 +327,56 @@ test_operator_own_tenant_may_flip_non_prohibited if {
 
 	decision.allow == true
 }
+
+# ---------------------------------------------------------------------------------------
+# edge-service-notification: the customer-edge M2M principal (ROLE_SERVICE) may call the
+# notification/device families on the customer's behalf; anything else stays denied.
+# ---------------------------------------------------------------------------------------
+test_allow_service_notification_mark_read if {
+	decision := rest.allow with input as {
+		"principal": {"id": "svc-edge", "type": "SERVICE", "roles": ["ROLE_SERVICE"]},
+		"action": "notification.mark-read",
+		"resource": {"type": "notification", "id": "n-1"},
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	decision.reason == "edge-service-notification"
+}
+
+test_allow_service_notification_list if {
+	decision := rest.allow with input as {
+		"principal": {"id": "svc-edge", "type": "SERVICE", "roles": ["ROLE_SERVICE"]},
+		"action": "notification.list",
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+}
+
+test_allow_service_device_list if {
+	decision := rest.allow with input as {
+		"principal": {"id": "svc-edge", "type": "SERVICE", "roles": ["ROLE_SERVICE"]},
+		"action": "device.list",
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+}
+
+# The rule must NOT open other action families to M2M callers (deny-by-default holds).
+test_deny_service_outside_notification_family if {
+	not rest.allow with input as {
+		"principal": {"id": "svc-edge", "type": "SERVICE", "roles": ["ROLE_SERVICE"]},
+		"action": "party.update",
+		"resource": {"type": "party", "id": "p-1"},
+	}
+}
+
+# A SERVICE principal WITHOUT ROLE_SERVICE gets nothing from this rule.
+test_deny_service_without_role if {
+	not rest.allow with input as {
+		"principal": {"id": "svc-x", "type": "SERVICE", "roles": []},
+		"action": "notification.list",
+	}
+}
