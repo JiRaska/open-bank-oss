@@ -15,6 +15,11 @@ on:
         required: false
         default: 'false'
 
+# Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
+# block); the prune job below declares its own override for the write access it needs.
+permissions:
+  contents: read
+
 jobs:
   prune-stale-branches:
     runs-on: ubuntu-latest

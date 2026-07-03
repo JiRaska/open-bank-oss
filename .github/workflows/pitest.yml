@@ -15,6 +15,11 @@ on:
         required: false
         default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service"
 
+# Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
+# block); the pitest job below already declares contents: read too, belt-and-suspenders.
+permissions:
+  contents: read
+
 jobs:
   pitest:
     name: pitest / ${{ matrix.service }}

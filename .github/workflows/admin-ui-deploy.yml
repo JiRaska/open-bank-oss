@@ -53,6 +53,11 @@ on:
         required: false
         default: "manual"
 
+# Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
+# block); the build-push job below declares its own override for the access it needs.
+permissions:
+  contents: read
+
 concurrency:
   # One admin-ui deploy at a time — a second push while a deploy PR is open would
   # produce conflicting image tags. Cancel the in-flight run; the newer commit wins.

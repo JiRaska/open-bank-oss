@@ -21,6 +21,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
 
+# Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
+# block); the auto-merge job below declares its own override for the write access it needs.
+permissions:
+  contents: read
+
 jobs:
   auto-merge:
     name: Auto-merge patch/minor Dependabot PRs
