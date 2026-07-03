@@ -41,5 +41,5 @@
   "openbank-statement-service": "0.5.5",
   "openbank-swift-service": "0.6.5",
   "openbank-tpp-registry-service": "0.6.4",
-  "openbank-transaction-service": "1.12.2"
+  "openbank-transaction-service": "1.12.3"
 }
