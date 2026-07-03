@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.13.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.13.0...agent-service-v1.13.1) (2026-07-03)
+
+
+### Security
+
+* **agent-service:** sanitize policy-gate values before logging (CodeQL java/log-injection) ([#153](https://github.com/JiRaska/open-bank-oss/issues/153)) ([83fae6c](https://github.com/JiRaska/open-bank-oss/commit/83fae6c840338518b8189a42e0afc2b814f36885))
+* **docker-svc:** pin all Dockerfile base images to digest (Scorecard Pinned-Dependencies) ([#103](https://github.com/JiRaska/open-bank-oss/issues/103)) ([27c2dab](https://github.com/JiRaska/open-bank-oss/commit/27c2dabe6b9f9440532edf29a73c6e48e677206b))
+
 ## [1.13.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.12.0...agent-service-v1.13.0) (2026-06-29)
 
 
