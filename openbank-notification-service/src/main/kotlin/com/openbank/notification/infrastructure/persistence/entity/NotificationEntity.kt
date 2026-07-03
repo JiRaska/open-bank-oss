@@ -39,6 +39,10 @@ class NotificationEntity : PanacheEntity() {
     @Column(name = "sent_at")
     var sentAt: Instant? = null
 
+    // Customer read-state (V8): null = unread. Set once via PATCH /{id}/read | /read-all.
+    @Column(name = "read_at")
+    var readAt: Instant? = null
+
     @Column(name = "created_at", nullable = false)
     lateinit var createdAt: Instant
 }

@@ -24,6 +24,7 @@ import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
+import jakarta.ws.rs.PATCH
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -1200,6 +1201,32 @@ class CustomerEdgeResource(
         val size = limit.coerceIn(1, 100)
         return upstream.get(
             "$notificationServiceUrl/api/v1/notifications?partyId=${customer.partyId}&page=0&size=$size",
+            customer.partyId.toString(),
+        )
+    }
+
+    /** Mark one notification read. partyId injected from the JWT — the service scopes by it (IDOR). */
+    @PATCH
+    @Path("/notifications/{id}/read")
+    @Authorize(action = "customer.notifications.mark-read", resource = "#id")
+    @Blocking
+    fun markNotificationRead(@PathParam("id") id: UUID): Response {
+        val customer = customer()
+        return upstream.patch(
+            "$notificationServiceUrl/api/v1/notifications/$id/read?partyId=${customer.partyId}",
+            customer.partyId.toString(),
+        )
+    }
+
+    /** Mark ALL of the caller's notifications read. */
+    @PATCH
+    @Path("/notifications/read-all")
+    @Authorize(action = "customer.notifications.mark-read")
+    @Blocking
+    fun markAllNotificationsRead(): Response {
+        val customer = customer()
+        return upstream.patch(
+            "$notificationServiceUrl/api/v1/notifications/read-all?partyId=${customer.partyId}",
             customer.partyId.toString(),
         )
     }

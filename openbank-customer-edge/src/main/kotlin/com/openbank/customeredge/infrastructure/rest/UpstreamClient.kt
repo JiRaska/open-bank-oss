@@ -226,6 +226,23 @@ class UpstreamClient {
 
     fun post(url: String, partyId: String, body: String): Response = post(url, partyId, body, null)
 
+    /** PATCH (no body) with the M2M token + party header — e.g. mark a notification read. */
+    fun patch(url: String, partyId: String): Response = try {
+        val request = HttpRequest.newBuilder()
+            .uri(validatedUri(url))
+            .header("Authorization", "Bearer ${serviceToken()}")
+            .header(PARTY_HEADER, partyId)
+            .header("Accept", "application/json")
+            .timeout(Duration.ofMillis(requestTimeoutMs))
+            .method("PATCH", HttpRequest.BodyPublishers.noBody()).build()
+        val r = http.send(request, HttpResponse.BodyHandlers.ofString())
+        Response.status(r.statusCode()).entity(r.body()).type(MediaType.APPLICATION_JSON).build()
+    } catch (e: Exception) {
+        Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
+        Response.status(502).entity("""{"error":"upstream unavailable"}""")
+            .type(MediaType.APPLICATION_JSON).build()
+    }
+
     /** DELETE with the M2M operator token + party header (e.g. cancel a standing order). */
     fun delete(url: String, partyId: String): Response = try {
         val request = HttpRequest.newBuilder()

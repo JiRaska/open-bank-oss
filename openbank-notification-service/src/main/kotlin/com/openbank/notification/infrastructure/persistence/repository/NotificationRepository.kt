@@ -9,6 +9,7 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
@@ -41,4 +42,30 @@ class NotificationRepository : PanacheRepository<NotificationEntity> {
 
     suspend fun deleteByPartyId(partyId: UUID): Long =
         Panache.withTransaction { delete("partyId", partyId) }.awaitSuspending()
+
+    /**
+     * Mark one notification read (idempotent). partyId scopes the UPDATE so the edge's
+     * injected identity can never mark another party's row (IDOR guard at the data layer).
+     * True when the row exists for that party (freshly marked OR already read); false = not found.
+     */
+    suspend fun markRead(id: UUID, partyId: UUID): Boolean {
+        val updated = Panache.withTransaction {
+            update(
+                "readAt = ?1 where notificationId = ?2 and partyId = ?3 and readAt is null",
+                Instant.now(),
+                id,
+                partyId,
+            )
+        }.awaitSuspending()
+        if (updated > 0) return true
+        // 0 rows: either already read (fine, idempotent) or not this party's notification.
+        return Panache.withSession {
+            find("notificationId = ?1 and partyId = ?2", id, partyId).count()
+        }.awaitSuspending() > 0
+    }
+
+    /** Mark all of a party's unread notifications read; returns how many flipped. */
+    suspend fun markAllRead(partyId: UUID): Int = Panache.withTransaction {
+        update("readAt = ?1 where partyId = ?2 and readAt is null", Instant.now(), partyId)
+    }.awaitSuspending()
 }

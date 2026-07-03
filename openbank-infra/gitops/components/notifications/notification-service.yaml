@@ -28,6 +28,10 @@ spec:
       app.kubernetes.io/name: notification-service
   template:
     metadata:
+      annotations:
+        # Rolls the Deployment when the OPA policy bundle changes (subPath mounts don't
+        # hot-reload). Kept in sync by gen-notification-opa-bundle.sh.
+        openbank.tech/policy-checksum: "37c5e6364dd5cc0e"
       labels:
         app.kubernetes.io/name: notification-service
         app.kubernetes.io/part-of: notifications
@@ -160,7 +164,79 @@ spec:
             limits:
               cpu: "1"
               memory: 768Mi
+        # OPA policy-decision sidecar (ADR-0034 D5) — same pattern as customer-edge.
+        # Without it every @Authorize endpoint (notification.list/read/mark-read,
+        # device.*) fails CLOSED: authz.enforce defaults true and the produced
+        # OpaSidecarPolicyDecisionPoint gets connection-refused on localhost:8181 →
+        # 503 for the whole customer notification center + push-device registry.
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       volumes:
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: notification-service-opa-bundle
         - name: tmp
           emptyDir: {}
         - name: kafka-keystore

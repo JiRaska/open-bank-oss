@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Notification Service API
-  version: 1.3.0
+  version: 1.4.0
   description: Notification delivery management — query sent/pending notifications, manage push device tokens.
   license:
     name: Apache-2.0
@@ -142,6 +142,48 @@ paths:
                 $ref: '#/components/schemas/NotificationResponse'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/v1/notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark a notification as read (idempotent; scoped to the partyId owner)
+      operationId: markNotificationRead
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: partyId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Marked read (or already read)
+        '400':
+          description: Missing partyId
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/notifications/read-all:
+    patch:
+      tags: [Notifications]
+      summary: Mark all of a party's notifications as read
+      operationId: markAllNotificationsRead
+      parameters:
+        - name: partyId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Count of notifications flipped to read
 
   /api/v1/ops/dispatch:
     get:

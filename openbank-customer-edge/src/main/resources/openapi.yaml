@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.9.0
+  version: 1.10.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -167,6 +167,32 @@ paths:
       responses:
         '200':
           description: Notification list
+
+  /notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark one notification as read (party-scoped, idempotent)
+      operationId: markNotificationRead
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204':
+          description: Marked read
+        '404':
+          description: Not the caller's notification
+
+  /notifications/read-all:
+    patch:
+      tags: [Notifications]
+      summary: Mark all of the caller's notifications as read
+      operationId: markAllNotificationsRead
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: Count of notifications marked read
 
   /profile:
     get:
