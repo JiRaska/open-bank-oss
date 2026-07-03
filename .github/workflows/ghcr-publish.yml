@@ -1,0 +1,163 @@
+# Public container images on GHCR (issue #196).
+#
+# WHY: the deploy pipeline pushes images to a private ECR — fine for the sandbox,
+# invisible to the community. A public reference implementation is only adoptable
+# if `docker run ghcr.io/jiraska/openbank-<service>` works without building the
+# monorepo. GHCR is free and unlimited for public packages.
+#
+# WHAT: builds every released service (a module with a version.txt) from main and
+# pushes a multi-arch (amd64 + arm64) image to ghcr.io with:
+#   - tags: latest, v<version.txt>, sha-<short-sha>
+#   - OCI source label linking the package to this repo
+#   - a Sigstore build-provenance attestation (actions/attest-build-provenance),
+#     verifiable with `gh attestation verify oci://ghcr.io/... -R JiRaska/open-bank-oss`
+#
+# This is DERIVED distribution, not the deploy path: the sandbox keeps deploying
+# cosign-KMS-signed ECR digests (ADR-0029/0030); a GHCR hiccup never blocks a
+# deploy. Runs weekly + on manual dispatch — the images track main at week
+# granularity, which is enough for evaluation use.
+#
+# NOTE: the JVM fast-jar is arch-agnostic (built once on the host runner); the
+# Dockerfile only COPYs it onto the JRE base, so the non-native platform leg is a
+# cheap QEMU no-op (no compilation under emulation).
+name: GHCR publish
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"  # weekly Monday 06:00 UTC (after the security/scan crons)
+  workflow_dispatch:
+    inputs:
+      services:
+        description: "Space-separated service dirs (empty = all released services)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ghcr-publish
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    name: Discover released services
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      services: ${{ steps.list.outputs.services }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - id: list
+        env:
+          REQUESTED: ${{ inputs.services }}
+        run: |
+          set -euo pipefail
+          if [ -n "${REQUESTED:-}" ]; then
+            list="$(printf '%s\n' $REQUESTED)"
+          else
+            # A module is a released component iff it has a version.txt (rule #2);
+            # only service modules bake a runtime image (libs/admin-ui have their
+            # own distribution channels).
+            list="$(for d in openbank-*-service; do
+              [ -f "$d/version.txt" ] && [ -f "$d/build.gradle.kts" ] && echo "$d"
+            done)"
+          fi
+          services="$(echo "$list" | jq -Rnc '[inputs | select(length > 0)]')"
+          echo "services=$services" >> "$GITHUB_OUTPUT"
+          echo "Publishing: $services"
+
+  publish:
+    name: ${{ matrix.service }}
+    needs: discover
+    if: needs.discover.outputs.services != '[]'
+    runs-on: ubuntu-24.04-arm  # native arm64 (free on public repos); amd64 leg is a QEMU COPY-only no-op
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write      # push to ghcr.io
+      id-token: write      # Sigstore keyless signing for the attestation
+      attestations: write  # actions/attest-build-provenance
+    strategy:
+      fail-fast: false     # one red service must not stop the fleet sweep
+      max-parallel: 6
+      matrix:
+        service: ${{ fromJSON(needs.discover.outputs.services) }}
+    env:
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      IMAGE: ghcr.io/jiraska/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-java@1bcf9fb12cf4aa7d266a90ae39939e61372fe520 # v5
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            25
+
+      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        # Hosted runner: the Actions cache is network-internal and free.
+
+      - name: Build fast-jar + SBOM
+        run: |
+          ./gradlew :${{ matrix.service }}:quarkusBuild :${{ matrix.service }}:cyclonedxBom \
+            --build-cache --console=plain
+
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Login to GHCR
+        uses: docker/login-action@c99871dec2022cc055c062a10cc1a1310835ceb4 # v4.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push multi-arch image
+        id: push
+        run: |
+          set -euo pipefail
+          svc="${{ matrix.service }}"
+          qa="${svc}/build/quarkus-app"
+          [ -d "$qa" ] || { echo "::error::${svc}: quarkus-app missing (fast-jar not built?)"; exit 1; }
+          version="$(tr -d '[:space:]' < "${svc}/version.txt")"
+          ctx="$(mktemp -d)"
+          cp -r "$qa" "${ctx}/quarkus-app"
+          # Gradle writes quarkus-app/lib/ as 600; the image runs as non-root
+          # (ClassNotFoundException at boot otherwise — PR #2141 pattern).
+          chmod -R a+r "${ctx}/quarkus-app"
+          cp .github/workflows/Dockerfile.deploy "${ctx}/Dockerfile"
+          # Bake the CycloneDX SBOM so /q/openbank/sbom serves it live (libs SbomResource).
+          if [ -f "${svc}/build/reports/bom.json" ]; then
+            mkdir -p "${ctx}/sbom"
+            cp "${svc}/build/reports/bom.json" "${ctx}/sbom/bom.json"
+            chmod a+r "${ctx}/sbom/bom.json"
+            echo "COPY sbom/bom.json /app/sbom/bom.json" >> "${ctx}/Dockerfile"
+            echo "ENV OPENBANK_SBOM_PATH=/app/sbom/bom.json" >> "${ctx}/Dockerfile"
+          fi
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --provenance=false \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.description=OpenBank ${svc#openbank-} (reference implementation; NOT production-ready)" \
+            --label "org.opencontainers.image.licenses=Apache-2.0" \
+            --label "org.opencontainers.image.version=${version}" \
+            -t "${IMAGE}:latest" \
+            -t "${IMAGE}:v${version}" \
+            -t "${IMAGE}:sha-${GITHUB_SHA::8}" \
+            --push \
+            --metadata-file "${ctx}/metadata.json" \
+            "${ctx}"
+          digest="$(jq -r '."containerimage.digest"' "${ctx}/metadata.json")"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          rm -rf "${ctx}"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ghcr.io/jiraska/${{ matrix.service }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
