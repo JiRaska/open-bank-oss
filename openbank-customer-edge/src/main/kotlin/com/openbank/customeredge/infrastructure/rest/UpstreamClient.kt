@@ -5,6 +5,7 @@
 package com.openbank.customeredge.infrastructure.rest
 
 import io.quarkus.logging.Log
+import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -35,6 +36,7 @@ import java.util.UUID
 // stringly-typed one, for no real complexity reduction (each verb still needs its own
 // header/body wiring). See existing precedent (BerlinXs2aMappers, KycRepository).
 @Suppress("TooManyFunctions")
+@ApplicationScoped
 class UpstreamClient {
     // FIELD injection (not constructor params). With Kotlin constructor parameters that
     // carry default values, Arc/@ConfigProperty injection is shadowed by the Kotlin
