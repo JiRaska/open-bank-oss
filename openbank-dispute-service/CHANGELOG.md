@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.4](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.7.3...dispute-service-v0.7.4) (2026-07-03)
+
+
+### Security
+
+* **docker-svc:** pin all Dockerfile base images to digest (Scorecard Pinned-Dependencies) ([#103](https://github.com/JiRaska/open-bank-oss/issues/103)) ([27c2dab](https://github.com/JiRaska/open-bank-oss/commit/27c2dabe6b9f9440532edf29a73c6e48e677206b))
+
 ## [0.7.3](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.7.2...dispute-service-v0.7.3) (2026-06-30)
 
 
