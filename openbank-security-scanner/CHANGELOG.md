@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.2](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.5.1...security-scanner-v0.5.2) (2026-07-03)
+
+
+### Bug Fixes
+
+* **libs-domain:** carry interbank settlement date through to pacs.008 (IntrBkSttlmDt) ([#195](https://github.com/JiRaska/open-bank-oss/issues/195)) ([62eef5e](https://github.com/JiRaska/open-bank-oss/commit/62eef5ef21626a56099ccfe9ebc6f6e5387a85b6))
+* **security:** pin openbank-security-scanner Dockerfile.prebuilt base image digest ([#192](https://github.com/JiRaska/open-bank-oss/issues/192)) ([2cf0481](https://github.com/JiRaska/open-bank-oss/commit/2cf0481545a232330965f86751d0b5943ce30cf9))
+
 ## [0.5.1](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.5.0...security-scanner-v0.5.1) (2026-07-03)
 
 
