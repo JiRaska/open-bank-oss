@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.10.0
+  version: 1.11.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -74,6 +74,47 @@ paths:
       responses:
         '200':
           description: Account detail
+        '403':
+          description: Not the owner
+
+  /accounts/{accountId}/goal:
+    put:
+      tags: [Accounts]
+      summary: Set or update the account's savings goal metadata (ADR-0153)
+      operationId: updateSavingsGoal
+      security:
+        - customerOidc: [accounts:write]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, targetMinorUnits]
+              properties:
+                name: {type: string}
+                targetMinorUnits: {type: integer, format: int64}
+                targetDate: {type: string, format: date}
+      responses:
+        '200':
+          description: Account with updated goal metadata
+        '400':
+          description: Malformed request or missing/invalid fields
+        '403':
+          description: Not the owner
+    delete:
+      tags: [Accounts]
+      summary: Clear the account's savings goal metadata
+      operationId: clearSavingsGoal
+      security:
+        - customerOidc: [accounts:write]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Account with goal metadata cleared
         '403':
           description: Not the owner
 
