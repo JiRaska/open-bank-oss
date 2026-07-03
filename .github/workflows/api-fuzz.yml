@@ -71,6 +71,11 @@ jobs:
         run: |
           set -euo pipefail
           # Pinned: v3 CLI flags are load-bearing below (v4 renamed them).
+          # Not hash-pinned (Scorecard Pinned-Dependencies: pipCommand, accepted gap):
+          # schemathesis carries ~20 direct + a much larger transitive dependency tree,
+          # so `pip install --require-hashes` would need a maintained full lockfile
+          # (pip-tools/poetry), not a hand-written --hash list — unlike pyyaml/yamllint
+          # elsewhere in this fleet, which are dependency-free leaf packages.
           python3 -m pip install --user --quiet "schemathesis==3.39.16"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 

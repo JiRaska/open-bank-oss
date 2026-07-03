@@ -1,4 +1,4 @@
-FROM eclipse-temurin:25-jdk AS build
+FROM eclipse-temurin:25-jdk@sha256:68868d04fa9cfd5f5c6abec0b5cef86d8de2bf9c62c37c7d3e4f0f80f5cfd7ff AS build
 ARG SERVICE_DIR
 
 WORKDIR /workspace
@@ -24,7 +24,7 @@ RUN chmod +x gradlew && \
       --console=plain && \
     cp /workspace/${SERVICE_DIR}/build/*-runner.jar /workspace/quarkus-run.jar
 
-FROM eclipse-temurin:25-jre-alpine
+FROM eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0
 WORKDIR /app
 
 RUN addgroup -S openbank && adduser -S openbank -G openbank
