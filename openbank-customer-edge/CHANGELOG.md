@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.16.0...customer-edge-v0.16.1) (2026-07-03)
+
+
+### Security
+
+* **customer-edge:** add SSRF host allowlist to UpstreamClient (CodeQL java/ssrf) ([#100](https://github.com/JiRaska/open-bank-oss/issues/100)) ([7490c6d](https://github.com/JiRaska/open-bank-oss/commit/7490c6d358f248549db67cf185146aa18253924a))
+* **customer-edge:** validate URL via regex before URI.create (CodeQL java/ssrf, take 2) ([#180](https://github.com/JiRaska/open-bank-oss/issues/180)) ([b58a4e8](https://github.com/JiRaska/open-bank-oss/commit/b58a4e8ce9b4dffcbc5cbd3bbb3f36137f707240))
+* **docker-svc:** pin all Dockerfile base images to digest (Scorecard Pinned-Dependencies) ([#103](https://github.com/JiRaska/open-bank-oss/issues/103)) ([27c2dab](https://github.com/JiRaska/open-bank-oss/commit/27c2dabe6b9f9440532edf29a73c6e48e677206b))
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.15.1...customer-edge-v0.16.0) (2026-06-29)
 
 
