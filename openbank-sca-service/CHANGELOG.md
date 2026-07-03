@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.5](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.8.4...sca-service-v0.8.5) (2026-07-03)
+
+
+### Security
+
+* **docker-svc:** pin all Dockerfile base images to digest (Scorecard Pinned-Dependencies) ([#103](https://github.com/JiRaska/open-bank-oss/issues/103)) ([27c2dab](https://github.com/JiRaska/open-bank-oss/commit/27c2dabe6b9f9440532edf29a73c6e48e677206b))
+* **sca:** sanitize notification message before logging (CodeQL java/log-injection) ([#150](https://github.com/JiRaska/open-bank-oss/issues/150)) ([fc2f026](https://github.com/JiRaska/open-bank-oss/commit/fc2f02622497fc15403dacab542765ec19629290))
+
 ## [0.8.4](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.8.3...sca-service-v0.8.4) (2026-06-30)
 
 
