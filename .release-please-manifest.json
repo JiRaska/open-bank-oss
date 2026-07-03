@@ -33,7 +33,7 @@
   "openbank-sanctions-service": "0.6.2",
   "openbank-sca-service": "0.8.5",
   "openbank-sdd-service": "0.6.2",
-  "openbank-security-scanner": "0.5.1",
+  "openbank-security-scanner": "0.5.2",
   "openbank-sepa-instant": "0.6.3",
   "openbank-sepa-payment": "0.7.5",
   "openbank-settlement-service": "0.4.3",
