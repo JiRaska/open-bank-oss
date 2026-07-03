@@ -588,3 +588,9 @@ jobs:
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5
         with:
           fail-on-severity: high
+          # See dependency-review.yml for the full rationale: starlette is pinned
+          # below its patched versions by schemathesis==3.39.16's own dependency
+          # declaration, and schemathesis is only used as a CI-only fuzzing CLI
+          # (never serves traffic), so the flagged ASGI-server code paths don't
+          # apply here.
+          allow-ghsas: GHSA-wqp7-x3pw-xc5r, GHSA-82w8-qh3p-5jfq
