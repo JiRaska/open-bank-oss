@@ -436,22 +436,26 @@ ci_runners:
   #   2. ARC on EKS Spot (scale-to-zero) = ONLY for jobs that genuinely need
   #      VPC/cluster-DNS reachability (Pact broker can-i-deploy, main-lane service
   #      builds that verify+publish pacts, runner-image build) — idle cost $0.
-  #   3. Static hosts (Hetzner/Mac) = being decommissioned; do NOT add new jobs to
-  #      openbank-build/openbank-batch labels unless the job needs the cluster network.
   # Consequence: if a build fails on a hosted runner due to an arch issue, fix the
   # root cause (native ubuntu-24.04-arm runner or --platform=$BUILDPLATFORM on
   # build-only stages) — never route it back to a paid pool as a workaround.
-  static_hosts:                          # DECOMMISSIONING (public-repo FinOps shift, issue #196)
+  static_hosts:                          # DECOMMISSIONED 2026-07-03 (public-repo FinOps shift, issue #196)
     hetzner:
-      type: cpx42                        # x86_64, 8 vCPU, 16 GB; retire after hosted-runner burn-in
-      labels: [openbank-build, openbank-batch, openbank-sandbox, hetzner]
-      count: 2
-      role: legacy_cluster_lane_backup   # serves remaining cluster-network jobs until retired; ARC covers the label after that
+      status: deleted                    # both openbank-runner-{1,2} (CPX42) deleted via hcloud; zero ongoing cost
+      former_labels: [openbank-build, openbank-batch, openbank-sandbox, hetzner]
+      # ARC (scale-to-zero) now serves every job that previously targeted these
+      # labels — the openbank-build/openbank-batch scale sets were never Hetzner-
+      # exclusive, so no CI change was needed. runner-tune-hetzner.yml (the only
+      # Hetzner-specific workflow) was deleted in the same PR as this entry.
     mac_mini:
       arch: arm64
       labels: [openbank-build, openbank-sandbox]
       count: 1
-      role: legacy_arm64_backup          # native arm64 now served free by ubuntu-24.04-arm; retire from pool
+      role: owner_managed_accelerator     # NOT a FinOps line item (owner's own hardware, no cloud billing);
+      # kept in the label pool at the owner's discretion, independent of this
+      # governance decision. Native arm64 is otherwise served free by
+      # ubuntu-24.04-arm, so this is a pure opt-in accelerator (ADR-0053), never
+      # something CI depends on being online.
   spot:
     provider: karpenter                 # diversified Graviton spot, price-capacity-optimized
     interruption: karpenter-managed     # no persistent spot request; node replaced on reclaim
