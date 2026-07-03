@@ -379,21 +379,17 @@ jobs:
       # deploying a known-fixable CRITICAL is pointless churn. HIGH is reported
       # advisory. A failed gate fails this job → the gitops PR never opens →
       # the vulnerable tag is never referenced by a manifest.
+      # This job runs on a GitHub-hosted runner (ubuntu-24.04-arm, not ARC), which
+      # never has trivy pre-baked — the old "ARC bakes it" fast path always missed
+      # here and fell through to an unauthenticated raw.githubusercontent.com curl,
+      # which is rate-limited on the shared hosted-runner IP pool and started
+      # failing every build-push run. Use the same maintained, commit-pinned setup
+      # action the `trivy` job in security.yml already relies on for this exact
+      # hosted-runner scenario.
       - name: Install Trivy
-        run: |
-          # The ARC runner image already bakes trivy (arc-runners.tf toolchain), so use
-          # it and skip the download — the install.sh curl from raw.githubusercontent.com
-          # is unauthenticated and rate-limited on the shared runners (it was failing the
-          # job at this step once the credentials fix let the pipeline get this far).
-          if command -v trivy >/dev/null 2>&1; then
-            echo "Using pre-baked trivy: $(trivy --version 2>/dev/null | head -1)"; exit 0
-          fi
-          # Pinned to the v0.63.0 tag (not `main`) so the installer script itself is
-          # immutable, matching the trivy version it installs. Hash-verified before
-          # execution (OpenSSF Scorecard Pinned-Dependencies: downloadThenRun).
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/v0.63.0/contrib/install.sh -o /tmp/trivy-install.sh
-          echo "2304dcc0c1883e802d376eae1b514c923b7427a7d88091dfcaf83967e6f55a7c  /tmp/trivy-install.sh" | sha256sum -c -
-          sh /tmp/trivy-install.sh -b /usr/local/bin v0.63.0
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.63.0
 
       - name: Prune Docker build cache before scan
         run: |
