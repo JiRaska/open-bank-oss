@@ -24,3 +24,20 @@ jobs:
           fail-on-severity: high
           comment-summary-in-pr: always
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
+          # starlette (pulled in transitively via schemathesis==3.39.16's own
+          # starlette<1,>=0.13 pin — .github/workflows/requirements/schemathesis.txt)
+          # is stuck below the versions that fix these two advisories (patched at
+          # 1.1.0 / 1.3.1). schemathesis 4.x drops that pin but renames the v3 CLI
+          # flags api-fuzz.yml depends on, so it isn't a drop-in bump. Both flagged
+          # code paths (StaticFiles Windows-UNC SSRF, request.form() limits) belong
+          # to starlette's ASGI-server surface; schemathesis only uses starlette as
+          # an in-process test client in an ephemeral CI job — it never serves
+          # traffic or accepts untrusted uploads here.
+          allow-ghsas: GHSA-wqp7-x3pw-xc5r, GHSA-82w8-qh3p-5jfq
+          # rfc3987 (GPL-3.0-or-later) is pulled in by schemathesis's own
+          # jsonschema[format] extra (the IRI/iri-reference format validator;
+          # jsonschema's non-GPL alternative extra is format-nongpl, which
+          # schemathesis does not use). It is a CI-only fuzzing-tool dependency,
+          # never redistributed or linked into anything we ship, so GPL's
+          # copyleft/distribution obligations don't apply here.
+          allow-dependencies-licenses: pkg:pypi/rfc3987@1.3.8
