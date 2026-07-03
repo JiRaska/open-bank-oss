@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.3.0...billing-service-v0.4.0) (2026-07-03)
+
+
+### Features
+
+* **billing:** wire OPA authorization onto the fee-assessment endpoint ([#179](https://github.com/JiRaska/open-bank-oss/issues/179)) ([6879d9a](https://github.com/JiRaska/open-bank-oss/commit/6879d9a26e33d9aa4d2158f302c4db02828e431a))
+
+
+### Security
+
+* **docker-svc:** pin all Dockerfile base images to digest (Scorecard Pinned-Dependencies) ([#103](https://github.com/JiRaska/open-bank-oss/issues/103)) ([27c2dab](https://github.com/JiRaska/open-bank-oss/commit/27c2dabe6b9f9440532edf29a73c6e48e677206b))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.2.0...billing-service-v0.3.0) (2026-06-30)
 
 
