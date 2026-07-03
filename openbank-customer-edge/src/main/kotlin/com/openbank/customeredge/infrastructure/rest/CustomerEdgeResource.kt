@@ -26,6 +26,7 @@ import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.PATCH
 import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -308,6 +309,55 @@ class CustomerEdgeResource(
         }
         return upstream.delete(
             "$accountServiceUrl/api/v1/accounts/$accountId/pockets/$ccy",
+            customer.partyId.toString(),
+        )
+    }
+
+    // --- Savings goal (ADR-0153) ---
+    // Customer self-service metadata on the account, not a money movement — no SCA (same
+    // gate rationale as pocket open/close above: ADR-0021 only scopes payments).
+
+    @PUT
+    @Path("/accounts/{accountId}/goal")
+    @Authorize(action = "customer.accounts.goal.write", resource = "#accountId")
+    @Blocking
+    fun updateSavingsGoal(@PathParam("accountId") accountId: UUID, body: String): Response {
+        val customer = customer()
+        if (!ownsAccount(accountId, customer.partyId)) {
+            return forbidden("Account does not belong to caller")
+        }
+        // Re-serialize through Jackson (not raw string interpolation) — the goal name is
+        // customer-authored free text and must be JSON-escaped, not spliced into a template.
+        val node = runCatching { objectMapper.readTree(body) }.getOrNull() as? ObjectNode
+            ?: return badRequest("Malformed goal request body")
+        val name = node.get("name")?.asText()?.takeIf { it.isNotBlank() }
+            ?: return badRequest("Missing goal name")
+        val targetMinorUnits = node.get("targetMinorUnits")?.takeIf { it.isIntegralNumber }?.asLong()
+            ?: return badRequest("Missing or invalid targetMinorUnits")
+        if (targetMinorUnits <= 0) return badRequest("targetMinorUnits must be positive")
+        val forwarded = objectMapper.createObjectNode().apply {
+            put("name", name)
+            put("targetMinorUnits", targetMinorUnits)
+            node.get("targetDate")?.takeIf { it.isTextual }?.let { put("targetDate", it.asText()) }
+        }
+        return upstream.put(
+            "$accountServiceUrl/api/v1/accounts/$accountId/goal",
+            customer.partyId.toString(),
+            objectMapper.writeValueAsString(forwarded),
+        )
+    }
+
+    @DELETE
+    @Path("/accounts/{accountId}/goal")
+    @Authorize(action = "customer.accounts.goal.write", resource = "#accountId")
+    @Blocking
+    fun clearSavingsGoal(@PathParam("accountId") accountId: UUID): Response {
+        val customer = customer()
+        if (!ownsAccount(accountId, customer.partyId)) {
+            return forbidden("Account does not belong to caller")
+        }
+        return upstream.delete(
+            "$accountServiceUrl/api/v1/accounts/$accountId/goal",
             customer.partyId.toString(),
         )
     }

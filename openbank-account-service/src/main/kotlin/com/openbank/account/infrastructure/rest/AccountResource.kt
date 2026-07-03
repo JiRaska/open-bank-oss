@@ -7,6 +7,7 @@ package com.openbank.account.infrastructure.rest
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.account.application.port.`in`.AccountUseCase
 import com.openbank.account.application.port.`in`.AddPocketCommand
+import com.openbank.account.application.port.`in`.ClearSavingsGoalCommand
 import com.openbank.account.application.port.`in`.CloseAccountCommand
 import com.openbank.account.application.port.`in`.ClosePocketCommand
 import com.openbank.account.application.port.`in`.FreezeAccountCommand
@@ -18,6 +19,7 @@ import com.openbank.account.application.port.`in`.OpenAccountCommand
 import com.openbank.account.application.port.`in`.ResolvePocketQuery
 import com.openbank.account.application.port.`in`.SearchAccountsQuery
 import com.openbank.account.application.port.`in`.UnfreezeAccountCommand
+import com.openbank.account.application.port.`in`.UpdateSavingsGoalCommand
 import com.openbank.account.infrastructure.rest.dto.AccountBalanceResponse
 import com.openbank.account.infrastructure.rest.dto.AccountResponse
 import com.openbank.account.infrastructure.rest.dto.AddPocketRequest
@@ -26,6 +28,7 @@ import com.openbank.account.infrastructure.rest.dto.FreezeAccountRequest
 import com.openbank.account.infrastructure.rest.dto.OpenAccountRequest
 import com.openbank.account.infrastructure.rest.dto.PocketResolutionResponse
 import com.openbank.account.infrastructure.rest.dto.PocketResponse
+import com.openbank.account.infrastructure.rest.dto.SavingsGoalRequest
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.money.CurrencyCode
@@ -41,6 +44,7 @@ import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -301,6 +305,51 @@ class AccountResource(
         return Response.ok(pocket.toResponse()).build()
     }
 
+    @PUT
+    @Path("/{accountId}/goal")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "account.update", resource = "#accountId")
+    @Operation(summary = "Set or replace the account's savings goal (ADR-0153)")
+    suspend fun updateSavingsGoal(
+        @PathParam("accountId") accountId: UUID,
+        request: SavingsGoalRequest,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): Response {
+        customerPartyId?.let {
+            val account = accountUseCase.getAccount(GetAccountQuery(accountId))
+            denyIfNotOwner(account.partyId, it)?.let { deny -> return deny }
+        }
+        val account = accountUseCase.updateSavingsGoal(
+            UpdateSavingsGoalCommand(
+                accountId = accountId,
+                name = request.name,
+                targetMinorUnits = request.targetMinorUnits,
+                targetDate = request.targetDate,
+                requestedBy = customerPartyId ?: operatorId(),
+            ),
+        )
+        return Response.ok(account.toResponse()).build()
+    }
+
+    @DELETE
+    @Path("/{accountId}/goal")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "account.update", resource = "#accountId")
+    @Operation(summary = "Clear the account's savings goal (ADR-0153)")
+    suspend fun clearSavingsGoal(
+        @PathParam("accountId") accountId: UUID,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): Response {
+        customerPartyId?.let {
+            val account = accountUseCase.getAccount(GetAccountQuery(accountId))
+            denyIfNotOwner(account.partyId, it)?.let { deny -> return deny }
+        }
+        val account = accountUseCase.clearSavingsGoal(
+            ClearSavingsGoalCommand(accountId = accountId, requestedBy = customerPartyId ?: operatorId()),
+        )
+        return Response.ok(account.toResponse()).build()
+    }
+
     @GET
     @Path("/{accountId}/pockets/resolve")
     @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
@@ -409,6 +458,9 @@ private fun com.openbank.account.domain.model.Account.toResponse() = AccountResp
     status = status,
     openedAt = openedAt,
     closedAt = closedAt,
+    goalName = goalName,
+    goalTargetMinorUnits = goalTargetMinorUnits,
+    goalTargetDate = goalTargetDate,
 )
 
 private fun CursorPage<com.openbank.account.domain.model.Account>.toResponse() =

@@ -9,6 +9,7 @@ import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
 import java.time.Clock
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 data class Account(
@@ -29,6 +30,15 @@ data class Account(
     val sanctionsStatus: String? = null,
     /** Account holder name stored for display / statements (V12). Null after GDPR Art. 17 erasure. */
     val legalName: String? = null,
+    /**
+     * Optional savings goal (ADR-0153) — customer-authored label for what this account is
+     * being saved toward. A goal is "set" iff [goalTargetMinorUnits] is non-null; the other
+     * two fields are meaningless without it. Denominated in this account's own [currency] (no
+     * cross-currency goal). Null after GDPR Art. 17 erasure, same as [legalName].
+     */
+    val goalName: String? = null,
+    val goalTargetMinorUnits: Long? = null,
+    val goalTargetDate: LocalDate? = null,
 ) {
     fun canDebit(amount: Money): Boolean {
         require(amount.currency == currency) { "Currency mismatch" }

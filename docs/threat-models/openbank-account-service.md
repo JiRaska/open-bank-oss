@@ -136,3 +136,35 @@ that is balance-service).
   the account-service → fx-service trust boundary, the dangling-debit failure mode (DEBIT without
   matching CREDIT on partial failure), and the dual-settlement complexity. The trust boundary entry
   above is removed from the DFD. No DB change; no Flyway migration needed.
+- **2026-07-03** — Optional savings goal on `Account` (ADR-0153): `PUT`/`DELETE /api/v1/accounts/
+  {accountId}/goal` (goal_name, goal_target_minor_units, goal_target_date — all nullable). No new
+  trust boundary, no new service, no money movement.
+  - **S (Spoofing):** same customer-mediated path as pocket add/close — the edge authenticates the
+    customer JWT and forwards `X-Customer-Party-Id`; account-service's `denyIfNotOwner` re-checks
+    ownership as defense-in-depth (the header is advisory per the edge's own comment) before
+    accepting operator/service-role requests.
+  - **T (Tampering):** goal name is customer-authored free text — bounded to 120 chars (VARCHAR(120)
+    + app-side `require`), forwarded through the edge via Jackson re-serialization (not string
+    interpolation) so it cannot break out of the JSON body. `targetMinorUnits` validated positive
+    server-side (both edge and account-service) before persisting.
+  - **R (Repudiation):** no new event/audit trail — a goal is customer preference metadata, not a
+    money-path state transition (ADR-0153 "Neutral" consequence); the `accounts.updated_at` /
+    optimistic `version` bump on the row is the only trace, same as any other field-level update
+    via the existing generic `AccountRepository.update()`.
+  - **I (Information disclosure):** goal name/target are returned only on the owning customer's own
+    `GET /accounts/{id}` (or operator/admin reads) — no new read endpoint, no new exposure surface.
+    PII-adjacent (customer-authored text) — nulled on GDPR Art. 17 erasure alongside `legalName`
+    (`anonymizeByPartyId` extended, not a new erasure path).
+  - **D (Denial of service):** plain synchronous DB write through the existing `update()` path — no
+    new external call, no new failure mode beyond "account not found" (404) already handled by
+    `requireAccount`.
+  - **E (Elevation of privilege):** none — reuses `account.update` action already scoped to
+    `ROLE_OPERATOR`/`ROLE_ADMIN` (service-side) and `customer.accounts.goal.write` (edge-side, under
+    the existing `customer.*` self-service OPA rule — no new policy rule needed).
+  **Risk class = low** (customer-preference metadata, no money movement, no new trust boundary).
+  Flyway `V13__savings_goal.sql`: `goal_name VARCHAR(120)`, `goal_target_minor_units BIGINT`,
+  `goal_target_date DATE` — all nullable. Rollback: `ALTER TABLE accounts DROP COLUMN goal_name,
+  DROP COLUMN goal_target_minor_units, DROP COLUMN goal_target_date` + revert commit.
+  Money-path service (account-service is in `rules.yaml: money_path_services`) — this entry
+  satisfies the threat-model requirement for the 2-approval gate (rule #8); the change itself moves
+  no money and needs no additional compensating control beyond what's documented above.
