@@ -1,3 +1,3 @@
 # Regenerate schemathesis.txt: pip install pip-tools && pip-compile --generate-hashes
 # --allow-unsafe --output-file=schemathesis.txt schemathesis.in
-schemathesis==3.39.16
+schemathesis==4.22.3
