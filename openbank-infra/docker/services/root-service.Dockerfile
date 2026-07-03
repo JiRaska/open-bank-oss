@@ -1,4 +1,4 @@
-FROM eclipse-temurin:20-jdk AS build
+FROM eclipse-temurin:20-jdk@sha256:a8010918241007417c8c0ce7d203cf110f8c945b56da01a13eb55af7eb3d3175 AS build
 ARG SERVICE_DIR
 
 WORKDIR /workspace
@@ -17,7 +17,7 @@ RUN chmod +x gradlew && \
     done; \
     exit 1
 
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:21-jre-alpine@sha256:3f08b13888f595cc49edabea7250ba69499ba25602b267da591720769400e08c
 WORKDIR /app
 
 RUN addgroup -S openbank && adduser -S openbank -G openbank

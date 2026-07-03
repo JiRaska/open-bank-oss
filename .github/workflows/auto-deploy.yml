@@ -383,9 +383,11 @@ jobs:
             echo "Using pre-baked trivy: $(trivy --version 2>/dev/null | head -1)"; exit 0
           fi
           # Pinned to the v0.63.0 tag (not `main`) so the installer script itself is
-          # immutable, matching the trivy version it installs.
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/v0.63.0/contrib/install.sh \
-            | sh -s -- -b /usr/local/bin v0.63.0
+          # immutable, matching the trivy version it installs. Hash-verified before
+          # execution (OpenSSF Scorecard Pinned-Dependencies: downloadThenRun).
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/v0.63.0/contrib/install.sh -o /tmp/trivy-install.sh
+          echo "2304dcc0c1883e802d376eae1b514c923b7427a7d88091dfcaf83967e6f55a7c  /tmp/trivy-install.sh" | sha256sum -c -
+          sh /tmp/trivy-install.sh -b /usr/local/bin v0.63.0
 
       - name: Prune Docker build cache before scan
         run: |

@@ -27,7 +27,7 @@
 
 ARG KEYCLOAK_VERSION=26.6.3
 
-FROM quay.io/keycloak/keycloak:${KEYCLOAK_VERSION} AS builder
+FROM quay.io/keycloak/keycloak:${KEYCLOAK_VERSION}@sha256:9b0330756022422149aa6502eb2def8cd47c6e1b000c7c65cdb13e7c0133e992 AS builder
 ENV KC_DB=postgres
 ENV KC_HEALTH_ENABLED=true
 ENV KC_METRICS_ENABLED=true
@@ -35,7 +35,7 @@ ENV KC_CACHE=local
 ENV KC_FEATURES=token-exchange,admin-fine-grained-authz:v1
 RUN /opt/keycloak/bin/kc.sh build
 
-FROM quay.io/keycloak/keycloak:${KEYCLOAK_VERSION}
+FROM quay.io/keycloak/keycloak:${KEYCLOAK_VERSION}@sha256:9b0330756022422149aa6502eb2def8cd47c6e1b000c7c65cdb13e7c0133e992
 # The augmented server (and its baked persisted-config) is the whole /opt/keycloak
 # tree — copy it wholesale, the approach Keycloak's own optimized-image docs use.
 COPY --from=builder /opt/keycloak/ /opt/keycloak/
