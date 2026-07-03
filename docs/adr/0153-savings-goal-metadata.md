@@ -1,7 +1,7 @@
 # ADR-0153 — Savings goal metadata on account-service
 
 Date: 2026-07-03
-Decision-Status: Proposed   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
+Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
 Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only; the build-axis status, independent of the decision axis -->
 Author(s): jiri.raska
 
