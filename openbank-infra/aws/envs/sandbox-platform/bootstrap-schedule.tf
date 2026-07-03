@@ -25,17 +25,30 @@
 # Lives in THIS root (sandbox-platform), not sandbox-substrate where the node
 # group itself is defined: platform-tofu.yml only plans/applies this root
 # (ENV_DIR), and sandbox-substrate has no CI pipeline at all — a schedule
-# resource placed there would never actually be planned or applied. The ASG
-# name crosses roots via terraform_remote_state (envs/sandbox-substrate
-# outputs.tf: bootstrap_asg_name), the same pattern this root already uses
-# for cluster_name/region/etc. (providers.tf).
+# resource placed there would never actually be planned or applied.
+#
+# Looked up by TAG, not by a sandbox-substrate output/remote-state reference:
+# EKS stamps every managed-node-group ASG with `eks:cluster-name` +
+# `eks:nodegroup-name` automatically, so this root can find it without any
+# change to (or re-apply of) sandbox-substrate — avoiding a cross-root
+# apply-ordering dependency that CI can't satisfy on its own (an earlier
+# version of this file used terraform_remote_state for a new substrate
+# output, which failed `tofu plan` here because substrate has no CI to ever
+# apply that output — self-caught before merge).
 #
 # Same 20:00-07:00 UTC boundary as the Karpenter consolidation freeze, for one
 # consistent "off hours" definition across the platform.
 
+data "aws_autoscaling_groups" "bootstrap" {
+  filter {
+    name   = "tag:eks:nodegroup-name"
+    values = ["${local.cluster_name}-bootstrap"]
+  }
+}
+
 resource "aws_autoscaling_schedule" "bootstrap_scale_down" {
   scheduled_action_name  = "openbank-bootstrap-scale-down"
-  autoscaling_group_name = local.s.bootstrap_asg_name
+  autoscaling_group_name = data.aws_autoscaling_groups.bootstrap.names[0]
 
   recurrence = "0 20 * * *" # 20:00 UTC daily
   time_zone  = "UTC"
@@ -47,7 +60,7 @@ resource "aws_autoscaling_schedule" "bootstrap_scale_down" {
 
 resource "aws_autoscaling_schedule" "bootstrap_scale_up" {
   scheduled_action_name  = "openbank-bootstrap-scale-up"
-  autoscaling_group_name = local.s.bootstrap_asg_name
+  autoscaling_group_name = data.aws_autoscaling_groups.bootstrap.names[0]
 
   recurrence = "0 7 * * *" # 07:00 UTC daily — matches the Karpenter freeze end
   time_zone  = "UTC"

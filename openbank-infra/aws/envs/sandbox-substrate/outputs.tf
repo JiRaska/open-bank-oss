@@ -8,11 +8,6 @@ output "cluster_name" {
   value = module.eks.cluster_name
 }
 
-output "bootstrap_asg_name" {
-  description = "Underlying ASG of the bootstrap managed node group — consumed by the platform root's aws_autoscaling_schedule (sandbox-platform/bootstrap-schedule.tf) via terraform_remote_state."
-  value       = module.eks.bootstrap_asg_name
-}
-
 output "cluster_endpoint" {
   value = module.eks.cluster_endpoint
 }

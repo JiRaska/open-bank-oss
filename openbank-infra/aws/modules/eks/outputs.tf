@@ -34,8 +34,3 @@ output "node_security_group_id" {
 output "kms_key_arn" {
   value = aws_kms_key.secrets.arn
 }
-
-output "bootstrap_asg_name" {
-  description = "Underlying ASG of the bootstrap managed node group — target for aws_autoscaling_schedule (sandbox-substrate bootstrap-schedule.tf)."
-  value       = aws_eks_node_group.bootstrap.resources[0].autoscaling_groups[0].name
-}
