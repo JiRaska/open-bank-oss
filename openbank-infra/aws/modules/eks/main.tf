@@ -181,6 +181,13 @@ resource "aws_eks_node_group" "bootstrap" {
     max_unavailable = 1
   }
 
+  # EKS Node Auto Repair: replaces nodes that boot but never join the cluster
+  # (or go NotReady) — the ASG's EC2 health check alone can't detect this class
+  # of guest-level hang (silent zombie instance, fully billed, never Ready).
+  node_repair_config {
+    enabled = true
+  }
+
   labels = {
     "openbank.io/pool" = "bootstrap"
   }
