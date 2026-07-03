@@ -28,7 +28,7 @@ concurrency:
 jobs:
   release-please:
     name: Release Please
-    runs-on: [self-hosted, openbank-sandbox]
+    runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     permissions:
       contents: write
       pull-requests: write
@@ -109,7 +109,7 @@ jobs:
     name: Release evidence (SBOM + SLSA + VEX bundle)
     needs: release-please
     if: needs.release-please.outputs.releases_created == 'true'
-    runs-on: openbank-batch
+    runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     timeout-minutes: 30
     continue-on-error: true
     permissions:

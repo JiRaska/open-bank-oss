@@ -27,7 +27,7 @@ permissions:
 jobs:
   backfill:
     name: Backfill ${{ inputs.tag }}
-    runs-on: openbank-batch
+    runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     permissions:
       contents: write   # upload release assets
       id-token: write   # OIDC → assume the build-runner role for KMS cosign

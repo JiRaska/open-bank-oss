@@ -52,7 +52,7 @@ jobs:
   plan:
     name: tofu plan (preview)
     if: github.event_name != 'workflow_dispatch'
-    runs-on: openbank-batch # non-blocking, credential-free pool (ADR-0053)
+    runs-on: ubuntu-latest # hosted-first (public repo, free); OIDC plan role unchanged (ADR-0060)
     timeout-minutes: 20
     env:
       TF_VAR_governance_gh_pat: ${{ secrets.GOVERNANCE_GH_PAT }}
@@ -126,7 +126,7 @@ jobs:
   infracost:
     name: infracost cost delta
     if: github.event_name == 'pull_request'
-    runs-on: openbank-batch
+    runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     timeout-minutes: 10
     continue-on-error: true   # non-blocking until INFRACOST_API_KEY is set
     steps:
@@ -170,7 +170,7 @@ jobs:
   apply:
     name: tofu apply (manual dispatch)
     if: github.event_name == 'workflow_dispatch'
-    runs-on: openbank-deploy # credentialed lane (ADR-0053)
+    runs-on: ubuntu-latest # hosted-first; security boundary is the OIDC job_workflow_ref pin + manual dispatch (ADR-0060), not the runner
     timeout-minutes: 30
     # Audit trail + future reviewer gate (issue #282). The openbank-ci-tofu-apply
     # trust policy now accepts the environment-form OIDC sub

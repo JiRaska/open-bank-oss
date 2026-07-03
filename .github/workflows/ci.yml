@@ -27,7 +27,7 @@ jobs:
   # ---------------------------------------------------------------------------
   changes-ui:
     name: Detect UI changes
-    runs-on: openbank-build
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       changed: ${{ steps.check.outputs.changed }}
@@ -55,7 +55,7 @@ jobs:
     name: Admin UI build
     needs: changes-ui
     if: needs.changes-ui.outputs.changed == 'true'
-    runs-on: openbank-build
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     defaults:
       run:
@@ -159,7 +159,7 @@ jobs:
     name: Admin UI
     needs: [changes-ui, ui-build]
     if: always()
-    runs-on: openbank-build
+    runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Check build result
@@ -175,15 +175,21 @@ jobs:
   # ---------------------------------------------------------------------------
   validate:
     name: Validate manifests
-    runs-on: openbank-build
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      # yamllint/shellcheck run as the host binaries (brew) rather than Docker
-      # container actions — container actions don't execute on the macOS pool
-      # member, so a direct CLI invocation keeps this job OS-portable across the
-      # mixed [self-hosted, openbank-sandbox] pool (ADR-0040).
+      # yamllint/shellcheck run as direct CLI invocations rather than Docker
+      # container actions (ADR-0040). shellcheck is pre-installed on the hosted
+      # ubuntu image; yamllint is not.
+      - name: Install lint tools
+        run: |
+          command -v yamllint >/dev/null 2>&1 || {
+            sudo apt-get update -q
+            sudo apt-get install -y -q yamllint
+          }
+
       - name: yamllint
         run: |
           # Lint the infra/CI manifests this job is named for. Quarkus service
@@ -465,7 +471,7 @@ jobs:
   app-status:
     name: Customer-app dossier
     if: github.event_name == 'pull_request'
-    runs-on: openbank-build
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
@@ -574,7 +580,7 @@ jobs:
   dependency-review:
     name: Dependency review
     if: github.event_name == 'pull_request' && github.event.repository.private == false
-    runs-on: openbank-build
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

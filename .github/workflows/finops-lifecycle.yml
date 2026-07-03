@@ -23,7 +23,7 @@ jobs:
   gate:
     name: Version lifecycle gate
     if: github.event_name == 'pull_request'
-    runs-on: openbank-batch
+    runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -37,7 +37,7 @@ jobs:
   audit:
     name: Weekly lifecycle audit
     if: github.event_name != 'pull_request'
-    runs-on: openbank-batch
+    runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     timeout-minutes: 5
     permissions:
       contents: read

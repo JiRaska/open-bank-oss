@@ -58,7 +58,7 @@ jobs:
   # ── 1. Detect which service modules actually changed ─────────────────────────
   changes:
     name: Detect changed services
-    runs-on: openbank-build
+    runs-on: ubuntu-latest  # pure git; hosted-first (public repo, free)
     permissions:
       contents: write
       pull-requests: write
@@ -157,7 +157,13 @@ jobs:
     name: Build + push
     needs: changes
     if: needs.changes.outputs.any == 'true'
-    runs-on: openbank-build
+    # Native arm64 GitHub-hosted runner (free on public repos) — the runtime images
+    # are linux/arm64, so buildx builds natively with no QEMU. ECR push + KMS cosign
+    # authenticate via the same GitHub-OIDC role as before (it trusts repo:*, not a
+    # runner identity). The in-cluster Gradle remote cache / Reposilite mirror are
+    # simply absent here (their probes fall through to Maven Central — free egress
+    # on hosted runners, unlike the NAT-metered VPC).
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: write
       pull-requests: write
@@ -501,6 +507,9 @@ jobs:
     name: can-i-deploy
     needs: [changes, build-push]
     if: needs.changes.outputs.any == 'true'
+    # Stays on the self-hosted pool: the Pact Broker has no public ingress
+    # (ADR-0056) and is only resolvable over cluster DNS. ARC scale-to-zero
+    # serves this label at ~$0 idle.
     runs-on: openbank-build
     permissions:
       contents: write
@@ -600,7 +609,7 @@ jobs:
     name: Gitops PR
     needs: [changes, build-push, can-i-deploy]
     if: needs.changes.outputs.any == 'true'
-    runs-on: openbank-build
+    runs-on: ubuntu-latest  # manifest rewrite + PR only; hosted-first (public repo, free)
     permissions:
       contents: write
       pull-requests: write
