@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.16.1...customer-edge-v0.16.2) (2026-07-03)
+
+
+### Bug Fixes
+
+* **notification:** notification-service authz fails closed with no OPA sidecar; add read-state ([#212](https://github.com/JiRaska/open-bank-oss/issues/212)) ([b976fbd](https://github.com/JiRaska/open-bank-oss/commit/b976fbdfb932f2e5adfb1c0fb62d8fc4e76f3b7e))
+
 ## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.16.0...customer-edge-v0.16.1) (2026-07-03)
 
 
