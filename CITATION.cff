@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use this software or reference its architecture, please cite it as below."
+title: "OpenBank — open-source retail banking platform reference implementation"
+type: software
+authors:
+  - family-names: "Raška"
+    given-names: "Jiří"
+repository-code: "https://github.com/JiRaska/open-bank-oss"
+url: "https://open-bank.tech/"
+license: Apache-2.0
+keywords:
+  - banking
+  - fintech
+  - open-banking
+  - psd2
+  - kotlin
+  - quarkus
+  - microservices
+  - hexagonal-architecture
+  - event-driven
+abstract: >-
+  Cloud-native, open-source retail banking platform reference implementation:
+  Kotlin/Quarkus event-driven microservices with a double-entry ledger,
+  ISO 20022 payment rails, machine-enforced governance, supply-chain
+  security, and AI-agent operations baked in as code.

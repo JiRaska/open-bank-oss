@@ -2,6 +2,12 @@
 
 > Cloud-native, open-source retail banking platform built on Kotlin + Quarkus, Next.js, and event-driven microservices — with governance, supply-chain security, and AI-agent operations baked in as code.
 
+[![Services CI](https://github.com/JiRaska/open-bank-oss/actions/workflows/services-ci.yml/badge.svg)](https://github.com/JiRaska/open-bank-oss/actions/workflows/services-ci.yml)
+[![CI](https://github.com/JiRaska/open-bank-oss/actions/workflows/ci.yml/badge.svg)](https://github.com/JiRaska/open-bank-oss/actions/workflows/ci.yml)
+[![Security scan](https://github.com/JiRaska/open-bank-oss/actions/workflows/security.yml/badge.svg)](https://github.com/JiRaska/open-bank-oss/actions/workflows/security.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/JiRaska/open-bank-oss/badge)](https://scorecard.dev/viewer/?uri=github.com/JiRaska/open-bank-oss)
+[![codecov](https://codecov.io/gh/JiRaska/open-bank-oss/graph/badge.svg)](https://codecov.io/gh/JiRaska/open-bank-oss)
+[![Open in GitHub Codespaces](https://img.shields.io/badge/Codespaces-Open-181717?logo=github)](https://codespaces.new/JiRaska/open-bank-oss)
 [![Platform: Apache 2.0](https://img.shields.io/badge/Platform-Apache_2.0-brightgreen.svg)](https://opensource.org/licenses/Apache-2.0)
 [![AI agents: AGPL-3.0 + commercial](https://img.shields.io/badge/AI_agents-AGPL--3.0--only_%2B_commercial-blue.svg)](docs/adr/0136-agent-services-agpl-in-repo-open-core.md)
 [![Status: Beta](https://img.shields.io/badge/Status-Beta-blue.svg)](#project-status)
