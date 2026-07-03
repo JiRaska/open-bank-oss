@@ -107,9 +107,9 @@ variable "arc_max_runners" {
 }
 
 variable "arc_batch_max_runners" {
-  description = "Max concurrent runner pods in the openbank-batch scale set (non-blocking PR checks + weekly cron: security/secret scans, finops audit, label sync). Capped low so a batch burst cannot starve the build lane."
+  description = "Max concurrent runner pods in the openbank-batch scale set. ZERO jobs target this label as of PR #198 (public-repo FinOps: security/secret scans, finops audit, dependency-review, sbom, trivy, tofu plan/apply, verify-release-evidence, backfill/release-evidence all moved to free GitHub-hosted runners). Lowered 4 -> 0: the scale set is a fully independent Helm release (no shared IRSA/webhook with build or deploy — arc-runners.tf), so this is a zero-risk change; Karpenter reclaims any lingering batch nodes via its normal 30m consolidation. Bump back up if a future job is deliberately routed to this label."
   type        = number
-  default     = 4
+  default     = 0
 }
 
 variable "arc_deploy_max_runners" {
