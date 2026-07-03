@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.3](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.12.2...notification-service-v0.12.3) (2026-07-03)
+
+
+### Bug Fixes
+
+* **security:** pin remaining unpinned dependencies fleet-wide (Scorecard) ([#190](https://github.com/JiRaska/open-bank-oss/issues/190)) ([e9e8ec3](https://github.com/JiRaska/open-bank-oss/commit/e9e8ec37d3c195bf2a889619894272f3a5b1a100))
+
 ## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.12.1...notification-service-v0.12.2) (2026-07-02)
 
 
