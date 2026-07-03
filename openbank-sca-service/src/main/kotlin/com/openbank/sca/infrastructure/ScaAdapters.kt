@@ -58,8 +58,12 @@ class RedisScaIdempotencyStore(private val redis: ReactiveRedisDataSource) : Sca
 class LoggingNotificationSender : NotificationSender {
     private val log = org.jboss.logging.Logger.getLogger(LoggingNotificationSender::class.java)
 
+    // CodeQL java/log-injection: message is caller-supplied and flows straight into the log
+    // line below. Strip CR/LF so an attacker can't forge additional log lines (CWE-117).
+    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+
     override suspend fun sendPushNotification(partyId: UUID, challengeId: UUID, message: String) {
-        log.infof("PUSH → partyId=%s challengeId=%s message=%s", partyId, challengeId, message)
+        log.infof("PUSH → partyId=%s challengeId=%s message=%s", partyId, challengeId, message.sanitizeForLog())
     }
 
     override suspend fun sendSmsOtp(partyId: UUID, otp: String) {
