@@ -42,6 +42,11 @@ on:
         required: false
         default: ""
 
+# Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
+# block); each job below declares its own override for the access it needs.
+permissions:
+  contents: read
+
 concurrency:
   # One deploy pipeline at a time — a second push while a deploy PR is open would
   # update the same gitops lines, causing a merge conflict. Cancel the in-flight run

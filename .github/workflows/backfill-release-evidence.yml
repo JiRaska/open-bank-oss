@@ -19,6 +19,11 @@ on:
         required: true
         type: string
 
+# Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
+# block); the backfill job below declares its own override for the write access it needs.
+permissions:
+  contents: read
+
 jobs:
   backfill:
     name: Backfill ${{ inputs.tag }}
