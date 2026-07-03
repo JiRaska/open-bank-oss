@@ -83,11 +83,6 @@ spec:
                 secretKeyRef:
                   name: consent-service-oidc
                   key: OIDC_CLIENT_SECRET
-            # OPA sidecar is deployed (ADR-0034). AUTHZ_ENFORCE=true enables the
-            # money-path enforcement pilot (Phase 5) — deployed behind the existing
-            # canary Rollout below, which aborts automatically on elevated error rate.
-            - name: AUTHZ_ENFORCE
-              value: "true"
             - name: QUARKUS_REDIS_HOSTS
               value: redis://redis.consent.svc:6379
             - name: QUARKUS_HTTP_PORT

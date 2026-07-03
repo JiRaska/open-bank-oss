@@ -103,6 +103,29 @@ else
   echo "::warning::check-adr-registry: $ADR_DIR/gen-index.sh missing — skipping index freshness check." >&2
 fi
 
+# --- 4. Delivery-Repos values must be in the known-repos allowlist (ADR-0147) ---
+# Catches a typo'd repo name at authoring time; does NOT verify the target repo's
+# actual state (out of scope — see known-repos.txt).
+KNOWN_REPOS="$ADR_DIR/known-repos.txt"
+if [[ -f "$KNOWN_REPOS" ]]; then
+  for f in "${adrs[@]}"; do
+    base=$(basename "$f")
+    line=$(grep -m1 -E '^Delivery-Repos:' "$f" || true)
+    [[ -z "$line" ]] && continue
+    repos_raw="${line#Delivery-Repos:}"
+    IFS=',' read -ra repo_list <<< "$repos_raw"
+    for repo in "${repo_list[@]}"; do
+      repo="$(echo "$repo" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+      [[ -z "$repo" ]] && continue
+      if ! grep -qxF "$repo" "$KNOWN_REPOS"; then
+        err "$base: Delivery-Repos names '$repo', which is not in $KNOWN_REPOS — add it there first (or fix the typo)."
+      fi
+    done
+  done
+else
+  echo "::warning::check-adr-registry: $KNOWN_REPOS missing — skipping Delivery-Repos allowlist check." >&2
+fi
+
 if [[ "$fail" -ne 0 ]]; then
   echo "::error::check-adr-registry: ADR registry has integrity violations (see above)." >&2
   exit 1

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.10.0...ledger-service-v1.10.1) (2026-07-02)
+
+
+### Security
+
+* **docker-svc:** pin all Dockerfile base images to digest (Scorecard Pinned-Dependencies) ([#103](https://github.com/JiRaska/open-bank-oss/issues/103)) ([27c2dab](https://github.com/JiRaska/open-bank-oss/commit/27c2dabe6b9f9440532edf29a73c6e48e677206b))
+
 ## [1.10.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.9.1...ledger-service-v1.10.0) (2026-06-30)
 
 

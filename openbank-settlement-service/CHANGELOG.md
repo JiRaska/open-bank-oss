@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.3](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.4.2...settlement-service-v0.4.3) (2026-07-02)
+
+
+### Security
+
+* **settlement:** sanitize idempotencyKey before logging (CodeQL java/log-injection) ([#149](https://github.com/JiRaska/open-bank-oss/issues/149)) ([1fa76fc](https://github.com/JiRaska/open-bank-oss/commit/1fa76fcd3a01e749bf0d35b034dd7187e33cfc82))
+
 ## [0.4.2](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.4.1...settlement-service-v0.4.2) (2026-06-29)
 
 

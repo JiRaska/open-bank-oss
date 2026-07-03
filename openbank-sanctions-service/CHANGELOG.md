@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.6.1...sanctions-service-v0.6.2) (2026-07-02)
+
+
+### Security
+
+* **docker-svc:** pin all Dockerfile base images to digest (Scorecard Pinned-Dependencies) ([#103](https://github.com/JiRaska/open-bank-oss/issues/103)) ([27c2dab](https://github.com/JiRaska/open-bank-oss/commit/27c2dabe6b9f9440532edf29a73c6e48e677206b))
+
 ## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.6.0...sanctions-service-v0.6.1) (2026-06-30)
 
 

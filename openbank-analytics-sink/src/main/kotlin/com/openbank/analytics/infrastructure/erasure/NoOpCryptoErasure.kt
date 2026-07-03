@@ -20,10 +20,15 @@ class NoOpCryptoErasure : CryptoErasure {
 
     private val log = Logger.getLogger(NoOpCryptoErasure::class.java)
 
+    // CodeQL java/log-injection: key.aggregateType/aggregateId are caller-supplied. Strip CR/LF
+    // so an attacker can't forge additional log lines (log forging, CWE-117).
+    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+
     override suspend fun erase(key: AggregateKey): Long {
         log.warnf(
             "CryptoErasure no-op: would crypto-shred analytics data for %s/%s. Bind the KMS adapter in production (ADR-0023 F6).",
-            key.aggregateType, key.aggregateId
+            key.aggregateType.sanitizeForLog(),
+            key.aggregateId.sanitizeForLog(),
         )
         return 0
     }

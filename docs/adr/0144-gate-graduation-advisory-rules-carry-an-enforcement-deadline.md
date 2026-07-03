@@ -2,8 +2,16 @@
 
 Date: 2026-07-02
 Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only -->
+Delivery-Status: Shipped    <!-- Planned | Partial | Shipped | N/A — decision-only -->
 Author(s): jiri.raska
+
+**Delivery note (2026-07-02):** `.github/scripts/check-gate-graduation.sh`
+is wired into `ci.yml`, enforced. Every rule with `enforced: advisory` or
+`enforced: planned` in `rules.yaml` carries a `target_enforce_date` +
+`blocked_on` (11 rules). `new_service_with_outbox` graduated to
+`enforce` the same day (its producer, `check-outbox-dispatch-enabled.sh`,
+shipped and reports 0 violations fleet-wide) — the first gate this ADR's
+own mechanism caught before it could decay.
 
 ## Context
 

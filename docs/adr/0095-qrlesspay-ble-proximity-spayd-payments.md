@@ -2,8 +2,16 @@
 
 Date: 2026-06-16
 Status: Accepted
-Delivery-Status: Planned
+Delivery-Status: Partial
 Author(s): Jiří Raška
+Delivery-Repos: openbank-app
+
+**Delivery note (2026-07-02, ADR-0147):** the client-side BLE
+peripheral/central implementation and the QR SPAYD flow it extends both
+ship in `openbank-app`, not in this monorepo — confirmed directly, not
+inferred. This repo holds the wire-format spec and threat model only. A
+review scoped to this monorepo alone will otherwise (and did, once)
+misread this ADR as unimplemented.
 
 ## Context
 

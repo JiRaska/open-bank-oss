@@ -28,8 +28,8 @@ OUT=README.md
   echo "\`origin/main\`, and open PRs) and scaffolds [TEMPLATE.md](TEMPLATE.md) with the canonical"
   echo "two-axis **Decision-Status** / **Delivery-Status** front-matter."
   echo
-  echo "| ADR | Title | Decision | Delivery |"
-  echo "|----:|-------|----------|----------|"
+  echo "| ADR | Title | Decision | Delivery | Repos |"
+  echo "|----:|-------|----------|----------|-------|"
 
   for f in $(ls [0-9]*.md | sort); do
     num=${f%%-*}
@@ -44,12 +44,16 @@ OUT=README.md
     # tolerate plain / bold / table (| Delivery-Status | … |) encodings
     delivery=$(grep -m1 -iE '^[*_| ]*Delivery-Status[*_ |]*[:|]' "$f" \
       | sed -E 's/^[*_| ]*Delivery-Status[*_ ]*[:|]+[*_ ]*//; s/<!--.*-->//; s/\|.*$//; s/[*_ ]*$//; s/^[*_ ]*//' || true)
+    # ADR-0147: optional cross-repo delivery pointer. Only match a live (non-comment)
+    # line — the TEMPLATE.md example is inside an HTML comment and must not match.
+    repos=$(grep -m1 -E '^Delivery-Repos:' "$f" | sed -E 's/^Delivery-Repos:[* ]*//; s/ *$//' || true)
 
     [ -z "$decision" ] && decision="—"
     [ -z "$delivery" ] && delivery="—"
+    [ -z "$repos" ] && repos="—"
     # collapse to a short token for the table (first sentence / before parenthesis)
     decision_short=$(echo "$decision" | sed -E 's/ *\(.*$//; s/ on [0-9].*$//' | cut -c1-40)
-    printf '| [%s](%s) | %s | %s | %s |\n' "$num" "$f" "$h1" "$decision_short" "$delivery"
+    printf '| [%s](%s) | %s | %s | %s | %s |\n' "$num" "$f" "$h1" "$decision_short" "$delivery" "$repos"
   done
 
   # Numbering gaps: computed from the actual file list, not hand-typed, so this

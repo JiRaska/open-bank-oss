@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.4](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.11.3...account-service-v0.11.4) (2026-07-02)
+
+
+### Security
+
+* **docker-svc:** pin all Dockerfile base images to digest (Scorecard Pinned-Dependencies) ([#103](https://github.com/JiRaska/open-bank-oss/issues/103)) ([27c2dab](https://github.com/JiRaska/open-bank-oss/commit/27c2dabe6b9f9440532edf29a73c6e48e677206b))
+
 ## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.11.2...account-service-v0.11.3) (2026-06-30)
 
 

@@ -262,6 +262,11 @@ data class ProductRequest(
  * "free text vs. executable rule" gap is visible on real data rather than silent.
  * No money is moved here — runtime fee posting is a deferred money-path phase.
  */
+// CodeQL java/log-injection: product.code/fee.name/fee.waiveCondition are admin-supplied
+// catalog config, logged verbatim below. Strip CR/LF so they can't forge additional log lines
+// (log forging, CWE-117).
+private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+
 private fun validateFeeWaivers(product: Product, log: Logger) {
     product.fees.filter { it.waivable }.forEach { fee ->
         require(!fee.waiveCondition.isNullOrBlank()) {
@@ -270,8 +275,9 @@ private fun validateFeeWaivers(product: Product, log: Logger) {
         val predicate = WaiveConditionParser.parse(fee.waiveCondition)
         if (predicate is WaivePredicate.Unparseable) {
             log.warning(
-                "Product '${product.code}' fee '${fee.name}' has a non-evaluable waiver condition " +
-                    "(${predicate.reason}): \"${fee.waiveCondition}\" — fee will not be auto-waived (ADR-0138)",
+                "Product '${product.code.sanitizeForLog()}' fee '${fee.name.sanitizeForLog()}' has a " +
+                    "non-evaluable waiver condition (${predicate.reason.sanitizeForLog()}): " +
+                    "\"${fee.waiveCondition.sanitizeForLog()}\" — fee will not be auto-waived (ADR-0138)",
             )
         }
     }

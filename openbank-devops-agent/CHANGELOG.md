@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.3.0...devops-agent-v0.3.1) (2026-07-02)
+
+
+### Security
+
+* **devops-agent:** sanitize finding id before logging (CodeQL java/log-injection) ([#152](https://github.com/JiRaska/open-bank-oss/issues/152)) ([363b7b4](https://github.com/JiRaska/open-bank-oss/commit/363b7b454820304d8997c5e6ffa2251fa197c96b))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.2.0...devops-agent-v0.3.0) (2026-06-29)
 
 

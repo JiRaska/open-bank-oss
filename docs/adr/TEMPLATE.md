@@ -4,6 +4,11 @@ Date: YYYY-MM-DD
 Decision-Status: Proposed   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
 Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only; the build-axis status, independent of the decision axis -->
 Author(s): <name>
+<!-- Optional (ADR-0147): Delivery-Repos: <repo-name>[, <repo-name>] — set this when
+     delivery lives partly or wholly outside this monorepo (e.g. the openbank-app
+     client). Repo names must appear in docs/adr/known-repos.txt. Omit the line
+     entirely for a monorepo-only ADR. -->
+<!-- Delivery-Repos: openbank-app -->
 
 ## Context
 
