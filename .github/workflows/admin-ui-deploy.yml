@@ -71,7 +71,9 @@ jobs:
     # The GitOps commit message always starts with "chore(admin-ui): deploy" and it
     # touches cluster-topology.json / infra-lifecycle.json which match the path filter.
     if: "!startsWith(github.event.head_commit.message, 'chore(admin-ui): deploy')"
-    runs-on: openbank-build
+    # Native arm64 GitHub-hosted runner (free on public repos): the admin-ui image
+    # is linux/arm64. ECR push + cosign use the same GitHub-OIDC role as before.
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: write
       pull-requests: write

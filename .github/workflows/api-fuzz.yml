@@ -45,7 +45,7 @@ concurrency:
 jobs:
   fuzz:
     name: schemathesis
-    runs-on: openbank-batch
+    runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     timeout-minutes: 45
     env:
       GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"

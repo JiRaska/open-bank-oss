@@ -37,7 +37,7 @@ concurrency:
 jobs:
   changes:
     name: Detect changed services
-    runs-on: openbank-build
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       services: ${{ steps.detect.outputs.services }}
@@ -197,7 +197,7 @@ jobs:
     name: all-green
     needs: [changes, build]
     if: always()
-    runs-on: openbank-build
+    runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Verify no service failed
@@ -214,7 +214,7 @@ jobs:
     name: nightly fleet-health alert
     needs: [changes, build]
     if: always() && github.event_name == 'schedule' && (needs.build.result == 'failure' || needs.changes.result == 'failure')
-    runs-on: openbank-build
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read

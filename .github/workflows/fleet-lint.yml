@@ -60,7 +60,7 @@ concurrency:
 jobs:
   fleet-lint:
     name: fleet lint + compile
-    runs-on: openbank-build
+    runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     timeout-minutes: 25
     permissions:
       contents: read

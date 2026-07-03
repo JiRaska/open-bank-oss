@@ -35,7 +35,16 @@ permissions:
 jobs:
   build:
     name: ${{ inputs.service }}
-    runs-on: openbank-build
+    # Split lane (FinOps, public repo): PR and nightly/scheduled builds run on free
+    # unlimited GitHub-hosted runners (4 vCPU/16 GB on public repos) — same
+    # no-broker/no-ECR environment a fork PR already gets. ONLY the main-PUSH build
+    # stays on the self-hosted pool (ARC scale-to-zero): the Pact broker has no
+    # public ingress (ADR-0056) and provider verification results MUST be published
+    # from the main-push build or can-i-deploy blocks the auto-deploy of that SHA.
+    # KEEP THIS EXPRESSION IN LOCKSTEP with the PACT_BROKER_URL env below — a hosted
+    # runner with a set (unreachable) broker URL fails the provider tests instead
+    # of skipping them.
+    runs-on: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'openbank-build' || 'ubuntu-latest' }}
     timeout-minutes: 45
     env:
       # Pact Broker (ADR-0092). The broker has no public ingress (ADR-0056); the
@@ -46,7 +55,11 @@ jobs:
       # cluster DNS). When PACT_BROKER_URL is unset (var not configured) the build
       # passes empty -D and the @PactBroker provider tests are @EnabledIfSystemProperty
       # -skipped, and the publish step no-ops — so this is inert until the var lands.
-      PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
+      # Blanked on the hosted lanes (a GitHub-hosted runner can't reach the
+      # cluster-DNS broker; a set-but-unreachable URL would fail the provider tests
+      # instead of skipping them). Main-push behaviour is unchanged: verify + publish.
+      # KEEP IN LOCKSTEP with the runs-on expression above.
+      PACT_BROKER_URL: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PACT_BROKER_URL || '' }}
       PACT_BROKER_USERNAME: ${{ vars.PACT_BROKER_USERNAME }}
       PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
       # Testcontainers pulls postgres:16.3-alpine and redpandadata/redpanda through
@@ -342,7 +355,13 @@ jobs:
           # exhausting the shared storage quota during full-fleet rebuilds
           # ("Failed to CreateArtifact: Artifact storage quota has been hit"), which failed
           # otherwise-green service builds.
-          cache-disabled: true
+          #
+          # The NAT-cost analysis above applies to SELF-HOSTED runners in the VPC.
+          # On GitHub-hosted runners (the PR lane) the Actions cache is
+          # network-internal and free, and there is no in-cluster remote build
+          # cache to fall back on — so the cache is enabled there and disabled
+          # on the self-hosted main lane.
+          cache-disabled: ${{ runner.environment == 'self-hosted' }}
 
       # No --no-daemon (ADR-0043): on a persistent runner the Gradle daemon is kept
       # warm and reused across jobs, so the JVM + 30-module configuration is not paid
@@ -373,13 +392,29 @@ jobs:
             -Dpact.provider.branch="${BRANCH}" \
             -Dpact.provider.tag="${BRANCH}"
 
+      # Coverage upload (Codecov is free for public repos; tokenless via the OIDC
+      # id-token this job already has). Advisory only — never gates the build.
+      # koverVerify stays the enforcement mechanism (ratchet-only, rules.yaml).
+      - name: Generate Kover XML report
+        continue-on-error: true
+        run: ./gradlew :${{ inputs.service }}:koverXmlReport --build-cache --console=plain
+
+      - name: Upload coverage to Codecov
+        continue-on-error: true
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: ${{ inputs.service }}/build/reports/kover/report.xml
+          flags: ${{ inputs.service }}
+          use_oidc: true
+          fail_ci_if_error: false
+
       # Publish this service's CONSUMER pacts to the broker (ADR-0092). The consumer
       # tests regenerate pacts/<consumer>-<provider>.json (pact.rootDir → repo /pacts);
       # publish only the files where THIS service is the consumer, keyed by git SHA +
       # branch via the /contracts/publish API. curl (not the pact-cli docker image):
       # the runner pod resolves the broker's cluster DNS, a dind container would not.
       - name: Publish consumer pacts to broker
-        if: ${{ vars.PACT_BROKER_URL != '' }}
+        if: ${{ env.PACT_BROKER_URL != '' }}
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |

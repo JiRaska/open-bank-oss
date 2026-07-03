@@ -142,7 +142,7 @@ jobs:
   # ---------------------------------------------------------------------------
   trivy:
     name: Trivy
-    runs-on: openbank-batch
+    runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     permissions:
       contents: read
       security-events: write # upload-sarif
@@ -150,7 +150,11 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      # Trivy runs as the host binary (brew) rather than the Docker container
+      # Hosted runners don't pre-install trivy; the pinned setup action fetches it.
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+
+      # Trivy runs as the host binary rather than the Docker container
       # action — container actions don't execute on the macOS pool member, so a
       # direct CLI invocation keeps this OS-portable across the mixed
       # [self-hosted, openbank-sandbox] pool (ADR-0040).
@@ -232,8 +236,8 @@ jobs:
   # This complements (does not replace) the repo-wide job above.
   sbom-per-service:
     name: SBOM (per service)
-    runs-on: openbank-batch
-    timeout-minutes: 30
+    runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
+    timeout-minutes: 45  # cold Maven-Central resolution on a hosted runner (no in-cluster mirror)
     # Builds the full runtime classpath of all modules — far too heavy to run on
     # every PR or on dependency-neutral commits (e.g. gitops auto-deploy). Runs on
     # schedule/manual and on main pushes only when dependencies changed (detect-deps).

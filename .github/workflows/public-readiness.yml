@@ -35,8 +35,8 @@ concurrency:
 jobs:
   audit:
     name: Public-readiness audit
-    # openbank-build = Hetzner + Mac Mini pool (always-online, zero AWS cost).
-    runs-on: openbank-build
+    # Public repo ⇒ GitHub-hosted runners are free and unlimited (FinOps: hosted-first).
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -46,6 +46,19 @@ jobs:
           # On PRs we SKIP_GITLEAKS (secret-scan.yml already gates gitleaks per-PR),
           # so a shallow checkout there is fine and faster.
           fetch-depth: ${{ github.event_name == 'pull_request' && 1 || 0 }}
+
+      # The full-history gitleaks leg (scheduled/manual runs) needs the binary,
+      # which hosted runners don't pre-install.
+      - name: Install gitleaks
+        if: github.event_name != 'pull_request'
+        env:
+          GITLEAKS_VERSION: "8.21.2"
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
 
       - name: Run public-readiness audit
         env:

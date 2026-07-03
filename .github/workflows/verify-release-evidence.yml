@@ -24,7 +24,7 @@ permissions:
 jobs:
   verify:
     name: Verify ${{ inputs.tag }}
-    runs-on: openbank-batch
+    runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     timeout-minutes: 15
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
