@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.6](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.7.5...sepa-payment-v0.7.6) (2026-07-03)
+
+
+### Bug Fixes
+
+* **libs-domain:** carry interbank settlement date through to pacs.008 (IntrBkSttlmDt) ([#195](https://github.com/JiRaska/open-bank-oss/issues/195)) ([62eef5e](https://github.com/JiRaska/open-bank-oss/commit/62eef5ef21626a56099ccfe9ebc6f6e5387a85b6))
+
 ## [0.7.5](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.7.4...sepa-payment-v0.7.5) (2026-07-03)
 
 
