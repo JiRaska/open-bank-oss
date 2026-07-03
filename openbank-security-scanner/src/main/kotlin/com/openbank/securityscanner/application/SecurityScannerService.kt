@@ -59,14 +59,16 @@ class SecurityScannerService(private val clock: Clock) {
         val findings = mutableListOf<SecurityFinding>()
         val mgmt = mgmtUrl(url)
 
-        // 1. Reachability check — tries management port first, falls back to API port
-        val (reachable, responseHeaders) = try {
+        // 1. Reachability check — tries management port first, falls back to API port.
+        // (Security headers are checked separately in step 2, against the API port —
+        // this response's headers are not used.)
+        val reachable = try {
             val req = HttpRequest.newBuilder(URI.create("$mgmt/q/health"))
                 .GET().timeout(Duration.ofSeconds(5)).build()
             val resp = http.send(req, HttpResponse.BodyHandlers.ofString())
-            Pair(resp.statusCode() in 200..599, resp.headers().map())
+            resp.statusCode() in 200..599
         } catch (e: Exception) {
-            Pair(false, emptyMap<String, List<String>>())
+            false
         }
 
         if (!reachable) {

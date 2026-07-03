@@ -89,7 +89,6 @@ class ScaServiceTest {
     @Test
     fun `initiate creates challenge with PUSH_NOTIFICATION as default method`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
-        val savedChallenge = challenge(partyId = partyId, method = ScaMethod.PUSH_NOTIFICATION)
 
         coEvery { idempotencyStore.get(any()) } returns null
         coEvery { repository.save(any()) } answers { firstArg() }

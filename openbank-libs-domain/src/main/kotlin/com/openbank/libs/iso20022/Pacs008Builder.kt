@@ -12,13 +12,17 @@ import java.time.format.DateTimeFormatter
 /**
  * A single FI-to-FI customer credit transfer instruction, in scheme-neutral domain terms.
  *
- * This is the rail's input to [Pacs008Builder]; it carries exactly the fields the SEPA SCT
- * pilot populates (ADR-0104). Amount is a [BigDecimal] in major units (e.g. `12.34` EUR);
- * the builder renders it with the scheme's decimal rules. Agents are BICs; accounts are IBANs.
+ * This is the rail's input to [Pacs008Builder]. Amount is a [BigDecimal] in major units
+ * (e.g. `12.34` EUR); the builder renders it with the scheme's decimal rules. Agents are
+ * BICs; accounts are IBANs. [interbankSettlementDate] maps to `IntrBkSttlmDt`: same-day for
+ * clearing-settled rails (SEPA/domestic, which have no explicit value date of their own —
+ * pass `creationDateTime`'s date), or the scheme-supplied value date for rails that carry one
+ * (e.g. SWIFT MT103 field 32A).
  */
 data class CreditTransferInstruction(
     val messageId: String,
     val creationDateTime: OffsetDateTime,
+    val interbankSettlementDate: OffsetDateTime,
     val endToEndId: String,
     val transactionId: String?,
     val amount: BigDecimal,
@@ -79,6 +83,7 @@ class Pacs008Builder {
         i.transactionId?.let { doc.text(pmtId, "TxId", it) }
 
         doc.text(tx, "IntrBkSttlmAmt", i.amount.toPlainString()).setAttribute("Ccy", i.currency)
+        doc.text(tx, "IntrBkSttlmDt", i.interbankSettlementDate.format(DateTimeFormatter.ISO_LOCAL_DATE))
         doc.text(tx, "ChrgBr", i.chargeBearer.name)
 
         doc.child(tx, "Dbtr").also { doc.text(it, "Nm", i.debtorName) }

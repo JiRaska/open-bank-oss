@@ -91,23 +91,29 @@ class SchemeGatewayAdapter(
         debtorIban: String,
         creditorIban: String,
         creditorAgentBic: String,
-    ) = CreditTransferInstruction(
-        messageId = "DOM-${payment.endToEndId}".take(MAX_35),
-        creationDateTime = OffsetDateTime.now(ZoneOffset.UTC),
-        endToEndId = payment.endToEndId,
-        transactionId = null,
-        amount = payment.amount,
-        currency = payment.currency,
-        chargeBearer = ChargeBearer.SLEV,
-        settlementMethod = SettlementMethod.CLRG,
-        debtorName = payment.debtorName,
-        debtorIban = debtorIban,
-        debtorAgentBic = "$ownBankBic",
-        creditorAgentBic = creditorAgentBic,
-        creditorName = payment.creditorName,
-        creditorIban = creditorIban,
-        remittanceInfo = buildRemittanceInfo(payment),
-    )
+    ): CreditTransferInstruction {
+        // Domestic transfers settle same-day via the clearing system (SttlmMtd CLRG) — there
+        // is no scheme-supplied value date to carry, unlike SWIFT MT103's field 32A.
+        val now = OffsetDateTime.now(ZoneOffset.UTC)
+        return CreditTransferInstruction(
+            messageId = "DOM-${payment.endToEndId}".take(MAX_35),
+            creationDateTime = now,
+            interbankSettlementDate = now,
+            endToEndId = payment.endToEndId,
+            transactionId = null,
+            amount = payment.amount,
+            currency = payment.currency,
+            chargeBearer = ChargeBearer.SLEV,
+            settlementMethod = SettlementMethod.CLRG,
+            debtorName = payment.debtorName,
+            debtorIban = debtorIban,
+            debtorAgentBic = "$ownBankBic",
+            creditorAgentBic = creditorAgentBic,
+            creditorName = payment.creditorName,
+            creditorIban = creditorIban,
+            remittanceInfo = buildRemittanceInfo(payment),
+        )
+    }
 
     private fun buildRemittanceInfo(payment: DomesticPayment): String? {
         val parts = listOfNotNull(

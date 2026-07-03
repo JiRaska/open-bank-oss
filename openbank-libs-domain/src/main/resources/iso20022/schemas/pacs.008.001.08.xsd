@@ -60,6 +60,7 @@
     <xs:sequence>
       <xs:element name="PmtId" type="PaymentIdentification7"/>
       <xs:element name="IntrBkSttlmAmt" type="ActiveCurrencyAndAmount"/>
+      <xs:element name="IntrBkSttlmDt" type="ISODate"/>
       <xs:element name="ChrgBr" type="ChargeBearerType1Code"/>
       <xs:element name="Dbtr" type="PartyIdentification135"/>
       <xs:element name="DbtrAcct" type="CashAccount38"/>
@@ -152,6 +153,10 @@
 
   <xs:simpleType name="ISODateTime">
     <xs:restriction base="xs:dateTime"/>
+  </xs:simpleType>
+
+  <xs:simpleType name="ISODate">
+    <xs:restriction base="xs:date"/>
   </xs:simpleType>
 
   <xs:simpleType name="ActiveCurrencyCode">
