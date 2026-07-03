@@ -34,3 +34,10 @@ jobs:
           # an in-process test client in an ephemeral CI job — it never serves
           # traffic or accepts untrusted uploads here.
           allow-ghsas: GHSA-wqp7-x3pw-xc5r, GHSA-82w8-qh3p-5jfq
+          # rfc3987 (GPL-3.0-or-later) is pulled in by schemathesis's own
+          # jsonschema[format] extra (the IRI/iri-reference format validator;
+          # jsonschema's non-GPL alternative extra is format-nongpl, which
+          # schemathesis does not use). It is a CI-only fuzzing-tool dependency,
+          # never redistributed or linked into anything we ship, so GPL's
+          # copyleft/distribution obligations don't apply here.
+          allow-dependencies-licenses: pkg:pypi/rfc3987@1.3.8
