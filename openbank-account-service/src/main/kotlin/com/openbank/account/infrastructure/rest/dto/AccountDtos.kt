@@ -10,6 +10,7 @@ import com.openbank.account.domain.model.AccountType
 import com.openbank.account.domain.model.PocketStatus
 import java.math.BigDecimal
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 data class OpenAccountRequest(
@@ -36,9 +37,16 @@ data class AccountResponse(
     val status: AccountStatus,
     val openedAt: Instant,
     val closedAt: Instant?,
+    /** Optional savings goal (ADR-0153) — all three null when no goal is set. */
+    val goalName: String? = null,
+    val goalTargetMinorUnits: Long? = null,
+    val goalTargetDate: LocalDate? = null,
 )
 
 data class AddPocketRequest(val currencyCode: String)
+
+/** PUT /{accountId}/goal body (ADR-0153). */
+data class SavingsGoalRequest(val name: String, val targetMinorUnits: Long, val targetDate: LocalDate? = null)
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class PocketResponse(

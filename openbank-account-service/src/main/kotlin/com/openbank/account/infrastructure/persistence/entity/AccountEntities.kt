@@ -13,6 +13,7 @@ import jakarta.persistence.PreUpdate
 import jakarta.persistence.Table
 import jakarta.persistence.Version
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 @Entity
@@ -71,6 +72,16 @@ class AccountEntity : PanacheEntityBase {
     /** Account holder name stored for downstream display / statements (V12). Nulled out on GDPR Art. 17 erasure. */
     @Column(name = "legal_name", length = 255)
     var legalName: String? = null
+
+    /** Optional savings goal (ADR-0153, V13). Set iff goalTargetMinorUnits is non-null. */
+    @Column(name = "goal_name", length = 120)
+    var goalName: String? = null
+
+    @Column(name = "goal_target_minor_units")
+    var goalTargetMinorUnits: Long? = null
+
+    @Column(name = "goal_target_date")
+    var goalTargetDate: LocalDate? = null
 
     @Column(name = "created_at", nullable = false, updatable = false)
     var createdAt: Instant = Instant.EPOCH

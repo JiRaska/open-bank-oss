@@ -309,10 +309,40 @@ class AccountService(
         )
     }
 
+    // ADR-0153: set/replace or clear the account's optional savings goal. Plain field
+    // updates on the existing aggregate (see the ADR's "not a new service" decision) —
+    // no new event, no new Kafka topic; the goal is customer-preference metadata, not a
+    // money-path state transition.
+    override suspend fun updateSavingsGoal(command: UpdateSavingsGoalCommand): Account {
+        require(command.name.isNotBlank()) { "Goal name must not be blank" }
+        require(command.name.length <= GOAL_NAME_MAX_LENGTH) {
+            "Goal name must be at most $GOAL_NAME_MAX_LENGTH characters"
+        }
+        require(command.targetMinorUnits > 0) { "Goal target must be positive" }
+        val account = requireAccount(command.accountId)
+        return accountRepository.update(
+            account.copy(
+                goalName = command.name,
+                goalTargetMinorUnits = command.targetMinorUnits,
+                goalTargetDate = command.targetDate,
+            ),
+        )
+    }
+
+    override suspend fun clearSavingsGoal(command: ClearSavingsGoalCommand): Account {
+        val account = requireAccount(command.accountId)
+        return accountRepository.update(
+            account.copy(goalName = null, goalTargetMinorUnits = null, goalTargetDate = null),
+        )
+    }
+
     private suspend fun requireAccount(id: UUID): Account = accountRepository.findById(id)
         ?: throw AccountNotFoundException("Account not found: $id")
 
     companion object {
+        /** Matches the goal_name VARCHAR(120) column (ADR-0153, V13) — validated app-side too. */
+        const val GOAL_NAME_MAX_LENGTH = 120
+
         /**
          * Map the free-text close reason to a **closed, low-cardinality** set for the
          * `openbank.accounts.closed` `reason` tag (ADR-0077 cardinality contract) — the raw string

@@ -322,6 +322,99 @@ class AccountServiceTest {
         assertThat(AccountService.closeReasonTag("acct-7af3-free-text-9931")).isEqualTo("other")
     }
 
+    // ── Savings goal (ADR-0153) ────────────────────────────────────────────────
+
+    @Test
+    fun `updateSavingsGoal persists the goal fields on the account`(): Unit = runBlocking {
+        val acc = account(UUID.randomUUID(), UUID.randomUUID())
+        coEvery { accountRepository.findById(acc.id) } returns acc
+        val captured = slot<Account>()
+        coEvery { accountRepository.update(capture(captured)) } answers { firstArg() }
+
+        val result = service.updateSavingsGoal(
+            com.openbank.account.application.port.`in`.UpdateSavingsGoalCommand(
+                accountId = acc.id,
+                name = "Nová lednička",
+                targetMinorUnits = 4_000_000L,
+                targetDate = java.time.LocalDate.of(2026, 12, 1),
+                requestedBy = UUID.randomUUID(),
+            ),
+        )
+
+        assertThat(captured.captured.goalName).isEqualTo("Nová lednička")
+        assertThat(captured.captured.goalTargetMinorUnits).isEqualTo(4_000_000L)
+        assertThat(captured.captured.goalTargetDate).isEqualTo(java.time.LocalDate.of(2026, 12, 1))
+        assertThat(result.goalName).isEqualTo("Nová lednička")
+    }
+
+    @Test
+    fun `updateSavingsGoal rejects a non-positive target`(): Unit = runBlocking {
+        val acc = account(UUID.randomUUID(), UUID.randomUUID())
+        coEvery { accountRepository.findById(acc.id) } returns acc
+
+        assertThatThrownBy {
+            runBlocking {
+                service.updateSavingsGoal(
+                    com.openbank.account.application.port.`in`.UpdateSavingsGoalCommand(
+                        accountId = acc.id,
+                        name = "Cíl",
+                        targetMinorUnits = 0L,
+                        targetDate = null,
+                        requestedBy = UUID.randomUUID(),
+                    ),
+                )
+            }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+
+        coVerify(exactly = 0) { accountRepository.update(any()) }
+    }
+
+    @Test
+    fun `updateSavingsGoal rejects a blank name`(): Unit = runBlocking {
+        val acc = account(UUID.randomUUID(), UUID.randomUUID())
+        coEvery { accountRepository.findById(acc.id) } returns acc
+
+        assertThatThrownBy {
+            runBlocking {
+                service.updateSavingsGoal(
+                    com.openbank.account.application.port.`in`.UpdateSavingsGoalCommand(
+                        accountId = acc.id,
+                        name = "   ",
+                        targetMinorUnits = 1_000L,
+                        targetDate = null,
+                        requestedBy = UUID.randomUUID(),
+                    ),
+                )
+            }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+
+        coVerify(exactly = 0) { accountRepository.update(any()) }
+    }
+
+    @Test
+    fun `clearSavingsGoal nulls all three goal fields`(): Unit = runBlocking {
+        val acc = account(UUID.randomUUID(), UUID.randomUUID()).copy(
+            goalName = "Dovolená",
+            goalTargetMinorUnits = 5_000_000L,
+            goalTargetDate = java.time.LocalDate.of(2026, 9, 1),
+        )
+        coEvery { accountRepository.findById(acc.id) } returns acc
+        val captured = slot<Account>()
+        coEvery { accountRepository.update(capture(captured)) } answers { firstArg() }
+
+        val result = service.clearSavingsGoal(
+            com.openbank.account.application.port.`in`.ClearSavingsGoalCommand(
+                accountId = acc.id,
+                requestedBy = UUID.randomUUID(),
+            ),
+        )
+
+        assertThat(captured.captured.goalName).isNull()
+        assertThat(captured.captured.goalTargetMinorUnits).isNull()
+        assertThat(captured.captured.goalTargetDate).isNull()
+        assertThat(result.goalTargetMinorUnits).isNull()
+    }
+
     private fun openAccountCommand(legalName: String = "Test Customer") = OpenAccountCommand(
         idempotencyKey = "idem-123",
         partyId = UUID.randomUUID(),

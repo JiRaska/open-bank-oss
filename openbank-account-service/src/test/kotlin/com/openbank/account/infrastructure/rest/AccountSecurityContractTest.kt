@@ -76,6 +76,8 @@ class AccountSecurityContractTest {
             "closeAccount",
             "freezeAccount",
             "unfreezeAccount",
+            "updateSavingsGoal",
+            "clearSavingsGoal",
         ).forEach { name ->
             assertThat(rolesOf(name))
                 .describedAs("%s mutation roles", name)

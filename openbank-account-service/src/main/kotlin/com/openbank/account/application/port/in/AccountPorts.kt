@@ -13,6 +13,7 @@ import com.openbank.account.domain.model.MissingPocketPolicy
 import com.openbank.account.domain.model.PocketResolution
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.domain.money.CurrencyCode
+import java.time.LocalDate
 import java.util.UUID
 
 data class OpenAccountCommand(
@@ -53,6 +54,16 @@ data class ResolvePocketQuery(
     val policy: MissingPocketPolicy = MissingPocketPolicy.CONVERT_TO_PRIMARY,
 )
 
+/** Set or replace the account's savings goal (ADR-0153). [targetMinorUnits] must be positive. */
+data class UpdateSavingsGoalCommand(
+    val accountId: UUID,
+    val name: String,
+    val targetMinorUnits: Long,
+    val targetDate: LocalDate?,
+    val requestedBy: UUID,
+)
+data class ClearSavingsGoalCommand(val accountId: UUID, val requestedBy: UUID)
+
 interface AccountUseCase {
     suspend fun openAccount(command: OpenAccountCommand): Account
 
@@ -70,6 +81,8 @@ interface AccountUseCase {
     suspend fun closePocket(command: ClosePocketCommand): CurrencyPocket
     suspend fun listPockets(query: ListPocketsQuery): List<CurrencyPocket>
     suspend fun resolvePocket(query: ResolvePocketQuery): PocketResolution
+    suspend fun updateSavingsGoal(command: UpdateSavingsGoalCommand): Account
+    suspend fun clearSavingsGoal(command: ClearSavingsGoalCommand): Account
 }
 
 data class GrantAuthorizationCommand(

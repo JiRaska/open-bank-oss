@@ -82,6 +82,14 @@ class AccountRepositoryImpl :
                 existing.openedAt = entity.openedAt
                 existing.closedAt = entity.closedAt
                 existing.version = entity.version
+                // Savings goal (ADR-0153) round-trips through the same generic update() the
+                // freeze/unfreeze/close use cases already call — those pass through a domain
+                // object whose goal fields are unchanged from the read, so this is a no-op for
+                // them and the only path that actually changes the goal is updateSavingsGoal/
+                // clearSavingsGoal in AccountService.
+                existing.goalName = entity.goalName
+                existing.goalTargetMinorUnits = entity.goalTargetMinorUnits
+                existing.goalTargetDate = entity.goalTargetDate
                 io.smallrye.mutiny.Uni.createFrom().item(existing)
             }
         }.awaitSuspending().toDomain()
@@ -90,8 +98,16 @@ class AccountRepositoryImpl :
     override suspend fun existsByIban(iban: Iban): Boolean =
         Panache.withSession { count("accountNumber", iban.value) }.awaitSuspending() > 0
 
-    override suspend fun anonymizeByPartyId(partyId: UUID): Int =
-        Panache.withTransaction { update("legalName = null WHERE partyId = ?1", partyId) }.awaitSuspending()
+    // GDPR Art. 17: nulls legalName AND the goal fields (ADR-0153 — goal_name is
+    // customer-authored free text, PII-adjacent like legalName) for every account owned by
+    // the erased party.
+    override suspend fun anonymizeByPartyId(partyId: UUID): Int = Panache.withTransaction {
+        update(
+            "legalName = null, goalName = null, goalTargetMinorUnits = null, goalTargetDate = null " +
+                "WHERE partyId = ?1",
+            partyId,
+        )
+    }.awaitSuspending()
 
     private fun AccountEntity.toDomain() = Account(
         id = id,
@@ -108,6 +124,9 @@ class AccountRepositoryImpl :
         sanctionsScreenedAt = sanctionsScreenedAt,
         sanctionsStatus = sanctionsStatus,
         legalName = legalName,
+        goalName = goalName,
+        goalTargetMinorUnits = goalTargetMinorUnits,
+        goalTargetDate = goalTargetDate,
     )
 
     private fun Account.toEntity() = AccountEntity().also {
@@ -125,5 +144,8 @@ class AccountRepositoryImpl :
         it.sanctionsScreenedAt = sanctionsScreenedAt
         it.sanctionsStatus = sanctionsStatus
         it.legalName = legalName
+        it.goalName = goalName
+        it.goalTargetMinorUnits = goalTargetMinorUnits
+        it.goalTargetDate = goalTargetDate
     }
 }
