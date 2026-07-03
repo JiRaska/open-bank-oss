@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.11.1...standing-order-service-v0.11.2) (2026-07-03)
+
+
+### Security
+
+* **docker-svc:** pin all Dockerfile base images to digest (Scorecard Pinned-Dependencies) ([#103](https://github.com/JiRaska/open-bank-oss/issues/103)) ([27c2dab](https://github.com/JiRaska/open-bank-oss/commit/27c2dabe6b9f9440532edf29a73c6e48e677206b))
+
 ## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.11.0...standing-order-service-v0.11.1) (2026-06-30)
 
 
