@@ -24,7 +24,7 @@
   "openbank-kyc-service": "0.8.1",
   "openbank-ledger-service": "1.10.1",
   "openbank-lending-service": "0.6.4",
-  "openbank-notification-service": "0.12.3",
+  "openbank-notification-service": "0.12.4",
   "openbank-onboarding-service": "0.5.5",
   "openbank-party-service": "0.7.2",
   "openbank-pid-service": "0.8.6",
