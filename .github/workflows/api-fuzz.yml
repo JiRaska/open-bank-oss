@@ -67,6 +67,13 @@ jobs:
         with:
           cache-read-only: true
 
+      # A cold Gradle wrapper distribution download (services.gradle.org) can itself take
+      # 2-3 minutes on a cache miss — long enough to burn through the FIRST service's whole
+      # 90x2s readiness wait below before its JVM even starts, reporting a false "failed to
+      # boot". Pay that cost here, once, outside any per-service timing budget.
+      - name: Warm Gradle wrapper
+        run: ./gradlew --version
+
       - name: Install schemathesis
         run: |
           set -euo pipefail
