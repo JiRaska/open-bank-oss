@@ -18,6 +18,7 @@ import io.mockk.coJustRun
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import jakarta.enterprise.inject.Instance
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.jwt.JsonWebToken
@@ -41,6 +42,10 @@ class PartyResourceAuditTest {
             coEvery { it.publish(capture(events)) } returns Unit
         }
         val token = mockk<JsonWebToken>().also { every { it.subject } returns actorSub }
+        val tokenInstance = mockk<Instance<JsonWebToken>>().also {
+            every { it.isResolvable } returns true
+            every { it.get() } returns token
+        }
         val identity = mockk<io.quarkus.security.identity.SecurityIdentity>().also {
             every { it.hasRole("ROLE_ADMIN") } returns true
             every { it.hasRole("ROLE_DPO") } returns false
@@ -48,7 +53,7 @@ class PartyResourceAuditTest {
         return PartyResource().apply {
             partyUseCase = mockk(relaxed = true)
             flags = mockk(relaxed = true)
-            jwt = token
+            jwtInstance = tokenInstance
             securityIdentity = identity
             auditPublisher = publisher
         }
