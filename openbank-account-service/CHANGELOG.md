@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.11.4...account-service-v0.12.0) (2026-07-04)
+
+
+### Features
+
+* **account,customer-edge:** implement ADR-0153 — savings goal metadata ([#219](https://github.com/JiRaska/open-bank-oss/issues/219)) ([05f73fd](https://github.com/JiRaska/open-bank-oss/commit/05f73fdd14d9fd9f7a9d30c4ffae50d15d5dfe07))
+
 ## [0.11.4](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.11.3...account-service-v0.11.4) (2026-07-02)
 
 
