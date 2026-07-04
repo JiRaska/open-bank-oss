@@ -86,8 +86,14 @@ class UpstreamClient {
      * validation has already passed. A leading "." in an entry (e.g. ".svc") matches any host
      * ending in that domain suffix; anything else (e.g. "127.0.0.1", "localhost") must match the
      * whole host exactly.
+     *
+     * `inline`: every caller (get/patch/put/delete/post) invokes this as a separate function,
+     * and CodeQL's SSRF barrier recognition does not follow the sanitizer across that call
+     * boundary — it re-flags a fresh alert at each new caller (#239-241, #288, #289). Inlining
+     * puts the regex check in the same function body as the URI.create() sink at every call
+     * site, which is what the barrier recognition needs to see.
      */
-    private fun validatedUri(url: String): URI {
+    private inline fun validatedUri(url: String): URI {
         val entries = allowedHostSuffixes.split(",").map { it.trim() }.filter { it.isNotEmpty() }
         val alternatives = entries.joinToString("|") { entry ->
             if (entry.startsWith(".")) {
