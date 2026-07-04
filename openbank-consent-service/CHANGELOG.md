@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.4](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.10.3...consent-service-v0.10.4) (2026-07-04)
+
+
+### Bug Fixes
+
+* three api-fuzz.yml boot failures (dispute, party, consent) ([#233](https://github.com/JiRaska/open-bank-oss/issues/233)) ([6534e12](https://github.com/JiRaska/open-bank-oss/commit/6534e12e5a90e62df1190d356f8058f8b476b84d))
+
 ## [0.10.3](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.10.2...consent-service-v0.10.3) (2026-07-02)
 
 
