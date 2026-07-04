@@ -186,6 +186,8 @@ paths:
       tags: [Parties]
       security:
         - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/partyId'
       requestBody:
         content:
           multipart/form-data:
