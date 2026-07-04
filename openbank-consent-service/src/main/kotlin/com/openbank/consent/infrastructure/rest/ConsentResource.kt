@@ -55,10 +55,11 @@ class ConsentResource(
     @Operation(summary = "Create a new consent (PENDING_SCA); idempotent via tppTransactionId / X-Request-ID")
     @POST
     suspend fun create(
-        request: CreateConsentRequest,
+        request: CreateConsentRequest?,
         @HeaderParam("X-Request-ID") xRequestId: String?,
         @Context uriInfo: UriInfo,
     ): Response {
+        requireNotNull(request) { "request body is required" }
         val idempotencyKey = request.tppTransactionId?.takeIf { it.isNotBlank() }
             ?: xRequestId?.takeIf { it.isNotBlank() }
 
@@ -124,8 +125,9 @@ class ConsentResource(
     suspend fun revoke(
         @PathParam("id") id: UUID,
         @QueryParam("partyId") partyId: UUID,
-        request: RevokeConsentRequest,
+        request: RevokeConsentRequest?,
     ): ConsentResponse {
+        requireNotNull(request) { "request body is required" }
         val consent = revokeConsent.revokeConsent(RevokeConsentCommand(id, partyId, request.reason))
         return ConsentResponse.from(consent)
     }
@@ -145,7 +147,8 @@ class ConsentResource(
     @Operation(summary = "Validate whether a consent covers the requested scope and account (resource servers)")
     @POST
     @Path("/{id}/validate")
-    suspend fun validate(@PathParam("id") id: UUID, request: ValidateConsentRequest): ConsentValidationResponse {
+    suspend fun validate(@PathParam("id") id: UUID, request: ValidateConsentRequest?): ConsentValidationResponse {
+        requireNotNull(request) { "request body is required" }
         val result = validateConsent.validateConsent(
             ValidateConsentCommand(id, request.granteeId, request.requiredScope, request.accountIban),
         )

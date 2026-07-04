@@ -46,6 +46,7 @@ import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import io.quarkus.security.identity.SecurityIdentity
+import jakarta.enterprise.inject.Instance
 import org.eclipse.microprofile.jwt.JsonWebToken
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
@@ -64,8 +65,17 @@ class PartyResource {
 
     @Inject lateinit var flags: FeatureClient
 
-    @Inject @io.quarkus.arc.Unremovable
-    lateinit var jwt: JsonWebToken
+    // Instance<> rather than a hard @Inject: quarkus-oidc is the only producer of JsonWebToken in
+    // this service, and %dev/%test disable OIDC (no Keycloak available there) — a direct @Inject
+    // fails CDI validation at boot with no bean satisfying the type. Resolving lazily degrades to
+    // an anonymous caller (no subject/claims) when OIDC is off, which the @RolesAllowed/@Authenticated
+    // checks already turn into a 401/403 before any of these accessors run in a real unauthenticated
+    // request.
+    @Inject
+    lateinit var jwtInstance: Instance<JsonWebToken>
+
+    private val jwt: JsonWebToken?
+        get() = if (jwtInstance.isResolvable) jwtInstance.get() else null
 
     @Inject lateinit var auditPublisher: AuditEventPublisher
 
@@ -187,7 +197,7 @@ class PartyResource {
     suspend fun exportPartyGdpr(@PathParam("id") id: UUID): Response {
         val isAdmin = securityIdentity.hasRole("ROLE_ADMIN")
         val isDpo = securityIdentity.hasRole("ROLE_DPO")
-        val isSelf = jwt.subject != null && jwt.subject == partyUseCase.getPartyKeycloakSub(id)
+        val isSelf = jwt?.subject != null && jwt?.subject == partyUseCase.getPartyKeycloakSub(id)
         if (!isAdmin && !isDpo && !isSelf) return Response.status(Response.Status.FORBIDDEN).build()
         val export = partyUseCase.exportPartyData(id)
         // ADR-0118 / ADR-0086: a subject-access read exposes the full PII set — audit the
@@ -205,7 +215,7 @@ class PartyResource {
     private suspend fun auditGdpr(operation: String, partyId: UUID, gdprArticle: String) {
         auditPublisher.publish(
             AuditEvent(
-                actorId = jwt.subject ?: jwt.name ?: "unknown",
+                actorId = jwt?.subject ?: jwt?.name ?: "unknown",
                 actorType = "HUMAN",
                 operation = operation,
                 resourceType = "party",
@@ -223,7 +233,7 @@ class PartyResource {
     @Authenticated
     @Operation(summary = "Get my party (mobile: returns party for the calling Keycloak sub)")
     suspend fun getMyParty(): Response {
-        val sub = jwt.subject ?: return Response.status(401).build()
+        val sub = jwt?.subject ?: return Response.status(401).build()
         val party = partyUseCase.getMyParty(sub)
             ?: return Response.status(404).entity(mapOf("code" to "NOT_REGISTERED")).build()
         return Response.ok(party.toResponse()).build()
@@ -234,8 +244,8 @@ class PartyResource {
     @Authenticated
     @Operation(summary = "Self-register as a new party (mobile onboarding). Idempotent by Keycloak sub.")
     suspend fun selfRegister(req: SelfRegisterRequest): Response {
-        val sub = jwt.subject ?: return Response.status(401).build()
-        val emailVerified = jwt.getClaim<Boolean>("email_verified") ?: false
+        val sub = jwt?.subject ?: return Response.status(401).build()
+        val emailVerified = jwt?.getClaim<Boolean>("email_verified") ?: false
         if (!emailVerified) {
             return Response.status(403)
                 .entity(mapOf("code" to "EMAIL_NOT_VERIFIED", "message" to "Verify your email before registering"))
@@ -247,7 +257,7 @@ class PartyResource {
                 emailVerified = emailVerified,
                 partyType = PartyType.valueOf(req.partyType),
                 legalName = req.legalName,
-                email = jwt.getClaim("email") ?: req.email,
+                email = jwt?.getClaim("email") ?: req.email,
                 phone = req.phone,
                 dateOfBirth = req.dateOfBirth,
                 nationality = req.nationality,
@@ -267,7 +277,7 @@ class PartyResource {
     @Consumes(MediaType.MULTIPART_FORM_DATA)
     @Operation(summary = "Upload KYC document image (mobile). Stores binary content server-side.")
     suspend fun uploadDocument(@PathParam("id") id: UUID, @MultipartForm form: DocumentUploadForm): Response {
-        val sub = jwt.subject ?: return Response.status(401).build()
+        val sub = jwt?.subject ?: return Response.status(401).build()
         // Verify caller owns this party
         val party = partyUseCase.getMyParty(sub)
         if (party == null || party.id != id) return Response.status(403).build()

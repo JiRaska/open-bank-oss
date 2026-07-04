@@ -109,12 +109,6 @@ mp:
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     outgoing:
-      dispute-events-out:
-        connector: smallrye-kafka
-        client.id: dispute-service-${quarkus.uuid}
-        topic: openbank.disputes.dispute.event
-        value.serializer: org.apache.kafka.common.serialization.StringSerializer
-        key.serializer: org.apache.kafka.common.serialization.StringSerializer
       dispute-outbox-out:
         connector: smallrye-kafka
         client.id: dispute-outbox-service-${quarkus.uuid}
