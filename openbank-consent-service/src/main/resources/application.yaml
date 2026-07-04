@@ -36,18 +36,14 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: vertx-reactive:postgresql://localhost:5432/openbank_consents
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_consents
 
   flyway:
     migrate-at-start: true
     connect-retries: 10
     connect-retries-interval: 2S
     locations: db/migration
-    datasource:
-      db-kind: postgresql
-      username: openbank
-      password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
-      jdbc:
-        url: jdbc:postgresql://localhost:5432/openbank_consents
 
   hibernate-orm:
     database:
