@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.17.0...customer-edge-v0.17.1) (2026-07-04)
+
+
+### Bug Fixes
+
+* **customer-edge:** mark validatedUri() inline to fix recurring CodeQL SSRF false positive ([#232](https://github.com/JiRaska/open-bank-oss/issues/232)) ([4f8e77b](https://github.com/JiRaska/open-bank-oss/commit/4f8e77b1661f336ccfecea01863779f12712a44f))
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.16.2...customer-edge-v0.17.0) (2026-07-04)
 
 
