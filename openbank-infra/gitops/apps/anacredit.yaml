@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# anacredit-service: AnaCredit regulatory reporting (ECB loan-level data, ADR-0128). Namespace: anacredit.
+# anacredit-service: AnaCredit regulatory reporting (ECB loan-level data, ADR-0037). Namespace: anacredit.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
