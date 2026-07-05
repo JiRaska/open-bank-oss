@@ -20,6 +20,19 @@
 // Honest by construction: a missing source yields null + a recorded gap, never a
 // fabricated value.
 //
+// Per-capability `derivedStatus` (issue #26): the curatorial `status` field
+// (live|partial|planned) is the single most change-prone fact in app-status.yaml
+// and it rotted — 5 of 13 capabilities under-stated as of 2026-06-08, fixed by
+// hand in #25. `deriveCapabilityStatus` below computes a `derivedStatus` for the
+// SUBSET of capabilities that are cheap presence/shape checks against the app
+// source (tls-pinning, sca-device-key, auth-pkce, credential-storage,
+// diagnostics, payment-initiation). It is diffed against the curatorial `status`
+// in --check mode and printed as a `::warning` on disagreement — advisory, not
+// enforced (unlike the derived-facts diff below): status has genuinely ambiguous
+// cases (e.g. an iOS-live/Android-stub split) the curator must still be able to
+// call `partial` even when a single signal reads `live`. See ADR-0074 follow-up
+// (2026-07-05) for which capabilities are derivable vs stay curatorial.
+//
 // Cross-repo by design: the customer app is a SEPARATE repo (JiRaska/openbank-app).
 // This is a new integration, not the in-repo monorepo walk that generate-catalog
 // does — the app source path is an explicit --app-repo arg, never a baked sibling
@@ -139,6 +152,91 @@ function deriveFromCode(appRepo) {
   }
 }
 
+// ── Per-capability derivedStatus: cheap code presence/shape signals ──────────
+// Each check is a targeted read + string/regex match against ONE source file,
+// same style as deriveFromCode above. A signal that can't find its source file
+// returns null (never guesses) and is surfaced as a gap; the capability's
+// derivedStatus itself is then also null and is skipped in the drift diff — an
+// absent signal has no verdict, exactly like the derived-facts layer.
+function deriveCapabilityStatus(appRepo, certPinningConfigured) {
+  const gaps = []
+  const read = (rel) => {
+    const p = path.join(appRepo, rel)
+    const text = readText(p)
+    if (text === null) gaps.push(`${rel} not found — derivedStatus signal unavailable`)
+    return text
+  }
+
+  const signals = {}
+
+  // tls-pinning: already extracted in deriveFromCode (certPinningConfigured) —
+  // reuse it rather than re-reading AppConfig.kt a second time.
+  signals['tls-pinning'] =
+    certPinningConfigured === null ? null : certPinningConfigured ? 'live' : 'partial'
+
+  // sca-device-key: ensureKeyPair() on Android must actually call the platform
+  // KeyPairGenerator against AndroidKeyStore, not a stub that just returns true.
+  {
+    const src = read('shared/src/androidMain/kotlin/tech/openbank/app/security/ScaDeviceKey.android.kt')
+    signals['sca-device-key'] =
+      src === null ? null : /KeyPairGenerator/.test(src) && /AndroidKeyStore/.test(src) ? 'live' : 'partial'
+  }
+
+  // auth-pkce: both platform OAuthLaunchers must compute a real SHA-256 PKCE
+  // challenge (not a hardcoded/omitted code_challenge), AND LoginScreen must
+  // actually wire the flow (via the shared AuthService, not a placeholder).
+  {
+    const ios = read('shared/src/iosMain/kotlin/tech/openbank/app/auth/OAuthLauncher.ios.kt')
+    const android = read('shared/src/androidMain/kotlin/tech/openbank/app/auth/OAuthLauncher.android.kt')
+    const login = read('composeApp/src/commonMain/kotlin/tech/openbank/app/ui/LoginScreen.kt')
+    const iosPkce = ios !== null && /CC_SHA256|sha256/i.test(ios) && /code_challenge/.test(ios)
+    const androidPkce =
+      android !== null && /MessageDigest\.getInstance\(\s*"SHA-256"\s*\)/.test(android) && /code_challenge/.test(android)
+    const loginWired = login !== null && /AuthService/.test(login)
+    signals['auth-pkce'] =
+      ios === null || android === null || login === null ? null : iosPkce && androidPkce && loginWired ? 'live' : 'planned'
+  }
+
+  // credential-storage: Android store must be backed by AndroidKeyStore (a real
+  // KeyStore/KeyGenerator, AES-GCM), not the F0 in-memory placeholder. The
+  // "AndroidKeyStore" provider name is usually held in a named constant (not
+  // inlined at the call site) so match KeyStore.getInstance(...) + the provider
+  // string appearing anywhere in the file, same looseness as sca-device-key.
+  {
+    const src = read('shared/src/androidMain/kotlin/tech/openbank/app/security/SecureCredentialStore.android.kt')
+    signals['credential-storage'] =
+      src === null
+        ? null
+        : /KeyStore\.getInstance/.test(src) && /AndroidKeyStore/.test(src) && /KeyGenerator/.test(src)
+          ? 'live'
+          : 'planned'
+  }
+
+  // diagnostics: partial/live iff a DebugMenu/DebugTrigger surface exists at all
+  // (a loose presence check — the curatorial layer still calls the F1/F2 split).
+  {
+    const menu = read('composeApp/src/commonMain/kotlin/tech/openbank/app/debug/DebugMenu.kt')
+    const trigger = read('composeApp/src/commonMain/kotlin/tech/openbank/app/debug/DebugTrigger.kt')
+    signals['diagnostics'] = menu === null && trigger === null ? null : menu !== null && trigger !== null ? 'partial' : 'planned'
+  }
+
+  // payment-initiation: SendScreen must wire BOTH PaymentApi and ScaApi through
+  // an initiate+approve pair — the full SCA-gated payment chain, not just a UI shell.
+  {
+    const src = read('composeApp/src/commonMain/kotlin/tech/openbank/app/ui/SendScreen.kt')
+    const wired =
+      src !== null &&
+      /PaymentApi/.test(src) &&
+      /ScaApi/.test(src) &&
+      /initiateChallenge/.test(src) &&
+      /approveChallenge/.test(src) &&
+      /createDomesticPayment/.test(src)
+    signals['payment-initiation'] = src === null ? null : wired ? 'live' : 'planned'
+  }
+
+  return { signals, gaps }
+}
+
 // ── DECLARED layer: curatorial app-status.yaml ───────────────────────────────
 function loadDeclared(appRepo) {
   const ymlPath = path.join(appRepo, 'app-status.yaml')
@@ -156,13 +254,23 @@ function loadDeclared(appRepo) {
 // ── Join ─────────────────────────────────────────────────────────────────────
 const { derived, gaps: derivedGaps } = deriveFromCode(APP_REPO)
 const { declared, gaps: declaredGaps } = loadDeclared(APP_REPO)
+const { signals: statusSignals, gaps: statusGaps } = deriveCapabilityStatus(APP_REPO, derived.certPinningConfigured)
 
-const capabilities = declared?.capabilities ?? []
+// Attach derivedStatus only to capabilities we have a signal for; everything
+// else (ui-stack, shared-domain, customer-edge, keycloak-realm, crash-monitoring,
+// qrless-pay, dossier) stays purely curatorial — no cheap code check calls those,
+// and guessing one would be exactly the fabricated-value ADR-0074 forbids.
+const capabilities = (declared?.capabilities ?? []).map((c) =>
+  Object.prototype.hasOwnProperty.call(statusSignals, c.id) ? { ...c, derivedStatus: statusSignals[c.id] } : c,
+)
 const decisionMissing = capabilities.filter((c) => c.decisionMissing === true)
 const byStatus = capabilities.reduce((acc, c) => {
   acc[c.status] = (acc[c.status] || 0) + 1
   return acc
 }, {})
+// status vs derivedStatus disagreement — the rot signal issue #26 exists to catch.
+// null derivedStatus (signal source unavailable) is never compared: no verdict.
+const statusDrift = capabilities.filter((c) => c.derivedStatus != null && c.derivedStatus !== c.status)
 
 const out = {
   schema: 'openbank.appstatus/v1',
@@ -181,7 +289,7 @@ const out = {
     byStatus,
     decisionMissing: decisionMissing.map((c) => c.id),
   },
-  gaps: [...derivedGaps, ...declaredGaps],
+  gaps: [...derivedGaps, ...declaredGaps, ...statusGaps],
 }
 
 const serialized = JSON.stringify(out, null, 2) + '\n'
@@ -192,7 +300,24 @@ function summarize() {
   )
   console.log(`  capabilities: ${capabilities.length} (${Object.entries(byStatus).map(([k, v]) => `${k}=${v}`).join(', ')})`)
   if (decisionMissing.length) console.log(`  decision-missing: ${decisionMissing.map((c) => c.id).join(', ')}`)
+  if (statusDrift.length) {
+    console.log(`  ⚠ status drift: ${statusDrift.length}`)
+    for (const c of statusDrift) console.log(`    - ${c.id}: yaml says '${c.status}' but code looks '${c.derivedStatus}'`)
+  }
   if (out.gaps.length) console.log(`  ⚠ gaps: ${out.gaps.length}\n    - ${out.gaps.join('\n    - ')}`)
+}
+
+// Print one ::warning per drifted capability (issue #26). Always advisory,
+// independent of --enforce: unlike the derived-facts diff, curatorial `status`
+// is allowed to legitimately override a single code signal (e.g. an iOS-live/
+// Android-stub split the curator judges still `partial`) — a human call, so a
+// disagreement is a prompt to re-check the yaml, not necessarily a bug.
+function reportStatusDrift() {
+  for (const c of statusDrift) {
+    console.log(
+      `::warning title=app-status status drift::dossier status is stale: ${c.id} code looks '${c.derivedStatus}' but yaml says '${c.status}'`,
+    )
+  }
 }
 
 // Read the committed artefact's `derived` block (the layer the content check
@@ -229,6 +354,12 @@ if (CHECK) {
     console.log('::warning title=app-status::app source unavailable — skipping derived-block content check (no openbank-app checkout)')
     process.exit(0)
   }
+
+  // Status drift (issue #26) is checked whenever the source IS available,
+  // independent of the derived-facts diff below and never gated by --enforce
+  // (see reportStatusDrift). Report it before the facts-diff early-exits so a
+  // clean facts-diff doesn't hide a stale curatorial status.
+  reportStatusDrift()
 
   const committed = committedDerived(AGAINST)
   if (committed === null) {
