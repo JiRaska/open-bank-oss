@@ -75,3 +75,8 @@ above batch SEPA.
   OIDC client-credentials for service-to-service authn; fraud-service is internal, cluster-only).
   **DFD update**: add `sepa-instant → fraud-service` edge with `OIDC client-credentials / mTLS`
   trust-boundary label. No DB schema change; rollback = revert adapter + port commits.
+- **2026-07-05** — ADR-0122 Phase 2: `build.gradle.kts` now declares `openbank-libs-domain` +
+  `openbank-libs-runtime` directly instead of the umbrella `openbank-libs` (which already re-exported
+  both via `api()`). Pure Gradle dependency-graph change — no source import changed, no new transitive
+  dependency introduced, no behavior change. Attack surface, trust boundaries, and STRIDE rows above are
+  unaffected. No DB change; rollback = revert the commit.

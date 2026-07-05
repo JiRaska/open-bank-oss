@@ -102,3 +102,8 @@ to a beneficiary — a primary fraud target.
   clearing-simulator ingress as ADR-0104 D4. **New STRIDE rows**: Spoofing (ACSC path) + Tampering
   (double-booking). No DB schema change; rollback = revert `SettlementAdapter`/`SettlementPort` + remove
   `TRANSACTION_SERVICE_URL` from gitops.
+- **2026-07-05** — ADR-0122 Phase 2: `build.gradle.kts` now declares `openbank-libs-domain` +
+  `openbank-libs-runtime` directly instead of the umbrella `openbank-libs` (which already re-exported
+  both via `api()`). Pure Gradle dependency-graph change — no source import changed, no new transitive
+  dependency introduced, no behavior change. Attack surface, trust boundaries, and STRIDE rows above are
+  unaffected. No DB change; rollback = revert the commit.
