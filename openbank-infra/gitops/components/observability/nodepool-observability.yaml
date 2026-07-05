@@ -2,8 +2,19 @@
 # The `default` pool allows spot, and spot reclamation was killing Prometheus/Tempo
 # every ~15-30 min (node dies mid-WAL-replay → stuck EBS volume → Multi-Attach). A
 # bank's monitoring plane must not ride spot. On-demand + a taint so ONLY tolerating
-# observability stateful pods land here; consolidation is conservative (WhenEmpty)
-# so a busy Prometheus node is never disrupted for bin-packing.
+# observability stateful pods land here.
+#
+# consolidationPolicy relaxed WhenEmpty -> WhenEmptyOrUnderutilized (FinOps):
+# WhenEmpty was the right call back when Prometheus/Tempo/Loki/Alertmanager had
+# NO PodDisruptionBudget — Karpenter's voluntary consolidation-driven eviction
+# could hit the exact same failure mode as spot reclaim (a stateful pod evicted
+# mid-WAL-replay). All 4 now have a PDB (minAvailable:1 -> 0 allowed disruptions,
+# same mechanism pyroscope/glitchtip-pg/goalert-db already relied on — see the
+# observability-components PDB manifests), confirmed live via `kubectl get pdb
+# -n observability` before this change. Karpenter's disruption controller
+# respects PDBs before evicting, so consolidation can now safely bin-pack idle
+# capacity without risking the original incident. Fleet was sitting at 7
+# on-demand nodes @ 6-37% resource-request utilization before this change.
 apiVersion: karpenter.sh/v1
 kind: NodePool
 metadata:
@@ -48,5 +59,5 @@ spec:
   limits:
     cpu: "16"
   disruption:
-    consolidationPolicy: WhenEmpty
+    consolidationPolicy: WhenEmptyOrUnderutilized
     consolidateAfter: 1h
