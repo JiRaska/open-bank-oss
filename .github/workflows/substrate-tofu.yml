@@ -1,0 +1,255 @@
+# Substrate OpenTofu (ADR-0060 follow-up, issue #225). Mirrors
+# platform-tofu.yml so envs/sandbox-substrate (EKS cluster, VPC/network, DNS,
+# audit baseline, FinOps budget) gets the same CI-driven `tofu plan`/
+# `tofu apply` pipeline instead of an unpredictable laptop `tofu apply`. That
+# gap already caused real drift: an unapplied security-hardening flag, EKS
+# add-ons sitting versions behind, and an inert budget-notification config bug
+# that nothing ever ran `plan` against (issue #225).
+#
+# A SEPARATE workflow file (not a matrix extension of platform-tofu.yml):
+#   - the OIDC trust design pins the admin apply role to the EXACT workflow
+#     file via job_workflow_ref, so plan/apply for this root need their own
+#     workflow file the same way they need their own IAM roles (see
+#     ci-tofu-apply.tf in this directory) — a matrix job sharing one workflow
+#     file would let one `job_workflow_ref` cover both roots, which is exactly
+#     the widened-trust outcome issue #225 says not to do.
+#   - keeps the already-working platform-tofu.yml completely untouched.
+#
+#   pull_request / push -> `plan` job: read-only `tofu plan` to the job summary
+#       (PLAN role, batch lane). On a PR this is the pre-merge preview.
+#   workflow_dispatch   -> `apply` job: manual "Run workflow" on main (deploy
+#       lane, admin APPLY role). It re-plans with `-out=tfplan` and applies THAT
+#       file in the same job, so the executed change is exactly the freshly
+#       computed plan against current (locked) state; a stale plan is rejected.
+#
+# Why manual dispatch, not auto-on-merge: same as platform-tofu.yml — a
+# reviewer-gated GitHub Environment is the stronger design, but environment
+# protection rules need GitHub Pro/Team on a private repo (Free returns 422 —
+# ADR-0060). So the gate is: a human dispatches the apply (write access
+# required) after reading the PR's plan preview, and the admin APPLY role's
+# trust is pinned to THIS workflow file on main (job_workflow_ref) so nothing
+# else can assume it. Upgrade to an Environment gate if the plan allows.
+#
+# Auth is GitHub OIDC -> IAM (no static AWS keys). Roles + trust live in
+# envs/sandbox-substrate/ci-tofu-apply.tf (dedicated roles, NOT the platform
+# root's openbank-ci-tofu-{plan,apply} — see that file's header for why).
+# State is S3 with use_lockfile=true.
+name: Substrate OpenTofu
+
+on:
+  pull_request:
+    paths:
+      - "openbank-infra/aws/envs/sandbox-substrate/**"
+      - "openbank-infra/aws/modules/**"
+      - ".github/workflows/substrate-tofu.yml"
+  push:
+    branches: [main]
+    paths:
+      - "openbank-infra/aws/envs/sandbox-substrate/**"
+      - "openbank-infra/aws/modules/**"
+      - ".github/workflows/substrate-tofu.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write   # infracost PR comment
+
+concurrency:
+  group: substrate-tofu-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-north-1
+  TOFU_VERSION: "1.12.1"
+  ENV_DIR: openbank-infra/aws/envs/sandbox-substrate
+  PLAN_ROLE: arn:aws:iam::265175468565:role/openbank-ci-tofu-plan-substrate
+  APPLY_ROLE: arn:aws:iam::265175468565:role/openbank-ci-tofu-apply-substrate
+
+jobs:
+  plan:
+    name: tofu plan (preview)
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest # hosted-first (public repo, free); OIDC plan role unchanged (ADR-0060)
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Configure AWS credentials (OIDC, read-only plan role)
+        uses: aws-actions/configure-aws-credentials@254c19bd240aabef8777f48595e9d2d7b972184b # v6.2.1
+        with:
+          role-to-assume: ${{ env.PLAN_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # The custom ARC runner image ships docker/jq/yq/trivy but NOT the AWS CLI.
+      # Install v2 without root/unzip (python3 is present via the image's yamllint).
+      # Durable follow-up: bake awscli into the runner image (runner-image/Dockerfile).
+      - name: Ensure AWS CLI
+        run: |
+          if command -v aws >/dev/null; then aws --version; exit 0; fi
+          # Arch-aware: the openbank-batch pool mixes ARC Graviton (aarch64) and Hetzner
+          # (x86_64) hosts, so a hardcoded aarch64 bundle gives "Exec format error" (exit
+          # 126) when the job lands on an x86_64 host. Map uname -m to the AWS CLI suffix.
+          case "$(uname -m)" in
+            aarch64 | arm64) aws_arch=aarch64 ;;
+            x86_64 | amd64) aws_arch=x86_64 ;;
+            *) aws_arch=aarch64 ;;
+          esac
+          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}.zip" -o /tmp/awscliv2.zip
+          python3 -m zipfile -e /tmp/awscliv2.zip /tmp/
+          # python zipfile extraction drops ALL execute bits; restore them (lowercase
+          # x, unconditional). Run the self-contained v2 bundle in place from dist/
+          # (no installer needed) and put it on PATH for the tofu steps.
+          chmod -R +x /tmp/aws/dist
+          echo "/tmp/aws/dist" >> "$GITHUB_PATH"
+          /tmp/aws/dist/aws --version
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+
+      - name: tofu init
+        working-directory: ${{ env.ENV_DIR }}
+        run: tofu init -input=false
+
+      - name: tofu plan (read-only, no lock)
+        working-directory: ${{ env.ENV_DIR }}
+        run: |
+          set -o pipefail
+          tofu plan -input=false -lock=false -no-color -detailed-exitcode \
+            2>&1 | tee /tmp/plan.txt && code=0 || code=$?
+          {
+            echo "### \`tofu plan\` — ${ENV_DIR}"
+            if [ "$code" = "2" ]; then echo "_Changes pending._";
+            elif [ "$code" = "0" ]; then echo "_No changes._";
+            else echo "_Plan errored (exit $code)._"; fi
+            echo '```'
+            tail -c 60000 /tmp/plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$code" = "1" ] && exit 1 || exit 0
+
+  # ── Infracost cost delta ───────────────────────────────────────────────────
+  # Posts a PR comment with the AWS cost delta introduced by this change.
+  # Runs without AWS credentials — Infracost parses HCL and fetches pricing
+  # from its own cloud API (free tier). INFRACOST_API_KEY must be set as a
+  # GitHub Actions secret (Settings → Secrets → Actions). Without the key the
+  # job soft-fails (continue-on-error) and blocks nothing.
+  infracost:
+    name: infracost cost delta
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
+    timeout-minutes: 10
+    continue-on-error: true   # non-blocking until INFRACOST_API_KEY is set
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Checkout base branch (for baseline)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          path: infracost-base
+
+      - name: Setup Infracost
+        uses: infracost/actions/setup@fb736a8f219195d6efdca58682069b16fe1bc280 # v4.2.0
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Generate baseline cost estimate
+        run: |
+          infracost breakdown \
+            --path infracost-base/${{ env.ENV_DIR }} \
+            --format json \
+            --out-file /tmp/infracost-base.json
+
+      - name: Generate cost delta
+        run: |
+          infracost diff \
+            --path ${{ env.ENV_DIR }} \
+            --format json \
+            --compare-to /tmp/infracost-base.json \
+            --out-file /tmp/infracost-diff.json
+
+      - name: Post PR comment
+        run: |
+          infracost comment github \
+            --path /tmp/infracost-diff.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --github-token "${{ github.token }}" \
+            --pull-request "${{ github.event.pull_request.number }}" \
+            --behavior update
+
+  apply:
+    name: tofu apply (manual dispatch)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest # hosted-first; security boundary is the OIDC job_workflow_ref pin + manual dispatch (ADR-0060), not the runner
+    timeout-minutes: 30
+    # Audit trail + future reviewer gate, same pattern as platform-apply
+    # (issue #282). The openbank-ci-tofu-apply-substrate trust policy accepts
+    # the environment-form OIDC sub
+    # ("repo:OWNER/REPO:environment:substrate-apply") alongside the ref form,
+    # so declaring this environment doesn't break AssumeRole. Security
+    # boundary remains the job_workflow_ref pin + manual dispatch on main.
+    environment: substrate-apply
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Configure AWS credentials (OIDC, admin apply role)
+        uses: aws-actions/configure-aws-credentials@254c19bd240aabef8777f48595e9d2d7b972184b # v6.2.1
+        with:
+          role-to-assume: ${{ env.APPLY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # The custom ARC runner image ships docker/jq/yq/trivy but NOT the AWS CLI.
+      # Install v2 without root/unzip (python3 is present via the image's yamllint).
+      # Durable follow-up: bake awscli into the runner image (runner-image/Dockerfile).
+      - name: Ensure AWS CLI
+        run: |
+          if command -v aws >/dev/null; then aws --version; exit 0; fi
+          # Arch-aware: the openbank-batch pool mixes ARC Graviton (aarch64) and Hetzner
+          # (x86_64) hosts, so a hardcoded aarch64 bundle gives "Exec format error" (exit
+          # 126) when the job lands on an x86_64 host. Map uname -m to the AWS CLI suffix.
+          case "$(uname -m)" in
+            aarch64 | arm64) aws_arch=aarch64 ;;
+            x86_64 | amd64) aws_arch=x86_64 ;;
+            *) aws_arch=aarch64 ;;
+          esac
+          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}.zip" -o /tmp/awscliv2.zip
+          python3 -m zipfile -e /tmp/awscliv2.zip /tmp/
+          # python zipfile extraction drops ALL execute bits; restore them (lowercase
+          # x, unconditional). Run the self-contained v2 bundle in place from dist/
+          # (no installer needed) and put it on PATH for the tofu steps.
+          chmod -R +x /tmp/aws/dist
+          echo "/tmp/aws/dist" >> "$GITHUB_PATH"
+          /tmp/aws/dist/aws --version
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+
+      - name: tofu init
+        working-directory: ${{ env.ENV_DIR }}
+        run: tofu init -input=false
+
+      # Re-plan to a file and apply THAT file in the same job: the executed change
+      # is exactly this plan, computed against current locked state. If state moved
+      # since planning, `tofu apply tfplan` rejects it as stale (no wrong apply).
+      - name: tofu plan -out
+        working-directory: ${{ env.ENV_DIR }}
+        run: |
+          set -o pipefail
+          tofu plan -input=false -lock-timeout=300s -no-color -out=tfplan 2>&1 | tee /tmp/apply-plan.txt
+          {
+            echo "### \`tofu apply\` plan — ${ENV_DIR}"
+            echo '```'
+            tail -c 60000 /tmp/apply-plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: tofu apply (saved plan)
+        working-directory: ${{ env.ENV_DIR }}
+        run: tofu apply -input=false -no-color -lock-timeout=300s tfplan
