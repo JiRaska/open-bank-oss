@@ -79,7 +79,7 @@ Without this job, expired consents remain `ACTIVE` in the DB — `isActive(now)`
 
 ### D5 — OPA enforcement (Planned)
 
-OPA sidecar is wired (`authz.enforce=true` default in consent-service config, advisory mode inherited from libs default `false`). Flip `AUTHZ_ENFORCE=true` in gitops after the OPA policy for consent endpoints is validated in staging. Tracked as a follow-up to ADR-0034.
+OPA sidecar is wired (`authz.enforce=true` default in consent-service config, advisory mode inherited from libs default `false`). Flip `AUTHZ_ENFORCE=true` in gitops after the OPA policy for consent endpoints is validated in staging. Tracked as a follow-up to ADR-0034, actionable in issue #263.
 
 ## Consequences
 

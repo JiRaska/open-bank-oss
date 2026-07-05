@@ -5,13 +5,13 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): Claude (session: Phase 5b consolidation)
 
-**Delivery note (updated 2026-06-30):**
+**Delivery note (updated 2026-07-05):**
 - **D1 (single OPA namespace)** — ✅ Shipped: `data.openbank.{agents,rest,shared}` unified; bundle in `openbank-libs/governance/`.
 - **D3 (Kotlin `@Authorize` API)** — ✅ Shipped: interceptor, `OpaSidecarPolicyDecisionPoint`, `AllowAllPolicyDecisionPoint`; fleet sweep complete — all 30 REST services annotated.
-- **Phase 5 (enforcement flip, non-money-path)** — ✅ Shipped (PR #1363-#1365): 13 non-money-path services flipped to `authz.enforce: true`; OPA deny→403, unavailable→503.
-- **Phase 5 (money-path)** — ⬜ Pending: 14 money-path services (account, balance, ledger, transaction, ...) still advisory; each needs 2 approvals + threat-model update.
-- **D2 (MCP enforcement sidecar)** — ⬜ Pending (advisory mode, PR #638 open).
-- **D4 (k8s sidecar deployment)** — ⬜ Pending.
+- **Phase 5 (enforcement flip, non-money-path)** — ✅ Shipped: 13 non-money-path services flipped to `authz.enforce: true`; OPA deny→403, unavailable→503. (The PR numbers previously cited here, #1363-#1365, don't resolve in this repo — pre-public-repo-transition references, same pattern as the ADR numbering gap in `README.md`; the shipped state itself is independently verified in gitops config, not just the PR citation.)
+- **Phase 5 (money-path)** — ⬜ Pending: 14 money-path services (account, balance, ledger, transaction, ...) still advisory; each needs 2 approvals + threat-model update. Tracked in issue #266.
+- **D2 (MCP enforcement sidecar)** — ⬜ Pending (advisory mode). The PR previously cited here, #638, doesn't resolve in this repo either (same pre-public-transition pattern). Tracked in issue #266.
+- **D4 (k8s sidecar deployment)** — ⬜ Pending. Tracked in issue #266.
 Amends: ADR-0018 (OPA for fine-grained authz, Proposed)
 Extends: ADR-0031 (AI agent governance, Accepted)
 

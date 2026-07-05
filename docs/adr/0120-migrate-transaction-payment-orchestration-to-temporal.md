@@ -149,5 +149,5 @@ orchestrates *when* an activity runs; the outbox guarantees the event is publish
 | 2 | `transaction` namespace added to `temporal-platform-ingress` NetworkPolicy | ✓ Done | on `main` |
 | 3 | `openbank-simulation` `PaymentSagaModel` updated to track workflow | ✓ Done | on `main` |
 | 4 | Enable flag in sandbox gitops (`openbank.transaction.orchestration.temporal=true`) | ✓ Done | #2793 |
-| 5 | Retire `PaymentSagaOrchestrator`; Flyway tombstone for `payment_sagas` write path | ✓ Done | #TBD |
-| 6 | Remove `libs/domain/saga` (ADR-0122 prereq satisfied) | ✓ Done | #TBD |
+| 5 | Retire `PaymentSagaOrchestrator`; Flyway tombstone for `payment_sagas` write path | ✓ Done | #17 |
+| 6 | Remove `libs/domain/saga` (ADR-0122 prereq satisfied) | ✓ Done | #17 |

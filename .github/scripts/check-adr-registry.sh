@@ -24,11 +24,21 @@
 # (local ∪ origin/main ∪ open PRs) and derives the H1 from it, so defects 1 & 2 are
 # avoided at authoring time rather than caught at merge.
 #
+#   4. DANGLING REFERENCES. `ADR-0132` was cited in 3 code/config comments and 43
+#      CHANGELOG entries before the file ever existed; `ADR-0128` was cited in two
+#      gitops comments as a plain typo for `ADR-0037`. Neither was structurally
+#      impossible (unlike defects 1/2/3 above), so nothing caught them until a
+#      manual repo-wide audit did (2026-07-05, fixed in the same sweep that added
+#      this check). Check 5 below makes the "reference points to a number with no
+#      file" half of that defect class permanent going forward.
+#
 # NOT covered (be honest about the gap): a reference that points to a WRONG-but-
 # EXISTING ADR number (e.g. 0121 citing `ADR-0119` when it meant the renamed
 # oss-readiness ADR, now 0124). That target exists, so no generic check flags it;
 # it needs a human/AI reviewer reading for intent. This gate is structural, not
-# semantic.
+# semantic. The same is true of dangling issue/PR references (e.g. `#1612`,
+# `#638`) found in the same audit — those need a GitHub API call to verify, which
+# this offline, no-network gate deliberately does not make.
 #
 # Exit: 0 = clean, 1 = at least one violation (always enforcing — the fleet is
 # clean as of PR #2414, so there is no sweep to grandfather).
@@ -125,6 +135,35 @@ if [[ -f "$KNOWN_REPOS" ]]; then
 else
   echo "::warning::check-adr-registry: $KNOWN_REPOS missing — skipping Delivery-Repos allowlist check." >&2
 fi
+
+# --- 5. Dangling ADR-NNNN references repo-wide -------------------------------
+# Every "ADR-NNNN" mention outside docs/adr/ (code comments, gitops YAML, other
+# governance docs) must resolve to an actual docs/adr/NNNN-*.md file. Catches the
+# ADR-0132/ADR-0128 defect class (see WHY THIS EXISTS #4) mechanically instead of
+# relying on the next manual audit to find it. Deliberately repo-wide, not just
+# docs/adr/, since that's exactly where both real-world instances were found.
+existing_numbers=$(
+  for f in "${adrs[@]}"; do
+    basename "$f" | sed -E 's/^([0-9]+)-.*/\1/'
+  done
+)
+while IFS=: read -r file num; do
+  [[ -z "$num" ]] && continue
+  n10=$((10#$num))
+  found=0
+  while IFS= read -r existing; do
+    [[ "$((10#$existing))" -eq "$n10" ]] && { found=1; break; }
+  done <<< "$existing_numbers"
+  if [[ "$found" -eq 0 ]]; then
+    err "$file: references ADR-$num, which has no docs/adr/$num-*.md file — fix the reference or write the ADR."
+  fi
+done < <(
+  # Exclude docs/adr/* (self-references already covered by checks 1-4 above) and
+  # this script itself (its own comments cite ADR-0128/ADR-0132 as worked examples
+  # of the defect class this check exists to catch — not real dangling references).
+  git grep -InoE 'ADR-[0-9]{4}' -- ':!docs/adr/*' ':!.github/scripts/check-adr-registry.sh' 2>/dev/null \
+    | sed -E 's/^([^:]+):[0-9]+:ADR-([0-9]{4})$/\1:\2/'
+)
 
 if [[ "$fail" -ne 0 ]]; then
   echo "::error::check-adr-registry: ADR registry has integrity violations (see above)." >&2

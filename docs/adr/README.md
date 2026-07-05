@@ -73,7 +73,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0062](0062-finops-cost-allocation-showback.md) | FinOps cost allocation: requests-weighted showback by service, domain and business flow | Accepted | Shipped | — |
 | [0063](0063-consumer-driven-contract-testing-pact-git-pact.md) | Consumer-driven contract testing with Pact (git-pact) and pitest mutation testing | Accepted | Partial | — |
 | [0064](0064-customer-app-kotlin-multiplatform.md) | Customer-facing app: Kotlin Multiplatform + Compose Multiplatform | Accepted | Planned | openbank-app |
-| [0065](0065-customer-facing-edge-and-keycloak-realm.md) | Customer-facing edge (BFF + gateway) and a dedicated Keycloak customer realm | Accepted | Partial | — |
+| [0065](0065-customer-facing-edge-and-keycloak-realm.md) | Customer-facing edge (BFF + gateway) and a dedicated Keycloak customer realm | Accepted | Shipped | — |
 | [0066](0066-passwordless-customer-authentication.md) | Passwordless customer authentication — passkey-first onboarding and login | Accepted | Shipped | — |
 | [0067](0067-feature-flags-and-experimentation.md) | Feature flags and experimentation (flag-as-code, OpenFeature-aligned) | Accepted | Shipped | — |
 | [0068](0068-onboarding-operations-cockpit.md) | Onboarding operations cockpit — a read-model and four-eyes workflow over the onboarding state machine | Accepted | Partial | — |
@@ -129,12 +129,13 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0118](0118-gdpr-data-lifecycle-and-retention.md) | GDPR data lifecycle — PII classification, retention periods, erasure model | Accepted | Partial | — |
 | [0119](0119-ai-devops-agent.md) | AI DevOps Agent: proactive SSDLC / DORA observability and durable-fix proposals | Accepted | Partial | — |
 | [0120](0120-migrate-transaction-payment-orchestration-to-temporal.md) | Migrate transaction-service payment orchestration to Temporal | Accepted | Shipped | — |
-| [0121](0121-service-self-reported-sbom-and-supply-chain-attestation.md) | Service self-reported SBOM and supply-chain attestation | Proposed | Partial | — |
+| [0121](0121-service-self-reported-sbom-and-supply-chain-attestation.md) | Service self-reported SBOM and supply-chain attestation | Accepted | Partial | — |
 | [0122](0122-split-openbank-libs-into-domain-and-runtime.md) | Split openbank-libs into domain and runtime modules | Accepted | Partial | — |
 | [0123](0123-relicense-to-apache-2.0.md) | Relicense the platform from MPL-2.0 to Apache-2.0 | Accepted | Shipped | — |
 | [0124](0124-oss-readiness-and-public-launch-hardening.md) | OSS-readiness and public-launch hardening | Accepted | Planned | — |
 | [0125](0125-same-account-currency-exchange.md) | Same-account currency exchange (the app's currency swap) | Superseded by ADR-0110 | Superseded | — |
 | [0126](0126-unified-consent-lifecycle.md) | Unified Consent Lifecycle and GDPR Linkage | Accepted | Partial | — |
+| [0132](0132-customer-edge-per-party-rate-limiting.md) | Per-party request rate limiting at the customer edge | Accepted | Shipped | — |
 | [0133](0133-tamper-evident-audit-chain.md) | ADR-0133: Tamper-evident audit chain | Accepted | Shipped | — |
 | [0134](0134-business-continuity-and-dora-ictrm.md) | ADR-0134: Business continuity plan and DORA ICT risk management framework | Accepted | Complete | — |
 | [0135](0135-push-notification-token-security.md) | ADR-0135: Push notification token security and lifecycle | Accepted | Partial | — |
@@ -159,11 +160,17 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 
 ---
 
-**Numbering gaps:** 0015 0127 0128 0129 0130 0131 0132 do not correspond to a file in this repo's history —
+**Numbering gaps:** 0015 0127 0128 0129 0130 0131 do not correspond to a file in this repo's history —
 confirmed by `git log --diff-filter=A` across all branches, not just an absent
-current file. One of them, ADR-0132, is named in a 2026-06 commit message
-("fix(customer-edge): add per-party rate-limit config key (ADR-0132)") with no
-corresponding merged ADR file, which does not by itself explain the other five.
-No decision record in this repo accounts for the gap; treat it as an open
-question for whoever holds the pre-public-launch history, not a deliberate
-reservation.
+current file. ADR-0132 was one of these gaps until it was cited in code/config
+comments before the file existed and has since been written down properly
+([ADR-0132](0132-customer-edge-per-party-rate-limiting.md)) — a real, gap-filling
+backfill, not just a documentation note. ADR-0128 turned out to be a plain typo for
+[ADR-0037](0037-anacredit-credit-exposure-reporting.md) in two gitops comments
+(fixed); it stays a gap here because no ADR-0128 decision was ever made.
+The remaining gap — 0015, 0127, 0128, 0129, 0130, 0131 — is formally closed as
+unrecoverable: no decision record, commit, or PR in this repo's full history
+accounts for any of them, and no one with access to pre-public-launch history has
+identified one. Treat these as numbering artifacts from before the public repo
+transition, not pending ADRs — no further investigation is expected, and no ADR
+will be retroactively written for these six numbers absent new evidence.

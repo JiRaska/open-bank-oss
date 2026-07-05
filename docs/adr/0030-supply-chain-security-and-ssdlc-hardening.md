@@ -5,12 +5,14 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): jiri.raska
 
-**Delivery note (updated 2026-07-01):**
+**Delivery note (updated 2026-07-05):**
 - **D2 (threat-model CI gate)** — ✅ Shipped: `check-threat-models.py` runs as a required check in `Validate manifests`; all 13 money-path services have STRIDE/DFD threat models at `docs/threat-models/<service>.md`; adding a money-path service without a threat model blocks merge. Diff-aware rule (trust-boundary changes) ⬜ pending.
-- **D4 (Kyverno admission control)** — Partial: Kyverno deployed (`gitops/apps/kyverno.yaml`); `verify-openbank-image-signatures` ClusterPolicy in **Audit** mode emitting PolicyReports; flip to **Enforce** blocked on: (1) choosing Cosign trust root (keyless OIDC or AWS KMS), (2) signing images in CI, (3) setting real attestor identity.
+- **D4 (Kyverno admission control)** — ✅ Shipped, further along than the previous note said: trust root chosen (AWS KMS key `alias/openbank-cosign-signing`), `build-push-{service,admin-ui}.sh` sign every pushed image, and `verify-images-policy.yaml`'s image-signature rule is **Enforce** fleet-wide (verified while auditing ADR delivery status, 2026-07-05 — see `openbank-infra/gitops/components/kyverno/verify-images-policy.yaml`). What remains: a **second** `verifyImages` rule requiring SBOM attestation specifically (not just the signature) at admission — still "(planned)" in that same policy file (tracked in ADR-0121, whose Axis 2 covers this).
 - **D1 (VEX + vulnerability-management lifecycle)** — ⬜ Pending: CycloneDX/OpenVEX documents not yet published alongside SBOMs; SLA-tracked triage workflow not yet implemented.
 - **D3 (mutation testing + DAST)** — ⬜ Pending: pitest configured for `openbank-lending-service` domain; DAST (OWASP ZAP baseline) not yet deployed.
 - **D5 (runtime SBOM drift detection)** — ⬜ Pending.
+
+Remaining D1/D3/D5 (+ D2's diff-aware rule) tracked in issue #265.
 
 > **Accepted (2026-06-11).** Status raised from Proposed to reflect established practice:
 > this ADR is partially implemented and load-bearing — the money-path threat-model gate

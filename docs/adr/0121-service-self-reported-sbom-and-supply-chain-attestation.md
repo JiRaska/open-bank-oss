@@ -1,13 +1,31 @@
 # Service self-reported SBOM and supply-chain attestation
 
 Date: 2026-06-28
-Status: Proposed
+Status: Accepted
 Delivery-Status: Partial
 Author(s): jiri.raska
 
-**Delivery note (updated 2026-06-30):**
+**Delivery note (updated 2026-07-05):** promoted from Proposed — the in-flight branches this
+ADR was written ahead of have long since merged and the decision held up in practice.
+- **Axis 1 (operational SBOM)** — ✅ Shipped: `openbank-libs-runtime/.../web/SbomResource.kt`
+  serves the live `/q/openbank/sbom` contract from the image-baked CycloneDX document; the
+  admin-ui Tech Inventory SBOM viewer (`app/api/services/[name]/sbom/route.ts`) reads it live
+  per-service with a fallback to the image-baked bundle. Host-side-only generation rule holds.
+- **Axis 2 (attested supply-chain SBOM)** — 🟡 Partial, further along than the previous note
+  suggested: `cosign attest --type cyclonedx` runs on every pushed image in `auto-deploy.yml`
+  (KMS key, same trust root as image signing), and image-signature verification is already
+  **Enforce** in Kyverno (`verify-images-policy.yaml`, ADR-0030 D4). What remains open, per
+  that policy file's own roadmap comment: a **second** `verifyImages` rule requiring the SBOM
+  attestation specifically (not just the signature) at admission — still marked "(planned)"
+  there. That is the one concrete remaining gap closing this ADR fully.
+
+<details>
+<summary>Original delivery note (2026-06-30), superseded above</summary>
+
 - **Axis 1 (operational SBOM)** — ✅ Specification complete and rule codified: host-side-only `cyclonedxBom` generation in `build-push-service.sh`, `COPY`-only in Dockerfiles, `/q/openbank/sbom` serving contract (`openbank.sbom.v1`) and admin-ui Tech Inventory consumer are designed; in-Docker `cyclonedxBom` path on `build/sbom-bake-pilot` Dockerfile rejected and the fix rule added to `CLAUDE.md` and `rules.yaml`; branches (`feat/libs-sbom-resource`, `build/sbom-bake-pilot`, `feat/admin-ui-sbom-live`) are in-flight and not yet merged to `main`.
 - **Axis 2 (attested supply-chain SBOM)** — ⬜ Pending: `syft`-on-image full SBOM generation, `cosign attest` OCI referrer attachment reusing the existing `awskms` signing key (ADR-0093), and Kyverno `verify-images-policy` extension to enforce SBOM attestation at admission (closing ADR-0029 D2) are not yet implemented.
+
+</details>
 
 ## Context
 
