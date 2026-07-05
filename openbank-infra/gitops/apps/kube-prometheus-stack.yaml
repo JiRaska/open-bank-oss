@@ -27,6 +27,14 @@ spec:
         # block referencing a Vault-sourced webhook secret).
         alertmanager:
           enabled: true
+          # Single replica -> minAvailable:1 blocks ANY voluntary eviction (Karpenter
+          # consolidation respects PDBs). Closes the same gap prometheus/loki/tempo
+          # had: the observability NodePool's consolidationPolicy is only safe to
+          # tighten from WhenEmpty because this now exists (see
+          # nodepool-observability.yaml).
+          podDisruptionBudget:
+            enabled: true
+            minAvailable: 1
           alertmanagerSpec:
             replicas: 1
             # Mount the GoAlert integration URL (with its token) from a Secret so the
@@ -110,6 +118,11 @@ spec:
                       {{ .Annotations.description }}
                       {{ end }}
         prometheus:
+          # Single replica -> minAvailable:1 blocks ANY voluntary eviction. Same
+          # rationale as alertmanager above.
+          podDisruptionBudget:
+            enabled: true
+            minAvailable: 1
           prometheusSpec:
             replicas: 1
             # 12h retention (FinOps per ADR-0027; the 5Gi PVC below is sized for it).
