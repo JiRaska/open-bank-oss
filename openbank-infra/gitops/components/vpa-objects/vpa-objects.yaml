@@ -396,3 +396,449 @@ spec:
         maxAllowed:
           cpu: 4000m
           memory: 8Gi
+---
+# ── Non-money-path namespaces (FinOps right-sizing panel coverage) ────────────
+# Added 2026-07-05: these namespaces showed up in the admin-ui FinOps
+# right-sizing table with no VPA behind them (0 recommendation data possible,
+# not just "not yet" — there was nothing to observe from). Same
+# updateMode: Off, recommendation-only pattern as the money-path VPAs above.
+# targetRef kind verified per-namespace via `kubectl get deployments/rollouts`
+# before writing any of these (the same mistake that caused #242 — verify,
+# don't assume Deployment).
+
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: developer-portal-vpa
+  namespace: developer-portal
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: developer-portal
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: developer-portal
+        minAllowed:
+          cpu: 25m
+          memory: 32Mi
+        maxAllowed:
+          cpu: 500m
+          memory: 512Mi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: billing-service-vpa
+  namespace: billing
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: billing-service
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: billing-service
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 1000m
+          memory: 1Gi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: anacredit-service-vpa
+  namespace: anacredit
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: anacredit-service
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: anacredit-service
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 1000m
+          memory: 1Gi
+---
+# lending-service runs as an Argo Rollout, not a Deployment (verified via
+# `kubectl get rollout -n lending lending-service`).
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: lending-service-vpa
+  namespace: lending
+spec:
+  targetRef:
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
+    name: lending-service
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: lending-service
+        minAllowed:
+          cpu: 50m
+          memory: 256Mi
+        maxAllowed:
+          cpu: 2000m
+          memory: 2Gi
+---
+# sanctions-service runs as an Argo Rollout, not a Deployment (verified via
+# `kubectl get rollout -n sanctions sanctions-service`).
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: sanctions-service-vpa
+  namespace: sanctions
+spec:
+  targetRef:
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
+    name: sanctions-service
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: sanctions-service
+        minAllowed:
+          cpu: 50m
+          memory: 256Mi
+        maxAllowed:
+          cpu: 2000m
+          memory: 2Gi
+---
+# ── Platform / dev-tooling infra ──────────────────────────────────────────────
+
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: gradle-build-cache-vpa
+  namespace: gradle-build-cache
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gradle-build-cache
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: nginx
+        minAllowed:
+          cpu: 25m
+          memory: 32Mi
+        maxAllowed:
+          cpu: 500m
+          memory: 256Mi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: keda-operator-vpa
+  namespace: keda
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: keda-operator
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: keda-operator
+        minAllowed:
+          cpu: 50m
+          memory: 64Mi
+        maxAllowed:
+          cpu: 1000m
+          memory: 512Mi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: pact-broker-vpa
+  namespace: pact-broker
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: pact-broker
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: pact-broker
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 1000m
+          memory: 1Gi
+---
+# Vault (OpenBao) runs as a StatefulSet, not a Deployment (verified via
+# `kubectl get statefulset -n vault openbao`). VPA natively supports
+# StatefulSet as a targetRef kind, no special handling needed (unlike Argo
+# Rollout, which needs the argoproj.io apiVersion — see lending/sanctions above).
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: openbao-vpa
+  namespace: vault
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: openbao
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: openbao
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 1000m
+          memory: 1Gi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: reposilite-vpa
+  namespace: reposilite
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: reposilite
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: reposilite
+        minAllowed:
+          cpu: 50m
+          memory: 64Mi
+        maxAllowed:
+          cpu: 1000m
+          memory: 512Mi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: finops-agent-vpa
+  namespace: finops-agent
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: finops-agent
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: finops-agent
+        minAllowed:
+          cpu: 50m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 1000m
+          memory: 1Gi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: keycloak-vpa
+  namespace: iam
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: keycloak
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: keycloak
+        minAllowed:
+          cpu: 50m
+          memory: 256Mi
+        maxAllowed:
+          cpu: 2000m
+          memory: 2Gi
+---
+# registry-cache namespace runs 3 independent pull-through cache proxies
+# (registry, ghcr-cache, quay-cache) — the FinOps panel showed them as one
+# aggregate line; per-component VPA gives real per-proxy visibility instead.
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: registry-cache-vpa
+  namespace: registry-cache
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: registry-cache
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: registry
+        minAllowed:
+          cpu: 25m
+          memory: 64Mi
+        maxAllowed:
+          cpu: 1000m
+          memory: 1Gi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: ghcr-cache-vpa
+  namespace: registry-cache
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ghcr-cache
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: registry
+        minAllowed:
+          cpu: 25m
+          memory: 64Mi
+        maxAllowed:
+          cpu: 500m
+          memory: 512Mi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: quay-cache-vpa
+  namespace: registry-cache
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: quay-cache
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: registry
+        minAllowed:
+          cpu: 25m
+          memory: 64Mi
+        maxAllowed:
+          cpu: 500m
+          memory: 512Mi
+---
+# ── Temporal (workflow engine) ─────────────────────────────────────────────────
+# The FinOps panel's single "temporal: 2300m request / 53m used (2%)" line
+# aggregates all 5 components below. Per-component VPA replaces that one
+# opaque number with real per-service visibility. temporal-admintools
+# (a debug/CLI pod, not a serving component) is intentionally excluded.
+
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: temporal-frontend-vpa
+  namespace: temporal
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: temporal-frontend
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: temporal-frontend
+        minAllowed:
+          cpu: 100m
+          memory: 256Mi
+        maxAllowed:
+          cpu: 2000m
+          memory: 2Gi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: temporal-history-vpa
+  namespace: temporal
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: temporal-history
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: temporal-history
+        minAllowed:
+          cpu: 100m
+          memory: 256Mi
+        maxAllowed:
+          cpu: 2000m
+          memory: 2Gi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: temporal-matching-vpa
+  namespace: temporal
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: temporal-matching
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: temporal-matching
+        minAllowed:
+          cpu: 100m
+          memory: 256Mi
+        maxAllowed:
+          cpu: 2000m
+          memory: 2Gi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: temporal-worker-vpa
+  namespace: temporal
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: temporal-worker
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: temporal-worker
+        minAllowed:
+          cpu: 100m
+          memory: 256Mi
+        maxAllowed:
+          cpu: 2000m
+          memory: 2Gi
