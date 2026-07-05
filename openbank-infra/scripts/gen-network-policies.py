@@ -21,6 +21,11 @@ openbank-infra/gitops/components/, extracts those edges and emits one
   - admin-ui allowed on every service HTTP port (the BFF discovers services
     dynamically via the k8s API, ADR-0051/0056 — its edges are not in env),
   - ingress-nginx allowed where an Ingress backend declares it,
+  - the keda namespace (KEDA HTTP add-on interceptor) allowed on the HTTP port
+    of any workload fronted by an HTTPScaledObject (T1 scale-to-zero) — the
+    interceptor is the one making the actual inbound connection once the
+    target scales 0 -> 1, and it is not a Deployment env edge so it cannot be
+    derived from the URL_RE scan like a normal caller,
   - the Strimzi broker gets a dedicated policy from the derived client set.
 
 Enforcement is LIVE: the VPC CNI network-policy agent runs in standard mode
@@ -62,6 +67,7 @@ SECURITY_SCANNER_NS = "security-scanner"
 ADMIN_UI_NS = "admin-ui"
 INGRESS_NS = "ingress-nginx"
 MESSAGING_NS = "messaging"
+KEDA_NS = "keda"
 
 HEADER = """\
 # SPDX-License-Identifier: Apache-2.0
@@ -74,7 +80,8 @@ HEADER = """\
 # Deployments declare a call to this service (env URLs), plus the static
 # platform edges (same-namespace, Prometheus scrape on {mgmt}, security-scanner
 # posture probe on {mgmt}, admin-ui BFF discovery, ingress-nginx where an Ingress
-# backend exists). CNPG Postgres
+# backend exists, the keda namespace where an HTTPScaledObject fronts the
+# workload — the KEDA HTTP add-on interceptor's proxied connection). CNPG Postgres
 # pods are NOT selected (operator-managed, no Deployment) — intra-namespace
 # data traffic is unaffected; Deployment-managed stores (e.g. redis) get a
 # same-namespace-only policy, which is their entire caller set.
@@ -114,6 +121,7 @@ def main():
     edges = defaultdict(set)
     edge_ports = defaultdict(set)  # (callee_ns, callee_svc) -> ports
     ingress_backends = defaultdict(set)  # (ns, svc-name) -> ports
+    http_scaled_targets = set()  # (ns, app.kubernetes.io/name) fronted by an HTTPScaledObject
     kafka_clients = set()
     # Prometheus scrape edges declared by Pod/ServiceMonitors:
     #   (target_ns, app.kubernetes.io/name) -> set of port NAMES Prometheus scrapes.
@@ -182,6 +190,18 @@ def main():
                     if be.get("name"):
                         port = (be.get("port", {}) or {}).get("number")
                         ingress_backends[(ns, be["name"])].add(port)
+
+        elif kind == "HTTPScaledObject" and ns:
+            # ADR-0083 T1 pilot: the KEDA HTTP add-on interceptor
+            # (keda-add-ons-http-interceptor.keda.svc) is the actual caller once the
+            # scaleTargetRef workload scales 0 -> 1. It is not a Deployment env edge, so
+            # it can't be picked up by the URL_RE scan above — derive it from the
+            # HTTPScaledObject itself instead.
+            labels = meta.get("labels", {}) or {}
+            target = (doc.get("spec", {}) or {}).get("scaleTargetRef", {}) or {}
+            name = labels.get("app.kubernetes.io/name") or target.get("service") or target.get("name")
+            if name:
+                http_scaled_targets.add((ns, name))
 
     def resolve_pod_port(ns, svc_name, svc_port):
         """Service port -> containerPort on the selected workload."""
@@ -261,6 +281,8 @@ def main():
         if http_ports:
             peers = [ns_peer(c) for c in callers if c != ADMIN_UI_NS]
             peers.append(ns_peer(ADMIN_UI_NS))  # BFF dynamic discovery
+            if (ns, wl_name) in http_scaled_targets:
+                peers.append(ns_peer(KEDA_NS))  # HTTP add-on interceptor (ADR-0083 T1)
             rules.append({
                 "from": peers,
                 "ports": [{"protocol": "TCP", "port": p} for p in http_ports],
