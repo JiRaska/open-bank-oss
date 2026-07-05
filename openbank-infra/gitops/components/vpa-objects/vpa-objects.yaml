@@ -20,8 +20,8 @@ metadata:
   namespace: accounts
 spec:
   targetRef:
-    apiVersion: apps/v1
-    kind: Deployment
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
     name: account-service
   updatePolicy:
     updateMode: "Off"
@@ -42,8 +42,8 @@ metadata:
   namespace: balances
 spec:
   targetRef:
-    apiVersion: apps/v1
-    kind: Deployment
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
     name: balance-service
   updatePolicy:
     updateMode: "Off"
@@ -64,8 +64,8 @@ metadata:
   namespace: ledger
 spec:
   targetRef:
-    apiVersion: apps/v1
-    kind: Deployment
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
     name: ledger-service
   updatePolicy:
     updateMode: "Off"
@@ -87,8 +87,8 @@ metadata:
   namespace: payments
 spec:
   targetRef:
-    apiVersion: apps/v1
-    kind: Deployment
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
     name: transaction-service
   updatePolicy:
     updateMode: "Off"
@@ -109,8 +109,8 @@ metadata:
   namespace: payments
 spec:
   targetRef:
-    apiVersion: apps/v1
-    kind: Deployment
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
     name: sepa-payment
   updatePolicy:
     updateMode: "Off"
@@ -133,8 +133,8 @@ metadata:
   namespace: fx
 spec:
   targetRef:
-    apiVersion: apps/v1
-    kind: Deployment
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
     name: fx-service
   updatePolicy:
     updateMode: "Off"
@@ -179,8 +179,8 @@ metadata:
   namespace: party
 spec:
   targetRef:
-    apiVersion: apps/v1
-    kind: Deployment
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
     name: party-service
   updatePolicy:
     updateMode: "Off"
@@ -201,8 +201,8 @@ metadata:
   namespace: kyc
 spec:
   targetRef:
-    apiVersion: apps/v1
-    kind: Deployment
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
     name: kyc-service
   updatePolicy:
     updateMode: "Off"
@@ -223,8 +223,8 @@ metadata:
   namespace: consent
 spec:
   targetRef:
-    apiVersion: apps/v1
-    kind: Deployment
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
     name: consent-service
   updatePolicy:
     updateMode: "Off"
@@ -337,8 +337,8 @@ metadata:
   namespace: customer-edge
 spec:
   targetRef:
-    apiVersion: apps/v1
-    kind: Deployment
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
     name: customer-edge
   updatePolicy:
     updateMode: "Off"
@@ -359,8 +359,8 @@ metadata:
   namespace: fraud
 spec:
   targetRef:
-    apiVersion: apps/v1
-    kind: Deployment
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
     name: fraud-service
   updatePolicy:
     updateMode: "Off"
