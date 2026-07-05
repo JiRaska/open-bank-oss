@@ -396,7 +396,7 @@ spec:
         maxAllowed:
           cpu: 4000m
           memory: 8Gi
-
+---
 # ── Non-money-path namespaces (FinOps right-sizing panel coverage) ────────────
 # Added 2026-07-05: these namespaces showed up in the admin-ui FinOps
 # right-sizing table with no VPA behind them (0 recommendation data possible,
