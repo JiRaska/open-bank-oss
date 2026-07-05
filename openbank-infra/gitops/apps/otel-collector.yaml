@@ -62,6 +62,14 @@ spec:
               endpoint: tempo.observability.svc:4317
               tls:
                 insecure: true
+              # Client-side call deadline for a single push. The exporter default
+              # (5s) was shorter than Tempo's own ingester needs to consume a batch
+              # under routine load, so nearly every push landed as "context
+              # canceled" server-side (tempo pusher log) — the collector gave up
+              # before Tempo finished, even though Tempo was healthy (low CPU/mem,
+              # no restarts). 15s gives real headroom while staying well inside the
+              # queue's ability to absorb the wait.
+              timeout: 15s
               # Absorb Tempo backpressure here so the receiver can ack the services
               # immediately instead of blocking past their 10s OTLP deadline. The
               # queue buffers spikes; retry rides out brief Tempo slowness.
