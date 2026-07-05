@@ -1,0 +1,20 @@
+# Loki's chart (singleBinary deployment mode, loki.yaml) has no native
+# podDisruptionBudget toggle for this mode (checked: `helm show values
+# grafana/loki --version 6.55.0` — the read/write/backend/ingester/distributor
+# components each expose one, singleBinary does not). Hand-authored to close
+# the same gap alertmanager/prometheus had: single replica -> minAvailable:1
+# blocks ANY voluntary eviction, which is what makes it safe to tighten the
+# observability NodePool's consolidationPolicy from WhenEmpty (see
+# nodepool-observability.yaml).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: loki
+  namespace: observability
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: loki
+      app.kubernetes.io/name: loki
+      app.kubernetes.io/component: single-binary
