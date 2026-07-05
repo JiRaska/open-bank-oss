@@ -1,0 +1,64 @@
+# HTTPScaledObject — ADR-0057 T1 (HTTP -> 0) for interest-service.
+#
+# Fleet sweep #230 (batch 2). Trigger investigation (per ADR-0057's decision rule):
+#   - interest-service exposes ONLY a REST surface (InterestResource, WithholdingRemittanceResource)
+#     under /api/v1/interest/**. There is no Kafka @Incoming consumer in this service.
+#   - The service's own docs (01-overview.en.md) describe a "scheduler (cron)" caller that
+#     hits POST /accrue/all and /capitalize on a daily/monthly schedule — but no such cron
+#     exists anywhere: no @Scheduled annotation in the source (only the InterestOutboxDispatcher's
+#     internal 5s outbox-drain tick, which is plumbing, not a business trigger), no CronJob in
+#     openbank-infra/gitops, and none live in the sandbox (`kubectl get cronjob -n interest` is
+#     empty). The documented external scheduler is aspirational and not yet built.
+#   - Conclusion: today's actual trigger is synchronous REST, invoked on demand by admin-ui
+#     operators and ROLE_SERVICE callers. Per the decision rule ("synchronous HTTP -> candidate
+#     T1"), this is T1, not T3. If/when the described external accrual scheduler is built, it
+#     should be a K8s CronJob POSTing to this endpoint — which itself would tolerate the same
+#     cold start as any other caller, so T1 remains compatible with that future addition.
+#
+# Modeled exactly on components/accounts/product-catalog-http-scaledobject.yaml (ADR-0083 pilot).
+#
+# Native-image status (T1 viability assumption per ADR-0057/rules.yaml finops_tiers.T1): NOT
+# native. interest-service's Dockerfile runs `quarkusBuild` (fast-jar) on a JVM (eclipse-temurin
+# jre-alpine) base — same as the product-catalog pilot itself, which is also fast-jar despite
+# rules.yaml's `declared` comment claiming a passed native cold-start gate (no native Dockerfile
+# lane, no native CI step, and no `-Dquarkus.native.enabled` anywhere in this repo backs that
+# comment). Per the issue's explicit guidance, native is a T1 prerequisite/promotion gate, not a
+# blocker to skip the service — the existing pilot itself shipped on JVM. Flagging this gap
+# rather than silently assuming native is live.
+#
+# minReplicas: 0 — safe because:
+#   - interest-service is NOT on the money path (rules.yaml money_path_services).
+#   - No resident listener depends on the pod staying warm (no live cron, see above).
+#   - The KEDA HTTP interceptor parks the first request rather than 5xx-ing it.
+#
+# maxReplicas: 2 — low-QPS operator/admin-driven traffic; no customer-facing fan-out measured.
+# scaledownPeriod: 300s — mirrors the product-catalog pilot's conservative idle window.
+# targetPendingRequests: 50 — lower than product-catalog's 100; this is an operator tool with
+#   much lower expected concurrency (rate config + accrual/capitalization admin actions).
+apiVersion: http.keda.sh/v1alpha1
+kind: HTTPScaledObject
+metadata:
+  name: interest-service-http
+  namespace: interest
+  labels:
+    app.kubernetes.io/name: interest-service
+    app.kubernetes.io/part-of: interest
+    openbank.io/finops-tier: T1
+    openbank.io/adr: "0057"
+spec:
+  hosts:
+    - interest-service.interest.svc.cluster.local
+    - interest-service.interest.svc
+  pathPrefixes:
+    - /api/v1/interest
+  scaleTargetRef:
+    service: interest-service
+    name: interest-service
+    kind: Deployment
+    apiVersion: apps/v1
+    port: 8125
+  replicas:
+    min: 0
+    max: 2
+  scaledownPeriod: 300
+  targetPendingRequests: 50
