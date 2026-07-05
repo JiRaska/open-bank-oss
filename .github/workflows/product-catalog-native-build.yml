@@ -1,0 +1,82 @@
+# Native (Mandrel/GraalVM) build + cold-start smoke test for product-catalog.
+#
+# ADR-0083 Enabler 1 / risk analysis: native build cost (RAM-hungry, ~3-5 min) must NOT
+# sit on the JVM PR gate. This workflow is therefore deliberately NOT triggered on
+# `pull_request` and must never be added to branch-protection required status checks —
+# it is a diagnostic/measurement lane, run on demand or after a merge that touches the
+# native Dockerfile, not a merge gate.
+#
+# What this validates: that Dockerfile.native actually compiles to a native executable
+# and that the resulting container serves traffic — i.e. Enabler 1 from ADR-0083. It
+# does NOT validate the ADR-0083 promotion gate (measured p95 cold-start under the real
+# KEDA HTTP add-on in the sandbox cluster) — that requires deploying to the cluster,
+# which is out of scope for a GitHub Actions job with no cluster network access
+# (rules.yaml: ci_runners — this lane needs no cluster network, so it runs GitHub-hosted).
+# Promoting `openbank-product-catalog` to T1 in rules.yaml:finops_tiers.declared still
+# requires that separate, cluster-side measurement (see ADR-0083 "Pilot plan" step 5).
+#
+# EXPECTED RED as of 2026-07-05 (see ADR-0083 correction note + issue #253): the native
+# image currently 500s on every request once running, a suspected openbank-libs
+# native-compatibility gap. That is exactly the failure this smoke test exists to catch
+# — a red run here means "do not promote," which is correct; it is non-blocking so it
+# does not stop unrelated JVM PRs from merging while this is investigated.
+name: Product Catalog Native Build (T1 enabler smoke test)
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - "openbank-product-catalog/**"
+      - ".github/workflows/product-catalog-native-build.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: product-catalog-native-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-build-smoke-test:
+    name: Build native image + smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Build native image (Mandrel container build)
+        run: |
+          docker build \
+            -f openbank-product-catalog/Dockerfile.native \
+            -t product-catalog:native-ci \
+            .
+
+      - name: Cold-start smoke test
+        run: |
+          set -euo pipefail
+          START=$(date +%s%N)
+          CID=$(docker run -d -p 8104:8104 product-catalog:native-ci)
+          READY=0
+          for _ in $(seq 1 60); do
+            if curl -sf http://localhost:8104/q/health/ready >/dev/null 2>&1; then
+              READY=1
+              break
+            fi
+            sleep 0.5
+          done
+          END=$(date +%s%N)
+          docker logs "$CID" || true
+          docker stop "$CID" >/dev/null || true
+
+          if [ "$READY" -ne 1 ]; then
+            echo "::error::native image never reported ready within the smoke-test budget"
+            exit 1
+          fi
+
+          ELAPSED_MS=$(( (END - START) / 1000000 ))
+          echo "Cold start (container start -> /q/health/ready): ${ELAPSED_MS} ms"
+          echo "NOTE: this measures container-runtime start on a GitHub-hosted runner, not"
+          echo "the ADR-0083 promotion-gate metric (p95 cold start behind the KEDA HTTP"
+          echo "add-on interceptor in the sandbox cluster). Treat this as a build-health"
+          echo "signal only; the real promotion measurement happens in-cluster."

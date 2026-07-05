@@ -642,7 +642,13 @@ finops_tiers:
   # t0_baseline and need no explicit entry.
   declared:
     openbank-notification-service: T2     # proven pilot, live in sandbox (ADR-0057 best-first target, #228)
-    openbank-product-catalog: T1          # ADR-0083 pilot: HTTPScaledObject minReplicas:0 live; native cold-start SLO gate passed in sandbox (#2083)
+    # openbank-product-catalog was WRONGLY declared T1 here (#2800), citing a
+    # non-existent issue (#2083), while only Enabler 2 (HTTPScaledObject) existed —
+    # no commit ever added a native build (Enabler 1), so the claimed "native
+    # cold-start SLO gate passed in sandbox" never happened. Corrected 2026-07-05:
+    # reverted to unclassified until the ADR-0083 promotion gate is actually measured
+    # in-cluster and passes — tracked in #253. Do not re-declare T1 from this comment
+    # alone; only from a real measurement.
 
   # Keep-honest classifier: reads measured signals (HTTP rate/idle ratio, Kafka lag +
   # active fraction, CPU/replica utilisation), emits a recommended tier + realised

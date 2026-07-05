@@ -1,0 +1,57 @@
+# Native (Mandrel/GraalVM) build variant for product-catalog — ADR-0083 Enabler 1.
+#
+# This is a SEPARATE file from the default Dockerfile (plain JVM fast-jar), which stays
+# the image every other pipeline (build-push-service.sh, services-ci.yml, auto-deploy)
+# builds by default. This file is built ONLY by the dedicated, non-blocking native CI
+# lane (.github/workflows/product-catalog-native-build.yml) — ADR-0083's own risk
+# analysis calls for a separate lane precisely so a slow/RAM-hungry native compile never
+# gates the JVM PR gate.
+#
+# KNOWN ISSUE (see ADR-0083 correction note + issue #253): the compiled native binary
+# starts fast (~200-330ms, verified locally) but currently 500s on EVERY request,
+# including /q/health/live — this is unresolved and likely an openbank-libs
+# native-compatibility gap (no service has run under GraalVM native before), not
+# something specific to this file. Do not treat a passing build of this Dockerfile as
+# proof the image is servable — the CI smoke-test lane below is expected to catch this.
+#
+# Unlike ADR-0083's literal `-Dquarkus.native.container-build=true` recipe (which has
+# quarkus-maven/gradle itself invoke Docker to spin up a Mandrel container — meant for a
+# host/CI runner that owns the Docker socket), this Dockerfile's build STAGE *is* the
+# Mandrel builder image: native-image is already on its PATH, so no nested
+# Docker-in-Docker is needed inside a `docker build`. Functionally equivalent output;
+# simpler to reason about inside a multi-stage build.
+FROM quay.io/quarkus/ubi9-quarkus-mandrel-builder-image:jdk-25@sha256:4dda6a3d677b57614849557d0d18aac7326c4f30175142b0f1bb91bdcfc5c29a AS build
+WORKDIR /build
+
+# Same full-repo-root context rationale as the JVM Dockerfile: settings.gradle.kts
+# unconditionally includes all 30+ modules with an explicit projectDir each.
+COPY . /build
+
+ENV GRADLE_OPTS="-Xmx2g -Xms256m -XX:MaxMetaspaceSize=512m"
+USER root
+RUN chmod +x gradlew && \
+    ./gradlew :openbank-product-catalog:quarkusBuild \
+      -Dquarkus.package.type=native \
+      -Dquarkus.native.enabled=true \
+      -Dorg.gradle.java.installations.auto-detect=false \
+      --no-daemon \
+      --console=plain
+
+# Runtime base MUST match the builder's glibc generation. quay.io/quarkus/quarkus-micro-image:2.0
+# is RHEL8-based (glibc 2.28) while the jdk-25 Mandrel builder is RHEL9-based (glibc 2.34) —
+# tried micro-image:2.0 first and the binary failed at container startup with
+# "/lib64/libc.so.6: version `GLIBC_2.34' not found" (verified locally). ubi9/ubi-minimal
+# matches the builder's RHEL9 base; it is the "ubi-minimal" alternative ADR-0083 names
+# alongside quarkus-micro-image, so this stays within the ADR's own recipe.
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8@sha256:463cae32c6f6f5594b11a5c22de275016bd8545ce58a6373388e8b24f13fc15c
+WORKDIR /work
+
+RUN chown 1001 /work \
+    && chmod "g+rwX" /work \
+    && chown 1001:root /work
+COPY --from=build --chown=1001:root /build/openbank-product-catalog/build/*-runner /work/application
+
+EXPOSE 8104
+USER 1001
+
+ENTRYPOINT ["/work/application", "-Dquarkus.http.host=0.0.0.0"]

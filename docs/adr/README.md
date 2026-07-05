@@ -91,7 +91,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0080](0080-pentest-remediation-p0-p2.md) | Pentest remediation (admin.open-bank.tech) — P0/P1/P2 | Accepted | Partial | — |
 | [0081](0081-cluster-segmentation-and-container-hardening-baseline.md) | Cluster segmentation & container hardening baseline | Accepted | Shipped | — |
 | [0082](0082-ci-runner-governance.md) | CI runner governance — trust-tiered persistent pools, no human in the merge path | Superseded by ADR-0053 | N/A | — |
-| [0083](0083-t1-http-scale-to-zero-native-pilot.md) | T1 (HTTP → 0): native-image + KEDA HTTP add-on pilot on product-catalog | Accepted | Shipped | — |
+| [0083](0083-t1-http-scale-to-zero-native-pilot.md) | T1 (HTTP → 0): native-image + KEDA HTTP add-on pilot on product-catalog | Accepted | Partial | — |
 | [0084](0084-fraud-detection-bounded-context.md) | Fraud detection bounded context — real-time transaction risk scoring | Accepted | Shipped | — |
 | [0085](0085-complaints-handling.md) | Complaints handling — regulatory complaints as a first-class process | Accepted | Partial | — |
 | [0086](0086-customer-payment-non-repudiation-and-audit-chain.md) | Customer payment non-repudiation — SCA settlement gate, identity threading, audit chain | Accepted | Shipped | — |
