@@ -8,7 +8,7 @@ Author(s): OpenBank platform
 **Delivery note (updated 2026-06-30):**
 - **Layer 2 (DST harness — Pure JVM)** — ✅ Shipped: `openbank-simulation` module with deterministic scheduler, fault injector, in-memory adapters, payment scenario DSL, and Layer 3 invariants (double-entry balance, no-negative, idempotency, compensation completeness, audit completeness). Updated in ADR-0120 Phase 5+6 to work without the retired `PaymentSaga` aggregate.
 - **Layer 1 (architectural constraints)** — Partial: clock injection in place for money-path services; governance rule mandating it in `rules.yaml` not yet enforced; deterministic `Random` CDI bean not yet required.
-- **Full-service adoption (ledger, balance, sepa-payment, settlement)** — ⬜ Pending: simulation currently covers the payment saga / Temporal workflow path; binding to each service's exact domain classes is tracked in #1612.
+- **Full-service adoption (ledger, balance, sepa-payment, settlement)** — ⬜ Pending: simulation currently covers the payment saga / Temporal workflow path; binding to each service's exact domain classes is tracked in issue #267.
 
 ## Context
 
@@ -126,7 +126,8 @@ and its compensation, ledger→balance projection with at-least-once delivery �
 deterministic scheduler + fault injector, and asserts the Layer-3 invariants below after every
 step. It is built on the real `openbank-libs` primitives (`Money`, `SagaStateMachine`); binding
 it to each service's exact domain classes, and the Antithesis fidelity step, remain tracked in
-#1612.
+issue #267 (the #1612 reference this line used to carry doesn't resolve in this repo — a
+pre-public-repo-transition reference, same pattern as the ADR numbering gap in `README.md`).
 
 ### Layer 3 — Global invariants (always-on assertions)
 

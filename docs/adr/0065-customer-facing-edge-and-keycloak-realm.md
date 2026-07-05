@@ -2,12 +2,28 @@
 
 Date: 2026-06-05
 Status: Accepted
-Delivery-Status: Partial
+Delivery-Status: Shipped
 Author(s): OpenBank platform
 
-**Delivery note (updated 2026-06-30):**
+**Delivery note (updated 2026-07-05):** the "Implementation — Pending" note below was stale
+— `openbank-customer-edge` (v0.17.1) has long since shipped: real gitops deployment
+manifests (`openbank-infra/gitops/components/customer-edge/`), the `openbank-customers`
+Keycloak realm (`openbank-infra/scripts/seed-customers-realm.sh`), an OPA ownership-check
+bundle, and a route surface far beyond the original 7-route allow-list (accounts, balances,
+pockets, savings goals, SCA device enrollment/challenge/decision, onboarding, and more — see
+`CustomerEdgeResource.kt`/`OnboardingResource.kt`). The one item still exactly as originally
+scoped is device attestation: it remains advisory-only behind a feature flag (no enforcing
+App Attest/Play Integrity check found in the edge code), which is the explicit, reversible
+sandbox posture this ADR always called for — not a regression, and not blocking Shipped
+status for the rest of the decision.
+
+<details>
+<summary>Original delivery note (2026-06-30), superseded above</summary>
+
 - **Decision and boundaries** — ✅ Complete: ADR records the decision; `openbank-customers` realm design (PKCE public client, party-scoped roles, WebAuthn), deny-by-default route allow-list, device attestation hook (advisory mode behind feature flag), and staff/customer trust-boundary separation are all specified.
 - **Implementation** — ⬜ Pending: concrete artifacts (realm export, customer edge deployment manifests, OPA ownership policies per route, edge service code) are deferred as follow-up issues per ADR-0052; no customer-facing edge or `openbank-customers` realm exists in the cluster today.
+
+</details>
 
 ## Context
 

@@ -5,6 +5,8 @@ Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | 
 Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only; the build-axis status, independent of the decision axis -->
 Author(s): jiri.raska
 
+Tracked in issue #264.
+
 ## Context
 
 The openbank-app Vault screen ("Spořák") shows a savings-goal progress bar — target
