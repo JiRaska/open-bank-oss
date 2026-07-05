@@ -5,6 +5,39 @@ Status: Accepted
 Delivery-Status: Shipped
 Author(s): Jiří Raška
 
+**Delivery note (updated 2026-07-05):**
+- **`derivedStatus` anti-rot signal (issue #26)** — ✅ Shipped: the curatorial `status`
+  field was, by design (invariant 3), the one fact this ADR did NOT derive — and it
+  rotted (5 of 13 capabilities under-stated as of 2026-06-08, corrected by hand in
+  #25). `generate-app-status.mjs` now also computes a `derivedStatus` per capability
+  from cheap code presence/shape checks, and `--check` prints a `::warning` (always
+  advisory, independent of `--enforce`) when curatorial `status` disagrees. This
+  extends invariant 5 (content check) to the status field without collapsing it into
+  invariant 3 (fully derived) — see the per-capability breakdown below.
+- **Derivable (has a `derivedStatus` signal) vs stays curatorial-only:**
+  - Derivable: `tls-pinning` (reuses the existing `certPinningConfigured` derived
+    fact), `sca-device-key` (Android `ensureKeyPair` calls `KeyPairGenerator` +
+    `AndroidKeyStore`, not a stub), `auth-pkce` (both `OAuthLauncher.{ios,android}.kt`
+    compute a real SHA-256 PKCE challenge AND `LoginScreen` wires `AuthService`),
+    `credential-storage` (Android `SecureCredentialStore` backed by `AndroidKeyStore`
+    + `KeyGenerator`, not in-memory), `diagnostics` (a `DebugMenu`/`DebugTrigger`
+    surface exists), `payment-initiation` (`SendScreen` wires `PaymentApi` + `ScaApi`
+    initiate/approve).
+  - Stays curatorial-only (no cheap code signal without guessing, which invariant 3
+    forbids): `ui-stack`, `shared-domain`, `customer-edge`, `keycloak-realm` (span
+    multiple files/behaviors with no single presence check), `crash-monitoring`
+    (live-ness depends on a runtime flag + external GlitchTip provisioning, not
+    something readable from source alone), `qrless-pay` (explicitly design-only, no
+    implementation to check), `dossier` (self-referential — this page).
+  - Chose **option 1 (derive + override, warn-on-drift)** over option 2 (drop
+    curatorial `status` entirely): preserves the curator's ability to call a
+    genuinely ambiguous split (e.g. iOS-live/Android-stub) `partial` even when one
+    platform's signal alone reads `live`, while still surfacing disagreement instead
+    of letting it rot silently.
+  - First real catch: `tls-pinning` — `PINNED_SPKI_HASHES` went from empty to 3
+    production hashes without the curatorial `status` following (still `partial` in
+    `app-status.yaml` as of this note), exactly the drift class this closes.
+
 ## Context
 
 The KMP customer app (ADR-0064) has acquired a corpus of decisions — the
