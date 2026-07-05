@@ -33,6 +33,13 @@ module "eks" {
   node_desired_size   = 2
   node_min_size       = 2
   node_max_size       = 4
+
+  tags = {
+    Project     = "openbank"
+    ManagedBy   = "opentofu"
+    Environment = "sandbox"
+    Service     = "openbank"
+  }
 }
 
 module "karpenter_iam" {
@@ -43,6 +50,13 @@ module "karpenter_iam" {
   # Must match the Karpenter Helm release in the platform root.
   controller_namespace       = "kube-system"
   controller_service_account = "karpenter"
+
+  tags = {
+    Project     = "openbank"
+    ManagedBy   = "opentofu"
+    Environment = "sandbox"
+    Service     = "karpenter"
+  }
 }
 
 # Public DNS (open-bank.tech) + zone-scoped Pod Identity IAM for external-dns

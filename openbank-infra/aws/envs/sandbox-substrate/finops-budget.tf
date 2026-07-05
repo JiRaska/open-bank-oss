@@ -158,3 +158,41 @@ resource "aws_budgets_budget" "nat_daily" {
     subscriber_email_addresses = [var.finops_alert_email]
   }
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AWS Config recording-mode drift guardrail (2026-07-06 incident)
+# ─────────────────────────────────────────────────────────────────────────────
+# Root cause: aws_config_configuration_recorder.recording_mode can drift to the
+# AWS default (CONTINUOUS) on the live resource without tofu apply ever failing
+# — it only surfaced via AWS Cost Anomaly Detection 1-2 days later
+# (EUN1-ConfigurationItemRecordedDaily, +$59/day, Karpenter's ~30min node churn
+# turned every node replace into a burst of recorded configuration items).
+# This budget catches the same signature same-day instead of via cost-anomaly
+# latency. Verify recording_mode directly after every audit-baseline apply:
+#   aws configservice describe-configuration-recorders (boto3 — an older AWS
+#   CLI can silently omit the recordingMode field from its output).
+resource "aws_budgets_budget" "config_recording_daily" {
+  name         = "openbank-config-recording-daily"
+  budget_type  = "COST"
+  limit_amount = "3"
+  limit_unit   = "USD"
+  time_unit    = "DAILY"
+
+  cost_filter {
+    name   = "Service"
+    values = ["AWS Config"]
+  }
+  cost_filter {
+    name   = "UsageType"
+    values = ["EUN1-ConfigurationItemRecordedDaily"]
+  }
+
+  # DAILY budgets only support ACTUAL notifications (see nat_daily above).
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 60 # $1.80/day actual — DAILY recording_mode is normally ~$0
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "ACTUAL"
+    subscriber_email_addresses = [var.finops_alert_email]
+  }
+}
