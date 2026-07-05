@@ -2,8 +2,38 @@
 
 Date: 2026-06-02
 Status: Accepted
-Delivery-Status: Shipped
+Delivery-Status: Partial
 Author(s): Jiri Raska
+
+> **Correction (2026-07-05).** A prior edit (#2800, 2026-06-30) marked this ADR
+> `Delivery-Status: Shipped` and declared `openbank-product-catalog: T1` in
+> `rules.yaml` on the strength of Enabler 2 alone (the `HTTPScaledObject` + KEDA HTTP
+> add-on) while citing a non-existent issue (`#2083`) for Enabler 1 (the native image).
+> **No commit in this repo's history ever added a native build for `product-catalog`**
+> — `git log --all -- openbank-product-catalog/Dockerfile` shows only JVM fast-jar
+> changes (base-image digest pins). The service is still deployed as a JVM image
+> today (see `openbank-infra/gitops/components/accounts/product-catalog.yaml`), which
+> means the live `HTTPScaledObject` (`minReplicas: 0`) is currently scaling a ~1-2 s
+> JVM cold start, not the ~tens-of-ms native cold start this ADR's promotion gate
+> requires — the SLO was never actually measured, let alone passed. `Dockerfile.native`
+> (this PR) closes Enabler 1 in code; the §"Promotion gate" measurement below is still
+> open, and `rules.yaml:finops_tiers.declared` has been reverted to leave
+> `product-catalog` unclassified until it is. Remaining sandbox deploy + measurement
+> tracked in #253 — re-declare T1 only from that, not from this correction.
+>
+> **Local verification of `Dockerfile.native` (2026-07-05) found exactly the "native
+> build gotcha" this ADR's own risk table warns about**, and it is NOT yet resolved:
+> the image compiles and cold-starts fast (~200-330 ms, confirming the ADR's cold-start
+> premise), but **every HTTP request — including `/q/health/live` and `/` — currently
+> returns 500** once running (JVM behavior is unaffected; this is native-only). Root
+> cause not yet isolated: `openbank-libs-runtime`'s JAX-RS filters
+> (`ApiVersionResponseFilter`, `CorrelationIdFilter`, `RateLimitFilter`) look reflection-free
+> on inspection, and no exception stack trace surfaces in the JSON console logger even at
+> DEBUG (`quarkus.log.console.json` is build-time-fixed for native, so it can't be flipped
+> at runtime to get one). No commit in this repo has ever exercised `openbank-libs` under
+> GraalVM native before, so this may be a fleet-wide libs gap, not a product-catalog-only
+> one. **This blocks Enabler 1 from being considered done** — tracked as the first item
+> in #253 alongside the sandbox measurement, ahead of any deploy attempt.
 
 > **Renumbered 0059 → 0083 (2026-06-11).** This ADR was originally filed as ADR-0059, a
 > number it accidentally shared with the (more widely referenced) outbound-oversight-webhooks
@@ -47,8 +77,14 @@ read/HTTP fleet; failure = revert to `min>0` with no harm.
 
 KEDA is deployed cluster-wide (ADR-0041 P1 confirmed).
 KEDA HTTP add-on is installed (tofu/sandbox-platform, HA interceptor 2 replicas).
-`HTTPScaledObject` for `product-catalog` is live (minReplicas: 0) and the tier is declared
-T1 in `rules.yaml: finops_tiers.declared` — pilot complete.
+`HTTPScaledObject` for `product-catalog` is live (minReplicas: 0) — Enabler 2 is done.
+Enabler 1 (native image) now has a build (`openbank-product-catalog/Dockerfile.native`
++ `.github/workflows/product-catalog-native-build.yml`, a non-blocking smoke-test lane),
+but it has not been deployed to the sandbox or measured against the promotion gate below
+— **the tier is NOT yet declared T1 in `rules.yaml`.** Until the measured cold-start SLO
+passes in-cluster, the live `HTTPScaledObject` is scaling a JVM image from zero, which
+does not meet this ADR's cold-start assumption; treat `minReplicas: 0` as running ahead
+of its own prerequisite, not as a completed pilot.
 
 ### Enabler 1 — native image build
 
