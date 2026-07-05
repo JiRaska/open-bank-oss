@@ -1,0 +1,67 @@
+# HTTPScaledObject — ADR-0057 T1 (HTTP -> 0) for card-issuance-service.
+#
+# Fleet sweep #230 (batch 2). Trigger investigation (per ADR-0057's decision rule):
+#   - card-issuance-service has BOTH a full REST surface (CardResource: issue/list/get/
+#     listByAccount/listByParty/activate/block/suspend/resume, all under /api/v1/cards) AND
+#     one Kafka @Incoming consumer (PartyEventConsumer on "party-events-in").
+#   - The Kafka consumer's ONLY job is GDPR Art. 17 erasure: on a PARTY_ERASED event it
+#     anonymises cardholder PII for that party's cards. It is a rare, best-effort side-channel
+#     (poison-pill safe, failures only logged) — not how card work normally arrives.
+#   - The REST surface is the dominant, customer-facing driver: gitops
+#     (components/payments/payments-services.yaml) documents this service as "Customer-facing
+#     via customer-edge (/customer/v1/cards)" — every card issuance, lifecycle change, and list
+#     read is a synchronous HTTP hop from a real customer session.
+#   - Conclusion: primary trigger is synchronous HTTP -> T1, per the decision rule. The Kafka
+#     consumer keeps working the same way under T1: KEDA HTTP add-on only gates the HTTP path;
+#     the Kafka `@Incoming` channel still requires the pod to be running to consume, so a
+#     GDPR erasure event arriving while the pod is scaled to zero would queue on the topic
+#     until the next HTTP-triggered wake (or until Kafka consumer-group rebalance timeout
+#     concerns arise) — acceptable for a low-frequency, no-SLO async side-channel, but noted
+#     here for anyone re-evaluating this service later. If PARTY_ERASED latency becomes a
+#     concern, revisit with min>=1 or add a lag-based KEDA trigger alongside the HTTP one.
+#
+# Modeled exactly on components/accounts/product-catalog-http-scaledobject.yaml (ADR-0083 pilot).
+#
+# Native-image status: NOT native — same fast-jar JVM pattern as every service in this repo
+# (Dockerfile runs `quarkusBuild` producing quarkus-app/, run via `java -jar` on a JRE-alpine
+# base; no native/Mandrel build lane exists here or anywhere in this repo, including the
+# product-catalog T1 pilot itself). Flagged as a gap, not a blocker, per the issue's guidance.
+#
+# minReplicas: 0 — safe because:
+#   - card-issuance-service is NOT on the money path (rules.yaml money_path_services).
+#   - No PodDisruptionBudget or karpenter.sh/do-not-disrupt annotation found on this Deployment
+#     (verified live in sandbox 2026-07-05); the only PDB in the `payments` namespace protects
+#     the CNPG db-primary pods, unrelated to this Deployment.
+#   - The KEDA HTTP interceptor parks the first request rather than 5xx-ing it.
+#
+# maxReplicas: 3 — matches the product-catalog pilot's cap; revise once live traffic is measured.
+# scaledownPeriod: 300s — same conservative idle window as the pilot.
+# targetPendingRequests: 75 — between product-catalog's 100 (pure read) and a tighter budget,
+#   reflecting card-issuance's mix of reads and mutating lifecycle actions (issue/block/suspend).
+apiVersion: http.keda.sh/v1alpha1
+kind: HTTPScaledObject
+metadata:
+  name: card-issuance-http
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: card-issuance-service
+    app.kubernetes.io/part-of: payments
+    openbank.io/finops-tier: T1
+    openbank.io/adr: "0057"
+spec:
+  hosts:
+    - card-issuance-service.payments.svc.cluster.local
+    - card-issuance-service.payments.svc
+  pathPrefixes:
+    - /api/v1/cards
+  scaleTargetRef:
+    service: card-issuance-service
+    name: card-issuance-service
+    kind: Deployment
+    apiVersion: apps/v1
+    port: 8118
+  replicas:
+    min: 0
+    max: 3
+  scaledownPeriod: 300
+  targetPendingRequests: 75
