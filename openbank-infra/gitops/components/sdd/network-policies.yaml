@@ -39,6 +39,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: admin-ui
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: keda
       ports:
         - protocol: TCP
           port: 8129
