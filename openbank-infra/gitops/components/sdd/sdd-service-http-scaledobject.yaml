@@ -1,0 +1,66 @@
+# HTTPScaledObject — ADR-0057 T1 (HTTP -> 0) for sdd-service.
+#
+# Fleet sweep #230 (batch 2). Trigger investigation (per ADR-0057's decision rule):
+#   - sdd-service exposes ONLY a REST surface (SddResource: mandate register/list/get/confirm/
+#     suspend/resume/cancel/amend, collection authorisation, refund assessment) under
+#     /api/v1/sdd/**. No Kafka @Incoming consumer in this service.
+#   - There IS a real in-process cron: MandateExpiryScheduler runs a daily idle-mandate-expiry
+#     sweep (openbank.sdd.expiry-cron, "0 15 3 * * ?", ADR-0036 SS B) — BUT it is disabled by
+#     default (openbank.sdd.expiry.enabled: false, confirmed in application.yaml and the class's
+#     own doc comment "Disabled by default"). It is a documented, not-yet-activated feature —
+#     dormant in production today, so it creates no live scale-to-zero conflict.
+#   - Conclusion: the only LIVE trigger is synchronous REST (mandate CRUD + collection
+#     authorisation), hit directly by payment rails and customers. Per the decision rule this
+#     is T1, not T3. CAVEAT: if openbank.sdd.expiry.enabled is ever flipped to true, this
+#     service would need re-evaluation before that flip ships — an in-process @Scheduled cron
+#     on a pod that KEDA can scale to zero will silently stop firing while idle (T3's own
+#     definition requires "no resident listener", i.e. a K8s CronJob, not this pattern). Do not
+#     enable the expiry sweep without first addressing that conflict (e.g. move it to a
+#     CronJob, or keep min>=1, or accept the sweep only runs while HTTP traffic keeps a pod warm).
+#
+# Modeled exactly on components/accounts/product-catalog-http-scaledobject.yaml (ADR-0083 pilot).
+#
+# Native-image status: NOT native — sdd-service has no local Dockerfile in this checkout (built
+# via the fleet's generic openbank-infra/scripts/build-push-service.sh path, same fast-jar
+# quarkusBuild pattern as every other service here, including the product-catalog T1 pilot
+# itself). Flagged as a gap, not a blocker, per the issue's guidance.
+#
+# minReplicas: 0 — safe because:
+#   - sdd-service is NOT on the money path (rules.yaml money_path_services).
+#   - No PodDisruptionBudget or karpenter.sh/do-not-disrupt annotation found on this Deployment
+#     (verified live in sandbox 2026-07-05); the only PDB in the `sdd` namespace protects the
+#     CNPG db-primary pod, unrelated to this Deployment.
+#   - The expiry cron is dormant (see above) — no resident-listener conflict today.
+#   - The KEDA HTTP interceptor parks the first request rather than 5xx-ing it.
+#
+# maxReplicas: 2 — SDD collection authorisation is a fail-closed synchronous check but at
+#   modest volume; revise once live traffic is measured.
+# scaledownPeriod: 300s — same conservative idle window as the pilot.
+# targetPendingRequests: 50 — mandate lifecycle + authorisation traffic, not a high-fanout read.
+apiVersion: http.keda.sh/v1alpha1
+kind: HTTPScaledObject
+metadata:
+  name: sdd-service-http
+  namespace: sdd
+  labels:
+    app.kubernetes.io/name: sdd-service
+    app.kubernetes.io/part-of: sdd
+    openbank.io/finops-tier: T1
+    openbank.io/adr: "0057"
+spec:
+  hosts:
+    - sdd-service.sdd.svc.cluster.local
+    - sdd-service.sdd.svc
+  pathPrefixes:
+    - /api/v1/sdd
+  scaleTargetRef:
+    service: sdd-service
+    name: sdd-service
+    kind: Deployment
+    apiVersion: apps/v1
+    port: 8129
+  replicas:
+    min: 0
+    max: 2
+  scaledownPeriod: 300
+  targetPendingRequests: 50
