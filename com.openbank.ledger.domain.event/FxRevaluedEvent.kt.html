@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html;charset=UTF-8">
+    <link rel="stylesheet" type="text/css" href="../style.css">
+</head>
+<body>
+
+
+<h1>FxRevaluedEvent.kt</h1>
+
+<table class="src">
+
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@443a06ad_1'/>
+1
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@443a06ad_1'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>// SPDX-License-Identifier: Apache-2.0</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@443a06ad_2'/>
+2
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@443a06ad_2'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@443a06ad_3'/>
+3
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@443a06ad_3'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@443a06ad_4'/>
+4
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@443a06ad_4'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@443a06ad_5'/>
+5
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@443a06ad_5'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>package com.openbank.ledger.domain.event</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@443a06ad_6'/>
+6
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@443a06ad_6'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@443a06ad_7'/>
+7
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@443a06ad_7'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>import java.math.BigDecimal</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@443a06ad_8'/>
+8
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@443a06ad_8'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>import java.time.LocalDate</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@443a06ad_9'/>
+9
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@443a06ad_9'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>import java.util.UUID</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@443a06ad_10'/>
+10
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@443a06ad_10'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@443a06ad_11'/>
+11
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@443a06ad_11'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>/**</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@443a06ad_12'/>
+12
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@443a06ad_12'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * Emitted when the daily FX revaluation posts an entry (ADR-0046). [movements] is the signed CZK</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@443a06ad_13'/>
+13
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@443a06ad_13'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * unrealized P&#38;L booked per currency for [date] (gain &#62; 0, loss &#60; 0). The authoritative, durable</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@443a06ad_14'/>
+14
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@443a06ad_14'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * signal remains the transactional-outbox `JournalPosted` for [journalId]; this is the</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@443a06ad_15'/>
+15
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@443a06ad_15'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * domain-specific notification on `openbank.ledger.fx.revalued`.</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@443a06ad_16'/>
+16
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@443a06ad_16'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> */</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@443a06ad_17'/>
+17
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@443a06ad_17'>1</a>
+<span>
+1. getMovements : replaced return value with Collections.emptyMap for com/openbank/ledger/domain/event/FxRevaluedEvent::getMovements &rarr; NO_COVERAGE<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>data class FxRevaluedEvent(val journalId: UUID, val date: LocalDate, val movements: Map&#60;String, BigDecimal&#62;)</span></pre></td></tr>
+
+
+
+<tr><td></td><td></td><td><h2>Mutations</h2></td></tr>
+
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@443a06ad_17'>17</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@443a06ad_17'/> 
+
+<p class='NO_COVERAGE'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>getMovements<br/><b>Killed by : </b>none</span></span> replaced return value with Collections.emptyMap for com/openbank/ledger/domain/event/FxRevaluedEvent::getMovements &rarr; NO_COVERAGE</span>
+</div> 
+</td>
+</tr>
+
+</table>
+
+
+<h2>Active mutators</h2>
+<ul>
+<li class='mutator'>CONDITIONALS_BOUNDARY</li>
+<li class='mutator'>EMPTY_RETURNS</li>
+<li class='mutator'>FALSE_RETURNS</li>
+<li class='mutator'>INCREMENTS</li>
+<li class='mutator'>INVERT_NEGS</li>
+<li class='mutator'>MATH</li>
+<li class='mutator'>NEGATE_CONDITIONALS</li>
+<li class='mutator'>NULL_RETURNS</li>
+<li class='mutator'>PRIMITIVE_RETURNS</li>
+<li class='mutator'>TRUE_RETURNS</li>
+<li class='mutator'>VOID_METHOD_CALLS</li>
+
+</ul>
+
+<h2>Tests examined</h2>
+<ul>
+</ul>
+
+<br/>
+
+Report generated by <a href='https://pitest.org'>PIT</a> 1.22.1
+
+</body>
+</html>
