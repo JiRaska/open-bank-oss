@@ -76,6 +76,11 @@ paths = [
   '''(^|/)\.sisyphus/''',
   # Binary assets
   '''\.(png|jpg|jpeg|gif|webp|ico|pdf|woff2?|ttf|otf|eot)$''',
+  # Fuzz seed corpora (fuzz/ossfuzz/corpus/**) are test vectors BY DEFINITION — a seed is a
+  # starting input for mutation, not a secret. The RodneCisloFuzzer/IBAN seeds necessarily
+  # match the rod-cislo/iban numeric heuristics (that is the code under fuzz). Whole-dir
+  # allowlist; real secrets never live in a fuzz corpus.
+  '''(^|/)fuzz/ossfuzz/corpus/''',
   # PSD2 sandbox / stub services intentionally contain fixed demo IBANs (RTS Art. 30 §1 requires a working sandbox).
   '''(^|/)openbank-psd2-service/src/main/kotlin/com/openbank/psd2/(infrastructure|application)/.*\.kt$''',
   '''(^|/)openbank-agent-service/src/main/kotlin/com/openbank/agent/application/McpToolRegistry\.kt$''',
