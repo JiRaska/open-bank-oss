@@ -1,0 +1,2018 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html;charset=UTF-8">
+    <link rel="stylesheet" type="text/css" href="../style.css">
+</head>
+<body>
+
+
+<h1>FxRevaluationPosting.kt</h1>
+
+<table class="src">
+
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_1'/>
+1
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_1'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>// SPDX-License-Identifier: Apache-2.0</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_2'/>
+2
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_2'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_3'/>
+3
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_3'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_4'/>
+4
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_4'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_5'/>
+5
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_5'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>package com.openbank.ledger.domain.model</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_6'/>
+6
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_6'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_7'/>
+7
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_7'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>import com.openbank.libs.domain.money.Money</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_8'/>
+8
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_8'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>import java.math.BigDecimal</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_9'/>
+9
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_9'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>import java.math.RoundingMode</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_10'/>
+10
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_10'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>import java.util.UUID</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_11'/>
+11
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_11'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_12'/>
+12
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_12'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>/**</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_13'/>
+13
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_13'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * One currency&#39;s input to the daily FX revaluation (ADR-0046). All amounts are signed.</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_14'/>
+14
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_14'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> *</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_15'/>
+15
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_15'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * @param currency          the foreign currency being revalued (e.g. &#34;EUR&#34;).</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_16'/>
+16
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_16'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * @param counterValueGlId  the CZK counter-value GL account (199x-CV, e.g. 1995) for this currency.</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_17'/>
+17
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_17'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * @param positionForeign   the bank&#39;s signed economic position in foreign units (+ = long the</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_18'/>
+18
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_18'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> *                          currency). Derived from the 199x FX-position trial balance as</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_19'/>
+19
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_19'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> *                          `credit &#8722; debit` (the position account is credited when the bank acquires</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_20'/>
+20
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_20'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> *                          the currency), so a credit balance means a long position.</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_21'/>
+21
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_21'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * @param cnbRate           the &#268;NB central-bank fixing, CZK per 1 unit of [currency]. Must be &#62; 0.</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_22'/>
+22
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_22'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * @param carryCzk          the CZK currently carried in the counter-value account, as its trial</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_23'/>
+23
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_23'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> *                          balance net (`debit &#8722; credit`); 0 before the first revaluation.</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_24'/>
+24
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_24'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> */</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_25'/>
+25
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_25'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>data class FxRevaluationInput(</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_26'/>
+26
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_26'>1</a>
+<span>
+1. getCurrency : replaced return value with &#34;&#34; for com/openbank/ledger/domain/model/FxRevaluationInput::getCurrency &rarr; SURVIVED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>    val currency: String,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_27'/>
+27
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_27'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    val counterValueGlId: UUID,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_28'/>
+28
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_28'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    val positionForeign: BigDecimal,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_29'/>
+29
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_29'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    val cnbRate: BigDecimal,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_30'/>
+30
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_30'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    val carryCzk: BigDecimal,</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_31'/>
+31
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_31'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>)</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_32'/>
+32
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_32'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_33'/>
+33
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_33'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>/**</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_34'/>
+34
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_34'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * Builds the journal lines for the daily mark-to-&#268;NB revaluation (ADR-0046, mirrors</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_35'/>
+35
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_35'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * [FxConversionPosting]). For each currency `X`:</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_36'/>
+36
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_36'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> *</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_37'/>
+37
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_37'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * ```</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_38'/>
+38
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_38'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * targetX = round(positionForeignX * cnbRateX, 2 CZK)   // the CZK the position is now worth</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_39'/>
+39
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_39'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * dX      = targetX &#8722; carryCzkX                          // the unrealized movement since last mark</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_40'/>
+40
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_40'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * ```</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_41'/>
+41
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_41'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> *</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_42'/>
+42
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_42'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * For each `dX &#8800; 0` it emits a **pure CZK** pair against the exchange-rate-differences account</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_43'/>
+43
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_43'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * (5900): on a gain `DEBIT counter-value / CREDIT 5900`, on a loss `CREDIT counter-value / DEBIT</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_44'/>
+44
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_44'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * 5900`. The whole entry self-balances in CZK and never references a foreign currency, so the</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_45'/>
+45
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_45'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * per-currency invariant ([JournalEntry.validateBalance]) holds and the foreign 199x positions are</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_46'/>
+46
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_46'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * untouched. Currencies whose mark is unchanged contribute no lines; an all-unchanged day yields an</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_47'/>
+47
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_47'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * empty list (the caller must then post nothing).</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_48'/>
+48
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_48'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> */</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_49'/>
+49
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_49'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>object FxRevaluationPosting {</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_50'/>
+50
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_50'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_51'/>
+51
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_51'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>    private const val CZK = &#34;CZK&#34;</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_52'/>
+52
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_52'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_53'/>
+53
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_53'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>    fun build(journalId: UUID, exchangeDiffGlId: UUID, inputs: List&#60;FxRevaluationInput&#62;): List&#60;JournalLine&#62; {</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_54'/>
+54
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_54'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>        val lines = mutableListOf&#60;JournalLine&#62;()</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_55'/>
+55
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_55'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>        var seq = 0</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_56'/>
+56
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_56'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>        for (input in inputs) {</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_57'/>
+57
+</td>
+<td class='killed'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_57'>3</a>
+<span>
+1. build : negated conditional &rarr; KILLED<br/>
+2. build : negated conditional &rarr; KILLED<br/>
+3. build : changed conditional boundary &rarr; KILLED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='killed'>            require(input.cnbRate.signum() &#62; 0) {</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_58'/>
+58
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_58'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                &#34;&#268;NB rate must be positive for ${input.currency}, was ${input.cnbRate}&#34;</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_59'/>
+59
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_59'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>            }</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_60'/>
+60
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_60'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>            val delta = movement(input)</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_61'/>
+61
+</td>
+<td class='killed'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_61'>1</a>
+<span>
+1. build : negated conditional &rarr; KILLED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='killed'>            if (delta.signum() == 0) continue</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_62'/>
+62
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_62'>1</a>
+<span>
+1. build : removed call to kotlin/jvm/internal/Intrinsics::checkNotNullExpressionValue &rarr; SURVIVED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>            val amount = Money.of(delta.abs(), CZK)</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_63'/>
+63
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_63'>2</a>
+<span>
+1. build : changed conditional boundary &rarr; SURVIVED<br/>
+2. build : negated conditional &rarr; KILLED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>            if (delta.signum() &#62; 0) {</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_64'/>
+64
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_64'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>                // Unrealized gain: the CZK mark of the position rose. Increase the ASSET</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_65'/>
+65
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_65'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>                // counter-value account and book the gain to exchange-rate differences (5900).</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_66'/>
+66
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_66'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                lines +=</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_67'/>
+67
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_67'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                    JournalLine(</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_68'/>
+68
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_68'>1</a>
+<span>
+1. build : removed call to kotlin/jvm/internal/Intrinsics::checkNotNullExpressionValue &rarr; SURVIVED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>                        UUID.randomUUID(),</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_69'/>
+69
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_69'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        journalId,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_70'/>
+70
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_70'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        input.counterValueGlId,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_71'/>
+71
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_71'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        JournalSide.DEBIT,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_72'/>
+72
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_72'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        amount,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_73'/>
+73
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_73'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        input.cnbRate,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_74'/>
+74
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_74'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        amount,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_75'/>
+75
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_75'>1</a>
+<span>
+1. build : Changed increment from 1 to -1 &rarr; SURVIVED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>                        ++seq,</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_76'/>
+76
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_76'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>                    )</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_77'/>
+77
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_77'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                lines +=</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_78'/>
+78
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_78'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                    JournalLine(</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_79'/>
+79
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_79'>1</a>
+<span>
+1. build : removed call to kotlin/jvm/internal/Intrinsics::checkNotNullExpressionValue &rarr; SURVIVED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>                        UUID.randomUUID(),</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_80'/>
+80
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_80'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        journalId,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_81'/>
+81
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_81'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        exchangeDiffGlId,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_82'/>
+82
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_82'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        JournalSide.CREDIT,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_83'/>
+83
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_83'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        amount,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_84'/>
+84
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_84'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        input.cnbRate,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_85'/>
+85
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_85'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        amount,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_86'/>
+86
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_86'>1</a>
+<span>
+1. build : Changed increment from 1 to -1 &rarr; SURVIVED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>                        ++seq,</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_87'/>
+87
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_87'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>                    )</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_88'/>
+88
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_88'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>            } else {</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_89'/>
+89
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_89'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>                // Unrealized loss: the mark fell. Decrease the counter-value account, book the loss.</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_90'/>
+90
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_90'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                lines +=</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_91'/>
+91
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_91'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                    JournalLine(</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_92'/>
+92
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_92'>1</a>
+<span>
+1. build : removed call to kotlin/jvm/internal/Intrinsics::checkNotNullExpressionValue &rarr; SURVIVED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>                        UUID.randomUUID(),</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_93'/>
+93
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_93'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        journalId,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_94'/>
+94
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_94'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        input.counterValueGlId,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_95'/>
+95
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_95'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        JournalSide.CREDIT,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_96'/>
+96
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_96'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        amount,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_97'/>
+97
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_97'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        input.cnbRate,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_98'/>
+98
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_98'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        amount,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_99'/>
+99
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_99'>1</a>
+<span>
+1. build : Changed increment from 1 to -1 &rarr; SURVIVED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>                        ++seq,</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_100'/>
+100
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_100'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>                    )</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_101'/>
+101
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_101'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                lines +=</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_102'/>
+102
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_102'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                    JournalLine(</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_103'/>
+103
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_103'>1</a>
+<span>
+1. build : removed call to kotlin/jvm/internal/Intrinsics::checkNotNullExpressionValue &rarr; SURVIVED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>                        UUID.randomUUID(),</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_104'/>
+104
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_104'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        journalId,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_105'/>
+105
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_105'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        exchangeDiffGlId,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_106'/>
+106
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_106'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        JournalSide.DEBIT,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_107'/>
+107
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_107'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        amount,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_108'/>
+108
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_108'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        input.cnbRate,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_109'/>
+109
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_109'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>                        amount,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_110'/>
+110
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_110'>1</a>
+<span>
+1. build : Changed increment from 1 to -1 &rarr; SURVIVED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>                        ++seq,</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_111'/>
+111
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_111'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>                    )</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_112'/>
+112
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_112'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>            }</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_113'/>
+113
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_113'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>        }</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_114'/>
+114
+</td>
+<td class='killed'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_114'>1</a>
+<span>
+1. build : replaced return value with Collections.emptyList for com/openbank/ledger/domain/model/FxRevaluationPosting::build &rarr; KILLED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='killed'>        return lines</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_115'/>
+115
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_115'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>    }</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_116'/>
+116
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_116'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_117'/>
+117
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_117'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>    /** The signed CZK movement (`targetX &#8722; carryCzkX`) for one currency, rounded to CZK minor units. */</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_118'/>
+118
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_118'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>    fun movement(input: FxRevaluationInput): BigDecimal {</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_119'/>
+119
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_119'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>        val target = input.positionForeign.multiply(input.cnbRate).setScale(2, RoundingMode.HALF_UP)</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_120'/>
+120
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_120'>1</a>
+<span>
+1. movement : removed call to kotlin/jvm/internal/Intrinsics::checkNotNullExpressionValue &rarr; SURVIVED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>        return target.subtract(input.carryCzk.setScale(2, RoundingMode.HALF_UP))</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_121'/>
+121
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_121'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>    }</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_122'/>
+122
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_122'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>}</span></pre></td></tr>
+
+
+
+<tr><td></td><td></td><td><h2>Mutations</h2></td></tr>
+
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_26'>26</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_26'/> 
+
+<p class='SURVIVED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>getCurrency<br/><b>Killed by : </b>none</span></span> replaced return value with &#34;&#34; for com/openbank/ledger/domain/model/FxRevaluationInput::getCurrency &rarr; SURVIVED</span>
+<a title="Click to view covering tests" class="view-covered-by-tests" onClick="document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationInput,-method=getCurrency,-methodDesc=()Ljava/lang/String;],-indexes=[5],-mutator=org.pitest.mutationtest.engine.gregor.mutators.returns.EmptyObjectReturnValsMutator]').style.display=(document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationInput,-method=getCurrency,-methodDesc=()Ljava/lang/String;],-indexes=[5],-mutator=org.pitest.mutationtest.engine.gregor.mutators.returns.EmptyObjectReturnValsMutator]').style.display == 'block')?'none':'block';">Covering tests</a>
+<div class="covered-tests" id="MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationInput,-method=getCurrency,-methodDesc=()Ljava/lang/String;],-indexes=[5],-mutator=org.pitest.mutationtest.engine.gregor.mutators.returns.EmptyObjectReturnValsMutator]" style="display:none;">Covered by tests:
+<ul>
+<li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:rejects a non-positive rate()]</li> 
+</ul>
+</div></div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_57'>57</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_57'/> 
+
+<p class='KILLED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>build<br/><b>Killed by : </b>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:an unchanged mark produces no lines for that currency()]</span></span> negated conditional &rarr; KILLED</span>
+</div> <p class='KILLED'><span class='pop'>2.<span><b>2</b><br/><b>Location : </b>build<br/><b>Killed by : </b>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:an unchanged mark produces no lines for that currency()]</span></span> negated conditional &rarr; KILLED</span>
+</div> <p class='KILLED'><span class='pop'>3.<span><b>3</b><br/><b>Location : </b>build<br/><b>Killed by : </b>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:rejects a non-positive rate()]</span></span> changed conditional boundary &rarr; KILLED</span>
+</div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_61'>61</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_61'/> 
+
+<p class='KILLED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>build<br/><b>Killed by : </b>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:an unchanged mark produces no lines for that currency()]</span></span> negated conditional &rarr; KILLED</span>
+</div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_62'>62</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_62'/> 
+
+<p class='SURVIVED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>build<br/><b>Killed by : </b>none</span></span> removed call to kotlin/jvm/internal/Intrinsics::checkNotNullExpressionValue &rarr; SURVIVED</span>
+<a title="Click to view covering tests" class="view-covered-by-tests" onClick="document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[89],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]').style.display=(document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[89],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]').style.display == 'block')?'none':'block';">Covering tests</a>
+<div class="covered-tests" id="MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[89],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]" style="display:none;">Covered by tests:
+<ul>
+<li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:mixes moved and unchanged currencies, only the movers emit pairs()]</li> <li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:short position gain books on the correct sides()]</li> <li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:loss credits the counter-value and debits 5900()]</li> <li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:gain debits the counter-value and credits 5900, balanced in CZK()]</li> <li>com.openbank.ledger.application.usecase.FxRevaluationServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.FxRevaluationServiceTest]/[method:marks a long EUR position and posts an idempotent fx-reval entry()]</li> 
+</ul>
+</div></div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_63'>63</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_63'/> 
+
+<p class='SURVIVED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>build<br/><b>Killed by : </b>none</span></span> changed conditional boundary &rarr; SURVIVED</span>
+<a title="Click to view covering tests" class="view-covered-by-tests" onClick="document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[97],-mutator=org.pitest.mutationtest.engine.gregor.mutators.ConditionalsBoundaryMutator]').style.display=(document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[97],-mutator=org.pitest.mutationtest.engine.gregor.mutators.ConditionalsBoundaryMutator]').style.display == 'block')?'none':'block';">Covering tests</a>
+<div class="covered-tests" id="MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[97],-mutator=org.pitest.mutationtest.engine.gregor.mutators.ConditionalsBoundaryMutator]" style="display:none;">Covered by tests:
+<ul>
+<li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:mixes moved and unchanged currencies, only the movers emit pairs()]</li> <li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:short position gain books on the correct sides()]</li> <li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:loss credits the counter-value and debits 5900()]</li> <li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:gain debits the counter-value and credits 5900, balanced in CZK()]</li> <li>com.openbank.ledger.application.usecase.FxRevaluationServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.FxRevaluationServiceTest]/[method:marks a long EUR position and posts an idempotent fx-reval entry()]</li> 
+</ul>
+</div></div> <p class='KILLED'><span class='pop'>2.<span><b>2</b><br/><b>Location : </b>build<br/><b>Killed by : </b>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:short position gain books on the correct sides()]</span></span> negated conditional &rarr; KILLED</span>
+</div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_68'>68</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_68'/> 
+
+<p class='SURVIVED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>build<br/><b>Killed by : </b>none</span></span> removed call to kotlin/jvm/internal/Intrinsics::checkNotNullExpressionValue &rarr; SURVIVED</span>
+<a title="Click to view covering tests" class="view-covered-by-tests" onClick="document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[112],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]').style.display=(document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[112],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]').style.display == 'block')?'none':'block';">Covering tests</a>
+<div class="covered-tests" id="MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[112],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]" style="display:none;">Covered by tests:
+<ul>
+<li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:mixes moved and unchanged currencies, only the movers emit pairs()]</li> <li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:short position gain books on the correct sides()]</li> <li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:gain debits the counter-value and credits 5900, balanced in CZK()]</li> <li>com.openbank.ledger.application.usecase.FxRevaluationServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.FxRevaluationServiceTest]/[method:marks a long EUR position and posts an idempotent fx-reval entry()]</li> 
+</ul>
+</div></div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_75'>75</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_75'/> 
+
+<p class='SURVIVED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>build<br/><b>Killed by : </b>none</span></span> Changed increment from 1 to -1 &rarr; SURVIVED</span>
+<a title="Click to view covering tests" class="view-covered-by-tests" onClick="document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[135],-mutator=org.pitest.mutationtest.engine.gregor.mutators.IncrementsMutator]').style.display=(document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[135],-mutator=org.pitest.mutationtest.engine.gregor.mutators.IncrementsMutator]').style.display == 'block')?'none':'block';">Covering tests</a>
+<div class="covered-tests" id="MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[135],-mutator=org.pitest.mutationtest.engine.gregor.mutators.IncrementsMutator]" style="display:none;">Covered by tests:
+<ul>
+<li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:mixes moved and unchanged currencies, only the movers emit pairs()]</li> <li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:short position gain books on the correct sides()]</li> <li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:gain debits the counter-value and credits 5900, balanced in CZK()]</li> <li>com.openbank.ledger.application.usecase.FxRevaluationServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.FxRevaluationServiceTest]/[method:marks a long EUR position and posts an idempotent fx-reval entry()]</li> 
+</ul>
+</div></div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_79'>79</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_79'/> 
+
+<p class='SURVIVED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>build<br/><b>Killed by : </b>none</span></span> removed call to kotlin/jvm/internal/Intrinsics::checkNotNullExpressionValue &rarr; SURVIVED</span>
+<a title="Click to view covering tests" class="view-covered-by-tests" onClick="document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[164],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]').style.display=(document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[164],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]').style.display == 'block')?'none':'block';">Covering tests</a>
+<div class="covered-tests" id="MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[164],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]" style="display:none;">Covered by tests:
+<ul>
+<li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:mixes moved and unchanged currencies, only the movers emit pairs()]</li> <li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:short position gain books on the correct sides()]</li> <li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:gain debits the counter-value and credits 5900, balanced in CZK()]</li> <li>com.openbank.ledger.application.usecase.FxRevaluationServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.FxRevaluationServiceTest]/[method:marks a long EUR position and posts an idempotent fx-reval entry()]</li> 
+</ul>
+</div></div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_86'>86</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_86'/> 
+
+<p class='SURVIVED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>build<br/><b>Killed by : </b>none</span></span> Changed increment from 1 to -1 &rarr; SURVIVED</span>
+<a title="Click to view covering tests" class="view-covered-by-tests" onClick="document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[186],-mutator=org.pitest.mutationtest.engine.gregor.mutators.IncrementsMutator]').style.display=(document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[186],-mutator=org.pitest.mutationtest.engine.gregor.mutators.IncrementsMutator]').style.display == 'block')?'none':'block';">Covering tests</a>
+<div class="covered-tests" id="MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[186],-mutator=org.pitest.mutationtest.engine.gregor.mutators.IncrementsMutator]" style="display:none;">Covered by tests:
+<ul>
+<li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:mixes moved and unchanged currencies, only the movers emit pairs()]</li> <li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:short position gain books on the correct sides()]</li> <li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:gain debits the counter-value and credits 5900, balanced in CZK()]</li> <li>com.openbank.ledger.application.usecase.FxRevaluationServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.FxRevaluationServiceTest]/[method:marks a long EUR position and posts an idempotent fx-reval entry()]</li> 
+</ul>
+</div></div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_92'>92</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_92'/> 
+
+<p class='SURVIVED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>build<br/><b>Killed by : </b>none</span></span> removed call to kotlin/jvm/internal/Intrinsics::checkNotNullExpressionValue &rarr; SURVIVED</span>
+<a title="Click to view covering tests" class="view-covered-by-tests" onClick="document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[217],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]').style.display=(document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[217],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]').style.display == 'block')?'none':'block';">Covering tests</a>
+<div class="covered-tests" id="MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[217],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]" style="display:none;">Covered by tests:
+<ul>
+<li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:loss credits the counter-value and debits 5900()]</li> 
+</ul>
+</div></div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_99'>99</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_99'/> 
+
+<p class='SURVIVED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>build<br/><b>Killed by : </b>none</span></span> Changed increment from 1 to -1 &rarr; SURVIVED</span>
+<a title="Click to view covering tests" class="view-covered-by-tests" onClick="document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[240],-mutator=org.pitest.mutationtest.engine.gregor.mutators.IncrementsMutator]').style.display=(document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[240],-mutator=org.pitest.mutationtest.engine.gregor.mutators.IncrementsMutator]').style.display == 'block')?'none':'block';">Covering tests</a>
+<div class="covered-tests" id="MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[240],-mutator=org.pitest.mutationtest.engine.gregor.mutators.IncrementsMutator]" style="display:none;">Covered by tests:
+<ul>
+<li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:loss credits the counter-value and debits 5900()]</li> 
+</ul>
+</div></div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_103'>103</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_103'/> 
+
+<p class='SURVIVED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>build<br/><b>Killed by : </b>none</span></span> removed call to kotlin/jvm/internal/Intrinsics::checkNotNullExpressionValue &rarr; SURVIVED</span>
+<a title="Click to view covering tests" class="view-covered-by-tests" onClick="document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[269],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]').style.display=(document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[269],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]').style.display == 'block')?'none':'block';">Covering tests</a>
+<div class="covered-tests" id="MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[269],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]" style="display:none;">Covered by tests:
+<ul>
+<li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:loss credits the counter-value and debits 5900()]</li> 
+</ul>
+</div></div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_110'>110</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_110'/> 
+
+<p class='SURVIVED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>build<br/><b>Killed by : </b>none</span></span> Changed increment from 1 to -1 &rarr; SURVIVED</span>
+<a title="Click to view covering tests" class="view-covered-by-tests" onClick="document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[291],-mutator=org.pitest.mutationtest.engine.gregor.mutators.IncrementsMutator]').style.display=(document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[291],-mutator=org.pitest.mutationtest.engine.gregor.mutators.IncrementsMutator]').style.display == 'block')?'none':'block';">Covering tests</a>
+<div class="covered-tests" id="MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=build,-methodDesc=(Ljava/util/UUID;Ljava/util/UUID;Ljava/util/List;)Ljava/util/List;],-indexes=[291],-mutator=org.pitest.mutationtest.engine.gregor.mutators.IncrementsMutator]" style="display:none;">Covered by tests:
+<ul>
+<li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:loss credits the counter-value and debits 5900()]</li> 
+</ul>
+</div></div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_114'>114</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_114'/> 
+
+<p class='KILLED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>build<br/><b>Killed by : </b>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:mixes moved and unchanged currencies, only the movers emit pairs()]</span></span> replaced return value with Collections.emptyList for com/openbank/ledger/domain/model/FxRevaluationPosting::build &rarr; KILLED</span>
+</div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@6b2fdffc_120'>120</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@6b2fdffc_120'/> 
+
+<p class='SURVIVED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>movement<br/><b>Killed by : </b>none</span></span> removed call to kotlin/jvm/internal/Intrinsics::checkNotNullExpressionValue &rarr; SURVIVED</span>
+<a title="Click to view covering tests" class="view-covered-by-tests" onClick="document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=movement,-methodDesc=(Lcom/openbank/ledger/domain/model/FxRevaluationInput;)Ljava/math/BigDecimal;],-indexes=[27],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]').style.display=(document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=movement,-methodDesc=(Lcom/openbank/ledger/domain/model/FxRevaluationInput;)Ljava/math/BigDecimal;],-indexes=[27],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]').style.display == 'block')?'none':'block';">Covering tests</a>
+<div class="covered-tests" id="MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.FxRevaluationPosting,-method=movement,-methodDesc=(Lcom/openbank/ledger/domain/model/FxRevaluationInput;)Ljava/math/BigDecimal;],-indexes=[27],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]" style="display:none;">Covered by tests:
+<ul>
+<li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:an unchanged mark produces no lines for that currency()]</li> <li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:mixes moved and unchanged currencies, only the movers emit pairs()]</li> <li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:short position gain books on the correct sides()]</li> <li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:loss credits the counter-value and debits 5900()]</li> <li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:gain debits the counter-value and credits 5900, balanced in CZK()]</li> <li>com.openbank.ledger.application.usecase.FxRevaluationServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.FxRevaluationServiceTest]/[method:posts nothing when no position has moved()]</li> <li>com.openbank.ledger.application.usecase.FxRevaluationServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.FxRevaluationServiceTest]/[method:marks a long EUR position and posts an idempotent fx-reval entry()]</li> 
+</ul>
+</div></div> 
+</td>
+</tr>
+
+</table>
+
+
+<h2>Active mutators</h2>
+<ul>
+<li class='mutator'>CONDITIONALS_BOUNDARY</li>
+<li class='mutator'>EMPTY_RETURNS</li>
+<li class='mutator'>FALSE_RETURNS</li>
+<li class='mutator'>INCREMENTS</li>
+<li class='mutator'>INVERT_NEGS</li>
+<li class='mutator'>MATH</li>
+<li class='mutator'>NEGATE_CONDITIONALS</li>
+<li class='mutator'>NULL_RETURNS</li>
+<li class='mutator'>PRIMITIVE_RETURNS</li>
+<li class='mutator'>TRUE_RETURNS</li>
+<li class='mutator'>VOID_METHOD_CALLS</li>
+
+</ul>
+
+<h2>Tests examined</h2>
+<ul>
+<li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:an unchanged mark produces no lines for that currency()] (0 ms)</li><li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:mixes moved and unchanged currencies, only the movers emit pairs()] (0 ms)</li><li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:short position gain books on the correct sides()] (0 ms)</li><li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:loss credits the counter-value and debits 5900()] (0 ms)</li><li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:gain debits the counter-value and credits 5900, balanced in CZK()] (0 ms)</li><li>com.openbank.ledger.application.usecase.FxRevaluationServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.FxRevaluationServiceTest]/[method:posts nothing when no position has moved()] (29 ms)</li><li>com.openbank.ledger.application.usecase.FxRevaluationServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.FxRevaluationServiceTest]/[method:marks a long EUR position and posts an idempotent fx-reval entry()] (629 ms)</li><li>com.openbank.ledger.domain.model.FxRevaluationPostingTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FxRevaluationPostingTest]/[method:rejects a non-positive rate()] (2 ms)</li>
+</ul>
+
+<br/>
+
+Report generated by <a href='https://pitest.org'>PIT</a> 1.22.1
+
+</body>
+</html>

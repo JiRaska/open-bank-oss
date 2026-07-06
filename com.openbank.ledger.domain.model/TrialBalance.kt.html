@@ -1,0 +1,1236 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html;charset=UTF-8">
+    <link rel="stylesheet" type="text/css" href="../style.css">
+</head>
+<body>
+
+
+<h1>TrialBalance.kt</h1>
+
+<table class="src">
+
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_1'/>
+1
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_1'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>// SPDX-License-Identifier: Apache-2.0</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_2'/>
+2
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_2'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_3'/>
+3
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_3'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_4'/>
+4
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_4'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_5'/>
+5
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_5'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>package com.openbank.ledger.domain.model</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_6'/>
+6
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_6'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_7'/>
+7
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_7'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>import java.math.BigDecimal</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_8'/>
+8
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_8'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>import java.time.LocalDate</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_9'/>
+9
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_9'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>import java.util.UUID</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_10'/>
+10
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_10'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_11'/>
+11
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_11'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>data class TrialBalanceLine(</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_12'/>
+12
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_12'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    val glAccountId: UUID,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_13'/>
+13
+</td>
+<td class='killed'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_13'>1</a>
+<span>
+1. getCode : replaced return value with &#34;&#34; for com/openbank/ledger/domain/model/TrialBalanceLine::getCode &rarr; KILLED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='killed'>    val code: String,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_14'/>
+14
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_14'>1</a>
+<span>
+1. getName : replaced return value with &#34;&#34; for com/openbank/ledger/domain/model/TrialBalanceLine::getName &rarr; NO_COVERAGE<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>    val name: String,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_15'/>
+15
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_15'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    val type: GlAccountType,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_16'/>
+16
+</td>
+<td class='killed'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_16'>1</a>
+<span>
+1. getCurrency : replaced return value with &#34;&#34; for com/openbank/ledger/domain/model/TrialBalanceLine::getCurrency &rarr; KILLED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='killed'>    val currency: String,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_17'/>
+17
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_17'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    val totalDebit: BigDecimal,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_18'/>
+18
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_18'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    val totalCredit: BigDecimal,</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_19'/>
+19
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_19'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>) {</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_20'/>
+20
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_20'>1</a>
+<span>
+1. getNet : removed call to kotlin/jvm/internal/Intrinsics::checkNotNullExpressionValue &rarr; SURVIVED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>    val net: BigDecimal get() = totalDebit.subtract(totalCredit)</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_21'/>
+21
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_21'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>}</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_22'/>
+22
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_22'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_23'/>
+23
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_23'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>/**</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_24'/>
+24
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_24'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * One customer account&#39;s standing in the deposit-control sub-ledger (analytick&#225; evidence,</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_25'/>
+25
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_25'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * ADR-0039 Phase B). Deposit control is a credit-normal liability, so the amount the bank owes</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_26'/>
+26
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_26'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * the customer is credit &#8722; debit; that is what must tie out against the balance read-model.</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_27'/>
+27
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_27'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> */</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_28'/>
+28
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_28'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>data class SubLedgerBalance(</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_29'/>
+29
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_29'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    val subAccountId: UUID,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_30'/>
+30
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_30'>1</a>
+<span>
+1. getCurrency : replaced return value with &#34;&#34; for com/openbank/ledger/domain/model/SubLedgerBalance::getCurrency &rarr; NO_COVERAGE<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>    val currency: String,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_31'/>
+31
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_31'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    val totalDebit: BigDecimal,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_32'/>
+32
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_32'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    val totalCredit: BigDecimal,</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_33'/>
+33
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_33'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>) {</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_34'/>
+34
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_34'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>    /** Customer-owed booked amount: credit &#8722; debit (liability, credit-normal). */</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_35'/>
+35
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_35'>1</a>
+<span>
+1. getNet : removed call to kotlin/jvm/internal/Intrinsics::checkNotNullExpressionValue &rarr; SURVIVED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>    val net: BigDecimal get() = totalCredit.subtract(totalDebit)</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_36'/>
+36
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_36'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>}</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_37'/>
+37
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_37'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_38'/>
+38
+</td>
+<td class='killed'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_38'>1</a>
+<span>
+1. getLines : replaced return value with Collections.emptyList for com/openbank/ledger/domain/model/TrialBalance::getLines &rarr; KILLED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='killed'>data class TrialBalance(val asOf: LocalDate, val lines: List&#60;TrialBalanceLine&#62;) {</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_39'/>
+39
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_39'>1</a>
+<span>
+1. getTotalDebit : removed call to kotlin/jvm/internal/Intrinsics::checkNotNullExpressionValue &rarr; SURVIVED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>    val totalDebit: BigDecimal get() = lines.fold(BigDecimal.ZERO) { acc, l -&#62; acc.add(l.totalDebit) }</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_40'/>
+40
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_40'>1</a>
+<span>
+1. getTotalCredit : removed call to kotlin/jvm/internal/Intrinsics::checkNotNullExpressionValue &rarr; SURVIVED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>    val totalCredit: BigDecimal get() = lines.fold(BigDecimal.ZERO) { acc, l -&#62; acc.add(l.totalCredit) }</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_41'/>
+41
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_41'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_42'/>
+42
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_42'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>    /** A correct double-entry ledger must always balance: total debits == total credits. */</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_43'/>
+43
+</td>
+<td class='killed'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_43'>2</a>
+<span>
+1. isBalanced : replaced boolean return with true for com/openbank/ledger/domain/model/TrialBalance::isBalanced &rarr; KILLED<br/>
+2. isBalanced : negated conditional &rarr; KILLED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='killed'>    val isBalanced: Boolean get() = totalDebit.compareTo(totalCredit) == 0</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_44'/>
+44
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_44'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>}</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_45'/>
+45
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_45'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_46'/>
+46
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_46'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>/**</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_47'/>
+47
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_47'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * Tie-out result for one deposit-control GL account (ADR-0039 Phase B).</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_48'/>
+48
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_48'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> *</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_49'/>
+49
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_49'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * A control account *ties out* when the sum of all per-customer sub-ledger entries equals</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_50'/>
+50
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_50'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * the aggregate GL balance for that control account. A non-zero [delta] means there are</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_51'/>
+51
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_51'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * lines that lack a sub_account_id (orphan entries) or sub-ledger arithmetic diverged from</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_52'/>
+52
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_52'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * the GL &#8212; both are incidents that require investigation.</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_53'/>
+53
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_53'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> *</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_54'/>
+54
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_54'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * @param controlAccountId  GL account UUID (one of the deposit-control accounts 2100&#8211;2103)</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_55'/>
+55
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_55'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * @param currency          ISO-4217 currency code</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_56'/>
+56
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_56'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * @param glNet             GL aggregate: `totalCredit &#8722; totalDebit` over ALL posted lines</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_57'/>
+57
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_57'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * @param subLedgerNet      Sum of per-customer nets: `&#931;(credit &#8722; debit)` over all sub-ledger lines</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_58'/>
+58
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_58'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * @param delta             `glNet &#8722; subLedgerNet` (zero = tie-out OK, non-zero = break)</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_59'/>
+59
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_59'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> * @param lines             Individual sub-account balances that make up [subLedgerNet]</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_60'/>
+60
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_60'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''> */</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_61'/>
+61
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_61'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>data class ControlAccountTieOut(</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_62'/>
+62
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_62'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    val controlAccountId: UUID,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_63'/>
+63
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_63'>1</a>
+<span>
+1. getCurrency : replaced return value with &#34;&#34; for com/openbank/ledger/domain/model/ControlAccountTieOut::getCurrency &rarr; NO_COVERAGE<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>    val currency: String,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_64'/>
+64
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_64'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    val asOf: LocalDate,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_65'/>
+65
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_65'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    val glNet: BigDecimal,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_66'/>
+66
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_66'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    val subLedgerNet: BigDecimal,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_67'/>
+67
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_67'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    val delta: BigDecimal,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_68'/>
+68
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_68'>1</a>
+<span>
+1. getLines : replaced return value with Collections.emptyList for com/openbank/ledger/domain/model/ControlAccountTieOut::getLines &rarr; NO_COVERAGE<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>    val lines: List&#60;SubLedgerBalance&#62;,</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_69'/>
+69
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_69'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>) {</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_70'/>
+70
+</td>
+<td class='killed'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_70'>2</a>
+<span>
+1. isTiedOut : negated conditional &rarr; KILLED<br/>
+2. isTiedOut : replaced boolean return with true for com/openbank/ledger/domain/model/ControlAccountTieOut::isTiedOut &rarr; KILLED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='killed'>    val isTiedOut: Boolean get() = delta.compareTo(BigDecimal.ZERO) == 0</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@5968800d_71'/>
+71
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_71'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>}</span></pre></td></tr>
+
+
+
+<tr><td></td><td></td><td><h2>Mutations</h2></td></tr>
+
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@5968800d_13'>13</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_13'/> 
+
+<p class='KILLED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>getCode<br/><b>Killed by : </b>com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest]/[nested-class:HashDeterminism]/[method:hash is 64 lowercase hex chars and canonical json is stable()]</span></span> replaced return value with &#34;&#34; for com/openbank/ledger/domain/model/TrialBalanceLine::getCode &rarr; KILLED</span>
+</div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@5968800d_14'>14</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_14'/> 
+
+<p class='NO_COVERAGE'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>getName<br/><b>Killed by : </b>none</span></span> replaced return value with &#34;&#34; for com/openbank/ledger/domain/model/TrialBalanceLine::getName &rarr; NO_COVERAGE</span>
+</div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@5968800d_16'>16</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_16'/> 
+
+<p class='KILLED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>getCurrency<br/><b>Killed by : </b>com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest]/[nested-class:HashDeterminism]/[method:hash is 64 lowercase hex chars and canonical json is stable()]</span></span> replaced return value with &#34;&#34; for com/openbank/ledger/domain/model/TrialBalanceLine::getCurrency &rarr; KILLED</span>
+</div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@5968800d_20'>20</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_20'/> 
+
+<p class='SURVIVED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>getNet<br/><b>Killed by : </b>none</span></span> removed call to kotlin/jvm/internal/Intrinsics::checkNotNullExpressionValue &rarr; SURVIVED</span>
+<a title="Click to view covering tests" class="view-covered-by-tests" onClick="document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.TrialBalanceLine,-method=getNet,-methodDesc=()Ljava/math/BigDecimal;],-indexes=[10],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]').style.display=(document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.TrialBalanceLine,-method=getNet,-methodDesc=()Ljava/math/BigDecimal;],-indexes=[10],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]').style.display == 'block')?'none':'block';">Covering tests</a>
+<div class="covered-tests" id="MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.TrialBalanceLine,-method=getNet,-methodDesc=()Ljava/math/BigDecimal;],-indexes=[10],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]" style="display:none;">Covered by tests:
+<ul>
+<li>com.openbank.ledger.domain.model.TrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.TrialBalanceTest]/[method:TrialBalanceLine net is debit minus credit()]</li> <li>com.openbank.ledger.application.usecase.FxRevaluationServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.FxRevaluationServiceTest]/[method:posts nothing when no position has moved()]</li> 
+</ul>
+</div></div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@5968800d_30'>30</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_30'/> 
+
+<p class='NO_COVERAGE'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>getCurrency<br/><b>Killed by : </b>none</span></span> replaced return value with &#34;&#34; for com/openbank/ledger/domain/model/SubLedgerBalance::getCurrency &rarr; NO_COVERAGE</span>
+</div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@5968800d_35'>35</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_35'/> 
+
+<p class='SURVIVED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>getNet<br/><b>Killed by : </b>none</span></span> removed call to kotlin/jvm/internal/Intrinsics::checkNotNullExpressionValue &rarr; SURVIVED</span>
+<a title="Click to view covering tests" class="view-covered-by-tests" onClick="document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.SubLedgerBalance,-method=getNet,-methodDesc=()Ljava/math/BigDecimal;],-indexes=[10],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]').style.display=(document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.SubLedgerBalance,-method=getNet,-methodDesc=()Ljava/math/BigDecimal;],-indexes=[10],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]').style.display == 'block')?'none':'block';">Covering tests</a>
+<div class="covered-tests" id="MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.SubLedgerBalance,-method=getNet,-methodDesc=()Ljava/math/BigDecimal;],-indexes=[10],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]" style="display:none;">Covered by tests:
+<ul>
+<li>com.openbank.ledger.domain.model.TrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.TrialBalanceTest]/[method:SubLedgerBalance net is credit minus debit (liability credit-normal)()]</li> <li>com.openbank.ledger.application.usecase.LedgerServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.LedgerServiceTest]/[nested-class:SubLedgerBalances]/[method:delegates to repository and returns sub-ledger balances()]</li> 
+</ul>
+</div></div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@5968800d_38'>38</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_38'/> 
+
+<p class='KILLED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>getLines<br/><b>Killed by : </b>com.openbank.ledger.application.usecase.FxRevaluationServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.FxRevaluationServiceTest]/[method:marks a long EUR position and posts an idempotent fx-reval entry()]</span></span> replaced return value with Collections.emptyList for com/openbank/ledger/domain/model/TrialBalance::getLines &rarr; KILLED</span>
+</div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@5968800d_39'>39</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_39'/> 
+
+<p class='SURVIVED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>getTotalDebit<br/><b>Killed by : </b>none</span></span> removed call to kotlin/jvm/internal/Intrinsics::checkNotNullExpressionValue &rarr; SURVIVED</span>
+<a title="Click to view covering tests" class="view-covered-by-tests" onClick="document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.TrialBalance,-method=getTotalDebit,-methodDesc=()Ljava/math/BigDecimal;],-indexes=[57],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]').style.display=(document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.TrialBalance,-method=getTotalDebit,-methodDesc=()Ljava/math/BigDecimal;],-indexes=[57],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]').style.display == 'block')?'none':'block';">Covering tests</a>
+<div class="covered-tests" id="MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.TrialBalance,-method=getTotalDebit,-methodDesc=()Ljava/math/BigDecimal;],-indexes=[57],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]" style="display:none;">Covered by tests:
+<ul>
+<li>com.openbank.ledger.domain.model.TrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.TrialBalanceTest]/[method:totalDebit sums all line debits()]</li> <li>com.openbank.ledger.domain.model.TrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.TrialBalanceTest]/[method:isBalanced returns true when total debits equal total credits()]</li> <li>com.openbank.ledger.domain.model.TrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.TrialBalanceTest]/[method:isBalanced returns false when trial balance does not balance()]</li> 
+</ul>
+</div></div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@5968800d_40'>40</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_40'/> 
+
+<p class='SURVIVED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>getTotalCredit<br/><b>Killed by : </b>none</span></span> removed call to kotlin/jvm/internal/Intrinsics::checkNotNullExpressionValue &rarr; SURVIVED</span>
+<a title="Click to view covering tests" class="view-covered-by-tests" onClick="document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.TrialBalance,-method=getTotalCredit,-methodDesc=()Ljava/math/BigDecimal;],-indexes=[57],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]').style.display=(document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.TrialBalance,-method=getTotalCredit,-methodDesc=()Ljava/math/BigDecimal;],-indexes=[57],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]').style.display == 'block')?'none':'block';">Covering tests</a>
+<div class="covered-tests" id="MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.TrialBalance,-method=getTotalCredit,-methodDesc=()Ljava/math/BigDecimal;],-indexes=[57],-mutator=org.pitest.mutationtest.engine.gregor.mutators.VoidMethodCallMutator]" style="display:none;">Covered by tests:
+<ul>
+<li>com.openbank.ledger.domain.model.TrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.TrialBalanceTest]/[method:totalCredit sums all line credits()]</li> <li>com.openbank.ledger.domain.model.TrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.TrialBalanceTest]/[method:isBalanced returns true when total debits equal total credits()]</li> <li>com.openbank.ledger.domain.model.TrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.TrialBalanceTest]/[method:isBalanced returns false when trial balance does not balance()]</li> 
+</ul>
+</div></div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@5968800d_43'>43</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_43'/> 
+
+<p class='KILLED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>isBalanced<br/><b>Killed by : </b>com.openbank.ledger.domain.model.TrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.TrialBalanceTest]/[method:isBalanced returns false when trial balance does not balance()]</span></span> replaced boolean return with true for com/openbank/ledger/domain/model/TrialBalance::isBalanced &rarr; KILLED</span>
+</div> <p class='KILLED'><span class='pop'>2.<span><b>2</b><br/><b>Location : </b>isBalanced<br/><b>Killed by : </b>com.openbank.ledger.domain.model.TrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.TrialBalanceTest]/[method:isBalanced returns true when total debits equal total credits()]</span></span> negated conditional &rarr; KILLED</span>
+</div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@5968800d_63'>63</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_63'/> 
+
+<p class='NO_COVERAGE'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>getCurrency<br/><b>Killed by : </b>none</span></span> replaced return value with &#34;&#34; for com/openbank/ledger/domain/model/ControlAccountTieOut::getCurrency &rarr; NO_COVERAGE</span>
+</div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@5968800d_68'>68</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_68'/> 
+
+<p class='NO_COVERAGE'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>getLines<br/><b>Killed by : </b>none</span></span> replaced return value with Collections.emptyList for com/openbank/ledger/domain/model/ControlAccountTieOut::getLines &rarr; NO_COVERAGE</span>
+</div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@5968800d_70'>70</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@5968800d_70'/> 
+
+<p class='KILLED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>isTiedOut<br/><b>Killed by : </b>com.openbank.ledger.domain.model.TrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.TrialBalanceTest]/[method:ControlAccountTieOut isTiedOut returns true when delta is zero()]</span></span> negated conditional &rarr; KILLED</span>
+</div> <p class='KILLED'><span class='pop'>2.<span><b>2</b><br/><b>Location : </b>isTiedOut<br/><b>Killed by : </b>com.openbank.ledger.domain.model.TrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.TrialBalanceTest]/[method:ControlAccountTieOut isTiedOut returns false when delta is non-zero()]</span></span> replaced boolean return with true for com/openbank/ledger/domain/model/ControlAccountTieOut::isTiedOut &rarr; KILLED</span>
+</div> 
+</td>
+</tr>
+
+</table>
+
+
+<h2>Active mutators</h2>
+<ul>
+<li class='mutator'>CONDITIONALS_BOUNDARY</li>
+<li class='mutator'>EMPTY_RETURNS</li>
+<li class='mutator'>FALSE_RETURNS</li>
+<li class='mutator'>INCREMENTS</li>
+<li class='mutator'>INVERT_NEGS</li>
+<li class='mutator'>MATH</li>
+<li class='mutator'>NEGATE_CONDITIONALS</li>
+<li class='mutator'>NULL_RETURNS</li>
+<li class='mutator'>PRIMITIVE_RETURNS</li>
+<li class='mutator'>TRUE_RETURNS</li>
+<li class='mutator'>VOID_METHOD_CALLS</li>
+
+</ul>
+
+<h2>Tests examined</h2>
+<ul>
+<li>com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest]/[nested-class:HashDeterminism]/[method:hash is 64 lowercase hex chars and canonical json is stable()] (0 ms)</li><li>com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest]/[nested-class:HashDeterminism]/[method:hash is independent of BigDecimal scale()] (1 ms)</li><li>com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest]/[nested-class:HashDeterminism]/[method:hash is independent of line ordering()] (0 ms)</li><li>com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest]/[nested-class:HashDeterminism]/[method:hash ignores cosmetic attributes but reacts to accounting content()] (3 ms)</li><li>com.openbank.ledger.application.usecase.YearCloseServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.YearCloseServiceTest]/[nested-class:Lookup]/[method:returns the stored record()] (3 ms)</li><li>com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest]/[nested-class:YearCloseRecordLifecycle]/[method:four-eyes - a draft with no recorded author cannot be attested (domain check)()] (1 ms)</li><li>com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest]/[nested-class:YearCloseRecordLifecycle]/[method:four-eyes - the maker cannot self-attest (domain check)()] (1 ms)</li><li>com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest]/[nested-class:YearCloseRecordLifecycle]/[method:draftOf snapshots totals, account count and content hash()] (0 ms)</li><li>com.openbank.ledger.application.usecase.YearCloseServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.YearCloseServiceTest]/[nested-class:Attestation]/[method:an open fiscal year cannot be attested()] (5 ms)</li><li>com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest]/[nested-class:YearCloseRecordLifecycle]/[method:attest flips DRAFT to ATTESTED with the audit trail()] (1 ms)</li><li>com.openbank.ledger.application.usecase.YearCloseServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.YearCloseServiceTest]/[nested-class:Verification]/[method:reports drift when the fresh trial balance changed since the record()] (4 ms)</li><li>com.openbank.ledger.application.usecase.YearCloseServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.YearCloseServiceTest]/[nested-class:DraftCreation]/[method:refreshing an existing DRAFT keeps the record id stable (idempotent per year)()] (5 ms)</li><li>com.openbank.ledger.application.usecase.YearCloseServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.YearCloseServiceTest]/[nested-class:Verification]/[method:reports imbalance without throwing()] (5 ms)</li><li>com.openbank.ledger.application.usecase.YearCloseServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.YearCloseServiceTest]/[nested-class:DraftCreation]/[method:an ATTESTED year is immutable - draft refresh conflicts()] (4 ms)</li><li>com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.FiscalYearTrialBalanceTest]/[nested-class:YearCloseRecordLifecycle]/[method:attesting an already attested record fails()] (1 ms)</li><li>com.openbank.ledger.application.usecase.YearCloseServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.YearCloseServiceTest]/[nested-class:DraftCreation]/[method:records the maker (draftedBy) from the command on a fresh draft()] (7 ms)</li><li>com.openbank.ledger.application.usecase.YearCloseServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.YearCloseServiceTest]/[nested-class:Attestation]/[method:four-eyes - a draft with a null maker fails closed (cannot attest)()] (6 ms)</li><li>com.openbank.ledger.application.usecase.YearCloseServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.YearCloseServiceTest]/[nested-class:Attestation]/[method:hash drift since the draft fails closed with a conflict()] (6 ms)</li><li>com.openbank.ledger.application.usecase.YearCloseServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.YearCloseServiceTest]/[nested-class:DraftCreation]/[method:creates a fresh DRAFT snapshotting the current trial balance()] (7 ms)</li><li>com.openbank.ledger.application.usecase.YearCloseServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.YearCloseServiceTest]/[nested-class:Attestation]/[method:four-eyes - the maker cannot self-attest (conflict, never persisted)()] (9 ms)</li><li>com.openbank.ledger.application.usecase.YearCloseServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.YearCloseServiceTest]/[nested-class:DraftCreation]/[method:refreshing a DRAFT updates the maker to the current actor()] (9 ms)</li><li>com.openbank.ledger.application.usecase.YearCloseServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.YearCloseServiceTest]/[nested-class:Attestation]/[method:re-attesting an ATTESTED year conflicts()] (10 ms)</li><li>com.openbank.ledger.application.usecase.YearCloseServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.YearCloseServiceTest]/[nested-class:Attestation]/[method:attests a DRAFT whose hash matches a fresh computation and emits the outbox event()] (9 ms)</li><li>com.openbank.ledger.application.usecase.YearCloseServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.YearCloseServiceTest]/[nested-class:Attestation]/[method:four-eyes - a different principal than the maker attests successfully()] (10 ms)</li><li>com.openbank.ledger.application.usecase.FxRevaluationServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.FxRevaluationServiceTest]/[method:posts nothing when no position has moved()] (29 ms)</li><li>com.openbank.ledger.application.usecase.YearCloseServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.YearCloseServiceTest]/[nested-class:Verification]/[method:reports a match for an attested year whose ledger is unchanged()] (12 ms)</li><li>com.openbank.ledger.application.usecase.FxRevaluationServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.FxRevaluationServiceTest]/[method:marks a long EUR position and posts an idempotent fx-reval entry()] (629 ms)</li><li>com.openbank.ledger.domain.model.TrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.TrialBalanceTest]/[method:totalCredit sums all line credits()] (0 ms)</li><li>com.openbank.ledger.domain.model.TrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.TrialBalanceTest]/[method:isBalanced returns true when total debits equal total credits()] (0 ms)</li><li>com.openbank.ledger.domain.model.TrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.TrialBalanceTest]/[method:isBalanced returns false when trial balance does not balance()] (0 ms)</li><li>com.openbank.ledger.domain.model.TrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.TrialBalanceTest]/[method:totalDebit sums all line debits()] (0 ms)</li><li>com.openbank.ledger.domain.model.TrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.TrialBalanceTest]/[method:ControlAccountTieOut isTiedOut returns true when delta is zero()] (0 ms)</li><li>com.openbank.ledger.domain.model.TrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.TrialBalanceTest]/[method:ControlAccountTieOut isTiedOut returns false when delta is non-zero()] (0 ms)</li><li>com.openbank.ledger.domain.model.TrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.TrialBalanceTest]/[method:TrialBalanceLine net is debit minus credit()] (0 ms)</li><li>com.openbank.ledger.domain.model.TrialBalanceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.TrialBalanceTest]/[method:SubLedgerBalance net is credit minus debit (liability credit-normal)()] (0 ms)</li><li>com.openbank.ledger.application.usecase.LedgerServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.LedgerServiceTest]/[nested-class:SubLedgerBalances]/[method:delegates to repository and returns sub-ledger balances()] (16 ms)</li>
+</ul>
+
+<br/>
+
+Report generated by <a href='https://pitest.org'>PIT</a> 1.22.1
+
+</body>
+</html>

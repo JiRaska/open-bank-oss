@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html;charset=UTF-8">
+    <link rel="stylesheet" type="text/css" href="../style.css">
+</head>
+<body>
+
+
+<h1>GlAccount.kt</h1>
+
+<table class="src">
+
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_1'/>
+1
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_1'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>// SPDX-License-Identifier: Apache-2.0</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_2'/>
+2
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_2'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_3'/>
+3
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_3'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_4'/>
+4
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_4'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_5'/>
+5
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_5'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>package com.openbank.ledger.domain.model</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_6'/>
+6
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_6'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_7'/>
+7
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_7'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>import com.openbank.libs.domain.money.CurrencyCode</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_8'/>
+8
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_8'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>import java.time.Instant</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_9'/>
+9
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_9'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>import java.util.UUID</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_10'/>
+10
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_10'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_11'/>
+11
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_11'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>data class GlAccount(</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_12'/>
+12
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_12'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    val id: UUID,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_13'/>
+13
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_13'>1</a>
+<span>
+1. getCode : replaced return value with &#34;&#34; for com/openbank/ledger/domain/model/GlAccount::getCode &rarr; SURVIVED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>    val code: String,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_14'/>
+14
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_14'>1</a>
+<span>
+1. getName : replaced return value with &#34;&#34; for com/openbank/ledger/domain/model/GlAccount::getName &rarr; NO_COVERAGE<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>    val name: String,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_15'/>
+15
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_15'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    val type: GlAccountType,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_16'/>
+16
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_16'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    val currency: CurrencyCode,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_17'/>
+17
+</td>
+<td class='killed'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_17'>1</a>
+<span>
+1. getParentId : replaced return value with null for com/openbank/ledger/domain/model/GlAccount::getParentId &rarr; KILLED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='killed'>    val parentId: UUID?,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_18'/>
+18
+</td>
+<td class='killed'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_18'>2</a>
+<span>
+1. isLeaf : replaced boolean return with true for com/openbank/ledger/domain/model/GlAccount::isLeaf &rarr; KILLED<br/>
+2. isLeaf : replaced boolean return with false for com/openbank/ledger/domain/model/GlAccount::isLeaf &rarr; KILLED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='killed'>    val isLeaf: Boolean,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_19'/>
+19
+</td>
+<td class='killed'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_19'>2</a>
+<span>
+1. isEnabled : replaced boolean return with false for com/openbank/ledger/domain/model/GlAccount::isEnabled &rarr; KILLED<br/>
+2. isEnabled : replaced boolean return with true for com/openbank/ledger/domain/model/GlAccount::isEnabled &rarr; KILLED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='killed'>    val isEnabled: Boolean,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_20'/>
+20
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_20'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    val createdAt: Instant,</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_21'/>
+21
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_21'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>) {</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_22'/>
+22
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_22'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>    /**</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_23'/>
+23
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_23'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>     * Customer deposit-control accounts (liability to the customer, one per currency:</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_24'/>
+24
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_24'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>     * 2100=CZK, 2101=EUR, 2102=USD, 2103=GBP). These are the only accounts that carry a</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_25'/>
+25
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_25'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>     * per-customer sub-ledger dimension (ADR-0039 Phase B): a journal line against one of</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_26'/>
+26
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_26'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>     * them may name the customer account via subAccountId.</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_27'/>
+27
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_27'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>     */</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_28'/>
+28
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_28'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>    val isDepositControl: Boolean</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_29'/>
+29
+</td>
+<td class='killed'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_29'>2</a>
+<span>
+1. isDepositControl : replaced boolean return with false for com/openbank/ledger/domain/model/GlAccount::isDepositControl &rarr; KILLED<br/>
+2. isDepositControl : replaced boolean return with true for com/openbank/ledger/domain/model/GlAccount::isDepositControl &rarr; KILLED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='killed'>        get() = code in DEPOSIT_CONTROL_CODES</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_30'/>
+30
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_30'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_31'/>
+31
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_31'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    companion object {</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_32'/>
+32
+</td>
+<td class='survived'>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_32'>1</a>
+<span>
+1. getDEPOSIT_CONTROL_CODES : replaced return value with Collections.emptySet for com/openbank/ledger/domain/model/GlAccount$Companion::getDEPOSIT_CONTROL_CODES &rarr; SURVIVED<br/>
+
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class='survived'>        val DEPOSIT_CONTROL_CODES = setOf(&#34;2100&#34;, &#34;2101&#34;, &#34;2102&#34;, &#34;2103&#34;)</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_33'/>
+33
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_33'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>    }</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_34'/>
+34
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_34'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>}</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_35'/>
+35
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_35'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''></span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_36'/>
+36
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_36'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>enum class GlAccountType {</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_37'/>
+37
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_37'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    ASSET,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_38'/>
+38
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_38'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    LIABILITY,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_39'/>
+39
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_39'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    EQUITY,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_40'/>
+40
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_40'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    INCOME,</span></pre></td></tr>
+
+<tr>
+<td class='covered'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_41'/>
+41
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_41'></a>
+<span>
+</span>
+</span>
+</td>
+<td class='covered'><pre><span  class=''>    EXPENSE,</span></pre></td></tr>
+
+<tr>
+<td class='na'>
+<a name='org.pitest.mutationtest.report.html.SourceFile@2a0b901c_42'/>
+42
+</td>
+<td class=''>
+<span class='pop'>
+<a href='#grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_42'></a>
+<span>
+</span>
+</span>
+</td>
+<td class=''><pre><span  class=''>}</span></pre></td></tr>
+
+
+
+<tr><td></td><td></td><td><h2>Mutations</h2></td></tr>
+
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@2a0b901c_13'>13</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_13'/> 
+
+<p class='SURVIVED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>getCode<br/><b>Killed by : </b>none</span></span> replaced return value with &#34;&#34; for com/openbank/ledger/domain/model/GlAccount::getCode &rarr; SURVIVED</span>
+<a title="Click to view covering tests" class="view-covered-by-tests" onClick="document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.GlAccount,-method=getCode,-methodDesc=()Ljava/lang/String;],-indexes=[5],-mutator=org.pitest.mutationtest.engine.gregor.mutators.returns.EmptyObjectReturnValsMutator]').style.display=(document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.GlAccount,-method=getCode,-methodDesc=()Ljava/lang/String;],-indexes=[5],-mutator=org.pitest.mutationtest.engine.gregor.mutators.returns.EmptyObjectReturnValsMutator]').style.display == 'block')?'none':'block';">Covering tests</a>
+<div class="covered-tests" id="MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.GlAccount,-method=getCode,-methodDesc=()Ljava/lang/String;],-indexes=[5],-mutator=org.pitest.mutationtest.engine.gregor.mutators.returns.EmptyObjectReturnValsMutator]" style="display:none;">Covered by tests:
+<ul>
+<li>com.openbank.ledger.application.usecase.LedgerServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.LedgerServiceTest]/[nested-class:PostJournal]/[method:rejects line whose base currency differs from the GL account currency()]</li> <li>com.openbank.ledger.application.usecase.LedgerServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.LedgerServiceTest]/[nested-class:PostJournal]/[method:rejects subAccountId on a non-deposit-control leg()]</li> <li>com.openbank.ledger.application.usecase.LedgerServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.LedgerServiceTest]/[nested-class:PostJournal]/[method:rejects posting to a disabled GL account()]</li> <li>com.openbank.ledger.application.usecase.LedgerServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.LedgerServiceTest]/[nested-class:PostJournal]/[method:rejects posting to a non-leaf GL account()]</li> 
+</ul>
+</div></div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@2a0b901c_14'>14</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_14'/> 
+
+<p class='NO_COVERAGE'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>getName<br/><b>Killed by : </b>none</span></span> replaced return value with &#34;&#34; for com/openbank/ledger/domain/model/GlAccount::getName &rarr; NO_COVERAGE</span>
+</div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@2a0b901c_17'>17</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_17'/> 
+
+<p class='KILLED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>getParentId<br/><b>Killed by : </b>com.openbank.ledger.domain.model.GlAccountTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.GlAccountTest]/[method:creates hierarchical account with parent()]</span></span> replaced return value with null for com/openbank/ledger/domain/model/GlAccount::getParentId &rarr; KILLED</span>
+</div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@2a0b901c_18'>18</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_18'/> 
+
+<p class='KILLED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>isLeaf<br/><b>Killed by : </b>com.openbank.ledger.application.usecase.LedgerServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.LedgerServiceTest]/[nested-class:PostJournal]/[method:rejects posting to a non-leaf GL account()]</span></span> replaced boolean return with true for com/openbank/ledger/domain/model/GlAccount::isLeaf &rarr; KILLED</span>
+</div> <p class='KILLED'><span class='pop'>2.<span><b>2</b><br/><b>Location : </b>isLeaf<br/><b>Killed by : </b>com.openbank.ledger.domain.model.GlAccountTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.GlAccountTest]/[method:creates asset account()]</span></span> replaced boolean return with false for com/openbank/ledger/domain/model/GlAccount::isLeaf &rarr; KILLED</span>
+</div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@2a0b901c_19'>19</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_19'/> 
+
+<p class='KILLED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>isEnabled<br/><b>Killed by : </b>com.openbank.ledger.domain.model.GlAccountTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.GlAccountTest]/[method:creates asset account()]</span></span> replaced boolean return with false for com/openbank/ledger/domain/model/GlAccount::isEnabled &rarr; KILLED</span>
+</div> <p class='KILLED'><span class='pop'>2.<span><b>2</b><br/><b>Location : </b>isEnabled<br/><b>Killed by : </b>com.openbank.ledger.domain.model.GlAccountTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.GlAccountTest]/[method:disabled account preserves state()]</span></span> replaced boolean return with true for com/openbank/ledger/domain/model/GlAccount::isEnabled &rarr; KILLED</span>
+</div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@2a0b901c_29'>29</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_29'/> 
+
+<p class='KILLED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>isDepositControl<br/><b>Killed by : </b>com.openbank.ledger.domain.model.GlAccountTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.GlAccountTest]/[method:deposit-control accounts are flagged, others are not()]</span></span> replaced boolean return with false for com/openbank/ledger/domain/model/GlAccount::isDepositControl &rarr; KILLED</span>
+</div> <p class='KILLED'><span class='pop'>2.<span><b>2</b><br/><b>Location : </b>isDepositControl<br/><b>Killed by : </b>com.openbank.ledger.domain.model.GlAccountTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.GlAccountTest]/[method:deposit-control accounts are flagged, others are not()]</span></span> replaced boolean return with true for com/openbank/ledger/domain/model/GlAccount::isDepositControl &rarr; KILLED</span>
+</div> 
+</td>
+</tr>
+<tr>
+<td><a href='#org.pitest.mutationtest.report.html.SourceFile@2a0b901c_32'>32</a></td> 
+<td></td>
+<td>
+
+<a name='grouporg.pitest.mutationtest.report.html.SourceFile@2a0b901c_32'/> 
+
+<p class='SURVIVED'><span class='pop'>1.<span><b>1</b><br/><b>Location : </b>getDEPOSIT_CONTROL_CODES<br/><b>Killed by : </b>none</span></span> replaced return value with Collections.emptySet for com/openbank/ledger/domain/model/GlAccount$Companion::getDEPOSIT_CONTROL_CODES &rarr; SURVIVED</span>
+<a title="Click to view covering tests" class="view-covered-by-tests" onClick="document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.GlAccount$Companion,-method=getDEPOSIT_CONTROL_CODES,-methodDesc=()Ljava/util/Set;],-indexes=[4],-mutator=org.pitest.mutationtest.engine.gregor.mutators.returns.EmptyObjectReturnValsMutator]').style.display=(document.getElementById('MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.GlAccount$Companion,-method=getDEPOSIT_CONTROL_CODES,-methodDesc=()Ljava/util/Set;],-indexes=[4],-mutator=org.pitest.mutationtest.engine.gregor.mutators.returns.EmptyObjectReturnValsMutator]').style.display == 'block')?'none':'block';">Covering tests</a>
+<div class="covered-tests" id="MutationIdentifier-[location=Location-[clazz=com.openbank.ledger.domain.model.GlAccount$Companion,-method=getDEPOSIT_CONTROL_CODES,-methodDesc=()Ljava/util/Set;],-indexes=[4],-mutator=org.pitest.mutationtest.engine.gregor.mutators.returns.EmptyObjectReturnValsMutator]" style="display:none;">Covered by tests:
+<ul>
+<li>com.openbank.ledger.domain.model.GlAccountTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.GlAccountTest]/[method:deposit-control accounts are flagged, others are not()]</li> 
+</ul>
+</div></div> 
+</td>
+</tr>
+
+</table>
+
+
+<h2>Active mutators</h2>
+<ul>
+<li class='mutator'>CONDITIONALS_BOUNDARY</li>
+<li class='mutator'>EMPTY_RETURNS</li>
+<li class='mutator'>FALSE_RETURNS</li>
+<li class='mutator'>INCREMENTS</li>
+<li class='mutator'>INVERT_NEGS</li>
+<li class='mutator'>MATH</li>
+<li class='mutator'>NEGATE_CONDITIONALS</li>
+<li class='mutator'>NULL_RETURNS</li>
+<li class='mutator'>PRIMITIVE_RETURNS</li>
+<li class='mutator'>TRUE_RETURNS</li>
+<li class='mutator'>VOID_METHOD_CALLS</li>
+
+</ul>
+
+<h2>Tests examined</h2>
+<ul>
+<li>com.openbank.ledger.domain.model.GlAccountTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.GlAccountTest]/[method:creates hierarchical account with parent()] (0 ms)</li><li>com.openbank.ledger.domain.model.GlAccountTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.GlAccountTest]/[method:creates asset account()] (0 ms)</li><li>com.openbank.ledger.application.usecase.LedgerServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.LedgerServiceTest]/[nested-class:PostJournal]/[method:rejects line whose base currency differs from the GL account currency()] (6 ms)</li><li>com.openbank.ledger.application.usecase.LedgerServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.LedgerServiceTest]/[nested-class:PostJournal]/[method:rejects subAccountId on a non-deposit-control leg()] (6 ms)</li><li>com.openbank.ledger.application.usecase.LedgerServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.LedgerServiceTest]/[nested-class:PostJournal]/[method:rejects posting to a non-leaf GL account()] (12 ms)</li><li>com.openbank.ledger.application.usecase.LedgerServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.LedgerServiceTest]/[nested-class:PostJournal]/[method:rejects unbalanced lines()] (6 ms)</li><li>com.openbank.ledger.application.usecase.LedgerServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.LedgerServiceTest]/[nested-class:PostJournal]/[method:posts balanced journal and writes outbox message()] (11 ms)</li><li>com.openbank.ledger.application.usecase.LedgerServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.LedgerServiceTest]/[nested-class:Metrics]/[method:counts one ledger posting per base currency on a successful post()] (12 ms)</li><li>com.openbank.ledger.application.usecase.LedgerServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.LedgerServiceTest]/[nested-class:PostJournal]/[method:creates lines with correct Money values()] (12 ms)</li><li>com.openbank.ledger.application.usecase.LedgerServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.LedgerServiceTest]/[nested-class:PostJournal]/[method:assigns sequential entry numbers()] (13 ms)</li><li>com.openbank.ledger.application.usecase.LedgerServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.LedgerServiceTest]/[nested-class:PostJournal]/[method:accepts subAccountId on a deposit-control leg()] (10 ms)</li><li>com.openbank.ledger.application.usecase.LedgerServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.LedgerServiceTest]/[nested-class:PostJournal]/[method:emits a JournalPosted and a matching AccountBookedChanged for a deposit-control leg()] (25 ms)</li><li>com.openbank.ledger.application.usecase.LedgerServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.LedgerServiceTest]/[nested-class:Metrics]/[method:counts one posting per distinct base currency on a multi-currency entry()] (84 ms)</li><li>com.openbank.ledger.domain.model.GlAccountTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.GlAccountTest]/[method:disabled account preserves state()] (0 ms)</li><li>com.openbank.ledger.application.usecase.LedgerServiceTest.[engine:junit-jupiter]/[class:com.openbank.ledger.application.usecase.LedgerServiceTest]/[nested-class:PostJournal]/[method:rejects posting to a disabled GL account()] (5 ms)</li><li>com.openbank.ledger.domain.model.GlAccountTest.[engine:junit-jupiter]/[class:com.openbank.ledger.domain.model.GlAccountTest]/[method:deposit-control accounts are flagged, others are not()] (0 ms)</li>
+</ul>
+
+<br/>
+
+Report generated by <a href='https://pitest.org'>PIT</a> 1.22.1
+
+</body>
+</html>
