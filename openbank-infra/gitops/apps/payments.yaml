@@ -24,6 +24,17 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      # RespectIgnoreDifferences: this app also carries compare-options:
+      # IncludeMutationWebhook=true (Kyverno digest-pin dry-run, #856) — with
+      # that comparison mode, the ignoreDifferences.jqPathExpressions entry
+      # below (card-issuance-service) suppresses the OutOfSync *status* but
+      # NOT what selfHeal actually pushes on a triggered sync; without this
+      # option selfHeal kept re-applying replicas:1 from git every reconcile,
+      # fighting KEDA's scale-to-zero forever (confirmed live in
+      # openbank-sandbox — repeated ScalingReplicaSet 0->1 events minutes
+      # apart). product-catalog and sdd don't need this because neither sets
+      # IncludeMutationWebhook.
+      - RespectIgnoreDifferences=true
   # Argo Rollouts (ADR-0098) sets spec.selector.rollouts-pod-template-hash on the
   # stable and canary Services at runtime; git holds only the base selector, so
   # without this every Rollout-backed Service reads as permanently OutOfSync.
@@ -37,3 +48,15 @@ spec:
       kind: Service
       jqPathExpressions:
         - .spec.selector."rollouts-pod-template-hash"
+    # ADR-0057 T1 pilot (#249): the KEDA HTTP add-on owns replicas 0<->1 on
+    # card-issuance-service, not ArgoCD. Without this, selfHeal fights KEDA
+    # every reconcile — forces replicas back to the git-declared 1, KEDA
+    # promptly scales it back to 0 on idle, permanent OutOfSync/flap loop
+    # (same pattern as product-catalog's ADR-0083 pilot,
+    # gitops/apps/product-catalog.yaml).
+    - group: apps
+      kind: Deployment
+      name: card-issuance-service
+      namespace: payments
+      jqPathExpressions:
+        - .spec.replicas

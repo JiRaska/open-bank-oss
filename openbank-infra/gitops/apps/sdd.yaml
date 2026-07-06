@@ -28,3 +28,15 @@ spec:
         maxDuration: 5m
     syncOptions:
       - CreateNamespace=false
+  # ADR-0057 T1 pilot (#251): the KEDA HTTP add-on owns replicas 0<->1 on
+  # sdd-service, not ArgoCD. Without this, selfHeal fights KEDA every
+  # reconcile — forces replicas back to the git-declared 1, KEDA promptly
+  # scales it back to 0 on idle, permanent OutOfSync/flap loop (same pattern
+  # as product-catalog's ADR-0083 pilot, gitops/apps/product-catalog.yaml).
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: sdd-service
+      namespace: sdd
+      jqPathExpressions:
+        - .spec.replicas
