@@ -68,9 +68,11 @@ Current limitations as of the Beta (June 2026). Updated as milestones ship:
   deployed with OPA enforce mode on, but app stores releases are not yet public.
 - **KYC/AML vendors are stubs** — screening logic is real (sanctions uses pg_trgm fuzzy matching) but
   runs against in-memory/seed lists, not real providers (Refinitiv, ComplyAdvantage, EBA feed).
-- **Some services are code-only, not deployed** — anacredit, sdd, tpp-registry, and finrep are
-  implemented but not yet wired into the sandbox cluster. (`lending` and `psd2` are deployed;
-  `swift-service` is deployed with ISO 20022 MT/MX but without a live SWIFT network connection.)
+- **One service is code-only, not deployed** — `finrep` is implemented and its gitops manifests
+  exist, but no ArgoCD Application wires it into the sandbox cluster yet. `anacredit`, `sdd`, and
+  `tpp-registry` were in this same state until 2026-07-01 and are now deployed. (`lending` and
+  `psd2` are deployed; `swift-service` is deployed with ISO 20022 MT/MX but without a live SWIFT
+  network connection.)
 - **SCA is maturing, not complete** — passkey RP, settlement gate and non-repudiation hash chain are
   in (ADR-0086), but full FIDO2 attestation / real OTP delivery are not finished.
 - **AI copilot is sandbox-only** — a real LLM (meta/llama-3.1-70b-instruct) runs in the sandbox
