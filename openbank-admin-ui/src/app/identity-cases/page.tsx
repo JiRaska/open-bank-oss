@@ -176,7 +176,7 @@ function DecisionForm({
           >
             {c.candidatePartyIds.map(pid => (
               <option key={pid} value={pid}>
-                party {shortId(pid)}
+                {t('strana', 'party')} {shortId(pid)}
               </option>
             ))}
           </select>
@@ -211,7 +211,7 @@ function DecisionForm({
 // ── Page ────────────────────────────────────────────────────────────────────────
 
 export default function IdentityCasesPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const [cases, setCases] = useState<VerificationCase[]>([])
   const [unavail, setUnavail] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(true)
@@ -270,7 +270,7 @@ export default function IdentityCasesPage() {
       </div>
 
       {unavail ? (
-        <DataUnavailable kind={unavail} service="pid-service" feature={t('ověření identity', 'identity verification')} />
+        <DataUnavailable kind={unavail} service="pid-service" feature={t('ověření identity', 'identity verification')} lang={language} />
       ) : cases.length === 0 && !loading ? (
         <div className="card" style={{ padding: '40px', textAlign: 'center' }}>
           <ShieldAlert size={28} style={{ color: 'var(--success)', marginBottom: '10px' }} />
@@ -302,7 +302,7 @@ export default function IdentityCasesPage() {
                       {c.trigger}
                     </span>
                     <span className="mono" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                      case {shortId(c.id)}
+                      {t('případ', 'case')} {shortId(c.id)}
                     </span>
                     {c.status === 'AWAITING_SECOND_APPROVAL' && (
                       <span style={{ fontSize: '11px', fontWeight: 600, color: '#d97706' }}>

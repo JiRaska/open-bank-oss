@@ -1,0 +1,197 @@
+# Independent agent review — an LLM reviewer that submits an approving (or
+# change-requesting) review on a PR, so a routine change can satisfy the single
+# required approval on `main-protection` without a human rubber-stamp.
+#
+# Design / guardrails (read before changing):
+#   * INDEPENDENCE. The primary reviewer runs on GitHub Models with a *different*
+#     model family (OpenAI) than the Claude agents that usually author PRs here,
+#     and the prompt is adversarial ("find a reason to REJECT"). A same-model
+#     reviewer that rubber-stamps its own reasoning is not a review.
+#   * SCOPE. This agent only auto-approves *boring* changes. Anything sensitive
+#     (money-path service, governance rules, CI/automation, DB migration, release
+#     wiring, threat model) is deliberately deferred to a human — the job posts a
+#     note and exits WITHOUT approving. Money-path still needs 2 human approvals +
+#     a threat model per rules.yaml (ADR-0030); this workflow must never weaken that.
+#   * NON-BLOCKING. This job is NOT a required check. If the model is down, the PR
+#     is from a fork (read-only token), or the change is sensitive, it simply adds
+#     no approval and a human reviews as before. It can only ever *add* signal.
+#   * FALLBACK. If GitHub Models errors or is rate-limited, fall back to Claude via
+#     claude-code-action (auth = CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`,
+#     which runs on a Pro/Max subscription — no paid API key required).
+#
+# Prerequisites (one-time, outside this file):
+#   1. Settings → Actions → General → "Allow GitHub Actions to approve pull
+#      requests" = ON  (repo actions permission `can_approve_pull_request_reviews`).
+#   2. Repo secret `CLAUDE_CODE_OAUTH_TOKEN` (generate locally: `claude setup-token`).
+#      Without it the Claude fallback step is skipped; GitHub Models still works.
+name: Agent review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# One review per PR head; supersede stale runs on force-push.
+concurrency:
+  group: agent-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write   # submit the review / post the deferral comment
+  models: read           # GitHub Models inference
+
+jobs:
+  agent-review:
+    # Skip drafts; skip the release-please bot (its PRs are machine-generated and
+    # gated separately). Everything else is evaluated.
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    # secrets context isn't available in a step-level `if:` — expose it as a
+    # job-level boolean env so the Claude fallback can gate on its presence.
+    env:
+      HAS_CLAUDE: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need base..head for a real 3-dot diff
+
+      # --- Scope gate --------------------------------------------------------
+      # Decide whether this PR is "sensitive" (defer to human) or "routine"
+      # (eligible for agent approval). Conservative: when in doubt, defer.
+      - name: Classify change scope
+        id: scope
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          git fetch origin "$BASE_REF" --quiet
+          CHANGED="$(git diff --name-only "origin/${BASE_REF}...HEAD")"
+          echo "Changed files:"; echo "$CHANGED"
+
+          # Money-path service directories, sourced dynamically from rules.yaml
+          # (never hardcode — the list grows; rules.yaml wins).
+          MP="$(yq -r '.money_path_services[]' openbank-libs/governance/rules.yaml)"
+          MP_RE="$(echo "$MP" | paste -sd'|' -)"
+
+          sensitive=""
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              .github/*) sensitive="CI / automation change ($f)";;
+              openbank-libs/governance/*) sensitive="governance rules change ($f)";;
+              release-please-config.json|.release-please-manifest.json) sensitive="release wiring change ($f)";;
+              docs/threat-models/*) sensitive="threat-model change ($f)";;
+              docs/adr/*) sensitive="architecture decision change ($f)";;
+              *db/migration/*|*.sql) sensitive="DB migration ($f)";;
+            esac
+            # Money-path service directory?
+            if echo "$f" | grep -qE "^(${MP_RE})/"; then
+              sensitive="money-path service change ($f)"
+            fi
+            [ -n "$sensitive" ] && break
+          done <<< "$CHANGED"
+
+          if [ -n "$sensitive" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=$sensitive" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Stash a size-capped diff for the reviewer prompt.
+          git diff "origin/${BASE_REF}...HEAD" | head -c 30000 > /tmp/pr.diff
+
+      # --- Sensitive: defer to a human, do not approve ------------------------
+      - name: Defer to human review
+        if: steps.scope.outputs.skip == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REASON: ${{ steps.scope.outputs.reason }}
+        run: |
+          gh pr comment "$PR" --body \
+            "🧑‍⚖️ **Agent review skipped — human review required.** Reason: ${REASON}. This class of change (money-path, governance, CI, migrations, release wiring, ADRs) is deliberately outside the agent's auto-approval scope."
+
+      # --- Routine: build the reviewer prompt --------------------------------
+      - name: Build review prompt
+        if: steps.scope.outputs.skip == 'false'
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          {
+            echo "You are an INDEPENDENT, adversarial code reviewer for a banking-grade"
+            echo "Quarkus/Kotlin monorepo. Your default posture is skepticism: actively"
+            echo "look for a reason to REQUEST_CHANGES. Approve only if the change is"
+            echo "clearly correct, in-scope, and low-risk."
+            echo
+            echo "PR title: ${TITLE}"
+            echo
+            echo "Unified diff (may be truncated):"
+            echo '```diff'
+            cat /tmp/pr.diff
+            echo '```'
+            echo
+            echo "Respond with ONLY a single-line JSON object, no prose, no code fence:"
+            echo '{"decision":"APPROVE"|"REQUEST_CHANGES","summary":"<=280 chars"}'
+          } > /tmp/prompt.txt
+
+      # --- Primary reviewer: GitHub Models (free, different model family) -----
+      - name: GitHub Models review
+        id: ghmodels
+        if: steps.scope.outputs.skip == 'false'
+        continue-on-error: true   # any failure → Claude fallback
+        uses: actions/ai-inference@v1
+        with:
+          model: openai/gpt-4o
+          prompt-file: /tmp/prompt.txt
+          max-tokens: 400
+
+      # --- Submit the GitHub Models verdict ----------------------------------
+      - name: Submit review (GitHub Models)
+        if: steps.scope.outputs.skip == 'false' && steps.ghmodels.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          RESPONSE: ${{ steps.ghmodels.outputs.response }}
+        run: |
+          set -euo pipefail
+          # Extract the first {...} JSON object; tolerate stray prose.
+          JSON="$(printf '%s' "$RESPONSE" | grep -oE '\{.*\}' | head -1)"
+          DECISION="$(printf '%s' "$JSON" | jq -r '.decision // "REQUEST_CHANGES"')"
+          SUMMARY="$(printf '%s' "$JSON" | jq -r '.summary // "no summary"')"
+          BODY="🤖 **Agent review (GitHub Models · gpt-4o)**
+
+          ${SUMMARY}
+
+          _Automated independent review. Sensitive changes are always deferred to a human._"
+          if [ "$DECISION" = "APPROVE" ]; then
+            gh pr review "$PR" --approve --body "$BODY"
+          else
+            gh pr review "$PR" --request-changes --body "$BODY"
+          fi
+
+      # --- Fallback reviewer: Claude (subscription OAuth, no paid API) --------
+      # Runs only if GitHub Models failed AND the secret is configured. The action
+      # is agentic: it reads the PR and submits its own review via gh.
+      - name: Claude review (fallback)
+        if: >-
+          steps.scope.outputs.skip == 'false' &&
+          steps.ghmodels.outcome == 'failure' &&
+          env.HAS_CLAUDE == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # v1 passes tool restrictions through claude_args, not an allowed_tools input.
+          claude_args: '--allowedTools "Bash(gh pr diff:*),Bash(gh pr review:*),Bash(gh pr view:*)"'
+          prompt: >-
+            You are an independent, adversarial reviewer for PR
+            #${{ github.event.pull_request.number }} in a banking-grade
+            Quarkus/Kotlin monorepo. Read the diff with `gh pr diff`. Default to
+            skepticism. Then submit your verdict with EXACTLY ONE of:
+            `gh pr review ${{ github.event.pull_request.number }} --approve --body "..."`
+            (only if clearly correct, in-scope, low-risk) or
+            `gh pr review ${{ github.event.pull_request.number }} --request-changes --body "..."`.
+            Prefix the body with "🤖 Agent review (Claude · fallback)".
