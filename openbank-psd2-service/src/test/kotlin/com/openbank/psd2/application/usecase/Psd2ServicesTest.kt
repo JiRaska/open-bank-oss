@@ -526,60 +526,65 @@ class Psd2ServicesTest {
     }
 
     @Test
-    fun `initiatePayment for DOMESTIC_CZ joins VS SS KS into remittance info and uses DOMESTIC_PAYMENT_INITIATE scope`(
-    ): Unit = runBlocking {
-        val payment = DomesticCzPayment(
-            endToEndIdentification = "e2e-cz",
-            debtorAccount = sampleAccountRef("CZ6508000000192000145399"),
-            instructedAmount = ObAmount("CZK", BigDecimal("250.00")),
-            creditorAccount = sampleAccountRef("CZ1234567890123456789012"),
-            creditorName = "Acme CZ",
-            variableSymbol = "123",
-            specificSymbol = "456",
-            constantSymbol = "789",
-            remittanceInformationUnstructured = null,
-            requestedExecutionDate = null,
-        )
-        val command = InitiatePaymentCommand(
-            tppId = "tpp-1",
-            consentId = "consent-1",
-            product = PaymentProduct.DOMESTIC_CZ,
-            payment = payment,
-            idempotencyKey = "idem-5",
-        )
-
-        coEvery {
-            consentClient.validateConsent("consent-1", "tpp-1", "DOMESTIC_PAYMENT_INITIATE", "CZ6508000000192000145399")
-        } returns true
-        coEvery {
-            transactionClient.initiatePayment(
-                debtorIban = "CZ6508000000192000145399",
-                creditorIban = "CZ1234567890123456789012",
+    fun `initiatePayment for DOMESTIC_CZ joins VS SS KS into remittance info and uses the DOMESTIC scope`(): Unit =
+        runBlocking {
+            val payment = DomesticCzPayment(
+                endToEndIdentification = "e2e-cz",
+                debtorAccount = sampleAccountRef("CZ6508000000192000145399"),
+                instructedAmount = ObAmount("CZK", BigDecimal("250.00")),
+                creditorAccount = sampleAccountRef("CZ1234567890123456789012"),
                 creditorName = "Acme CZ",
-                amount = BigDecimal("250.00"),
-                currency = "CZK",
-                endToEndId = "e2e-cz",
-                remittanceInfo = "123/456/789",
+                variableSymbol = "123",
+                specificSymbol = "456",
+                constantSymbol = "789",
+                remittanceInformationUnstructured = null,
+                requestedExecutionDate = null,
+            )
+            val command = InitiatePaymentCommand(
+                tppId = "tpp-1",
+                consentId = "consent-1",
+                product = PaymentProduct.DOMESTIC_CZ,
+                payment = payment,
                 idempotencyKey = "idem-5",
             )
-        } returns "payment-cz-1"
 
-        val result = paymentInitiationService.initiatePayment(command)
+            coEvery {
+                consentClient.validateConsent(
+                    "consent-1",
+                    "tpp-1",
+                    "DOMESTIC_PAYMENT_INITIATE",
+                    "CZ6508000000192000145399",
+                )
+            } returns true
+            coEvery {
+                transactionClient.initiatePayment(
+                    debtorIban = "CZ6508000000192000145399",
+                    creditorIban = "CZ1234567890123456789012",
+                    creditorName = "Acme CZ",
+                    amount = BigDecimal("250.00"),
+                    currency = "CZK",
+                    endToEndId = "e2e-cz",
+                    remittanceInfo = "123/456/789",
+                    idempotencyKey = "idem-5",
+                )
+            } returns "payment-cz-1"
 
-        assertThat(result.paymentId).isEqualTo("payment-cz-1")
-        coVerify(exactly = 1) {
-            transactionClient.initiatePayment(
-                debtorIban = "CZ6508000000192000145399",
-                creditorIban = "CZ1234567890123456789012",
-                creditorName = "Acme CZ",
-                amount = BigDecimal("250.00"),
-                currency = "CZK",
-                endToEndId = "e2e-cz",
-                remittanceInfo = "123/456/789",
-                idempotencyKey = "idem-5",
-            )
+            val result = paymentInitiationService.initiatePayment(command)
+
+            assertThat(result.paymentId).isEqualTo("payment-cz-1")
+            coVerify(exactly = 1) {
+                transactionClient.initiatePayment(
+                    debtorIban = "CZ6508000000192000145399",
+                    creditorIban = "CZ1234567890123456789012",
+                    creditorName = "Acme CZ",
+                    amount = BigDecimal("250.00"),
+                    currency = "CZK",
+                    endToEndId = "e2e-cz",
+                    remittanceInfo = "123/456/789",
+                    idempotencyKey = "idem-5",
+                )
+            }
         }
-    }
 
     @Test
     fun `initiatePayment for SIPO zeroes the amount and targets the SIPO clearing account`(): Unit = runBlocking {
@@ -623,7 +628,9 @@ class Psd2ServicesTest {
     fun `getPaymentStatus delegates to transactionClient`(): Unit = runBlocking {
         coEvery { transactionClient.getPaymentStatus("payment-1") } returns PaymentStatus.ACSC
 
-        val result = paymentInitiationService.getPaymentStatus(GetPaymentStatusQuery("payment-1", "tpp-1", PaymentProduct.SEPA_CREDIT_TRANSFERS))
+        val result = paymentInitiationService.getPaymentStatus(
+            GetPaymentStatusQuery("payment-1", "tpp-1", PaymentProduct.SEPA_CREDIT_TRANSFERS),
+        )
 
         assertThat(result).isEqualTo(PaymentStatus.ACSC)
         coVerify(exactly = 1) { transactionClient.getPaymentStatus("payment-1") }

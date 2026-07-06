@@ -44,6 +44,7 @@ class AisResourceTest {
         assertThat(response.status).isEqualTo(401)
         @Suppress("UNCHECKED_CAST")
         val body = response.entity as Map<String, Any?>
+
         @Suppress("UNCHECKED_CAST")
         val messages = body["tppMessages"] as List<Map<String, Any?>>
         assertThat(messages[0]["code"]).isEqualTo("CERTIFICATE_MISSING")
@@ -90,6 +91,7 @@ class AisResourceTest {
         assertThat(response.status).isEqualTo(200)
         @Suppress("UNCHECKED_CAST")
         val body = response.entity as Map<String, Any?>
+
         @Suppress("UNCHECKED_CAST")
         val account = body["account"] as Map<String, Any?>
         assertThat(account["iban"]).isEqualTo("acc-1")
@@ -103,30 +105,39 @@ class AisResourceTest {
     }
 
     @Test
-    fun `getTransactions parses filters, defaults bookingStatus and limit, and omits _links without a cursor`(
-    ): Unit = runBlocking {
-        coEvery {
-            ais.getTransactions(
-                GetTransactionsQuery(
-                    consentId = "consent-1",
-                    tppId = "tpp-1",
-                    accountId = "acc-1",
-                    dateFrom = null,
-                    dateTo = null,
-                    bookingStatus = BookingStatus.BOOKED,
-                    limit = 50,
-                    afterCursor = null,
-                ),
+    fun `getTransactions parses filters, defaults bookingStatus and limit, and omits _links without a cursor`(): Unit =
+        runBlocking {
+            coEvery {
+                ais.getTransactions(
+                    GetTransactionsQuery(
+                        consentId = "consent-1",
+                        tppId = "tpp-1",
+                        accountId = "acc-1",
+                        dateFrom = null,
+                        dateTo = null,
+                        bookingStatus = BookingStatus.BOOKED,
+                        limit = 50,
+                        afterCursor = null,
+                    ),
+                )
+            } returns TransactionPage(booked = emptyList(), pending = emptyList(), nextCursor = null)
+
+            val response = resource.getTransactions(
+                "acc-1",
+                "consent-1",
+                null,
+                null,
+                null,
+                null,
+                null,
+                ctxWithTpp("tpp-1"),
             )
-        } returns TransactionPage(booked = emptyList(), pending = emptyList(), nextCursor = null)
 
-        val response = resource.getTransactions("acc-1", "consent-1", null, null, null, null, null, ctxWithTpp("tpp-1"))
-
-        assertThat(response.status).isEqualTo(200)
-        @Suppress("UNCHECKED_CAST")
-        val body = response.entity as Map<String, Any?>
-        assertThat(body).doesNotContainKey("_links")
-    }
+            assertThat(response.status).isEqualTo(200)
+            @Suppress("UNCHECKED_CAST")
+            val body = response.entity as Map<String, Any?>
+            assertThat(body).doesNotContainKey("_links")
+        }
 
     @Test
     fun `getTransactions adds a next-page link when a cursor is present`(): Unit = runBlocking {
@@ -159,8 +170,10 @@ class AisResourceTest {
         assertThat(response.status).isEqualTo(200)
         @Suppress("UNCHECKED_CAST")
         val body = response.entity as Map<String, Any>
+
         @Suppress("UNCHECKED_CAST")
         val links = body["_links"] as Map<String, Any>
+
         @Suppress("UNCHECKED_CAST")
         val next = links["next"] as Map<String, String>
         assertThat(next["href"]).isEqualTo("?afterCursor=cur-2")

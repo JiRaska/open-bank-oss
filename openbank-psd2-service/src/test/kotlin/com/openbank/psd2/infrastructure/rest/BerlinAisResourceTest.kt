@@ -49,6 +49,7 @@ class BerlinAisResourceTest {
         assertThat(response.status).isEqualTo(401)
         @Suppress("UNCHECKED_CAST")
         val body = response.entity as Map<String, Any?>
+
         @Suppress("UNCHECKED_CAST")
         val messages = body["tppMessages"] as List<Map<String, Any?>>
         assertThat(messages[0]["code"]).isEqualTo("CONSENT_INVALID")

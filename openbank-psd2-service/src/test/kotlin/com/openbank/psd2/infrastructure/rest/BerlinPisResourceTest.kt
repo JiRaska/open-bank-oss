@@ -9,7 +9,6 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.libs.idempotency.IdempotencyRecord
 import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.psd2.application.port.`in`.GetPaymentStatusQuery
-import com.openbank.psd2.application.port.`in`.InitiatePaymentCommand
 import com.openbank.psd2.application.port.`in`.PaymentInitiationUseCase
 import com.openbank.psd2.domain.model.ObLinks
 import com.openbank.psd2.domain.model.PaymentInitiationResponse
@@ -84,6 +83,7 @@ class BerlinPisResourceTest {
         assertThat(response.status).isEqualTo(404)
         @Suppress("UNCHECKED_CAST")
         val body = response.entity as Map<String, Any?>
+
         @Suppress("UNCHECKED_CAST")
         val messages = body["tppMessages"] as List<Map<String, Any?>>
         assertThat(messages[0]["code"]).isEqualTo("PRODUCT_UNKNOWN")
@@ -116,6 +116,7 @@ class BerlinPisResourceTest {
         assertThat(response.status).isEqualTo(400)
         @Suppress("UNCHECKED_CAST")
         val body = response.entity as Map<String, Any?>
+
         @Suppress("UNCHECKED_CAST")
         val messages = body["tppMessages"] as List<Map<String, Any?>>
         assertThat(messages[0]["code"]).isEqualTo("FORMAT_ERROR")
@@ -135,21 +136,27 @@ class BerlinPisResourceTest {
     }
 
     @Test
-    fun `initiate deserialises the SEPA body, delegates and returns Berlin created body with Location`(
-    ): Unit = runBlocking {
-        val cacheKey = "psd2:v1:payment:tpp-1:SEPA_CREDIT_TRANSFERS:req-2"
-        coEvery { idempotencyStore.get(cacheKey) } returns null
-        coEvery {
-            pis.initiatePayment(match { it.tppId == "tpp-1" && it.product == PaymentProduct.SEPA_CREDIT_TRANSFERS })
-        } returns sampleResponse("p-1")
-        coEvery { idempotencyStore.save(cacheKey, 201, any()) } returns Unit
+    fun `initiate deserialises the SEPA body, delegates and returns Berlin created body with Location`(): Unit =
+        runBlocking {
+            val cacheKey = "psd2:v1:payment:tpp-1:SEPA_CREDIT_TRANSFERS:req-2"
+            coEvery { idempotencyStore.get(cacheKey) } returns null
+            coEvery {
+                pis.initiatePayment(match { it.tppId == "tpp-1" && it.product == PaymentProduct.SEPA_CREDIT_TRANSFERS })
+            } returns sampleResponse("p-1")
+            coEvery { idempotencyStore.save(cacheKey, 201, any()) } returns Unit
 
-        val response = resource.initiate("sepa-credit-transfers", sepaBody(), "consent-1", "req-2", ctxWithTpp("tpp-1"))
+            val response = resource.initiate(
+                "sepa-credit-transfers",
+                sepaBody(),
+                "consent-1",
+                "req-2",
+                ctxWithTpp("tpp-1"),
+            )
 
-        assertThat(response.status).isEqualTo(201)
-        assertThat(response.headers.getFirst("Location")).isEqualTo("/v1/payments/sepa-credit-transfers/p-1")
-        assertThat(response.headers.getFirst("X-Request-ID")).isEqualTo("req-2")
-    }
+            assertThat(response.status).isEqualTo(201)
+            assertThat(response.headers.getFirst("Location")).isEqualTo("/v1/payments/sepa-credit-transfers/p-1")
+            assertThat(response.headers.getFirst("X-Request-ID")).isEqualTo("req-2")
+        }
 
     @Test
     fun `initiate deserialises the SIPO body into a SipoPayment`(): Unit = runBlocking {

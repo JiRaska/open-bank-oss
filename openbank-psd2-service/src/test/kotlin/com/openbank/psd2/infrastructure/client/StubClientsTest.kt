@@ -49,8 +49,7 @@ class StubClientsTest {
     }
 
     @Test
-    fun `StubAccountServiceClient getBalances returns closingBooked and expected balances with the clock's date`(
-    ): Unit = runBlocking {
+    fun `getBalances returns closingBooked and expected balances using the clock's date`(): Unit = runBlocking {
         val client = StubAccountServiceClient(fixedClock)
 
         val balances = client.getBalances("acc-1")

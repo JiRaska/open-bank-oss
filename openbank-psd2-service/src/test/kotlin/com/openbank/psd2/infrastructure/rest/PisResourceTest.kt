@@ -99,7 +99,13 @@ class PisResourceTest {
         coEvery { idempotencyStore.get(cacheKey) } returns null
         coEvery {
             pis.initiatePayment(
-                InitiatePaymentCommand("tpp-1", "consent-1", PaymentProduct.SEPA_CREDIT_TRANSFERS, samplePayment(), "idem-2"),
+                InitiatePaymentCommand(
+                    "tpp-1",
+                    "consent-1",
+                    PaymentProduct.SEPA_CREDIT_TRANSFERS,
+                    samplePayment(),
+                    "idem-2",
+                ),
             )
         } returns sampleResponse("p-1")
         coEvery { idempotencyStore.save(cacheKey, 201, any()) } returns Unit
