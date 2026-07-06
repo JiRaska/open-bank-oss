@@ -215,6 +215,8 @@ kind: Service
 metadata:
   name: transaction-service
   namespace: payments
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
   labels:
     app.kubernetes.io/name: transaction-service
 spec:
@@ -231,6 +233,8 @@ kind: Service
 metadata:
   name: transaction-service-canary
   namespace: payments
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
   labels:
     app.kubernetes.io/name: transaction-service
 spec:
@@ -476,6 +480,8 @@ kind: Service
 metadata:
   name: sepa-payment
   namespace: payments
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
   labels:
     app.kubernetes.io/name: sepa-payment
 spec:
@@ -491,6 +497,8 @@ kind: Service
 metadata:
   name: sepa-payment-canary
   namespace: payments
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
   labels:
     app.kubernetes.io/name: sepa-payment
 spec:
@@ -705,6 +713,8 @@ kind: Service
 metadata:
   name: domestic-payment
   namespace: payments
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
   labels:
     app.kubernetes.io/name: domestic-payment
 spec:
@@ -720,6 +730,8 @@ kind: Service
 metadata:
   name: domestic-payment-canary
   namespace: payments
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
   labels:
     app.kubernetes.io/name: domestic-payment
 spec:
@@ -926,6 +938,8 @@ kind: Service
 metadata:
   name: sepa-instant
   namespace: payments
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
   labels:
     app.kubernetes.io/name: sepa-instant
 spec:
@@ -941,6 +955,8 @@ kind: Service
 metadata:
   name: sepa-instant-canary
   namespace: payments
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
   labels:
     app.kubernetes.io/name: sepa-instant
 spec:
@@ -1120,6 +1136,8 @@ kind: Service
 metadata:
   name: clearing-service
   namespace: payments
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
   labels:
     app.kubernetes.io/name: clearing-service
 spec:
@@ -1135,6 +1153,8 @@ kind: Service
 metadata:
   name: clearing-service-canary
   namespace: payments
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
   labels:
     app.kubernetes.io/name: clearing-service
 spec:
@@ -1551,6 +1571,8 @@ kind: Service
 metadata:
   name: settlement-service
   namespace: payments
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
   labels:
     app.kubernetes.io/name: settlement-service
 spec:
@@ -1567,6 +1589,8 @@ kind: Service
 metadata:
   name: settlement-service-canary
   namespace: payments
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
   labels:
     app.kubernetes.io/name: settlement-service
 spec:
@@ -1870,6 +1894,8 @@ kind: Service
 metadata:
   name: swift-service
   namespace: payments
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
   labels:
     app.kubernetes.io/name: swift-service
 spec:
@@ -1885,6 +1911,8 @@ kind: Service
 metadata:
   name: swift-service-canary
   namespace: payments
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
   labels:
     app.kubernetes.io/name: swift-service
 spec:
