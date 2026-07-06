@@ -88,14 +88,25 @@ def info_version(openapi_text: str) -> str | None:
 
 
 def config_api_major(service_dir: Path) -> int | None:
-    """openbank.api.version from the service application.yaml (default 1)."""
+    """openbank.api.version from the service application.yaml, or None if the key is absent.
+
+    Returns None (not a defaulted 1) when the service does not declare the key — the D2
+    invariant is only asserted against an EXPLICIT value, so a pre-1.0 or external-contract
+    service that never set openbank.api.version is not falsely flagged.
+    """
     app_yaml = service_dir / "src/main/resources/application.yaml"
     if not app_yaml.is_file():
         return None
     text = app_yaml.read_text(encoding="utf-8", errors="replace")
-    # nested `api:\n  version: "N"` — match the pair with one indent step
-    m = re.search(r"^(\s*)api:\s*$\n\1\s+version:\s*['\"]?(\d+)", text, re.MULTILINE)
-    return int(m.group(2)) if m else 1  # ServiceInfoResource default is "1"
+    # nested `api:\n  version: "N"` — allow comments/blank lines between the pair, but stay
+    # within the api: block's indent (scan a few lines under `api:` for `version:`).
+    m = re.search(r"^(\s*)api:\s*(?:#.*)?$\n(?:\1\s+.*\n)*?\1\s+version:\s*['\"]?(\d+)", text, re.MULTILINE)
+    return int(m.group(2)) if m else None
+
+
+# JAX-RS REST *client* stubs carry the CALLEE's URL major (e.g. an Alertmanager client at
+# /api/v2), not this service's own contract — they must not drive the D2 URL-major check.
+_CLIENT_HINT = re.compile(r"@RegisterRestClient|RestClient\b")
 
 
 def url_majors(service_dir: Path) -> set[int]:
@@ -104,9 +115,15 @@ def url_majors(service_dir: Path) -> set[int]:
     if not src.is_dir():
         return majors
     for kt in src.rglob("*.kt"):
+        # Skip files under a client package or that declare a REST client — their /api/v{N}
+        # is an outbound URL to another service, not this service's served contract.
+        if "/client/" in kt.as_posix().lower():
+            continue
         try:
             text = kt.read_text(encoding="utf-8", errors="replace")
         except OSError:
+            continue
+        if _CLIENT_HINT.search(text):
             continue
         for m in re.finditer(r"/api/v(\d+)", text):
             majors.add(int(m.group(1)))
@@ -125,7 +142,13 @@ def oasdiff_classify(oasdiff: str, old: Path, new: Path) -> tuple[str, list[str]
     breaking: list[str] = []
     if breaking_raw.strip():
         try:
-            breaking = [c.get("text") or c.get("id", "breaking change") for c in json.loads(breaking_raw)]
+            # `oasdiff breaking` also emits WARN-level (level 2) entries; only ERR-level
+            # (level 3) changes are truly breaking and require a MAJOR bump. Keep the entry
+            # when its level is error, or when no level field exists (be safe).
+            for c in json.loads(breaking_raw):
+                lvl = str(c.get("level", "")).lower()
+                if lvl in ("", "error", "err", "3"):
+                    breaking.append(c.get("text") or c.get("id", "breaking change"))
         except json.JSONDecodeError:
             breaking = ["(unparseable oasdiff breaking output — treating as breaking)"]
     if breaking:
@@ -239,20 +262,30 @@ def main() -> int:
                         f"(API axis is independent of version.txt — ADR-0048 D5)"
                     )
 
-        # D2 API invariant on HEAD
+        # D2 API invariant on HEAD. Only meaningful for a stable (>=1.0) contract that the
+        # service actually serves under its own /api/v{N}. Skip when:
+        #  - doc_major == 0: a pre-1.0 spec (semver major 0 is explicitly unstable; product-catalog)
+        #  - the service serves no own /api/v{N} path: external-contract services (e.g. psd2 on
+        #    the Berlin Group scheme serve /v1/consents, not /api/v{N}); their info.version major
+        #    tracks the external spec, not a URL segment / api.version this repo owns.
         cfg_major = config_api_major(service_dir)
         majors = url_majors(service_dir)
         doc_major = new_v[0]
-        if cfg_major is not None and cfg_major != doc_major:
-            findings.append(
-                f"{service}: API invariant broken — major(info.version)={doc_major} but "
-                f"openbank.api.version={cfg_major} (ADR-0048 D2)"
-            )
-        if majors and max(majors) != doc_major:
-            findings.append(
-                f"{service}: API invariant broken — major(info.version)={doc_major} but the newest "
-                f"URL major in @Path is /api/v{max(majors)} (ADR-0048 D2/D4)"
-            )
+        if doc_major == 0:
+            print(f"api-contract gate: {service}: info.version {new_raw} is pre-1.0 — D2 invariant not asserted.")
+        elif not majors:
+            print(f"api-contract gate: {service}: serves no own /api/v{{N}} path — external contract, D2 not asserted.")
+        else:
+            if cfg_major is not None and cfg_major != doc_major:
+                findings.append(
+                    f"{service}: API invariant broken — major(info.version)={doc_major} but "
+                    f"openbank.api.version={cfg_major} (ADR-0048 D2)"
+                )
+            if max(majors) != doc_major:
+                findings.append(
+                    f"{service}: API invariant broken — major(info.version)={doc_major} but the newest "
+                    f"served URL major is /api/v{max(majors)} (ADR-0048 D2/D4)"
+                )
 
     for f in findings:
         print(f"::{level}::api-contract gate: {f}")
