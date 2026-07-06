@@ -5,11 +5,16 @@ Status: Accepted
 Delivery-Status: Shipped
 Author(s): jiri.raska
 
-**Delivery note (updated 2026-06-30):**
+**Delivery note (updated 2026-07-06):**
 - **D3** — ✅ Shipped: `ApiVersionResponseFilter` emits `X-API-Version: v{N}` (contract major) and
   `X-Service-Version: {semver}` (release axis). `ServiceInfoResource` body + headers both correct.
-- **D5** — ✅ Documented: `rules.yaml` `change_requirements.api_change` specifies OpenAPI-diff
-  classification. Gate is `advisory` until `oasdiff` CI enforcement lands (acknowledged in Consequences).
+- **D5** — ✅ Shipped (advisory): `.github/scripts/check-api-contract.py` runs in the
+  `Validate manifests` job on every PR — classifies breaking/additive/editorial from the OpenAPI
+  diff (`oasdiff` 1.22.0, pinned + checksum-verified), validates the `info.version` bump against
+  the classification, and asserts the D2 API invariant
+  (`major(info.version) == openbank.api.version == newest URL major`). Findings are `::warning`
+  annotations until the rules.yaml `api_change` gate flips to enforced
+  (`target_enforce_date: 2026-08-15`, ADR-0144) — the flip is a one-line `--enforce` in ci.yml.
 - **D6** — ✅ Shipped: `ApiVersionResponseFilter.isDeprecatedPath()` reads
   `openbank.api.deprecated-paths` (optional list, empty by default). `Sunset` reads
   `openbank.api.sunset-date`. Link header derives successor URL from current `openbank.api.version`.
