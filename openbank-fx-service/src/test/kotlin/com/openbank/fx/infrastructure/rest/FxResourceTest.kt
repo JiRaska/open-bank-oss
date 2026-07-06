@@ -5,16 +5,28 @@
 package com.openbank.fx.infrastructure.rest
 
 import com.openbank.fx.application.port.`in`.CnbRateIngestionUseCase
+import com.openbank.fx.application.port.`in`.ConvertCommand
 import com.openbank.fx.application.port.`in`.FxUseCase
 import com.openbank.fx.application.port.`in`.GetRateHistoryQuery
+import com.openbank.fx.application.port.`in`.GetRateQuery
+import com.openbank.fx.domain.model.FxConversion
+import com.openbank.fx.domain.model.FxConversionStatus
+import com.openbank.fx.domain.model.FxRate
+import com.openbank.fx.domain.model.RateSource
+import com.openbank.fx.domain.model.RateType
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.slot
 import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
+import java.time.Instant
+import java.util.UUID
 
 class FxResourceTest {
 
@@ -27,6 +39,146 @@ class FxResourceTest {
         fxUseCase = mockk()
         cnbIngestion = mockk()
         resource = FxResource(fxUseCase, cnbIngestion)
+    }
+
+    private fun rate() = FxRate(
+        id = UUID.randomUUID(),
+        baseCurrency = "EUR",
+        quoteCurrency = "CZK",
+        bidRate = BigDecimal("24.90"),
+        askRate = BigDecimal("25.10"),
+        rateType = RateType.SPOT,
+        source = RateSource.INTERNAL,
+        validFrom = Instant.parse("2026-01-01T00:00:00Z"),
+        validTo = Instant.parse("2026-12-31T23:59:59Z"),
+        createdAt = Instant.parse("2026-01-01T00:00:00Z"),
+    )
+
+    private fun conversion() = FxConversion(
+        id = UUID.randomUUID(),
+        idempotencyKey = "idem-1",
+        partyId = UUID.randomUUID(),
+        accountId = UUID.randomUUID(),
+        fromCurrency = "EUR",
+        toCurrency = "CZK",
+        fromAmountMinorUnits = 10_000L,
+        toAmountMinorUnits = 251_000L,
+        appliedRate = BigDecimal("25.10"),
+        feeMinorUnits = 50L,
+        rateId = UUID.randomUUID(),
+        status = FxConversionStatus.SETTLED,
+        createdAt = Instant.parse("2026-01-01T00:00:00Z"),
+        settledAt = Instant.parse("2026-01-01T00:00:00Z"),
+    )
+
+    @Test
+    fun `getRates returns 200 with all current rates from the use case`(): Unit = runBlocking {
+        val rates = listOf(rate())
+        coEvery { fxUseCase.getAllRates() } returns rates
+
+        val resp = resource.getRates()
+
+        assertThat(resp.status).isEqualTo(200)
+        assertThat(resp.entity).isEqualTo(rates)
+    }
+
+    @Test
+    fun `getRate with no source returns the internal spot rate`(): Unit = runBlocking {
+        val stored = rate()
+        coEvery { fxUseCase.getRate(GetRateQuery("EUR", "CZK")) } returns stored
+
+        val resp = resource.getRate(base = "eur", quote = "czk", source = null)
+
+        assertThat(resp.status).isEqualTo(200)
+        assertThat(resp.entity).isEqualTo(stored)
+        coVerify(exactly = 0) { cnbIngestion.getCnbRate(any(), any()) }
+    }
+
+    @Test
+    fun `getRate with source=CNB delegates to the ČNB ingestion use case instead`(): Unit = runBlocking {
+        val stored = rate()
+        coEvery { cnbIngestion.getCnbRate("EUR", "CZK") } returns stored
+
+        val resp = resource.getRate(base = "eur", quote = "czk", source = "cnb")
+
+        assertThat(resp.status).isEqualTo(200)
+        assertThat(resp.entity).isEqualTo(stored)
+        coVerify(exactly = 0) { fxUseCase.getRate(any()) }
+    }
+
+    @Test
+    fun `getRate returns 404 when no rate is stored for the pair`(): Unit = runBlocking {
+        coEvery { fxUseCase.getRate(GetRateQuery("USD", "CZK")) } returns null
+
+        val resp = resource.getRate(base = "usd", quote = "czk", source = null)
+
+        assertThat(resp.status).isEqualTo(404)
+        @Suppress("UNCHECKED_CAST")
+        assertThat((resp.entity as Map<String, String>)["error"]).contains("USD/CZK")
+    }
+
+    @Test
+    fun `convert requires a non-blank Idempotency-Key header`(): Unit = runBlocking {
+        assertThatThrownBy {
+            runBlocking {
+                resource.convert(
+                    ConvertRequest(
+                        partyId = UUID.randomUUID(),
+                        accountId = null,
+                        partyName = "Alice",
+                        fromCurrency = "EUR",
+                        toCurrency = "CZK",
+                        fromAmountMinorUnits = 1000L,
+                    ),
+                    key = "  ",
+                )
+            }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `convert maps the request onto a ConvertCommand and returns 201 with a Location header`(): Unit = runBlocking {
+        val result = conversion()
+        val cmd = slot<ConvertCommand>()
+        coEvery { fxUseCase.convert(capture(cmd)) } returns result
+
+        val req = ConvertRequest(
+            partyId = result.partyId,
+            accountId = result.accountId,
+            partyName = "Alice Example",
+            fromCurrency = "EUR",
+            toCurrency = "CZK",
+            fromAmountMinorUnits = 10_000L,
+        )
+        val resp = resource.convert(req, key = "idem-key-1")
+
+        assertThat(resp.status).isEqualTo(201)
+        assertThat(resp.entity).isEqualTo(result)
+        assertThat(resp.location.toString()).isEqualTo("/api/v1/fx/conversions/${result.id}")
+        assertThat(cmd.captured.idempotencyKey).isEqualTo("idem-key-1")
+        assertThat(cmd.captured.partyId).isEqualTo(result.partyId)
+        assertThat(cmd.captured.fromAmountMinorUnits).isEqualTo(10_000L)
+    }
+
+    @Test
+    fun `getConversion returns 200 when the conversion exists`(): Unit = runBlocking {
+        val result = conversion()
+        coEvery { fxUseCase.getConversion(result.id) } returns result
+
+        val resp = resource.getConversion(result.id)
+
+        assertThat(resp.status).isEqualTo(200)
+        assertThat(resp.entity).isEqualTo(result)
+    }
+
+    @Test
+    fun `getConversion returns 404 when it does not exist`(): Unit = runBlocking {
+        val id = UUID.randomUUID()
+        coEvery { fxUseCase.getConversion(id) } returns null
+
+        val resp = resource.getConversion(id)
+
+        assertThat(resp.status).isEqualTo(404)
     }
 
     @Test
