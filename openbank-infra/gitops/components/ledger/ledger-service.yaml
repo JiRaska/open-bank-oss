@@ -45,7 +45,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: ledger-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-ledger-service:sandbox-02c6f66d
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-ledger-service:sandbox-7513884d
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
