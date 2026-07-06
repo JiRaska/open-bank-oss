@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.8.2...card-issuance-service-v0.9.0) (2026-07-06)
+
+
+### Features
+
+* **card-issuance:** scale-to-zero to T1 via HTTPScaledObject (ADR-0057) ([#249](https://github.com/JiRaska/open-bank-oss/issues/249)) ([14556c8](https://github.com/JiRaska/open-bank-oss/commit/14556c87b6db5df07bd362d31eaec945d0af0c65)), closes [#230](https://github.com/JiRaska/open-bank-oss/issues/230)
+
 ## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.8.1...card-issuance-service-v0.8.2) (2026-07-03)
 
 
