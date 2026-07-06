@@ -41,8 +41,12 @@ class AuditChainHashTest {
     @Test
     fun `any field edit changes the hash (tamper evidence)`() {
         val original = AuditRepository.chainHash(genesis, entry())
-        assertThat(AuditRepository.chainHash(genesis, entry(payload = """{"amount":"999.00"}"""))).isNotEqualTo(original)
-        assertThat(AuditRepository.chainHash(genesis, entry(actorId = UUID.randomUUID().toString()))).isNotEqualTo(original)
+        assertThat(
+            AuditRepository.chainHash(genesis, entry(payload = """{"amount":"999.00"}""")),
+        ).isNotEqualTo(original)
+        assertThat(
+            AuditRepository.chainHash(genesis, entry(actorId = UUID.randomUUID().toString())),
+        ).isNotEqualTo(original)
         assertThat(AuditRepository.chainHash(genesis, entry(eventType = "OTHER"))).isNotEqualTo(original)
     }
 

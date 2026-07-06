@@ -35,7 +35,7 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; border: string }
 }
 
 export default function AmlPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const [cases, setCases] = useState<AmlCase[]>([])
   const [loading, setLoading] = useState(true)
   const [scanning, setScanning] = useState(false)
@@ -144,11 +144,12 @@ export default function AmlPage() {
             // it isn't deployed in this sandbox (most of the fleet isn't). Explain
             // it calmly instead of the old "Mikroservisa běží na portu 8117" copy,
             // which falsely claimed the service was up.
-            <DataUnavailable kind="not_deployed" service="AML-service" feature={t('AML monitoring', 'AML monitoring')} />
+            <DataUnavailable kind="not_deployed" service="AML-service" feature={t('AML monitoring', 'AML monitoring')} lang={language} />
           ) : filtered.length === 0 ? (
             <DataUnavailable
               kind="no_data"
               feature={t('AML případy', 'AML cases')}
+              lang={language}
               detail={search
                 ? t('Žádný případ neodpovídá zadanému filtru. Zkuste upravit hledaný výraz.', 'No case matches the filter. Try adjusting the search term.')
                 : t('Služba běží, ale zatím neeviduje žádné AML případy. Spusťte kontrolu tlačítkem „Spustit AML kontrolu".', 'Service is up but no AML cases recorded yet. Run a scan using the "Run AML scan" button.')}

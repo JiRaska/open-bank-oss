@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.3](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.6.2...sanctions-service-v0.6.3) (2026-07-06)
+
+
+### Bug Fixes
+
+* set real koverVerify floors for sanctions/finrep/psd2-service ([#288](https://github.com/JiRaska/open-bank-oss/issues/288)) ([b49c139](https://github.com/JiRaska/open-bank-oss/commit/b49c13968c67b34352512b6d10690bab772b2d67))
+
 ## [0.6.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.6.1...sanctions-service-v0.6.2) (2026-07-02)
 
 

@@ -51,16 +51,18 @@ class AuditConsumerTest {
         consumer.consume(payload)
 
         coVerify {
-            repo.save(match {
-                it.eventType == "TRANSACTION_FAILED" &&
-                    it.aggregateType == "TRANSACTION" &&
-                    it.aggregateId == transactionId.toString() &&
-                    it.actorId == "operator-7" &&
-                    it.sourceService == "transaction-service" &&
-                    it.correlationId == "corr-123" &&
-                    it.occurredAt == occurredAt &&
-                    it.payload == payload
-            })
+            repo.save(
+                match {
+                    it.eventType == "TRANSACTION_FAILED" &&
+                        it.aggregateType == "TRANSACTION" &&
+                        it.aggregateId == transactionId.toString() &&
+                        it.actorId == "operator-7" &&
+                        it.sourceService == "transaction-service" &&
+                        it.correlationId == "corr-123" &&
+                        it.occurredAt == occurredAt &&
+                        it.payload == payload
+                },
+            )
         }
     }
 

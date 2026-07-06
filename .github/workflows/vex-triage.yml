@@ -1,0 +1,53 @@
+# VEX triage lifecycle (ADR-0030 D1) — the loop that keeps VEX documents from
+# being produced-but-never-triaged. Weekly:
+#
+#   1. vex-inventory.py aggregates the OpenVEX docs on every component's latest
+#      release; CVEs still `under_investigation` form the triage queue.
+#   2. vex-triage.py ensures one `VEX triage: <CVE>` issue per queued CVE
+#      (labels: vex-triage + severity:<level> from api.osv.dev). The ISSUE'S
+#      CREATION DATE is the SLA clock — no committed state.
+#   3. An open triage issue older than rules.yaml vuln_management.sla_days for
+#      its severity FAILS this job — the weekly red run is the escalation
+#      (same forcing-function pattern as gate graduation, ADR-0144).
+#   4. Issues whose CVE left the queue (overlay verdict landed / dep bumped)
+#      are commented and auto-closed.
+#
+# Triage verdict = maintainer edit to openbank-libs/governance/vex/
+# <component>.openvex.json; build-release-evidence.sh folds it into the next
+# release's VEX document.
+name: VEX triage
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"   # weekly Monday 07:00 UTC, after the Dependabot 06:00 wave
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report what would change without opening/closing issues"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  vex-triage:
+    name: VEX triage lifecycle
+    # Public repo ⇒ hosted runners are free; no cluster access needed (FinOps: hosted-first).
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Run triage lifecycle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/vex-triage.py \
+            ${{ inputs.dry_run == true && '--dry-run' || '' }}
