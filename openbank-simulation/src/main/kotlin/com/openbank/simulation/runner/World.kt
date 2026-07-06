@@ -4,6 +4,8 @@
 
 package com.openbank.simulation.runner
 
+import com.openbank.sepa.domain.model.SepaPayment
+import com.openbank.settlement.domain.model.Settlement
 import com.openbank.simulation.adapters.AuditLog
 import com.openbank.simulation.adapters.BalanceProjection
 import com.openbank.simulation.adapters.SimEventBus
@@ -42,6 +44,12 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     val balances = BalanceStore()
     val audit = AuditLog()
     val sagas = mutableListOf<SimPaymentSaga>()
+
+    // Issue #267 (ADR-0100 full-service adoption): the REAL `SepaPayment` (sepa-payment) and
+    // `Settlement` (settlement-service) domain aggregates driven by SepaSettlementScenario, kept
+    // here so the Layer-3 invariants can assert every one reaches a terminal state.
+    val sepaPayments = mutableListOf<SepaPayment>()
+    val settlements = mutableListOf<Settlement>()
 
     val customerAccounts: List<UUID>
     val currency: String = config.currency

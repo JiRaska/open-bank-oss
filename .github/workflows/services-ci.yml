@@ -123,9 +123,15 @@ jobs:
               # explicitly so the invariant checker runs on every money-path change (it already runs
               # on its own edits, on push to main, and nightly). Code-global changes (libs etc.)
               # already build everything incl. the simulation, so this only matters per-module.
-              if grep -qE '(^| )openbank-(ledger|balance|transaction)-service( |$)' <<< " $CHANGED " \
+              # Issue #267 (ADR-0100 full-service adoption) extended the same project-dependency
+              # binding to sepa-payment (directory openbank-sepa-payment, no "-service" suffix)
+              # and settlement-service — add both to the edge so a change to either also rebuilds
+              # the simulation, exactly like ledger/balance/transaction already do.
+              if { grep -qE '(^| )openbank-(ledger|balance|transaction)-service( |$)' <<< " $CHANGED " \
+                   || grep -qE '(^| )openbank-sepa-payment( |$)' <<< " $CHANGED " \
+                   || grep -qE '(^| )openbank-settlement-service( |$)' <<< " $CHANGED "; } \
                  && ! grep -qE '(^| )openbank-simulation( |$)' <<< " $CHANGED "; then
-                echo "Decision: money-path change -> add openbank-simulation (DST harness, ADR-0115)."
+                echo "Decision: money-path change -> add openbank-simulation (DST harness, ADR-0115/#267)."
                 CHANGED="$CHANGED openbank-simulation"
               fi
               # A change to the CI recipe itself (services-ci / _service-ci) can NOT
