@@ -86,6 +86,11 @@ object SepaSettlementScenario {
         val debtorIdx = random.nextInt(accounts.size)
         val debtorAccount = accounts[debtorIdx]
         val creditorAccountIdx = (debtorIdx + 1 + random.nextInt(accounts.size - 1)) % accounts.size
+        // codeql[java/insecure-randomness]: intentional. `random` is SimulationRandom, a
+        // seeded kotlin.random.Random wrapper (engine/SimulationRandom.kt) whose entire purpose
+        // is deterministic, REPRODUCIBLE test-account selection (ADR-0100) -- a SecureRandom
+        // here would break the seed-replay property this harness exists for. openbank-simulation
+        // is a test-tooling module (no version.txt, never deployed), not production code.
         val creditorAccount = accounts[creditorAccountIdx]
 
         val payment = SepaPayment(
