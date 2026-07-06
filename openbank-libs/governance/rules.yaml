@@ -381,7 +381,7 @@ provenance:
   enforce_criteria:
     - "every deployable service's latest release carries a verify-release-evidence-green bundle (admin-ui excepted until it has a non-Gradle SBOM source)"
     - "the running fleet has been redeployed so every live image carries the cosign SBOM attestation"
-    - "kyverno verify-images gains an SBOM-attestation rule, staged Audit -> Enforce (verify-images-policy.yaml step 4)"
+    - "kyverno SBOM-attestation rule flips Audit -> Enforce (Audit is LIVE: verify-sbom-attestation-policy.yaml; the flip is one line once criteria 1-2 hold)"
     - "the advisory gate has run clean for an observation window (no false-positive blocks)"
 
 # ---------------------------------------------------------------------------------------
