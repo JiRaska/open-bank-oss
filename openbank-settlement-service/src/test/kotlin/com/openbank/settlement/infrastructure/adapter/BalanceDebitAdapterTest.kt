@@ -7,8 +7,8 @@ package com.openbank.settlement.infrastructure.adapter
 import com.openbank.settlement.application.port.out.SettlementRepository
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
-import com.openbank.settlement.infrastructure.client.BalanceRestClient
 import com.openbank.settlement.infrastructure.client.BalanceResponse
+import com.openbank.settlement.infrastructure.client.BalanceRestClient
 import com.openbank.settlement.infrastructure.client.MoneyMovementRequest
 import io.mockk.coEvery
 import io.mockk.every

@@ -98,7 +98,13 @@ class LedgerBookAdapterTest {
 
         assertThatThrownBy {
             runBlocking {
-                LedgerBookAdapter(ledgerClient, repo, glDebitAccountId, glCreditAccountId, fixedClock).book(settlement.id)
+                LedgerBookAdapter(
+                    ledgerClient,
+                    repo,
+                    glDebitAccountId,
+                    glCreditAccountId,
+                    fixedClock,
+                ).book(settlement.id)
             }
         }.isInstanceOf(RuntimeException::class.java).hasMessageContaining("ledger-service down")
     }
