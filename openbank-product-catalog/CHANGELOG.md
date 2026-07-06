@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.8.1...product-catalog-v0.8.2) (2026-07-06)
+
+
+### Bug Fixes
+
+* **product-catalog,governance:** correct false ADR-0083 T1 native claim; add real native build ([#258](https://github.com/JiRaska/open-bank-oss/issues/258)) ([aac0eb4](https://github.com/JiRaska/open-bank-oss/commit/aac0eb4d8ff31a7a0d2774d3e50cc577eb6b2329)), closes [#230](https://github.com/JiRaska/open-bank-oss/issues/230) [#253](https://github.com/JiRaska/open-bank-oss/issues/253)
+
 ## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.8.0...product-catalog-v0.8.1) (2026-07-02)
 
 
