@@ -87,7 +87,14 @@ class SettlementWorkflowImplTest {
         assertThat(calls.reverseDebit.get()).isEqualTo(1)
         assertThat(calls.reverseBookToLedger.get()).isZero()
         assertThat(calls.rejectSettlement.get()).isEqualTo(1)
-        assertThat(calls.order).containsExactly("debitPayer", "creditPayee", "bookToLedger", "reverseCredit", "reverseDebit")
+        assertThat(calls.order).containsExactly(
+            "debitPayer",
+            "creditPayee",
+            "bookToLedger",
+            "reverseCredit",
+            "reverseDebit",
+            "rejectSettlement",
+        )
     }
 
     @Test
