@@ -168,16 +168,16 @@ export default function DashboardPage() {
       {/* Observability KPIs */}
       <div className="grid-4" style={{ marginBottom: '28px' }}>
         <KpiCard icon={<AlertTriangle size={18} />} label={t('Chybovost', 'Error Rate')} value={`${100 - healthPct}%`}
-          sub="derived from health" color={100 - healthPct > 5 ? 'var(--danger)' : 'var(--success)'}
+          sub={t('odvozeno ze zdraví', 'derived from health')} color={100 - healthPct > 5 ? 'var(--danger)' : 'var(--success)'}
           trend={100 - healthPct > 5 ? 'up' : 'down'} />
         <KpiCard icon={<Clock size={18} />} label={t('p99 Latence (odh.)', 'p99 Latency (est.)')} value={`${Math.round(avgLatency * 2.5)}ms`}
-          sub="approx from latencies" color="var(--accent)"
+          sub={t('odhad z latencí', 'approx from latencies')} color="var(--accent)"
           trend={avgLatency * 2.5 < 200 ? 'up' : 'down'} />
         <KpiCard icon={<Activity size={18} />} label={t('Propustnost', 'Throughput')} value={`${upCount * 125} req/s`}
-          sub="health-check proxy" color="var(--info)"
+          sub={t('proxy z health-checku', 'health-check proxy')} color="var(--info)"
           trend="up" />
         <KpiCard icon={<TrendingUp size={18} />} label={t('Zátěž systému', 'System Load')} value={`${Math.round((upCount / Math.max(1, deployedCount)) * 42)}%`}
-          sub="average cpu proxy" color="var(--warning)" trend="up" />
+          sub={t('odhad průměrné zátěže CPU', 'average cpu proxy')} color="var(--warning)" trend="up" />
       </div>
 
       {/* Uptime by group */}
@@ -248,7 +248,7 @@ export default function DashboardPage() {
                   const fg = !s.deployed ? 'var(--text-tertiary)' : s.up ? 'var(--success-text)' : 'var(--danger-text)'
                   const dot = !s.deployed ? 'var(--text-tertiary)' : s.up ? 'var(--success)' : 'var(--danger)'
                   return (
-                    <div key={s.name} title={!s.deployed ? t('Nenasazeno v tomto prostředí', 'Not deployed in this environment') : s.up ? 'UP' : 'DOWN'} style={{
+                    <div key={s.name} title={!s.deployed ? t('Nenasazeno v tomto prostředí', 'Not deployed in this environment') : s.up ? t('BĚŽÍ', 'UP') : t('NEBĚŽÍ', 'DOWN')} style={{
                       display: 'flex', alignItems: 'center', gap: '5px',
                       padding: '4px 10px', borderRadius: '6px',
                       background: bg, border: `1px solid ${bd}`,

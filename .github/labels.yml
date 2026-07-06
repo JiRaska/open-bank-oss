@@ -15,6 +15,23 @@
 # namespace (`runs-on`, rules.yaml: ci_runners) and are NOT issue labels — keep them out.
 
 labels:
+  # --- VEX / vulnerability triage (ADR-0030 D1, vex-triage.yml) -------------------------
+  - name: vex-triage
+    color: "b60205"
+    description: "CVE awaiting a human VEX verdict; the issue's age is the vuln_management SLA clock."
+  - name: "severity:critical"
+    color: "b60205"
+    description: "vuln_management SLA: 7 days."
+  - name: "severity:high"
+    color: "d93f0b"
+    description: "vuln_management SLA: 30 days."
+  - name: "severity:medium"
+    color: "fbca04"
+    description: "vuln_management SLA: 90 days."
+  - name: "severity:low"
+    color: "c2e0c6"
+    description: "vuln_management SLA: 180 days."
+
   # --- Type: what kind of work this is -------------------------------------------------
   - name: bug
     color: "d73a4a"

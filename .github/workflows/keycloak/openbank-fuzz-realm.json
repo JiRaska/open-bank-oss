@@ -1,0 +1,37 @@
+{
+  "realm": "openbank",
+  "enabled": true,
+  "sslRequired": "none",
+  "accessTokenLifespan": 3600,
+  "clients": [
+    {
+      "clientId": "openbank-services",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "fuzz-ci-throwaway-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "fullScopeAllowed": true,
+      "attributes": {
+        "access.token.lifespan": "3600"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-openbank-services",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-services",
+      "realmRoles": ["ROLE_OPERATOR", "ROLE_COMPLIANCE"]
+    }
+  ],
+  "roles": {
+    "realm": [
+      { "name": "ROLE_OPERATOR" },
+      { "name": "ROLE_COMPLIANCE" },
+      { "name": "ROLE_ADMIN" }
+    ]
+  }
+}

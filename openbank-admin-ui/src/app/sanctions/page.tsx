@@ -32,7 +32,8 @@ interface ApiError {
 }
 
 const DAYS = ['MON','TUE','WED','THU','FRI','SAT','SUN']
-const DAY_LABELS: Record<string,string> = { MON:'Po', TUE:'Út', WED:'St', THU:'Čt', FRI:'Pá', SAT:'So', SUN:'Ne' }
+const DAY_LABELS_CS: Record<string,string> = { MON:'Po', TUE:'Út', WED:'St', THU:'Čt', FRI:'Pá', SAT:'So', SUN:'Ne' }
+const DAY_LABELS_EN: Record<string,string> = { MON:'Mon', TUE:'Tue', WED:'Wed', THU:'Thu', FRI:'Fri', SAT:'Sat', SUN:'Sun' }
 
 function CronEditor({ list, onSave }: { list: SanctionsList; onSave: (id: string, patch: Partial<SanctionsList>) => void }) {
   const { t } = useLanguage()
@@ -58,7 +59,7 @@ function CronEditor({ list, onSave }: { list: SanctionsList; onSave: (id: string
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '12px', background: 'var(--surface-2)', borderRadius: '8px', border: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 600, minWidth: '40px' }}>Čas</span>
+        <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 600, minWidth: '40px' }}>{t('Čas', 'Time')}</span>
         <select value={hour} onChange={e => setHour(+e.target.value)}
           style={{ padding: '4px 8px', borderRadius: '5px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '12px' }}>
           {Array.from({length:24},(_,i)=>i).map(h => <option key={h} value={h}>{String(h).padStart(2,'0')}</option>)}
@@ -70,14 +71,14 @@ function CronEditor({ list, onSave }: { list: SanctionsList; onSave: (id: string
         </select>
       </div>
       <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 600, minWidth: '40px' }}>Dny</span>
+        <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 600, minWidth: '40px' }}>{t('Dny', 'Days')}</span>
         {DAYS.map(d => (
           <button key={d} onClick={() => toggleDay(d)}
             style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', border: '1px solid',
               background: days.includes(d) ? 'var(--accent)' : 'var(--surface)',
               color: days.includes(d) ? 'white' : 'var(--text-secondary)',
               borderColor: days.includes(d) ? 'var(--accent)' : 'var(--border)' }}>
-            {DAY_LABELS[d]}
+            {t(DAY_LABELS_CS[d], DAY_LABELS_EN[d])}
           </button>
         ))}
       </div>
@@ -187,14 +188,14 @@ export default function SanctionsPage() {
       if (!res.ok) {
         const errorPayload = data as ApiError
         setChecks([])
-        setChecksError(errorPayload.error ?? `Načtení kontrol selhalo (HTTP ${res.status})`)
+        setChecksError(errorPayload.error ?? t(`Načtení kontrol selhalo (HTTP ${res.status})`, `Failed to load checks (HTTP ${res.status})`))
         return
       }
       setChecks(Array.isArray(data) ? data : [])
     } catch (error) {
       setServiceUp(false)
       setChecks([])
-      setChecksError(error instanceof Error ? error.message : 'Spojení se službou selhalo')
+      setChecksError(error instanceof Error ? error.message : t('Spojení se službou selhalo', 'Connection to the service failed'))
     }
     finally { setLoading(false) }
   }, [])
@@ -208,7 +209,7 @@ export default function SanctionsPage() {
       if (!res.ok) {
         const errorPayload = data as ApiError
         setLists([])
-        setListsError(errorPayload.error ?? `Načtení listů selhalo (HTTP ${res.status})`)
+        setListsError(errorPayload.error ?? t(`Načtení listů selhalo (HTTP ${res.status})`, `Failed to load lists (HTTP ${res.status})`))
         return
       }
       setLists(Array.isArray(data) ? data : [])
@@ -249,11 +250,11 @@ export default function SanctionsPage() {
       })
       if (res.ok) { setScreenResult(await res.json()); loadChecks() }
       else {
-        const errorPayload = await res.json().catch(() => ({ error: 'Screening failed' })) as ApiError
-        setScreenError(`Chyba ${res.status}: ${errorPayload.error ?? 'Screening failed'}`)
+        const errorPayload = await res.json().catch(() => ({ error: t('Screening selhal', 'Screening failed') })) as ApiError
+        setScreenError(`${t('Chyba', 'Error')} ${res.status}: ${errorPayload.error ?? t('Screening selhal', 'Screening failed')}`)
       }
     } catch (error) {
-      setScreenError(error instanceof Error ? error.message : 'Spojení se službou selhalo')
+      setScreenError(error instanceof Error ? error.message : t('Spojení se službou selhalo', 'Connection to the service failed'))
     }
     setScreening(false)
   }
@@ -274,7 +275,7 @@ export default function SanctionsPage() {
     const res = await fetch(`/api/sanctions/lists/${listType}/refresh`, { method: 'POST' })
     if (!res.ok) {
       const errorPayload = await res.json().catch(() => ({ error: 'Refresh failed' })) as ApiError
-      setListsError(errorPayload.error ?? `Obnovení listu selhalo (HTTP ${res.status})`)
+      setListsError(errorPayload.error ?? t(`Obnovení listu selhalo (HTTP ${res.status})`, `Failed to refresh list (HTTP ${res.status})`))
       return
     }
     loadLists()
@@ -285,7 +286,7 @@ export default function SanctionsPage() {
     const res = await fetch(`/api/sanctions/lists/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) })
     if (!res.ok) {
       const errorPayload = await res.json().catch(() => ({ error: 'Update failed' })) as ApiError
-      setListsError(errorPayload.error ?? `Uložení plánu selhalo (HTTP ${res.status})`)
+      setListsError(errorPayload.error ?? t(`Uložení plánu selhalo (HTTP ${res.status})`, `Failed to save schedule (HTTP ${res.status})`))
       return
     }
     loadLists()
@@ -297,7 +298,7 @@ export default function SanctionsPage() {
     const res = await fetch('/api/sanctions/lists', { method: 'POST' })
     if (!res.ok) {
       const errorPayload = await res.json().catch(() => ({ error: 'Refresh failed' })) as ApiError
-      setListsError(errorPayload.error ?? `Obnovení všech listů selhalo (HTTP ${res.status})`)
+      setListsError(errorPayload.error ?? t(`Obnovení všech listů selhalo (HTTP ${res.status})`, `Failed to refresh all lists (HTTP ${res.status})`))
       setRefreshingAll(false)
       return
     }
@@ -348,7 +349,7 @@ export default function SanctionsPage() {
             display: 'flex', alignItems: 'center', gap: '10px' }}>
             <AlertTriangle size={16} style={{ color: 'var(--danger)', flexShrink: 0 }} />
             <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--danger-text)' }}>
-              {hits.length} sankcní shoda{hits.length > 1 ? 'y' : ''} vyžaduje okamžitou pozornost
+              {t(`${hits.length} sankční shoda${hits.length > 1 ? 'y' : ''} vyžaduje okamžitou pozornost`, `${hits.length} sanctions match${hits.length > 1 ? 'es' : ''} require immediate attention`)}
             </span>
           </div>
         )}
@@ -392,7 +393,7 @@ export default function SanctionsPage() {
                       border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
                 </div>
                 <button onClick={loadChecks} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface-2)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                  <RefreshCw size={12} />Obnovit
+                  <RefreshCw size={12} />{t('Obnovit', 'Refresh')}
                 </button>
               </div>
               {loading ? (
@@ -582,7 +583,7 @@ export default function SanctionsPage() {
                         {screenResult.status === 'HIT' ? t('SHODA NALEZENA', 'MATCH FOUND') : t('ČISTÝ ZÁZNAM', 'CLEAR RECORD')}
                       </span>
                       <span style={{ marginLeft: 'auto', fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
-                        Skóre: {Math.round((screenResult.overallScore ?? 0) * 100)}%
+                        {t('Skóre', 'Score')}: {Math.round((screenResult.overallScore ?? 0) * 100)}%
                       </span>
                     </div>
                     <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>

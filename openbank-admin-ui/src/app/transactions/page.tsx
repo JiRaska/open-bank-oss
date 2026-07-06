@@ -56,7 +56,7 @@ const STATUSES = ['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'REVERSED']
 const TYPES    = ['DEBIT', 'CREDIT', 'TRANSFER', 'FEE', 'INTEREST', 'REVERSAL', 'ADJUSTMENT']
 
 export default function TransactionsPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const [showFilters, setShowFilters] = useState(false)
   const [loading, setLoading] = useState(false)
   const [failure, setFailure] = useState<BffFailure | null>(null)
@@ -232,7 +232,7 @@ export default function TransactionsPage() {
           </div>
         )}
 
-        {failure && <DataUnavailable kind={failure} service="Transaction-service" feature="Vyhledávání transakcí" />}
+        {failure && <DataUnavailable kind={failure} service="Transaction-service" feature={t('Vyhledávání transakcí', 'Transaction search')} lang={language} />}
 
         {/* Results */}
         {result && (

@@ -11,7 +11,6 @@ import com.openbank.audit.infrastructure.persistence.AuditRepository
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.reactive.messaging.Incoming
-import org.eclipse.microprofile.reactive.messaging.Message
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant

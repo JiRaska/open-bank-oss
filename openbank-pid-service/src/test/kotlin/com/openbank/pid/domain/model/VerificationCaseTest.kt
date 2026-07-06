@@ -115,4 +115,47 @@ class VerificationCaseTest {
             .isInstanceOf(IllegalCaseTransition::class.java)
             .hasMessageContaining("no first proposal")
     }
+
+    @Test
+    fun `a second approver proposing a different link target is rejected as disagreement`() {
+        val otherCandidate = UUID.randomUUID()
+        val awaiting = VerificationCase.open(
+            id = UUID.randomUUID(),
+            dedupKey = "RN:abc123",
+            trigger = VerificationTrigger.RN_COLLISION,
+            applicant = ApplicantSnapshot("Jan", "Novak", LocalDate.of(1976, 5, 6), null, listOf("CZ")),
+            blindIndex = "abc123",
+            candidatePartyIds = listOf(candidate, otherCandidate),
+            now = now,
+        ).proposeFirst("alice", CaseVerdict.LINK_TO_EXISTING, candidate, null, now)
+
+        assertThatThrownBy { awaiting.confirmSecond("bob", CaseVerdict.LINK_TO_EXISTING, otherCandidate, now) }
+            .isInstanceOf(IllegalCaseTransition::class.java)
+            .hasMessageContaining("disagrees")
+    }
+
+    @Test
+    fun `linkPartyId is rejected on a non-LINK_TO_EXISTING verdict`() {
+        assertThatThrownBy { openCase().proposeFirst("alice", CaseVerdict.DISTINCT_NEW, candidate, null, now) }
+            .isInstanceOf(IllegalCaseTransition::class.java)
+            .hasMessageContaining("only valid with verdict LINK_TO_EXISTING")
+    }
+
+    @Test
+    fun `reopen requires an AWAITING_SECOND_APPROVAL case — cannot reopen a fresh OPEN case`() {
+        assertThatThrownBy { openCase().reopen(now) }
+            .isInstanceOf(IllegalCaseTransition::class.java)
+            .hasMessageContaining("only an AWAITING case can be reopened")
+    }
+
+    @Test
+    fun `reopen requires an AWAITING_SECOND_APPROVAL case — cannot reopen a DECIDED case`() {
+        val decided = openCase()
+            .proposeFirst("alice", CaseVerdict.DISTINCT_NEW, null, null, now)
+            .confirmSecond("bob", CaseVerdict.DISTINCT_NEW, null, now)
+
+        assertThatThrownBy { decided.reopen(now) }
+            .isInstanceOf(IllegalCaseTransition::class.java)
+            .hasMessageContaining("only an AWAITING case can be reopened")
+    }
 }
