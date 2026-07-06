@@ -119,7 +119,11 @@ change_requirements:
     gate: api-contract
     enforced: advisory
     target_enforce_date: "2026-08-15"   # ADR-0144
-    blocked_on: "oasdiff wiring into CI (ADR-0048 D5) — classification logic is designed, not yet a CI step"
+    # CI producer is LIVE (advisory): .github/scripts/check-api-contract.py runs in the
+    # "Validate manifests" job on every PR (oasdiff 1.22.0, pinned + checksum-verified).
+    # Classification + api_invariant findings are ::warning annotations. Flipping this
+    # rule to enforced = pass --enforce to the script in ci.yml (one-line change).
+    ci_producer: ".github/scripts/check-api-contract.py"
   db_change:
     detect: ["src/main/resources/db/migration/*.sql", "Flyway/Liquibase changeset"]
     require:
