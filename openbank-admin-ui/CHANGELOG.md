@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.39.2...admin-ui-v0.40.0) (2026-07-05)
+
+
+### Features
+
+* **admin-ui:** derive customer-app dossier status per-capability (ADR-0074) ([#247](https://github.com/JiRaska/open-bank-oss/issues/247)) ([384d7ba](https://github.com/JiRaska/open-bank-oss/commit/384d7ba89c2a0dde44456cd33d5a124dfa8a6a25))
+
 ## [0.39.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.39.1...admin-ui-v0.39.2) (2026-07-03)
 
 
