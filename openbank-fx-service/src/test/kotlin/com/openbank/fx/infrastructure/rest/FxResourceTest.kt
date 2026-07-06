@@ -113,8 +113,9 @@ class FxResourceTest {
         val resp = resource.getRate(base = "usd", quote = "czk", source = null)
 
         assertThat(resp.status).isEqualTo(404)
+        // The 404 message echoes the raw path params, not the uppercased lookup key (FxResource.getRate).
         @Suppress("UNCHECKED_CAST")
-        assertThat((resp.entity as Map<String, String>)["error"]).contains("USD/CZK")
+        assertThat((resp.entity as Map<String, String>)["error"]).contains("usd/czk")
     }
 
     @Test
