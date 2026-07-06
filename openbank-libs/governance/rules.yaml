@@ -652,9 +652,14 @@ finops_tiers:
     # promotion gate (native cold start ≤ ~300-500ms p95) was MEASURED and FAILS:
     # 5 scale-0->1 cycles landed at 3.5-8.8s, dominated by Kubernetes Pod scheduling /
     # image-pull / readiness-probe overhead, not the ~200ms application start. Stays
-    # unclassified — do not re-declare T1 until #253's product decision (redefine the
-    # gate around process start, or treat T1 as not viable here without platform work)
-    # is resolved.
+    # Update 2026-07-06 (2): the gate is now redefined (ADR-0083) as two components —
+    # process start ≤500ms p95 (met, ~0.2-0.3s) and end-to-end scale-from-zero with
+    # tuned probes ≤5s p95 (met on a small sample, ~4.4s avg/5.0s worst-of-3; probe
+    # tuning alone cut ~28% off the untuned 3.5-8.8s, the residual ~4s floor is
+    # Kubernetes control-plane + admission-webhook overhead, not the image). Stays
+    # unclassified — T1 requires the live gitops Deployment to actually run the native
+    # image + tuned probes (a separate, deliberate infra cutover, not implied by this
+    # scratch measurement) plus a burn-in window per the ADR's Pilot plan steps 4-6.
 
   # Keep-honest classifier: reads measured signals (HTTP rate/idle ratio, Kafka lag +
   # active fraction, CPU/replica utilisation), emits a recommended tier + realised
