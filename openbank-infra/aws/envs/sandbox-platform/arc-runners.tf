@@ -180,6 +180,62 @@ locals {
     ]
   }
 
+  # Populates the shared runner-tool-cache hostPath with the JDK 21 + 25 layout
+  # baked into the runner image (runner-image/Dockerfile, /opt/openbank-jdk-preload/),
+  # so actions/setup-java finds both already ".complete" and never downloads or
+  # extracts a JDK on this node again. This is the actual fix for the
+  # ENOENT/EACCES race (see the runner-tool-cache volume comment above): the
+  # concurrent-extraction scenario is eliminated at the source rather than
+  # patched with a lock, because after this init container runs there is
+  # nothing left for two jobs to race on writing.
+  #
+  # Runs AFTER init-gradle-home (which creates + chmods the parent dir) and
+  # must run on every pod start, not just once per node: it is cheap (a `-d`
+  # test + a no-op when already populated) and pod restarts on an already-warm
+  # node must not depend on ordering against other pods' init containers.
+  #
+  # Copy is atomic per JDK version: extract-shaped content already exists at
+  # its final layout in the image, so this only needs `cp -r` into a SIBLING
+  # temp dir on the SAME volume + `mv` (rename, atomic within one filesystem)
+  # to the real version dir, then the `.complete` marker is written LAST —
+  # identical ordering to what actions/toolkit's own cacheDir does internally
+  # for a single writer. Guarding on `[ -e "$dst.complete" ]` first makes two
+  # concurrent pods on a cold node redundant-but-harmless: at worst both copy
+  # to their own uniquely-named temp dir (mktemp -d) and both rename into
+  # place — the second rename simply replaces the first with an identical tree.
+  jdk_toolcache_preload_init_container = {
+    name    = "init-jdk-toolcache-preload"
+    image   = local.runner_image
+    command = ["sh", "-c"]
+    args = [
+      <<-SH
+      set -eu
+      cache_root="/mnt/k8s-disks/0/runner-tool-cache/Java_Temurin-Hotspot_jdk"
+      preload_root="/opt/openbank-jdk-preload/Java_Temurin-Hotspot_jdk"
+      mkdir -p "$cache_root"
+      for version_dir in "$preload_root"/*/; do
+        version="$(basename "$version_dir")"
+        dst="$cache_root/$version/arm64"
+        if [ -e "$dst.complete" ]; then
+          echo "jdk toolcache: $version already present, skipping"
+          continue
+        fi
+        echo "jdk toolcache: populating $version"
+        tmp="$(mktemp -d "$cache_root/.preload-XXXXXX")"
+        cp -r "$version_dir/arm64/." "$tmp/"
+        mkdir -p "$cache_root/$version"
+        rm -rf "$dst"
+        mv "$tmp" "$dst"
+        touch "$dst.complete"
+      done
+      echo "jdk toolcache: ready"
+      SH
+    ]
+    volumeMounts = [
+      { name = "runner-tool-cache", mountPath = "/mnt/k8s-disks/0/runner-tool-cache" },
+    ]
+  }
+
   # The dind daemon — chart-parity args PLUS the pinned default address pool.
   # Image comes from AWS's public ECR mirror of the Docker Official Images, NOT
   # docker.io: with 8 runners churning, anonymous Docker Hub pulls of docker:dind
@@ -256,8 +312,24 @@ locals {
     # Node-local GitHub Actions tool cache — JDK 21 + 25 (~380 MB) downloaded
     # once per node lifecycle. Root cause of 790 GB/day NAT (June 20-29): each
     # ephemeral runner pod re-downloaded both JDKs from GitHub CDN (185.199.x.x,
-    # 57.150.x.x) on every build. Shared hostPath on NVMe is safe: setup-java
-    # uses atomic rename to the final tool dir so concurrent pods don't corrupt.
+    # 57.150.x.x) on every build.
+    #
+    # CORRECTION (2026-07-06, the previous version of this comment was wrong):
+    # actions/setup-java is NOT safe for concurrent first-time writers on a
+    # shared cache. Two `build (openbank-<service>)` matrix jobs landing on the
+    # same node at the same time, both needing a JDK version not yet cached,
+    # both extract to a private temp dir and then copy/rename into the SAME
+    # final versioned path — that final copy is not coordinated across
+    # processes, so one job's extraction corrupted the other's, surfacing as
+    # `ENOENT`/`EACCES` on individual JDK files (Services CI, 3 failures/2 days).
+    # Fixed by init_jdk_toolcache_preload below: the runner image now carries
+    # JDK 21 + 25 pre-extracted (runner-image/Dockerfile), and this init
+    # container copies them into the shared cache atomically (temp dir + mv,
+    # `.complete` written last) BEFORE the runner starts accepting jobs — so by
+    # the time setup-java runs, both JDKs are already present and it never
+    # attempts a download/extract at all. Concurrent pods on a cold node race
+    # only on the (idempotent, cheap) copy-if-missing check, never on partial
+    # JDK extraction.
     { name = "runner-tool-cache", hostPath = { path = "/mnt/k8s-disks/0/runner-tool-cache", type = "DirectoryOrCreate" } },
   ]
 }
@@ -607,7 +679,7 @@ resource "helm_release" "arc_build" {
         nodeSelector       = local.runner_node_selector
         tolerations        = local.runner_tolerations
         affinity           = local.runner_affinity
-        initContainers     = [local.dind_init_container, local.aio_sysctl_init_container, local.gradle_home_init_container]
+        initContainers     = [local.dind_init_container, local.aio_sysctl_init_container, local.gradle_home_init_container, local.jdk_toolcache_preload_init_container]
         containers = [
           {
             name         = "runner"
@@ -708,7 +780,7 @@ resource "helm_release" "arc_deploy" {
         serviceAccountName = kubernetes_service_account.arc_deploy[0].metadata[0].name
         nodeSelector       = local.runner_node_selector
         tolerations        = local.runner_tolerations
-        initContainers     = [local.dind_init_container, local.aio_sysctl_init_container, local.gradle_home_init_container]
+        initContainers     = [local.dind_init_container, local.aio_sysctl_init_container, local.gradle_home_init_container, local.jdk_toolcache_preload_init_container]
         containers = [
           {
             name         = "runner"

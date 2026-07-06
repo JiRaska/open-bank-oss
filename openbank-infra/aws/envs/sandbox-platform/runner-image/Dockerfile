@@ -15,6 +15,33 @@
 #                                      IRSA; without the CLI the step soft-skips
 #                                      and dep resolution falls back to public
 #                                      Maven Central (NAT cost + 429 risk).
+#   * Temurin JDK 21 + 25 preload   — pre-extracted at /opt/openbank-jdk-preload/,
+#                                      laid out exactly as actions/setup-java's
+#                                      Temurin installer expects the toolcache
+#                                      (Java_Temurin-Hotspot_jdk/<version>/<arch>/
+#                                      + a sibling <arch>.complete marker), but
+#                                      NOT baked directly into RUNNER_TOOL_CACHE
+#                                      itself — that path is a shared hostPath
+#                                      volume (arc-runners.tf), and a Kubernetes
+#                                      volume mount always shadows whatever the
+#                                      image had at that mountPath, so anything
+#                                      baked there would just be hidden at
+#                                      container start. The init-jdk-toolcache-
+#                                      preload init container (arc-runners.tf)
+#                                      copies this staged layout into the
+#                                      hostPath cache on pod start, atomically
+#                                      (temp dir + rename, `.complete` written
+#                                      last) and only if a version is missing —
+#                                      this is what actually eliminates the race
+#                                      two concurrent `build (openbank-<service>)`
+#                                      jobs used to hit when both extracted the
+#                                      same not-yet-cached JDK into the shared
+#                                      cache at once (ENOENT/EACCES from
+#                                      actions/setup-java, corrupted extraction).
+#                                      setup-java now finds both JDKs already
+#                                      complete and skips download+extract
+#                                      entirely — faster for every job, and the
+#                                      concurrent-write scenario no longer exists.
 #
 # arm64 only (the runners NodePool is Graviton).
 #
@@ -41,6 +68,21 @@ ARG GITLEAKS_SHA256=e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4
 ARG YQ_VERSION=v4.53.2
 ARG AWSCLI_VERSION=2.33.14
 ARG AWSCLI_SHA256=d4914cdbcfccfe151d1f4672bf7aeb81bd7cdfc5edc41425a9e54c900cddab24
+
+# Temurin JDK preload (see the header comment). Versions match what the fleet's
+# jvmToolchain(..) actually resolves (_service-ci.yml, api-fuzz.yml, fleet-lint.yml,
+# ghcr-publish.yml: `java-version: 21 / 25`). Pin the exact Adoptium release (not
+# just the major) so the sha256 is meaningful; bump both the version and hash
+# together from https://api.adoptium.net/v3/assets/latest/<major>/hotspot?vendor=eclipse&architecture=aarch64&os=linux&image_type=jdk
+# when Temurin ships a new build. TEMURIN_*_TOOLCACHE_VERSION is the SAME string
+# with `+` -> `-`: that's the literal directory name actions/setup-java's
+# getToolcacheVersionName() computes and looks for under Java_Temurin-Hotspot_jdk/.
+ARG TEMURIN_21_VERSION=21.0.11+10
+ARG TEMURIN_21_TOOLCACHE_VERSION=21.0.11-10.0.LTS
+ARG TEMURIN_21_SHA256=8d498ec88e1c1989fab95c6784240ab92d011e29c54d20a3f9c324b13476f9ad
+ARG TEMURIN_25_VERSION=25.0.3+9
+ARG TEMURIN_25_TOOLCACHE_VERSION=25.0.3-9.0.LTS
+ARG TEMURIN_25_SHA256=3e4287cb98870ba824ed698854bdc27cff984254caf66dd12cc291e7bfdde26b
 
 # yamllint + shellcheck + tooling deps (jq used by the workflows + curl/tar here).
 RUN apt-get update \
@@ -84,5 +126,31 @@ RUN curl -fsSL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/
       -o /usr/local/bin/yq \
  && chmod +x /usr/local/bin/yq \
  && yq --version
+
+# Temurin JDK 21 + 25 preload — staged at /opt/openbank-jdk-preload/ (NOT at
+# RUNNER_TOOL_CACHE; see the header comment for why). Layout matches
+# actions/setup-java's Temurin installer toolcache convention exactly:
+#   Java_Temurin-Hotspot_jdk/<toolcache-version>/<arch>/<jdk contents>
+#   Java_Temurin-Hotspot_jdk/<toolcache-version>/<arch>.complete   (empty marker)
+# The tarball's single top-level dir (e.g. jdk-21.0.11+10/) is unwrapped so its
+# CONTENTS land directly under <arch>/ — actions/toolkit's cacheDir does the same
+# unwrap (temurin/installer.ts: archivePath = extractedJavaPath/<archiveName>).
+RUN set -eu; \
+    preload_jdk() { \
+      major="$1"; version="$2"; toolcache_version="$3"; sha256="$4"; \
+      url="https://github.com/adoptium/temurin${major}-binaries/releases/download/jdk-$(echo "$version" | sed 's/+/%2B/')/OpenJDK${major}U-jdk_aarch64_linux_hotspot_$(echo "$version" | sed 's/+/_/').tar.gz"; \
+      dest="/opt/openbank-jdk-preload/Java_Temurin-Hotspot_jdk/${toolcache_version}/arm64"; \
+      curl -fsSL "$url" -o "/tmp/jdk${major}.tar.gz"; \
+      echo "${sha256}  /tmp/jdk${major}.tar.gz" | sha256sum -c -; \
+      mkdir -p "/tmp/jdk${major}-extract" "$dest"; \
+      tar -xzf "/tmp/jdk${major}.tar.gz" -C "/tmp/jdk${major}-extract"; \
+      inner="$(find "/tmp/jdk${major}-extract" -mindepth 1 -maxdepth 1 -type d)"; \
+      cp -r "${inner}/." "$dest/"; \
+      touch "/opt/openbank-jdk-preload/Java_Temurin-Hotspot_jdk/${toolcache_version}/arm64.complete"; \
+      rm -rf "/tmp/jdk${major}.tar.gz" "/tmp/jdk${major}-extract"; \
+      "${dest}/bin/java" -version; \
+    }; \
+    preload_jdk 21 "${TEMURIN_21_VERSION}" "${TEMURIN_21_TOOLCACHE_VERSION}" "${TEMURIN_21_SHA256}"; \
+    preload_jdk 25 "${TEMURIN_25_VERSION}" "${TEMURIN_25_TOOLCACHE_VERSION}" "${TEMURIN_25_SHA256}"
 
 USER runner
