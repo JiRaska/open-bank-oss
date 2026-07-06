@@ -645,10 +645,16 @@ finops_tiers:
     # openbank-product-catalog was WRONGLY declared T1 here (#2800), citing a
     # non-existent issue (#2083), while only Enabler 2 (HTTPScaledObject) existed —
     # no commit ever added a native build (Enabler 1), so the claimed "native
-    # cold-start SLO gate passed in sandbox" never happened. Corrected 2026-07-05:
-    # reverted to unclassified until the ADR-0083 promotion gate is actually measured
-    # in-cluster and passes — tracked in #253. Do not re-declare T1 from this comment
-    # alone; only from a real measurement.
+    # cold-start SLO gate passed in sandbox" never happened. Corrected 2026-07-05.
+    # Update 2026-07-06: Enabler 1 (native build) is now real and its two native-only
+    # bugs are fixed (bad Mutiny/coroutine bridge, missing @RegisterForReflection —
+    # verified working end-to-end in a scratch namespace, #253) — but the ADR-0083
+    # promotion gate (native cold start ≤ ~300-500ms p95) was MEASURED and FAILS:
+    # 5 scale-0->1 cycles landed at 3.5-8.8s, dominated by Kubernetes Pod scheduling /
+    # image-pull / readiness-probe overhead, not the ~200ms application start. Stays
+    # unclassified — do not re-declare T1 until #253's product decision (redefine the
+    # gate around process start, or treat T1 as not viable here without platform work)
+    # is resolved.
 
   # Keep-honest classifier: reads measured signals (HTTP rate/idle ratio, Kafka lag +
   # active fraction, CPU/replica utilisation), emits a recommended tier + realised
