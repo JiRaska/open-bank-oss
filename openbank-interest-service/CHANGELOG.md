@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.6.4...interest-service-v0.7.0) (2026-07-06)
+
+
+### Features
+
+* **interest:** scale-to-zero to T1 via HTTPScaledObject (ADR-0057) ([#248](https://github.com/JiRaska/open-bank-oss/issues/248)) ([f06c908](https://github.com/JiRaska/open-bank-oss/commit/f06c90847ee5777d66e0c1652a77c9c88cdc4d48)), closes [#230](https://github.com/JiRaska/open-bank-oss/issues/230)
+
 ## [0.6.4](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.6.3...interest-service-v0.6.4) (2026-07-02)
 
 
