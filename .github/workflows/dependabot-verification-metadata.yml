@@ -40,18 +40,38 @@ jobs:
     permissions:
       contents: write
     steps:
+      # A push made with the default GITHUB_TOKEN does NOT re-trigger workflow runs
+      # (GitHub's recursion guard), so required checks would sit "expected" on the new head
+      # SHA and native auto-merge (dependabot-auto-merge.yml) would deadlock forever. To push
+      # a commit that DOES re-trigger checks we need a bot PAT / app token. If the
+      # METADATA_REFRESH_PAT secret is absent we SKIP the push (safe: verification is lenient,
+      # so stale metadata is a warning, not a merge blocker) rather than create the deadlock.
+      - name: Detect refresh token
+        id: tok
+        run: |
+          if [ -n "${{ secrets.METADATA_REFRESH_PAT }}" ]; then
+            echo "have=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::METADATA_REFRESH_PAT not set — skipping metadata refresh (lenient verification means stale metadata only warns; a GITHUB_TOKEN push would deadlock auto-merge)."
+            echo "have=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout PR branch
+        if: steps.tok.outputs.have == 'true'
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.METADATA_REFRESH_PAT }}
 
-      - uses: actions/setup-java@1bcf9fb12cf4aa7d266a90ae39939e61372fe520 # v5
+      - if: steps.tok.outputs.have == 'true'
+        uses: actions/setup-java@1bcf9fb12cf4aa7d266a90ae39939e61372fe520 # v5
         with:
           java-version: "25"
           distribution: temurin
           cache: gradle
 
       - name: Regenerate verification metadata
+        if: steps.tok.outputs.have == 'true'
         run: |
           set -euo pipefail
           ./gradlew --write-verification-metadata sha256 testClasses --no-daemon -q
@@ -59,6 +79,7 @@ jobs:
           GRADLE_OPTS: "-Dorg.gradle.daemon=false"
 
       - name: Push metadata diff back to the PR branch
+        if: steps.tok.outputs.have == 'true'
         run: |
           set -euo pipefail
           if git diff --quiet gradle/verification-metadata.xml; then
