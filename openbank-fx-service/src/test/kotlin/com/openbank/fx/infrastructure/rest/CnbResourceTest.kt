@@ -104,7 +104,8 @@ class CnbResourceTest {
         val resp = resource.getCnbRate(base = "chf")
 
         assertThat(resp.status).isEqualTo(404)
+        // The 404 message echoes the raw path param, not the uppercased lookup key (CnbResource.getCnbRate).
         @Suppress("UNCHECKED_CAST")
-        assertThat((resp.entity as Map<String, String>)["error"]).contains("CHF/CZK")
+        assertThat((resp.entity as Map<String, String>)["error"]).contains("chf/CZK")
     }
 }
