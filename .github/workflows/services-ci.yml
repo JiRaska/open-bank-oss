@@ -178,10 +178,15 @@ jobs:
       # Set 4 for PR/push: safe for both runner pools; the TC pre-warm step already
       # serialises the registry-cache cold-start window, so the NAT benefit is preserved.
       # Raise back to 8 once runner-tune-hetzner runs and persists aio-max-nr=1048576.
-      # Set 2 for nightly schedule: keeps the full-fleet build within Hetzner+Mac mini
-      # capacity (3 always-on self-hosted runners) so the nightly cron never spills onto
-      # ARC spot nodes. FinOps rule: ARC is overflow-only, not a guaranteed daily cost.
-      max-parallel: ${{ github.event_name == 'schedule' && 2 || 4 }}
+      # Nightly schedule now matches PR/push at 4 (was capped at 2). The old cap was a
+      # self-hosted-capacity guard (Hetzner+Mac mini) that no longer applies: since #198
+      # the schedule/nightly matrix runs on ubuntu-latest (hosted, free & unlimited on this
+      # public repo) — same pool and same proven-safe concurrency as PR/push — and Hetzner
+      # was deleted entirely in #208. Not raised past 4: the GitHub account is on the Free
+      # plan, capped at 20 concurrent hosted-runner jobs account-wide (shared with other
+      # repos/workflows), and nightly's matrix is ~30 services, so 4 keeps healthy headroom
+      # under that ceiling instead of racing other concurrent CI for the same slots.
+      max-parallel: 4
       matrix:
         service: ${{ fromJSON(needs.changes.outputs.services) }}
     uses: ./.github/workflows/_service-ci.yml

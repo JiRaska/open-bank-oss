@@ -94,4 +94,36 @@ class Pacs008ReaderTest {
         assertThatThrownBy { reader.read(noCcy) }
             .isInstanceOf(Pacs008ParseException::class.java)
     }
+
+    // Fuzzing findings (Jazzer, fuzz/ossfuzz): malformed input must surface as the typed
+    // Pacs008ParseException, never a raw SAXParseException / NumberFormatException that would
+    // become a 500 at the clearing boundary instead of a clean 4xx.
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = ["", "   ", "<", "<Document", "not xml at all", "<a></b>"])
+    fun `malformed XML surfaces as a typed parse exception`(bad: String) {
+        assertThatThrownBy { reader.read(bad) }
+            .isInstanceOf(Pacs008ParseException::class.java)
+    }
+
+    @Test
+    fun `rejects a non-numeric settlement amount without leaking NumberFormatException`() {
+        val badAmount = """
+            <Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08">
+              <FIToFICstmrCdtTrf>
+                <GrpHdr><MsgId>M1</MsgId></GrpHdr>
+                <CdtTrfTxInf>
+                  <PmtId><EndToEndId>E2E-0001</EndToEndId></PmtId>
+                  <IntrBkSttlmAmt Ccy="EUR">not-a-number</IntrBkSttlmAmt>
+                  <Cdtr><Nm>Bob</Nm></Cdtr>
+                  <CdtrAcct><Id><IBAN>FR1420041010050500013M02606</IBAN></Id></CdtrAcct>
+                  <CdtrAgt><FinInstnId><BICFI>BNPAFRPPXXX</BICFI></FinInstnId></CdtrAgt>
+                  <DbtrAcct><Id><IBAN>DE89370400440532013000</IBAN></Id></DbtrAcct>
+                </CdtTrfTxInf>
+              </FIToFICstmrCdtTrf>
+            </Document>
+        """.trimIndent()
+
+        assertThatThrownBy { reader.read(badAmount) }
+            .isInstanceOf(Pacs008ParseException::class.java)
+    }
 }
