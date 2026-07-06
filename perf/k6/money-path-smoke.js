@@ -19,6 +19,13 @@ import http from "k6/http";
 import { check } from "k6";
 import { Trend } from "k6/metrics";
 
+// The two money-path reads sit behind auth and legitimately answer 401 unauthenticated.
+// Without this, k6's http_req_failed counts every 401 as a failure → the built-in
+// reliability metric would be ~0.67 by construction whenever OIDC is on, breaching its
+// threshold on every run and making the "trend" meaningless. Treat 200 AND 401 as expected
+// so http_req_failed only counts real transport errors / 5xx.
+http.setResponseCallback(http.expectedStatuses(200, 401));
+
 const LEDGER_URL = __ENV.LEDGER_URL || "http://localhost:8101";
 const TXN_URL = __ENV.TXN_URL || "http://localhost:8102";
 
