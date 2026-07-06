@@ -5,6 +5,50 @@
   "messages": [
     {
       "contents": {
+        "eventType": "KYC_STATUS_CHANGED",
+        "partyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "status": "ACTIVE"
+      },
+      "description": "a KYC_STATUS_CHANGED event",
+      "generators": {
+        "body": {
+          "$.partyId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.partyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.status": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "a party KYC status has changed"
+        }
+      ]
+    },
+    {
+      "contents": {
         "eventType": "PARTY_CREATED",
         "legalName": "Jane Smith",
         "partyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
@@ -53,6 +97,50 @@
       "providerStates": [
         {
           "name": "a party has been created"
+        }
+      ]
+    },
+    {
+      "contents": {
+        "eventType": "PARTY_UPDATED",
+        "partyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "status": "ACTIVE"
+      },
+      "description": "a PARTY_UPDATED event",
+      "generators": {
+        "body": {
+          "$.partyId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.partyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.status": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "a party has been updated"
         }
       ]
     }
