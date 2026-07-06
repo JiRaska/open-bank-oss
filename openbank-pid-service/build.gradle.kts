@@ -57,7 +57,10 @@ kover {
         verify {
             rule {
                 bound {
-                    minValue = 0
+                    // Ratchet-only floor (ADR-0029 rule #5): measured line coverage is ~57.6% as of
+                    // this change (up from 0/unset); set a few points below so routine variance
+                    // doesn't trip CI, but the floor never goes back down.
+                    minValue = 55
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }

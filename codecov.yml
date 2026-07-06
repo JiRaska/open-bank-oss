@@ -1,0 +1,216 @@
+codecov:
+  require_ci_to_pass: false
+
+coverage:
+  precision: 2
+  round: down
+  range: "30...80"
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+        informational: true
+      money-path:
+        target: auto
+        threshold: 0.5%
+        informational: true
+        flags:
+          - openbank-ledger-service
+          - openbank-transaction-service
+          - openbank-account-service
+          - openbank-balance-service
+          - openbank-sepa-payment
+          - openbank-sepa-instant
+          - openbank-domestic-payment
+          - openbank-clearing-service
+          - openbank-swift-service
+          - openbank-fx-service
+          - openbank-lending-service
+          - openbank-sca-service
+          - openbank-consent-service
+          - openbank-fraud-service
+          - openbank-billing-service
+    patch:
+      default:
+        target: auto
+        informational: true
+
+flag_management:
+  default_rules:
+    carryforward: true
+    statuses:
+      - type: project
+        target: auto
+        informational: true
+
+component_management:
+  default_rules:
+    statuses:
+      - type: project
+        target: auto
+        informational: true
+  individual_components:
+    - component_id: money-path
+      name: Money-path services
+      flag_regexes:
+        - ^openbank-ledger-service$
+        - ^openbank-transaction-service$
+        - ^openbank-account-service$
+        - ^openbank-balance-service$
+        - ^openbank-sepa-payment$
+        - ^openbank-sepa-instant$
+        - ^openbank-domestic-payment$
+        - ^openbank-clearing-service$
+        - ^openbank-swift-service$
+        - ^openbank-fx-service$
+        - ^openbank-lending-service$
+        - ^openbank-sca-service$
+        - ^openbank-consent-service$
+        - ^openbank-fraud-service$
+        - ^openbank-billing-service$
+    - component_id: account-service
+      name: account-service
+      flag_regexes: ["^openbank-account-service$"]
+    - component_id: agent-service
+      name: agent-service
+      flag_regexes: ["^openbank-agent-service$"]
+    - component_id: aml-service
+      name: aml-service
+      flag_regexes: ["^openbank-aml-service$"]
+    - component_id: anacredit-service
+      name: anacredit-service
+      flag_regexes: ["^openbank-anacredit-service$"]
+    - component_id: analytics-sink
+      name: analytics-sink
+      flag_regexes: ["^openbank-analytics-sink$"]
+    - component_id: audit-service
+      name: audit-service
+      flag_regexes: ["^openbank-audit-service$"]
+    - component_id: balance-service
+      name: balance-service
+      flag_regexes: ["^openbank-balance-service$"]
+    - component_id: billing-service
+      name: billing-service
+      flag_regexes: ["^openbank-billing-service$"]
+    - component_id: card-issuance-service
+      name: card-issuance-service
+      flag_regexes: ["^openbank-card-issuance-service$"]
+    - component_id: clearing-service
+      name: clearing-service
+      flag_regexes: ["^openbank-clearing-service$"]
+    - component_id: clearing-simulator
+      name: clearing-simulator
+      flag_regexes: ["^openbank-clearing-simulator$"]
+    - component_id: consent-service
+      name: consent-service
+      flag_regexes: ["^openbank-consent-service$"]
+    - component_id: copilot-service
+      name: copilot-service
+      flag_regexes: ["^openbank-copilot-service$"]
+    - component_id: customer-edge
+      name: customer-edge
+      flag_regexes: ["^openbank-customer-edge$"]
+    - component_id: devops-agent
+      name: devops-agent
+      flag_regexes: ["^openbank-devops-agent$"]
+    - component_id: dispute-service
+      name: dispute-service
+      flag_regexes: ["^openbank-dispute-service$"]
+    - component_id: domestic-payment
+      name: domestic-payment
+      flag_regexes: ["^openbank-domestic-payment$"]
+    - component_id: finops-agent
+      name: finops-agent
+      flag_regexes: ["^openbank-finops-agent$"]
+    - component_id: finrep-service
+      name: finrep-service
+      flag_regexes: ["^openbank-finrep-service$"]
+    - component_id: fraud-service
+      name: fraud-service
+      flag_regexes: ["^openbank-fraud-service$"]
+    - component_id: fx-service
+      name: fx-service
+      flag_regexes: ["^openbank-fx-service$"]
+    - component_id: interest-service
+      name: interest-service
+      flag_regexes: ["^openbank-interest-service$"]
+    - component_id: kyc-service
+      name: kyc-service
+      flag_regexes: ["^openbank-kyc-service$"]
+    - component_id: ledger-service
+      name: ledger-service
+      flag_regexes: ["^openbank-ledger-service$"]
+    - component_id: lending-service
+      name: lending-service
+      flag_regexes: ["^openbank-lending-service$"]
+    - component_id: libs
+      name: libs
+      flag_regexes: ["^openbank-libs$"]
+    - component_id: libs-domain
+      name: libs-domain
+      flag_regexes: ["^openbank-libs-domain$"]
+    - component_id: libs-runtime
+      name: libs-runtime
+      flag_regexes: ["^openbank-libs-runtime$"]
+    - component_id: notification-service
+      name: notification-service
+      flag_regexes: ["^openbank-notification-service$"]
+    - component_id: onboarding-service
+      name: onboarding-service
+      flag_regexes: ["^openbank-onboarding-service$"]
+    - component_id: party-service
+      name: party-service
+      flag_regexes: ["^openbank-party-service$"]
+    - component_id: pid-service
+      name: pid-service
+      flag_regexes: ["^openbank-pid-service$"]
+    - component_id: product-catalog
+      name: product-catalog
+      flag_regexes: ["^openbank-product-catalog$"]
+    - component_id: psd2-service
+      name: psd2-service
+      flag_regexes: ["^openbank-psd2-service$"]
+    - component_id: sanctions-service
+      name: sanctions-service
+      flag_regexes: ["^openbank-sanctions-service$"]
+    - component_id: sca-service
+      name: sca-service
+      flag_regexes: ["^openbank-sca-service$"]
+    - component_id: sdd-service
+      name: sdd-service
+      flag_regexes: ["^openbank-sdd-service$"]
+    - component_id: security-scanner
+      name: security-scanner
+      flag_regexes: ["^openbank-security-scanner$"]
+    - component_id: sepa-instant
+      name: sepa-instant
+      flag_regexes: ["^openbank-sepa-instant$"]
+    - component_id: sepa-payment
+      name: sepa-payment
+      flag_regexes: ["^openbank-sepa-payment$"]
+    - component_id: settlement-service
+      name: settlement-service
+      flag_regexes: ["^openbank-settlement-service$"]
+    - component_id: simulation
+      name: simulation
+      flag_regexes: ["^openbank-simulation$"]
+    - component_id: standing-order-service
+      name: standing-order-service
+      flag_regexes: ["^openbank-standing-order-service$"]
+    - component_id: statement-service
+      name: statement-service
+      flag_regexes: ["^openbank-statement-service$"]
+    - component_id: swift-service
+      name: swift-service
+      flag_regexes: ["^openbank-swift-service$"]
+    - component_id: tpp-registry-service
+      name: tpp-registry-service
+      flag_regexes: ["^openbank-tpp-registry-service$"]
+    - component_id: transaction-service
+      name: transaction-service
+      flag_regexes: ["^openbank-transaction-service$"]
+
+comment:
+  layout: "condensed_header, diff, flags, components"
+  require_changes: true
