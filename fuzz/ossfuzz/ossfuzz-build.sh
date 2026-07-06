@@ -13,8 +13,12 @@ cd "$SRC/open-bank-oss"
 # 1) Compile the fuzzed classes (domain module only — no Quarkus, no containers).
 ./gradlew :openbank-libs-domain:classes --no-daemon -q
 
-# 2) Compile the fuzz harnesses against them (standalone module).
-(cd fuzz/ossfuzz && gradle shadowJar --no-daemon -q)
+# 2) Compile the fuzz harnesses against them. The fuzz module is a standalone build with
+# its own settings.gradle.kts and NO wrapper of its own, so drive it with the ROOT wrapper
+# (which provides the Gradle distribution) — a bare `gradle` is not on the OSS-Fuzz
+# base-builder-jvm image. `-p` points the root wrapper at the standalone project dir, which
+# uses fuzz/ossfuzz/settings.gradle.kts.
+./gradlew -p fuzz/ossfuzz shadowJar --no-daemon -q
 
 # 3) Package per OSS-Fuzz JVM conventions.
 cp fuzz/ossfuzz/build/libs/ossfuzz-all.jar "$OUT/openbank.jar"
