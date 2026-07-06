@@ -20,7 +20,15 @@ import org.junit.jupiter.api.extension.ExtendWith
 /**
  * Consumer-driven contract for the ledger trial-balance endpoint called by the ADR-0039 Phase A
  * reconciliation. The generated pact file is committed to `pacts/` (git-pact pattern, ADR-0063)
- * and replayed by [LedgerPactProviderVerificationTest] in openbank-ledger-service.
+ * and replayed by `LedgerPactProviderVerificationTest` (`@PactFolder("../pacts")`) in
+ * openbank-ledger-service — that test always runs, no Pact Broker involved.
+ *
+ * IMPORTANT — regenerate on change: if this test's `@Pact` methods change (new interaction,
+ * different matcher, renamed field), re-run this test (`./gradlew :openbank-balance-service:test
+ * --tests "*LedgerTrialBalancePactConsumerTest*"`) and commit the updated
+ * `pacts/openbank-balance-service-openbank-ledger-service.json` in the same PR. There is no CI
+ * drift check yet (planned for ADR-0063 Phase 2) — an un-regenerated pact file silently verifies
+ * the OLD contract on the provider side.
  *
  * Uses Pact DSL — not the actual MicroProfile REST Client — so the test has zero Quarkus
  * boot overhead and runs in < 100 ms. What is verified: the shape and types the client DTO

@@ -1,0 +1,122 @@
+# Post-publish container image rescan (ADR-0030; SSDLC-audit follow-up 2026-07-06).
+#
+# security.yml scans the SOURCE TREE at build time; nothing rescanned the images
+# already published to GHCR when a NEW CVE lands in an already-shipped dependency.
+# This closes that window: weekly trivy scan of every released service's
+# ghcr.io/jiraska/<service>:latest image.
+#
+# VEX-aware: each component's human triage overlay
+# (openbank-libs/governance/vex/<component>.openvex.json) is passed to trivy
+# natively (--vex), so dispositioned findings (not_affected / fixed) do not
+# re-alarm. What remains is genuinely new, undispositioned exposure.
+#
+# Failure semantics (escalation pattern shared with vex-triage.yml / ADR-0144):
+# an undispositioned CRITICAL or HIGH in a shipped image FAILS that service's
+# job — the weekly red run is the signal to either bump + redeploy (Dependabot
+# usually already has the PR open) or record a VEX verdict.
+name: Image rescan
+
+on:
+  schedule:
+    - cron: "30 6 * * 1"   # weekly Monday 06:30 UTC — after Dependabot (06:00), before vex-triage (07:00)
+  workflow_dispatch:
+    inputs:
+      services:
+        description: "Space-separated service modules to rescan (default: every released openbank-*-service)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    name: Discover released services
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      services: ${{ steps.list.outputs.services }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - id: list
+        env:
+          REQUESTED: ${{ inputs.services }}
+        run: |
+          set -euo pipefail
+          if [ -n "${REQUESTED:-}" ]; then
+            list="$(printf '%s\n' $REQUESTED)"
+          else
+            # Same discovery rule as ghcr-publish.yml: a module is a released
+            # component iff it has a version.txt; only services bake an image.
+            list="$(for d in openbank-*-service; do
+              [ -f "$d/version.txt" ] && [ -f "$d/build.gradle.kts" ] && echo "$d"
+            done)"
+          fi
+          services="$(echo "$list" | jq -Rnc '[inputs | select(length > 0)]')"
+          echo "services=$services" >> "$GITHUB_OUTPUT"
+          echo "Rescanning: $services"
+
+  rescan:
+    name: rescan / ${{ matrix.service }}
+    needs: discover
+    if: needs.discover.outputs.services != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read       # pull from ghcr.io
+    strategy:
+      fail-fast: false     # one red service must not hide the others' results
+      max-parallel: 6
+      matrix:
+        service: ${{ fromJSON(needs.discover.outputs.services) }}
+    env:
+      IMAGE: ghcr.io/jiraska/${{ matrix.service }}:latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          cache: true
+
+      - name: Check image exists on GHCR
+        id: exists
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            # Released component that has not been GHCR-published yet — not this
+            # workflow's failure to report (ghcr-publish.yml owns publication).
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${IMAGE} not on GHCR — skipping (not yet published)."
+          fi
+
+      - name: Rescan image (VEX-aware)
+        if: steps.exists.outputs.found == 'true'
+        run: |
+          set -euo pipefail
+          # Component overlay: release tags use the module name; accept both
+          # openbank-x-service.openvex.json and x-service.openvex.json.
+          svc="${{ matrix.service }}"
+          vex_args=()
+          for cand in "openbank-libs/governance/vex/${svc}.openvex.json" \
+                      "openbank-libs/governance/vex/${svc#openbank-}.openvex.json"; do
+            if [ -f "$cand" ]; then
+              vex_args+=(--vex "$cand")
+              echo "Using VEX overlay: $cand"
+            fi
+          done
+          # --ignore-unfixed: a finding with no released fix is tracked by the
+          # VEX triage lifecycle, not solvable by a rebuild; alarming weekly on
+          # it would train alert fatigue.
+          trivy image "$IMAGE" \
+            --scanners vuln \
+            --severity CRITICAL,HIGH \
+            --ignore-unfixed \
+            "${vex_args[@]}" \
+            --format table \
+            --exit-code 1 \
+            || { echo "::error::${IMAGE}: undispositioned fixable CRITICAL/HIGH in a shipped image — bump + redeploy (check the open Dependabot PR) or record a VEX verdict in openbank-libs/governance/vex/"; exit 1; }
+          echo "::notice::${IMAGE}: no undispositioned fixable CRITICAL/HIGH."
