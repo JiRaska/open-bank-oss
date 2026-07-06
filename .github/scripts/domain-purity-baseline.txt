@@ -1,0 +1,14 @@
+# Domain-purity baseline (ADR-0002) — grandfathered violations, BURN DOWN ONLY.
+# Never add entries: a new framework import in the domain layer fails CI outright.
+# Delete a line here in the same PR that fixes (or removes) the import.
+openbank-agent-service/src/main/kotlin/com/openbank/agent/domain/McpTypes.kt:import com.fasterxml.jackson.annotation.JsonInclude
+openbank-agent-service/src/main/kotlin/com/openbank/agent/domain/McpTypes.kt:import com.fasterxml.jackson.databind.JsonNode
+openbank-agent-service/src/main/kotlin/com/openbank/agent/domain/model/ModelTypes.kt:import com.fasterxml.jackson.databind.JsonNode
+openbank-copilot-service/src/main/kotlin/com/openbank/copilot/domain/model/ModelTypes.kt:import com.fasterxml.jackson.databind.JsonNode
+openbank-libs-domain/src/main/kotlin/com/openbank/libs/domain/identifiers/EntityId.kt:import com.fasterxml.jackson.annotation.JsonCreator
+openbank-libs-domain/src/main/kotlin/com/openbank/libs/domain/identifiers/EntityId.kt:import com.fasterxml.jackson.annotation.JsonValue
+openbank-libs-domain/src/main/kotlin/com/openbank/libs/domain/identifiers/LendingIds.kt:import com.fasterxml.jackson.annotation.JsonCreator
+openbank-libs-domain/src/main/kotlin/com/openbank/libs/domain/identifiers/LendingIds.kt:import com.fasterxml.jackson.annotation.JsonValue
+openbank-libs-domain/src/main/kotlin/com/openbank/libs/domain/money/Money.kt:import com.fasterxml.jackson.annotation.JsonCreator
+openbank-libs-domain/src/main/kotlin/com/openbank/libs/domain/money/Money.kt:import com.fasterxml.jackson.annotation.JsonProperty
+openbank-product-catalog/src/main/kotlin/com/openbank/productcatalog/domain/Product.kt:import io.quarkus.runtime.annotations.RegisterForReflection

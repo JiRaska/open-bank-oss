@@ -424,6 +424,12 @@ dependencies:
 architecture:
   hexagonal: true
   domain_zero_framework_imports: true   # domain layer must not import Quarkus/Jakarta/Spring
+  # ENFORCED by .github/scripts/check-domain-purity.sh (Validate manifests job):
+  # baseline-ratcheted — 11 grandfathered violations burn down as touched, any NEW
+  # framework import in */domain/* fails CI. openbank-libs-runtime is module-exempt
+  # (shares the domain package string for its JPA converters but IS the framework
+  # side of the ADR-0122 split).
+  ci_producer: ".github/scripts/check-domain-purity.sh"
 
 # ---------------------------------------------------------------------------------------
 # Vulnerability-management lifecycle SLAs (ADR-0030 D1). Detection -> closure, in days.
