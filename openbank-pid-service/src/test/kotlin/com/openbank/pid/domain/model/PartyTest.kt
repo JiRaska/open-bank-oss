@@ -18,19 +18,17 @@ class PartyTest {
 
     private val now: OffsetDateTime = OffsetDateTime.parse("2025-01-01T00:00:00Z")
 
-    private fun relationship(
-        role: PartyRole,
-        status: RelationshipStatus = RelationshipStatus.ACTIVE,
-    ) = PartyRelationship(
-        id = UUID.randomUUID(),
-        partyId = UUID.randomUUID(),
-        role = role,
-        status = status,
-        onboardedAt = now,
-        onboardingChannel = OnboardingChannel.API,
-        terminatedAt = null,
-        terminationReason = null,
-    )
+    private fun relationship(role: PartyRole, status: RelationshipStatus = RelationshipStatus.ACTIVE) =
+        PartyRelationship(
+            id = UUID.randomUUID(),
+            partyId = UUID.randomUUID(),
+            role = role,
+            status = status,
+            onboardedAt = now,
+            onboardingChannel = OnboardingChannel.API,
+            terminatedAt = null,
+            terminationReason = null,
+        )
 
     private fun party(
         relationships: List<PartyRelationship> = emptyList(),

@@ -174,16 +174,15 @@ class VerificationCaseServiceTest {
     }
 
     @Test
-    fun `listActive delegates to the repository with OPEN and AWAITING_SECOND_APPROVAL statuses`(): Unit =
-        runBlocking {
-            val expected = listOf(storedCase(VerificationCaseStatus.OPEN))
-            val activeStatuses = listOf(VerificationCaseStatus.OPEN, VerificationCaseStatus.AWAITING_SECOND_APPROVAL)
-            coEvery { repo.listByStatuses(activeStatuses) } returns expected
+    fun `listActive delegates to the repository with OPEN and AWAITING_SECOND_APPROVAL statuses`(): Unit = runBlocking {
+        val expected = listOf(storedCase(VerificationCaseStatus.OPEN))
+        val activeStatuses = listOf(VerificationCaseStatus.OPEN, VerificationCaseStatus.AWAITING_SECOND_APPROVAL)
+        coEvery { repo.listByStatuses(activeStatuses) } returns expected
 
-            val result = svc.listActive()
+        val result = svc.listActive()
 
-            assertThat(result).isEqualTo(expected)
-        }
+        assertThat(result).isEqualTo(expected)
+    }
 
     @Test
     fun `get delegates to the repository by id`(): Unit = runBlocking {

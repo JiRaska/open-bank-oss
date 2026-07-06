@@ -38,11 +38,8 @@ class StatusListServiceTest {
         issuerId = issuerId,
     )
 
-    private fun service(
-        withKey: Boolean = true,
-        listId: String = "1",
-        ttlSeconds: Long = 3600,
-    ) = StatusListService(eudiKey(withKey), mapper, InMemoryStatusListStore(), listId, ttlSeconds, testClock)
+    private fun service(withKey: Boolean = true, listId: String = "1", ttlSeconds: Long = 3600) =
+        StatusListService(eudiKey(withKey), mapper, InMemoryStatusListStore(), listId, ttlSeconds, testClock)
 
     @Test
     fun `enabled mirrors whether an issuer signing key is configured`() {
