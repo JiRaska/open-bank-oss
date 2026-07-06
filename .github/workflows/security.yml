@@ -108,6 +108,13 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      # autobuild below shells out to `./gradlew testClasses` for the java-kotlin
+      # leg — validate the wrapper jar before it runs, same as every other job
+      # that invokes gradlew.
+      - name: Validate Gradle wrapper
+        if: matrix.language == 'java-kotlin'
+        uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+
       # The javascript-typescript extractor needs Node.js on PATH even in
       # build-mode: none — it shells out to autobuild.sh internally to verify a
       # Node install before parsing .ts files for type info. Our self-hosted
@@ -249,6 +256,8 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
       - name: Cache Gradle
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
         with:
