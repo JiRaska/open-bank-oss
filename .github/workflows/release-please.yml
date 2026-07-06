@@ -116,6 +116,11 @@ jobs:
       contents: write       # upload release assets
       id-token: write       # GitHub OIDC → assume the build-runner role for KMS cosign
       attestations: write   # native GitHub artifact attestation (activates when repo is public)
+    outputs:
+      # JSON array of release tags (strings) whose signed evidence bundle was
+      # successfully attached — feeds the provenance-subjects job below. Mirrors
+      # released.tsv minus any tag the evidence step skipped/failed for.
+      tags_matrix: ${{ steps.matrix.outputs.tags_matrix }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       PATHS_RELEASED: ${{ needs.release-please.outputs.paths_released }}
@@ -233,6 +238,7 @@ jobs:
             fi
             for f in $assets; do upload_asset "$upurl" "$f" || true; done
             echo "Attached signed evidence bundle to release $tag: $assets"
+            echo "$tag" >> provenance_ok.tags
           done < released.tsv
 
       # Native GitHub artifact attestation (Sigstore-backed SLSA provenance, verifiable
@@ -245,3 +251,114 @@ jobs:
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: "*.cdx.json"
+
+      - name: Emit tags matrix for SLSA provenance job
+        id: matrix
+        run: |
+          # Scorecard's Signed-Releases check only recognizes provenance as a release
+          # asset literally named "*.intoto.jsonl" (probes/releasesHaveProvenance) — our
+          # hand-authored <tag>.slsa.json above does NOT satisfy it regardless of content.
+          # Build the matrix (one entry per tag whose signed SBOM made it onto the release)
+          # for the separate `provenance` job, which calls the official
+          # slsa-framework/slsa-github-generator reusable workflow per component/tag.
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          tags = []
+          try:
+              with open("provenance_ok.tags") as f:
+                  tags = [line.strip() for line in f if line.strip()]
+          except FileNotFoundError:
+              pass
+          print("tags_matrix=" + json.dumps(tags))
+          PY
+          echo "tags for SLSA provenance: $(cat provenance_ok.tags 2>/dev/null | tr '\n' ' ')"
+
+  # ---------------------------------------------------------------------------
+  # SLSA provenance (OpenSSF Scorecard Signed-Releases, rules.yaml: provenance).
+  # ---------------------------------------------------------------------------
+  # Generates verifiable SLSA v1.0 build provenance via the OFFICIAL
+  # slsa-framework/slsa-github-generator reusable workflow and attaches a
+  # `<sbom>.intoto.jsonl` asset to EACH released component's GitHub Release — one
+  # call per tag (matrix), matching the per-service independent release model. This
+  # does NOT replace the cosign-signed evidence bundle above (SBOM/VEX/manifest,
+  # regulator-facing audit trail) — it is an ADDITIONAL, narrowly-scoped attestation
+  # whose sole purpose is to satisfy Scorecard's file-extension-based provenance
+  # detector (probes/releasesHaveProvenance only recognizes a release asset literally
+  # named "*.intoto.jsonl" — content is irrelevant), which the evidence bundle's
+  # *.slsa.json cannot satisfy regardless of how well-formed it is. Subject = the
+  # already-uploaded, cosign-signed CycloneDX SBOM for that release, so provenance
+  # covers the same artifact operators already download and verify.
+  provenance-subjects:
+    name: Hash SBOMs for SLSA provenance
+    needs: [release-please, release-evidence]
+    if: needs.release-please.outputs.releases_created == 'true' && needs.release-evidence.outputs.tags_matrix != '[]'
+    runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      # JSON object { "<tag>": "<base64 sha256sum line>", ... } — only tags whose SBOM
+      # asset was found and hashed successfully.
+      hashes_by_tag: ${{ steps.hash.outputs.hashes_by_tag }}
+      # JSON array of just those same tags, in the same order — this (not
+      # release-evidence's tags_matrix) is what the `provenance` job below matrixes
+      # over, so a job never starts for a tag whose hash lookup failed. A single
+      # (non-matrix) job, because job outputs from a `strategy.matrix` job do NOT fan
+      # back out per-index to a downstream matrix job (`needs.<job>.outputs.x`
+      # collapses to one arbitrary matrix run's value) — per-tag hashes are computed
+      # here in one pass and indexed by tag in the `provenance` job.
+      tags_matrix: ${{ steps.hash.outputs.tags_matrix }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAGS_MATRIX: ${{ needs.release-evidence.outputs.tags_matrix }}
+    steps:
+      - name: Download each release's signed SBOM and hash it
+        id: hash
+        run: |
+          set -euo pipefail
+          api() { curl -sS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
+          python3 -c "import json; [print(t) for t in json.loads('''$TAGS_MATRIX''')]" > tags.txt
+          echo "{" > map.json
+          : > ok.tags
+          first=true
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            rel="$(api "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${tag}")"
+            aid="$(echo "$rel" | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('assets',[]) if x['name']=='${tag}.cdx.json']; print(a[0]['id'] if a else '')")"
+            if [ -z "$aid" ]; then echo "::warning::no ${tag}.cdx.json asset on release ${tag} — skipping provenance"; continue; fi
+            curl -sSL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/octet-stream" \
+              -o "${tag}.cdx.json" "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${aid}"
+            if [ ! -s "${tag}.cdx.json" ]; then echo "::warning::downloaded ${tag}.cdx.json is empty — skipping"; continue; fi
+            hash="$(sha256sum "${tag}.cdx.json" | base64 -w0)"
+            $first || echo "," >> map.json
+            first=false
+            printf '"%s": %s' "$tag" "$(python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$hash")" >> map.json
+            echo "$tag" >> ok.tags
+          done < tags.txt
+          echo "}" >> map.json
+          {
+            echo "hashes_by_tag=$(python3 -c "import json; print(json.dumps(json.load(open('map.json'))))")"
+            echo "tags_matrix=$(python3 -c "import json; print(json.dumps([l.strip() for l in open('ok.tags') if l.strip()]))")"
+          } >> "$GITHUB_OUTPUT"
+
+  provenance:
+    name: SLSA provenance (${{ matrix.tag }})
+    needs: [release-please, release-evidence, provenance-subjects]
+    if: needs.provenance-subjects.outputs.tags_matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: ${{ fromJSON(needs.provenance-subjects.outputs.tags_matrix) }}
+    permissions:
+      actions: read         # required by the generator to detect the GitHub Actions environment
+      id-token: write       # provenance signing (Sigstore/Rekor) via OIDC
+      contents: write       # upload the provenance asset to the release
+    # Pinned by semver tag, NOT commit SHA (deviates from this repo's usual SHA-pin
+    # convention): the generator's own docs require a `@vX.Y.Z` ref — it verifies its
+    # own workflow identity against the tag for the builder-id in the provenance it
+    # issues, so a SHA pin breaks that self-verification. https://github.com/slsa-framework/slsa-github-generator/blob/main/internal/builders/generic/README.md#referencing-the-slsa-generator
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ fromJSON(needs.provenance-subjects.outputs.hashes_by_tag)[matrix.tag] }}
+      upload-assets: true
+      upload-tag-name: ${{ matrix.tag }}
