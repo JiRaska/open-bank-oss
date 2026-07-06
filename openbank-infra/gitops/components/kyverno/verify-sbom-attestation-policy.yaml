@@ -78,8 +78,13 @@ spec:
                         signatureAlgorithm: sha256
               conditions:
                 - all:
-                    # The attested predicate must actually be a CycloneDX BOM, not an
-                    # empty envelope: bomFormat is a required CycloneDX root field.
-                    - key: "{{ bomFormat }}"
+                    # The attested predicate must actually be a CycloneDX BOM, not an empty
+                    # envelope: bomFormat is a required CycloneDX root field. cosign attest
+                    # --type cyclonedx wraps the SBOM predicate under `Data`, so the field is
+                    # {{ Data.bomFormat }} — a bare {{ bomFormat }} resolves to null and would
+                    # fail EVERY correctly-attested image (100% false Audit failures, and a
+                    # fleet-wide reject if later flipped to Enforce). Matches Kyverno's own
+                    # reference "Verify CycloneDX SBOM" policy.
+                    - key: "{{ Data.bomFormat }}"
                       operator: Equals
                       value: "CycloneDX"
