@@ -61,14 +61,10 @@ data class Fee(
     val frequency: String,
     val description: String? = null,
     val waivable: Boolean = false,
-    val waiveCondition: String? = null
+    val waiveCondition: String? = null,
 )
 
-data class InterestTier(
-    val fromAmount: Double,
-    val toAmount: Double?,
-    val rateAnnual: Double
-)
+data class InterestTier(val fromAmount: Double, val toAmount: Double?, val rateAnnual: Double)
 
 data class CardConfig(
     val enabled: Boolean = false,
@@ -81,7 +77,7 @@ data class CardConfig(
     val eligibilityMinAge: Int? = null,
     val eligibilitySegments: List<EligibilitySegment> = listOf(EligibilitySegment.ALL),
     val monthlyFeePerCard: Double = 0.0,
-    val cardCurrency: String? = null
+    val cardCurrency: String? = null,
 )
 
 data class MultiCurrencyConfig(
@@ -91,7 +87,7 @@ data class MultiCurrencyConfig(
     val fxMarginPct: Double = 1.5,
     val fxMarginBuyPct: Double? = null,
     val fxMarginSellPct: Double? = null,
-    val crossCurrencyTransferAllowed: Boolean = true
+    val crossCurrencyTransferAllowed: Boolean = true,
 )
 
 data class OverdraftConfig(
@@ -101,7 +97,7 @@ data class OverdraftConfig(
     val gracePeriodDays: Int = 0,
     val unarrangedDailyFee: Double? = null,
     val unarrangedRateAnnual: Double? = null,
-    val autoApprovalEnabled: Boolean = false
+    val autoApprovalEnabled: Boolean = false,
 )
 
 data class TermDepositConfig(
@@ -112,7 +108,7 @@ data class TermDepositConfig(
     val payoutFrequency: InterestPayoutFrequency = InterestPayoutFrequency.AT_MATURITY,
     val autoRenewEnabled: Boolean = true,
     val earlyWithdrawalPenaltyPct: Double = 50.0,
-    val earlyWithdrawalNoticeDays: Int = 0
+    val earlyWithdrawalNoticeDays: Int = 0,
 )
 
 data class SavingsConfig(
@@ -121,7 +117,7 @@ data class SavingsConfig(
     val freeWithdrawalsPerMonth: Int = 0,
     val excessWithdrawalFee: Double = 0.0,
     val bonusRateCondition: String? = null,
-    val bonusRateAnnual: Double? = null
+    val bonusRateAnnual: Double? = null,
 )
 
 data class TermsAndConditions(
@@ -131,7 +127,7 @@ data class TermsAndConditions(
     val effectiveFrom: LocalDate,
     val effectiveTo: LocalDate? = null,
     val language: String = "cs",
-    val summary: String? = null
+    val summary: String? = null,
 )
 
 data class ProductVersion(
@@ -140,7 +136,7 @@ data class ProductVersion(
     val validTo: LocalDate? = null,
     val isPublic: Boolean = true,
     val changeNote: String? = null,
-    val createdAt: Instant = Instant.EPOCH
+    val createdAt: Instant = Instant.EPOCH,
 )
 
 @RegisterForReflection
@@ -172,5 +168,5 @@ data class Product(
     val tags: List<String> = emptyList(),
     val eligibilitySegments: List<EligibilitySegment> = listOf(EligibilitySegment.ALL),
     val createdAt: Instant = Instant.EPOCH,
-    val updatedAt: Instant = Instant.EPOCH
+    val updatedAt: Instant = Instant.EPOCH,
 )
