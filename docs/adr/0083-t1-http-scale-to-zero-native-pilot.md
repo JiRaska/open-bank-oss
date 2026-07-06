@@ -34,6 +34,47 @@ Author(s): Jiri Raska
 > GraalVM native before, so this may be a fleet-wide libs gap, not a product-catalog-only
 > one. **This blocks Enabler 1 from being considered done** — tracked as the first item
 > in #253 alongside the sandbox measurement, ahead of any deploy attempt.
+>
+> **Update (2026-07-06) — Enabler 1 bugs fixed; promotion gate still NOT met, for a
+> different reason than expected.** Root-caused and fixed both native-only defects (JVM
+> was unaffected by either — full detail in #253):
+> 1. `PostgresProductRepository.coAwait()` bridged Mutiny `Uni` → Kotlin coroutine via
+>    `subscribeAsCompletionStage().await()`, dropping the Vert.x duplicated context
+>    RESTEasy Reactive needs to write the response — a hand-rolled bridge; every other
+>    service in the fleet already uses the standard `mutiny-kotlin` `awaitSuspending()`
+>    for this. Switched to match the fleet.
+> 2. `Product` (JSONB-backed, deserialized via plain `ObjectMapper.readValue`, not a
+>    direct JAX-RS body) was never registered for reflection, so Jackson's Kotlin
+>    data-class Creator lookup failed under native with `InvalidDefinitionException`.
+>    Added `@RegisterForReflection`.
+>
+> With both fixed, `/api/v1/products` returns 200 with real data and `/q/health/ready`
+> on the management port returns `UP` with live DB connectivity — **the native image
+> itself now works correctly.** Deployed it to an isolated scratch namespace in the
+> sandbox cluster (own throwaway Postgres, no Ingress/HTTPScaledObject, zero blast
+> radius) and measured 5 scale-0→1 cycles: **3.5 s, 4.8 s, 8.8 s, 5.2 s, 7.5 s** (mixed
+> methodology — Pod-`Ready` time and Service-reachable time; both landed in the same
+> multi-second range). This is **7-25× the ADR's ~300-500 ms p95 target**, and the gap
+> is NOT the application — process start alone is ~0.2-0.3 s, confirmed repeatedly.
+> **The gap is Kubernetes Pod-lifecycle overhead**: scheduling, image pull when a node
+> hasn't cached the image (~3 s observed), and the kubelet's readiness-probe polling
+> interval — none of which a fast-starting binary can shortcut. The scratch test used a
+> *more aggressive* probe (`periodSeconds: 1`) than product-catalog's real gitops
+> manifest (`periodSeconds: 10`, plus a `startupProbe` with `initialDelaySeconds: 5`) —
+> so production would measure slower, not faster, than these numbers.
+>
+> **This means the ADR's promotion gate as written may be unmeasurable-as-stated for a
+> Pod-scale-from-zero mechanism, regardless of image type.** The KEDA HTTP add-on
+> interceptor hides this latency from the caller (parks the request, no 5xx — by
+> design, per the risk table above), but the ADR's own §"Promotion gate" asks to
+> "promote only if native cold start (0 → first-byte) ≤ ~300-500 ms p95," and that
+> number was scoped to *process* start, not *Kubernetes Pod* start. `rules.yaml`'s
+> `openbank-product-catalog` entry stays unclassified (not T1) — the SLO, as measured
+> end-to-end, is not met. Whether to (a) redefine the promotion gate around what's
+> actually controllable (process start) and treat multi-second interceptor latency as
+> an accepted trade-off, or (b) treat this as evidence T1 isn't viable for this service
+> without further platform work (node-level image pre-pulling, a faster probe) is a
+> product decision, not something this correction resolves — recorded in #253.
 
 > **Renumbered 0059 → 0083 (2026-06-11).** This ADR was originally filed as ADR-0059, a
 > number it accidentally shared with the (more widely referenced) outbound-oversight-webhooks

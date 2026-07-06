@@ -8,8 +8,8 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.productcatalog.application.port.out.ProductRepository
 import com.openbank.productcatalog.domain.Product
 import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
-import kotlinx.coroutines.future.await
 import org.hibernate.reactive.mutiny.Mutiny
 import java.util.UUID
 
@@ -28,24 +28,24 @@ class PostgresProductRepository(
 
     override suspend fun findAll(): List<Product> = sf.withSession { s ->
         s.createQuery("FROM ProductEntity ORDER BY code", ProductEntity::class.java).resultList
-    }.map { rows -> rows.map { it.toDomain() } }.coAwait()
+    }.map { rows -> rows.map { it.toDomain() } }.awaitSuspending()
 
     override suspend fun findById(id: UUID): Product? =
         sf.withSession { s -> s.find(ProductEntity::class.java, id) }
             .map { it?.toDomain() }
-            .coAwait()
+            .awaitSuspending()
 
     override suspend fun findByCode(code: String): Product? = sf.withSession { s ->
         s.createQuery(
             "FROM ProductEntity WHERE code = :c OR legacyCode = :c",
             ProductEntity::class.java,
         ).setParameter("c", code).resultList
-    }.map { rows -> rows.firstOrNull()?.toDomain() }.coAwait()
+    }.map { rows -> rows.firstOrNull()?.toDomain() }.awaitSuspending()
 
     override suspend fun save(product: Product, legacyCode: String?): Product =
         sf.withTransaction { s -> s.persist(newEntity(product, legacyCode)) }
             .replaceWith(product)
-            .coAwait()
+            .awaitSuspending()
 
     override suspend fun update(product: Product): Product = sf.withTransaction { s ->
         s.find(ProductEntity::class.java, UUID.fromString(product.id)).flatMap { existing ->
@@ -56,11 +56,11 @@ class PostgresProductRepository(
                 s.persist(newEntity(product, null)).replaceWith(product)
             }
         }
-    }.coAwait()
+    }.awaitSuspending()
 
     override suspend fun count(): Long =
         sf.withSession { s -> s.createQuery("SELECT COUNT(p) FROM ProductEntity p", Long::class.javaObjectType).singleResult }
-            .coAwait()
+            .awaitSuspending()
 
     private fun newEntity(p: Product, legacyCode: String?): ProductEntity =
         ProductEntity().apply {
@@ -78,7 +78,4 @@ class PostgresProductRepository(
     }
 
     private fun ProductEntity.toDomain(): Product = mapper.readValue(doc, Product::class.java)
-
-    /** Bridge a Mutiny [Uni] to a coroutine without pulling in mutiny-kotlin. */
-    private suspend fun <T> Uni<T>.coAwait(): T = subscribeAsCompletionStage().await()
 }
