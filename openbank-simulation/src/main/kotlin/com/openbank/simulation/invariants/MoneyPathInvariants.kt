@@ -4,6 +4,8 @@
 
 package com.openbank.simulation.invariants
 
+import com.openbank.sepa.domain.model.SepaPaymentStatus
+import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.runner.World
 import com.openbank.transaction.domain.saga.SagaState
@@ -100,6 +102,56 @@ object MoneyPathInvariants {
         }
     }
 
+    /**
+     * Issue #267 (ADR-0100 full-service adoption): every `SepaPayment` driven by
+     * [com.openbank.simulation.scenario.SepaSettlementScenario] must reach a terminal status
+     * (COMPLETED / REJECTED / RETURNED / CANCELLED) by the time a step has fully settled — the
+     * SEPA analogue of [compensationCompleteness].
+     */
+    val sepaPaymentCompleteness = object : Invariant {
+        private val terminal = setOf(
+            SepaPaymentStatus.COMPLETED,
+            SepaPaymentStatus.REJECTED,
+            SepaPaymentStatus.RETURNED,
+            SepaPaymentStatus.CANCELLED,
+        )
+
+        override val name = "sepa-payment-completeness"
+        override fun check(world: World): Violation? {
+            world.sepaPayments.forEach { payment ->
+                if (payment.status !in terminal) {
+                    return Violation(name, "sepa payment ${payment.id} stuck in ${payment.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #267: every `Settlement` driven alongside a SEPA payment must reach a terminal
+     * status (BOOKED / REJECTED / REVERSED / CREDITED_REVERSED / LEDGER_REVERSED) — no
+     * settlement may be left mid-flight (DEBITED/CREDITED without a following terminal state).
+     */
+    val settlementCompleteness = object : Invariant {
+        private val terminal = setOf(
+            SettlementStatus.BOOKED,
+            SettlementStatus.REJECTED,
+            SettlementStatus.REVERSED,
+            SettlementStatus.CREDITED_REVERSED,
+            SettlementStatus.LEDGER_REVERSED,
+        )
+
+        override val name = "settlement-completeness"
+        override fun check(world: World): Violation? {
+            world.settlements.forEach { settlement ->
+                if (settlement.status !in terminal) {
+                    return Violation(name, "settlement ${settlement.id} stuck in ${settlement.status}")
+                }
+            }
+            return null
+        }
+    }
+
     /** All Layer-3 invariants, in check order. */
     val ALL: List<Invariant> = listOf(
         conservationOfMoney,
@@ -107,6 +159,8 @@ object MoneyPathInvariants {
         projectionConsistency,
         compensationCompleteness,
         auditCompleteness,
+        sepaPaymentCompleteness,
+        settlementCompleteness,
     )
 
     /** A terminal-state guard used by the saga orchestrator. */

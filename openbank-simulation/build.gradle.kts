@@ -53,6 +53,14 @@ dependencies {
     implementation(project(":openbank-balance-service"))
     implementation(project(":openbank-transaction-service"))
 
+    // Issue #267 (ADR-0100 full-service adoption): the harness also drives the REAL
+    // `SepaPayment` status machine (sepa-payment) and `Settlement` status machine
+    // (settlement-service), rather than a re-model of either. Both domain packages
+    // are framework-free (ADR-0002 — no jakarta/quarkus/temporal imports), so only
+    // the domain POJOs land on the classpath, not a runtime.
+    implementation(project(":openbank-sepa-payment"))
+    implementation(project(":openbank-settlement-service"))
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
