@@ -29,21 +29,21 @@ interface TechnicalAccount {
   lastMovementAt?: string
 }
 
-const TYPE_LABELS: Record<string, { label: string; color: string }> = {
-  NOSTRO:           { label: 'Nostro',          color: '#2563eb' },
-  VOSTRO:           { label: 'Vostro',          color: '#7c3aed' },
-  SUSPENSE:         { label: 'Suspense',         color: '#d97706' },
-  FEE_INCOME:       { label: 'Fee Income',       color: '#16a34a' },
-  FEE_EXPENSE:      { label: 'Fee Expense',      color: '#dc2626' },
-  INTEREST_INCOME:  { label: 'Interest Income',  color: '#059669' },
-  INTEREST_EXPENSE: { label: 'Interest Expense', color: '#b91c1c' },
-  PROVISION:        { label: 'Provision',        color: '#9333ea' },
-  CLEARING:         { label: 'Clearing',         color: '#0891b2' },
-  SETTLEMENT:       { label: 'Settlement',       color: '#1d4ed8' },
-  CAPITAL:          { label: 'Capital',          color: '#065f46' },
-  RESERVE:          { label: 'Reserve',          color: '#1e3a5f' },
-  TAX:              { label: 'Tax',              color: '#92400e' },
-  OTHER:            { label: 'Other',            color: '#6b7280' },
+const TYPE_LABELS: Record<string, { labelCs: string; labelEn: string; color: string }> = {
+  NOSTRO:           { labelCs: 'Nostro',           labelEn: 'Nostro',          color: '#2563eb' },
+  VOSTRO:           { labelCs: 'Vostro',           labelEn: 'Vostro',          color: '#7c3aed' },
+  SUSPENSE:         { labelCs: 'Přechodný účet',   labelEn: 'Suspense',        color: '#d97706' },
+  FEE_INCOME:       { labelCs: 'Výnosy z poplatků', labelEn: 'Fee Income',      color: '#16a34a' },
+  FEE_EXPENSE:      { labelCs: 'Náklady na poplatky', labelEn: 'Fee Expense',  color: '#dc2626' },
+  INTEREST_INCOME:  { labelCs: 'Úrokové výnosy',   labelEn: 'Interest Income', color: '#059669' },
+  INTEREST_EXPENSE: { labelCs: 'Úrokové náklady',  labelEn: 'Interest Expense', color: '#b91c1c' },
+  PROVISION:        { labelCs: 'Rezerva na ztráty', labelEn: 'Provision',      color: '#9333ea' },
+  CLEARING:         { labelCs: 'Clearing',         labelEn: 'Clearing',        color: '#0891b2' },
+  SETTLEMENT:       { labelCs: 'Vypořádání',       labelEn: 'Settlement',      color: '#1d4ed8' },
+  CAPITAL:          { labelCs: 'Kapitál',          labelEn: 'Capital',         color: '#065f46' },
+  RESERVE:          { labelCs: 'Rezerva',          labelEn: 'Reserve',         color: '#1e3a5f' },
+  TAX:              { labelCs: 'Daň',              labelEn: 'Tax',            color: '#92400e' },
+  OTHER:            { labelCs: 'Ostatní',          labelEn: 'Other',          color: '#6b7280' },
 }
 
 // Seed data — in production this would come from account-service /api/v1/technical-accounts
@@ -110,7 +110,7 @@ export default function TechnicalAccountsPage() {
               background: filter === g ? (cfg?.color || 'var(--accent)') : 'var(--surface)',
               color: filter === g ? '#fff' : 'var(--text-secondary)',
               cursor: 'pointer', fontFamily: 'inherit',
-            }}>{g === 'all' ? t('Vše', 'All') : (cfg?.label || g)}</button>
+            }}>{g === 'all' ? t('Vše', 'All') : (cfg ? t(cfg.labelCs, cfg.labelEn) : g)}</button>
           )
         })}
       </div>
@@ -144,7 +144,7 @@ export default function TechnicalAccountsPage() {
                     </td>
                     <td>
                       <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '4px', background: `${typeCfg.color}15`, color: typeCfg.color, border: `1px solid ${typeCfg.color}30` }}>
-                        {typeCfg.label}
+                        {t(typeCfg.labelCs, typeCfg.labelEn)}
                       </span>
                     </td>
                     <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '12px' }}>{acc.currency}</td>

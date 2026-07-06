@@ -140,6 +140,43 @@ class FxServiceTest {
     }
 
     @Test
+    fun `conversion applies the ask rate and rounds the converted amount half-up`() = runBlocking<Unit> {
+        val command = convertCommand(fromAmountMinorUnits = 10_000L) // 100.00 EUR
+        coEvery { rateRepo.findLatest(any(), any(), any()) } returns fxRate() // ask = 25.10
+        clear()
+
+        val result = service.convert(command)
+
+        // 10_000 * 25.10 = 251_000.0 exactly -> no rounding ambiguity
+        assertThat(result.toAmountMinorUnits).isEqualTo(251_000L)
+        assertThat(result.appliedRate).isEqualByComparingTo("25.10")
+    }
+
+    @Test
+    fun `conversion fee is 0_5 percent of the source amount rounded half-up`() = runBlocking<Unit> {
+        val command = convertCommand(fromAmountMinorUnits = 999L) // fee = 4.995 -> rounds to 5
+        coEvery { rateRepo.findLatest(any(), any(), any()) } returns fxRate()
+        clear()
+
+        val result = service.convert(command)
+
+        assertThat(result.feeMinorUnits).isEqualTo(5L)
+    }
+
+    @Test
+    fun `a tiny source amount still produces a non-negative rounded result`() = runBlocking<Unit> {
+        val command = convertCommand(fromAmountMinorUnits = 1L) // 0.01 EUR
+        coEvery { rateRepo.findLatest(any(), any(), any()) } returns fxRate()
+        clear()
+
+        val result = service.convert(command)
+
+        // 1 * 25.10 = 25.1 -> HALF_UP to 25
+        assertThat(result.toAmountMinorUnits).isEqualTo(25L)
+        assertThat(result.feeMinorUnits).isZero() // 1 * 0.005 = 0.005 -> HALF_UP to 0
+    }
+
+    @Test
     fun `sanctions hit fails the conversion and opens a CRITICAL case`() = runBlocking<Unit> {
         val command = convertCommand()
         coEvery { rateRepo.findLatest(any(), any(), any()) } returns fxRate()
@@ -271,13 +308,13 @@ class FxServiceTest {
         coVerify(exactly = 1) { fraudScoringPort.score(any()) }
     }
 
-    private fun convertCommand() = ConvertCommand(
+    private fun convertCommand(fromAmountMinorUnits: Long = 10_000L) = ConvertCommand(
         idempotencyKey = "idem-1",
         partyId = UUID.randomUUID(),
         accountId = UUID.randomUUID(),
         fromCurrency = "EUR",
         toCurrency = "CZK",
-        fromAmountMinorUnits = 10_000L,
+        fromAmountMinorUnits = fromAmountMinorUnits,
         partyName = "Alice Example",
     )
 

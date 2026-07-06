@@ -66,7 +66,11 @@ kover {
         verify {
             rule {
                 bound {
-                    minValue = 40
+                    // Ratcheted from 40 after real line coverage measured ~69% (test/fx-service-coverage):
+                    // CnbResource, FxWorkflowImpl, the sanctions/AML/fraud/ČNB REST-client adapters, the
+                    // outbox dispatcher, and the daily ingestion scheduler gained real unit tests. Kept a
+                    // few points below the measured figure for headroom, never below the prior floor.
+                    minValue = 65
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }
