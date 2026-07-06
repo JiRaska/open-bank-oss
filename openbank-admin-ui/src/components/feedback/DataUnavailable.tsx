@@ -109,9 +109,9 @@ function copyFor(kind: UnavailableKind, service: string, feature: string, lang: 
  */
 export function DataUnavailable({
   kind,
-  service = 'Služba',
+  service = 'Service',
   feature = '',
-  lang = 'cs',
+  lang = 'en',
   title,
   detail,
   children,

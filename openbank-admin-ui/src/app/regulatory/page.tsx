@@ -187,7 +187,7 @@ export default function RegulatoryPage() {
     setGenerating(id)
     await new Promise(r => setTimeout(r, 1500))
     setGenerating(null)
-    alert(`Report ${id} vygenerován (demo — v produkci by se odeslal přes API)`)
+    alert(t(`Report ${id} vygenerován (demo — v produkci by se odeslal přes API)`, `Report ${id} generated (demo — in production this would be submitted via API)`))
   }
 
   function openPreview(id: string, e: React.MouseEvent) {

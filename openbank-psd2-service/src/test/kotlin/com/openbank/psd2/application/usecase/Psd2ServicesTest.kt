@@ -9,21 +9,30 @@ import com.openbank.psd2.application.port.`in`.DeleteConsentCommand
 import com.openbank.psd2.application.port.`in`.GetAccountsQuery
 import com.openbank.psd2.application.port.`in`.GetBalancesQuery
 import com.openbank.psd2.application.port.`in`.GetConsentQuery
+import com.openbank.psd2.application.port.`in`.GetPaymentStatusQuery
 import com.openbank.psd2.application.port.`in`.GetTransactionsQuery
+import com.openbank.psd2.application.port.`in`.InitiatePaymentCommand
 import com.openbank.psd2.application.port.`in`.TransactionPage
 import com.openbank.psd2.application.port.out.AccountServiceClient
 import com.openbank.psd2.application.port.out.ConsentServiceClient
 import com.openbank.psd2.application.port.out.ConsentSnapshot
+import com.openbank.psd2.application.port.out.TransactionServiceClient
 import com.openbank.psd2.domain.model.BookingStatus
 import com.openbank.psd2.domain.model.ConsentStatusOb
+import com.openbank.psd2.domain.model.DomesticCzPayment
 import com.openbank.psd2.domain.model.ObAccess
 import com.openbank.psd2.domain.model.ObAccount
 import com.openbank.psd2.domain.model.ObAccountRef
+import com.openbank.psd2.domain.model.ObAdditionalInformation
 import com.openbank.psd2.domain.model.ObAmount
 import com.openbank.psd2.domain.model.ObBalance
 import com.openbank.psd2.domain.model.ObConsentRequest
 import com.openbank.psd2.domain.model.ObLinks
 import com.openbank.psd2.domain.model.ObTransaction
+import com.openbank.psd2.domain.model.PaymentInitiation
+import com.openbank.psd2.domain.model.PaymentProduct
+import com.openbank.psd2.domain.model.PaymentStatus
+import com.openbank.psd2.domain.model.SipoPayment
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -45,9 +54,11 @@ class Psd2ServicesTest {
 
     private val accountClient = mockk<AccountServiceClient>()
     private val consentClient = mockk<ConsentServiceClient>()
+    private val transactionClient = mockk<TransactionServiceClient>()
 
     private val accountInformationService = AccountInformationService(accountClient, consentClient)
     private val consentManagementService = ConsentManagementService(consentClient, fixedClock)
+    private val paymentInitiationService = PaymentInitiationService(transactionClient, consentClient)
 
     @Test
     fun `getAccounts validates consent and returns accounts`(): Unit = runBlocking {
@@ -245,6 +256,386 @@ class Psd2ServicesTest {
         assertThat(result).isEqualTo(ConsentStatusOb.VALID)
     }
 
+    @Test
+    fun `getConsentStatus maps every upstream status to its Berlin equivalent`(): Unit = runBlocking {
+        val expected = mapOf(
+            "ACTIVE" to ConsentStatusOb.VALID,
+            "PENDING_SCA" to ConsentStatusOb.RECEIVED,
+            "REVOKED" to ConsentStatusOb.REVOKED_BY_PSU,
+            "EXPIRED" to ConsentStatusOb.EXPIRED,
+            "REJECTED" to ConsentStatusOb.REJECTED,
+            "SOMETHING_UNKNOWN" to ConsentStatusOb.RECEIVED,
+        )
+        expected.forEach { (upstream, obStatus) ->
+            coEvery { consentClient.getConsentStatus("consent-x") } returns upstream
+            assertThat(consentManagementService.getConsentStatus(GetConsentQuery("consent-x", "tpp-1")))
+                .isEqualTo(obStatus)
+        }
+    }
+
+    @Test
+    fun `getConsent maps status and defaults access to all-null`(): Unit = runBlocking {
+        coEvery { consentClient.getConsent("consent-1") } returns
+            ConsentSnapshot(consentId = "consent-1", partyId = "party-1", status = "REVOKED")
+
+        val result = consentManagementService.getConsent(GetConsentQuery("consent-1", "tpp-1"))
+
+        assertThat(result.consentId).isEqualTo("consent-1")
+        assertThat(result.consentStatus).isEqualTo(ConsentStatusOb.REVOKED_BY_PSU)
+        assertThat(result.access).isEqualTo(ObAccess(null, null, null, null))
+        assertThat(result.recurringIndicator).isTrue()
+        assertThat(result.frequencyPerDay).isEqualTo(4)
+        assertThat(result.validUntil).isEqualTo(fixedToday.plusDays(90))
+        assertThat(result.links).isEqualTo(ObLinks(self = "/open-banking/v2/consents/consent-1"))
+    }
+
+    @Test
+    fun `createConsent aggregates scopes from accounts, balances, transactions and additional info`(): Unit =
+        runBlocking {
+            val access = ObAccess(
+                accounts = listOf(sampleAccountRef("iban-a")),
+                balances = listOf(sampleAccountRef("iban-b")),
+                transactions = listOf(sampleAccountRef("iban-c")),
+                additionalInformation = ObAdditionalInformation(
+                    ownerName = null,
+                    trustedBeneficiaries = null,
+                    standingOrders = listOf(sampleAccountRef("iban-d")),
+                    directDebits = listOf(sampleAccountRef("iban-e")),
+                ),
+            )
+            val request = ObConsentRequest(
+                access = access,
+                recurringIndicator = true,
+                validUntil = fixedToday.plusDays(30),
+                frequencyPerDay = 4,
+            )
+            val capturedScopes = slot<Set<String>>()
+            val capturedIbans = slot<List<String>>()
+
+            coEvery {
+                consentClient.createConsent(
+                    partyId = any(),
+                    granteeId = any(),
+                    granteeName = any(),
+                    scopes = capture(capturedScopes),
+                    accountIbans = capture(capturedIbans),
+                    validUntil = any(),
+                    redirectUri = any(),
+                    tppTransactionId = any(),
+                    ipAddress = any(),
+                )
+            } returns "consent-789"
+
+            consentManagementService.createConsent(
+                CreateConsentCommand(
+                    tppId = "tpp-1",
+                    tppName = "TPP One",
+                    request = request,
+                    redirectUri = null,
+                    tppTransactionId = null,
+                    ipAddress = null,
+                ),
+            )
+
+            assertThat(capturedScopes.captured).containsExactlyInAnyOrder(
+                "ACCOUNTS_READ",
+                "BALANCES_READ",
+                "TRANSACTIONS_READ",
+                "STANDING_ORDERS_READ",
+                "DIRECT_DEBITS_READ",
+            )
+            // Only accounts/balances/transactions ibans are collected — additionalInformation
+            // (standing orders / direct debits) contributes scopes but not IBAN scoping.
+            assertThat(capturedIbans.captured).containsExactlyInAnyOrder("iban-a", "iban-b", "iban-c")
+        }
+
+    @Test
+    fun `createConsent yields null ibans when access carries none`(): Unit = runBlocking {
+        val access = ObAccess(accounts = null, balances = null, transactions = null, additionalInformation = null)
+        val request = ObConsentRequest(
+            access = access,
+            recurringIndicator = false,
+            validUntil = fixedToday.plusDays(10),
+            frequencyPerDay = 1,
+        )
+
+        coEvery {
+            consentClient.createConsent(
+                partyId = any(),
+                granteeId = any(),
+                granteeName = any(),
+                scopes = any(),
+                accountIbans = null,
+                validUntil = any(),
+                redirectUri = any(),
+                tppTransactionId = any(),
+                ipAddress = any(),
+            )
+        } returns "consent-000"
+
+        consentManagementService.createConsent(
+            CreateConsentCommand(
+                tppId = "tpp-1",
+                tppName = "TPP One",
+                request = request,
+                redirectUri = null,
+                tppTransactionId = null,
+                ipAddress = null,
+            ),
+        )
+
+        coVerify(exactly = 1) {
+            consentClient.createConsent(
+                partyId = any(),
+                granteeId = any(),
+                granteeName = any(),
+                scopes = any(),
+                accountIbans = null,
+                validUntil = any(),
+                redirectUri = any(),
+                tppTransactionId = any(),
+                ipAddress = any(),
+            )
+        }
+    }
+
+    @Test
+    fun `initiatePayment validates SEPA consent scope and delegates to transactionClient`(): Unit = runBlocking {
+        val payment = PaymentInitiation(
+            endToEndIdentification = "e2e-1",
+            debtorAccount = sampleAccountRef("CZ6508000000192000145399"),
+            instructedAmount = ObAmount("CZK", BigDecimal("100.00")),
+            creditorAccount = sampleAccountRef("CZ1234567890123456789012"),
+            creditorName = "Acme",
+            creditorAddress = null,
+            remittanceInformationUnstructured = "invoice 123",
+            requestedExecutionDate = null,
+        )
+        val command = InitiatePaymentCommand(
+            tppId = "tpp-1",
+            consentId = "consent-1",
+            product = PaymentProduct.SEPA_CREDIT_TRANSFERS,
+            payment = payment,
+            idempotencyKey = "idem-1",
+        )
+
+        coEvery {
+            consentClient.validateConsent("consent-1", "tpp-1", "PAYMENTS_INITIATE", "CZ6508000000192000145399")
+        } returns true
+        coEvery {
+            transactionClient.initiatePayment(
+                debtorIban = "CZ6508000000192000145399",
+                creditorIban = "CZ1234567890123456789012",
+                creditorName = "Acme",
+                amount = BigDecimal("100.00"),
+                currency = "CZK",
+                endToEndId = "e2e-1",
+                remittanceInfo = "invoice 123",
+                idempotencyKey = "idem-1",
+            )
+        } returns "payment-1"
+
+        val result = paymentInitiationService.initiatePayment(command)
+
+        assertThat(result.paymentId).isEqualTo("payment-1")
+        assertThat(result.transactionStatus).isEqualTo(PaymentStatus.RCVD)
+        assertThat(result.scaStatus).isEqualTo("received")
+        assertThat(result.links.self).isEqualTo("/open-banking/v2/payments/sepa_credit_transfers/payment-1")
+        assertThat(result.links.status).isEqualTo("/open-banking/v2/payments/sepa_credit_transfers/payment-1/status")
+    }
+
+    @Test
+    fun `initiatePayment throws ConsentUnauthorizedException when consent invalid`(): Unit = runBlocking {
+        val payment = PaymentInitiation(
+            endToEndIdentification = null,
+            debtorAccount = sampleAccountRef("CZ6508000000192000145399"),
+            instructedAmount = ObAmount("CZK", BigDecimal("50.00")),
+            creditorAccount = sampleAccountRef("CZ1234567890123456789012"),
+            creditorName = "Acme",
+            creditorAddress = null,
+            remittanceInformationUnstructured = null,
+            requestedExecutionDate = null,
+        )
+        val command = InitiatePaymentCommand(
+            tppId = "tpp-1",
+            consentId = "consent-1",
+            product = PaymentProduct.SEPA_CREDIT_TRANSFERS,
+            payment = payment,
+            idempotencyKey = "idem-2",
+        )
+        coEvery {
+            consentClient.validateConsent("consent-1", "tpp-1", "PAYMENTS_INITIATE", "CZ6508000000192000145399")
+        } returns false
+
+        assertThatThrownBy { runBlocking { paymentInitiationService.initiatePayment(command) } }
+            .isInstanceOf(ConsentUnauthorizedException::class.java)
+    }
+
+    @Test
+    fun `initiatePayment requires debtor IBAN for SEPA payment`(): Unit = runBlocking {
+        val payment = PaymentInitiation(
+            endToEndIdentification = null,
+            debtorAccount = sampleAccountRef(null),
+            instructedAmount = ObAmount("CZK", BigDecimal("50.00")),
+            creditorAccount = sampleAccountRef("CZ1234567890123456789012"),
+            creditorName = "Acme",
+            creditorAddress = null,
+            remittanceInformationUnstructured = null,
+            requestedExecutionDate = null,
+        )
+        val command = InitiatePaymentCommand(
+            tppId = "tpp-1",
+            consentId = "consent-1",
+            product = PaymentProduct.SEPA_CREDIT_TRANSFERS,
+            payment = payment,
+            idempotencyKey = "idem-3",
+        )
+        coEvery { consentClient.validateConsent("consent-1", "tpp-1", "PAYMENTS_INITIATE", null) } returns true
+
+        assertThatThrownBy { runBlocking { paymentInitiationService.initiatePayment(command) } }
+            .isInstanceOf(InvalidPaymentProductException::class.java)
+            .hasMessageContaining("Debtor IBAN required")
+    }
+
+    @Test
+    fun `initiatePayment requires creditor IBAN for SEPA payment`(): Unit = runBlocking {
+        val payment = PaymentInitiation(
+            endToEndIdentification = null,
+            debtorAccount = sampleAccountRef("CZ6508000000192000145399"),
+            instructedAmount = ObAmount("CZK", BigDecimal("50.00")),
+            creditorAccount = sampleAccountRef(null),
+            creditorName = "Acme",
+            creditorAddress = null,
+            remittanceInformationUnstructured = null,
+            requestedExecutionDate = null,
+        )
+        val command = InitiatePaymentCommand(
+            tppId = "tpp-1",
+            consentId = "consent-1",
+            product = PaymentProduct.SEPA_CREDIT_TRANSFERS,
+            payment = payment,
+            idempotencyKey = "idem-4",
+        )
+        coEvery {
+            consentClient.validateConsent("consent-1", "tpp-1", "PAYMENTS_INITIATE", "CZ6508000000192000145399")
+        } returns true
+
+        assertThatThrownBy { runBlocking { paymentInitiationService.initiatePayment(command) } }
+            .isInstanceOf(InvalidPaymentProductException::class.java)
+            .hasMessageContaining("Creditor IBAN required")
+    }
+
+    @Test
+    fun `initiatePayment for DOMESTIC_CZ joins VS SS KS into remittance info and uses the DOMESTIC scope`(): Unit =
+        runBlocking {
+            val payment = DomesticCzPayment(
+                endToEndIdentification = "e2e-cz",
+                debtorAccount = sampleAccountRef("CZ6508000000192000145399"),
+                instructedAmount = ObAmount("CZK", BigDecimal("250.00")),
+                creditorAccount = sampleAccountRef("CZ1234567890123456789012"),
+                creditorName = "Acme CZ",
+                variableSymbol = "123",
+                specificSymbol = "456",
+                constantSymbol = "789",
+                remittanceInformationUnstructured = null,
+                requestedExecutionDate = null,
+            )
+            val command = InitiatePaymentCommand(
+                tppId = "tpp-1",
+                consentId = "consent-1",
+                product = PaymentProduct.DOMESTIC_CZ,
+                payment = payment,
+                idempotencyKey = "idem-5",
+            )
+
+            coEvery {
+                consentClient.validateConsent(
+                    "consent-1",
+                    "tpp-1",
+                    "DOMESTIC_PAYMENT_INITIATE",
+                    "CZ6508000000192000145399",
+                )
+            } returns true
+            coEvery {
+                transactionClient.initiatePayment(
+                    debtorIban = "CZ6508000000192000145399",
+                    creditorIban = "CZ1234567890123456789012",
+                    creditorName = "Acme CZ",
+                    amount = BigDecimal("250.00"),
+                    currency = "CZK",
+                    endToEndId = "e2e-cz",
+                    remittanceInfo = "123/456/789",
+                    idempotencyKey = "idem-5",
+                )
+            } returns "payment-cz-1"
+
+            val result = paymentInitiationService.initiatePayment(command)
+
+            assertThat(result.paymentId).isEqualTo("payment-cz-1")
+            coVerify(exactly = 1) {
+                transactionClient.initiatePayment(
+                    debtorIban = "CZ6508000000192000145399",
+                    creditorIban = "CZ1234567890123456789012",
+                    creditorName = "Acme CZ",
+                    amount = BigDecimal("250.00"),
+                    currency = "CZK",
+                    endToEndId = "e2e-cz",
+                    remittanceInfo = "123/456/789",
+                    idempotencyKey = "idem-5",
+                )
+            }
+        }
+
+    @Test
+    fun `initiatePayment for SIPO zeroes the amount and targets the SIPO clearing account`(): Unit = runBlocking {
+        val payment = SipoPayment(
+            debtorAccount = sampleAccountRef("CZ6508000000192000145399"),
+            sipoNumber = "1234567890",
+            variableSymbol = "999",
+            requestedExecutionDate = null,
+        )
+        val command = InitiatePaymentCommand(
+            tppId = "tpp-1",
+            consentId = "consent-1",
+            product = PaymentProduct.SIPO,
+            payment = payment,
+            idempotencyKey = "idem-6",
+        )
+
+        coEvery {
+            consentClient.validateConsent("consent-1", "tpp-1", "SIPO_PAYMENT_INITIATE", "CZ6508000000192000145399")
+        } returns true
+        coEvery {
+            transactionClient.initiatePayment(
+                debtorIban = "CZ6508000000192000145399",
+                creditorIban = "CZ0000000000000000000000",
+                creditorName = "SIPO",
+                amount = BigDecimal.ZERO,
+                currency = "CZK",
+                endToEndId = "1234567890",
+                remittanceInfo = "999",
+                idempotencyKey = "idem-6",
+            )
+        } returns "payment-sipo-1"
+
+        val result = paymentInitiationService.initiatePayment(command)
+
+        assertThat(result.paymentId).isEqualTo("payment-sipo-1")
+        assertThat(result.links.self).isEqualTo("/open-banking/v2/payments/sipo/payment-sipo-1")
+    }
+
+    @Test
+    fun `getPaymentStatus delegates to transactionClient`(): Unit = runBlocking {
+        coEvery { transactionClient.getPaymentStatus("payment-1") } returns PaymentStatus.ACSC
+
+        val result = paymentInitiationService.getPaymentStatus(
+            GetPaymentStatusQuery("payment-1", "tpp-1", PaymentProduct.SEPA_CREDIT_TRANSFERS),
+        )
+
+        assertThat(result).isEqualTo(PaymentStatus.ACSC)
+        coVerify(exactly = 1) { transactionClient.getPaymentStatus("payment-1") }
+    }
+
     private fun sampleAccount(id: String) = ObAccount(
         resourceId = id,
         iban = "CZ6508000000192000145399",
@@ -262,7 +653,7 @@ class Psd2ServicesTest {
         referenceDate = null,
     )
 
-    private fun sampleAccountRef(iban: String) = ObAccountRef(
+    private fun sampleAccountRef(iban: String?) = ObAccountRef(
         iban = iban,
         bban = null,
         pan = null,

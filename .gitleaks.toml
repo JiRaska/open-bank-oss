@@ -106,12 +106,15 @@ paths = [
   # AWS/GCP/key detectors, iban/pan/rod-cislo) still scans them for real secrets.
   '''(^|/)openbank-infra/docker-compose\.yml$''',
   # PiiMasking holds card-/birth-number REGEXES by design (it masks them), so the
-  # pan-card-number and rod-cislo rules match its own pattern literals.
-  '''(^|/)openbank-libs/src/main/kotlin/com/openbank/libs/security/PiiMasking\.kt$''',
+  # pan-card-number and rod-cislo rules match its own pattern literals. Anchored on
+  # the package path (not the module dir) so it survives module moves — the file
+  # relocated openbank-libs → openbank-libs-domain in the ADR-0122 domain/runtime split.
+  '''(^|/)com/openbank/libs/security/PiiMasking\.kt$''',
   # CzechAccountNumber implements the ČNB mod-11 BBAN check; its doc/test literals
   # (e.g. the comment "rejects 0000000000") are example digit strings that match
   # the rod-cislo numeric heuristic — account-number validation logic, not a secret.
-  '''(^|/)openbank-libs/src/main/kotlin/com/openbank/libs/domain/account/CzechAccountNumber\.kt$''',
+  # Package-path anchored for the same ADR-0122 relocation reason as PiiMasking above.
+  '''(^|/)com/openbank/libs/domain/account/CzechAccountNumber\.kt$''',
   # GitOps manifests carry numeric infra config (Kafka retention.ms, JDBC ports)
   # that trips the numeric rod-cislo / generic-api-key heuristics. Real secrets
   # are delivered via Vault/SealedSecrets, never inlined in these manifests.
