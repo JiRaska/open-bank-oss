@@ -27,21 +27,22 @@ OpenBank is an **early-stage, community-driven** banking platform reference impl
 
 ## Project Status
 
-**Beta — M1 complete, M2/M3/M5 in progress.** 33 backend microservices in the repo (28 deployed to the AWS sandbox, 5 code-only/deploy-gated); customer-edge + admin-UI + developer portal deployed. The intra-bank money path is end-to-end; the ISO 20022 pipeline and clearing simulator are wired; live interbank network connections and multi-region are later milestones. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full M1–M7 plan.
+**Beta — M1 complete, M2/M3/M5 in progress.** 33 backend microservices in the repo (32 deployed to the AWS sandbox, 1 code-only/deploy-gated — FINREP; manifests exist but no ArgoCD Application wires them in yet); customer-edge + admin-UI + developer portal deployed. The intra-bank money path is end-to-end; the ISO 20022 pipeline and clearing simulator are wired; live interbank network connections and multi-region are later milestones. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full M1–M7 plan.
 
 | Area | Status |
 |---|---|
 | Core domain (account, ledger, transaction, balance) | 🟢 Implemented, tested, deployed |
 | Payments — intra-bank (transaction saga → ledger → balance) | 🟢 End-to-end, deployed |
 | Payments — interbank rails (SEPA, domestic, instant, clearing) | 🟡 ISO 20022 pipeline + clearing simulator wired (ADR-0104/0108); **live interbank network not connected** |
-| PSD2 / Open Banking (consent, SCA, TPP registry) | 🟡 Consent + SCA + XS2A developer portal live (developer.open-bank.tech); TPP registry code-only |
+| PSD2 / Open Banking (consent, SCA, TPP registry) | 🟢 Consent + SCA + XS2A developer portal live (developer.open-bank.tech); TPP registry deployed to sandbox |
 | EUDI / PID digital identity | 🟢 OpenID4VP + OpenID4VCI e2e live (ADR-0094); pid-service deployed |
 | KYC / AML / Sanctions screening | 🟡 Real screening logic (pg_trgm), deployed; vendor feeds are stubs |
 | GDPR Art. 17 right-to-erasure | 🟢 PARTY_ERASED event handled fleet-wide (kyc, notification, card-issuance) |
 | Cards, disputes, interest, standing orders, statements, onboarding | 🟢 Implemented + deployed; standing-order daily scheduler live |
 | Lending | 🟢 Deployed to sandbox (four-eyes KYC gate, ADR-0028); no live credit bureau integration |
 | SWIFT messaging | 🟡 Deployed (ISO 20022 MT/MX pipeline wired); no live SWIFT network connection |
-| AnaCredit, SDD, FINREP, TPP registry | 🟡 Implemented, code-only (not deployed to sandbox) |
+| AnaCredit, SDD, TPP registry | 🟢 Implemented, deployed to sandbox |
+| FINREP | 🟡 Implemented, code-only (manifests exist; not yet wired into an ArgoCD Application) |
 | Product catalog | 🟢 Implemented, deployed |
 | Customer edge (BFF) + mobile app | 🟡 BFF deployed (OPA enforce mode on); KMP/Compose app in active dev (separate repo) |
 | AI agent service (MCP, policy-gated) | 🟡 Fleet read tools + audit (ADR-0031); **copilot-service with LLM deployed in sandbox** |
@@ -52,7 +53,7 @@ OpenBank is an **early-stage, community-driven** banking platform reference impl
 | Supply-chain security (SBOM, signing, SAST, pen-test P0–P2) | 🟢 CI-enforced (ADR-0030); external pen-test P0–P2 findings remediated |
 | CI/CD | 🟢 Self-hosted runners + path-scoped gates + GitOps auto-deploy (ADR-0040) |
 | Observability (OTel, Grafana, Prometheus, Loki, Tempo, Pyroscope) | 🟢 Live; GoAlert on-call, Pyrra SLO-as-code, GlitchTip errors, DomainMetrics fleet-wide |
-| Cloud substrate (AWS, OpenTofu, ArgoCD GitOps) | 🟢 Sandbox live (EKS + ArgoCD) — 33 backend microservices in repo, 28 deployed (lending / anacredit / sdd / swift / billing code-only or deploy-gated) |
+| Cloud substrate (AWS, OpenTofu, ArgoCD GitOps) | 🟢 Sandbox live (EKS + ArgoCD) — 33 backend microservices in repo, 32 deployed (FINREP code-only/deploy-gated) |
 
 ### What works right now (sandbox at open-bank.tech)
 
