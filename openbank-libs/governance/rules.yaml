@@ -119,7 +119,11 @@ change_requirements:
     gate: api-contract
     enforced: advisory
     target_enforce_date: "2026-08-15"   # ADR-0144
-    blocked_on: "oasdiff wiring into CI (ADR-0048 D5) — classification logic is designed, not yet a CI step"
+    # CI producer is LIVE (advisory): .github/scripts/check-api-contract.py runs in the
+    # "Validate manifests" job on every PR (oasdiff 1.22.0, pinned + checksum-verified).
+    # Classification + api_invariant findings are ::warning annotations. Flipping this
+    # rule to enforced = pass --enforce to the script in ci.yml (one-line change).
+    ci_producer: ".github/scripts/check-api-contract.py"
   db_change:
     detect: ["src/main/resources/db/migration/*.sql", "Flyway/Liquibase changeset"]
     require:
@@ -130,13 +134,18 @@ change_requirements:
     target_enforce_date: "2026-08-15"   # ADR-0144
     blocked_on: "no CI script checks a PR touching db/migration for a rollback note — needs a PR-body-parsing check (not yet written)"
   event_change:
-    detect: ["*.avsc", "Avro/JSON schema under */schema/* or */avro/*"]
+    detect: ["*.avsc", "Avro/JSON schema under */schema/* or */avro/*", "Kotlin data class extending DomainEvent (the actual event contract today — JSON on Kafka via the outbox)"]
     require:
       - "schema versioned backward-compatibly"
+      - "breaking event change ships as a NEW versioned event (-vN topic, ADR-0006), never an in-place edit"
     gate: schema-compat
     enforced: advisory
     target_enforce_date: "2026-09-15"   # ADR-0144
-    blocked_on: "no Avro backward-compatibility checker wired into CI (not yet written)"
+    # CI producer is LIVE (advisory): .github/scripts/check-event-schema-compat.py runs in
+    # the "Validate manifests" job on every PR — diff-scoped over DomainEvent data classes
+    # (removed/renamed props, type changes, non-nullable-no-default additions = replay break,
+    # eventType renames) and *.avsc files (field default rules). Flip to enforced = --enforce.
+    ci_producer: ".github/scripts/check-event-schema-compat.py"
   service_code_change:
     detect: ["<service>/src/main/**"]
     require:
@@ -415,6 +424,12 @@ dependencies:
 architecture:
   hexagonal: true
   domain_zero_framework_imports: true   # domain layer must not import Quarkus/Jakarta/Spring
+  # ENFORCED by .github/scripts/check-domain-purity.sh (Validate manifests job):
+  # baseline-ratcheted — 11 grandfathered violations burn down as touched, any NEW
+  # framework import in */domain/* fails CI. openbank-libs-runtime is module-exempt
+  # (shares the domain package string for its JPA converters but IS the framework
+  # side of the ADR-0122 split).
+  ci_producer: ".github/scripts/check-domain-purity.sh"
 
 # ---------------------------------------------------------------------------------------
 # Vulnerability-management lifecycle SLAs (ADR-0030 D1). Detection -> closure, in days.

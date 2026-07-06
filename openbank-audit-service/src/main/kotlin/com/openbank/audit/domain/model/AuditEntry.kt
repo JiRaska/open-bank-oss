@@ -18,5 +18,5 @@ data class AuditEntry(
     val sourceService: String,
     val correlationId: String?,
     val occurredAt: Instant,
-    val recordedAt: Instant
+    val recordedAt: Instant,
 )

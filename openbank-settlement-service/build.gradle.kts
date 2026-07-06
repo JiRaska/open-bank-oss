@@ -53,7 +53,9 @@ kover {
         verify {
             rule {
                 bound {
-                    minValue = 18
+                    // Ratchet: measured 85.49% line coverage after adding workflow-saga,
+                    // outbound-adapter and repository tests (was 31.66%, floor was a stale 18).
+                    minValue = 80
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }

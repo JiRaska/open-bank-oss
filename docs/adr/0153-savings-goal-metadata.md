@@ -2,10 +2,12 @@
 
 Date: 2026-07-03
 Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only; the build-axis status, independent of the decision axis -->
+Delivery-Status: Shipped    <!-- Planned | Partial | Shipped | N/A — decision-only; the build-axis status, independent of the decision axis -->
 Author(s): jiri.raska
 
-Tracked in issue #264.
+Shipped in PR #219 (account-service schema/endpoints + customer-edge proxy + GDPR Art. 17
+erasure hook). Issue #264 was opened two days after #219 merged, from a stale reading of
+this file's own Delivery-Status field — closed as already-resolved.
 
 ## Context
 

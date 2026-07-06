@@ -182,6 +182,7 @@ full checklist. Maintainers with Claude Code can also run `/ship-check` — it m
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — milestones M1–M7
 - [`docs/adr/README.md`](docs/adr/README.md) — Architecture Decision Records index, with per-decision delivery status (governance lives in 0029–0031 and 0040)
 - [`docs/strategy/`](docs/strategy/) — BIAN mapping, security baseline, compliance matrix, resilience
+- [`RELEASE_NOTES.md`](RELEASE_NOTES.md) — per-component changelogs (release-please, Conventional Commits)
 - [`CLAUDE.md`](CLAUDE.md) — agent & contributor guide (human summary of `rules.yaml`)
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to contribute
 - [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — community standards

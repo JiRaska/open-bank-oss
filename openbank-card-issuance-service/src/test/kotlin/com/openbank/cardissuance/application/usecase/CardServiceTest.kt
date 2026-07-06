@@ -112,6 +112,32 @@ class CardServiceTest {
         coVerify(exactly = 0) { repo.save(any(), any()) }
     }
 
+    // ── listByParty — GDPR Art. 15 export contribution (ADR-0118 §6, issue #268) ────────
+    // party-service's GdprAggregationAdapter calls GET /api/v1/cards/party/{partyId},
+    // backed by this pass-through. Covered here because it is the sole PII-exposure path
+    // this service contributes to the cross-service subject-access export.
+
+    @Test fun `listByParty returns every card issued to the party for GDPR export`(): Unit = runBlocking {
+        val partyId = UUID.fromString("22222222-2222-2222-2222-222222222222")
+        val cards = listOf(card(status = CardStatus.ACTIVE), card(status = CardStatus.BLOCKED))
+        coEvery { repo.findByPartyId(partyId) } returns cards
+
+        val result = service.listByParty(partyId)
+
+        assertThat(result).hasSize(2)
+        assertThat(result).allMatch { it.partyId == partyId }
+        coVerify(exactly = 1) { repo.findByPartyId(partyId) }
+    }
+
+    @Test fun `listByParty returns an empty list when the party holds no cards`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { repo.findByPartyId(partyId) } returns emptyList()
+
+        val result = service.listByParty(partyId)
+
+        assertThat(result).isEmpty()
+    }
+
     private fun issueCmd(idempotencyKey: String) = IssueCardCommand(
         idempotencyKey = idempotencyKey,
         partyId = UUID.fromString("22222222-2222-2222-2222-222222222222"),

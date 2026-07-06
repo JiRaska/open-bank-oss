@@ -1,0 +1,83 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.fx.infrastructure.outbox
+
+import com.openbank.fx.application.port.out.FxOutboxRepository
+import com.openbank.libs.persistence.outbox.OutboxEntry
+import com.openbank.libs.persistence.outbox.OutboxEventPublisher
+import com.openbank.libs.persistence.outbox.OutboxStatus
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.mockk
+import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.Test
+import java.time.Instant
+import java.util.UUID
+
+class FxOutboxDispatcherTest {
+
+    private val outboxRepository = mockk<FxOutboxRepository>(relaxed = true)
+    private val eventPublisher = mockk<OutboxEventPublisher>(relaxed = true)
+    private val dispatcher = FxOutboxDispatcher(outboxRepository, eventPublisher, dispatchEnabled = true)
+
+    private fun entry(payload: String) = OutboxEntry(
+        eventId = UUID.randomUUID(),
+        aggregateId = UUID.randomUUID(),
+        eventType = "FxConversionExecuted",
+        payload = payload,
+        status = OutboxStatus.PENDING,
+        attemptCount = 0,
+        createdAt = Instant.parse("2026-05-27T00:00:00Z"),
+        updatedAt = Instant.parse("2026-05-27T00:00:00Z"),
+        sentAt = null,
+        lastError = null,
+    )
+
+    @Test
+    fun `dispatch publishes each processable row and marks it sent`(): Unit = runBlocking {
+        val a = entry(payload = "evt-a")
+        val b = entry(payload = "evt-b")
+        coEvery { outboxRepository.listProcessable(any()) } returns listOf(a, b)
+
+        dispatcher.dispatch()
+
+        coVerify(exactly = 1) { eventPublisher.publish(a) }
+        coVerify(exactly = 1) { eventPublisher.publish(b) }
+        coVerify(exactly = 1) { outboxRepository.markSent(a.eventId, any()) }
+        coVerify(exactly = 1) { outboxRepository.markSent(b.eventId, any()) }
+        coVerify(exactly = 0) { outboxRepository.markFailed(any(), any(), any()) }
+    }
+
+    @Test
+    fun `a publish failure marks that row failed with the error and does not mark it sent`(): Unit = runBlocking {
+        val failing = entry(payload = "boom")
+        coEvery { outboxRepository.listProcessable(any()) } returns listOf(failing)
+        coEvery { eventPublisher.publish(failing) } throws RuntimeException("kafka down")
+
+        dispatcher.dispatch()
+
+        coVerify(exactly = 1) { outboxRepository.markFailed(failing.eventId, "kafka down", any()) }
+        coVerify(exactly = 0) { outboxRepository.markSent(failing.eventId, any()) }
+    }
+
+    @Test
+    fun `a repository read failure is swallowed so the scheduler never crashes`(): Unit = runBlocking {
+        coEvery { outboxRepository.listProcessable(any()) } throws IllegalStateException("db unavailable")
+
+        dispatcher.dispatch()
+
+        coVerify(exactly = 0) { eventPublisher.publish(any()) }
+    }
+
+    @Test
+    fun `dispatch is a no-op when dispatch-enabled is false`(): Unit = runBlocking {
+        val disabledDispatcher = FxOutboxDispatcher(outboxRepository, eventPublisher, dispatchEnabled = false)
+
+        disabledDispatcher.dispatch()
+
+        coVerify(exactly = 0) { outboxRepository.listProcessable(any()) }
+        coVerify(exactly = 0) { eventPublisher.publish(any()) }
+    }
+}

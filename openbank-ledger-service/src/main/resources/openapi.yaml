@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Ledger Service API
-  version: 1.5.0
+  version: 1.5.1
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -276,6 +276,18 @@ components:
       bearerFormat: JWT
 
   responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Forbidden:
+      description: Authenticated but not authorized for this resource
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
     NotFound:
       description: Not found
       content:

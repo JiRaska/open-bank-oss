@@ -10,26 +10,33 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
-import au.com.dius.pact.provider.junitsupport.loader.PactBroker
+import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
-import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
 
 /**
- * Provider-side Pact verification for contracts published by consumers (ADR-0063 → ADR-0092).
- * Fetches the consumer pacts from the Pact Broker (`@PactBroker`, configured via the
- * `pactbroker.*` system properties CI passes with `-D`) and replays each interaction against
- * the running Quarkus test instance to prove the ledger service fulfils the consumer contracts;
- * the verification result is published back to the broker so `can-i-deploy` can gate on it.
+ * Provider-side Pact verification for contracts published by consumers (ADR-0063: Phase 1
+ * pilot, `balance-service` → `ledger-service`).
  *
- * Gated on `pactbroker.url`: with no broker configured (local `./gradlew build`) the class is
- * skipped and the committed `pacts/` (git-pact) remains the offline fallback until retirement.
- * `@IgnoreNoPactsToVerify(ignoreIoErrors)` makes a transient broker outage a skip, not a failure.
+ * Reads the consumer pact from the git-pact folder (`@PactFolder`, resolved relative to this
+ * module's working directory at `../pacts` = the monorepo-root `pacts/` dir) and replays each
+ * interaction against the running Quarkus test instance to prove the ledger service fulfils the
+ * consumer contract. This always runs — no broker, no gate, no CI secret required (ADR-0063
+ * chose git-pact over a Pact Broker for exactly this reason: zero new infra dependency).
+ *
+ * IMPORTANT: if `LedgerTrialBalancePactConsumerTest` (openbank-balance-service) changes the
+ * contract, regenerate the pact JSON (`./gradlew :openbank-balance-service:test --tests
+ * "*LedgerTrialBalancePactConsumerTest*"`) and commit the updated `pacts/openbank-balance-service-
+ * openbank-ledger-service.json` in the same PR, or this test will fail against a stale contract.
+ *
+ * `@IgnoreNoPactsToVerify(ignoreIoErrors)` makes a missing/unreadable pact file a skip, not a
+ * failure — relevant if the folder is ever emptied ahead of a broker migration (see ADR-0063
+ * "Migration to a broker is the natural follow-up").
  *
  * Authentication: [TestSecurity] cannot annotate @TestTemplate; instead a request filter is
  * configured below so Pact injects the service role on every replayed request. This matches the
@@ -39,9 +46,8 @@ import org.junit.jupiter.api.extension.ExtendWith
 @QuarkusTestResource(com.openbank.ledger.it.PostgresRedpandaTestResource::class)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_SERVICE", "ROLE_OPERATOR"])
 @Provider("openbank-ledger-service")
-@PactBroker
+@PactFolder("../pacts")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
-@EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class LedgerPactProviderVerificationTest {
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
