@@ -6,12 +6,14 @@ package com.openbank.pid.application.usecase
 
 import com.openbank.pid.application.port.`in`.DecideCaseCommand
 import com.openbank.pid.application.port.`in`.OpenCaseCommand
+import com.openbank.pid.application.port.`in`.ReopenCaseCommand
 import com.openbank.pid.application.port.out.PartyEventPublisher
 import com.openbank.pid.application.port.out.VerificationCaseRepository
 import com.openbank.pid.domain.event.VerificationCaseDecidedEvent
 import com.openbank.pid.domain.event.VerificationCaseOpenedEvent
 import com.openbank.pid.domain.model.ApplicantSnapshot
 import com.openbank.pid.domain.model.CaseVerdict
+import com.openbank.pid.domain.model.IllegalCaseTransition
 import com.openbank.pid.domain.model.VerificationCase
 import com.openbank.pid.domain.model.VerificationCaseStatus
 import com.openbank.pid.domain.model.VerificationTrigger
@@ -21,6 +23,7 @@ import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Clock
@@ -121,5 +124,72 @@ class VerificationCaseServiceTest {
         coVerify(exactly = 1) { events.publish(capture(decidedSlot)) }
         assertThat(decidedSlot.captured.firstApprover).isEqualTo("alice")
         assertThat(decidedSlot.captured.secondApprover).isEqualTo("bob")
+    }
+
+    @Test
+    fun `decide throws VerificationCaseNotFoundException for an unknown case`(): Unit = runBlocking {
+        val id = UUID.randomUUID()
+        coEvery { repo.findById(id) } returns null
+
+        assertThatThrownBy {
+            runBlocking { svc.decide(DecideCaseCommand(id, "alice", CaseVerdict.DISTINCT_NEW, null, null)) }
+        }.isInstanceOf(VerificationCaseNotFoundException::class.java)
+    }
+
+    @Test
+    fun `decide on an already-DECIDED case throws IllegalCaseTransition`(): Unit = runBlocking {
+        val decided = storedCase(VerificationCaseStatus.DECIDED)
+        coEvery { repo.findById(decided.id) } returns decided
+
+        assertThatThrownBy {
+            runBlocking { svc.decide(DecideCaseCommand(decided.id, "alice", CaseVerdict.DISTINCT_NEW, null, null)) }
+        }.isInstanceOf(IllegalCaseTransition::class.java)
+        coVerify(exactly = 0) { repo.update(any()) }
+    }
+
+    @Test
+    fun `reopen resets an AWAITING case back to OPEN`(): Unit = runBlocking {
+        val awaiting = storedCase(VerificationCaseStatus.AWAITING_SECOND_APPROVAL).copy(
+            firstApprover = "alice",
+            firstVerdict = CaseVerdict.DISTINCT_NEW,
+        )
+        coEvery { repo.findById(awaiting.id) } returns awaiting
+        coEvery { repo.update(any()) } answers { firstArg() }
+
+        val result = svc.reopen(ReopenCaseCommand(awaiting.id, "supervisor"))
+
+        assertThat(result.status).isEqualTo(VerificationCaseStatus.OPEN)
+        assertThat(result.firstApprover).isNull()
+        coVerify(exactly = 1) { repo.update(any()) }
+    }
+
+    @Test
+    fun `reopen throws VerificationCaseNotFoundException for an unknown case`(): Unit = runBlocking {
+        val id = UUID.randomUUID()
+        coEvery { repo.findById(id) } returns null
+
+        assertThatThrownBy {
+            runBlocking { svc.reopen(ReopenCaseCommand(id, "supervisor")) }
+        }.isInstanceOf(VerificationCaseNotFoundException::class.java)
+    }
+
+    @Test
+    fun `listActive delegates to the repository with OPEN and AWAITING_SECOND_APPROVAL statuses`(): Unit =
+        runBlocking {
+            val expected = listOf(storedCase(VerificationCaseStatus.OPEN))
+            val activeStatuses = listOf(VerificationCaseStatus.OPEN, VerificationCaseStatus.AWAITING_SECOND_APPROVAL)
+            coEvery { repo.listByStatuses(activeStatuses) } returns expected
+
+            val result = svc.listActive()
+
+            assertThat(result).isEqualTo(expected)
+        }
+
+    @Test
+    fun `get delegates to the repository by id`(): Unit = runBlocking {
+        val case = storedCase(VerificationCaseStatus.OPEN)
+        coEvery { repo.findById(case.id) } returns case
+
+        assertThat(svc.get(case.id)).isEqualTo(case)
     }
 }
