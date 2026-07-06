@@ -3,10 +3,6 @@ kind: Application
 metadata:
   name: payments
   namespace: argocd
-  annotations:
-    # Server-Side Diff must run the Kyverno verify-images mutation in its dry-run, otherwise the
-    # digest-pinning annotation it injects reads as a permanent OutOfSync diff (issue #856).
-    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -24,25 +20,25 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
-      # RespectIgnoreDifferences: this app also carries compare-options:
-      # IncludeMutationWebhook=true (Kyverno digest-pin dry-run, #856) — with
-      # that comparison mode, the ignoreDifferences.jqPathExpressions entry
-      # below (card-issuance-service) suppresses the OutOfSync *status* but
-      # NOT what selfHeal actually pushes on a triggered sync; without this
-      # option selfHeal kept re-applying replicas:1 from git every reconcile,
-      # fighting KEDA's scale-to-zero forever (confirmed live in
-      # openbank-sandbox — repeated ScalingReplicaSet 0->1 events minutes
-      # apart). product-catalog and sdd don't need this because neither sets
-      # IncludeMutationWebhook.
-      - RespectIgnoreDifferences=true
   # Argo Rollouts (ADR-0098) sets spec.selector.rollouts-pod-template-hash on the
   # stable and canary Services at runtime; git holds only the base selector, so
   # without this every Rollout-backed Service reads as permanently OutOfSync.
   # Ignore exactly that one controller-managed selector key — git-owned selector
   # changes are still reconciled. NB: jqPathExpressions, NOT managedFieldsManagers:
-  # the latter is silently bypassed on apps with compare-options
+  # the latter is silently bypassed on resources with compare-options
   # IncludeMutationWebhook (Kyverno digest-pin, #856), which left 6 apps OutOfSync
   # (verified in-cluster). Rollback = delete this block.
+  #
+  # IncludeMutationWebhook itself moved from an app-wide annotation to a
+  # per-resource `argocd.argoproj.io/compare-options` annotation on just the 14
+  # Rollout-backed Service objects (stable+canary) that need it — see
+  # gitops/components/payments/payments-services.yaml. App-wide it silently
+  # defeated the ignoreDifferences.jqPathExpressions on card-issuance-service's
+  # replicas below, keeping the whole app permanently OutOfSync even with
+  # RespectIgnoreDifferences protecting the actual apply (#230 T1 follow-up).
+  # Scoping it per-resource fixes both problems at once; confirmed live in
+  # openbank-sandbox (all resources Synced, card-issuance-service replicas
+  # stayed at 0, no regression on the Rollout Service selector diff).
   ignoreDifferences:
     - group: ""
       kind: Service
