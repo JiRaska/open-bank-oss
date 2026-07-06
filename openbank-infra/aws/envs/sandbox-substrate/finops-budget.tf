@@ -70,6 +70,34 @@ output "finops_budget_name" {
   value       = aws_budgets_budget.monthly_cost.name
 }
 
+# Faster-feedback daily companion to monthly_cost above (created 2026-06-13,
+# manually — codified here via `tofu import` so it stops being a silent
+# unmanaged resource). $50/day is a tighter early-warning than waiting for the
+# monthly ceiling's 50/80/100% thresholds to trip; actual spend has regularly
+# exceeded it since creation (real-money account, no more Activate credits).
+resource "aws_budgets_budget" "daily_cost" {
+  name         = "openbank-sandbox-daily"
+  budget_type  = "COST"
+  limit_amount = "50"
+  limit_unit   = "USD"
+  time_unit    = "DAILY"
+
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 80
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "ACTUAL"
+    subscriber_email_addresses = [var.finops_alert_email]
+  }
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 100
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "ACTUAL"
+    subscriber_email_addresses = [var.finops_alert_email]
+  }
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # NAT egress early-warning — CloudWatch alarm + daily NAT budget
 # ─────────────────────────────────────────────────────────────────────────────

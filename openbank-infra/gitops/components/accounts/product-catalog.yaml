@@ -6,6 +6,18 @@
 # automatically.
 # Quarkus management endpoints (health, metrics) bind to a separate port (8085).
 # QUARKUS_MANAGEMENT_HOST=0.0.0.0 is required so kubelet probes can reach them.
+#
+# ADR-0083 T1 native cutover (2026-07-06, #253). This Deployment now runs the
+# Mandrel/GraalVM native image (openbank-product-catalog/Dockerfile.native), not the
+# JVM fast-jar image every other service in the fleet still uses — the first native
+# cutover in the repo. startupProbe/readinessProbe are tuned to match (initialDelaySeconds:
+# 0, periodSeconds: 1 — a ~0.2-0.3s native process doesn't need the ~5s of JVM-scoped
+# headroom the previous probe carried). Do NOT copy this probe config onto a JVM-image
+# service without re-adding that headroom. The existing `product-catalog-http-scaledobject.yaml`
+# HTTPScaledObject (minReplicas: 0) was already live against the old JVM image; this
+# cutover is what actually makes its cold-start assumption true. Burn-in window before
+# declaring `openbank-product-catalog: T1` in `rules.yaml:finops_tiers.declared` per the
+# ADR's own Pilot plan step 5 — do not declare T1 from this manifest alone.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -42,7 +54,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: product-catalog
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-product-catalog:sandbox-7a2761c2
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-product-catalog:native-a2e14752
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -69,15 +81,15 @@ spec:
             httpGet:
               path: /q/health/ready
               port: management
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            failureThreshold: 30
+            initialDelaySeconds: 0
+            periodSeconds: 1
+            failureThreshold: 10
           readinessProbe:
             httpGet:
               path: /q/health/ready
               port: management
-            periodSeconds: 10
-            failureThreshold: 3
+            periodSeconds: 1
+            failureThreshold: 10
           livenessProbe:
             httpGet:
               path: /q/health/live
