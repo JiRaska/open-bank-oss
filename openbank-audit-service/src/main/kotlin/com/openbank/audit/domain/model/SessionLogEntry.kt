@@ -4,6 +4,7 @@
 
 package com.openbank.audit.domain.model
 
+import com.openbank.libs.domain.identifiers.Ids
 import java.time.Instant
 import java.util.UUID
 
@@ -20,7 +21,9 @@ import java.util.UUID
  * that obligation for every other row class it holds.
  */
 data class SessionLogEntry(
-    val id: UUID = UUID.randomUUID(),
+    // ADR-0106: [id] is a durable, indexed identifier (unique-indexed log_id column), so it is
+    // minted via Ids.newId() (time-ordered UUIDv7) rather than a bare UUID.randomUUID().
+    val id: UUID = Ids.newId(),
     val partyId: UUID?,
     val sessionId: String,
     val actorId: String?,
