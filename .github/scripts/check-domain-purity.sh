@@ -28,7 +28,10 @@ baseline="${script_dir}/domain-purity-baseline.txt"
 # Framework/library prefixes that must never appear in a domain-layer import.
 # java.*/kotlin.*/kotlinx.coroutines are fine; serialization, DI, persistence,
 # transport and runtime frameworks are not.
-prefixes='jakarta\.|javax\.|io\.quarkus|org\.eclipse\.microprofile|org\.hibernate|io\.smallrye|org\.jboss|com\.fasterxml\.jackson|org\.apache\.kafka|io\.vertx|org\.flywaydb|org\.springframework|io\.micrometer|io\.opentelemetry'
+# Every prefix ends with an explicit `\.` so a package boundary is required — otherwise
+# `io.quarkus` would also match a hypothetical `io.quarkusish.*`. Anchored for defense in
+# depth since this gate is enforced fleet-wide.
+prefixes='jakarta\.|javax\.|io\.quarkus\.|org\.eclipse\.microprofile\.|org\.hibernate\.|io\.smallrye\.|org\.jboss\.|com\.fasterxml\.jackson\.|org\.apache\.kafka\.|io\.vertx\.|org\.flywaydb\.|org\.springframework\.|io\.micrometer\.|io\.opentelemetry\.'
 
 violations=()
 while IFS= read -r line; do
