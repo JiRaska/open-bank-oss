@@ -258,7 +258,7 @@ function PaymentsContent() {
       ])
       setPayments([...sepa, ...domestic].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()))
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load payments')
+      setError(e instanceof Error ? e.message : t('Nepodařilo se načíst platby', 'Failed to load payments'))
     } finally { setLoading(false) }
   }, [])
 
@@ -319,12 +319,12 @@ function PaymentsContent() {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify(payload),
       })
-      if (!res.ok) throw new Error(await res.text() || 'Failed to create payment')
+      if (!res.ok) throw new Error(await res.text() || t('Vytvoření platby selhalo', 'Failed to create payment'))
       setCreateSuccess(t(f.instant ? 'Okamžitá platba vytvořena' : 'Platba vytvořena', f.instant ? 'Instant payment created' : 'Payment created'))
       setShowCreate(null)
       load()
     } catch (err: unknown) {
-      setCreateError(err instanceof Error ? err.message : 'Unknown error')
+      setCreateError(err instanceof Error ? err.message : t('Neznámá chyba', 'Unknown error'))
     } finally { setCreating(false) }
   }
 
@@ -355,12 +355,12 @@ function PaymentsContent() {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify(payload),
       })
-      if (!res.ok) throw new Error(await res.text() || 'Failed to create payment')
+      if (!res.ok) throw new Error(await res.text() || t('Vytvoření platby selhalo', 'Failed to create payment'))
       setCreateSuccess(t(f.instant ? 'SCT Inst platba vytvořena' : 'SEPA platba vytvořena', f.instant ? 'SCT Inst payment created' : 'SEPA payment created'))
       setShowCreate(null)
       load()
     } catch (err: unknown) {
-      setCreateError(err instanceof Error ? err.message : 'Unknown error')
+      setCreateError(err instanceof Error ? err.message : t('Neznámá chyba', 'Unknown error'))
     } finally { setCreating(false) }
   }
 
@@ -583,7 +583,7 @@ function PaymentsContent() {
                         </div>
                       </div>
                       <div style={{ fontSize: '11px', fontWeight: 600, color: opt.type === 'domestic-instant' || opt.type === 'sct-inst' ? '#d97706' : 'var(--text-tertiary)' }}>
-                        {t('Settlement:', 'Settlement:')} {opt.speed}
+                        {t('Vypořádání:', 'Settlement:')} {opt.speed}
                       </div>
                     </button>
                   )

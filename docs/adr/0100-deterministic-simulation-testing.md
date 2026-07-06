@@ -5,10 +5,10 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): OpenBank platform
 
-**Delivery note (updated 2026-06-30):**
-- **Layer 2 (DST harness — Pure JVM)** — ✅ Shipped: `openbank-simulation` module with deterministic scheduler, fault injector, in-memory adapters, payment scenario DSL, and Layer 3 invariants (double-entry balance, no-negative, idempotency, compensation completeness, audit completeness). Updated in ADR-0120 Phase 5+6 to work without the retired `PaymentSaga` aggregate.
+**Delivery note (updated 2026-07-06):**
+- **Layer 2 (DST harness — Pure JVM)** — ✅ Shipped: `openbank-simulation` module with deterministic scheduler, fault injector, in-memory adapters, payment scenario DSL, and Layer 3 invariants (double-entry balance, no-negative, idempotency, compensation completeness, audit completeness, SEPA/settlement completeness). Updated in ADR-0120 Phase 5+6 to work without the retired `PaymentSaga` aggregate.
 - **Layer 1 (architectural constraints)** — Partial: clock injection in place for money-path services; governance rule mandating it in `rules.yaml` not yet enforced; deterministic `Random` CDI bean not yet required.
-- **Full-service adoption (ledger, balance, sepa-payment, settlement)** — ⬜ Pending: simulation currently covers the payment saga / Temporal workflow path; binding to each service's exact domain classes is tracked in issue #267.
+- **Full-service adoption (ledger, balance, sepa-payment, settlement)** — ✅ Shipped (issue #267): `openbank-simulation` now takes a Gradle project dependency on all four services' framework-free domain packages and drives their real aggregates directly — `JournalEntry`/`bookedDeltas` (ledger), `Balance`/`withReservation` (balance), `SepaPayment.transitionTo` (sepa-payment), and the `Settlement` status enum (settlement-service) — rather than a re-model of any of them. None of the four required a module split: each service's `domain` package already has zero framework imports (ADR-0002), so only its POJOs land on the simulation's classpath. Remaining: none of the four services expose a Temporal-workflow-level binding yet (the harness models their state machines directly, not through the `sepa-payment`/`settlement-service` Temporal workflows) — that gap, plus the Antithesis fidelity step, is out of scope for #267 and would need its own follow-up if pursued.
 
 ## Context
 
@@ -122,12 +122,14 @@ The implementation issue will benchmark fidelity vs. cost and pick one.
 **Implementation status.** The **Pure JVM simulation** first rung has shipped as the
 [`openbank-simulation`](../../openbank-simulation/) module (tooling; no `version.txt`). It
 virtualises the money-path semantics — double-entry ledger, balance/overdraft, the payment saga
-and its compensation, ledger→balance projection with at-least-once delivery — under a seeded
-deterministic scheduler + fault injector, and asserts the Layer-3 invariants below after every
-step. It is built on the real `openbank-libs` primitives (`Money`, `SagaStateMachine`); binding
-it to each service's exact domain classes, and the Antithesis fidelity step, remain tracked in
-issue #267 (the #1612 reference this line used to carry doesn't resolve in this repo — a
-pre-public-repo-transition reference, same pattern as the ADR numbering gap in `README.md`).
+and its compensation, ledger→balance projection with at-least-once delivery, and (issue #267) the
+SEPA credit-transfer + settlement lifecycle — under a seeded deterministic scheduler + fault
+injector, and asserts the Layer-3 invariants below after every step. It is built on the real
+`openbank-libs` primitives (`Money`, `SagaStateMachine`) and now takes a direct Gradle project
+dependency on the framework-free `domain` package of all four money-path services (ledger,
+balance, sepa-payment, settlement), driving each service's exact domain classes rather than a
+re-model. The Antithesis fidelity step remains open; see #267 for the record of what was bound
+and what (a Temporal-workflow-level binding) was explicitly out of scope.
 
 ### Layer 3 — Global invariants (always-on assertions)
 

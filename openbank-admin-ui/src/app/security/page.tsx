@@ -193,7 +193,7 @@ export default function SecurityPage() {
 
         {report?.complianceStatus && (
           <div className="card" style={{ padding: '16px 20px', marginBottom: '20px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
-            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: '4px' }}>Compliance</span>
+            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: '4px' }}>{t('Shoda', 'Compliance')}</span>
             {Object.entries(report.complianceStatus).map(([key, ok]) => (
               <span key={key} style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600,
                 background: ok ? 'var(--success-bg)' : 'var(--danger-bg)',
@@ -296,7 +296,7 @@ export default function SecurityPage() {
                           onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}>
                           <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
                             <div>{r.serviceName}</div>
-                            {!r.reachable && <div style={{ fontSize: '10px', color: 'var(--danger-text)', fontWeight: 400 }}>unreachable</div>}
+                            {!r.reachable && <div style={{ fontSize: '10px', color: 'var(--danger-text)', fontWeight: 400 }}>{t('nedostupné', 'unreachable')}</div>}
                           </td>
                           <td style={{ padding: '12px 16px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>

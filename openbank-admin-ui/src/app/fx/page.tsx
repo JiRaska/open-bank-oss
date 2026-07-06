@@ -48,7 +48,8 @@ interface ScheduleEntry {
 }
 
 const ALL_DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
-const DAY_LABELS: Record<string, string> = { MON: 'Po', TUE: 'Út', WED: 'St', THU: 'Čt', FRI: 'Pá', SAT: 'So', SUN: 'Ne' }
+const DAY_LABELS_CS: Record<string, string> = { MON: 'Po', TUE: 'Út', WED: 'St', THU: 'Čt', FRI: 'Pá', SAT: 'So', SUN: 'Ne' }
+const DAY_LABELS_EN: Record<string, string> = { MON: 'Mon', TUE: 'Tue', WED: 'Wed', THU: 'Thu', FRI: 'Fri', SAT: 'Sat', SUN: 'Sun' }
 
 function nextRunTime(hour: number, minute: number, days: string[]): string {
   const now = new Date()
@@ -65,16 +66,18 @@ function nextRunTime(hour: number, minute: number, days: string[]): string {
   return fallback.toISOString()
 }
 
-function formatNextRun(iso: string): string {
+function formatNextRun(iso: string, t: (cs: string, en: string) => string): string {
   const diffMs = new Date(iso).getTime() - Date.now()
-  if (diffMs < 0) return 'brzy'
+  if (diffMs < 0) return t('brzy', 'soon')
   const h = Math.floor(diffMs / 3600000)
   const m = Math.floor((diffMs % 3600000) / 60000)
-  if (h >= 24) return `za ${Math.floor(h / 24)}d ${h % 24}h`
-  if (h > 0) return `za ${h}h ${m}m`
-  if (m > 0) return `za ${m}m`
-  return 'brzy'
+  if (h >= 24) return t(`za ${Math.floor(h / 24)}d ${h % 24}h`, `in ${Math.floor(h / 24)}d ${h % 24}h`)
+  if (h > 0) return t(`za ${h}h ${m}m`, `in ${h}h ${m}m`)
+  if (m > 0) return t(`za ${m}m`, `in ${m}m`)
+  return t('brzy', 'soon')
 }
+
+const SCHEDULE_LABELS_EN: Record<string, string> = { 'cnb-daily': 'CNB Daily rates', 'ecb-daily': 'ECB Reference rates' }
 
 const INITIAL_SCHEDULES: ScheduleEntry[] = [
   { id: 'cnb-daily', source: 'CNB', label: 'ČNB Denní kurzy', hour: 14, minute: 30, days: ['MON', 'TUE', 'WED', 'THU', 'FRI'], nextRun: nextRunTime(14, 30, ['MON', 'TUE', 'WED', 'THU', 'FRI']), lastRun: null, lastStatus: null, lastCount: null },
@@ -374,7 +377,7 @@ export default function FxPage() {
               <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
                   {t('Střed kurzu z ČNB · Nákup/Prodej = střed ±', 'CNB mid rate · Buy/Sell = mid ±')} {cnbSpread}% {t('(orientační)', '(indicative)')}
-                  {cnbSyncedAt && ` · Sync: ${new Date(cnbSyncedAt).toLocaleTimeString('cs-CZ')}`}
+                  {cnbSyncedAt && ` · ${t('Synchronizace', 'Sync')}: ${new Date(cnbSyncedAt).toLocaleTimeString(language === 'cs' ? 'cs-CZ' : 'en-US')}`}
                   {cnbError && <span style={{ color: 'var(--red)', marginLeft: '8px' }}>⚠ {cnbError}</span>}
                 </span>
                 <button onClick={() => manualRefresh('cnb')} disabled={!!refreshing || loading} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
@@ -407,7 +410,7 @@ export default function FxPage() {
                           <td style={{ padding: '8px 16px' }}><span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 700, color: 'var(--danger-text)' }}>{sell.toFixed(4)}</span></td>
                           <td style={{ padding: '8px 16px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
                             {r.validFor}
-                            {r.amount > 1 && <div style={{ fontSize: '10px', marginTop: '1px' }}>za {r.amount} {r.currencyCode}</div>}
+                            {r.amount > 1 && <div style={{ fontSize: '10px', marginTop: '1px' }}>{t('za', 'per')} {r.amount} {r.currencyCode}</div>}
                           </td>
                         </tr>
                       )
@@ -423,7 +426,7 @@ export default function FxPage() {
               <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
                   {t('ECB referenční kurzy (EUR base) · Nákup/Prodej = střed ±', 'ECB reference rates (EUR base) · Buy/Sell = mid ±')} {margin.buyPct}%/{margin.sellPct}%
-                  {ecbSyncedAt && ` · Sync: ${new Date(ecbSyncedAt).toLocaleTimeString('cs-CZ')}`}
+                  {ecbSyncedAt && ` · ${t('Synchronizace', 'Sync')}: ${new Date(ecbSyncedAt).toLocaleTimeString(language === 'cs' ? 'cs-CZ' : 'en-US')}`}
                   {ecbError && <span style={{ color: 'var(--red)', marginLeft: '8px' }}>⚠ {ecbError}</span>}
                 </span>
                 <button onClick={() => manualRefresh('ecb')} disabled={!!refreshing || loading} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--info)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
@@ -529,10 +532,10 @@ export default function FxPage() {
                         onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
                         onMouseLeave={e => (e.currentTarget.style.background = '')}>
                         <td style={{ padding: '8px 16px' }}>
-                          <button onClick={() => togglePublished(r.code)} title={r.published ? 'Skrýt z lístku' : 'Publikovat na lístek'}
+                          <button onClick={() => togglePublished(r.code)} title={r.published ? t('Skrýt z lístku', 'Hide from rate sheet') : t('Publikovat na lístek', 'Publish to rate sheet')}
                             style={{ background: r.published ? 'var(--success-bg)' : 'var(--surface-3)', border: `1px solid ${r.published ? 'var(--success-border)' : 'var(--border)'}`, borderRadius: '5px', padding: '3px 7px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', color: r.published ? 'var(--success-text)' : 'var(--text-tertiary)', fontSize: '10px', fontWeight: 600 }}>
                             {r.published ? <Eye size={11} /> : <EyeOff size={11} />}
-                            {r.published ? 'Ano' : 'Ne'}
+                            {r.published ? t('Ano', 'Yes') : t('Ne', 'No')}
                           </button>
                         </td>
                         <td style={{ padding: '8px 16px' }}><CurrencyCell code={r.code} meta={CURRENCY_META[r.code]} /></td>
@@ -545,7 +548,7 @@ export default function FxPage() {
                           ) : (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 700, color: 'var(--success-text)' }}>{r.buy.toFixed(4)}</span>
-                              {overrides[r.code]?.buyOverride != null && <span title="Override aktivní"><Lock size={10} style={{ color: 'var(--warning)' }} /></span>}
+                              {overrides[r.code]?.buyOverride != null && <span title={t('Override aktivní', 'Override active')}><Lock size={10} style={{ color: 'var(--warning)' }} /></span>}
                             </div>
                           )}
                         </td>
@@ -557,7 +560,7 @@ export default function FxPage() {
                           ) : (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 700, color: 'var(--danger-text)' }}>{r.sell.toFixed(4)}</span>
-                              {overrides[r.code]?.sellOverride != null && <span title="Override aktivní"><Lock size={10} style={{ color: 'var(--warning)' }} /></span>}
+                              {overrides[r.code]?.sellOverride != null && <span title={t('Override aktivní', 'Override active')}><Lock size={10} style={{ color: 'var(--warning)' }} /></span>}
                             </div>
                           )}
                         </td>
@@ -573,13 +576,13 @@ export default function FxPage() {
                             <div style={{ display: 'flex', gap: '5px' }}>
                               <button onClick={() => { setEditingOverride(r.code); setOverrideDraft({ buyOverride: overrides[r.code]?.buyOverride ?? null, sellOverride: overrides[r.code]?.sellOverride ?? null }) }}
                                 style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border)', padding: '3px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '3px' }}>
-                                <Edit3 size={10} /> Fix
+                                <Edit3 size={10} /> {t('Upravit', 'Fix')}
                               </button>
                               {r.hasOverride && (
                                 <button onClick={() => setOverrides(prev => ({ ...prev, [r.code]: { ...prev[r.code], buyOverride: null, sellOverride: null } }))}
-                                  title="Zrušit override"
+                                  title={t('Zrušit override', 'Clear override')}
                                   style={{ background: 'var(--warning-bg)', color: 'var(--warning-text)', border: '1px solid var(--warning-border)', padding: '3px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '3px' }}>
-                                  <Unlock size={10} /> Reset
+                                  <Unlock size={10} /> {t('Reset', 'Reset')}
                                 </button>
                               )}
                             </div>
@@ -611,15 +614,15 @@ export default function FxPage() {
                     {s.source === 'CNB' ? <Banknote size={14} /> : <Globe size={14} />}
                   </div>
                   <div>
-                    <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{s.label}</div>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{t(s.label, SCHEDULE_LABELS_EN[s.id] ?? s.label)}</div>
                     <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
-                      {String(s.hour).padStart(2, '0')}:{String(s.minute).padStart(2, '0')} · {s.days.map(d => DAY_LABELS[d]).join(', ')}
+                      {String(s.hour).padStart(2, '0')}:{String(s.minute).padStart(2, '0')} · {s.days.map(d => t(DAY_LABELS_CS[d], DAY_LABELS_EN[d])).join(', ')}
                     </div>
                   </div>
                   <div style={{ textAlign: 'right', minWidth: '110px' }}>
                     <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{t('Příští spuštění', 'Next run')}</div>
                     <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'flex-end' }}>
-                      <Clock size={11} style={{ color: 'var(--text-tertiary)' }} />{formatNextRun(s.nextRun)}
+                      <Clock size={11} style={{ color: 'var(--text-tertiary)' }} />{formatNextRun(s.nextRun, t)}
                     </div>
                   </div>
                   <div style={{ textAlign: 'right', minWidth: '110px' }}>
@@ -634,7 +637,7 @@ export default function FxPage() {
                     )}
                     {s.lastStatus === 'error' && (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, background: 'var(--danger-bg)', color: 'var(--danger-text)', border: '1px solid var(--danger-border)' }}>
-                        <XCircle size={10} /> Chyba
+                        <XCircle size={10} /> {t('Chyba', 'Error')}
                       </span>
                     )}
                     {!s.lastStatus && <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>—</span>}
@@ -655,7 +658,7 @@ export default function FxPage() {
                 {editingSchedule === s.id && (
                   <div style={{ padding: '14px 16px', borderTop: '1px solid var(--border)', background: 'var(--surface-1)', display: 'flex', alignItems: 'center', gap: '24px', flexWrap: 'wrap' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Čas:</span>
+                      <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('Čas:', 'Time:')}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                         <select value={scheduleDraft.hour ?? s.hour}
                           onChange={e => setScheduleDraft(p => ({ ...p, hour: parseInt(e.target.value) }))}
@@ -675,7 +678,7 @@ export default function FxPage() {
                       </div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Dny:</span>
+                      <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('Dny:', 'Days:')}</span>
                       <div style={{ display: 'flex', gap: '4px' }}>
                         {ALL_DAYS.map(day => {
                           const active = (scheduleDraft.days ?? s.days).includes(day)
@@ -686,7 +689,7 @@ export default function FxPage() {
                                 return { ...p, days: active ? days.filter(d => d !== day) : [...days, day] }
                               })}
                               style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 700, borderRadius: '5px', cursor: 'pointer', border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`, background: active ? 'var(--accent)' : 'var(--surface-2)', color: active ? '#fff' : 'var(--text-tertiary)', transition: 'all 0.1s' }}>
-                              {DAY_LABELS[day]}
+                              {t(DAY_LABELS_CS[day], DAY_LABELS_EN[day])}
                             </button>
                           )
                         })}
