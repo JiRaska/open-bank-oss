@@ -22,7 +22,7 @@ import java.util.UUID
  */
 data class SessionLogEntry(
     // ADR-0106: [id] is a durable, indexed identifier (unique-indexed log_id column), so it is
-    // minted via Ids.newId() (time-ordered UUIDv7) rather than a bare UUID.randomUUID().
+    // minted via Ids.newId() (time-ordered UUIDv7) rather than a bare JDK random UUID call.
     val id: UUID = Ids.newId(),
     val partyId: UUID?,
     val sessionId: String,
