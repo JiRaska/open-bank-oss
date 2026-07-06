@@ -635,13 +635,13 @@ function DevOpsContent() {
                   label: t('Prošlo', 'Passed'),
                   value: tests.totals.passed.toLocaleString(),
                   icon: <CheckCircle2 size={16} />, color: '#16a34a',
-                  sub: fleetPassRate !== null ? `${fleetPassRate}% pass rate` : '—',
+                  sub: fleetPassRate !== null ? t(`${fleetPassRate} % úspěšnost`, `${fleetPassRate}% pass rate`) : '—',
                 },
                 {
                   label: t('Selhalo', 'Failed'),
                   value: (tests.totals.failed).toLocaleString(),
                   icon: <XCircle size={16} />, color: tests.totals.failed > 0 ? '#dc2626' : '#16a34a',
-                  sub: t('unit + integration', 'unit + integration'),
+                  sub: t('unit + integrační', 'unit + integration'),
                 },
                 {
                   label: t('Money-path compliance', 'Money-path Compliance'),
