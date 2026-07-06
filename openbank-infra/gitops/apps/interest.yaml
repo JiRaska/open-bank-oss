@@ -5,10 +5,6 @@ kind: Application
 metadata:
   name: interest
   namespace: argocd
-  annotations:
-    # Server-Side Diff must run the Kyverno verify-images mutation in its dry-run, otherwise the
-    # digest-pinning annotation it injects reads as a permanent OutOfSync diff (issue #856).
-    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
   finalizers: [resources-finalizer.argocd.argoproj.io]
 spec:
   project: default
@@ -31,16 +27,6 @@ spec:
         maxDuration: 5m
     syncOptions:
       - ServerSideApply=true
-      # RespectIgnoreDifferences: this app also carries compare-options:
-      # IncludeMutationWebhook=true (Kyverno digest-pin dry-run, #856) — with
-      # that comparison mode, the ignoreDifferences.jqPathExpressions entry
-      # below suppresses the OutOfSync *status* but NOT what selfHeal actually
-      # pushes on a triggered sync; without this option selfHeal kept
-      # re-applying replicas:1 from git every reconcile, fighting KEDA's
-      # scale-to-zero forever (confirmed live in openbank-sandbox — repeated
-      # ScalingReplicaSet 0->1 events minutes apart). product-catalog and sdd
-      # don't need this because neither sets IncludeMutationWebhook.
-      - RespectIgnoreDifferences=true
   # ADR-0057 T1 pilot (#248): the KEDA HTTP add-on owns replicas 0<->1 on
   # interest-service, not ArgoCD. Without this, selfHeal fights KEDA every
   # reconcile — forces replicas back to the git-declared 1, KEDA promptly
