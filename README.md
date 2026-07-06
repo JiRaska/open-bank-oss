@@ -6,6 +6,7 @@
 [![CI](https://github.com/JiRaska/open-bank-oss/actions/workflows/ci.yml/badge.svg)](https://github.com/JiRaska/open-bank-oss/actions/workflows/ci.yml)
 [![Security scan](https://github.com/JiRaska/open-bank-oss/actions/workflows/security.yml/badge.svg)](https://github.com/JiRaska/open-bank-oss/actions/workflows/security.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/JiRaska/open-bank-oss/badge)](https://scorecard.dev/viewer/?uri=github.com/JiRaska/open-bank-oss)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13505/badge)](https://www.bestpractices.dev/projects/13505)
 [![codecov](https://codecov.io/gh/JiRaska/open-bank-oss/graph/badge.svg)](https://codecov.io/gh/JiRaska/open-bank-oss)
 [![Open in GitHub Codespaces](https://img.shields.io/badge/Codespaces-Open-181717?logo=github)](https://codespaces.new/JiRaska/open-bank-oss)
 [![Platform: Apache 2.0](https://img.shields.io/badge/Platform-Apache_2.0-brightgreen.svg)](https://opensource.org/licenses/Apache-2.0)
