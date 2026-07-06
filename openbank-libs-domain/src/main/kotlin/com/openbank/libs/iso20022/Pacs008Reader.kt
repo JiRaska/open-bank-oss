@@ -5,7 +5,9 @@
 package com.openbank.libs.iso20022
 
 import org.w3c.dom.Element
+import org.xml.sax.SAXException
 import java.io.ByteArrayInputStream
+import java.io.IOException
 import java.math.BigDecimal
 import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
@@ -23,8 +25,8 @@ data class ReceivedCreditTransfer(
     val debtorIban: String,
 )
 
-/** Thrown when a `pacs.008` cannot be parsed into a [ReceivedCreditTransfer] (missing field). */
-class Pacs008ParseException(message: String) : RuntimeException(message)
+/** Thrown when a `pacs.008` cannot be parsed into a [ReceivedCreditTransfer] (missing/malformed field). */
+class Pacs008ParseException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
 /**
  * Reads the key fields out of an inbound `pacs.008.001.08` XML document (ADR-0104 D2).
@@ -49,8 +51,7 @@ class Pacs008Reader {
         factory.isExpandEntityReferences = false
         factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
         factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
-        val doc = factory.newDocumentBuilder()
-            .parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))
+        val doc = parseDocument(factory, xml)
         doc.documentElement.normalize()
 
         val root = doc.documentElement
@@ -61,7 +62,7 @@ class Pacs008Reader {
             messageId = root.requireText("MsgId"),
             endToEndId = tx.requireText("EndToEndId"),
             transactionId = tx.firstByLocal("TxId")?.trimmedText(),
-            amount = BigDecimal(amountEl.trimmedText()),
+            amount = parseAmount(amountEl.trimmedText()),
             currency = amountEl.getAttribute("Ccy").ifBlank {
                 throw Pacs008ParseException("pacs.008 IntrBkSttlmAmt missing Ccy attribute")
             },
@@ -70,6 +71,26 @@ class Pacs008Reader {
             creditorAgentBic = tx.requireChild("CdtrAgt").requireText("BICFI"),
             debtorIban = tx.requireChild("DbtrAcct").requireText("IBAN"),
         )
+    }
+
+    // The input is XML from OUTSIDE the trust boundary (inbound clearing). A malformed document
+    // must surface as the typed Pacs008ParseException, not a raw SAXParseException/IOException —
+    // callers catch the former to return a clean 4xx; an unwrapped throwable becomes a 500.
+    // (Found by fuzzing: empty/'<'/truncated input leaked SAXParseException.)
+    private fun parseDocument(factory: DocumentBuilderFactory, xml: String) = try {
+        factory.newDocumentBuilder().parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))
+    } catch (e: SAXException) {
+        throw Pacs008ParseException("pacs.008 is not well-formed XML: ${e.message}", e)
+    } catch (e: IOException) {
+        throw Pacs008ParseException("pacs.008 could not be read: ${e.message}", e)
+    }
+
+    // A non-numeric IntrBkSttlmAmt must also be a typed parse error, not a raw
+    // NumberFormatException (same fuzzing finding class as the SAX wrap above).
+    private fun parseAmount(raw: String): BigDecimal = try {
+        BigDecimal(raw)
+    } catch (e: NumberFormatException) {
+        throw Pacs008ParseException("pacs.008 IntrBkSttlmAmt is not a valid amount: '$raw'", e)
     }
 
     private fun missing(local: String): Nothing =

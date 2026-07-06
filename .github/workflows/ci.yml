@@ -422,6 +422,35 @@ jobs:
           if [ -n "$base" ]; then git fetch --depth=1 origin "$base" 2>/dev/null || true; fi
           bash .github/scripts/check-new-random-uuid.sh "$base"
 
+      # ADR-0048 D5: api-contract gate — classify the API-contract bump from the
+      # OpenAPI diff (oasdiff), independently of the release axis (version.txt):
+      #   breaking  => info.version MAJOR (new URL major /api/v{N+1})
+      #   additive  => info.version MINOR within the same /v{N}
+      #   editorial => info.version PATCH
+      # Also asserts the D2 API invariant on HEAD:
+      #   major(info.version) == openbank.api.version == newest URL major.
+      # ADVISORY until rules.yaml change_requirements.api_change flips to
+      # enforced (target 2026-08-15, ADR-0144) — findings are ::warning
+      # annotations; add --enforce to the script invocation to flip.
+      # oasdiff is a pinned, checksum-verified binary (OpenSSF Pinned-Dependencies),
+      # same direct-CLI pattern as gitleaks (ADR-0040). PR-only: the gate diffs
+      # against the PR base; pushes to main have already been classified.
+      - name: "api-contract gate — OpenAPI diff classification (ADR-0048 D5, advisory)"
+        if: github.event_name == 'pull_request'
+        env:
+          OASDIFF_VERSION: "1.22.0"
+          OASDIFF_SHA256: "8b972accaf49f984cf40702af8b29360126ac9436594ccf6ac1ae662209a5fe6"
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/oasdiff.tar.gz \
+            "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz"
+          echo "${OASDIFF_SHA256}  /tmp/oasdiff.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/oasdiff.tar.gz -C /tmp oasdiff
+          sudo install -m 0755 /tmp/oasdiff /usr/local/bin/oasdiff
+          git fetch --depth=1 origin "${PR_BASE_SHA}" 2>/dev/null || true
+          python3 .github/scripts/check-api-contract.py --base "${PR_BASE_SHA}"
+
       # rules.yaml event_change / ADR-0006: schema-compat gate. The fleet's event
       # contract is the set of Kotlin data classes extending DomainEvent (JSON on
       # Kafka via the outbox; no .avsc files exist yet — the script covers those

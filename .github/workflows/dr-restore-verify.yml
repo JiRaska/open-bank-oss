@@ -1,0 +1,82 @@
+# Automated DR restore-and-verify (design: docs/bcp/automated-dr-restore.md).
+#
+# Proves the ledger-db CNPG backup actually RESTORES and that the restored ledger is
+# internally consistent (double-entry invariant holds) — not just that the S3 archive is
+# reachable, which is all the table-top exercises confirm today.
+#
+# It restores ledger-db into a THROWAWAY namespace, boots ledger-service against it (no
+# Kafka, no OIDC), asserts GET /api/v1/ledger/close/trial-balance returns balanced:true,
+# records measured RTO/RPO, and tears the namespace down.
+#
+# DISPATCH-ONLY and CLUSTER-GATED: needs a self-hosted runner in the deploy pool with
+# kubectl + read-only IRSA for the backup bucket. Skips with a notice on a hosted runner.
+# Steps that require live infra are marked `# WIRING:` — the deliberate remaining work
+# (see the design doc's "Remaining wiring"). Promote to a quarterly schedule after the
+# first green manual run (bcp-policy.md cadence).
+name: DR restore verify
+
+on:
+  workflow_dispatch:
+    inputs:
+      fiscal_year:
+        description: "Fiscal year to assert the trial balance for (defaults to current)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  restore-verify:
+    name: Restore ledger-db and verify integrity
+    # WIRING: change to the deploy-pool self-hosted label once it exists (kubectl + IRSA).
+    # Until then this runs on a hosted runner and self-skips at the gate below.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Gate on cluster access
+        id: gate
+        run: |
+          set -euo pipefail
+          if command -v kubectl >/dev/null 2>&1 && kubectl auth can-i create namespace >/dev/null 2>&1; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No cluster access (kubectl/IRSA) on this runner — skipping the DR restore. Run on a deploy-pool self-hosted runner. See docs/bcp/automated-dr-restore.md."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Restore, verify, teardown
+        if: steps.gate.outputs.run == 'true'
+        env:
+          FISCAL_YEAR: ${{ inputs.fiscal_year }}
+        run: |
+          set -euo pipefail
+          RUN_ID="${GITHUB_RUN_ID:-local}"
+          NS="dr-verify-${RUN_ID}"
+          FY="${FISCAL_YEAR:-$(date -u +%Y)}"
+          cleanup() { kubectl delete namespace "$NS" --ignore-not-found --wait=false || true; }
+          trap cleanup EXIT
+
+          kubectl create namespace "$NS"
+          RESTORE_START=$(date -u +%s)
+
+          # WIRING: apply the CNPG recovery Cluster (bootstrap.recovery from the ledger-db
+          # barman S3 store) + an ephemeral ledger-service Deployment (OUTBOX_DISPATCH_ENABLED
+          # =false, OIDC off) into $NS. Templates tracked in the design doc's remaining wiring.
+          echo "::error::WIRING INCOMPLETE: CNPG recovery Cluster + ledger-service manifests for \$NS are not yet in-repo (docs/bcp/automated-dr-restore.md). Failing rather than reporting a hollow PASS."
+          exit 1
+
+          # --- The verification below is the intended shape once the manifests land: ---
+          # kubectl -n "$NS" wait --for=condition=Ready cluster/ledger-db-restored --timeout=30m
+          # kubectl -n "$NS" rollout status deploy/ledger-service --timeout=10m
+          # kubectl -n "$NS" port-forward svc/ledger-service 18101:8101 &
+          # PF=$!; sleep 5
+          # BODY="$(curl -sf "http://localhost:18101/api/v1/ledger/close/trial-balance?fiscalYear=${FY}")"
+          # kill "$PF" || true
+          # RESTORE_END=$(date -u +%s); RTO=$(( RESTORE_END - RESTORE_START ))
+          # BALANCED="$(printf '%s' "$BODY" | python3 -c 'import sys,json;print(json.load(sys.stdin)["balanced"])')"
+          # if [ "$BALANCED" != "True" ]; then
+          #   echo "::error::restored ledger is UNBALANCED — backup integrity FAILED"; exit 1
+          # fi
+          # echo "::notice::DR restore verified: balanced=true, RTO=${RTO}s (append to docs/bcp/dr-test-log.md)"
