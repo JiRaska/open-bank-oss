@@ -321,9 +321,15 @@ coverage:
     money_path_target: 70               # aspirational target; raise floor PRs as tests land
   money_path_depth:
     tool: pitest                        # mutation testing on money-path domain math (ADR-0030 D3)
-    enforced: planned                   # pitest still planned; kover floor is now block
+    enforced: planned                   # weekly advisory runs are live; blocking flip pending sustained >=70%
     target_enforce_date: "2026-09-30"   # ADR-0144
-    blocked_on: "pitest wired for openbank-lending-service only (per-service Gradle version pin, deliberately not in the shared version catalog to avoid a fleet-wide rebuild); needs the other 13 money-path services onboarded"
+    # Wired (pitest.yml weekly): ledger, balance, account, transaction, fx + sepa-payment,
+    # sepa-instant, domestic-payment, fraud (SSDLC-audit rollout 2026-07-06). Remaining
+    # money-path services are excluded by the ADR-0063 thin-domain criterion (1-2 domain
+    # files: sca, consent, billing, clearing, swift, lending) — mutation noise, not signal.
+    # True baselines at rollout (after fixing the KILLED-quote parsing bug): account 49%,
+    # transaction 46%, balance 55%, ledger 65%, fx 73%.
+    blocked_on: "blocking flip requires each service to sustain >=70% mutation kill score on the weekly run; account/transaction/balance/ledger are below it today (see baselines above)"
 
 # ---------------------------------------------------------------------------------------
 # API deprecation policy — drives ApiVersionResponseFilter.isDeprecatedPath() (ADR-0029 D2).

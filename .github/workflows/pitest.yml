@@ -13,7 +13,7 @@ on:
       services:
         description: "Space-separated list of service modules to run pitest on (the matrix below is the source of truth)"
         required: false
-        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service"
+        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service openbank-sepa-payment openbank-sepa-instant openbank-domestic-payment openbank-fraud-service"
 
 # Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
 # block); the pitest job below already declares contents: read too, belt-and-suspenders.
@@ -38,6 +38,15 @@ jobs:
           - openbank-account-service
           - openbank-transaction-service
           - openbank-fx-service
+          # SSDLC-audit rollout (2026-07-06): the payment trio + fraud carry money-movement
+          # decision logic (3 domain files each — routing, screening, validation); a surviving
+          # mutant there is a real miss. Remaining money-path services stay excluded by the
+          # same ADR-0063 thin-domain criterion (sca/consent/billing/clearing 1-2 files,
+          # swift/lending 1 file).
+          - openbank-sepa-payment
+          - openbank-sepa-instant
+          - openbank-domestic-payment
+          - openbank-fraud-service
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -64,6 +73,11 @@ jobs:
           path: ${{ matrix.service }}/build/reports/pitest/
           retention-days: 30
 
+      # Advisory, not blocking, ON PURPOSE: true baselines at rollout (2026-07-06 run,
+      # after fixing the quote bug below) — account 49%, transaction 46%, balance 55%,
+      # ledger 65%, fx 73%. Flip to blocking per service only after it sustains >=70%
+      # (rules.yaml money_path_depth; raising kill scores is tracked with the coverage
+      # ratchet roadmap).
       - name: Check mutation threshold (advisory)
         if: always()
         run: |
@@ -73,7 +87,11 @@ jobs:
             exit 0
           fi
           TOTAL=$(grep -o '<mutation ' "$XML" | wc -l | tr -d ' ')
-          KILLED=$(grep -o 'status="KILLED"' "$XML" | wc -l | tr -d ' ')
+          # pitest writes SINGLE-quoted XML attributes (status='KILLED'); the original
+          # double-quote-only grep silently reported 0% for every service on every run
+          # (caught 2026-07-06 against run 28805099041: ledger really scored 65%, not 0%).
+          # Accept both quote styles so a pitest quoting change can't zero the score again.
+          KILLED=$(grep -oE "status=['\"]KILLED['\"]" "$XML" | wc -l | tr -d ' ')
           if [ "$TOTAL" -eq "0" ]; then
             echo "::warning::No mutations generated for ${{ matrix.service }} domain layer — check targetClasses config"
             exit 0

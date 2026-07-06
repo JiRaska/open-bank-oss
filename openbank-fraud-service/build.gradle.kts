@@ -4,6 +4,7 @@
 
 plugins {
     id("openbank.quarkus-service")
+    id("info.solidsoft.pitest") version "1.19.0"
 }
 
 dependencies {
@@ -90,4 +91,20 @@ tasks.named("koverVerify") {
 
 tasks.named("check") {
     dependsOn(tasks.named("koverVerify"))
+}
+
+// Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3). Weekly + manual via
+// pitest.yml, advisory — never a per-PR gate. Per-service plugin pin on purpose (rules.yaml
+// money_path_depth): keeping it out of the shared version catalog avoids a fleet-wide rebuild.
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf("com.openbank.fraud.domain.*")
+    targetTests = setOf("com.openbank.fraud.domain.*", "com.openbank.fraud.application.usecase.*")
+    // Advisory (ADR-0063): pitest.yml reports the score; the Gradle task itself must not
+    // fail the run, so the threshold is 0. The workflow owns the 70% check.
+    mutationThreshold = 0
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
+    excludedClasses = setOf("com.openbank.fraud.domain.*Kt")
 }
