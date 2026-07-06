@@ -6,6 +6,7 @@
 import { useEffect } from "react"
 import { useSession, signIn } from "next-auth/react"
 import { Permission, hasPermission } from "@/lib/auth/roles"
+import { useLanguage } from "@/lib/i18n/LanguageContext"
 
 interface AuthGuardProps {
   children: React.ReactNode
@@ -15,6 +16,7 @@ interface AuthGuardProps {
 
 export function AuthGuard({ children, permission, fallback }: AuthGuardProps) {
   const { data: session, status } = useSession()
+  const { t } = useLanguage()
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -27,7 +29,7 @@ export function AuthGuard({ children, permission, fallback }: AuthGuardProps) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "var(--bg)" }}>
         <div style={{ textAlign: "center" }}>
           <div style={{ width: "32px", height: "32px", border: "3px solid var(--border)", borderTopColor: "var(--accent)", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 12px" }} />
-          <div style={{ fontSize: "13px", color: "var(--text-tertiary)" }}>Ověřování identity…</div>
+          <div style={{ fontSize: "13px", color: "var(--text-tertiary)" }}>{t('Ověřování identity…', 'Verifying identity…')}</div>
         </div>
       </div>
     )
@@ -40,12 +42,12 @@ export function AuthGuard({ children, permission, fallback }: AuthGuardProps) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "60vh" }}>
         <div style={{ textAlign: "center", maxWidth: "400px" }}>
           <div style={{ fontSize: "48px", marginBottom: "16px" }}>🔒</div>
-          <div style={{ fontSize: "18px", fontWeight: 700, color: "var(--text-primary)", marginBottom: "8px" }}>Přístup odepřen</div>
+          <div style={{ fontSize: "18px", fontWeight: 700, color: "var(--text-primary)", marginBottom: "8px" }}>{t('Přístup odepřen', 'Access denied')}</div>
           <div style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
-            Nemáte oprávnění k zobrazení této stránky. Kontaktujte správce systému.
+            {t('Nemáte oprávnění k zobrazení této stránky. Kontaktujte správce systému.', 'You do not have permission to view this page. Contact your system administrator.')}
           </div>
           <div style={{ marginTop: "8px", fontSize: "11px", color: "var(--text-tertiary)", fontFamily: "JetBrains Mono, monospace" }}>
-            Požadované oprávnění: {permission}
+            {t('Požadované oprávnění:', 'Required permission:')} {permission}
           </div>
         </div>
       </div>

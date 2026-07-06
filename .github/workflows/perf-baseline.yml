@@ -1,0 +1,77 @@
+# Money-path performance baseline (k6) — SSDLC-audit follow-up 2026-07-06.
+#
+# The platform advertises SLOs (Pyrra) but had no load evidence behind them. This lane
+# runs the read-only k6 baseline (perf/k6/money-path-smoke.js) weekly and on demand,
+# recording latency percentiles so a regression shows as a trend.
+#
+# ADVISORY: k6 runs with --no-thresholds-fail — a breached tripwire is reported and
+# uploaded, never fails the run or blocks a deploy (issue #334). Money-path perf gating
+# is a deliberate later step, not a surprise red build.
+#
+# Target: the services must already be reachable. Set the repo/environment variables
+# PERF_LEDGER_URL and PERF_TXN_URL (e.g. a sandbox internal URL reached via a
+# self-hosted runner, or a port-forward). If unset, the job SKIPS with a notice rather
+# than pretending to have measured something — no silent green.
+name: Perf baseline
+
+on:
+  schedule:
+    - cron: "0 4 * * 2"   # weekly Tuesday 04:00 UTC (low-traffic window)
+  workflow_dispatch:
+    inputs:
+      ledger_url:
+        description: "Ledger base URL (overrides the PERF_LEDGER_URL variable)"
+        required: false
+      txn_url:
+        description: "Transaction base URL (overrides the PERF_TXN_URL variable)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  k6:
+    name: k6 money-path read baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Resolve target URLs
+        id: target
+        env:
+          IN_LEDGER: ${{ inputs.ledger_url }}
+          IN_TXN: ${{ inputs.txn_url }}
+          VAR_LEDGER: ${{ vars.PERF_LEDGER_URL }}
+          VAR_TXN: ${{ vars.PERF_TXN_URL }}
+        run: |
+          set -euo pipefail
+          ledger="${IN_LEDGER:-$VAR_LEDGER}"
+          txn="${IN_TXN:-$VAR_TXN}"
+          if [ -z "$ledger" ] || [ -z "$txn" ]; then
+            echo "::notice::PERF_LEDGER_URL / PERF_TXN_URL not configured — skipping the perf baseline (no target to measure)."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "ledger=$ledger" >> "$GITHUB_OUTPUT"
+            echo "txn=$txn" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run k6 baseline
+        if: steps.target.outputs.run == 'true'
+        uses: grafana/k6-action@e4714b734f2b0afaabeb7b4a69142745548ab9ec # v0.3.1
+        with:
+          filename: perf/k6/money-path-smoke.js
+          # Advisory: report threshold breaches, never fail the workflow on them.
+          flags: --no-thresholds-fail --summary-export=perf-summary.json
+        env:
+          LEDGER_URL: ${{ steps.target.outputs.ledger }}
+          TXN_URL: ${{ steps.target.outputs.txn }}
+
+      - name: Upload k6 summary
+        if: steps.target.outputs.run == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: k6-money-path-summary
+          path: perf-summary.json
+          retention-days: 90

@@ -40,3 +40,37 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
 }
+
+// Coverage floor (ADR-0020, ratchet-only — issue #321: billing was the only money-path
+// service with NO koverVerify gate at all). Measured 98.4% line coverage at introduction
+// (121/123); floor set at 90 so a 123-line service isn't brittle to a single new branch,
+// raise-only from here.
+kover {
+    reports {
+        filters {
+            excludes {
+                // Same rationale as the ledger config: thin REST adapters are covered by
+                // ApiIT tests; reflection DTOs are data holders. @ApplicationScoped
+                // (use-case layer) DOES count toward the floor.
+                annotatedBy("jakarta.ws.rs.Path")
+                annotatedBy("io.quarkus.runtime.annotations.RegisterForReflection")
+            }
+        }
+        verify {
+            rule {
+                bound {
+                    minValue = 90
+                    coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
+                }
+            }
+        }
+    }
+}
+
+tasks.named("koverVerify") {
+    enabled = true
+}
+
+tasks.named("check") {
+    dependsOn(tasks.named("koverVerify"))
+}
