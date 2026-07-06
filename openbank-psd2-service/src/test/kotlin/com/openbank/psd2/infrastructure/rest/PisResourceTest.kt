@@ -4,7 +4,8 @@
 
 package com.openbank.psd2.infrastructure.rest
 
-import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.libs.idempotency.IdempotencyRecord
 import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.psd2.application.port.`in`.GetPaymentStatusQuery
@@ -38,7 +39,7 @@ class PisResourceTest {
 
     private val pis = mockk<PaymentInitiationUseCase>()
     private val idempotencyStore = mockk<IdempotencyStore>()
-    private val objectMapper = ObjectMapper()
+    private val objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
     private val resource = PisResource(pis, idempotencyStore, objectMapper)
 
     private fun ctxWithTpp(tppId: String?): ContainerRequestContext {

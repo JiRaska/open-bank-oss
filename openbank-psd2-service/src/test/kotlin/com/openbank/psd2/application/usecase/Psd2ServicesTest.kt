@@ -344,7 +344,9 @@ class Psd2ServicesTest {
                 "STANDING_ORDERS_READ",
                 "DIRECT_DEBITS_READ",
             )
-            assertThat(capturedIbans.captured).containsExactlyInAnyOrder("iban-a", "iban-b", "iban-c", "iban-d", "iban-e")
+            // Only accounts/balances/transactions ibans are collected — additionalInformation
+            // (standing orders / direct debits) contributes scopes but not IBAN scoping.
+            assertThat(capturedIbans.captured).containsExactlyInAnyOrder("iban-a", "iban-b", "iban-c")
         }
 
     @Test

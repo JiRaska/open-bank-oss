@@ -56,7 +56,7 @@ class KafkaPsd2OutboxEventPublisherTest {
         assertThat(meta).isPresent
         assertThat(meta.get().key).isEqualTo(OutboxKafkaHeaders.partitionKey(entry))
 
-        val headers = meta.get().headers.associate { String(it.key().toByteArray()).let { _ -> it.key() to String(it.value()) } }
+        val headers = meta.get().headers.associate { it.key() to String(it.value()) }
         val expected = OutboxKafkaHeaders.headersFor(entry)
         expected.forEach { (k, v) -> assertThat(headers[k]).isEqualTo(v) }
     }
