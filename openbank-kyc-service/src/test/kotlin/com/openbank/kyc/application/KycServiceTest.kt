@@ -424,6 +424,37 @@ class KycServiceTest {
         coVerify(exactly = 0) { repo.findById(any()) }
     }
 
+    // ── getCaseByParty — GDPR Art. 15 export contribution (ADR-0118 §6, issue #268) ─────
+    // party-service's GdprAggregationAdapter calls GET /api/v1/kyc/cases/party/{partyId},
+    // backed by this pass-through. Covered here because it is the sole PII-exposure path
+    // this service contributes to the cross-service subject-access export.
+
+    @Test
+    fun `getCaseByParty returns the party's case including check history for GDPR export`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        val existing = kycCase(checks = listOf(check(UUID.randomUUID(), CheckType.IDENTITY, CheckStatus.PASSED)))
+            .copy(partyId = partyId)
+        coEvery { repo.findByPartyId(partyId) } returns existing
+
+        val result = service.getCaseByParty(partyId)
+
+        assertThat(result).isNotNull
+        assertThat(result!!.partyId).isEqualTo(partyId)
+        assertThat(result.checks).hasSize(1)
+        assertThat(result.checks.single().checkType).isEqualTo(CheckType.IDENTITY)
+        coVerify(exactly = 1) { repo.findByPartyId(partyId) }
+    }
+
+    @Test
+    fun `getCaseByParty returns null when the party has no KYC case (no data to export)`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { repo.findByPartyId(partyId) } returns null
+
+        val result = service.getCaseByParty(partyId)
+
+        assertThat(result).isNull()
+    }
+
     private fun kycCase(id: UUID = UUID.randomUUID(), checks: List<KycCheck>) = KycCase(
         id = id,
         partyId = UUID.randomUUID(),
