@@ -39,7 +39,9 @@ import re
 import subprocess
 import sys
 
-EVENT_MARKER = ": DomainEvent("
+# DomainEvent as a supertype: matches `: DomainEvent(`, `, DomainEvent(` (interface listed
+# first) and a multiline supertype list. `\b` keeps it from matching `AbstractDomainEvent(`.
+EVENT_MARKER_RE = re.compile(r"\bDomainEvent\s*\(")
 
 
 def git_show(base: str, path: str) -> str | None:
@@ -55,20 +57,31 @@ def changed_files(base: str) -> list[str]:
 
 
 def split_params(paramlist: str) -> list[str]:
-    """Split a Kotlin parameter list on top-level commas (generics/parens aware)."""
+    """Split a Kotlin parameter list on top-level commas (generics/parens/brace aware).
+
+    Tracks (), [], {} and <> for generics. `>` is only treated as a generic close when depth
+    is positive AND it isn't part of an arrow `->` (lambda type), so a lambda-typed or
+    comparison-defaulted param cannot drive depth negative and silently merge later params.
+    """
     parts: list[str] = []
     depth = 0
     cur: list[str] = []
+    prev = ""
     for ch in paramlist:
-        if ch in "(<[":
+        if ch in "(<[{":
+            # only count `<` as a generic-open (it's also the less-than operator, but that
+            # doesn't appear in a well-formed ctor param type); parens/brackets/braces always.
             depth += 1
-        elif ch in ")>]":
-            depth -= 1
+        elif ch in ")]}":
+            depth = max(0, depth - 1)
+        elif ch == ">" and prev != "-" and depth > 0:
+            depth = max(0, depth - 1)  # generic close, but not the `>` of an arrow `->`
         if ch == "," and depth == 0:
             parts.append("".join(cur).strip())
             cur = []
         else:
             cur.append(ch)
+        prev = ch
     tail = "".join(cur).strip()
     if tail:
         parts.append(tail)
@@ -100,9 +113,13 @@ def parse_events(text: str) -> dict[str, dict]:
                 depth -= 1
             i += 1
         paramlist = text[m.end(): i - 1]
-        # an event class is `data class X(...) : DomainEvent(...)` — the marker
-        # must follow the constructor's closing paren
-        if EVENT_MARKER not in text[i: i + 80]:
+        # an event class is `data class X(...) : Iface?, DomainEvent(...) { ... }` — the marker
+        # must appear in the supertype list, i.e. between the ctor's closing paren and the class
+        # body's opening brace. Search that whole span (not a fixed 80-char window) so a class
+        # with marker interfaces before DomainEvent, or a multiline supertype list, isn't skipped.
+        body_open = text.find("{", i)
+        supertypes = text[i: body_open if body_open != -1 else i + 200]
+        if not EVENT_MARKER_RE.search(supertypes):
             continue
         props: dict[str, tuple[str, bool]] = {}
         for raw in split_params(paramlist):
@@ -112,11 +129,13 @@ def parse_events(text: str) -> dict[str, dict]:
                 continue
             ptype = " ".join(pm.group("type").split())
             props[pm.group("name")] = (ptype, pm.group("default") is not None)
-        # eventType literal in the class body (best effort)
-        body_start = text.find("{", i)
+        # eventType literal in the class body (best effort). Scan to the next data-class
+        # declaration (or EOF) rather than a fixed 600-char window, so a large KDoc before the
+        # `override val eventType` line doesn't hide it.
         event_type = None
-        if body_start != -1:
-            body = text[body_start: body_start + 600]
+        if body_open != -1:
+            nxt = text.find("data class", body_open + 1)
+            body = text[body_open: nxt if nxt != -1 else len(text)]
             em = re.search(r"eventType\s*=\s*\"([^\"]+)\"", body)
             if em:
                 event_type = em.group(1)
@@ -215,13 +234,13 @@ def main() -> int:
         except OSError:
             new_text = None
         if new_text is None:
-            if old_text and EVENT_MARKER in old_text:
+            if old_text and EVENT_MARKER_RE.search(old_text):
                 findings.append(
                     f"{path}: file with event classes deleted — breaking unless the events are "
                     f"retired with their consumers (verify in review)"
                 )
             continue
-        if EVENT_MARKER not in (old_text or "") and EVENT_MARKER not in new_text:
+        if not EVENT_MARKER_RE.search(old_text or "") and not EVENT_MARKER_RE.search(new_text):
             continue
         findings.extend(compare_events(path, parse_events(old_text or ""), parse_events(new_text)))
 
