@@ -93,6 +93,25 @@ jobs:
             [ -n "$sensitive" ] && break
           done <<< "$CHANGED"
 
+          # Money-path gitops deploy — content-based, not directory-name-based.
+          # openbank-infra/gitops/ does NOT mirror service names 1:1: several
+          # money-path services (transaction, sepa-payment, sepa-instant,
+          # domestic-payment, clearing, swift) are bundled into one shared
+          # component (components/payments/payments-services.yaml), so no
+          # per-service directory exists to pattern-match on (surfaced while
+          # reviewing PR #347, tracked as a gap in ADR-0154). Instead, scan the
+          # diff of any changed openbank-infra/gitops/** file for an `image:`
+          # line referencing a money-path service's ECR repo name.
+          if [ -z "$sensitive" ] && echo "$CHANGED" | grep -q '^openbank-infra/gitops/'; then
+            GITOPS_DIFF="$(git diff "origin/${BASE_REF}...HEAD" -- openbank-infra/gitops/)"
+            for svc in $MP; do
+              if echo "$GITOPS_DIFF" | grep -qE "image:.*${svc}:"; then
+                sensitive="money-path gitops deploy (image references ${svc})"
+                break
+              fi
+            done
+          fi
+
           if [ -n "$sensitive" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "reason=$sensitive" >> "$GITHUB_OUTPUT"
