@@ -444,6 +444,18 @@ jobs:
       - name: "clock-injection gate — domain/application layers (ADR-0100, #1612)"
         run: bash .github/scripts/check-clock-injection.sh
 
+      # ADR-0002 / rules.yaml architecture.domain_zero_framework_imports: the
+      # hexagonal invariant was documented in every PR template but never enforced,
+      # and the fleet quietly accumulated violations (Quarkus @RegisterForReflection
+      # on a domain type, Jackson JsonNode in domain models). Baseline-ratcheted
+      # (detekt pattern): the 11 pre-existing violations are grandfathered in
+      # domain-purity-baseline.txt and burn down as touched; any NEW framework
+      # import in a domain layer fails outright. openbank-libs-runtime is module-
+      # exempt (it IS the framework side of the ADR-0122 split; only its package
+      # string says "domain"). ENFORCED from introduction (0 new on main).
+      - name: "domain-purity gate — hexagonal invariant (ADR-0002, enforced)"
+        run: bash .github/scripts/check-domain-purity.sh .
+
       # Every ADR in docs/adr/ must carry a Status field with a canonical value
       # (Accepted, Proposed, Superseded, Deprecated). Enforced as part of OSS-readiness
       # (public launch gate E2): a missing status makes it impossible to machine-read
