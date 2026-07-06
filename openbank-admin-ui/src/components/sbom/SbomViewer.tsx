@@ -135,7 +135,8 @@ export function SbomViewer({ serviceName }: Props) {
             <DataUnavailable
               kind="no_data"
               feature={`SBOM — ${serviceName}`}
-              detail="Pro tento build admin-ui nebyl SBOM této služby vygenerován. Vznikne automaticky, jakmile se image sestaví s ./gradlew sbomAll (CI ho generuje při release)."
+              lang="en"
+              detail="No SBOM was generated for this service in this admin-ui build. It appears automatically once the image is built with ./gradlew sbomAll (CI generates it on release)."
               dense
             />
           )}
@@ -143,7 +144,8 @@ export function SbomViewer({ serviceName }: Props) {
             <DataUnavailable
               kind="error"
               feature={`SBOM — ${serviceName}`}
-              detail="SBOM se nepodařilo načíst kvůli neočekávané chybě. Zkuste to prosím znovu."
+              lang="en"
+              detail="Failed to load the SBOM due to an unexpected error. Please try again."
               dense
             />
           )}
