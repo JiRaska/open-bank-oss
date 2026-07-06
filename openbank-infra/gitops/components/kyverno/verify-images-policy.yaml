@@ -17,15 +17,16 @@
 #      Caveat: only CURRENT workload templates were back-signed; a `kubectl rollout undo` to a
 #      pre-signing revision references an unsigned historical tag and will be REJECTED — rebuild
 #      (build-push-*.sh signs) or sign that digest first.
-#   4. (planned) SBOM-attestation rule — the provenance gate beyond signatures (ADR-0030 D4).
-#      auto-deploy.yml now runs `cosign attest --type cyclonedx` on every pushed image (KMS key),
-#      and release-please.yml attaches a signed evidence bundle per release. To enforce provenance
-#      at admission, add a SECOND verifyImages rule here requiring that SBOM attestation
-#      (predicateType https://cyclonedx.org/bom), staged Audit -> Enforce — but ONLY after the
-#      running fleet has been redeployed so every live image carries the attestation, else Audit
-#      floods with violations and Enforce would reject the fleet (cf. the step-3 #770 revert).
-#      Until then the provenance gate is ADVISORY (rules.yaml: provenance.enforced=advisory,
-#      enforce_criteria). The signature rule below stays Enforce regardless.
+#   4. (in progress) SBOM-attestation rule — the provenance gate beyond signatures (ADR-0030 D4).
+#      auto-deploy.yml runs `cosign attest --type cyclonedx` on every pushed image (KMS key),
+#      and release-please.yml attaches a signed evidence bundle per release. The admission rule
+#      is LIVE in AUDIT mode as a SEPARATE ClusterPolicy (verify-sbom-attestation-policy.yaml —
+#      separate so this policy's Enforce is not coupled to the attestation rule's staging).
+#      Its PolicyReport violations are the fleet-redeploy worklist. Flip that policy to Enforce
+#      ONLY once the running fleet is redeployed with attested images and the Audit report runs
+#      clean for an observation window (rules.yaml: provenance.enforce_criteria; cf. the step-3
+#      #770 revert). Until then the provenance gate stays ADVISORY. The signature rule below
+#      stays Enforce regardless.
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
