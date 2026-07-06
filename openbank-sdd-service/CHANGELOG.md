@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.6.2...sdd-service-v0.7.0) (2026-07-06)
+
+
+### Features
+
+* **sdd:** scale-to-zero to T1 via HTTPScaledObject (ADR-0057) ([#251](https://github.com/JiRaska/open-bank-oss/issues/251)) ([5135252](https://github.com/JiRaska/open-bank-oss/commit/5135252f2d5d5cdf4d8ba8c866a7860857a15d82)), closes [#230](https://github.com/JiRaska/open-bank-oss/issues/230)
+
 ## [0.6.2](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.6.1...sdd-service-v0.6.2) (2026-06-30)
 
 
