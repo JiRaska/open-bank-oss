@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+"""schema-compat gate — event backward-compatibility (rules.yaml event_change, ADR-0006/0048).
+
+The fleet's event contract is the set of Kotlin data classes extending
+`DomainEvent`, serialized as JSON onto Kafka via the transactional outbox
+(there are no .avsc files today; Apicurio/Avro is the ADR-0006 target state).
+A consumer replaying historical events, or an old consumer reading new
+events, breaks when a producer edits an event class incompatibly.
+
+DIFF-SCOPED: for every changed Kotlin file that declares `... : DomainEvent(`
+(at base or head), compare each event data class's primary-constructor
+properties between the PR base and HEAD and report:
+
+    removed property            breaking — consumers reading it get null/fail
+    property type changed       breaking — deserialization of old/new payloads diverges
+    new property, no default    breaking on REPLAY — historical events lack the
+      and non-nullable            field; deserializer cannot construct the class
+    eventType literal changed   breaking — consumer routing keys off eventType
+
+Compatible evolutions (new nullable property, new property with a default)
+pass silently. A breaking change is legitimate ONLY as a new versioned event
+(new class + `-vN` topic per ADR-0006) — never an in-place edit.
+
+Also covers *.avsc files if/when they appear (ADR-0006 target state):
+added fields must carry a "default", removed fields must have had one,
+in-place type changes are flagged.
+
+stdlib-only. Advisory by default (::warning, exit 0); --enforce exits 1.
+
+Usage:
+    check-event-schema-compat.py --base <sha> [--enforce]
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+
+EVENT_MARKER = ": DomainEvent("
+
+
+def git_show(base: str, path: str) -> str | None:
+    res = subprocess.run(["git", "show", f"{base}:{path}"], capture_output=True, text=True)
+    return res.stdout if res.returncode == 0 else None
+
+
+def changed_files(base: str) -> list[str]:
+    out = subprocess.run(
+        ["git", "diff", "--name-only", base, "HEAD"], capture_output=True, text=True, check=True
+    ).stdout
+    return [line for line in out.splitlines() if line.strip()]
+
+
+def split_params(paramlist: str) -> list[str]:
+    """Split a Kotlin parameter list on top-level commas (generics/parens aware)."""
+    parts: list[str] = []
+    depth = 0
+    cur: list[str] = []
+    for ch in paramlist:
+        if ch in "(<[":
+            depth += 1
+        elif ch in ")>]":
+            depth -= 1
+        if ch == "," and depth == 0:
+            parts.append("".join(cur).strip())
+            cur = []
+        else:
+            cur.append(ch)
+    tail = "".join(cur).strip()
+    if tail:
+        parts.append(tail)
+    return parts
+
+
+PARAM_RE = re.compile(
+    r"^(?:@\w+(?:\([^)]*\))?\s+)*"          # annotations
+    r"(?:override\s+)?(?:val|var)\s+"
+    r"(?P<name>\w+)\s*:\s*"
+    r"(?P<type>[^=]+?)\s*"
+    r"(?P<default>=.+)?$",
+    re.DOTALL,
+)
+
+
+def parse_events(text: str) -> dict[str, dict]:
+    """Map event class name -> {props: {name: (type, has_default)}, event_type: str|None}."""
+    events: dict[str, dict] = {}
+    for m in re.finditer(r"data class\s+(\w+)\s*\(", text):
+        name = m.group(1)
+        # capture the balanced parameter list
+        i = m.end()
+        depth = 1
+        while i < len(text) and depth:
+            if text[i] == "(":
+                depth += 1
+            elif text[i] == ")":
+                depth -= 1
+            i += 1
+        paramlist = text[m.end(): i - 1]
+        # an event class is `data class X(...) : DomainEvent(...)` — the marker
+        # must follow the constructor's closing paren
+        if EVENT_MARKER not in text[i: i + 80]:
+            continue
+        props: dict[str, tuple[str, bool]] = {}
+        for raw in split_params(paramlist):
+            raw = " ".join(raw.split())  # collapse whitespace/newlines
+            pm = PARAM_RE.match(raw)
+            if not pm:
+                continue
+            ptype = " ".join(pm.group("type").split())
+            props[pm.group("name")] = (ptype, pm.group("default") is not None)
+        # eventType literal in the class body (best effort)
+        body_start = text.find("{", i)
+        event_type = None
+        if body_start != -1:
+            body = text[body_start: body_start + 600]
+            em = re.search(r"eventType\s*=\s*\"([^\"]+)\"", body)
+            if em:
+                event_type = em.group(1)
+        events[name] = {"props": props, "event_type": event_type}
+    return events
+
+
+def compare_events(path: str, old: dict[str, dict], new: dict[str, dict]) -> list[str]:
+    findings: list[str] = []
+    for cls, o in old.items():
+        n = new.get(cls)
+        if n is None:
+            findings.append(
+                f"{path}: event class {cls} was removed/renamed — breaking for consumers; "
+                f"ship a new versioned event and deprecate the old one (ADR-0006)"
+            )
+            continue
+        for prop, (otype, _) in o["props"].items():
+            if prop not in n["props"]:
+                findings.append(
+                    f"{path}: {cls}.{prop} removed — breaking (consumers/replay still read it); "
+                    f"a breaking change must be a NEW versioned event, not an in-place edit"
+                )
+            elif n["props"][prop][0] != otype:
+                findings.append(
+                    f"{path}: {cls}.{prop} type changed {otype} -> {n['props'][prop][0]} — "
+                    f"breaking for deserialization of historical payloads"
+                )
+        for prop, (ptype, has_default) in n["props"].items():
+            if prop in o["props"]:
+                continue
+            nullable = ptype.rstrip().endswith("?")
+            if not has_default and not nullable:
+                findings.append(
+                    f"{path}: {cls}.{prop} added as non-nullable {ptype} without a default — "
+                    f"breaking on REPLAY (historical events lack the field); make it nullable "
+                    f"or defaulted, or version the event"
+                )
+        if o["event_type"] and n["event_type"] and o["event_type"] != n["event_type"]:
+            findings.append(
+                f"{path}: {cls}.eventType changed \"{o['event_type']}\" -> \"{n['event_type']}\" — "
+                f"breaking for consumer routing"
+            )
+    return findings
+
+
+def avro_fields(schema: dict) -> dict[str, dict]:
+    return {f["name"]: f for f in schema.get("fields", []) if isinstance(f, dict) and "name" in f}
+
+
+def compare_avsc(path: str, old_text: str, new_text: str) -> list[str]:
+    findings: list[str] = []
+    try:
+        old, new = json.loads(old_text), json.loads(new_text)
+    except json.JSONDecodeError as e:
+        return [f"{path}: unparseable Avro schema JSON ({e})"]
+    of, nf = avro_fields(old), avro_fields(new)
+    for name, f in of.items():
+        if name not in nf:
+            if "default" not in f:
+                findings.append(
+                    f"{path}: Avro field {name} removed without a writer default — breaking for readers"
+                )
+        elif json.dumps(nf[name].get("type"), sort_keys=True) != json.dumps(f.get("type"), sort_keys=True):
+            findings.append(f"{path}: Avro field {name} type changed — verify schema-resolution compatibility")
+    for name, f in nf.items():
+        if name not in of and "default" not in f:
+            findings.append(
+                f"{path}: Avro field {name} added without a default — old payloads cannot be read (breaking)"
+            )
+    return findings
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--base", required=True)
+    ap.add_argument("--enforce", action="store_true")
+    args = ap.parse_args()
+
+    findings: list[str] = []
+    for path in changed_files(args.base):
+        if path.endswith(".avsc"):
+            old_text = git_show(args.base, path)
+            try:
+                new_text = open(path, encoding="utf-8").read()
+            except OSError:
+                continue  # deleted schema — reviewed as a service/event removal
+            if old_text is not None:
+                findings.extend(compare_avsc(path, old_text, new_text))
+            continue
+        if not (path.endswith(".kt") and "/src/main/" in path):
+            continue
+        old_text = git_show(args.base, path)
+        try:
+            new_text = open(path, encoding="utf-8").read()
+        except OSError:
+            new_text = None
+        if new_text is None:
+            if old_text and EVENT_MARKER in old_text:
+                findings.append(
+                    f"{path}: file with event classes deleted — breaking unless the events are "
+                    f"retired with their consumers (verify in review)"
+                )
+            continue
+        if EVENT_MARKER not in (old_text or "") and EVENT_MARKER not in new_text:
+            continue
+        findings.extend(compare_events(path, parse_events(old_text or ""), parse_events(new_text)))
+
+    level = "error" if args.enforce else "warning"
+    for f in findings:
+        print(f"::{level}::schema-compat gate: {f}")
+    if not findings:
+        print("schema-compat gate: no backward-incompatible event/schema change detected.")
+        return 0
+    if args.enforce:
+        return 1
+    print(
+        f"schema-compat gate: {len(findings)} finding(s) — advisory until the ADR-0144 "
+        "target_enforce_date; a breaking event change ships as a NEW versioned event (ADR-0006)."
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
