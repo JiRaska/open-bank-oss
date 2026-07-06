@@ -43,6 +43,8 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@254c19bd240aabef8777f48595e9d2d7b972184b # v5.0.0
         with:
