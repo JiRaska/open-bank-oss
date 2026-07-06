@@ -41,15 +41,20 @@ import sys
 from pathlib import Path
 
 AUTHORIZE_RE = re.compile(r'@Authorize\(\s*action\s*=\s*"([^"]+)"(?:\s*,\s*resource\s*=\s*"([^"]*)")?')
-READ_VERBS = ("read", "list", "search")
+# rest.rego's read-family allow rules (operator-read-any, party-self-service) match ONLY
+# {"list","read"}; compliance-read-any matches only ".read". NO rule matches ".search", so a
+# *.search action has no allow path and must NOT be classified covered.
+READ_VERBS = ("read", "list")
 
 
 def money_path_services(root: Path) -> list[str]:
     rules = (root / "openbank-libs/governance/rules.yaml").read_text()
-    m = re.search(r"^money_path_services:\n((?:\s+-\s+\S+\n)+)", rules, re.MULTILINE)
+    # Entries may carry a trailing `# ADR-…` comment (fraud/billing do), so an anchored
+    # `\S+\n` would silently drop those lines. Match the whole list line, extract the token.
+    m = re.search(r"^money_path_services:\n((?:[ \t]+-[ \t]+\S.*\n)+)", rules, re.MULTILINE)
     if not m:
         sys.exit("cannot parse money_path_services from rules.yaml")
-    return re.findall(r"-\s+(\S+)", m.group(1))
+    return re.findall(r"-[ \t]+(\S+)", m.group(1))
 
 
 def classify(action: str, resource: str) -> tuple[str, str]:
