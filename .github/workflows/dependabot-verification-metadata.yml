@@ -1,0 +1,93 @@
+# Dependency-verification metadata refresh for Dependabot PRs.
+#
+# gradle/verification-metadata.xml pins a SHA-256 checksum for every resolved
+# artifact (supply-chain integrity: a repository-level tamper or dependency-
+# confusion swap of an existing version no longer resolves). Dependabot bumps a
+# version but does NOT know how to regenerate the metadata — without this
+# workflow every Dependabot PR would fail verification and the weekly
+# auto-merge flow (dependabot-auto-merge.yml) would be dead on arrival.
+#
+# So: on a Dependabot PR that touches Gradle files, re-run
+# `--write-verification-metadata sha256` and push the metadata diff back to the
+# PR branch. Trust model: checksums are computed from what Maven Central/the
+# Gradle Plugin Portal actually serve at PR time, i.e. this pins
+# "what Dependabot proposed", the same artifact a human reviewer would inspect.
+#
+# Security: pull_request event only (no pull_request_target), actor-gated to
+# dependabot[bot], same-repo branches only — the same trust boundary as
+# dependabot-auto-merge.yml. contents:write is scoped to pushing the metadata
+# file to the PR's own head branch.
+name: Dependabot verification metadata
+
+on:
+  pull_request:
+    paths:
+      - "**/build.gradle.kts"
+      - "**/libs.versions.toml"
+      - "gradle/wrapper/**"
+      - "gradle.properties"
+      - "settings.gradle.kts"
+
+permissions:
+  contents: read
+
+jobs:
+  refresh-metadata:
+    name: Refresh verification metadata
+    if: github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      # A push made with the default GITHUB_TOKEN does NOT re-trigger workflow runs
+      # (GitHub's recursion guard), so required checks would sit "expected" on the new head
+      # SHA and native auto-merge (dependabot-auto-merge.yml) would deadlock forever. To push
+      # a commit that DOES re-trigger checks we need a bot PAT / app token. If the
+      # METADATA_REFRESH_PAT secret is absent we SKIP the push (safe: verification is lenient,
+      # so stale metadata is a warning, not a merge blocker) rather than create the deadlock.
+      - name: Detect refresh token
+        id: tok
+        run: |
+          if [ -n "${{ secrets.METADATA_REFRESH_PAT }}" ]; then
+            echo "have=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::METADATA_REFRESH_PAT not set — skipping metadata refresh (lenient verification means stale metadata only warns; a GITHUB_TOKEN push would deadlock auto-merge)."
+            echo "have=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout PR branch
+        if: steps.tok.outputs.have == 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.METADATA_REFRESH_PAT }}
+
+      - if: steps.tok.outputs.have == 'true'
+        uses: actions/setup-java@1bcf9fb12cf4aa7d266a90ae39939e61372fe520 # v5
+        with:
+          java-version: "25"
+          distribution: temurin
+          cache: gradle
+
+      - name: Regenerate verification metadata
+        if: steps.tok.outputs.have == 'true'
+        run: |
+          set -euo pipefail
+          ./gradlew --write-verification-metadata sha256 testClasses --no-daemon -q
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+
+      - name: Push metadata diff back to the PR branch
+        if: steps.tok.outputs.have == 'true'
+        run: |
+          set -euo pipefail
+          if git diff --quiet gradle/verification-metadata.xml; then
+            echo "verification metadata unchanged — nothing to push."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add gradle/verification-metadata.xml
+          git commit -m "chore(deps): refresh dependency-verification metadata for this bump"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"

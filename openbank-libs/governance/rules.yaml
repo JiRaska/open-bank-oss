@@ -423,6 +423,17 @@ dependencies:
       adr: ADR-0136
   block_on_cve_severity: [CRITICAL, HIGH]
   catalog: openbank-libs/gradle/libs.versions.toml  # version catalog is the single dependency source
+  artifact_integrity:
+    # Gradle dependency verification (gradle/verification-metadata.xml): SHA-256 pins for
+    # every resolved artifact — a repository-level tamper or dependency-confusion swap of an
+    # existing version no longer resolves. Lockfiles/Dependabot pin VERSIONS; this pins BYTES.
+    # LENIENT (warn-only) while the metadata soaks across all CI lanes and developer
+    # platforms; flip = org.gradle.dependency.verification=strict in gradle.properties.
+    # Dependabot PRs auto-refresh the metadata (dependabot-verification-metadata.yml).
+    mechanism: gradle-verification-metadata-sha256
+    enforced: advisory
+    target_enforce_date: "2026-09-30"   # ADR-0144
+    ci_producer: "gradle.properties org.gradle.dependency.verification=lenient + .github/workflows/dependabot-verification-metadata.yml"
 
 # ---------------------------------------------------------------------------------------
 # Architecture invariants (ADR-0002 hexagonal).
