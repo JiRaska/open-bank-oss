@@ -1,12 +1,12 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-07-06T17:05:51.525Z",
+  "generatedAt": "2026-07-06T20:13:47.634Z",
   "counts": {
     "namespaces": 55,
     "networkPolicies": 74,
     "externalSecrets": 108,
-    "clusterPolicies": 3
+    "clusterPolicies": 4
   },
   "groups": [
     {
@@ -588,7 +588,7 @@
     {
       "item": "Admission policy",
       "plan": "sada kyverno policies",
-      "reality": "3 ClusterPolicy (image-verify)",
+      "reality": "4 ClusterPolicy (image-verify)",
       "status": "partial"
     }
   ]
