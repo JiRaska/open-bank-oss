@@ -72,36 +72,86 @@ def gh(url: str, method: str = "GET", body: dict | None = None):
         return json.loads(r.read() or "{}")
 
 
+def _cvss31_base_score(vector: str) -> float | None:
+    """CVSS v3.0/3.1 base score from the vector string (deterministic, per the spec).
+
+    OSV returns `severity[].score` as a CVSS VECTOR for CVE entries (not a number and not a
+    qualitative rating), so we must compute the base score to derive critical/high/medium/low.
+    Returns None for a non-v3 vector (v2/v4 handled by the caller's fallback).
+    """
+    if not vector.startswith(("CVSS:3.0", "CVSS:3.1")):
+        return None
+    m = dict(part.split(":", 1) for part in vector.split("/") if ":" in part)
+    try:
+        av = {"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.2}[m["AV"]]
+        ac = {"L": 0.77, "H": 0.44}[m["AC"]]
+        ui = {"N": 0.85, "R": 0.62}[m["UI"]]
+        changed = m["S"] == "C"
+        pr = ({"N": 0.85, "L": 0.68, "H": 0.5} if changed else {"N": 0.85, "L": 0.62, "H": 0.27})[m["PR"]]
+        imp = {"H": 0.56, "L": 0.22, "N": 0.0}
+        c, i, a = imp[m["C"]], imp[m["I"]], imp[m["A"]]
+    except KeyError:
+        return None
+    isc_base = 1 - (1 - c) * (1 - i) * (1 - a)
+    if changed:
+        impact = 7.52 * (isc_base - 0.029) - 3.25 * (isc_base - 0.02) ** 15
+    else:
+        impact = 6.42 * isc_base
+    if impact <= 0:
+        return 0.0
+    exploitability = 8.22 * av * ac * pr * ui
+    raw = min((1.08 if changed else 1.0) * (impact + exploitability), 10.0)
+    # spec roundup: ceil to one decimal, avoiding binary-float artifacts
+    scaled = int(round(raw * 100000))
+    return scaled / 100000.0 if scaled % 10000 == 0 else (scaled // 10000 + 1) / 10.0
+
+
+def _qualitative(score: float) -> str:
+    if score >= 9.0:
+        return "critical"
+    if score >= 7.0:
+        return "high"
+    if score >= 4.0:
+        return "medium"
+    return "low"
+
+
 def osv_severity(vuln_id: str) -> str:
-    """critical/high/medium/low from api.osv.dev CVSS; 'high' when unknown (conservative)."""
+    """critical/high/medium/low from api.osv.dev; 'high' when unknown (conservative)."""
     try:
         with urllib.request.urlopen(f"https://api.osv.dev/v1/vulns/{vuln_id}", timeout=15) as r:
             doc = json.loads(r.read())
     except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
         return "high"
-    # GHSA entries (most JVM/npm advisories) carry database_specific.severity
+    # 1) GHSA-style qualitative rating, when present (npm/some JVM advisories).
     for eco in [doc] + (doc.get("affected") or []):
         db = eco.get("database_specific") or {}
         s = (db.get("severity") or "").lower()
         if s in ("critical", "high", "moderate", "medium", "low"):
             return {"moderate": "medium"}.get(s, s)
-    # fall back to a numeric CVSS base score when one is present
-    score = 0.0
+    # 2) CVE-style: severity[].score is a CVSS vector — compute the base score (v3),
+    #    or accept a bare numeric score if a database ever provides one.
+    best = None
     for sev in doc.get("severity", []) or []:
-        sc = sev.get("score", "")
-        if re.match(r"^[\d.]+$", sc):
-            score = max(score, float(sc))
-    if score >= 9:
-        return "critical"
-    if score >= 7:
-        return "high"
-    if 0 < score < 7:
-        return "medium" if score >= 4 else "low"
-    return "high"
+        sc = (sev.get("score") or "").strip()
+        if re.fullmatch(r"[\d.]+", sc):
+            val = float(sc)
+        else:
+            val = _cvss31_base_score(sc)
+        if val is not None:
+            best = val if best is None else max(best, val)
+    if best is not None:
+        return _qualitative(best)
+    return "high"  # unknown severity → conservative
 
 
-def triage_queue() -> dict[str, list[str]]:
-    """CVE -> [components] still under_investigation, from vex-inventory.py --json."""
+def triage_queue() -> tuple[dict[str, list[str]], bool]:
+    """(CVE -> [components] under_investigation, inventory_had_bundles) from vex-inventory.py.
+
+    The second element guards the auto-close loop: if the inventory transiently returns nothing
+    (e.g. a GitHub release-asset fetch blip), we must NOT interpret an empty queue as 'every CVE
+    triaged' and close every open issue — that would silently reset every SLA clock.
+    """
     res = subprocess.run(
         [sys.executable, ".github/scripts/vex-inventory.py", "--json"],
         capture_output=True, text=True,
@@ -113,7 +163,8 @@ def triage_queue() -> dict[str, list[str]]:
     for cve in data.get("needs_triage", []):
         comps = [c for c, s in data["cve"].get(cve, {}).items() if s == "under_investigation"]
         out[cve] = sorted(comps)
-    return out
+    had_bundles = bool(data.get("with_bundle"))
+    return out, had_bundles
 
 
 def open_triage_issues() -> dict[str, dict]:
@@ -136,7 +187,7 @@ def main() -> int:
         sys.exit("GH_TOKEN/GITHUB_TOKEN required")
     dry = "--dry-run" in sys.argv
     slas = sla_days()
-    queue = triage_queue()
+    queue, inventory_had_data = triage_queue()
     existing = open_triage_issues()
     now = datetime.now(timezone.utc)
     failures = 0
@@ -170,8 +221,14 @@ def main() -> int:
         })
         print(f"opened: VEX triage: {cve} (severity:{sev})")
 
-    # 4: close issues whose CVE left the queue
-    for cve, issue in sorted(existing.items()):
+    # 4: close issues whose CVE left the queue — but ONLY if the inventory actually returned
+    # bundles. A transiently-empty inventory must not be read as "everything triaged" and
+    # close every open issue (which would reset every SLA clock). SLA enforcement below still
+    # runs on the existing issues regardless.
+    if not inventory_had_data and existing:
+        print("::warning::vex-inventory returned no bundles this run — skipping auto-close to "
+              "avoid resetting SLA clocks on a transient empty inventory.")
+    for cve, issue in ([] if not inventory_had_data else sorted(existing.items())):
         if cve in queue:
             continue
         if dry:
