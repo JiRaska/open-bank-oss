@@ -308,13 +308,13 @@ class FxServiceTest {
         coVerify(exactly = 1) { fraudScoringPort.score(any()) }
     }
 
-    private fun convertCommand() = ConvertCommand(
+    private fun convertCommand(fromAmountMinorUnits: Long = 10_000L) = ConvertCommand(
         idempotencyKey = "idem-1",
         partyId = UUID.randomUUID(),
         accountId = UUID.randomUUID(),
         fromCurrency = "EUR",
         toCurrency = "CZK",
-        fromAmountMinorUnits = 10_000L,
+        fromAmountMinorUnits = fromAmountMinorUnits,
         partyName = "Alice Example",
     )
 

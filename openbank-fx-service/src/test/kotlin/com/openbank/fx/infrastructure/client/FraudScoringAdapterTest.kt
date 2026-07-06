@@ -32,7 +32,12 @@ class FraudScoringAdapterTest {
     fun `a DECLINE verdict is mapped through unchanged`() {
         every { client.score(any()) } returns
             Uni.createFrom().item(
-                FraudScoreClientResponse(verdict = "DECLINE", score = 95, reasons = listOf("velocity-cap"), ruleVersion = "v3"),
+                FraudScoreClientResponse(
+                    verdict = "DECLINE",
+                    score = 95,
+                    reasons = listOf("velocity-cap"),
+                    ruleVersion = "v3",
+                ),
             )
 
         val outcome = runBlocking { adapter.score(command()) }
