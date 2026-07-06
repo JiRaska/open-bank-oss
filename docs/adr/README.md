@@ -156,7 +156,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0150](0150-internationalization-and-language-support-strategy.md) | Internationalization and language-support strategy | Accepted | Planned | — |
 | [0151](0151-chaos-engineering-and-infrastructure-failure-injection-policy.md) | Chaos engineering and infrastructure failure-injection policy | Accepted | Planned | — |
 | [0152](0152-single-tenancy-boundary-statement.md) | Single-tenancy boundary statement | Accepted | N/A — decision-only | — |
-| [0153](0153-savings-goal-metadata.md) | Savings goal metadata on account-service | Accepted | Planned | — |
+| [0153](0153-savings-goal-metadata.md) | Savings goal metadata on account-service | Accepted | Shipped | — |
 
 ---
 
