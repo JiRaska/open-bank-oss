@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.8.2...product-catalog-v0.8.3) (2026-07-06)
+
+
+### Bug Fixes
+
+* **product-catalog:** close two GraalVM native gotchas; measure ADR-0083 T1 promotion gate ([#275](https://github.com/JiRaska/open-bank-oss/issues/275)) ([7a2761c](https://github.com/JiRaska/open-bank-oss/commit/7a2761c2dbd86bb49eaacc8f94a6f662d7c26cb9))
+
 ## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.8.1...product-catalog-v0.8.2) (2026-07-06)
 
 
