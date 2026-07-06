@@ -1,0 +1,4 @@
+build/
+.gradle/
+crash-*
+Crash_*.java
