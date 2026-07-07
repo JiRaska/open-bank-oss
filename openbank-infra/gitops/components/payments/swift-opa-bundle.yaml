@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: swift-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "37d694854f617127"
+    openbank.tech/policy-checksum: "56a7c357de91bdad"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1120,15 +1120,33 @@ data:
         money_path_target: 70               # aspirational target; raise floor PRs as tests land
       money_path_depth:
         tool: pitest                        # mutation testing on money-path domain math (ADR-0030 D3)
-        enforced: planned                   # weekly advisory runs are live; blocking flip pending sustained >=70%
+        enforced: advisory                  # weekly advisory runs are live; blocking flip pending sustained >=70%
         target_enforce_date: "2026-09-30"   # ADR-0144
-        # Wired (pitest.yml weekly): ledger, balance, account, transaction, fx + sepa-payment,
-        # sepa-instant, domestic-payment, fraud (SSDLC-audit rollout 2026-07-06). Remaining
-        # money-path services are excluded by the ADR-0063 thin-domain criterion (1-2 domain
-        # files: sca, consent, billing, clearing, swift, lending) — mutation noise, not signal.
+        ci_producer: .github/workflows/pitest.yml
+        # Fleet rollout re-verified complete per the ADR-0063 criterion (2026-07-07, issue #265 D3):
+        # 9/15 money-path services wired (pitest.yml weekly) — ledger, balance, account, transaction,
+        # fx + sepa-payment, sepa-instant, domestic-payment, fraud (SSDLC-audit rollout 2026-07-06).
+        # The remaining 6 (sca, consent, billing, clearing, swift, lending) stay excluded: each has
+        # only 1-2 domain files, and those files are plain data models (no branching money-movement
+        # logic), so mutation testing there is noise, not signal — re-confirmed by file count on
+        # 2026-07-07, unchanged since the 2026-07-06 rollout. Revisit if any of these services grows
+        # real decision logic in its domain layer.
         # True baselines at rollout (after fixing the KILLED-quote parsing bug): account 49%,
         # transaction 46%, balance 55%, ledger 65%, fx 73%.
         blocked_on: "blocking flip requires each service to sustain >=70% mutation kill score on the weekly run; account/transaction/balance/ledger are below it today (see baselines above)"
+      dast:
+        tool: "OWASP ZAP baseline (zaproxy/action-baseline)"   # ADR-0030 D3
+        enforced: advisory                  # report-only first cut; no fail_action, no PR gate
+        target_enforce_date: "2026-12-31"   # revisit once findings are triaged via the D1 lifecycle
+        ci_producer: .github/workflows/dast-zap-baseline.yml
+        # Scope decision (2026-07-07, issue #265 D3): customer-edge is the true internet-facing edge
+        # (ADR-0065) but is a gitops-only Rollout/proxy with no Gradle module or image build in this
+        # repo, and booting the full fleet (openbank-infra/docker-compose.yml: postgres/kafka/keycloak
+        # + ~30 service images) is too heavy for a CI job. First cut scans ONE already-defined
+        # docker-compose target instead: ledger-service (postgres + kafka deps only), against its
+        # documented unauthenticated public paths (QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS).
+        # Scheduled weekly, not per-PR (cost + expected finding volume on a fresh banking-API scan).
+        blocked_on: "unauthenticated-surface only; an authenticated crawl needs Keycloak token issuance wired into the CI job, and a customer-edge / fleet-wide target needs either the real cluster or a much heavier compose boot — both deferred"
 
     # ---------------------------------------------------------------------------------------
     # API deprecation policy — drives ApiVersionResponseFilter.isDeprecatedPath() (ADR-0029 D2).
