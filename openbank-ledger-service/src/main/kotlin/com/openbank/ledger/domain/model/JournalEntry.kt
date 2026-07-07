@@ -77,6 +77,11 @@ data class JournalEntry(
         val reversalLines = lines.map { line ->
             line.copy(
                 id = lineIdProvider(line.id),
+                // Re-parent onto the reversal entry: leaving the original's journalId here is the
+                // V10-era bug (persistLines attached the reversal's lines to the ORIGINAL, saving
+                // the reversal with zero lines — unreadable on hydration). The V10 migration
+                // repaired the data; the code fix it references was never committed (#465).
+                journalId = reversalId,
                 side = if (line.side == JournalSide.DEBIT) JournalSide.CREDIT else JournalSide.DEBIT,
             )
         }
