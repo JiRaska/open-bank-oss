@@ -5,7 +5,7 @@ info:
   title: Transaction Service API
   # Kept in lockstep with version.txt / quarkus.application.version
   # (ADR-0029 D2 single-source invariant).
-  version: 1.7.0
+  version: 1.7.1
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0
@@ -45,6 +45,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TransactionPage'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Transactions]
+      summary: Initiate a new transaction
+      operationId: initiateTransaction
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InitiateTransactionRequest'
+      responses:
+        '201':
+          description: Transaction created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/transactions/search:
     get:
@@ -123,6 +146,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TransactionSearchResult'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/transactions/{transactionId}:
     get:
@@ -143,6 +168,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TransactionResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -173,6 +200,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TransactionResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
@@ -186,6 +215,12 @@ components:
       bearerFormat: JWT
 
   responses:
+    Forbidden:
+      description: Authenticated but denied by the OPA authorization policy (ADR-0034)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
     NotFound:
       description: Not found
       content:
