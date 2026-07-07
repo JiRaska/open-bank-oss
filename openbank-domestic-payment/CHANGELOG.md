@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.9](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.8.8...domestic-payment-v0.8.9) (2026-07-07)
+
+
+### Security
+
+* **domestic-payment:** enforce OPA authorization on payment endpoints (ADR-0034 Phase 5) ([#393](https://github.com/JiRaska/open-bank-oss/issues/393)) ([7e38bf5](https://github.com/JiRaska/open-bank-oss/commit/7e38bf533b44da36c3d5723f9eae2658566d23a0))
+
 ## [0.8.8](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.8.7...domestic-payment-v0.8.8) (2026-07-03)
 
 
