@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: copilot-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "a95d9c7563422017"
+    openbank.tech/policy-checksum: "1b80a815c8e4459b"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -55,11 +55,13 @@ data:
     	"policy_version": policy_version,
     } if {
     	count(allowed_reasons) > 0
+
     	# Defense-in-depth: a prohibited action (e.g. flipping off SCA/sanctions via a feature
     	# flag, issue #419) can never be granted by ANY reason — not even operator-on-own-tenant
     	# with a tenant-matched resource. Gating the allow head, not each reason, makes this
     	# impossible to bypass by enriching the input (the prohibition is not just surfaced).
     	not prohibited
+
     	# Pick the lexicographically smallest reason so the complete rule produces a single
     	# deterministic output even when multiple allowed_reasons rules fire simultaneously
     	# (e.g. operator-on-own-tenant + operator-read-any for a tenant-scoped read).
@@ -83,6 +85,7 @@ data:
     allowed_reasons contains "operator-on-own-tenant" if {
     	input.principal.type == "HUMAN"
     	"ROLE_OPERATOR" in input.principal.roles
+
     	# Resource-scoped actions must target the operator's tenant; non-scoped
     	# (system-wide) actions are not granted by this rule.
     	input.resource
@@ -100,10 +103,13 @@ data:
     # duplicate the charter logic — call it through the unified package boundary.
     allowed_reasons contains "agent-charter-allows" if {
     	input.principal.type == "AI_AGENT"
-    	# Translate the REST input into the MCP input shape and reuse agents.allow.
-    	# Kept tight on purpose: only proceeds if the agent has an EXPLICIT allow
-    	# from its charter, not just absence-of-deny.
-    	data.openbank.agents.charter_allowed with input as {
+
+    	# Translate the REST input into the MCP input shape and reuse agents.allow --
+    	# NOT charter_allowed: agents.allow ALSO applies hard_denied / charter_denied /
+    	# skill_ok, none of which charter_allowed alone consults. Calling charter_allowed
+    	# directly would let a fleet-wide hard-denied tool tier, or an agent's own
+    	# tools.deny glob, silently reach a REST action anyway.
+    	data.openbank.agents.allow with input as {
     		"agent": input.principal.id,
     		"tool": input.action,
     		"resource": input.resource,
@@ -343,9 +349,15 @@ data:
     default allow := false
 
     # Look up the calling agent's charter (from agents.yaml, loaded as data.agents.agents).
+    # input.agent is bare on the MCP path (openbank-agent-service sets it directly from its own
+    # config, e.g. "ui-assistant" -- AgentChatService.ASSISTANT_IDENTITY), but rest.rego's REST
+    # bridge sources it from the JWT `sub` via AuthorizeInterceptor.principal.id, which for an
+    # AI_AGENT is prefixed "agent:" (AuthorizeInterceptor.principalType()'s own convention, e.g.
+    # "agent:onboarding" per its test). trim_prefix is a no-op when the prefix isn't present, so
+    # this normalises both callers to the bare charter id without needing two lookup rules.
     charter contains a if {
     	some a in data.agents.agents
-    	a.id == input.agent
+    	a.id == trim_prefix(input.agent, "agent:")
     }
 
     # The hard-forbidden tier is forbidden for ALL agents, regardless of charter (agents.yaml: tool_tiers.deny).
@@ -353,16 +365,79 @@ data:
 
     # A tool is explicitly denied by the agent's own charter (supports glob like "money.*", "*.write").
     charter_denied if {
-    	some a in charter
-    	some pattern in a.tools.deny
+    	some pattern in allowed_or_denied_patterns.deny
     	glob_match(pattern, input.tool)
+    }
+
+    # Every tools.allow / tools.deny pattern across the agent's charter(s) -- factored out so
+    # charter_allowed and rest_action_allowed don't each re-walk `some a in charter` themselves.
+    allowed_or_denied_patterns := {
+    	"allow": {pattern |
+    		some a in charter
+    		some pattern in a.tools.allow
+    	},
+    	"deny": {pattern |
+    		some a in charter
+    		some pattern in a.tools.deny
+    	},
     }
 
     # A tool is explicitly allowed by the agent's charter allowlist.
     charter_allowed if {
-    	some a in charter
-    	some pattern in a.tools.allow
+    	some pattern in allowed_or_denied_patterns.allow
     	glob_match(pattern, input.tool)
+    }
+
+    # rest.rego's "agent-charter-allows" rule reuses this package for a REST call from an
+    # AI_AGENT principal by setting input.tool := input.action -- the raw REST action string
+    # an @Authorize-annotated endpoint declares (e.g. "ledger.list", "account.read"). Charters
+    # declare tools.allow in the MCP tool-tier vocabulary instead (agents.yaml tool_tiers.read,
+    # e.g. "query.ledger.readonly") -- a different string space. glob_match("query.ledger.readonly",
+    # "ledger.list") never matches (they're unrelated strings, not even a prefix/suffix
+    # relationship), so charter_allowed alone could never grant a REST read no matter how
+    # clearly the charter's tools.allow / data_scope intended it -- the moment ANY service a
+    # charter reads flips OPA to enforce mode, every AI_AGENT read against it 403s. IMPORTANT:
+    # rest.rego MUST delegate to this package's `allow` (which also applies hard_denied /
+    # charter_denied / skill_ok), never to charter_allowed directly -- charter_allowed alone
+    # skips those checks.
+    charter_allowed if rest_action_allowed
+
+    # rest_domains mirrors openbank-agent-service's own McpToolRegistry.capabilities map -- the
+    # single place that already decided which REST-action service scopes each `query.*.readonly`
+    # MCP capability is meant to cover (e.g. query.ledger.readonly also backs the
+    # account/transaction/balance read tools, not just ledger). Keep the two in sync: a new
+    # query.<x>.readonly tool, or a domain added to an existing one, needs an entry here too, or
+    # the fleet regains this exact gap. Some domains (catalog, aml, clearing, sepa-instant,
+    # dispute, balance-via-query.balance.readonly) have no @Authorize-gated read endpoint yet --
+    # their entries are forward-looking and inert until that service adopts @Authorize on its
+    # reads (tracked in issue #401). Where a service's only real @Authorize action today is a
+    # WRITE (e.g. aml-service's amlCase.updateDecision, clearing-service's clearingBatch.settle,
+    # sepa-instant's sctInstPayment.recall), the verified write-action prefix is listed alongside
+    # the bare service name, since a future read endpoint may reuse either convention and both
+    # are inert until then anyway.
+    rest_domains := {
+    	"query.ledger.readonly": {"ledger", "account", "transaction", "balance"},
+    	"query.catalog.readonly": {"catalog"},
+    	"query.compliance.readonly": {"aml", "amlCase", "sanctions"},
+    	"query.payments.readonly": {"fx", "clearing", "clearingBatch", "sepa-instant", "sctInstPayment"},
+    	"query.interest.readonly": {"interest"},
+    	"query.disputes.readonly": {"dispute"},
+    	"query.balance.readonly": {"balance"},
+    	"query.transaction.readonly": {"transaction"},
+    }
+
+    # Scoped to read verbs only -- a `*.readonly` tool must never bridge into a write action,
+    # however permissive matching the domain prefix alone would otherwise be.
+    rest_read_verbs := {"list", "read", "search"}
+
+    # A charter tool pattern authorizes a REST action iff the action's service-scope prefix is
+    # in that tool's mapped rest_domains set AND the verb is read-only.
+    rest_action_allowed if {
+    	some pattern in allowed_or_denied_patterns.allow
+    	some scope in rest_domains[pattern]
+    	startswith(input.tool, sprintf("%s.", [scope]))
+    	some verb in rest_read_verbs
+    	endswith(input.tool, sprintf(".%s", [verb]))
     }
 
     # run.skill is further constrained to the agent's `skills` allowlist (development plane).
