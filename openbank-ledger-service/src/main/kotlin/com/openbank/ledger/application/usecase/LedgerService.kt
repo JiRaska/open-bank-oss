@@ -34,8 +34,10 @@ import com.openbank.libs.api.pagination.PageInfo
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import jakarta.persistence.PersistenceException
 import java.time.Clock
 import java.time.ZoneId
 import java.util.UUID
@@ -117,31 +119,58 @@ class LedgerService(
             "Unvalidated GL account referenced in journal entry"
         }
 
-        val outbox = OutboxMessage(
-            aggregateId = entry.id,
-            eventType = JOURNAL_POSTED,
-            payload = objectMapper.writeValueAsString(
-                JournalPostedEvent(
-                    aggregateId = entry.id,
-                    version = entry.version,
-                    entryNumber = entry.entryNumber!!,
-                    transactionId = entry.transactionId,
-                    entryDate = entry.entryDate,
-                    lineCount = entry.lines.size,
-                    occurredAt = clock.instant(),
-                ),
-            ),
-        )
-
-        val saved = journalRepository.save(entry, command.idempotencyKey, listOf(outbox) + bookedChangedMessages(entry))
+        val messages = listOf(journalPostedMessage(entry)) + bookedChangedMessages(entry)
+        val saved = try {
+            journalRepository.save(entry, command.idempotencyKey, messages)
+        } catch (e: PersistenceException) {
+            return recoverConcurrentReplay(e, command.idempotencyKey)
+        } catch (e: PgException) {
+            return recoverConcurrentReplay(e, command.idempotencyKey)
+        }
         recordPostings(entry, POSTING, metrics)
         recordPostingAmounts(entry, metrics)
         return saved
     }
 
+    /**
+     * The loser of a concurrent duplicate-submission race: both contenders passed the replay
+     * check before either committed, and this transaction died on the ledger_idempotency
+     * primary key. Recover to the same contract as the sequential path — return the winner's
+     * entry (idempotent replay; no metrics, a replay is never a second posting). Anything that
+     * is not the idempotency-key conflict propagates untouched.
+     */
+    private suspend fun recoverConcurrentReplay(e: RuntimeException, idempotencyKey: String): JournalEntry {
+        val isIdempotencyKeyConflict = generateSequence<Throwable>(e) { it.cause.takeIf { c -> c !== it } }
+            .any { it.message?.contains("ledger_idempotency", ignoreCase = true) == true }
+        if (!isIdempotencyKeyConflict) throw e
+        return journalRepository.findByIdempotencyKey(idempotencyKey) ?: throw e
+    }
+
+    private fun journalPostedMessage(entry: JournalEntry): OutboxMessage = OutboxMessage(
+        aggregateId = entry.id,
+        eventType = JOURNAL_POSTED,
+        payload = objectMapper.writeValueAsString(
+            JournalPostedEvent(
+                aggregateId = entry.id,
+                version = entry.version,
+                entryNumber = entry.entryNumber!!,
+                transactionId = entry.transactionId,
+                entryDate = entry.entryDate,
+                lineCount = entry.lines.size,
+                occurredAt = clock.instant(),
+            ),
+        ),
+    )
+
     override suspend fun reverseJournal(command: ReverseJournalCommand): JournalEntry {
         val original = journalRepository.findById(command.journalId)
             ?: throw JournalNotFoundException("Journal not found: ${command.journalId}")
+
+        // Deterministic 409 for the sequential repeat; the concurrent window (both contenders
+        // read POSTED here) is closed by the conditional status flip in saveReversal.
+        if (original.status != JournalStatus.POSTED) {
+            throw JournalReversalConflictException("Journal ${original.id} is not POSTED — already reversed")
+        }
 
         // Period lock (#869): a reversal inherits the original entry's date (reverse() preserves
         // entryDate), so reversing a prior-year entry would post into that year. If that year is
@@ -326,6 +355,14 @@ private fun recordPostingAmounts(entry: JournalEntry, metrics: DomainMetrics) {
 
 class JournalNotFoundException(message: String) : RuntimeException(message)
 class GlAccountValidationException(message: String) : RuntimeException(message)
+
+/**
+ * A reversal targeted a journal that is not POSTED — repeated or concurrent reversal (#465).
+ * Dedicated type (not IllegalStateException): libs-runtime and this service both register an
+ * ExceptionMapper<IllegalStateException> (422 vs 409) and JAX-RS picks between same-type
+ * providers non-deterministically (ADR-0049 D4), so the conflict status would flip-flop.
+ */
+class JournalReversalConflictException(message: String) : RuntimeException(message)
 
 /** A posting or reversal targeted an ATTESTED (locked) fiscal period. Mapped to 409 (#869). */
 class ClosedFiscalPeriodException(message: String) : RuntimeException(message)
