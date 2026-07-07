@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.8.2...audit-service-v0.9.0) (2026-07-07)
+
+
+### Features
+
+* **gdpr:** add kyc/card export coverage and disabled-by-default session-log retention ([#356](https://github.com/JiRaska/open-bank-oss/issues/356)) ([d627e0a](https://github.com/JiRaska/open-bank-oss/commit/d627e0a0d9c7514f65b53f8d253c2ae5394e5386))
+
 ## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.8.1...audit-service-v0.8.2) (2026-07-03)
 
 
