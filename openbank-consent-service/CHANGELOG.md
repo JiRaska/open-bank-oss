@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.5](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.10.4...consent-service-v0.10.5) (2026-07-07)
+
+
+### Security
+
+* **consent:** enforce OPA authorization on all consent endpoints (ADR-0126 D5) ([#383](https://github.com/JiRaska/open-bank-oss/issues/383)) ([dce975e](https://github.com/JiRaska/open-bank-oss/commit/dce975e1bab86e43b9c0c864c49cb24298836c86))
+
 ## [0.10.4](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.10.3...consent-service-v0.10.4) (2026-07-04)
 
 
