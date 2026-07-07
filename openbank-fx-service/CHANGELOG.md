@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.5](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.7.4...fx-service-v0.7.5) (2026-07-07)
+
+
+### Security
+
+* **fx:** enforce OPA authorization on FX endpoints (ADR-0034 Phase 5) ([#406](https://github.com/JiRaska/open-bank-oss/issues/406)) ([347b893](https://github.com/JiRaska/open-bank-oss/commit/347b8934ccfcc665cbe5796440664bdc4463b77b))
+
 ## [0.7.4](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.7.3...fx-service-v0.7.4) (2026-07-02)
 
 
