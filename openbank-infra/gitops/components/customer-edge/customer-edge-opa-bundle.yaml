@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: customer-edge
     app.kubernetes.io/part-of: customer-edge
   annotations:
-    openbank.tech/policy-checksum: "b9e2b0d0ecfa2769"
+    openbank.tech/policy-checksum: "64bf88316f5fce9b"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -54,6 +54,7 @@ data:
     	"allow": true,
     	"reason": reason,
     	"policy_version": policy_version,
+    	"attributes": response_attributes,
     } if {
     	count(allowed_reasons) > 0
 
@@ -68,6 +69,17 @@ data:
     	# (e.g. operator-on-own-tenant + operator-read-any for a tenant-scoped read).
     	reason := min(allowed_reasons)
     }
+
+    # Surfaced on the allow object so OpaSidecarPolicyDecisionPoint (which reads
+    # `result.attributes` generically) actually delivers it to AuthzDecision.attributes.
+    # A fleet audit (issue #395) found four_eyes_required was computed below but never
+    # reached this object — "attributes" was simply absent from the allow head — so no
+    # caller anywhere could ever have acted on it, independent of any money_path_scopes
+    # naming mismatch. Sparse on purpose: omitted (not `false`) when not required, matching
+    # this file's existing audit-attribute style (cf. default policy_version above).
+    default response_attributes := {}
+
+    response_attributes := {"four_eyes_required": true} if four_eyes_required
 
     # policy_version is audit METADATA, never a gate. Resolve it via a defaulted rule so
     # a bundle that omits openbank.bundle.version cannot turn a legitimate allow into an
@@ -173,10 +185,27 @@ data:
     # Money-path service scopes, normalised to the action namespace: money_path_services in
     # rules.yaml uses the module name (openbank-ledger-service) but an action prefix is the
     # commit scope (ledger). Strip the `openbank-` prefix and a trailing `-service` so the
-    # two align (e.g. openbank-ledger-service -> ledger; openbank-sepa-payment -> sepa-payment).
+    # two align (e.g. openbank-ledger-service -> ledger).
+    #
+    # Five services' real @Authorize action prefix does NOT match that derived name (a
+    # fleet audit, issue #395, found this silently disabled four-eyes for every one of
+    # them): sepa-payment -> sepaPayment, sepa-instant -> sctInstPayment, domestic-payment
+    # -> domesticPayment, clearing -> clearingBatch, sca -> device / scaChallenge. Two of
+    # those aren't even a casing variant of the derived name, so this uses an explicit
+    # override table (rules.yaml: money_path_action_prefixes) rather than a camelCase
+    # guess — self-documenting, and rest_test.rego pins it so a future rename can't
+    # silently drift back out of sync.
     money_path_scopes contains scope if {
     	some svc in data.rules.money_path_services
-    	scope := trim_suffix(trim_prefix(svc, "openbank-"), "-service")
+    	derived := trim_suffix(trim_prefix(svc, "openbank-"), "-service")
+    	not data.rules.money_path_action_prefixes[derived]
+    	scope := derived
+    }
+
+    money_path_scopes contains scope if {
+    	some svc in data.rules.money_path_services
+    	derived := trim_suffix(trim_prefix(svc, "openbank-"), "-service")
+    	some scope in data.rules.money_path_action_prefixes[derived]
     }
 
     four_eyes_required if {
@@ -642,12 +671,37 @@ data:
       self_merge_forbidden_on: [CODEOWNERS_protected]
 
     # ---------------------------------------------------------------------------------------
+    # Money-path action-prefix overrides (issue #395). rest.rego derives a scope from each
+    # money_path_services entry by stripping `openbank-` and a trailing `-service`
+    # (openbank-ledger-service -> ledger) and matches it against the @Authorize action
+    # prefix (the part before the first `.`). A fleet audit found 5 services whose real
+    # prefix does not equal that derived name — two (clearing, sca) aren't even a casing
+    # variant of it — which silently disabled four_eyes_required for every one of them.
+    # List the REAL @Authorize prefix(es) here for any service where it differs; rest.rego
+    # uses this instead of the derived name for that service, and rest_test.rego pins each
+    # entry against the service's actual source so a rename can't silently drift back out
+    # of sync. Only list a service here when it diverges — everything else keeps using the
+    # derived name.
+    money_path_action_prefixes:
+      sepa-payment: [sepaPayment]
+      sepa-instant: [sctInstPayment]
+      domestic-payment: [domesticPayment]
+      clearing: [clearingBatch]
+      sca: [device, scaChallenge]
+
+    # ---------------------------------------------------------------------------------------
     # Four-eyes (dual control) for the unified OPA authz PEP (ADR-0034 D1; rest.rego reads
     # data.rules.four_eyes.verbs). A money-path action whose verb is listed here is flagged
     # `four_eyes_required` so the handler demands a second approver (maker-checker). This is
     # an AUGMENTATION flag, not an allow/deny on its own. NOTE: rest.rego normalises the
-    # money_path_services entries (strips the `openbank-` prefix and a trailing `-service`)
-    # to the action scope namespace, e.g. `openbank-ledger-service` -> `ledger`.
+    # money_path_services entries (strips the `openbank-` prefix and a trailing `-service`,
+    # or applies the money_path_action_prefixes override above) to the action scope
+    # namespace, e.g. `openbank-ledger-service` -> `ledger`.
+    #
+    # transfer/post/reverse/freeze/release/flip were the originally-designed vocabulary, but
+    # a fleet audit (issue #395) found real @Authorize verbs rarely spell it that way — only
+    # ledger.reverse, transaction.reverse and account.freeze literally matched. The verbs
+    # below were added to cover the real money-moving action each service actually emits.
     four_eyes:
       verbs:
         - transfer                          # outbound value movement (sepa/domestic/swift/instant)
@@ -656,6 +710,13 @@ data:
         - freeze                            # account freeze/unfreeze
         - release                           # release a held payment
         - flip                              # money-path feature-flag flip (ADR-0067 / issue #419)
+        - transitionStatus                  # sepa-payment / domestic-payment lifecycle transition (issue #395)
+        - recall                            # sepa-instant: recall a SETTLED payment (issue #395)
+        - settle                            # clearing: settle a clearing batch (issue #395)
+        - disburse                          # lending: loan payout (issue #395)
+        - send                              # swift: send an outbound wire message (issue #395)
+        - credit                            # balance: direct ledger-balance credit adjustment (issue #395)
+        - debit                             # balance: direct ledger-balance debit adjustment (issue #395)
 
     # ---------------------------------------------------------------------------------------
     # Feature-flag flip governance (ADR-0067 follow-up, issue #419). The OPA PEP (rest.rego)
