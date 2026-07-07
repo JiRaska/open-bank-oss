@@ -334,6 +334,22 @@ jobs:
       - name: threat-model coverage (ADR-0030 D2)
         run: python3 openbank-infra/scripts/check-threat-models.py
 
+      # ADR-0030 D2, diff-aware half (issue #265): when a PR moves a money-path
+      # service's TRUST BOUNDARIES — inbound REST surface, a new outbound
+      # HTTP/gRPC edge, authn/listener/transport keys in application.yaml, or
+      # its NetworkPolicy / Deployment/Rollout in gitops — the same diff must
+      # update docs/threat-models/<service>.md. ADVISORY until rules.yaml
+      # trust_boundary_diff_change flips to enforced (target 2026-09-15,
+      # ADR-0144) — findings are ::warning annotations; add --enforce to flip.
+      # PR-only: the gate diffs 3-dot against the PR base.
+      - name: "threat-model updated on trust-boundary change (ADR-0030 D2, advisory)"
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --depth=1 origin "${PR_BASE_SHA}" 2>/dev/null || true
+          python3 openbank-infra/scripts/check-threat-model-diff.py --base "${PR_BASE_SHA}"
+
       # CLAUDE.md rule 3 / ADR-0029: a module is a released component iff it has
       # a version.txt, and must be registered in release-please-config.json AND
       # .release-please-manifest.json. stdlib-only gate; catches a new service

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger
   annotations:
-    openbank.tech/policy-checksum: "843e8a6581f268b5"
+    openbank.tech/policy-checksum: "7b8f06a02fe7916c"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1049,6 +1049,25 @@ data:
           - "docs/threat-models/<service>.md present/updated"   # ADR-0030 D2
         gate: threat-model
         enforced: enforce                   # check-threat-models.py live in CI; all 13 money-path services have valid threat models
+      trust_boundary_diff_change:
+        # ADR-0030 D2, diff-aware half (issue #265). The coverage gate above proves a threat
+        # model EXISTS; this one proves it is UPDATED in the same PR when a money-path
+        # service's trust boundaries move: new/changed inbound REST endpoints
+        # (infrastructure/rest/**), a new outbound HTTP/gRPC edge (infrastructure/client/**,
+        # client-flavoured adapters), authn/listener/transport keys
+        # (oidc|auth|authz|opa|http|kafka|security) in application.yaml, or the service's
+        # NetworkPolicy / Deployment/Rollout manifest under openbank-infra/gitops/components/.
+        detect: ["money-path <service> trust-boundary paths in the PR diff"]
+        require:
+          - "docs/threat-models/<service>.md updated in the SAME PR"   # ADR-0030 D2
+        gate: threat-model-diff
+        enforced: advisory
+        target_enforce_date: "2026-09-15"   # ADR-0144
+        # CI producer is LIVE (advisory): openbank-infra/scripts/check-threat-model-diff.py runs
+        # in the "Validate manifests" job on every PR, right after the coverage gate — diff-scoped
+        # (3-dot against the PR base). Findings are ::warning annotations. Flip to enforced =
+        # pass --enforce to the script in ci.yml (one-line change).
+        ci_producer: "openbank-infra/scripts/check-threat-model-diff.py"
       new_service_with_outbox:
         # A service that extends AbstractOutboxEntity / uses OutboxDispatcher but does NOT
         # set openbank.outbox.dispatch-enabled=true silently never dispatches events —
@@ -1404,6 +1423,20 @@ data:
       sla_days: { critical: 7, high: 30, medium: 90, low: 180 }
       triage_owner: CODEOWNERS
       surfaced_in: admin-ui-governance
+      vex_format: openvex                   # OpenVEX 0.2.0; one doc per component per release
+      vex_store: openbank-libs/governance/vex/<component>.openvex.json   # human-triaged overlay
+      # D1 is SHIPPED (PR #325 image-rescan.yml, PR #315 vex-triage.yml + vex-triage.py /
+      # vex-inventory.py). Not a PR-blocking gate — a scheduled lifecycle: vex-triage.yml
+      # (weekly) opens/closes `vex-triage`-labelled GitHub issues per queued CVE (the issue's
+      # creation date IS the SLA clock) and the job itself goes red (::error, non-zero exit)
+      # when an open issue's age exceeds sla_days for its OSV-derived severity — that red run
+      # is the enforcement signal, same forcing-function shape as ADR-0144 gate graduation,
+      # but on a cron rather than a PR check. image-rescan.yml (weekly) additionally passes
+      # each component's VEX overlay to `trivy image --vex`, so a human `not_affected`/`fixed`
+      # verdict suppresses re-alarming on an already-triaged finding.
+      gate: vex-triage
+      enforced: active                      # producer is wired and the weekly job enforces its own SLA
+      ci_producer: ".github/scripts/vex-triage.py (+ vex-inventory.py), .github/workflows/vex-triage.yml"
 
     # ---------------------------------------------------------------------------------------
     # CI runner governance (ADR-0053, supersedes ADR-0082). Per-job EPHEMERAL ARC runner
@@ -1646,10 +1679,21 @@ data:
         # process start ≤500ms p95 (met, ~0.2-0.3s) and end-to-end scale-from-zero with
         # tuned probes ≤5s p95 (met on a small sample, ~4.4s avg/5.0s worst-of-3; probe
         # tuning alone cut ~28% off the untuned 3.5-8.8s, the residual ~4s floor is
-        # Kubernetes control-plane + admission-webhook overhead, not the image). Stays
-        # unclassified — T1 requires the live gitops Deployment to actually run the native
-        # image + tuned probes (a separate, deliberate infra cutover, not implied by this
-        # scratch measurement) plus a burn-in window per the ADR's Pilot plan steps 4-6.
+        # Kubernetes control-plane + admission-webhook overhead, not the image).
+        openbank-product-catalog: T1
+        # Declared 2026-07-07 (#253): the live sandbox Deployment (accounts namespace)
+        # already runs the native image + tuned probes (startupProbe/readinessProbe
+        # periodSeconds:1, failureThreshold:10). A 10-sample end-to-end scale-from-zero
+        # series through the KEDA HTTP interceptor measured median 5.29s / p95 ~5.4s
+        # (excl. one 9.1s sample that likely captured a cold node-local image pull) —
+        # marginally over the ADR's ≤5s p95 target. Accepted as met (maintainer call,
+        # #253): the miss is small, and for a non-money-path, rarely-hit admin/fees read
+        # endpoint the interceptor's whole job is absorbing that wait as a slow first
+        # click, not a 5xx — the FinOps trade (near-zero idle cost) holds. Caveat: this
+        # is a single n=10 sample on one day, not the ADR's originally-specified 48h
+        # burn-in window — re-validate over a longer window before treating T1 as
+        # permanently locked in; a regression would demote per t0_baseline's own
+        # 2-approval bar for money-path (N/A here) or a simple re-declare for non-money-path.
 
       # Keep-honest classifier: reads measured signals (HTTP rate/idle ratio, Kafka lag +
       # active fraction, CPU/replica utilisation), emits a recommended tier + realised
