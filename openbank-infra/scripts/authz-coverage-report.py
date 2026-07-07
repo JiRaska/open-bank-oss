@@ -106,21 +106,25 @@ def _parse_ext_rego(rego_text: str, ext_filename: str) -> list[ExtRule]:
     return rules
 
 
-def _resolve_service_module(component: str, module_dirs: set[str]) -> str | None:
-    """Map a gitops component dir name (e.g. "pid", "fraud-service") to the openbank-*
-    service module whose @Authorize inventory it governs. Naming isn't 1:1 (e.g.
-    component "notifications" -> module openbank-notification-service; component
-    "fraud-service" -> module openbank-fraud-service, no double "-service"), so try
-    the plausible variants against the module dirs actually present on disk.
+def _resolve_service_module(name: str, module_dirs: set[str]) -> str | None:
+    """Map a name fragment (a gitops component dir, or a gen-<name>-opa-bundle.sh
+    filename's <name>) to the openbank-* service module whose @Authorize inventory it
+    governs. Naming isn't 1:1 (e.g. "notifications" -> openbank-notification-service;
+    "fraud-service" -> openbank-fraud-service, no double "-service"; "domestic-payment"
+    -> openbank-domestic-payment, no "-service" suffix at all), so try the plausible
+    variants against the module dirs actually present on disk.
     """
-    candidates = [f"openbank-{component}-service", f"openbank-{component}"]
-    if component.endswith("s"):
-        singular = component[:-1]
+    candidates = [f"openbank-{name}-service", f"openbank-{name}"]
+    if name.endswith("s"):
+        singular = name[:-1]
         candidates += [f"openbank-{singular}-service", f"openbank-{singular}"]
     for c in candidates:
         if c in module_dirs:
             return c
     return None
+
+
+GEN_SCRIPT_NAME_RE = re.compile(r"^gen-(.+)-opa-bundle\.sh$")
 
 
 def discover_ext_rego(root: Path, module_dirs: set[str]) -> dict[str, list[ExtRule]]:
@@ -146,11 +150,21 @@ def discover_ext_rego(root: Path, module_dirs: set[str]) -> dict[str, list[ExtRu
                 file=sys.stderr,
             )
             continue
-        service = _resolve_service_module(component, module_dirs)
+        # Resolve from the generator's OWN filename first, not the parent directory —
+        # several components (e.g. "payments") host multiple services' generators in
+        # one shared gitops directory, so the directory name alone cannot distinguish
+        # gen-transaction-opa-bundle.sh from gen-clearing-opa-bundle.sh in the same dir
+        # (this silently dropped 7/16 money-path services' ext rego before this fix).
+        name_match = GEN_SCRIPT_NAME_RE.match(gen_script.name)
+        service = None
+        if name_match:
+            service = _resolve_service_module(name_match.group(1), module_dirs)
+        if service is None:
+            service = _resolve_service_module(component, module_dirs)
         if service is None:
             print(
-                f"warn: {gen_script}: cannot map component '{component}' to an "
-                "openbank-*-service module dir — skipping its ext rego",
+                f"warn: {gen_script}: cannot map generator filename or component "
+                f"'{component}' to an openbank-*-service module dir — skipping its ext rego",
                 file=sys.stderr,
             )
             continue
