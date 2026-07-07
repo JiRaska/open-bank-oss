@@ -86,9 +86,14 @@ module "audit_baseline" {
 
   name = var.cluster_name
 
-  # Sandbox is out of prod compliance scope (and churns Karpenter nodes constantly),
-  # so record AWS Config daily instead of per-change: same resource-type coverage, no
-  # change-triggered rules depend on continuous, ~$85/mo of ConfigurationItem cost cut.
+  # Sandbox is out of prod compliance scope (and churns Karpenter nodes constantly).
+  # Even at DAILY frequency, full resource-type recording over that churn is a steady
+  # ~$140/mo with no consumer (no Config rules on this account), so the recorder is
+  # stopped entirely; CloudTrail carries the ADR-0027 tamper-evident trail on its own.
+  # All Config resources stay provisioned — re-enable is this one flag (frequency
+  # stays DAILY for when it comes back), and the openbank-config-recording-daily
+  # budget in finops-budget.tf remains as the tripwire against silent re-enable.
+  config_recording_enabled   = false
   config_recording_frequency = "DAILY"
 
   # 1-day COMPLIANCE lock keeps the sandbox destroyable; config history is short-lived.
