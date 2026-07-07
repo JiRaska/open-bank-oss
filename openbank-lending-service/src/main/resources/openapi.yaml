@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.0.0
+  version: 1.0.1
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions are four-eyes
@@ -35,6 +35,8 @@ paths:
           description: Application accepted
         '400':
           $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     get:
       tags: [Lending]
       operationId: listApplications
@@ -47,6 +49,8 @@ paths:
       responses:
         '200':
           description: Applications for the party
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/lending/applications/{id}:
     get:
       tags: [Lending]
@@ -56,6 +60,8 @@ paths:
         - $ref: '#/components/parameters/IdPath'
       responses:
         '200': { description: The application }
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404': { description: Not found }
   /api/v1/lending/applications/{id}/decision:
     post:
@@ -73,6 +79,8 @@ paths:
               $ref: '#/components/schemas/DecisionRequest'
       responses:
         '200': { description: Decision applied }
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
   /api/v1/lending/applications/{id}/disburse:
@@ -85,6 +93,8 @@ paths:
         - $ref: '#/components/parameters/IdPath'
       responses:
         '201': { description: Loan disbursed and booked }
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
   /api/v1/lending/loans:
@@ -99,6 +109,8 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         '200': { description: Loans for the party }
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/lending/loans/{id}:
     get:
       tags: [Lending]
@@ -108,6 +120,8 @@ paths:
         - $ref: '#/components/parameters/IdPath'
       responses:
         '200': { description: The loan }
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404': { description: Not found }
   /api/v1/lending/loans/{id}/schedule:
     get:
@@ -118,6 +132,8 @@ paths:
         - $ref: '#/components/parameters/IdPath'
       responses:
         '200': { description: The repayment schedule }
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/lending/loans/{id}/installments/{installmentId}/repay:
     post:
       tags: [Lending]
@@ -131,6 +147,8 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         '200': { description: Repayment recorded }
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
   /api/v1/lending/loans/{id}/writeoff:
@@ -149,6 +167,8 @@ paths:
               $ref: '#/components/schemas/WriteOffRequest'
       responses:
         '200': { description: Loan written off }
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
   /api/v1/lending/loans/{id}/collateral:
@@ -168,6 +188,8 @@ paths:
         '201': { description: Collateral registered }
         '400':
           $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     get:
       tags: [Lending]
       operationId: listCollateral
@@ -176,6 +198,8 @@ paths:
         - $ref: '#/components/parameters/IdPath'
       responses:
         '200': { description: Collateral for the loan }
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/lending/loans/{id}/provisioning:
     get:
       tags: [Lending]
@@ -190,6 +214,8 @@ paths:
           schema: { type: string, format: date }
       responses:
         '200': { description: IFRS 9 snapshot }
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404': { description: Not found }
 components:
   securitySchemes:
@@ -204,6 +230,12 @@ components:
       required: true
       schema: { type: string, format: uuid }
   responses:
+    Forbidden:
+      description: Authenticated but denied by the OPA authorization policy (ADR-0034)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
     BadRequest:
       description: Bad request
       content:

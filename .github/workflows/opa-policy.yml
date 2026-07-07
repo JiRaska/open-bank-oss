@@ -1,8 +1,11 @@
 # OPA agent-policy bundle CI (ADR-0031 D2). Runs on any change to the policy source
 # or the generated artifacts: builds + validates the bundle (opa check + the decision
-# assertions in build-bundle.sh) and verifies the committed agent-opa-bundle ConfigMap
-# is in sync with the policy source (no drift — the ConfigMap is generated, never
-# hand-edited). A broken policy or a stale ConfigMap fails the gate before it can ship.
+# assertions in build-bundle.sh) and verifies the committed OPA-bundle ConfigMaps
+# (agent + the per-service sidecar bundles) are in sync with the policy source — no
+# drift; the ConfigMaps AND the pod-roll checksum annotations in the service manifests
+# are generated, never hand-edited. subPath mounts do not hot-reload, so a stale
+# pod-roll annotation means pods silently keep serving the old policy. A broken policy
+# or a stale artifact fails the gate before it can ship.
 name: OPA policy
 
 on:
@@ -11,15 +14,27 @@ on:
     paths:
       - openbank-infra/opa/**
       - openbank-libs/governance/agents.yaml
+      - openbank-libs/governance/rules.yaml
+      - openbank-libs/governance/policies/**
       - openbank-infra/gitops/components/agent/gen-opa-bundle-configmap.sh
       - openbank-infra/gitops/components/agent/agent-opa-bundle.yaml
+      - openbank-infra/gitops/components/pid/**
+      - openbank-infra/gitops/components/copilot/**
+      - openbank-infra/gitops/components/customer-edge/**
+      - openbank-infra/gitops/components/notifications/**
       - .github/workflows/opa-policy.yml
   pull_request:
     paths:
       - openbank-infra/opa/**
       - openbank-libs/governance/agents.yaml
+      - openbank-libs/governance/rules.yaml
+      - openbank-libs/governance/policies/**
       - openbank-infra/gitops/components/agent/gen-opa-bundle-configmap.sh
       - openbank-infra/gitops/components/agent/agent-opa-bundle.yaml
+      - openbank-infra/gitops/components/pid/**
+      - openbank-infra/gitops/components/copilot/**
+      - openbank-infra/gitops/components/customer-edge/**
+      - openbank-infra/gitops/components/notifications/**
       - .github/workflows/opa-policy.yml
 
 permissions:
@@ -71,3 +86,23 @@ jobs:
             exit 1
           fi
           echo "ConfigMap is in sync with agents.rego + agents.yaml + bundle.manifest."
+
+      - name: Verify service OPA bundles + pod-roll annotations are in sync with the policy source
+        run: |
+          # Each generator writes its ConfigMap AND stamps the matching Deployment/Rollout
+          # pod-template annotation (openbank.tech/policy-checksum) — the annotation is what
+          # actually rolls the pods, since subPath mounts do not hot-reload. Regenerate all
+          # four and fail on any diff: a stale bundle OR a stale annotation blocks the merge.
+          ./openbank-infra/gitops/components/pid/gen-pid-opa-bundle.sh
+          ./openbank-infra/gitops/components/copilot/gen-copilot-opa-bundle.sh
+          ./openbank-infra/gitops/components/customer-edge/gen-customer-edge-opa-bundle.sh
+          ./openbank-infra/gitops/components/notifications/gen-notification-opa-bundle.sh
+          if ! git diff --exit-code -- \
+              openbank-infra/gitops/components/pid \
+              openbank-infra/gitops/components/copilot \
+              openbank-infra/gitops/components/customer-edge \
+              openbank-infra/gitops/components/notifications; then
+            echo "::error::A service OPA bundle ConfigMap or its pod-roll checksum annotation is stale — re-run the gen-*-opa-bundle.sh generators and commit the result."
+            exit 1
+          fi
+          echo "All service OPA bundles + pod-roll annotations are in sync with the policy source."
