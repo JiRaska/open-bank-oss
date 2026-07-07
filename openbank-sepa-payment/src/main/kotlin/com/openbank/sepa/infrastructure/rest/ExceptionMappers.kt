@@ -6,6 +6,7 @@ package com.openbank.sepa.infrastructure.rest
 
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
+import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import com.openbank.sepa.application.usecase.InvalidSepaPaymentStateTransitionException
 import com.openbank.sepa.application.usecase.SepaPaymentNotFoundException
 import jakarta.ws.rs.core.Response
@@ -25,4 +26,23 @@ class InvalidSepaPaymentStateTransitionMapper : ExceptionMapper<InvalidSepaPayme
     override fun toResponse(exception: InvalidSepaPaymentStateTransitionException): Response = Response.status(409)
         .entity(ApiError(UUID.randomUUID().toString(), 409, ErrorCode.CONFLICT.code, exception.message ?: "Conflict"))
         .build()
+}
+
+// ADR-0155: a checker can never decide their own PendingApproval — ApprovalStore.decide
+// enforces this itself (defense-in-depth), surfaced here as a plain 403.
+@Provider
+class SelfApprovalNotAllowedMapper : ExceptionMapper<SelfApprovalNotAllowedException> {
+    override fun toResponse(exception: SelfApprovalNotAllowedException): Response {
+        val status = Response.Status.FORBIDDEN.statusCode
+        return Response.status(status)
+            .entity(
+                ApiError(
+                    UUID.randomUUID().toString(),
+                    status,
+                    ErrorCode.FORBIDDEN.code,
+                    exception.message ?: "Forbidden",
+                ),
+            )
+            .build()
+    }
 }
