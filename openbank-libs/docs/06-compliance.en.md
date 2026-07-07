@@ -90,9 +90,9 @@ The 2026-05-28 audit rates the compliance posture as follows:
 When the auditor asks *"how do you know every service masks email the same way?"* the answer is:
 
 1. Open [`02-architecture.md § 5. PiiMasking`](./02-architecture.md)
-2. Click the link to the source `openbank-libs/src/main/kotlin/com/openbank/libs/security/PiiMasking.kt`
+2. Click the link to the source `openbank-libs-domain/src/main/kotlin/com/openbank/libs/security/PiiMasking.kt`
 3. Review 1 file, 80 lines
-4. Verify tests `openbank-libs/src/test/kotlin/com/openbank/libs/security/PiiMaskTest.kt` (15 cases)
+4. Verify tests `openbank-libs-domain/src/test/kotlin/com/openbank/libs/security/PiiMaskTest.kt` (15 cases)
 5. Verify each of the 27 services imports `com.openbank.libs.security.PiiMask` (grep)
 
 Without libs, the same question would mean reviewing 27 different implementations with the risk that 3 of them mask PII incorrectly.

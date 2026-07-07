@@ -49,6 +49,8 @@
 # --- Platform / infra ---
 /openbank-infra/                        @JiRaska
 /openbank-libs/                         @JiRaska
+/openbank-libs-domain/                  @JiRaska
+/openbank-libs-runtime/                 @JiRaska
 
 # --- CI / security tooling ---
 /.github/                               @JiRaska

@@ -90,9 +90,9 @@ Audit 2026-05-28 hodnotí compliance posture takto:
 Když auditor zeptá *"jak víš, že každá služba maskuje email stejně?"* odpověď je:
 
 1. Otevři [`02-architecture.md § 5. PiiMasking`](./02-architecture.md)
-2. Klikni odkaz na zdrojový kód `openbank-libs/src/main/kotlin/com/openbank/libs/security/PiiMasking.kt`
+2. Klikni odkaz na zdrojový kód `openbank-libs-domain/src/main/kotlin/com/openbank/libs/security/PiiMasking.kt`
 3. Reviewuj 1 soubor, 80 řádků
-4. Ověř testy `openbank-libs/src/test/kotlin/com/openbank/libs/security/PiiMaskTest.kt` (15 cases)
+4. Ověř testy `openbank-libs-domain/src/test/kotlin/com/openbank/libs/security/PiiMaskTest.kt` (15 cases)
 5. Ověř že každá z 27 služeb importuje `com.openbank.libs.security.PiiMask` (grep)
 
 Bez libs by stejná otázka znamenala review 27 různých implementací s rizikem, že 3 z nich PII rotin maskují špatně.
