@@ -189,6 +189,91 @@ test_deny_rca_tool_not_in_allowlist if {
 }
 
 # ---------------------------------------------------------------------------------------
+# REST-action bridge (rest_domains / rest_action_allowed): rest.rego delegates an AI_AGENT
+# REST call by setting input.tool := the raw REST action string (e.g. "ledger.list"), which
+# lives in a different vocabulary than a charter's tools.allow (e.g. "query.ledger.readonly").
+# These prove the bridge grants exactly the intended REST reads and nothing more.
+# ---------------------------------------------------------------------------------------
+
+# compliance-officer's query.ledger.readonly grant bridges to a same-domain REST read action.
+test_allow_rest_action_via_readonly_tool_ledger_list if {
+	agents.allow with data.agents as charters
+		with input as {"agent": "compliance-officer", "tool": "ledger.list", "resource": null}
+}
+
+test_allow_rest_action_via_readonly_tool_ledger_read if {
+	agents.allow with data.agents as charters
+		with input as {"agent": "compliance-officer", "tool": "ledger.read", "resource": null}
+}
+
+# The bridge is read-only: a write verb in the same domain is NOT granted by the readonly
+# tool, even though "ledger" is in its mapped domain set.
+test_deny_rest_action_write_verb_not_bridged if {
+	not agents.allow with data.agents as charters
+		with input as {"agent": "compliance-officer", "tool": "ledger.create", "resource": null}
+	agents.decision.reason == "no matching allow rule" with data.agents as charters
+		with input as {"agent": "compliance-officer", "tool": "ledger.create", "resource": null}
+}
+
+# A domain outside the tool's mapped set stays denied (rca-investigator only holds
+# query.observability.readonly -- no bridge to ledger.*).
+test_deny_rest_action_domain_not_in_tool_map if {
+	not agents.allow with data.agents as charters
+		with input as {"agent": "rca-investigator", "tool": "ledger.list", "resource": null}
+}
+
+# rest.rego sources input.agent from the JWT `sub` via principal.id, which for a real
+# AI_AGENT is prefixed "agent:" (AuthorizeInterceptor's own convention/test uses
+# "agent:onboarding") -- agents.yaml charter ids are bare. The charter lookup strips a
+# leading "agent:" so the bridge still resolves the charter with the REAL production id
+# shape, not just the bare id agents_test.rego's other cases use.
+test_allow_rest_action_with_agent_colon_prefixed_id if {
+	agents.allow with data.agents as charters
+		with input as {"agent": "agent:compliance-officer", "tool": "ledger.list", "resource": null}
+}
+
+# A bare id (no "agent:" prefix) still resolves too -- trim_prefix is a no-op when the
+# prefix isn't present, so the MCP path (which already passes bare ids) is unaffected.
+test_allow_rest_action_with_bare_id_unaffected if {
+	agents.allow with data.agents as charters
+		with input as {"agent": "compliance-officer", "tool": "ledger.list", "resource": null}
+}
+
+# The fleet-wide hard-denied tier still blocks a tool reachable via the REST-action bridge:
+# agents.allow (not charter_allowed alone) must be the thing rest.rego delegates to, since
+# only allow applies hard_denied. Regression for that exact class of bug.
+test_deny_rest_action_hard_denied_via_bridge if {
+	not agents.allow with data.agents as {
+		"agents": charters.agents,
+		"tool_tiers": {"deny": ["ledger.list"]},
+	}
+		with input as {"agent": "compliance-officer", "tool": "ledger.list", "resource": null}
+	agents.decision.reason == "hard-denied tool tier" with data.agents as {
+		"agents": charters.agents,
+		"tool_tiers": {"deny": ["ledger.list"]},
+	}
+		with input as {"agent": "compliance-officer", "tool": "ledger.list", "resource": null}
+}
+
+# A charter's own tools.deny glob still blocks a tool reachable via the REST-action bridge.
+test_deny_rest_action_charter_denied_via_bridge if {
+	denying_charters := {
+		"agents": [
+			{
+				"id": "compliance-officer",
+				"plane": "control",
+				"tools": {"allow": ["query.ledger.readonly"], "deny": ["ledger.*"]},
+			},
+		],
+		"tool_tiers": {"deny": []},
+	}
+	not agents.allow with data.agents as denying_charters
+		with input as {"agent": "compliance-officer", "tool": "ledger.list", "resource": null}
+	agents.decision.reason == "denied by charter" with data.agents as denying_charters
+		with input as {"agent": "compliance-officer", "tool": "ledger.list", "resource": null}
+}
+
+# ---------------------------------------------------------------------------------------
 # customer-copilot (customer plane, ADR-0089). Reads the signed-in customer's own data and
 # emits PROPOSALS only; money-path tools are hard-denied and money never moves on its word.
 # ---------------------------------------------------------------------------------------
