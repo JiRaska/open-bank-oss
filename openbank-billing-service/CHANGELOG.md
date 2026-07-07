@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.4.0...billing-service-v0.4.1) (2026-07-07)
+
+
+### Security
+
+* **billing:** enforce OPA authorization on billing endpoints (ADR-0034 Phase 5) ([#391](https://github.com/JiRaska/open-bank-oss/issues/391)) ([525be76](https://github.com/JiRaska/open-bank-oss/commit/525be76cd8fbbe136e2f6f72e676fd420988cc43)), closes [#266](https://github.com/JiRaska/open-bank-oss/issues/266)
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.3.0...billing-service-v0.4.0) (2026-07-03)
 
 
