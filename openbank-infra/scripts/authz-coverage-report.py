@@ -24,17 +24,27 @@ and classifies each action against the rest.rego reason rules:
                                   compliance-read-any (.read); party-self-service
                                   (resource-scoped read/list where id == JWT sub)
     customer.*                    customer-self-action (any authenticated HUMAN)
-    notification.* / device.*     edge-service-notification (SERVICE principal)
+    notification.* / device.*     edge-service-notification (customer-edge's
+                                  client_credentials identity, HUMAN principal.id ==
+                                  "service-account-openbank-edge" — NOT a SERVICE
+                                  principal.type; see M2M caveat below)
     other verbs WITH resource     operator-on-own-tenant ONLY (HUMAN OPERATOR whose
                                   tenant matches resource.attributes.tenant)
     other verbs WITHOUT resource  NO allow path — operator-on-own-tenant requires
                                   input.resource; nothing else matches a non-read,
                                   non-customer, non-notification action
 
-M2M caveat (the Phase-5 blocker): a SERVICE principal is only ever allowed the
-notification./device. families. Any service-to-service call to a money-path write
-endpoint (e.g. transaction-service -> ledger.create) has NO allow path today and
-will 403 under enforce. Static analysis cannot see runtime callers — check the
+M2M caveat (the Phase-5 blocker, resolved for customer-edge, open elsewhere): OPA's
+input.principal.type is NEVER "SERVICE" in this fleet — AuthorizeInterceptor.
+principalType() only ever emits ANONYMOUS/AI_AGENT/HUMAN (M2M calls carry a Keycloak
+client_credentials JWT, which the interceptor classifies as HUMAN), and no Keycloak
+client is ever granted ROLE_SERVICE. Any rego rule gated on `principal.type ==
+"SERVICE"` is dead code that can never fire. edge-service-notification was fixed to
+gate on the edge's verified principal.id instead (see rest.rego); any OTHER
+service-to-service caller (e.g. a money-path write endpoint like
+transaction-service -> ledger.create) still has NO allow path today and will 403
+under enforce unless it is verified against actual caller code and given the same
+identity-based treatment. Static analysis cannot see runtime callers — check the
 OPA advisory decision logs (AuditEvent decision_reason) before any flip.
 
 Output: a Markdown report (stdout). Not a CI gate — an analysis tool for the
@@ -218,7 +228,7 @@ def classify(action: str, resource: str) -> tuple[str, str]:
     if action.startswith("customer."):
         return "covered", "customer-self-action (any authenticated HUMAN)"
     if action.split(".", 1)[0] in ("notification", "device"):
-        return "covered", "edge-service-notification (SERVICE) + read rules"
+        return "covered", "edge-service-notification (edge identity) + read rules"
     if verb in READ_VERBS:
         scoped = " + party-self-service (resource-scoped)" if resource else ""
         return "covered", f"operator-read-any / compliance-read-any{scoped}"
@@ -290,8 +300,8 @@ def main() -> int:
           f"{totals['uncovered']} uncovered\n")
     print("> Static approximation only. Before any AUTHZ_ENFORCE flip, confirm against the "
           "OPA advisory decision logs (AuditEvent decision_reason) that no legitimate caller "
-          "hits a would-be deny — especially M2M (SERVICE) callers, which this analysis "
-          "cannot see.")
+          "hits a would-be deny — especially M2M callers, which this analysis cannot see and "
+          "which never present principal.type == \"SERVICE\" (see the M2M caveat above).")
     return 0
 
 
