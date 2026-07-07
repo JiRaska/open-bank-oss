@@ -27,10 +27,16 @@ on:
     branches: [main]
     paths:
       - "openbank-*/src/main/**"
-      - "openbank-libs/**"
-      # Governance catalogs are data for CI checks + admin-ui, not a compile
-      # input — an ADR/control edit must not trigger a 33-image fleet rebuild.
-      - "!openbank-libs/governance/**"
+      # openbank-libs/src/main no longer holds compiled code (ADR-0122 moved it to
+      # openbank-libs-domain / openbank-libs-runtime, both already covered by the
+      # openbank-*/src/main/** glob above) — only its build file and Gradle wrapper
+      # still affect the build. A bare "openbank-libs/**" glob also matches
+      # openbank-libs/docs/** and openbank-libs/governance/**, neither a compile
+      # input, so it silently triggered a 37-service rebuild on docs-only changes.
+      - "openbank-libs/build.gradle.kts"
+      - "openbank-libs/gradle/**"
+      - "openbank-libs-domain/build.gradle.kts"
+      - "openbank-libs-runtime/build.gradle.kts"
       - "build-logic/**"
   # Manual re-trigger: rebuild + push + gitops-PR on demand. Useful to recover
   # after a failed auto-deploy run left the gitops image tags stale, without
@@ -119,7 +125,10 @@ jobs:
           # (same footgun documented in services-ci.yml).
           CODE_FILES="$(grep -vE '^openbank-libs/governance/' <<< "$CHANGED_FILES" || true)"
           SHARED_CHANGED=0
-          grep -qE '^(openbank-libs|build-logic|gradle/|settings\.gradle\.kts|openbank-libs/gradle/)' <<< "$CODE_FILES" && SHARED_CHANGED=1 || true
+          # Precise per-module match (src/main + build file), not a bare "openbank-libs"
+          # prefix — that also matched openbank-libs/docs/** (non-compiled) and silently
+          # triggered a 37-service rebuild on doc-only changes (issue #375).
+          grep -qE '^(openbank-libs/(src/main|build\.gradle\.kts|gradle/)|openbank-libs-domain/(src/main|build\.gradle\.kts)|openbank-libs-runtime/(src/main|build\.gradle\.kts)|build-logic|gradle/|settings\.gradle\.kts)' <<< "$CODE_FILES" && SHARED_CHANGED=1 || true
 
           if [ "$SHARED_CHANGED" = "1" ]; then
             echo "Shared dependency changed → rebuilding all services."
