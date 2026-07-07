@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.10.4](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.10.3...ledger-service-v1.10.4) (2026-07-07)
+
+
+### Bug Fixes
+
+* **account:** ktlintFormat AccountServiceLifecycleTest — Fleet lint red on main ([#480](https://github.com/JiRaska/open-bank-oss/issues/480)) ([37d303e](https://github.com/JiRaska/open-bank-oss/commit/37d303ef3e804f4cc30b79d8f0632ccfc2d942e7)), closes [#479](https://github.com/JiRaska/open-bank-oss/issues/479)
+* **ledger:** race-safe reversal, idempotent concurrent posting, reversal line re-parenting ([#528](https://github.com/JiRaska/open-bank-oss/issues/528)) ([166728b](https://github.com/JiRaska/open-bank-oss/commit/166728b5e899522d39d0729b6ccfaf0483b4b375)), closes [#465](https://github.com/JiRaska/open-bank-oss/issues/465)
+
 ## [1.10.3](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.10.2...ledger-service-v1.10.3) (2026-07-07)
 
 
