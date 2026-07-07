@@ -2,7 +2,12 @@
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
 # Unit tests for the REST authorization policy (ADR-0034 D1). Run from repo root:
-#   opa test openbank-libs/governance/policies
+#   opa test openbank-libs/governance/policies openbank-infra/opa/policies
+# (both directories: the agent-charter-allows tests below delegate into
+# data.openbank.agents, defined in openbank-infra/opa/policies/agents.rego -- running this
+# directory alone leaves that package undefined and those tests fail. build-bundle.sh
+# already runs both together; this is only a trap for `opa test` invoked by hand on just
+# this directory, as the comment on line 5 used to suggest.)
 #
 # Mirrors agents_test.rego patterns. Mocks the rules.yaml + bundle-version data so
 # the policy is verified in isolation, before it is shipped into a live OPA sidecar.
@@ -386,12 +391,19 @@ test_deny_service_without_role if {
 
 # ---------------------------------------------------------------------------------------
 # agent-charter-allows: an AI_AGENT principal calling a REST action directly. rest.allow
-# delegates to agents.charter_allowed by setting input.tool := input.action -- a charter
-# declaring "query.ledger.readonly" in tools.allow (the MCP tool-tier vocabulary) must
-# still grant a same-domain REST read like "ledger.list" (the @Authorize action-string
-# vocabulary), via the rest_domains bridge in agents.rego. Before that bridge existed,
-# glob_match("query.ledger.readonly", "ledger.list") never matched and every AI_AGENT
-# REST read 403'd the moment a service flipped OPA to enforce mode.
+# delegates to agents.allow by setting input.tool := input.action -- a charter declaring
+# "query.ledger.readonly" in tools.allow (the MCP tool-tier vocabulary) must still grant a
+# same-domain REST read like "ledger.list" (the @Authorize action-string vocabulary), via
+# the rest_domains bridge in agents.rego. Before that bridge existed, glob_match
+# ("query.ledger.readonly", "ledger.list") never matched and every AI_AGENT REST read
+# 403'd the moment a service flipped OPA to enforce mode.
+#
+# principal.id here uses the REAL production shape: AuthorizeInterceptor.principalType()
+# classifies AI_AGENT from a JWT `sub` prefixed "agent:" (its own test uses "agent:onboarding"),
+# and principal.id is that sub VERBATIM, prefix included -- agents.yaml charter ids are bare
+# ("ui-assistant"). agents.rego's charter lookup strips the prefix before comparing; these
+# tests use the prefixed form so a regression there (e.g. someone removing the trim_prefix)
+# fails here instead of only in a bare-id unit test that doesn't reflect the real JWT shape.
 # ---------------------------------------------------------------------------------------
 agent_charters_for_rest_bridge := {
 	"agents": [
@@ -409,7 +421,7 @@ agent_charters_for_rest_bridge := {
 
 test_allow_ai_agent_ledger_list_via_charter_bridge if {
 	decision := rest.allow with input as {
-		"principal": {"id": "ui-assistant", "type": "AI_AGENT", "roles": []},
+		"principal": {"id": "agent:ui-assistant", "type": "AI_AGENT", "roles": []},
 		"action": "ledger.list",
 		"resource": null,
 	}
@@ -423,7 +435,7 @@ test_allow_ai_agent_ledger_list_via_charter_bridge if {
 # The bridge is read-only -- an AI_AGENT can never reach a write action through it.
 test_deny_ai_agent_ledger_create_via_charter_bridge if {
 	not rest.allow with input as {
-		"principal": {"id": "ui-assistant", "type": "AI_AGENT", "roles": []},
+		"principal": {"id": "agent:ui-assistant", "type": "AI_AGENT", "roles": []},
 		"action": "ledger.create",
 		"resource": null,
 	}
@@ -433,9 +445,46 @@ test_deny_ai_agent_ledger_create_via_charter_bridge if {
 # An AI_AGENT whose charter holds no matching tool stays denied (deny-by-default holds).
 test_deny_ai_agent_without_matching_charter_tool if {
 	not rest.allow with input as {
-		"principal": {"id": "rca-investigator", "type": "AI_AGENT", "roles": []},
+		"principal": {"id": "agent:rca-investigator", "type": "AI_AGENT", "roles": []},
 		"action": "ledger.list",
 		"resource": null,
 	}
 		with data.agents as agent_charters_for_rest_bridge
+}
+
+# The fleet-wide hard-denied tier still blocks a REST action reachable via the bridge --
+# rest.allow MUST delegate to agents.allow (which checks hard_denied), not to
+# agents.charter_allowed alone (which doesn't). Regression coverage for that exact bug:
+# hard-denying "ledger.list" here (an artificial hard-deny entry, since no real fleet entry
+# collides with a read verb today) would otherwise still be granted by rest_action_allowed.
+test_deny_ai_agent_hard_denied_tool_via_bridge if {
+	not rest.allow with input as {
+		"principal": {"id": "agent:ui-assistant", "type": "AI_AGENT", "roles": []},
+		"action": "ledger.list",
+		"resource": null,
+	}
+		with data.agents as {
+			"agents": agent_charters_for_rest_bridge.agents,
+			"tool_tiers": {"deny": ["ledger.list"]},
+		}
+}
+
+# A charter's own tools.deny glob still blocks a REST action reachable via the bridge --
+# same regression class as the hard-denied case above, at the charter_denied layer instead.
+test_deny_ai_agent_charter_denied_tool_via_bridge if {
+	not rest.allow with input as {
+		"principal": {"id": "agent:ui-assistant", "type": "AI_AGENT", "roles": []},
+		"action": "ledger.list",
+		"resource": null,
+	}
+		with data.agents as {
+			"agents": [
+				{
+					"id": "ui-assistant",
+					"plane": "control",
+					"tools": {"allow": ["query.ledger.readonly"], "deny": ["ledger.*"]},
+				},
+			],
+			"tool_tiers": {"deny": []},
+		}
 }
