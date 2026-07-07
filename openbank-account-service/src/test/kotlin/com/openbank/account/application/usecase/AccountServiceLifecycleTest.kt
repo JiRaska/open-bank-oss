@@ -243,7 +243,11 @@ class AccountServiceLifecycleTest {
         assertThatThrownBy {
             runBlocking {
                 service.unfreezeAccount(
-                    UnfreezeAccountCommand(accountId = acc.id, reason = "alert cleared", requestedBy = UUID.randomUUID()),
+                    UnfreezeAccountCommand(
+                        accountId = acc.id,
+                        reason = "alert cleared",
+                        requestedBy = UUID.randomUUID(),
+                    ),
                 )
             }
         }.isInstanceOf(IllegalStateException::class.java)
@@ -260,7 +264,11 @@ class AccountServiceLifecycleTest {
         assertThatThrownBy {
             runBlocking {
                 service.unfreezeAccount(
-                    UnfreezeAccountCommand(accountId = accountId, reason = "alert cleared", requestedBy = UUID.randomUUID()),
+                    UnfreezeAccountCommand(
+                        accountId = accountId,
+                        reason = "alert cleared",
+                        requestedBy = UUID.randomUUID(),
+                    ),
                 )
             }
         }.isInstanceOf(AccountNotFoundException::class.java)

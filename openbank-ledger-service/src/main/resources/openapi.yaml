@@ -20,13 +20,23 @@ paths:
     get:
       tags: [Ledger]
       summary: List journal entries (cursor-paginated)
+      description: >
+        Lists journal entries whose entry date falls in [fromDate, toDate], newest-window
+        pagination via an opaque cursor. toDate defaults to today.
       operationId: listJournals
       parameters:
-        - name: accountId
+        - name: fromDate
           in: query
           schema:
             type: string
-            format: uuid
+            format: date
+            default: '2020-01-01'
+        - name: toDate
+          in: query
+          description: Defaults to today when omitted.
+          schema:
+            type: string
+            format: date
         - name: limit
           in: query
           schema:
@@ -47,6 +57,50 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Ledger]
+      summary: Post a balanced journal entry
+      description: >
+        Books a double-entry journal (at least 2 lines; debits must equal credits within each
+        settlement currency, ADR-0025). Idempotent via `idempotencyKey` — replaying the same key
+        returns the originally created entry. Fails closed with 409 when the entry date falls in
+        an ATTESTED (locked) fiscal period (#869), and with 422 when the entry is unbalanced or
+        references an invalid GL account.
+      operationId: postJournal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostJournalRequest'
+      responses:
+        '201':
+          description: Journal entry created
+          headers:
+            Location:
+              description: URL of the created journal entry (/api/v1/journals/{journalId}).
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalEntryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Entry date falls in an ATTESTED (locked) fiscal period, or a conflicting state was detected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Unbalanced journal (debits != credits per currency) or GL account validation failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
   /api/v1/journals/{journalId}:
     get:
@@ -455,7 +509,10 @@ components:
     JournalLineResponse:
       type: object
       properties:
-        accountId:
+        id:
+          type: string
+          format: uuid
+        glAccountId:
           type: string
           format: uuid
         side:
@@ -463,8 +520,17 @@ components:
           enum: [DEBIT, CREDIT]
         amount:
           type: number
-        currency:
+          description: Amount in the line's transaction currency.
+        currencyCode:
           type: string
+        baseAmount:
+          type: number
+          description: Amount in the settlement (base) currency; balance is asserted per base currency (ADR-0025).
+        baseCurrencyCode:
+          type: string
+        sequence:
+          type: integer
+          description: Stable 1-based ordering of the line within its journal entry.
         subAccountId:
           type: string
           format: uuid
@@ -504,16 +570,30 @@ components:
         id:
           type: string
           format: uuid
+        entryNumber:
+          type: integer
+          format: int64
+          nullable: true
+          description: Monotonic ledger sequence number, assigned on posting.
         transactionId:
           type: string
           format: uuid
+        entryDate:
+          type: string
+          format: date
+        valueDate:
+          type: string
+          format: date
         description:
           type: string
+        status:
+          type: string
+          enum: [PENDING, POSTED, REVERSED]
         lines:
           type: array
           items:
             $ref: '#/components/schemas/JournalLineResponse'
-        postedAt:
+        createdAt:
           type: string
           format: date-time
 
@@ -544,6 +624,65 @@ components:
           type: string
           format: uuid
           description: Operator posting the reversal.
+
+    PostJournalLineRequest:
+      type: object
+      required: [glAccountId, side, amount, currencyCode, baseAmount, baseCurrencyCode]
+      properties:
+        glAccountId:
+          type: string
+          format: uuid
+        side:
+          type: string
+          enum: [DEBIT, CREDIT]
+        amount:
+          type: number
+          description: Amount in the line's transaction currency.
+        currencyCode:
+          type: string
+        fxRate:
+          type: number
+          nullable: true
+          description: Transaction-to-base conversion rate; omitted for same-currency lines.
+        baseAmount:
+          type: number
+          description: Amount in the settlement (base) currency; debits must equal credits per base currency (ADR-0025).
+        baseCurrencyCode:
+          type: string
+        subAccountId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Sub-ledger dimension; set only on deposit-control legs (ADR-0039 Phase B).
+
+    PostJournalRequest:
+      type: object
+      required: [idempotencyKey, transactionId, entryDate, valueDate, createdBy, lines]
+      properties:
+        idempotencyKey:
+          type: string
+          description: Caller-supplied idempotency key; replaying the same key returns the original entry.
+        transactionId:
+          type: string
+          format: uuid
+        entryDate:
+          type: string
+          format: date
+        valueDate:
+          type: string
+          format: date
+        description:
+          type: string
+          nullable: true
+        createdBy:
+          type: string
+          format: uuid
+          description: Operator posting the journal.
+        lines:
+          type: array
+          minItems: 2
+          items:
+            $ref: '#/components/schemas/PostJournalLineRequest'
 
     TrialBalanceLineResponse:
       type: object
