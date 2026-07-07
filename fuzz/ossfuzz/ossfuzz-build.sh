@@ -23,6 +23,14 @@ cd "$SRC/open-bank-oss"
 # 3) Package per OSS-Fuzz JVM conventions.
 cp fuzz/ossfuzz/build/libs/ossfuzz-all.jar "$OUT/openbank.jar"
 
+# Bundle the JDK the classes were compiled with. The OSS-Fuzz base-runner image
+# executes fuzzers with its OWN bundled JVM — OpenJDK 17, class file 61 — while
+# this repo's toolchain is 25 (class file 69), so without this the targets die at
+# startup with UnsupportedClassVersionError (bad_build_check: "100% broken").
+# Standard OSS-Fuzz escape hatch: ship the JDK in $OUT and point the wrapper's
+# JAVA_HOME/LD_LIBRARY_PATH at it instead of the runner's $JVM_LD_LIBRARY_PATH.
+cp -r "$JAVA_HOME" "$OUT/openbank-jdk"
+
 for fuzzer in Pacs008ReaderFuzzer RodneCisloFuzzer; do
   # The "LLVMFuzzerTestOneInput" comment below is a REQUIRED magic marker, not doc:
   # OSS-Fuzz/CIFuzz recognizes a file in $OUT as a fuzz target only if its CONTENT
@@ -38,7 +46,8 @@ if [[ "\$@" =~ (^| )-runs=[0-9]+(\$| ) ]]; then
 else
   mem_settings='-Xmx2048m:-Xss1024k'
 fi
-LD_LIBRARY_PATH="\$JVM_LD_LIBRARY_PATH" \\
+JAVA_HOME="\$this_dir/openbank-jdk" \\
+LD_LIBRARY_PATH="\$this_dir/openbank-jdk/lib/server:\$this_dir" \\
   "\$this_dir/jazzer_driver" --agent_path="\$this_dir/jazzer_agent_deploy.jar" \\
   --cp="\$this_dir/openbank.jar" \\
   --target_class=com.openbank.fuzz.$fuzzer \\
