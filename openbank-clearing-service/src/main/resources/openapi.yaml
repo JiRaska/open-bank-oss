@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Clearing Service API
-  version: 1.0.0
+  version: 1.0.1
   description: Payment clearing and settlement — batch submission, cycle triggering, position management.
   license:
     name: Apache-2.0
@@ -29,6 +29,8 @@ paths:
       responses:
         '200':
           description: Clearing item created
+        '403':
+          description: Forbidden — OPA policy denied clearingBatch.submit (ADR-0034 Phase 5)
 
   /api/v1/clearing/batches:
     get:
@@ -47,6 +49,8 @@ paths:
       responses:
         '200':
           description: List of batches
+        '403':
+          description: Forbidden — OPA policy denied clearingBatch.list (ADR-0034 Phase 5)
 
   /api/v1/clearing/batches/{id}:
     get:
@@ -58,6 +62,8 @@ paths:
       responses:
         '200':
           description: Batch detail
+        '403':
+          description: Forbidden — OPA policy denied clearingBatch.read (ADR-0034 Phase 5)
 
   /api/v1/clearing/batches/{id}/items:
     get:
@@ -69,6 +75,8 @@ paths:
       responses:
         '200':
           description: Batch items
+        '403':
+          description: Forbidden — OPA policy denied clearingBatch.readItems (ADR-0034 Phase 5)
 
   /api/v1/clearing/batches/{id}/settle:
     post:
@@ -80,6 +88,8 @@ paths:
       responses:
         '200':
           description: Settlement initiated
+        '403':
+          description: Forbidden — OPA policy denied clearingBatch.settle (ADR-0034 Phase 5)
 
   /api/v1/clearing/cycle/trigger:
     post:
@@ -95,6 +105,8 @@ paths:
       responses:
         '200':
           description: Cycle triggered
+        '403':
+          description: Forbidden — OPA policy denied clearingBatch.triggerCycle (ADR-0034 Phase 5)
 
   /api/v1/clearing/positions/{cycleId}:
     get:
@@ -110,6 +122,8 @@ paths:
       responses:
         '200':
           description: Settlement positions
+        '403':
+          description: Forbidden — OPA policy denied clearingBatch.readPositions (ADR-0034 Phase 5)
 
   /api/v1/clearing/items/{id}:
     get:
@@ -126,6 +140,8 @@ paths:
       responses:
         '200':
           description: Clearing item
+        '403':
+          description: Forbidden — OPA policy denied clearingBatch.readItem (ADR-0034 Phase 5)
 
   /api/v1/clearing/items/by-payment/{paymentId}:
     get:
@@ -142,6 +158,23 @@ paths:
       responses:
         '200':
           description: Clearing items
+        '403':
+          description: Forbidden — OPA policy denied clearingBatch.readItemsByPayment (ADR-0034 Phase 5)
+
+  /api/v1/clearing/batches/{id}/reconcile:
+    get:
+      tags: [Clearing]
+      summary: Run internal reconciliation check for a settled batch
+      operationId: reconcileBatch
+      parameters:
+        - $ref: '#/components/parameters/batchId'
+      responses:
+        '200':
+          description: Reconciliation clean
+        '409':
+          description: Reconciliation found a discrepancy
+        '403':
+          description: Forbidden — OPA policy denied clearingBatch.reconcile (ADR-0034 Phase 5)
 
 components:
   securitySchemes:
