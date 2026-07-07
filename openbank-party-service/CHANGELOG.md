@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.7.3...party-service-v0.8.0) (2026-07-07)
+
+
+### Features
+
+* **gdpr:** add kyc/card export coverage and disabled-by-default session-log retention ([#356](https://github.com/JiRaska/open-bank-oss/issues/356)) ([d627e0a](https://github.com/JiRaska/open-bank-oss/commit/d627e0a0d9c7514f65b53f8d253c2ae5394e5386))
+
 ## [0.7.3](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.7.2...party-service-v0.7.3) (2026-07-04)
 
 
