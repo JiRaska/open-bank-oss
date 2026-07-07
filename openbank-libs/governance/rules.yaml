@@ -500,6 +500,30 @@ architecture:
   ci_producer: ".github/scripts/check-domain-purity.sh"
 
 # ---------------------------------------------------------------------------------------
+# REST/MCP authorization policy invariants (ADR-0034 Phase 5, issue #266). rest.rego is
+# the shared OPA policy mounted in every enforcing service's bundle.
+# ---------------------------------------------------------------------------------------
+authz_policy:
+  principal_type_service_unreachable: true
+  # AuthorizeInterceptor.principalType() (openbank-libs-runtime) only ever emits
+  # ANONYMOUS/AI_AGENT/HUMAN — never SERVICE. M2M callers authenticate with a Keycloak
+  # client_credentials JWT, which the interceptor classifies as HUMAN, and no realm
+  # client is ever granted a ROLE_SERVICE role. A rego rule gated on
+  # `input.principal.type == "SERVICE"` can therefore never fire. Found live 2026-07-07
+  # in the shared rest.rego edge-service-notification rule (deployed with AUTHZ_ENFORCE
+  # defaulting true — notification.mark-read/device.create/device.delete had NO other
+  # allow path) and pre-merge in the sca/domestic-payment ADR-0034 Phase 5 PRs.
+  #
+  # Identify a specific M2M caller by input.principal.id (Keycloak's
+  # "service-account-<clientId>" convention for a service-account token) instead of
+  # principal.type or role alone — ROLE_OPERATOR is shared with real human staff, so a
+  # role-only check over-grants (e.g. it would let any operator call SCA's
+  # device.enroll — an account-takeover primitive — see rest.rego's
+  # edge-service-notification rule and rest_test.rego's
+  # test_deny_operator_read_any_does_not_cover_write).
+  ci_producer: ".github/scripts/check-no-service-principal-type.sh"
+
+# ---------------------------------------------------------------------------------------
 # Vulnerability-management lifecycle SLAs (ADR-0030 D1). Detection -> closure, in days.
 # ---------------------------------------------------------------------------------------
 vuln_management:

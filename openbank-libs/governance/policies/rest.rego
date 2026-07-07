@@ -149,15 +149,32 @@ allowed_reasons contains "customer-self-action" if {
 	startswith(input.action, "customer.")
 }
 
-# The customer-edge's M2M identity (ROLE_SERVICE) calling notification-service on a
-# customer's behalf. The edge authenticates the CUSTOMER itself (customer-self-action
-# above + per-handler IDOR guards) and injects the authoritative partyId query param the
-# downstream handlers scope by — so this check only needs to recognise the edge principal.
-# Deliberately narrow: just the notification/device families notification-service exposes;
-# a blanket SERVICE allow would open every @Authorize endpoint to any M2M client.
+# The customer-edge's M2M identity calling notification-service on a customer's behalf.
+# The edge authenticates the CUSTOMER itself (customer-self-action above + per-handler
+# IDOR guards) and injects the authoritative partyId query param the downstream handlers
+# scope by — so this check only needs to recognise the edge principal.
+#
+# NOTE (found during ADR-0034 Phase 5 rollout, issue #266): AuthorizeInterceptor never
+# produces principal.type == "SERVICE" — M2M calls authenticate with a Keycloak
+# client_credentials JWT (openbank-edge), which the interceptor's principalType()
+# classifies as HUMAN (see AuthorizeInterceptor.kt), and the realm never issues a
+# ROLE_SERVICE role to any client — only ROLE_OPERATOR. A SERVICE-gated rule is therefore
+# structurally unreachable dead code.
+#
+# Gating on HUMAN + ROLE_OPERATOR alone is NOT safe here: real operator/admin staff also
+# carry ROLE_OPERATOR, and this rule's action families include device.enroll (SCA-service's
+# WebAuthn device registration) — granting that to any staff member is an account-takeover
+# primitive (an operator could enrol their own authenticator against a victim's account).
+# test_deny_operator_read_any_does_not_cover_write encodes exactly this invariant.
+#
+# Instead, match the edge's client_credentials principal precisely by identity:
+# AuthorizeInterceptor sets principal.id from the JWT's preferred_username, which for a
+# Keycloak service-account token is deterministically "service-account-<clientId>"
+# (verified against a live token from the openbank-edge client, ADR-0065/0034 issue #266)
+# — not forgeable by a human session, which authenticates through a different client.
 allowed_reasons contains "edge-service-notification" if {
-	input.principal.type == "SERVICE"
-	"ROLE_SERVICE" in input.principal.roles
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-edge"
 	some family in {"notification.", "device."}
 	startswith(input.action, family)
 }

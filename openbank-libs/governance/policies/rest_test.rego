@@ -436,12 +436,16 @@ test_operator_own_tenant_may_flip_non_prohibited if {
 }
 
 # ---------------------------------------------------------------------------------------
-# edge-service-notification: the customer-edge M2M principal (ROLE_SERVICE) may call the
-# notification/device families on the customer's behalf; anything else stays denied.
+# edge-service-notification: the customer-edge M2M caller presents a client_credentials
+# JWT that AuthorizeInterceptor classifies as HUMAN, principal.id
+# "service-account-openbank-edge" (Keycloak never issues ROLE_SERVICE, and
+# principalType() never emits "SERVICE" — see rest.rego). The rule matches on that exact
+# identity, NOT on ROLE_OPERATOR alone — a real operator/admin also carries ROLE_OPERATOR
+# and must NOT gain this rule's device.enroll reach (test_deny_operator_* below).
 # ---------------------------------------------------------------------------------------
 test_allow_service_notification_mark_read if {
 	decision := rest.allow with input as {
-		"principal": {"id": "svc-edge", "type": "SERVICE", "roles": ["ROLE_SERVICE"]},
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "notification.mark-read",
 		"resource": {"type": "notification", "id": "n-1"},
 	}
@@ -453,7 +457,7 @@ test_allow_service_notification_mark_read if {
 
 test_allow_service_notification_list if {
 	decision := rest.allow with input as {
-		"principal": {"id": "svc-edge", "type": "SERVICE", "roles": ["ROLE_SERVICE"]},
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "notification.list",
 	}
 		with data.openbank.bundle as bundle
@@ -463,7 +467,7 @@ test_allow_service_notification_list if {
 
 test_allow_service_device_list if {
 	decision := rest.allow with input as {
-		"principal": {"id": "svc-edge", "type": "SERVICE", "roles": ["ROLE_SERVICE"]},
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "device.list",
 	}
 		with data.openbank.bundle as bundle
@@ -471,19 +475,21 @@ test_allow_service_device_list if {
 	decision.allow == true
 }
 
-# The rule must NOT open other action families to M2M callers (deny-by-default holds).
+# The rule must NOT open other action families to the edge M2M caller (deny-by-default
+# holds) — operator-read-any also does not cover a write like party.update.
 test_deny_service_outside_notification_family if {
 	not rest.allow with input as {
-		"principal": {"id": "svc-edge", "type": "SERVICE", "roles": ["ROLE_SERVICE"]},
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "party.update",
 		"resource": {"type": "party", "id": "p-1"},
 	}
 }
 
-# A SERVICE principal WITHOUT ROLE_SERVICE gets nothing from this rule.
-test_deny_service_without_role if {
+# A SERVICE-typed principal (should one ever reach OPA) gets NOTHING from this rule —
+# it is intentionally HUMAN-only, matching what AuthorizeInterceptor actually emits.
+test_deny_service_typed_principal_never_matches if {
 	not rest.allow with input as {
-		"principal": {"id": "svc-x", "type": "SERVICE", "roles": []},
+		"principal": {"id": "service-account-openbank-edge", "type": "SERVICE", "roles": ["ROLE_OPERATOR"]},
 		"action": "notification.list",
 	}
 }
@@ -586,4 +592,28 @@ test_deny_ai_agent_charter_denied_tool_via_bridge if {
 			],
 			"tool_tiers": {"deny": []},
 		}
+}
+
+# A real operator/admin staff member (ROLE_OPERATOR, but NOT the edge's identity) must
+# NOT gain this rule's reach — critically, must NOT be able to device.enroll (SCA
+# WebAuthn registration is an account-takeover primitive if grantable to arbitrary staff).
+# See also test_deny_operator_read_any_does_not_cover_write above for the same invariant.
+test_deny_human_operator_who_is_not_the_edge if {
+	not rest.allow with input as {
+		"principal": {"id": "operator-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "device.enroll",
+		"resource": {"type": "device", "id": "any-party-id"},
+	}
+}
+
+# A HUMAN caller with the edge's identity but somehow missing ROLE_OPERATOR is still
+# irrelevant to this rule — it gates on identity, not role, and must still allow.
+test_allow_edge_identity_without_explicit_operator_role_check if {
+	decision := rest.allow with input as {
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": []},
+		"action": "notification.list",
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
 }
