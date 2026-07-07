@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.5](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.6.4...lending-service-v0.6.5) (2026-07-07)
+
+
+### Security
+
+* **lending:** enforce OPA authorization on lending endpoints (ADR-0034 Phase 5) ([#392](https://github.com/JiRaska/open-bank-oss/issues/392)) ([a3ab024](https://github.com/JiRaska/open-bank-oss/commit/a3ab02462e32f95b63b1427032f0b9bcb20af056))
+
 ## [0.6.4](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.6.3...lending-service-v0.6.4) (2026-06-30)
 
 
