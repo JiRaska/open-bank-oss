@@ -69,10 +69,11 @@ kover {
         verify {
             rule {
                 bound {
-                    // Ratchet floor at measured LINE coverage (52.3%) minus headroom, with the
-                    // @Path / @RegisterForReflection excludes. No-regression baseline; raise as
-                    // tests land. (#1130 follow-up — gate enabled below.)
-                    minValue = 47
+                    // Ratchet floor at measured LINE coverage (69.2%) minus headroom, with the
+                    // @Path / @RegisterForReflection excludes. Raised 47 -> 65 for the Q3
+                    // ratchet milestone (#321) after unit tests landed for AccountService
+                    // lifecycle/pockets, AuthorizationService and AccountAuthorization.
+                    minValue = 65
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }
