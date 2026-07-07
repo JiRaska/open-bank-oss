@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.4](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.4.3...settlement-service-v0.4.4) (2026-07-07)
+
+
+### Security
+
+* **settlement:** enforce OPA authorization on settlement endpoints (ADR-0034 Phase 5) ([#409](https://github.com/JiRaska/open-bank-oss/issues/409)) ([747dfcf](https://github.com/JiRaska/open-bank-oss/commit/747dfcfc13ee94966f1e52e1af2e941e48246d4c)), closes [#266](https://github.com/JiRaska/open-bank-oss/issues/266) [#307](https://github.com/JiRaska/open-bank-oss/issues/307)
+
 ## [0.4.3](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.4.2...settlement-service-v0.4.3) (2026-07-02)
 
 

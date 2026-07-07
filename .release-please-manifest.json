@@ -18,10 +18,10 @@
   "openbank-domestic-payment": "0.8.8",
   "openbank-finops-agent": "0.2.2",
   "openbank-finrep-service": "0.3.2",
-  "openbank-fraud-service": "0.5.0",
+  "openbank-fraud-service": "0.5.1",
   "openbank-fx-service": "0.7.4",
   "openbank-interest-service": "0.7.0",
-  "openbank-kyc-service": "0.8.1",
+  "openbank-kyc-service": "0.9.0",
   "openbank-ledger-service": "1.10.2",
   "openbank-lending-service": "0.6.4",
   "openbank-notification-service": "0.12.4",
@@ -36,10 +36,10 @@
   "openbank-security-scanner": "0.5.2",
   "openbank-sepa-instant": "0.6.4",
   "openbank-sepa-payment": "0.7.6",
-  "openbank-settlement-service": "0.4.3",
+  "openbank-settlement-service": "0.4.4",
   "openbank-standing-order-service": "0.11.2",
   "openbank-statement-service": "0.5.5",
   "openbank-swift-service": "0.6.8",
   "openbank-tpp-registry-service": "0.6.4",
-  "openbank-transaction-service": "1.12.3"
+  "openbank-transaction-service": "1.12.4"
 }
