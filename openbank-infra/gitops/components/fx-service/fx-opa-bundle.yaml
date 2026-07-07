@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fx-service
     app.kubernetes.io/part-of: fx
   annotations:
-    openbank.tech/policy-checksum: "db8591b50d9a0fe2"
+    openbank.tech/policy-checksum: "a82bde644ef9ff89"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -260,9 +260,27 @@ data:
     # Deliberately narrow: fx.create (conversion) and fx.trigger (CNB ingest) have NO
     # in-repo M2M caller today and stay human-only. No blanket SERVICE allow on a
     # money-path service (rules.yaml money_path_services includes openbank-fx-service).
-    allowed_reasons contains "service-fx-m2m" if {
-    	input.principal.type == "SERVICE"
-    	"ROLE_SERVICE" in input.principal.roles
+    #
+    # NOTE (found post-merge, issue tracked separately): AuthorizeInterceptor never
+    # emits principal.type == "SERVICE" — M2M callers authenticate via Keycloak
+    # client_credentials JWTs, which the interceptor classifies as HUMAN. Split into
+    # two rules since the callers use different Keycloak clients (both granting the
+    # same read-only action set):
+    #   - customer-edge has its own dedicated client, identity
+    #     `service-account-openbank-edge`.
+    #   - ledger-service and agent-service share the `openbank-services` client
+    #     (like nearly every other backend service), identity
+    #     `service-account-openbank-services` — not unique to either, documented
+    #     inline.
+    allowed_reasons contains "service-fx-edge-m2m" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-edge"
+    	input.action in {"fx.read", "fx.list"}
+    }
+
+    allowed_reasons contains "service-fx-shared-client-m2m" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-services"
     	input.action in {"fx.read", "fx.list"}
     }
   agents.rego: |
