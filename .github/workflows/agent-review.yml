@@ -119,8 +119,13 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-          # Stash a size-capped diff for the reviewer prompt.
-          git diff "origin/${BASE_REF}...HEAD" | head -c 30000 > /tmp/pr.diff
+          # Stash a size-capped diff for the reviewer prompt. Write to a file
+          # first, then truncate — piping straight into `head -c` lets `head`
+          # close stdin early on a large diff, sending `git diff` a SIGPIPE
+          # that fails the step under `pipefail` even though the truncated
+          # diff was written successfully.
+          git diff "origin/${BASE_REF}...HEAD" > /tmp/pr.full.diff
+          head -c 30000 /tmp/pr.full.diff > /tmp/pr.diff
 
       # --- Sensitive: defer to a human, do not approve ------------------------
       - name: Defer to human review
