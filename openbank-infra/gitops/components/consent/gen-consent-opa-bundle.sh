@@ -49,9 +49,20 @@ allowed_reasons contains "operator-consent-write" if {
 # channel (customer or operator), mirroring edge-service-notification's stance
 # that a blanket SERVICE allow would open every @Authorize endpoint to any
 # M2M client.
+#
+# NOTE (found post-merge, issue tracked separately): AuthorizeInterceptor never
+# emits principal.type == "SERVICE" — M2M callers authenticate via Keycloak
+# client_credentials JWTs, which the interceptor classifies as HUMAN. Nearly
+# every backend service (psd2-service, sca-service included) shares ONE
+# Keycloak client `openbank-services`, whose service-account identity is
+# `service-account-openbank-services` — gate on that identity instead of a
+# type/role that never fires. This means psd2-service and sca-service (and any
+# other `openbank-services`-client caller) are NOT distinguishable from each
+# other at this layer — this rule grants the listed actions to ANY backend
+# service using that shared client, not just the two verified callers.
 allowed_reasons contains "service-consent-m2m" if {
-	input.principal.type == "SERVICE"
-	"ROLE_SERVICE" in input.principal.roles
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-services"
 	input.action in {"consent.read", "consent.validate", "consent.activate", "consent.reject"}
 }
 REGO
