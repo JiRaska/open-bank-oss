@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.13.1...agent-service-v1.13.2) (2026-07-07)
+
+
+### Bug Fixes
+
+* **account:** ktlintFormat AccountServiceLifecycleTest — Fleet lint red on main ([#480](https://github.com/JiRaska/open-bank-oss/issues/480)) ([37d303e](https://github.com/JiRaska/open-bank-oss/commit/37d303ef3e804f4cc30b79d8f0632ccfc2d942e7)), closes [#479](https://github.com/JiRaska/open-bank-oss/issues/479)
+
 ## [1.13.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.13.0...agent-service-v1.13.1) (2026-07-03)
 
 
