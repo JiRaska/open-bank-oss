@@ -597,6 +597,17 @@ resource "aws_iam_role_policy" "arc_deploy_ecr" {
   policy = data.aws_iam_policy_document.arc_deploy_ecr.json
 }
 
+# The openbank-deploy runner also rebuilds AND signs/attests the ci-runner image
+# itself (runner-image.yml, ADR-0030 D4 step 4 / issue #310) — it needs the same
+# cosign KMS grant as the build runner (reuses arc_build_cosign's policy document,
+# scoped to the single signing key).
+resource "aws_iam_role_policy" "arc_deploy_cosign" {
+  count  = var.arc_runner_enabled ? 1 : 0
+  name   = "cosign-kms-sign"
+  role   = aws_iam_role.arc_deploy[0].id
+  policy = data.aws_iam_policy_document.arc_build_cosign.json
+}
+
 # ---------------------------------------------------------------------------
 # Runner namespace + the deploy pod ServiceAccount (IRSA-annotated).
 # ---------------------------------------------------------------------------
