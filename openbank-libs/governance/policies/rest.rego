@@ -39,6 +39,7 @@ allow := {
 	"allow": true,
 	"reason": reason,
 	"policy_version": policy_version,
+	"attributes": response_attributes,
 } if {
 	count(allowed_reasons) > 0
 	# Defense-in-depth: a prohibited action (e.g. flipping off SCA/sanctions via a feature
@@ -51,6 +52,17 @@ allow := {
 	# (e.g. operator-on-own-tenant + operator-read-any for a tenant-scoped read).
 	reason := min(allowed_reasons)
 }
+
+# Surfaced on the allow object so OpaSidecarPolicyDecisionPoint (which reads
+# `result.attributes` generically) actually delivers it to AuthzDecision.attributes.
+# A fleet audit (issue #395) found four_eyes_required was computed below but never
+# reached this object — "attributes" was simply absent from the allow head — so no
+# caller anywhere could ever have acted on it, independent of any money_path_scopes
+# naming mismatch. Sparse on purpose: omitted (not `false`) when not required, matching
+# this file's existing audit-attribute style (cf. default policy_version above).
+default response_attributes := {}
+
+response_attributes := {"four_eyes_required": true} if four_eyes_required
 
 # policy_version is audit METADATA, never a gate. Resolve it via a defaulted rule so
 # a bundle that omits openbank.bundle.version cannot turn a legitimate allow into an
@@ -152,10 +164,27 @@ allowed_reasons contains "edge-service-notification" if {
 # Money-path service scopes, normalised to the action namespace: money_path_services in
 # rules.yaml uses the module name (openbank-ledger-service) but an action prefix is the
 # commit scope (ledger). Strip the `openbank-` prefix and a trailing `-service` so the
-# two align (e.g. openbank-ledger-service -> ledger; openbank-sepa-payment -> sepa-payment).
+# two align (e.g. openbank-ledger-service -> ledger).
+#
+# Five services' real @Authorize action prefix does NOT match that derived name (a
+# fleet audit, issue #395, found this silently disabled four-eyes for every one of
+# them): sepa-payment -> sepaPayment, sepa-instant -> sctInstPayment, domestic-payment
+# -> domesticPayment, clearing -> clearingBatch, sca -> device / scaChallenge. Two of
+# those aren't even a casing variant of the derived name, so this uses an explicit
+# override table (rules.yaml: money_path_action_prefixes) rather than a camelCase
+# guess — self-documenting, and rest_test.rego pins it so a future rename can't
+# silently drift back out of sync.
 money_path_scopes contains scope if {
 	some svc in data.rules.money_path_services
-	scope := trim_suffix(trim_prefix(svc, "openbank-"), "-service")
+	derived := trim_suffix(trim_prefix(svc, "openbank-"), "-service")
+	not data.rules.money_path_action_prefixes[derived]
+	scope := derived
+}
+
+money_path_scopes contains scope if {
+	some svc in data.rules.money_path_services
+	derived := trim_suffix(trim_prefix(svc, "openbank-"), "-service")
+	some scope in data.rules.money_path_action_prefixes[derived]
 }
 
 four_eyes_required if {
