@@ -115,10 +115,18 @@ replacing the former in-memory stub), so settlement state is durable across rest
    origination endpoint is the new highest-value attack surface** — keep its role gate + OPA action
    tight, and never expose it without authentication.
 
-1. **OPA policy for `settlement.create` (origination) not yet written** — the new endpoint declares
-   `@Authorize(action = "settlement.create")`, but with `AUTHZ_ENFORCE` unset it is advisory. Write
-   the REST/origination policy and flip enforcement (runbook 0006 Gate 2) before treating the
-   endpoint as access-controlled.
+1. ~~**OPA policy for `settlement.create` (origination) not yet written.**~~ **Closed** (ADR-0034
+   Phase 5, issue #266). `settlement_rest_ext.rego` now grants `operator-settlement-write` for
+   HUMAN ROLE_OPERATOR/ROLE_ADMIN on `settlement.create`; there is deliberately NO SERVICE/M2M allow
+   rule — a fleet audit found no in-repo caller ever invokes `POST /api/v1/settlements` as a
+   service-to-service action (no rest-client config anywhere in the repo targets it, and the
+   NetworkPolicy ingress-allow-list only admits admin-ui, which forwards the operator's own bearer
+   token). `AUTHZ_ENFORCE=true` is now set on the settlement Rollout; the OPA sidecar is deployed.
+   `@RolesAllowed(SERVICE, OPERATOR, ADMIN)` remains the coarse outer gate (unchanged, pre-existing),
+   so a SERVICE-token caller would still pass RBAC but is denied by OPA (deny-by-default, no
+   matching `allowed_reasons`) — if a genuine M2M caller for this action is ever verified, add a
+   narrow `service-settlement-m2m` rule the way `service-domestic-payment-m2m` / `service-sca-m2m`
+   do it, not a blanket SERVICE allow.
 
 2. **OPA policy for settlement activities not yet written** — `openbank-infra/opa/policies/` does not yet
    contain a `settlement_activity.rego`. Until it does, the `OpaActivityInterceptor` in libs

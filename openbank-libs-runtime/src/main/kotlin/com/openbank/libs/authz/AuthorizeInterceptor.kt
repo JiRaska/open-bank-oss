@@ -4,6 +4,9 @@
 
 package com.openbank.libs.authz
 
+import com.openbank.libs.approval.ApprovalStatus
+import com.openbank.libs.approval.ApprovalStore
+import com.openbank.libs.approval.PendingApproval
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.Priority
 import jakarta.enterprise.inject.Instance
@@ -13,7 +16,10 @@ import jakarta.interceptor.Interceptor
 import jakarta.interceptor.InvocationContext
 import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.ServiceUnavailableException
+import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.HttpHeaders
+import jakarta.ws.rs.core.MediaType
+import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.SecurityContext
 import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -59,6 +65,17 @@ import kotlin.reflect.jvm.kotlinFunction
  * Priority sits between PLATFORM_AFTER (authn already populated the
  * SecurityContext) and APPLICATION (business logic). The same slot the
  * Quarkus `@RolesAllowed` interceptor uses.
+ *
+ * Four-eyes (ADR-0155, issue #395): an ALLOWED decision may still carry
+ * `attributes["four_eyes_required"] == true` (OPA's `rest.rego`, for a
+ * money-path action). When a service opts in (`authz.four-eyes.enforce=true`)
+ * and wires an [ApprovalStore], such a call is paused instead of proceeding —
+ * see [requireFourEyes] — until a second, distinct principal decides a
+ * [com.openbank.libs.approval.PendingApproval] via the service's own
+ * approval-decide endpoint and the maker retries with `X-Approval-Id`.
+ * Default off and no-op without a wired [ApprovalStore], so shipping this in
+ * the shared libs JAR does not retroactively change behavior for services
+ * that haven't opted in.
  */
 @Authorize(action = "")
 @Interceptor
@@ -100,6 +117,11 @@ class AuthorizeInterceptor {
     @Inject
     lateinit var clock: Clock
 
+    // Instance<> for the same reason as `pdp`/`securityContext` above: most services
+    // never wire an ApprovalStore, so a hard @Inject would break their build.
+    @Inject
+    lateinit var approvalStore: Instance<ApprovalStore>
+
     /**
      * Phase toggle (ADR-0034 D5). Default `true` so a service that adds
      * `@Authorize` without an explicit setting gets enforcement — the safe
@@ -107,6 +129,15 @@ class AuthorizeInterceptor {
      */
     @ConfigProperty(name = "authz.enforce", defaultValue = "true")
     var enforce: Boolean = true
+
+    /**
+     * Four-eyes opt-in (ADR-0155). Default `false`: merging this feature into the
+     * shared libs JAR must not retroactively start blocking traffic anywhere. A
+     * service flips this only after wiring an [ApprovalStore] and reviewing its
+     * threat model for the maker/checker flow.
+     */
+    @ConfigProperty(name = "authz.four-eyes.enforce", defaultValue = "false")
+    var fourEyesEnforce: Boolean = false
 
     @AroundInvoke
     fun authorize(ctx: InvocationContext): Any? {
@@ -175,8 +206,88 @@ class AuthorizeInterceptor {
             )
             throw ForbiddenException(decision.reason ?: "policy denied")
         }
-        return ctx.proceed()
+        return requireFourEyesOrProceed(ctx, annotation, query, decision)
     }
+
+    /**
+     * ADR-0155: gate an otherwise-allowed money-path action behind a second
+     * approver when OPA flagged it `four_eyes_required`. No-op (proceeds
+     * immediately) unless the service opted in via [fourEyesEnforce] AND wired
+     * an [ApprovalStore] — see the class KDoc.
+     */
+    private fun requireFourEyesOrProceed(
+        ctx: InvocationContext,
+        annotation: Authorize,
+        query: AuthzQuery,
+        decision: AuthzDecision,
+    ): Any? {
+        val fourEyesRequired = decision.attributes["four_eyes_required"] == true
+        if (!fourEyesRequired || !fourEyesEnforce) {
+            return ctx.proceed()
+        }
+        if (!approvalStore.isResolvable) {
+            // Code review finding: this used to fall into the same silent-proceed branch as
+            // "four-eyes not required" / "not enforced", with no log at all — indistinguishable
+            // from a service correctly not opting in. Mirrors the log.errorf the PDP-missing
+            // branch above already uses for an analogous misconfiguration; still proceeds
+            // (ADR-0155 D3 deliberately keeps this a no-op, not a fail-closed 503) but now at
+            // least leaves an operator-visible trail that four-eyes was supposed to gate this.
+            log.errorf(
+                "four-eyes: action=%s is flagged four_eyes_required with authz.four-eyes.enforce=true, " +
+                    "but no ApprovalStore bean is wired — proceeding WITHOUT the second-approver gate. " +
+                    "Wire an ApprovalStore for this service or set authz.four-eyes.enforce=false until it is.",
+                annotation.action,
+            )
+            return ctx.proceed()
+        }
+        val store = approvalStore.get()
+        val maker = query.principal.id
+        val resourceId = query.resource?.id
+
+        val approvalId = resolveApprovalIdHeader()
+        if (approvalId != null) {
+            val approval = runBlocking { store.find(approvalId) }
+            if (approval.satisfies(annotation.action, resourceId, maker)) {
+                runBlocking { store.markExecuted(approvalId) }
+                return ctx.proceed()
+            }
+            log.warnf(
+                "four-eyes: approval id=%s not valid for action=%s maker=%s " +
+                    "(missing, mismatched, not approved, or already consumed) — re-issuing a pending approval",
+                approvalId,
+                annotation.action,
+                maker,
+            )
+        }
+
+        val pending = runBlocking { store.create(annotation.action, resourceId, maker) }
+        log.infof(
+            "four-eyes: action=%s resource=%s maker=%s requires a second approver — approvalId=%s",
+            annotation.action,
+            resourceId,
+            maker,
+            pending.id,
+        )
+        throw WebApplicationException(
+            Response.status(PENDING_APPROVAL_STATUS)
+                .entity(mapOf("status" to "PENDING_APPROVAL", "approvalId" to pending.id))
+                .type(MediaType.APPLICATION_JSON)
+                .build(),
+        )
+    }
+
+    private fun resolveApprovalIdHeader(): String? {
+        if (!httpHeaders.isResolvable) return null
+        return httpHeaders.get().getRequestHeader(APPROVAL_ID_HEADER)?.firstOrNull()
+    }
+
+    /** A supplied approval only unlocks THIS exact action, resource, and original maker. */
+    private fun PendingApproval?.satisfies(action: String, resourceId: String?, maker: String): Boolean =
+        this != null &&
+            status == ApprovalStatus.APPROVED &&
+            this.action == action &&
+            this.resourceId == resourceId &&
+            makerId == maker
 
     private fun buildQuery(ctx: InvocationContext, annotation: Authorize): AuthzQuery {
         val sc = securityContext.get()
@@ -226,5 +337,10 @@ class AuthorizeInterceptor {
         // separate mTLS path and never hits this interceptor.
         val name = sc.userPrincipal?.name ?: return "ANONYMOUS"
         return if (name.startsWith("agent:")) "AI_AGENT" else "HUMAN"
+    }
+
+    private companion object {
+        const val APPROVAL_ID_HEADER = "X-Approval-Id"
+        const val PENDING_APPROVAL_STATUS = 202
     }
 }
