@@ -38,6 +38,11 @@ spec:
       labels:
         app.kubernetes.io/name: transaction-service
         app.kubernetes.io/part-of: payments
+      annotations:
+        # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-transaction-opa-bundle.sh via the trailing marker comment
+        # (do not hand-edit, do not drop the marker).
+        openbank.tech/policy-checksum: "41e9c77c700daf73" # transaction-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -128,6 +133,14 @@ spec:
               value: openbank-payments
             - name: OPENBANK_TRANSACTION_ORCHESTRATION_TEMPORAL_TASK_QUEUE
               value: openbank-payment-execution
+            # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
+            # enables the @Authorize HTTP interceptor to enforce decisions from
+            # data.openbank.rest.allow. RBAC via OIDC remains the outer gate; OPA is the
+            # fine-grained PEP. The money-path canary analysis (openbank-money-path-canary,
+            # already wired on this Rollout) aborts the rollout if enforce regresses the
+            # error rate.
+            - name: AUTHZ_ENFORCE
+              value: "true"
           startupProbe:
             tcpSocket:
               port: management
@@ -170,9 +183,87 @@ spec:
             limits:
               cpu: "1"
               memory: 768Mi
+        # OPA policy-decision sidecar (ADR-0034). Serves data.openbank.rest.allow for all
+        # @Authorize-annotated endpoints in transaction-service (transaction.*). Bundle
+        # mounted from transaction-opa-bundle ConfigMap (gen-transaction-opa-bundle.sh).
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            # Bind on the pod network (not 127.0.0.1) so kubelet httpGet probes reach
+            # /health. The image is scratch (no shell), so an exec probe isn't possible.
+            # Reachability is fenced by the NetworkPolicy; OPA serves only policy decisions.
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/transaction_rest_ext.rego
+              subPath: transaction_rest_ext.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            # OPA writes temp files during bundle load — required with readOnlyRootFilesystem.
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: transaction-opa-bundle
         - name: kafka-keystore
           secret:
             secretName: transaction-service-kafka-keystore
@@ -275,6 +366,10 @@ spec:
       labels:
         app.kubernetes.io/name: sepa-payment
         app.kubernetes.io/part-of: payments
+      annotations:
+        # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-sepa-payment-opa-bundle.sh (do not hand-edit).
+        openbank.tech/policy-checksum: "32fa5bf2389c2545"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -396,6 +491,13 @@ spec:
             # debit in transaction-service then advance to COMPLETED. Same namespace.
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
+            # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
+            # enables the @Authorize HTTP interceptor to enforce decisions from
+            # data.openbank.rest.allow. RBAC via OIDC remains the outer gate; OPA is the
+            # fine-grained PEP. The money-path canary analysis (openbank-money-path-canary)
+            # aborts the rollout if enforce regresses the error rate.
+            - name: AUTHZ_ENFORCE
+              value: "true"
           startupProbe:
             tcpSocket:
               port: management
@@ -438,9 +540,87 @@ spec:
             limits:
               cpu: "1"
               memory: 768Mi
+        # OPA policy-decision sidecar (ADR-0034). Serves data.openbank.rest.allow for
+        # all @Authorize-annotated endpoints in sepa-payment (sepaPayment.*).
+        # Bundle mounted from sepa-payment-opa-bundle ConfigMap (gen-sepa-payment-opa-bundle.sh).
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            # Bind on the pod network (not 127.0.0.1) so kubelet httpGet probes reach
+            # /health. The image is scratch (no shell), so an exec probe isn't possible.
+            # Reachability is fenced by the NetworkPolicy; OPA serves only policy decisions.
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/sepa_payment_rest_ext.rego
+              subPath: sepa_payment_rest_ext.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            # OPA writes temp files during bundle load — required with readOnlyRootFilesystem.
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: sepa-payment-opa-bundle
         - name: kafka-keystore
           secret:
             secretName: sepa-payment-kafka-keystore
@@ -771,6 +951,10 @@ spec:
       labels:
         app.kubernetes.io/name: sepa-instant
         app.kubernetes.io/part-of: payments
+      annotations:
+        # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-sepa-instant-opa-bundle.sh (do not hand-edit).
+        openbank.tech/policy-checksum: "1a35746d875e9687"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -859,6 +1043,13 @@ spec:
               value: "true"
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
+            # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
+            # enables the @Authorize HTTP interceptor to enforce decisions from
+            # data.openbank.rest.allow. RBAC via OIDC remains the outer gate; OPA is the
+            # fine-grained PEP. The money-path canary analysis (openbank-money-path-canary)
+            # aborts the rollout if enforce regresses the error rate.
+            - name: AUTHZ_ENFORCE
+              value: "true"
           startupProbe:
             tcpSocket:
               port: management
@@ -898,9 +1089,87 @@ spec:
             limits:
               cpu: "1"
               memory: 768Mi
+        # OPA policy-decision sidecar (ADR-0034). Serves data.openbank.rest.allow for
+        # all @Authorize-annotated endpoints in sepa-instant (sctInstPayment.*).
+        # Bundle mounted from sepa-instant-opa-bundle ConfigMap (gen-sepa-instant-opa-bundle.sh).
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            # Bind on the pod network (not 127.0.0.1) so kubelet httpGet probes reach
+            # /health. The image is scratch (no shell), so an exec probe isn't possible.
+            # Reachability is fenced by the NetworkPolicy; OPA serves only policy decisions.
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/sepa_instant_rest_ext.rego
+              subPath: sepa_instant_rest_ext.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            # OPA writes temp files during bundle load — required with readOnlyRootFilesystem.
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: sepa-instant-opa-bundle
         - name: kafka-keystore
           secret:
             secretName: sepa-instant-kafka-keystore
@@ -996,6 +1265,11 @@ spec:
       labels:
         app.kubernetes.io/name: clearing-service
         app.kubernetes.io/part-of: payments
+      annotations:
+        # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-clearing-opa-bundle.sh via the trailing marker comment
+        # (do not hand-edit, do not drop the marker).
+        openbank.tech/policy-checksum: "841e47f4d768cb2b" # clearing-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1057,6 +1331,13 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
+            # enables the @Authorize HTTP interceptor to enforce decisions from
+            # data.openbank.rest.allow. RBAC via OIDC remains the outer gate; OPA is the
+            # fine-grained PEP. The money-path canary analysis (openbank-money-path-canary)
+            # aborts the rollout if enforce regresses the error rate.
+            - name: AUTHZ_ENFORCE
+              value: "true"
           startupProbe:
             tcpSocket:
               port: management
@@ -1096,9 +1377,87 @@ spec:
             limits:
               cpu: "1"
               memory: 768Mi
+        # OPA policy-decision sidecar (ADR-0034). Serves data.openbank.rest.allow for
+        # all @Authorize-annotated endpoints in clearing-service (clearingBatch.*).
+        # Bundle mounted from clearing-opa-bundle ConfigMap (gen-clearing-opa-bundle.sh).
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            # Bind on the pod network (not 127.0.0.1) so kubelet httpGet probes reach
+            # /health. The image is scratch (no shell), so an exec probe isn't possible.
+            # Reachability is fenced by the NetworkPolicy; OPA serves only policy decisions.
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/clearing_rest_ext.rego
+              subPath: clearing_rest_ext.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            # OPA writes temp files during bundle load — required with readOnlyRootFilesystem.
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: clearing-opa-bundle
         - name: kafka-keystore
           secret:
             secretName: clearing-service-kafka-keystore
@@ -1437,6 +1796,11 @@ spec:
       labels:
         app.kubernetes.io/name: settlement-service
         app.kubernetes.io/part-of: payments
+      annotations:
+        # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-settlement-opa-bundle.sh via the trailing marker comment
+        # (do not hand-edit, do not drop the marker).
+        openbank.tech/policy-checksum: "8f8a20a7b9c3d273" # settlement-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1502,6 +1866,13 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
+            # enables the @Authorize HTTP interceptor to enforce decisions from
+            # data.openbank.rest.allow. RBAC via OIDC remains the outer gate; OPA is the
+            # fine-grained PEP. The money-path canary analysis (openbank-money-path-canary)
+            # aborts the rollout if enforce regresses the error rate.
+            - name: AUTHZ_ENFORCE
+              value: "true"
           startupProbe:
             tcpSocket:
               port: management
@@ -1535,9 +1906,87 @@ spec:
             limits:
               cpu: "1"
               memory: 768Mi
+        # OPA policy-decision sidecar (ADR-0034). Serves data.openbank.rest.allow for
+        # the @Authorize-annotated endpoint in settlement-service (settlement.create).
+        # Bundle mounted from settlement-opa-bundle ConfigMap (gen-settlement-opa-bundle.sh).
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            # Bind on the pod network (not 127.0.0.1) so kubelet httpGet probes reach
+            # /health. The image is scratch (no shell), so an exec probe isn't possible.
+            # Reachability is fenced by the NetworkPolicy; OPA serves only policy decisions.
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/settlement_rest_ext.rego
+              subPath: settlement_rest_ext.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            # OPA writes temp files during bundle load — required with readOnlyRootFilesystem.
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: settlement-opa-bundle
   strategy:
     canary:
       stableService: settlement-service

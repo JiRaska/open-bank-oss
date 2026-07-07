@@ -27,7 +27,10 @@ import java.util.UUID
 /**
  * Origination endpoint for interbank settlements. A POST creates a PENDING settlement and starts
  * its durable settlement workflow (ADR-0101 P3). Money-path: guarded by a coarse role gate plus
- * the fine-grained `settlement.create` OPA action (advisory until the settlement policy lands).
+ * the fine-grained `settlement.create` OPA action, enforced (ADR-0034 Phase 5, issue #266) — an
+ * OPA sidecar is deployed with `settlement_rest_ext.rego` and `AUTHZ_ENFORCE=true`. Only
+ * ROLE_OPERATOR/ROLE_ADMIN are granted by policy; the SERVICE role above remains valid RBAC but
+ * has no OPA allow rule (no verified in-repo M2M caller — see settlement_rest_ext.rego).
  */
 @Path("/api/v1/settlements")
 @Produces(MediaType.APPLICATION_JSON)
