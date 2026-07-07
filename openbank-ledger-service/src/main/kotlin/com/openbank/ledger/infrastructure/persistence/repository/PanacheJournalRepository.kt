@@ -5,6 +5,7 @@
 package com.openbank.ledger.infrastructure.persistence.repository
 
 import com.openbank.ledger.application.port.out.JournalRepository
+import com.openbank.ledger.application.usecase.JournalReversalConflictException
 import com.openbank.ledger.domain.model.ControlAccountTieOut
 import com.openbank.ledger.domain.model.GlAccountType
 import com.openbank.ledger.domain.model.JournalEntry
@@ -136,20 +137,32 @@ class PanacheJournalRepository(
         originalEntryDate: LocalDate,
         outbox: List<OutboxMessage>,
     ): JournalEntry = Panache.withTransaction {
-        persist(reversal.toEntity())
-            .flatMap { persistLines(reversal) }
-            .flatMap {
-                find("id = ?1 and entryDate = ?2", originalId, originalEntryDate).firstResult()
-                    .invoke { e ->
-                        if (e != null) {
-                            e.status = JournalStatus.REVERSED.name
-                            e.version += 1
-                        }
-                    }
-                    .replaceWithVoid()
+        // Status guard FIRST, as a conditional update: only a still-POSTED original may be
+        // flipped to REVERSED. Two concurrent reversals both read POSTED before either
+        // commits (the use-case check cannot see the other transaction); the row lock taken
+        // here serialises them and the loser matches 0 rows after the winner commits — so it
+        // fails BEFORE persisting a second compensation entry and its AccountBookedChanged
+        // deltas (double-credit downstream). Backstop: uq_journal_entries_reversal_of (V12).
+        update(
+            "status = ?1, version = version + 1 where id = ?2 and entryDate = ?3 and status = ?4",
+            JournalStatus.REVERSED.name,
+            originalId,
+            originalEntryDate,
+            JournalStatus.POSTED.name,
+        ).flatMap { updated ->
+            if (updated == 0) {
+                Uni.createFrom().failure(
+                    JournalReversalConflictException(
+                        "Journal $originalId is not POSTED — already reversed by a concurrent request",
+                    ),
+                )
+            } else {
+                persist(reversal.toEntity())
+                    .flatMap { persistLines(reversal) }
+                    .flatMap { persistOutbox(outbox) }
+                    .replaceWith(reversal)
             }
-            .flatMap { persistOutbox(outbox) }
-            .replaceWith(reversal)
+        }
     }.awaitSuspending()
 
     override suspend fun trialBalance(asOf: LocalDate): List<TrialBalanceLine> {
