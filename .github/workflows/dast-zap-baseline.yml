@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: Apache-2.0
+# DAST baseline scan (OWASP ZAP) — ADR-0030 D3.
+#
+# Scope decision (first cut): a full customer-edge or fleet-wide DAST run needs either the
+# real k8s cluster (customer-edge is a gitops-only Rollout/proxy, not a Gradle module with its
+# own image build in this repo) or booting all ~30 services from openbank-infra/docker-compose.yml
+# (postgres/kafka/keycloak + every service Dockerfile — too heavy for a CI job). Instead this
+# scans ONE already-defined docker-compose target: ledger-service (postgres + kafka deps only,
+# already has a health check and documented unauthenticated public paths — see
+# QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS in openbank-infra/docker-compose.yml). This is
+# unauthenticated-surface coverage, not a full authenticated crawl — the money-path service most
+# reachable from a plain HTTP client without standing up Keycloak token issuance in CI.
+#
+# Advisory / report-only for the first cut, same posture as pitest.yml: a fresh ZAP baseline
+# against a banking API is expected to surface findings that need triage (ADR-0030 D1 lifecycle),
+# not an immediate hard gate. Scheduled (not per-PR) — cost + noise.
+name: DAST baseline (ZAP)
+
+on:
+  schedule:
+    - cron: "30 4 * * 0"   # Sunday 04:30 UTC — before the pitest 03:00 UTC... run gets its own slot
+  workflow_dispatch:
+    inputs:
+      target_service:
+        description: "docker-compose service name to scan (must exist in openbank-infra/docker-compose.yml)"
+        required: false
+        default: "ledger-service"
+
+permissions:
+  contents: read
+
+jobs:
+  zap-baseline:
+    name: ZAP baseline / ledger-service
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: none
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Boot ledger-service + deps (postgres, kafka)
+        working-directory: openbank-infra
+        env:
+          # Must match the QUARKUS_DATASOURCE_PASSWORD hardcoded per-service in
+          # docker-compose.yml ("openbank_secret") — every service's datasource password is
+          # a literal there, not templated from POSTGRES_PASSWORD, so this can't be a fresh
+          # random value.
+          POSTGRES_PASSWORD: openbank_secret
+        run: |
+          docker compose up -d postgres kafka ledger-service
+          echo "Waiting for ledger-service health..."
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8101/api/v1/info >/dev/null 2>&1; then
+              echo "ledger-service is up"; break
+            fi
+            if [ "$i" -eq 40 ]; then
+              echo "::error::ledger-service did not become healthy in time"
+              docker compose logs ledger-service kafka postgres | tail -300
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: ZAP baseline scan (unauthenticated public surface)
+        uses: zaproxy/action-baseline@6c5a007541891231cd9e0ddec25d4f25c59c9874 # v0.15.0
+        with:
+          target: "http://127.0.0.1:8101/api/v1/journals"
+          # Report-only: never fail the job on findings (ADR-0030 D3 first cut). Findings feed
+          # the D1 vulnerability-management lifecycle for triage, not an automatic PR gate.
+          fail_action: false
+          allow_issue_writing: false
+          artifact_name: zap-baseline-ledger-service
+          cmd_options: "-a"
+
+      - name: Dump container logs on failure
+        if: failure()
+        working-directory: openbank-infra
+        run: docker compose logs ledger-service kafka postgres | tail -300
+
+      - name: Tear down stack
+        if: always()
+        working-directory: openbank-infra
+        run: docker compose down -v
