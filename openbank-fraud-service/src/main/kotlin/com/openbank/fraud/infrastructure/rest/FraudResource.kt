@@ -7,6 +7,7 @@ package com.openbank.fraud.infrastructure.rest
 import com.openbank.fraud.application.port.`in`.ScoreFraudUseCase
 import com.openbank.fraud.domain.model.FraudScore
 import com.openbank.fraud.domain.model.ScoreRequest
+import com.openbank.libs.authz.Authorize
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
@@ -37,6 +38,7 @@ class FraudResource {
     @POST
     @Path("/score")
     @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "fraud.score")
     @Operation(summary = "Score a payment intent and return a fraud verdict (ALLOW/CHALLENGE/REVIEW/DECLINE)")
     suspend fun score(req: ScoreFraudRequest): Response {
         val result: FraudScore = scoreFraud.score(req.toDomain())
