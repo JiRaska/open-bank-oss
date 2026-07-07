@@ -505,6 +505,8 @@ spec:
       ports:
         - protocol: TCP
           port: 8102
+        - protocol: TCP
+          port: 8181
     - from:
         - namespaceSelector:
             matchLabels:
