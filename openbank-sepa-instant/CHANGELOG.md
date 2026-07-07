@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.5](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.6.4...sepa-instant-v0.6.5) (2026-07-07)
+
+
+### Security
+
+* **sepa-instant:** enforce OPA authorization on payment endpoints (ADR-0034 Phase 5) ([#410](https://github.com/JiRaska/open-bank-oss/issues/410)) ([a207575](https://github.com/JiRaska/open-bank-oss/commit/a2075759a8f1326a30aaf18a6a0bb72dc18e1087)), closes [#266](https://github.com/JiRaska/open-bank-oss/issues/266)
+
 ## [0.6.4](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.6.3...sepa-instant-v0.6.4) (2026-07-03)
 
 
