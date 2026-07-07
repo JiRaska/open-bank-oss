@@ -427,7 +427,7 @@ class PanacheJournalRepository(
             join journal_entries je on je.id = jl.journal_id
             where je.status = 'POSTED'
               and je.entry_date <= :asOf
-              and jl.account_id = :controlAccountId
+              and jl.gl_account_id = :controlAccountId
             group by jl.base_currency
             order by jl.base_currency
         """.trimIndent()
@@ -442,7 +442,7 @@ class PanacheJournalRepository(
             join journal_entries je on je.id = jl.journal_id
             where je.status = 'POSTED'
               and je.entry_date <= :asOf
-              and jl.account_id = :controlAccountId
+              and jl.gl_account_id = :controlAccountId
               and jl.sub_account_id is not null
             group by jl.base_currency, jl.sub_account_id
             order by jl.base_currency, jl.sub_account_id
