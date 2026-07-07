@@ -60,7 +60,7 @@ jobs:
     env:
       HAS_CLAUDE: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0   # need base..head for a real 3-dot diff
 
@@ -198,7 +198,7 @@ jobs:
         id: ghmodels
         if: steps.scope.outputs.skip == 'false'
         continue-on-error: true   # any failure → Claude fallback
-        uses: actions/ai-inference@v2
+        uses: actions/ai-inference@a7805884c80886efc241e94a5351df715968a0ad # v2.1.1
         with:
           model: openai/gpt-4o
           prompt-file: /tmp/prompt.txt
@@ -243,7 +243,7 @@ jobs:
           steps.scope.outputs.skip == 'false' &&
           steps.ghmodels.outcome == 'failure' &&
           env.HAS_CLAUDE == 'true'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@f87768c6d25f92ae6efa7175e223ef77d4cbf97f # v1.0.166
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
