@@ -42,6 +42,19 @@ variable "config_history_retention_days" {
   default     = 90
 }
 
+# Master switch for AWS Config recording. When false the recorder, delivery
+# channel, IAM role and history bucket all stay provisioned but the recorder is
+# stopped — zero ConfigurationItem cost, one-flag re-enable, no resource churn.
+# CloudTrail (the tamper-evident half of ADR-0027) is unaffected. Sandbox sets
+# false: it is out of prod compliance scope, has no Config rules consuming the
+# items, and a high-churn Karpenter estate makes even DAILY recording a steady
+# cost with no consumer.
+variable "config_recording_enabled" {
+  description = "Whether the AWS Config recorder actively records. False stops recording but keeps all resources in place."
+  type        = bool
+  default     = true
+}
+
 variable "config_recording_frequency" {
   description = <<-EOT
     AWS Config recording frequency: CONTINUOUS (every change) or DAILY (one snapshot
