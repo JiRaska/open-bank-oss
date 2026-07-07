@@ -7,6 +7,7 @@ plugins {
     alias(libs.plugins.kotlin.allopen)
     alias(libs.plugins.quarkus)
     alias(libs.plugins.cyclonedx)
+    alias(libs.plugins.kover)
     // Static analysis gate (detekt + ktlint, ratchet via baselines) — same
     // convention the services get through openbank.quarkus-service.
     id("openbank.static-analysis")
@@ -79,4 +80,21 @@ tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
     setSkipConfigs(listOf("testCompileClasspath", "testRuntimeClasspath", "annotationProcessor", "kapt"))
     setProjectType("application")
     setSchemaVersion("1.5")
+}
+
+// Coverage floor (ADR-0020, ratchet-only — sweep #466: this module previously had no kover
+// plugin at all). Measured 56.7% LINE (538/949) at introduction, no filter excludes;
+// ~5 pt headroom, raise-only from here. Kover auto-wires koverVerify into check when a
+// verify{} rule is present (this module does not apply openbank.quarkus-service).
+kover {
+    reports {
+        verify {
+            rule {
+                bound {
+                    minValue = 51
+                    coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
+                }
+            }
+        }
+    }
 }
