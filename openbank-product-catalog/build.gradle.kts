@@ -40,3 +40,26 @@ dependencies {
     testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.testcontainers.postgresql)
 }
+
+// Coverage floor (ADR-0020, ratchet-only — sweep #466: this module previously had NO
+// koverVerify gate at all). Floor = measured LINE coverage at introduction minus ~5 pt
+// headroom; raise-only from here. Same excludes rationale as ledger/billing: thin REST
+// adapters are covered by API ITs, reflection DTOs are data holders.
+kover {
+    reports {
+        filters {
+            excludes {
+                annotatedBy("jakarta.ws.rs.Path")
+                annotatedBy("io.quarkus.runtime.annotations.RegisterForReflection")
+            }
+        }
+        verify {
+            rule {
+                bound {
+                    minValue = 90 // measured 95.4% (1315/1379) at introduction
+                    coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
+                }
+            }
+        }
+    }
+}
