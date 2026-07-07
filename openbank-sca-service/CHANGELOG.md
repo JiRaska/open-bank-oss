@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.7](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.8.6...sca-service-v0.8.7) (2026-07-07)
+
+
+### Security
+
+* **sca:** enforce OPA authorization on all SCA endpoints (ADR-0034 Phase 5) ([#387](https://github.com/JiRaska/open-bank-oss/issues/387)) ([b446ad0](https://github.com/JiRaska/open-bank-oss/commit/b446ad0a9c8b1739ed422928bb2d3bbf2ab46c09))
+
 ## [0.8.6](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.8.5...sca-service-v0.8.6) (2026-07-03)
 
 
