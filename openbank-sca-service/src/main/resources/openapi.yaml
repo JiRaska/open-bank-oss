@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SCA Service API
-  version: 1.2.0
+  version: 1.2.1
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -36,6 +36,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScaChallengeResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/sca/challenges/{id}:
     get:
@@ -51,6 +53,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScaChallengeResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -76,6 +80,8 @@ paths:
                 $ref: '#/components/schemas/ScaChallengeResponse'
         '400':
           description: Invalid or expired code
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '429':
           description: Max attempts exceeded
 
@@ -126,6 +132,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EnrolledDeviceResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/sca/challenges/{id}/decision:
     post:
@@ -172,6 +180,12 @@ components:
         format: uuid
 
   responses:
+    Forbidden:
+      description: Authenticated but denied by the OPA authorization policy (ADR-0034)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
     NotFound:
       description: Not found
       content:
