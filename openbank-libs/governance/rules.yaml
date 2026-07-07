@@ -267,6 +267,7 @@ money_path_services:
   - openbank-consent-service
   - openbank-fraud-service                # ADR-0084: first executable landed (Phase 1 skeleton)
   - openbank-billing-service              # ADR-0143: fee posting to the ledger (Phase 2b skeleton)
+  - openbank-settlement-service           # issue #307: debit->credit->ledger-booking saga (ADR-0101)
 review:
   default_approvals: 1
   money_path_approvals: 2               # CONTRIBUTING.md + branch protection
