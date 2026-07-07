@@ -96,6 +96,8 @@ spec:
       ports:
         - protocol: TCP
           port: 8124
+        - protocol: TCP
+          port: 8181
     - from:
         - namespaceSelector:
             matchLabels:
