@@ -177,6 +177,44 @@ class AccountServiceLifecycleTest {
     }
 
     @Test
+    fun `freezeAccount rejects an already-FROZEN account without updating it`() {
+        val acc = account(status = AccountStatus.FROZEN)
+        coEvery { accountRepository.findById(acc.id) } returns acc
+
+        assertThatThrownBy {
+            runBlocking {
+                service.freezeAccount(
+                    FreezeAccountCommand(
+                        accountId = acc.id,
+                        reason = "duplicate freeze",
+                        requestedBy = UUID.randomUUID(),
+                    ),
+                )
+            }
+        }.isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("Cannot freeze")
+
+        coVerify(exactly = 0) { accountRepository.update(any()) }
+    }
+
+    @Test
+    fun `unfreezeAccount rejects an ACTIVE (non-frozen) account without updating it`() {
+        val acc = account(status = AccountStatus.ACTIVE)
+        coEvery { accountRepository.findById(acc.id) } returns acc
+
+        assertThatThrownBy {
+            runBlocking {
+                service.unfreezeAccount(
+                    UnfreezeAccountCommand(accountId = acc.id, reason = "not frozen", requestedBy = UUID.randomUUID()),
+                )
+            }
+        }.isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("Cannot unfreeze")
+
+        coVerify(exactly = 0) { accountRepository.update(any()) }
+    }
+
+    @Test
     fun `unfreezeAccount returns a FROZEN account to ACTIVE and publishes the transition`(): Unit = runBlocking {
         val acc = account(status = AccountStatus.FROZEN)
         coEvery { accountRepository.findById(acc.id) } returns acc
@@ -260,6 +298,27 @@ class AccountServiceLifecycleTest {
             assertThat(closedEvent.reason).isEqualTo("dormant for 10 years")
             assertThat(closedEvent.occurredAt).isEqualTo(fixedInstant)
         }
+
+    @Test
+    fun `closeAccount rejects an already-CLOSED account without republishing or updating it`() {
+        val acc = account(status = AccountStatus.CLOSED)
+        coEvery { accountRepository.findById(acc.id) } returns acc
+
+        assertThatThrownBy {
+            runBlocking {
+                service.closeAccount(
+                    CloseAccountCommand(
+                        accountId = acc.id,
+                        reason = "duplicate close",
+                        requestedBy = UUID.randomUUID(),
+                    ),
+                )
+            }
+        }.isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("Cannot close")
+
+        coVerify(exactly = 0) { accountRepository.update(any()) }
+    }
 
     @Test
     fun `closeAccount throws AccountNotFoundException for an unknown account`() {
