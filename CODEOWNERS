@@ -34,6 +34,9 @@
 # --- Fraud detection (money-path per rules.yaml: ADR-0084) ---
 /openbank-fraud-service/                @JiRaska
 
+# --- Settlement (money-path per rules.yaml: ADR-0101 saga, issue #307) ---
+/openbank-settlement-service/           @JiRaska
+
 # --- Compliance & risk ---
 /openbank-aml-service/                  @JiRaska
 /openbank-kyc-service/                  @JiRaska
