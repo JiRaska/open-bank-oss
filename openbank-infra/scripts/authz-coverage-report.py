@@ -7,6 +7,16 @@ in openbank-libs/governance/policies/rest.rego for every legitimate caller type.
 Advisory mode hides the gap: the interceptor logs the would-be deny and lets the
 request through; enforce turns each uncovered (action, caller) pair into a 403.
 
+Since the Phase 5 rollout (issues #263/#266) some services also mount a per-service
+REST extension — an `allowed_reasons` block inlined as a heredoc in that service's
+openbank-infra/gitops/components/<svc>/gen-<svc>-opa-bundle.sh (e.g. pid_rest_ext.rego,
+copilot_rest_ext.rego), merged into the same `openbank.rest` package at the OPA bundle
+level (ADR-0034). Those extension reasons are NOT in rest.rego, so without reading them
+this tool reports false-negative "uncovered"/"partial" for actions the deployed bundle
+already allows. discover_ext_rego() below pulls the heredoc out of every generator script
+found and feeds its allowed_reasons into the classification, so the report reflects what
+is actually deployed, not just the shared base policy.
+
 This tool statically inventories every @Authorize(action, resource) in the fleet
 and classifies each action against the rest.rego reason rules:
 
@@ -45,6 +55,123 @@ AUTHORIZE_RE = re.compile(r'@Authorize\(\s*action\s*=\s*"([^"]+)"(?:\s*,\s*resou
 # {"list","read"}; compliance-read-any matches only ".read". NO rule matches ".search", so a
 # *.search action has no allow path and must NOT be classified covered.
 READ_VERBS = ("read", "list")
+
+# --- service-local ext rego extraction (ADR-0034, issues #263/#266) ------------------------
+# Generator scripts assign the ext rego to a shell var via `VAR=$(cat << 'REGO' ... REGO )`
+# and separately echo its ConfigMap data key as `<name>_rest_ext.rego: |` right before
+# dumping it — that echo is the authoritative filename (not the shell var name, which is
+# not standardised, e.g. PID_REST_EXT / COPILOT_REST_EXT).
+EXT_HEREDOC_RE = re.compile(r"\$\(\s*cat\s*<<-?\s*'?REGO'?\s*\n(.*?)\nREGO\s*\n\)", re.DOTALL)
+EXT_FILENAME_RE = re.compile(r'echo\s+"\s*(\w+_rest_ext\.rego):\s*\|"')
+REASON_HEAD_RE = re.compile(r'allowed_reasons\s+contains\s+"([^"]+)"\s+if\s*\{')
+ACTION_EQ_RE = re.compile(r'input\.action\s*==\s*"([^"]+)"')
+ACTION_IN_RE = re.compile(r'input\.action\s+in\s+\{([^}]*)\}')
+ACTION_PREFIX_RE = re.compile(r'startswith\(\s*input\.action\s*,\s*"([^"]+)"\s*\)')
+QUOTED_RE = re.compile(r'"([^"]+)"')
+
+# (kind, value, reason, ext_filename) — kind "exact" matches action == value,
+# "prefix" matches action.startswith(value).
+ExtRule = tuple[str, str, str, str]
+
+
+def _extract_block(text: str, brace_start: int) -> str:
+    """text[brace_start] == '{'; return the body up to its matching close brace.
+
+    A plain non-greedy regex breaks here because bodies routinely contain their own
+    braces (e.g. `input.action in {"a", "b"}`), so the first `}` is not the block end.
+    """
+    depth = 0
+    for i in range(brace_start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[brace_start + 1 : i]
+    raise ValueError("unbalanced braces in ext rego allowed_reasons block")
+
+
+def _parse_ext_rego(rego_text: str, ext_filename: str) -> list[ExtRule]:
+    rules: list[ExtRule] = []
+    for m in REASON_HEAD_RE.finditer(rego_text):
+        reason = m.group(1)
+        body = _extract_block(rego_text, m.end() - 1)
+        for am in ACTION_EQ_RE.finditer(body):
+            rules.append(("exact", am.group(1), reason, ext_filename))
+        for am in ACTION_IN_RE.finditer(body):
+            for qm in QUOTED_RE.finditer(am.group(1)):
+                rules.append(("exact", qm.group(1), reason, ext_filename))
+        for am in ACTION_PREFIX_RE.finditer(body):
+            rules.append(("prefix", am.group(1), reason, ext_filename))
+    return rules
+
+
+def _resolve_service_module(component: str, module_dirs: set[str]) -> str | None:
+    """Map a gitops component dir name (e.g. "pid", "fraud-service") to the openbank-*
+    service module whose @Authorize inventory it governs. Naming isn't 1:1 (e.g.
+    component "notifications" -> module openbank-notification-service; component
+    "fraud-service" -> module openbank-fraud-service, no double "-service"), so try
+    the plausible variants against the module dirs actually present on disk.
+    """
+    candidates = [f"openbank-{component}-service", f"openbank-{component}"]
+    if component.endswith("s"):
+        singular = component[:-1]
+        candidates += [f"openbank-{singular}-service", f"openbank-{singular}"]
+    for c in candidates:
+        if c in module_dirs:
+            return c
+    return None
+
+
+def discover_ext_rego(root: Path, module_dirs: set[str]) -> dict[str, list[ExtRule]]:
+    """Extract every service-local ext rego heredoc from gen-<svc>-opa-bundle.sh generators.
+
+    Returns service module dir -> list of ExtRule. A generator with no ext rego heredoc
+    (e.g. customer-edge, notifications today — they only mount the shared rest.rego) is
+    simply absent from the result.
+    """
+    by_service: dict[str, list[ExtRule]] = {}
+    for gen_script in sorted(root.glob("openbank-infra/gitops/components/*/gen-*-opa-bundle.sh")):
+        component = gen_script.parent.name
+        text = gen_script.read_text(encoding="utf-8", errors="replace")
+        heredocs = [hm.group(1) for hm in EXT_HEREDOC_RE.finditer(text)]
+        if not heredocs:
+            continue
+        filenames = [fm.group(1) for fm in EXT_FILENAME_RE.finditer(text)]
+        if len(filenames) != len(heredocs):
+            print(
+                f"warn: {gen_script}: found {len(heredocs)} ext rego heredoc(s) but "
+                f"{len(filenames)} '<name>_rest_ext.rego: |' echo(s) — skipping "
+                "(generator doesn't match the expected convention)",
+                file=sys.stderr,
+            )
+            continue
+        service = _resolve_service_module(component, module_dirs)
+        if service is None:
+            print(
+                f"warn: {gen_script}: cannot map component '{component}' to an "
+                "openbank-*-service module dir — skipping its ext rego",
+                file=sys.stderr,
+            )
+            continue
+        for body, filename in zip(heredocs, filenames):
+            by_service.setdefault(service, []).extend(_parse_ext_rego(body, filename))
+    return by_service
+
+
+def ext_covered(rules: list[ExtRule], action: str) -> tuple[str, str] | None:
+    """Return (comma-joined reasons, ext filename) if any ext rule allows this action."""
+    reasons: list[str] = []
+    ext_filename = ""
+    for kind, value, reason, filename in rules:
+        hit = (kind == "exact" and action == value) or (kind == "prefix" and action.startswith(value))
+        if hit:
+            if reason not in reasons:
+                reasons.append(reason)
+            ext_filename = filename
+    if not reasons:
+        return None
+    return ", ".join(sorted(reasons)), ext_filename
 
 
 def money_path_services(root: Path) -> list[str]:
@@ -87,14 +214,20 @@ def main() -> int:
     mp = set(money_path_services(root))
 
     inventory: dict[str, list[tuple[str, str, str]]] = {}
+    module_dirs: set[str] = set()
     for kt in root.glob("openbank-*/src/main/kotlin/**/*.kt"):
         service = kt.parts[0]
+        module_dirs.add(service)
         for m in AUTHORIZE_RE.finditer(kt.read_text(encoding="utf-8", errors="replace")):
             inventory.setdefault(service, []).append((m.group(1), m.group(2) or "", str(kt)))
 
+    ext_index = discover_ext_rego(root, module_dirs)
+
     print("# @Authorize coverage vs rest.rego (static) — ADR-0034 Phase 5 flip readiness\n")
     print("Caller legend: covered = an allow reason exists for the expected human caller; "
-          "partial = human-operator-only path (no M2M); uncovered = no allow path at all.\n")
+          "partial = human-operator-only path (no M2M); uncovered = no allow path at all. "
+          "A `covered` row attributed to a service-local ext rego reflects an allow path from "
+          "that service's own gen-<svc>-opa-bundle.sh extension, not the shared rest.rego.\n")
 
     totals = {"covered": 0, "partial": 0, "uncovered": 0}
     for service in sorted(inventory):
@@ -102,7 +235,11 @@ def main() -> int:
             continue
         rows = inventory[service]
         flag = " (money-path)" if service in mp else ""
+        ext_rules = ext_index.get(service, [])
         print(f"## {service}{flag}\n")
+        if ext_rules:
+            ext_files = sorted({filename for _, _, _, filename in ext_rules})
+            print(f"Service-local ext rego in effect: {', '.join(f'`{f}`' for f in ext_files)}\n")
         print("| action | resource | coverage | allow path |")
         print("|---|---|---|---|")
         seen: set[tuple[str, str]] = set()
@@ -110,7 +247,12 @@ def main() -> int:
             if (action, resource) in seen:
                 continue
             seen.add((action, resource))
-            cov, note = classify(action, resource)
+            hit = ext_covered(ext_rules, action)
+            if hit:
+                reasons, ext_filename = hit
+                cov, note = "covered", f"{reasons} (service-local ext: `{ext_filename}`)"
+            else:
+                cov, note = classify(action, resource)
             totals[cov] += 1
             marker = {"covered": "✅", "partial": "⚠️", "uncovered": "❌"}[cov]
             print(f"| `{action}` | `{resource or '—'}` | {marker} {cov} | {note} |")
