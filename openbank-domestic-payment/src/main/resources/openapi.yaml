@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Domestic Payment Service API
-  version: 1.1.0
+  version: 1.1.1
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names
     are synchronously screened against the sanctions lists (ADR-0032): a clean payment is returned
@@ -44,6 +44,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DomesticPaymentResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     get:
       tags: [Domestic Payments]
       summary: List domestic payments
@@ -77,6 +79,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/DomesticPaymentResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/domestic-payments/{paymentId}:
     get:
@@ -92,6 +96,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DomesticPaymentResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -111,6 +117,8 @@ paths:
       responses:
         '200':
           description: Updated payment
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
 components:
   securitySchemes:
@@ -129,6 +137,12 @@ components:
         format: uuid
 
   responses:
+    Forbidden:
+      description: Authenticated but denied by the OPA authorization policy (ADR-0034)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
     NotFound:
       description: Not found
       content:

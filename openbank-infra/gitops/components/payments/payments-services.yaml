@@ -718,6 +718,11 @@ spec:
       labels:
         app.kubernetes.io/name: domestic-payment
         app.kubernetes.io/part-of: payments
+      annotations:
+        # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-domestic-payment-opa-bundle.sh via the trailing marker
+        # comment (do not hand-edit, do not drop the marker).
+        openbank.tech/policy-checksum: "f42524affe616713" # domestic-payment-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -814,6 +819,13 @@ spec:
             # ADR-0108: book funds in transaction-service after scheme ACSC.
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
+            # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
+            # enables the @Authorize HTTP interceptor to enforce decisions from
+            # data.openbank.rest.allow. RBAC via OIDC remains the outer gate; OPA is the
+            # fine-grained PEP. The money-path canary analysis (openbank-money-path-canary)
+            # aborts the rollout if enforce regresses the error rate.
+            - name: AUTHZ_ENFORCE
+              value: "true"
           startupProbe:
             tcpSocket:
               port: management
@@ -853,9 +865,88 @@ spec:
             limits:
               cpu: "1"
               memory: 768Mi
+        # OPA policy-decision sidecar (ADR-0034). Serves data.openbank.rest.allow for
+        # all @Authorize-annotated endpoints in domestic-payment (domestic-payment.*).
+        # Bundle mounted from domestic-payment-opa-bundle ConfigMap
+        # (gen-domestic-payment-opa-bundle.sh).
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            # Bind on the pod network (not 127.0.0.1) so kubelet httpGet probes reach
+            # /health. The image is scratch (no shell), so an exec probe isn't possible.
+            # Reachability is fenced by the NetworkPolicy; OPA serves only policy decisions.
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/domestic_payment_rest_ext.rego
+              subPath: domestic_payment_rest_ext.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            # OPA writes temp files during bundle load — required with readOnlyRootFilesystem.
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: domestic-payment-opa-bundle
         - name: kafka-keystore
           secret:
             secretName: domestic-payment-kafka-keystore
@@ -2187,6 +2278,10 @@ spec:
       labels:
         app.kubernetes.io/name: swift-service
         app.kubernetes.io/part-of: payments
+      annotations:
+        # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-swift-opa-bundle.sh (do not hand-edit).
+        openbank.tech/policy-checksum: "8355522135649199"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2264,6 +2359,14 @@ spec:
             # ADR-0108: transaction-service for post-ACSC settlement booking.
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
+            # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
+            # enables the @Authorize HTTP interceptor to enforce decisions from
+            # data.openbank.rest.allow. There is no @RolesAllowed outer gate on
+            # SwiftResource today, so OPA is the ONLY authz PEP on this rail — the
+            # money-path canary analysis (openbank-money-path-canary) aborts the
+            # rollout if enforce regresses the error rate.
+            - name: AUTHZ_ENFORCE
+              value: "true"
           startupProbe:
             tcpSocket:
               port: management
@@ -2303,6 +2406,79 @@ spec:
             limits:
               cpu: "1"
               memory: 512Mi
+        # OPA policy-decision sidecar (ADR-0034). Serves data.openbank.rest.allow for
+        # all @Authorize-annotated endpoints in swift-service (swift.*). Bundle
+        # mounted from swift-opa-bundle ConfigMap (gen-swift-opa-bundle.sh).
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            # Bind on the pod network (not 127.0.0.1) so kubelet httpGet probes reach
+            # /health. The image is scratch (no shell), so an exec probe isn't possible.
+            # Reachability is fenced by the NetworkPolicy; OPA serves only policy decisions.
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/swift_rest_ext.rego
+              subPath: swift_rest_ext.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            # OPA writes temp files during bundle load — required with readOnlyRootFilesystem.
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       volumes:
         - name: tmp
           emptyDir: {}
@@ -2312,6 +2488,11 @@ spec:
         - name: kafka-truststore
           secret:
             secretName: kafka-cluster-ca-truststore
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: swift-opa-bundle
   strategy:
     canary:
       stableService: swift-service
