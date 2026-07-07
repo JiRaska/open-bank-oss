@@ -73,6 +73,15 @@ jobs:
       - name: Build SBOM
         run: ./gradlew :${{ steps.map.outputs.path }}:cyclonedxBom --console=plain --no-daemon || true
 
+      # trivy is NOT preinstalled on hosted runners — without it the non-Gradle SBOM
+      # fallback below silently falls through (`command -v trivy` guard) and the
+      # backfill hard-fails for any module without the cyclonedx plugin (admin-ui).
+      # Same maintained, commit-pinned setup action security.yml / auto-deploy.yml use.
+      - name: Install Trivy (SBOM fallback for non-Gradle modules)
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.72.0
+
       - name: Build, sign and attach the evidence bundle
         env:
           COMP: ${{ steps.map.outputs.comp }}
