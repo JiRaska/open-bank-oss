@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.12.1...account-service-v0.12.2) (2026-07-07)
+
+
+### Bug Fixes
+
+* **account:** ktlintFormat AccountServiceLifecycleTest — Fleet lint red on main ([#480](https://github.com/JiRaska/open-bank-oss/issues/480)) ([37d303e](https://github.com/JiRaska/open-bank-oss/commit/37d303ef3e804f4cc30b79d8f0632ccfc2d942e7)), closes [#479](https://github.com/JiRaska/open-bank-oss/issues/479)
+* **account:** wrap over-long argument lists in AccountServiceLifecycleTest (latent ktlint violation) ([#476](https://github.com/JiRaska/open-bank-oss/issues/476)) ([5f1a606](https://github.com/JiRaska/open-bank-oss/commit/5f1a6065f2509a8414f1266328a7702f72c801a1)), closes [#321](https://github.com/JiRaska/open-bank-oss/issues/321)
+
 ## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.12.0...account-service-v0.12.1) (2026-07-07)
 
 
