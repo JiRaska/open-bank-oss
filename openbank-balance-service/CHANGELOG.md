@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.2](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.8.1...balance-service-v1.8.2) (2026-07-07)
+
+
+### Security
+
+* **balance:** enforce OPA authorization on balance endpoints (ADR-0034 Phase 5) ([#407](https://github.com/JiRaska/open-bank-oss/issues/407)) ([42ee4b2](https://github.com/JiRaska/open-bank-oss/commit/42ee4b233f29f044eeb8114fbe43139d2395e9ae))
+
 ## [1.8.1](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.8.0...balance-service-v1.8.1) (2026-07-02)
 
 
