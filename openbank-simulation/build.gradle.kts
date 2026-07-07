@@ -22,6 +22,11 @@ plugins {
     alias(libs.plugins.kover)
     // Same static-analysis gate (detekt + ktlint) the rest of the fleet runs.
     id("openbank.static-analysis")
+    // Fleet-wide Netty/Jackson/etc. patch-version floors (issue #461). This module pulls
+    // several services in via project(...) and independently re-resolves their transitive
+    // graph (a producer's own resolutionStrategy.force() does not propagate to a project(...)
+    // consumer), so it needs the same floor those services get through openbank.quarkus-service.
+    id("openbank.dependency-vulnerability-pins")
 }
 
 group = "com.openbank"

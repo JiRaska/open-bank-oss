@@ -15,6 +15,8 @@ plugins {
     id("org.jetbrains.kotlinx.kover")
     // Static analysis gate (detekt + ktlint, ratchet via per-module baselines).
     id("openbank.static-analysis")
+    // Fleet-wide Netty/Jackson/etc. patch-version floors (issue #461).
+    id("openbank.dependency-vulnerability-pins")
 }
 
 // All services share the same Maven groupId (ADR-0029 D2).
