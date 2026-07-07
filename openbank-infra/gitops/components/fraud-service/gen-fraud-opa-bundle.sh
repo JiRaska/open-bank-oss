@@ -45,9 +45,17 @@ allowed_reasons contains "operator-fraud-write" if {
 # fraud.score — a future fraud.rules.* management surface must NOT be openable
 # by any M2M client, mirroring edge-service-notification's stance that a
 # blanket SERVICE allow would open every @Authorize endpoint to any M2M client.
+#
+# NOTE (found post-merge, issue tracked separately): AuthorizeInterceptor never
+# emits principal.type == "SERVICE" — M2M callers authenticate via Keycloak
+# client_credentials JWTs, which the interceptor classifies as HUMAN. fx-service
+# shares the `openbank-services` client (like nearly every other backend
+# service), identity `service-account-openbank-services` — gate on that
+# instead. This identity is not unique to fx-service; any other backend
+# service sharing the client would also match this rule for fraud.score.
 allowed_reasons contains "service-fraud-scoring" if {
-	input.principal.type == "SERVICE"
-	"ROLE_SERVICE" in input.principal.roles
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-services"
 	input.action == "fraud.score"
 }
 REGO
