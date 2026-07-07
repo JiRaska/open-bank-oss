@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.40.0...admin-ui-v0.40.1) (2026-07-07)
+
+
+### Bug Fixes
+
+* **admin-ui:** stop Czech/English strings leaking across the language toggle ([#316](https://github.com/JiRaska/open-bank-oss/issues/316)) ([334c266](https://github.com/JiRaska/open-bank-oss/commit/334c2666a06da33a79d7ed4125716e522156155d))
+
 ## [0.40.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.39.2...admin-ui-v0.40.0) (2026-07-05)
 
 
