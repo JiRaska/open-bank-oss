@@ -99,8 +99,12 @@ rassert() { # desc | rule | input-json | expected (true|false)
 
 rassert "four-eyes fires for a money-path post (real long service names normalised)" \
 	four_eyes_required '{"action":"ledger.post"}' true
-rassert "four-eyes fires for a sepa-payment transfer" \
-	four_eyes_required '{"action":"sepa-payment.transfer"}' true
+# sepaPayment.transitionStatus is the REAL @Authorize action in SepaPaymentResource.kt —
+# "sepa-payment.transfer" (fixed here, issue #395) was a synthetic string no service ever
+# emits, so it silently proved nothing about whether money_path_action_prefixes actually
+# covers the fleet's real, shipped action name.
+rassert "four-eyes fires for a real sepa-payment status transition" \
+	four_eyes_required '{"action":"sepaPayment.transitionStatus"}' true
 rassert "four-eyes not required for a non-money-path update" \
 	four_eyes_required '{"action":"party.update"}' false
 rassert "four-eyes fires for a money-path feature-flag flip" \
