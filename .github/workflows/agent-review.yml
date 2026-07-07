@@ -181,8 +181,15 @@ jobs:
           RESPONSE: ${{ steps.ghmodels.outputs.response }}
         run: |
           set -euo pipefail
-          # Extract the first {...} JSON object; tolerate stray prose.
-          JSON="$(printf '%s' "$RESPONSE" | grep -oE '\{.*\}' | head -1)"
+          # Extract the first {...} JSON object; tolerate stray prose. Same fix as the
+          # diff-truncation step (#359): write to a file first, THEN filter with
+          # head/grep -m1 — piping straight into a command that can stop reading early
+          # lets the writer get SIGPIPE (exit 141) under pipefail. max-tokens: 400 keeps
+          # $RESPONSE small enough that this hasn't been observed failing in practice,
+          # but the pattern is identical to the one that did fail on a real PR — fixed
+          # here too rather than leaving a second instance of the same footgun.
+          printf '%s' "$RESPONSE" > /tmp/response.txt
+          JSON="$(grep -oE '\{.*\}' -m1 /tmp/response.txt || true)"
           DECISION="$(printf '%s' "$JSON" | jq -r '.decision // "REQUEST_CHANGES"')"
           SUMMARY="$(printf '%s' "$JSON" | jq -r '.summary // "no summary"')"
           BODY="🤖 **Agent review (GitHub Models · gpt-4o)**
