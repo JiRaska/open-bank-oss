@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Balance Service API
-  version: 1.4.0
+  version: 1.4.1
   description: >-
     Account balance management — holds, credits, debits, multi-currency. Per ADR-0039 (Phase A) a
     read-only reconciliation ties out, per currency, the ledger deposit-control balance against the
@@ -36,6 +36,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/BalanceResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/balances/{accountId}/{currency}:
     get:
@@ -68,6 +70,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BalanceResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -91,6 +95,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HoldResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/balances/holds/{holdId}:
     delete:
@@ -107,6 +113,8 @@ paths:
       responses:
         '204':
           description: Hold released
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/balances/{accountId}/credit:
     post:
@@ -132,6 +140,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BalanceResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/balances/{accountId}/debit:
     post:
@@ -157,6 +167,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BalanceResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '422':
           description: Insufficient funds
 
@@ -176,6 +188,8 @@ paths:
       responses:
         '201':
           description: Balance initialized
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/balances/reconciliation:
     post:
@@ -200,6 +214,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReconciliationReport'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/balances/reconciliation/latest:
     get:
@@ -213,6 +229,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReconciliationReport'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           description: No reconciliation has been run yet
 
@@ -233,6 +251,12 @@ components:
         format: uuid
 
   responses:
+    Forbidden:
+      description: Authenticated but denied by the OPA authorization policy (ADR-0034)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
     NotFound:
       description: Not found
       content:

@@ -4,8 +4,14 @@
 
 package com.openbank.balance.infrastructure.rest
 
-import com.openbank.balance.application.port.`in`.*
-import com.openbank.balance.application.usecase.*
+import com.openbank.balance.application.port.`in`.BalanceUseCase
+import com.openbank.balance.application.port.`in`.CreditAccountCommand
+import com.openbank.balance.application.port.`in`.DebitAccountCommand
+import com.openbank.balance.application.port.`in`.GetBalanceQuery
+import com.openbank.balance.application.port.`in`.InitializeBalanceCommand
+import com.openbank.balance.application.port.`in`.PlaceHoldCommand
+import com.openbank.balance.application.port.`in`.ReleaseHoldCommand
+import com.openbank.balance.application.port.`in`.SetOverdraftLimitCommand
 import com.openbank.balance.infrastructure.client.AccountServiceClient
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
@@ -33,10 +39,14 @@ import java.util.UUID
  * (limit overrides are a supervisory action per [Roles.SUPERVISOR]). Enforced by Quarkus OIDC and
  * locked by BalanceResourceSecurityTest.
  *
- * Authz migration (ADR-0034): the money-moving credit/debit legs keep their coarse [RolesAllowed]
- * gate AND additionally carry the resource-scoped [Authorize] OPA check (advisory phase 3 — denies
- * log at WARN, request still proceeds). Both must pass, per the libs authz contract, so layering OPA
- * on top of RBAC strengthens rather than weakens authz on a value-moving service.
+ * Authz migration (ADR-0034 Phase 5, issue #266): every endpoint now carries a resource-scoped
+ * [Authorize] OPA check on top of its coarse [RolesAllowed] gate — `AUTHZ_ENFORCE=true` in gitops
+ * means a denied decision now short-circuits with 403 (no longer advisory-only). Both checks must
+ * pass, per the libs authz contract, so OPA strengthens rather than replaces RBAC. See
+ * `openbank-infra/gitops/components/balances/gen-balance-opa-bundle.sh` for the composed policy and
+ * the verified in-repo M2M caller map (residual risk: OPA cannot distinguish between SERVICE callers
+ * beyond ROLE_SERVICE, so `balance.credit`/`balance.debit` admit any ROLE_SERVICE caller, not just
+ * the one verified caller, settlement-service).
  *
  * Customer ownership (A1 / issue #628): if X-Customer-Party-Id is present (set by customer-edge for
  * retail sessions), GET endpoints verify the account belongs to that party before returning data.
@@ -56,6 +66,7 @@ class BalanceResource(private val svc: BalanceUseCase, private val accountClient
     @GET
     @Path("/{accountId}")
     @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "balance.read", resource = "#accountId")
     suspend fun getBalances(
         @PathParam("accountId") accountId: UUID,
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
@@ -70,6 +81,7 @@ class BalanceResource(private val svc: BalanceUseCase, private val accountClient
     @GET
     @Path("/{accountId}/{currency}")
     @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "balance.read", resource = "#accountId")
     suspend fun getBalance(
         @PathParam("accountId") accountId: UUID,
         @PathParam("currency") currency: String,
@@ -88,6 +100,7 @@ class BalanceResource(private val svc: BalanceUseCase, private val accountClient
     @POST
     @Path("/{accountId}/holds")
     @RolesAllowed(Roles.SERVICE, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "balance.hold", resource = "#accountId")
     suspend fun placeHold(@PathParam("accountId") accountId: UUID, body: PlaceHoldRequest): Response {
         val hold = svc.placeHold(
             PlaceHoldCommand(accountId, body.amount, body.currency, body.reason, body.referenceId, body.ttlSeconds),
@@ -98,6 +111,7 @@ class BalanceResource(private val svc: BalanceUseCase, private val accountClient
     @DELETE
     @Path("/holds/{holdId}")
     @RolesAllowed(Roles.SERVICE, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "balance.holdRelease", resource = "#holdId")
     suspend fun releaseHold(@PathParam("holdId") holdId: UUID): Response =
         Response.ok(svc.releaseHold(ReleaseHoldCommand(holdId))).build()
 
@@ -118,6 +132,7 @@ class BalanceResource(private val svc: BalanceUseCase, private val accountClient
     @POST
     @Path("/{accountId}/initialize")
     @RolesAllowed(Roles.SERVICE, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "balance.initialize", resource = "#accountId")
     suspend fun initialize(@PathParam("accountId") accountId: UUID, body: InitializeRequest): Response {
         val balance = svc.initializeBalance(
             InitializeBalanceCommand(
@@ -133,6 +148,7 @@ class BalanceResource(private val svc: BalanceUseCase, private val accountClient
     @PUT
     @Path("/{accountId}/{currency}/overdraft-limit")
     @RolesAllowed(Roles.SUPERVISOR, Roles.ADMIN)
+    @Authorize(action = "balance.overdraftLimit", resource = "#accountId")
     suspend fun setOverdraftLimit(
         @PathParam("accountId") accountId: UUID,
         @PathParam("currency") currency: String,
