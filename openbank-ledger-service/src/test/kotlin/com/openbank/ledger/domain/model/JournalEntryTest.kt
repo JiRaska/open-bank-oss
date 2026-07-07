@@ -290,6 +290,11 @@ class JournalEntryTest {
             assertThat(reversal.transactionId).isEqualTo(posted.transactionId)
             assertThat(reversal.entryNumber).isNull()
             assertThat(reversal.version).isEqualTo(0L)
+            // Every reversal line is re-parented onto the reversal entry. Leaving the original's
+            // journalId is the V10-era bug: persistLines then attaches the lines to the ORIGINAL
+            // and the persisted reversal has zero lines — unreadable on hydration (#465).
+            assertThat(reversal.lines).allSatisfy { assertThat(it.journalId).isEqualTo(reversalId) }
+            assertThat(reversal.lines.map { it.id }).doesNotContainAnyElementsOf(posted.lines.map { it.id })
         }
 
         @Test
