@@ -6,7 +6,7 @@ openapi: "3.1.0"
 
 info:
   title: OpenBank SWIFT Service API
-  version: "1.0.0"
+  version: "1.0.1"
   description: |
     SWIFT MT/MX message dispatch, acknowledgement, and status tracking.
     Supports MT103 (customer credit transfer), MT202 (bank transfer), MT900/910/940/950 (confirmations/statements).
@@ -66,6 +66,8 @@ paths:
                 $ref: '#/components/schemas/SwiftMessage'
         "400":
           $ref: '#/components/responses/BadRequest'
+        "403":
+          $ref: '#/components/responses/Forbidden'
         "409":
           description: Duplicate idempotency key with conflicting payload
           content:
@@ -98,6 +100,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SwiftMessage'
+        "403":
+          $ref: '#/components/responses/Forbidden'
         "404":
           $ref: '#/components/responses/NotFound'
 
@@ -121,6 +125,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/SwiftMessage'
+        "403":
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/swift/{id}/ack:
     post:
@@ -154,6 +160,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SwiftMessage'
+        "403":
+          $ref: '#/components/responses/Forbidden'
         "404":
           $ref: '#/components/responses/NotFound'
         "409":
@@ -195,6 +203,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SwiftMessage'
+        "403":
+          $ref: '#/components/responses/Forbidden'
         "404":
           $ref: '#/components/responses/NotFound'
         "409":
@@ -451,6 +461,12 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
     NotFound:
       description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Policy denied the request (ADR-0034 OPA authorization)
       content:
         application/json:
           schema:
