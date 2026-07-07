@@ -433,6 +433,6 @@ resource "aws_config_delivery_channel" "audit" {
 
 resource "aws_config_configuration_recorder_status" "audit" {
   name       = aws_config_configuration_recorder.audit.name
-  is_enabled = true
+  is_enabled = var.config_recording_enabled
   depends_on = [aws_config_delivery_channel.audit]
 }
