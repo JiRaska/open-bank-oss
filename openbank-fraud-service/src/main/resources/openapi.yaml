@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Fraud Service API
-  version: 1.0.0
+  version: 1.0.1
   description: >-
     Real-time transaction fraud scoring (ADR-0084). Returns a verdict
     (ALLOW/CHALLENGE/REVIEW/DECLINE) for a payment intent. Phase 1 is a deterministic, versioned
@@ -59,7 +59,9 @@ components:
           schema:
             $ref: '#/components/schemas/ApiError'
     Forbidden:
-      description: Caller lacks a required role
+      description: >-
+        Caller lacks a required role, or is authenticated but denied by the OPA
+        authorization policy (ADR-0034)
       content:
         application/json:
           schema:
