@@ -50,7 +50,8 @@ def money_path_services() -> list[str]:
             in_block = True
             continue
         if in_block:
-            m = re.match(r"^\s+-\s+(\S+)\s*$", line)
+            # Trailing `# comment` allowed — entries carry ADR references inline.
+            m = re.match(r"^\s+-\s+(\S+)\s*(?:#.*)?$", line)
             if m:
                 out.append(m.group(1))
             elif line.strip() and not line.startswith((" ", "\t")):
