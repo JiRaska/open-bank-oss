@@ -189,6 +189,40 @@ test_deny_rca_tool_not_in_allowlist if {
 }
 
 # ---------------------------------------------------------------------------------------
+# REST-action bridge (rest_domains / rest_action_allowed): rest.rego delegates an AI_AGENT
+# REST call by setting input.tool := the raw REST action string (e.g. "ledger.list"), which
+# lives in a different vocabulary than a charter's tools.allow (e.g. "query.ledger.readonly").
+# These prove the bridge grants exactly the intended REST reads and nothing more.
+# ---------------------------------------------------------------------------------------
+
+# compliance-officer's query.ledger.readonly grant bridges to a same-domain REST read action.
+test_allow_rest_action_via_readonly_tool_ledger_list if {
+	agents.allow with data.agents as charters
+		with input as {"agent": "compliance-officer", "tool": "ledger.list", "resource": null}
+}
+
+test_allow_rest_action_via_readonly_tool_ledger_read if {
+	agents.allow with data.agents as charters
+		with input as {"agent": "compliance-officer", "tool": "ledger.read", "resource": null}
+}
+
+# The bridge is read-only: a write verb in the same domain is NOT granted by the readonly
+# tool, even though "ledger" is in its mapped domain set.
+test_deny_rest_action_write_verb_not_bridged if {
+	not agents.allow with data.agents as charters
+		with input as {"agent": "compliance-officer", "tool": "ledger.create", "resource": null}
+	agents.decision.reason == "no matching allow rule" with data.agents as charters
+		with input as {"agent": "compliance-officer", "tool": "ledger.create", "resource": null}
+}
+
+# A domain outside the tool's mapped set stays denied (rca-investigator only holds
+# query.observability.readonly -- no bridge to ledger.*).
+test_deny_rest_action_domain_not_in_tool_map if {
+	not agents.allow with data.agents as charters
+		with input as {"agent": "rca-investigator", "tool": "ledger.list", "resource": null}
+}
+
+# ---------------------------------------------------------------------------------------
 # customer-copilot (customer plane, ADR-0089). Reads the signed-in customer's own data and
 # emits PROPOSALS only; money-path tools are hard-denied and money never moves on its word.
 # ---------------------------------------------------------------------------------------

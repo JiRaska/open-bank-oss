@@ -6,9 +6,12 @@
 #
 # Mirrors agents_test.rego patterns. Mocks the rules.yaml + bundle-version data so
 # the policy is verified in isolation, before it is shipped into a live OPA sidecar.
-# The AI_AGENT branch (which delegates to data.openbank.agents.charter_allowed) is
-# covered by agents_test.rego — repeating that surface here would just couple the
-# two suites.
+# The AI_AGENT branch's charter_allowed rule VARIATIONS (which tool bridges to which
+# domain, read-vs-write scoping) are covered by agents_test.rego — repeating that
+# surface here would just couple the two suites. What IS covered here is the
+# end-to-end wiring of that delegation through rest.allow itself (the
+# input.tool := input.action translation) — the exact integration a REST-action /
+# tool-tier vocabulary mismatch used to break silently.
 
 package openbank.rest_test
 
@@ -379,4 +382,60 @@ test_deny_service_without_role if {
 		"principal": {"id": "svc-x", "type": "SERVICE", "roles": []},
 		"action": "notification.list",
 	}
+}
+
+# ---------------------------------------------------------------------------------------
+# agent-charter-allows: an AI_AGENT principal calling a REST action directly. rest.allow
+# delegates to agents.charter_allowed by setting input.tool := input.action -- a charter
+# declaring "query.ledger.readonly" in tools.allow (the MCP tool-tier vocabulary) must
+# still grant a same-domain REST read like "ledger.list" (the @Authorize action-string
+# vocabulary), via the rest_domains bridge in agents.rego. Before that bridge existed,
+# glob_match("query.ledger.readonly", "ledger.list") never matched and every AI_AGENT
+# REST read 403'd the moment a service flipped OPA to enforce mode.
+# ---------------------------------------------------------------------------------------
+agent_charters_for_rest_bridge := {
+	"agents": [
+		{
+			"id": "ui-assistant",
+			"plane": "control",
+			"tools": {
+				"allow": ["query.ledger.readonly", "query.catalog.readonly", "draft.ticket"],
+				"deny": ["money.*", "gh.pr.*"],
+			},
+		},
+	],
+	"tool_tiers": {"deny": ["money.transfer", "money.post.ledger", "gh.pr.merge", "gh.pr.approve", "secrets.read.raw"]},
+}
+
+test_allow_ai_agent_ledger_list_via_charter_bridge if {
+	decision := rest.allow with input as {
+		"principal": {"id": "ui-assistant", "type": "AI_AGENT", "roles": []},
+		"action": "ledger.list",
+		"resource": null,
+	}
+		with data.openbank.bundle as bundle
+		with data.agents as agent_charters_for_rest_bridge
+
+	decision.allow == true
+	decision.reason == "agent-charter-allows"
+}
+
+# The bridge is read-only -- an AI_AGENT can never reach a write action through it.
+test_deny_ai_agent_ledger_create_via_charter_bridge if {
+	not rest.allow with input as {
+		"principal": {"id": "ui-assistant", "type": "AI_AGENT", "roles": []},
+		"action": "ledger.create",
+		"resource": null,
+	}
+		with data.agents as agent_charters_for_rest_bridge
+}
+
+# An AI_AGENT whose charter holds no matching tool stays denied (deny-by-default holds).
+test_deny_ai_agent_without_matching_charter_tool if {
+	not rest.allow with input as {
+		"principal": {"id": "rca-investigator", "type": "AI_AGENT", "roles": []},
+		"action": "ledger.list",
+		"resource": null,
+	}
+		with data.agents as agent_charters_for_rest_bridge
 }
