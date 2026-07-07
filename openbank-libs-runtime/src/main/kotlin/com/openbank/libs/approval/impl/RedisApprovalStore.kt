@@ -8,12 +8,12 @@ import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.redis.datasource.ReactiveRedisDataSource
 import io.quarkus.redis.datasource.value.SetArgs
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import java.time.Clock
 import java.time.OffsetDateTime
-import java.util.UUID
 
 /**
  * NOT a CDI bean by itself — same per-service `@Produces` wiring pattern as
@@ -43,7 +43,7 @@ class RedisApprovalStore(private val redis: ReactiveRedisDataSource, private val
         ttlSeconds: Long,
     ): PendingApproval {
         val approval = PendingApproval(
-            id = UUID.randomUUID().toString(),
+            id = Ids.newId().toString(),
             action = action,
             resourceId = resourceId,
             makerId = makerId,

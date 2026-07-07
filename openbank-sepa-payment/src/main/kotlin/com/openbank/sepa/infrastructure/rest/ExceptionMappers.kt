@@ -7,6 +7,7 @@ package com.openbank.sepa.infrastructure.rest
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.sepa.application.usecase.InvalidSepaPaymentStateTransitionException
 import com.openbank.sepa.application.usecase.SepaPaymentNotFoundException
 import jakarta.ws.rs.core.Response
@@ -37,7 +38,8 @@ class SelfApprovalNotAllowedMapper : ExceptionMapper<SelfApprovalNotAllowedExcep
         return Response.status(status)
             .entity(
                 ApiError(
-                    UUID.randomUUID().toString(),
+                    // ADR-0106: a per-response correlation id, not a durable/indexed identifier — Ids.randomId().
+                    Ids.randomId().toString(),
                     status,
                     ErrorCode.FORBIDDEN.code,
                     exception.message ?: "Forbidden",
