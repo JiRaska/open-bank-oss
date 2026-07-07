@@ -89,10 +89,16 @@ module "audit_baseline" {
   # Sandbox is out of prod compliance scope (and churns Karpenter nodes constantly).
   # Even at DAILY frequency, full resource-type recording over that churn is a steady
   # ~$140/mo with no consumer (no Config rules on this account), so the recorder is
-  # stopped entirely; CloudTrail carries the ADR-0027 tamper-evident trail on its own.
-  # All Config resources stay provisioned — re-enable is this one flag (frequency
-  # stays DAILY for when it comes back), and the openbank-config-recording-daily
-  # budget in finops-budget.tf remains as the tripwire against silent re-enable.
+  # stopped entirely. Risk boundary: what is lost is only the supplementary
+  # "what the resource looked like" state snapshots; the "who did what" audit trail —
+  # the actual ADR-0027 tamper-evident requirement — is CloudTrail (multi-region,
+  # SHA-256 digest chain, COMPLIANCE Object-Lock WORM bucket) and is untouched, so
+  # every configuration CHANGE remains attributable and tamper-evident via its API
+  # event. All Config resources stay provisioned — re-enable is this one flag
+  # (frequency stays DAILY for when it comes back), and the
+  # openbank-config-recording-daily budget in finops-budget.tf remains as the
+  # tripwire against silent re-enable. Prod-shaped environments keep the module
+  # default (enabled).
   config_recording_enabled   = false
   config_recording_frequency = "DAILY"
 
