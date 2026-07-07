@@ -329,9 +329,6 @@ openbank-admin-ui/patch-*.js
 **/console_logs.txt
 **/qa_findings.txt
 
-# Pact consumer contract files — published to the Pact Broker by CI, not committed
-pacts/
-
 # CI-generated artifacts that were accidentally committed (#repo-hygiene). These
 # are produced by CI and belong in release assets / workflow artifacts, never in
 # git history. SBOMs: `syft`/cyclonedx output. reports/: Gradle test HTML output.
