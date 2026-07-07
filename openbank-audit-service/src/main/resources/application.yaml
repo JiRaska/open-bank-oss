@@ -122,6 +122,18 @@ openbank:
     audit-retention-days: 3650
   outbox:
     dispatch-enabled: true
+  retention:
+    # ADR-0118 §2/§5, issue #268: session/access-log TTL cleanup.
+    # SAFETY: enabled defaults to false and dry-run defaults to true — this scheduler ships
+    # disabled everywhere until a human deliberately flips it per environment (see
+    # SessionLogRetentionScheduler kdoc). This differs on purpose from card-issuance-service's
+    # and kyc-service's retention schedulers, which were already reviewed and enabled in their
+    # own prior PRs (#2479 / #2480); this is new, unreviewed-in-production code.
+    session-log:
+      enabled: "${RETENTION_SESSION_LOG_ENABLED:false}"
+      dry-run: "${RETENTION_SESSION_LOG_DRY_RUN:true}"
+      retention-days: "${RETENTION_SESSION_LOG_DAYS:90}"
+      cron: "${RETENTION_SESSION_LOG_CRON:0 0 4 * * ?}"
   audit:
     anchor:
       # ADR-0031 D5: externally-signed tamper-evidence checkpoints over the audit hash chain.

@@ -123,6 +123,9 @@ repo is the single source of truth.
 
 - Rules (authoritative): `openbank-libs/governance/rules.yaml`
 - Architecture decisions: `docs/adr/` (start at 0001; governance is 0029/0030)
-- Shared runtime plumbing: `openbank-libs/src/main/kotlin/com/openbank/libs/`
-  (`web/ServiceInfoResource`, security, audit, outbox, idempotency)
+- Shared runtime plumbing (ADR-0122 domain/runtime split): pure domain logic —
+  security, audit envelope, outbox ports, idempotency store — lives in
+  `openbank-libs-domain/src/main/kotlin/com/openbank/libs/`; framework-touching
+  code — `web/ServiceInfoResource`, audit publisher, outbox dispatchers,
+  idempotency impl — lives in `openbank-libs-runtime/src/main/kotlin/com/openbank/libs/`.
 - Per-service specifics: that service's own `CLAUDE.md`.
