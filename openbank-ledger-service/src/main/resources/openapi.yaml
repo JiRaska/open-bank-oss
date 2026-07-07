@@ -128,6 +128,77 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/journals/{journalId}/reverse:
+    post:
+      tags: [Ledger]
+      summary: Reverse a posted journal entry
+      description: >
+        Posts a compensating journal entry (sides flipped, same amounts and entry date) that
+        nets the original to zero. The reversal is itself a journal entry with its own entry
+        number. Fails closed with 409 when the original is already reversed (or otherwise not
+        reversible) or when its entry date falls in an ATTESTED (locked) fiscal period —
+        corrections to a closed year must be booked as an adjustment in the open period.
+      operationId: reverseJournal
+      parameters:
+        - name: journalId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReverseJournalRequest'
+      responses:
+        '200':
+          description: The compensating (reversal) journal entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalEntryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Journal already reversed / not reversible, or its fiscal period is ATTESTED (period lock)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/journals/trial-balance:
+    get:
+      tags: [Ledger]
+      summary: Trial balance — debit/credit totals per GL account (must net to zero)
+      description: >
+        Aggregates POSTED journal lines per GL account as of the given date (defaults to
+        today). The double-entry invariant (sum of debits == sum of credits over the whole GL)
+        is reported as `balanced`.
+      operationId: getTrialBalance
+      parameters:
+        - name: asOf
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Trial balance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrialBalanceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/journals/sub-ledger-balances:
     get:
       tags: [Ledger]
@@ -542,6 +613,18 @@ components:
             hasMore:
               type: boolean
 
+    ReverseJournalRequest:
+      type: object
+      required: [reason, reversedBy]
+      properties:
+        reason:
+          type: string
+          description: Business reason for the reversal; carried on the JournalReversed event.
+        reversedBy:
+          type: string
+          format: uuid
+          description: Operator posting the reversal.
+
     PostJournalLineRequest:
       type: object
       required: [glAccountId, side, amount, currencyCode, baseAmount, baseCurrencyCode]
@@ -623,6 +706,25 @@ components:
         net:
           type: number
           description: totalDebit − totalCredit.
+
+    TrialBalanceResponse:
+      type: object
+      description: Point-in-time GL trial balance (all POSTED activity up to `asOf`).
+      properties:
+        asOf:
+          type: string
+          format: date
+        totalDebit:
+          type: number
+        totalCredit:
+          type: number
+        balanced:
+          type: boolean
+          description: Double-entry invariant over the whole GL — sum(debits) == sum(credits).
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrialBalanceLineResponse'
 
     TrialBalanceSectionResponse:
       type: object
