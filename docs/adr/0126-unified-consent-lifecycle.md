@@ -77,9 +77,20 @@ Without this job, expired consents remain `ACTIVE` in the DB — `isActive(now)`
 
 **Implemented** in `openbank-consent-service/src/main/kotlin/com/openbank/consent/infrastructure/ConsentExpirationJob.kt` — reactive Uni pipeline, `Clock`-injected for testability, logs `consent.expiration.sweep expired=%d` on each sweep.
 
-### D5 — OPA enforcement (Planned)
+### D5 — OPA enforcement (Shipped)
 
-OPA sidecar is wired (`authz.enforce=true` default in consent-service config, advisory mode inherited from libs default `false`). Flip `AUTHZ_ENFORCE=true` in gitops after the OPA policy for consent endpoints is validated in staging. Tracked as a follow-up to ADR-0034, actionable in issue #263.
+**Shipped** (issue #263): every `ConsentResource` endpoint carries `@Authorize`
+(`consent.create/read/list/revoke/activate/reject/validate`); the consent-specific allow
+reasons live in `consent_rest_ext.rego` (`operator-consent-write` for the HUMAN
+operator/admin console, `service-consent-m2m` for the psd2/SCA resource-server calls —
+deliberately excluding `consent.create`/`consent.revoke` from M2M). The OPA sidecar is
+deployed by `openbank-infra/gitops/components/consent/consent-service.yaml` with the
+bundle from `gen-consent-opa-bundle.sh`, and `AUTHZ_ENFORCE=true` is set in gitops.
+Decision assertions for the policy run in the generator's source; sandbox rollout is
+guarded by the `openbank-money-path-canary` analysis (auto-abort on error-rate
+regression). The pre-flip validation record: `authz-coverage-report.py` + the generator
+assertions replace a manual staging soak (there is no separate staging environment —
+sandbox is the validation stage, ADR-0042).
 
 ## Consequences
 
