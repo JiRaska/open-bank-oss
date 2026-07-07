@@ -56,22 +56,29 @@ Domain layer has zero framework imports (ADR-0002); overdraft + reconciliation m
 - Service-to-service callers authenticated (mTLS + OIDC); OPA policy gates credit / debit / hold (ADR-0034).
 - Money-moving endpoints are role-gated: `@RolesAllowed(SERVICE, OPERATOR, ADMIN)` on
   credit/debit/hold/initialize, supervisor/admin on overdraft-limit override; **no endpoint is
-  `@PermitAll`** (locked by `BalanceResourceSecurityTest`). On top of role gating, `@Authorize`
-  (OPA, ADR-0034) is wired on `balance.credit` / `balance.debit` in **advisory** mode and graduates
-  to enforce in Phase 5.
+  `@PermitAll`** (locked by `BalanceResourceSecurityTest`). On top of role gating, every endpoint now
+  carries `@Authorize` (OPA, ADR-0034 Phase 5, issue #266) and `AUTHZ_ENFORCE=true` is set in gitops —
+  a denied decision now 403s instead of only logging (advisory). **Residual risk:** every verified
+  in-repo M2M caller (settlement-service, transaction-service, account-service, statement-service,
+  billing-service, agent-service) authenticates as the same `openbank-services` client, so OPA's
+  `input.principal` cannot distinguish "settlement-service asking for credit" from "any other
+  ROLE_SERVICE caller asking for credit" — the SERVICE rule is scoped to the action-class the
+  verified callers collectively need (no blanket allow across every balance action), but not to the
+  specific caller. Tightening this needs per-caller identity (mTLS SPIFFE, ADR-0017, or a dedicated
+  OIDC client per caller) — tracked as a follow-up, not solved here.
 
 ## 4. STRIDE analysis
 
 | # | Element | Threat (STRIDE) | Mitigation | Residual |
 |---|---------|-----------------|------------|----------|
-| S1 | REST/port in | **Spoofing** — unauthenticated caller posts a credit/debit, or forges identity | mTLS + OIDC; reject anonymous; bearer JWT (Keycloak); role-gated mutations | OPA fine-grained authz (ADR-0018/0034) advisory on balance — *open* (see §3 finding) |
+| S1 | REST/port in | **Spoofing** — unauthenticated caller posts a credit/debit, or forges identity | mTLS + OIDC; reject anonymous; bearer JWT (Keycloak); role-gated mutations; OPA fine-grained authz (ADR-0018/0034) now **enforced** on every balance endpoint | Cannot distinguish SERVICE callers beyond ROLE_SERVICE (see §3 residual risk) |
 | T1 | Cover check | **Tampering** — manipulated request authorizes an unfunded debit / negative balance | Server-side overdraft evaluation against stored limit; available = booked − holds + overdraft; optimistic locking / row versioning; per-currency rows; pure-domain, unit-tested | Low |
 | T2 | Balance rows | **Tampering** — direct DB mutation desynchronizes from ledger | App-only write path; DB creds in Vault (ADR-0017); **Phase A reconciliation** detects drift vs ledger deposit-control per currency | Drift detected, not prevented — by design (projection); Phase D cutover hardens |
 | R1 | Movements | **Repudiation** — actor denies a balance change it applied | AuditEvent per credit/debit/hold; movements carry origin/actor + idempotency key; outbox event with correlation id; reconciliation run timestamped/persisted | Strengthen with signed audit (ADR-0029) — *planned* |
-| I1 | Reads | **Information disclosure** — balance harvesting across accounts/pockets | AuthZ scoped to account owner/role; per-account server-side scoping; no bulk export/enumeration; JWT required. **A1 (issue #628):** `X-Customer-Party-Id` triggers M2M ownership lookup via `AccountServiceClient`; mismatch → 404 (existence oracle protection) | OPA read-path enforce — *planned* |
+| I1 | Reads | **Information disclosure** — balance harvesting across accounts/pockets | AuthZ scoped to account owner/role; per-account server-side scoping; no bulk export/enumeration; JWT required. **A1 (issue #628):** `X-Customer-Party-Id` triggers M2M ownership lookup via `AccountServiceClient`; mismatch → 404 (existence oracle protection). OPA read-path (`balance.read`) now enforced | Low |
 | I2 | Domain metrics | **Information disclosure** — domain metrics leak PII / enable per-account inference via high-cardinality labels | `DomainMetrics` low-cardinality contract (ADR-0077): the outbox-backlog gauge (`openbank.outbox.backlog`) is tagged only by `service="balance"` — never an account id, IBAN, currency-pocket value, balance, or party id. The gauge reads a read-only `count(*)` of PENDING/FAILED outbox rows refreshed off the Prometheus scrape thread by a scheduled tick (no per-scrape reactive query); `/q/metrics` is cluster-internal | Low |
 | D1 | Reconciliation / writes | **DoS** — hold exhaustion / write storm / expensive tie-out scans | Rate limits; idempotency drops retries; per-currency aggregation; scheduled reconciliation cadence; reactive non-blocking stack | Gateway rate-limit — infra scope |
-| E1 | Roles | **Elevation** — read role triggers a debit / raises own overdraft | Deny-by-default; explicit role for money movement; cover check cannot mutate | OPA advisory — *open* |
+| E1 | Roles | **Elevation** — read role triggers a debit / raises own overdraft | Deny-by-default; explicit role for money movement; cover check cannot mutate; OPA now enforced (a viewer/read-only reason never grants `balance.credit`/`balance.debit`) | Low |
 | T3 | Ledger client | **Tampering / spoofing of source** — projection trusts a forged ledger response | Authenticated ledger-service inside trust mesh; reconciliation compares against ledger as golden source, flags mismatch | mTLS/service-identity hardening — infra scope |
 
 ## 5. Key invariants (must never regress)
@@ -89,8 +96,11 @@ Domain layer has zero framework imports (ADR-0002); overdraft + reconciliation m
 
 ## 6. Open items / follow-ups
 
-- Confirm authz annotations vs OPA coverage on money-moving endpoints (see §3 finding); enforce
-  OPA authz on balance read + write + cover paths (ADR-0034) — currently advisory.
+- ~~Confirm authz annotations vs OPA coverage on money-moving endpoints (see §3 finding); enforce
+  OPA authz on balance read + write + cover paths (ADR-0034) — currently advisory.~~ **Done** (ADR-0034
+  Phase 5, issue #266): every endpoint carries `@Authorize`, `AUTHZ_ENFORCE=true` in gitops. Follow-up:
+  per-caller SERVICE identity so OPA can distinguish settlement-service from other M2M callers on
+  `balance.credit`/`balance.debit` (see §3 residual risk).
 - Signed audit / evidence bundle (ADR-0029 D2) for movement non-repudiation.
 - ~~Phase D: cut the projection over to ledger-emitted `AccountBookedChangedEvent` (ADR-0039),
   retiring any independent balance write path.~~ **Done 2026-06-17** (Phase D-2): projection enabled
