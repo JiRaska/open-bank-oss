@@ -155,7 +155,21 @@ def discover_ext_rego(root: Path, module_dirs: set[str]) -> dict[str, list[ExtRu
             )
             continue
         for body, filename in zip(heredocs, filenames):
-            by_service.setdefault(service, []).extend(_parse_ext_rego(body, filename))
+            try:
+                rules = _parse_ext_rego(body, filename)
+            except ValueError as e:
+                # A single malformed allowed_reasons block (e.g. unbalanced braces from a
+                # hand-edited generator) must not crash the whole report — every other
+                # malformed-input case in this loop is a skip-with-warning, and one bad
+                # heredoc shouldn't erase ext-rego coverage for every other service too.
+                print(
+                    f"warn: {gen_script}: failed to parse '{filename}' ext rego "
+                    f"({e}) — skipping this heredoc, its allow rules will NOT be "
+                    "reflected in the report",
+                    file=sys.stderr,
+                )
+                continue
+            by_service.setdefault(service, []).extend(rules)
     return by_service
 
 
