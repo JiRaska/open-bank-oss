@@ -4,7 +4,7 @@
   "openbank-agent-service": "1.13.1",
   "openbank-aml-service": "0.7.2",
   "openbank-anacredit-service": "0.4.2",
-  "openbank-audit-service": "0.8.2",
+  "openbank-audit-service": "0.9.0",
   "openbank-balance-service": "1.8.1",
   "openbank-billing-service": "0.4.0",
   "openbank-card-issuance-service": "0.9.0",
