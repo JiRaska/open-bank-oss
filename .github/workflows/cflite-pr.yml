@@ -1,0 +1,54 @@
+# -----------------------------------------------------------------------------
+# ClusterFuzzLite — PR-lane fuzzing of the libs-domain parsers (ADR-0030 SSDLC).
+#
+# Runs the SAME Jazzer targets as the OSS-Fuzz proposal package (fuzz/ossfuzz)
+# for 300s against any PR that touches the fuzzed code, so parser regressions
+# (XXE, entity-expansion OOM, leaked raw exceptions) surface before merge
+# instead of waiting for upstream google/oss-fuzz onboarding (issue #330).
+#
+# Also what OpenSSF Scorecard's Fuzzing check keys on: it recognizes
+# ClusterFuzzLite by the presence of .clusterfuzzlite/Dockerfile, while its
+# Jazzer detection matches only *.java sources — the Kotlin harnesses alone
+# score 0 (checks/raw/fuzzing.go, languageFuzzSpecs).
+#
+# ADVISORY in v1 (continue-on-error): same rollout idiom as ADR-0144 — prove
+# the lane's signal on real PRs first, then drop the flag so crash findings
+# block. Crash artifacts upload to the run either way.
+# -----------------------------------------------------------------------------
+name: ClusterFuzzLite
+
+on:
+  pull_request:
+    paths:
+      - "openbank-libs-domain/**"
+      - "fuzz/**"
+      - ".clusterfuzzlite/**"
+      - ".github/workflows/cflite-pr.yml"
+
+permissions: read-all
+
+concurrency:
+  group: cflite-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz-pr:
+    name: Fuzz changed code (Jazzer, 300s)
+    runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
+    timeout-minutes: 45
+    continue-on-error: true  # advisory-first: promote to blocking once proven (ADR-0144 idiom)
+    steps:
+      - name: Build fuzzers
+        id: build
+        uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          language: jvm
+          sanitizer: address
+      - name: Run fuzzers (code-change mode)
+        uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          language: jvm
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fuzz-seconds: 300
+          mode: code-change
+          sanitizer: address
