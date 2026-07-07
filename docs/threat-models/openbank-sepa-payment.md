@@ -36,6 +36,8 @@ value transfer — a primary fraud target; clears via batch/clearing rather than
 
 - `@RolesAllowed("ROLE_OPERATOR","ROLE_ADMIN","ROLE_PAYMENTS")` on initiation; read includes `ROLE_VIEWER`.
 - OPA enforce; SCA for customer-initiated transfers.
+- Four-eyes approval-decide endpoint: same role set as the gated action, plus a domain-level
+  segregation-of-duties check (checker id != maker id) — see §4a.
 
 ## 4. STRIDE
 
@@ -50,10 +52,38 @@ value transfer — a primary fraud target; clears via batch/clearing rather than
 | **D**oS | Initiation flooding | Rate limit; idempotency |
 | **E**oP | Viewer initiates transfer | Distinct `ROLE_PAYMENTS`; deny-by-default |
 
+## 4a. Four-eyes approval (ADR-0155) — STRIDE supplement
+
+`PATCH /status` (`sepaPayment.transitionStatus`) is a money-path action OPA (`rest.rego`)
+flags `four_eyes_required` (issue #395 fixed the scope/verb match that had silently disabled
+this fleet-wide). New endpoint `PATCH /api/v1/sepa-payments/approvals/{id}` lets a DIFFERENT
+operator decide the resulting `PendingApproval`; the maker retries `PATCH /status` with an
+`X-Approval-Id` header. **`authz.four-eyes.enforce` stays `false` in this PR** — the
+`ApprovalStore`/endpoint are wired and tested, but blocking is a deliberate follow-up flip,
+not bundled here (see ADR-0155).
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **S**poofing | A caller other than an operator decides an approval | `@RolesAllowed("ROLE_OPERATOR","ROLE_ADMIN","ROLE_PAYMENTS")` + OPA `@Authorize(action="sepaPayment.approval.decide")` on the decide endpoint |
+| **E**oP | The maker approves their own request (self-approval defeats maker-checker) | `ApprovalStore.decide` throws `SelfApprovalNotAllowedException` (mapped to 403) when `decidedBy == makerId` — enforced in the domain port itself, not just the REST layer, and `makerId`/`decidedBy` both resolve via the same `.principal.name` extraction (interceptor vs. `SecurityIdentity`) so the comparison can't silently mismatch for the same real person |
+| **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different request | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
+| **R**epudiation | No record of who approved a gated transition | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see ADR-0155 Negative consequences: not yet a permanent audit trail) |
+| **I**nfo disclosure | Approval id enumeration reveals payment/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random UUID (`RedisApprovalStore`, not sequential) |
+| **D**oS | Flooding `PATCH /status` to exhaust Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
+
+**DFD update:** adds `Operator (checker) → PATCH /api/v1/sepa-payments/approvals/{id} → Redis (approval:*)`
+alongside the existing `PATCH /status` edge; the maker's retry reuses the existing DFD edge.
+**Risk class:** integrity (segregation of duties) + confidentiality (approval record scope).
+**Rollback:** `authz.four-eyes.enforce=false` (default) — the endpoint and store exist but do
+not change any existing request's outcome until explicitly flipped.
+
 ## 5. Residual risks / assumptions
 
 - **Idempotency-key required** — duplicate transfer on retry must be rejected.
 - IBAN/sanctions screening expected upstream (sanctions-service) before release.
+- **Four-eyes `PendingApproval` records are TTL-bounded (Redis), not a permanent audit
+  trail** (ADR-0155) — a durable-audit requirement for "who approved what, forever" would
+  need an additional store; not implemented in this PR.
 
 ## 5a. Return path (pacs.004) — STRIDE supplement
 
@@ -115,3 +145,10 @@ from clearing-simulator (cluster-internal, `ROLE_SERVICE`). New trust boundary:
   both via `api()`). Pure Gradle dependency-graph change — no source import changed, no new transitive
   dependency introduced, no behavior change. Attack surface, trust boundaries, and STRIDE rows above are
   unaffected. No DB change; rollback = revert the commit.
+- **2026-07-07** — ADR-0155 four-eyes enforcement pilot. New endpoint `PATCH
+  /api/v1/sepa-payments/approvals/{id}` + `ApprovalConfig` (Redis-backed `ApprovalStore`) +
+  `AuthorizeInterceptor` four-eyes gate (openbank-libs-runtime, shared, opt-in). New STRIDE
+  supplement §4a. `authz.four-eyes.enforce` defaults `false` — no behavior change to any
+  existing request in this PR; flipping it is a tracked follow-up. No DB schema change (Redis,
+  TTL-bounded); rollback = revert the commit (or leave `authz.four-eyes.enforce=false`, its
+  default).
