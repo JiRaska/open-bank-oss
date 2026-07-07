@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pid-service
     app.kubernetes.io/part-of: pid
   annotations:
-    openbank.tech/policy-checksum: "087b66a4d08bd076"
+    openbank.tech/policy-checksum: "19cf8cdbc8ca001c"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -143,6 +143,19 @@ data:
     allowed_reasons contains "customer-self-action" if {
     	input.principal.type == "HUMAN"
     	startswith(input.action, "customer.")
+    }
+
+    # The customer-edge's M2M identity (ROLE_SERVICE) calling notification-service on a
+    # customer's behalf. The edge authenticates the CUSTOMER itself (customer-self-action
+    # above + per-handler IDOR guards) and injects the authoritative partyId query param the
+    # downstream handlers scope by — so this check only needs to recognise the edge principal.
+    # Deliberately narrow: just the notification/device families notification-service exposes;
+    # a blanket SERVICE allow would open every @Authorize endpoint to any M2M client.
+    allowed_reasons contains "edge-service-notification" if {
+    	input.principal.type == "SERVICE"
+    	"ROLE_SERVICE" in input.principal.roles
+    	some family in {"notification.", "device."}
+    	startswith(input.action, family)
     }
 
     # ---------------------------------------------------------------------------------------
@@ -773,6 +786,12 @@ data:
         contract_diff_tool: oasdiff
         gate: api-contract
         enforced: advisory
+        target_enforce_date: "2026-08-15"   # ADR-0144
+        # CI producer is LIVE (advisory): .github/scripts/check-api-contract.py runs in the
+        # "Validate manifests" job on every PR (oasdiff 1.22.0, pinned + checksum-verified).
+        # Classification + api_invariant findings are ::warning annotations. Flipping this
+        # rule to enforced = pass --enforce to the script in ci.yml (one-line change).
+        ci_producer: ".github/scripts/check-api-contract.py"
       db_change:
         detect: ["src/main/resources/db/migration/*.sql", "Flyway/Liquibase changeset"]
         require:
@@ -780,12 +799,21 @@ data:
           - "rollback note in PR"
         gate: db-migration
         enforced: advisory
+        target_enforce_date: "2026-08-15"   # ADR-0144
+        blocked_on: "no CI script checks a PR touching db/migration for a rollback note — needs a PR-body-parsing check (not yet written)"
       event_change:
-        detect: ["*.avsc", "Avro/JSON schema under */schema/* or */avro/*"]
+        detect: ["*.avsc", "Avro/JSON schema under */schema/* or */avro/*", "Kotlin data class extending DomainEvent (the actual event contract today — JSON on Kafka via the outbox)"]
         require:
           - "schema versioned backward-compatibly"
+          - "breaking event change ships as a NEW versioned event (-vN topic, ADR-0006), never an in-place edit"
         gate: schema-compat
         enforced: advisory
+        target_enforce_date: "2026-09-15"   # ADR-0144
+        # CI producer is LIVE (advisory): .github/scripts/check-event-schema-compat.py runs in
+        # the "Validate manifests" job on every PR — diff-scoped over DomainEvent data classes
+        # (removed/renamed props, type changes, non-nullable-no-default additions = replay break,
+        # eventType renames) and *.avsc files (field default rules). Flip to enforced = --enforce.
+        ci_producer: ".github/scripts/check-event-schema-compat.py"
       service_code_change:
         detect: ["<service>/src/main/**"]
         require:
@@ -793,6 +821,8 @@ data:
           - "test added/updated for new behavior"
         gate: version-bump
         enforced: advisory
+        target_enforce_date: "2026-10-01"   # ADR-0144
+        blocked_on: "the version-bump half is effectively covered by release-please + check-app-version-override.sh; 'test added for new behavior' has no automated diff-aware detector (not yet written) — may get redefined to lean on the coverage ratchet gate instead of a literal test-added check"
       service_config_change:
         # SmallRye Config / SnakeYAML do NOT merge duplicate mapping keys — the LAST
         # occurrence wins and earlier ones are SILENTLY dropped to library defaults, so
@@ -821,7 +851,9 @@ data:
         require:
           - "openbank.outbox.dispatch-enabled: true in <service>/src/main/resources/application.yaml"
         gate: outbox-dispatch-enabled
-        enforced: advisory
+        # check-outbox-dispatch-enabled.sh landed and reports 0 violations fleet-wide
+        # (2026-07-02) — the first gate this ADR-0144 sweep graduated on its own merge day.
+        enforced: enforce
       admin_ui_code_change:
         # admin-ui is a released component (scope `admin-ui`); the version-bump discipline that
         # applies to every service applies here too. Changing app code under
@@ -834,6 +866,8 @@ data:
           - "test added/updated for new behavior"
         gate: version-bump
         enforced: advisory
+        target_enforce_date: "2026-10-01"   # ADR-0144
+        blocked_on: "the version.txt==package.json half is already enforced (check-admin-ui-version-sync.sh, ci.yml); 'test added for new behavior' has no automated detector, same gap as service_code_change"
       admin_ui_docs_currency:
         # Documentation must stay current. Any change to a process or an admin-ui
         # section must update that section's documentation in the SAME PR — applies
@@ -848,6 +882,8 @@ data:
           - "compliance scorecard reflects current live/partial/planned status"
         gate: docs-currency
         enforced: advisory
+        target_enforce_date: "2026-09-15"   # ADR-0144
+        blocked_on: "no CI checker for section-documentation currency (not yet written) — likely needs a docs-touched-when-page-touched heuristic, not a strict diff rule"
       clock_injection:
         # ADR-0100 (DST Layer 1): no Instant.now() / LocalDateTime.now() / System.currentTimeMillis()
         # in domain or application layer of money-path services. All time must flow from an injected
@@ -953,7 +989,15 @@ data:
         money_path_target: 70               # aspirational target; raise floor PRs as tests land
       money_path_depth:
         tool: pitest                        # mutation testing on money-path domain math (ADR-0030 D3)
-        enforced: planned                   # pitest still planned; kover floor is now block
+        enforced: planned                   # weekly advisory runs are live; blocking flip pending sustained >=70%
+        target_enforce_date: "2026-09-30"   # ADR-0144
+        # Wired (pitest.yml weekly): ledger, balance, account, transaction, fx + sepa-payment,
+        # sepa-instant, domestic-payment, fraud (SSDLC-audit rollout 2026-07-06). Remaining
+        # money-path services are excluded by the ADR-0063 thin-domain criterion (1-2 domain
+        # files: sca, consent, billing, clearing, swift, lending) — mutation noise, not signal.
+        # True baselines at rollout (after fixing the KILLED-quote parsing bug): account 49%,
+        # transaction 46%, balance 55%, ledger 65%, fx 73%.
+        blocked_on: "blocking flip requires each service to sustain >=70% mutation kill score on the weekly run; account/transaction/balance/ledger are below it today (see baselines above)"
 
     # ---------------------------------------------------------------------------------------
     # API deprecation policy — drives ApiVersionResponseFilter.isDeprecatedPath() (ADR-0029 D2).
@@ -969,6 +1013,15 @@ data:
     provenance:
       sign_images: cosign
       attestation: slsa                     # in-toto / SLSA provenance
+      # Two SLSA artifacts per release, both attached to the GitHub Release, serving different
+      # consumers: <tag>.slsa.json (hand-assembled, cosign-signed, human/regulator-facing —
+      # part of the evidence_bundle below) and <tag>.cdx.json.intoto.jsonl (generated by the
+      # official slsa-framework/slsa-github-generator reusable workflow, release-please.yml
+      # `provenance` job). The generator's output is what OpenSSF Scorecard's Signed-Releases
+      # check actually detects — it only recognizes a release asset named "*.intoto.jsonl"
+      # (content-blind), which the hand-assembled *.slsa.json does not satisfy regardless of
+      # correctness.
+      slsa_generator: slsa-framework/slsa-github-generator@v2.1.0   # generator_generic_slsa3.yml
       sbom: cyclonedx                       # per-service, signed, attached to release (not orphaned)
       evidence_bundle:                      # the signed, point-in-time audit object per release
         - version
@@ -997,10 +1050,12 @@ data:
       # only when ALL enforce_criteria below hold. (A blind flip would outage deploys of
       # uncovered services; cf. the #770 image-signature Enforce revert.)
       enforced: advisory
+      target_enforce_date: "2026-09-30"   # ADR-0144
+      blocked_on: "all four enforce_criteria below must hold; see that list for the specific gap"
       enforce_criteria:
         - "every deployable service's latest release carries a verify-release-evidence-green bundle (admin-ui excepted until it has a non-Gradle SBOM source)"
         - "the running fleet has been redeployed so every live image carries the cosign SBOM attestation"
-        - "kyverno verify-images gains an SBOM-attestation rule, staged Audit -> Enforce (verify-images-policy.yaml step 4)"
+        - "kyverno SBOM-attestation rule flips Audit -> Enforce (Audit is LIVE: verify-sbom-attestation-policy.yaml; the flip is one line once criteria 1-2 hold)"
         - "the advisory gate has run clean for an observation window (no false-positive blocks)"
 
     # ---------------------------------------------------------------------------------------
@@ -1036,6 +1091,17 @@ data:
           adr: ADR-0136
       block_on_cve_severity: [CRITICAL, HIGH]
       catalog: openbank-libs/gradle/libs.versions.toml  # version catalog is the single dependency source
+      artifact_integrity:
+        # Gradle dependency verification (gradle/verification-metadata.xml): SHA-256 pins for
+        # every resolved artifact — a repository-level tamper or dependency-confusion swap of an
+        # existing version no longer resolves. Lockfiles/Dependabot pin VERSIONS; this pins BYTES.
+        # LENIENT (warn-only) while the metadata soaks across all CI lanes and developer
+        # platforms; flip = org.gradle.dependency.verification=strict in gradle.properties.
+        # Dependabot PRs auto-refresh the metadata (dependabot-verification-metadata.yml).
+        mechanism: gradle-verification-metadata-sha256
+        enforced: advisory
+        target_enforce_date: "2026-09-30"   # ADR-0144
+        ci_producer: "gradle.properties org.gradle.dependency.verification=lenient + .github/workflows/dependabot-verification-metadata.yml"
 
     # ---------------------------------------------------------------------------------------
     # Architecture invariants (ADR-0002 hexagonal).
@@ -1043,6 +1109,12 @@ data:
     architecture:
       hexagonal: true
       domain_zero_framework_imports: true   # domain layer must not import Quarkus/Jakarta/Spring
+      # ENFORCED by .github/scripts/check-domain-purity.sh (Validate manifests job):
+      # baseline-ratcheted — 11 grandfathered violations burn down as touched, any NEW
+      # framework import in */domain/* fails CI. openbank-libs-runtime is module-exempt
+      # (shares the domain package string for its JPA converters but IS the framework
+      # side of the ADR-0122 split).
+      ci_producer: ".github/scripts/check-domain-purity.sh"
 
     # ---------------------------------------------------------------------------------------
     # Vulnerability-management lifecycle SLAs (ADR-0030 D1). Detection -> closure, in days.
@@ -1064,25 +1136,35 @@ data:
       model: ephemeral-scale-to-zero        # ADR-0053; per-job ARC pods, NOT persistent
       platform: arc-on-eks                  # actions-runner-controller; Karpenter spot nodes
       scale_to_zero: true                   # minRunners=0 idle; spend -> $0 when no CI
-      # FinOps dispatch order — AGENTS MUST ENFORCE THIS, never bypass:
-      #   1. Hetzner (x86, CPX42) + Mac mini (arm64) = primary; zero AWS cost; always-on
-      #   2. ARC on EKS Spot = overflow only; scales to zero when idle
-      # Consequence: if a build FAILS on Hetzner/Mac due to an arch/platform issue, fix the
-      # root cause (e.g. Dockerfile --platform=$BUILDPLATFORM on build-only stages so x86
-      # runners can build arm64 images without QEMU). NEVER "fix" it by removing Hetzner/Mac
-      # from the runner label pool — that silently routes work to expensive ARC.
-      # Removing openbank-build from a Hetzner runner to avoid a crash is a FinOps violation.
-      static_hosts:
+      # FinOps dispatch order — AGENTS MUST ENFORCE THIS, never bypass.
+      # REVISED when the repo went PUBLIC: GitHub-hosted standard runners became free
+      # and unlimited (ubuntu-latest = 4 vCPU/16 GB; ubuntu-24.04-arm = native arm64),
+      # which inverts the old Hetzner-first order:
+      #   1. GitHub-hosted (ubuntu-latest / ubuntu-24.04-arm) = primary for every job
+      #      that does NOT need the cluster network — $0, no idle cost, no NAT exposure.
+      #   2. ARC on EKS Spot (scale-to-zero) = ONLY for jobs that genuinely need
+      #      VPC/cluster-DNS reachability (Pact broker can-i-deploy, main-lane service
+      #      builds that verify+publish pacts, runner-image build) — idle cost $0.
+      # Consequence: if a build fails on a hosted runner due to an arch issue, fix the
+      # root cause (native ubuntu-24.04-arm runner or --platform=$BUILDPLATFORM on
+      # build-only stages) — never route it back to a paid pool as a workaround.
+      static_hosts:                          # DECOMMISSIONED 2026-07-03 (public-repo FinOps shift, issue #196)
         hetzner:
-          type: cpx42                        # x86_64, 8 vCPU, 16 GB; pending migration to CAX31 ARM (~40% saving)
-          labels: [openbank-build, openbank-batch, openbank-sandbox, hetzner]
-          count: 2
-          role: primary_build_and_batch      # first pick for ALL jobs; never remove from pool to work around a build failure
+          status: deleted                    # both openbank-runner-{1,2} (CPX42) deleted via hcloud; zero ongoing cost
+          former_labels: [openbank-build, openbank-batch, openbank-sandbox, hetzner]
+          # ARC (scale-to-zero) now serves every job that previously targeted these
+          # labels — the openbank-build/openbank-batch scale sets were never Hetzner-
+          # exclusive, so no CI change was needed. runner-tune-hetzner.yml (the only
+          # Hetzner-specific workflow) was deleted in the same PR as this entry.
         mac_mini:
           arch: arm64
           labels: [openbank-build, openbank-sandbox]
           count: 1
-          role: primary_build_arm64          # native arm64 fallback; offline = ARC takes over
+          role: owner_managed_accelerator     # NOT a FinOps line item (owner's own hardware, no cloud billing);
+          # kept in the label pool at the owner's discretion, independent of this
+          # governance decision. Native arm64 is otherwise served free by
+          # ubuntu-24.04-arm, so this is a pure opt-in accelerator (ADR-0053), never
+          # something CI depends on being online.
       spot:
         provider: karpenter                 # diversified Graviton spot, price-capacity-optimized
         interruption: karpenter-managed     # no persistent spot request; node replaced on reclaim
@@ -1137,6 +1219,8 @@ data:
         deploy_only_signed_digests: true
       gate: ci-runner-governance
       enforced: planned                     # ADR-0053 Accepted; lint + tofu enable land on rollout
+      target_enforce_date: "2026-08-31"   # ADR-0144
+      blocked_on: "a CI lint enforcing pr_jobs_allowed_pools (build/batch only, never deploy) + the OpenTofu apply for the three scale sets have not both landed yet"
 
     # ---------------------------------------------------------------------------------------
     # Infra apply (ADR-0060). Closes the "as-code without applied" gap: CI applies the
@@ -1162,6 +1246,8 @@ data:
       scope: envs/sandbox-platform          # first env; others onboard via working-directory
       gate_name: platform-tofu
       enforced: advisory                    # apply is manual; not a PR-blocking check
+      target_enforce_date: "2027-01-31"   # ADR-0144 — long horizon: blocked on an external plan change, not unbuilt tooling
+      blocked_on: "gate_upgrade to a reviewer-gated Environment needs GitHub plan Environment-protection support (Free plan doesn't have it) — issue #282. Move this date forward, don't silently drop it, if the plan constraint is still unresolved when it arrives."
 
     # ---------------------------------------------------------------------------------------
     # Issue tracking (ADR-0052). Issues are the actionable backlog layer — they do NOT
@@ -1265,7 +1351,24 @@ data:
       # t0_baseline and need no explicit entry.
       declared:
         openbank-notification-service: T2     # proven pilot, live in sandbox (ADR-0057 best-first target, #228)
-        openbank-product-catalog: T1          # ADR-0083 pilot: HTTPScaledObject minReplicas:0 live; native cold-start SLO gate passed in sandbox (#2083)
+        # openbank-product-catalog was WRONGLY declared T1 here (#2800), citing a
+        # non-existent issue (#2083), while only Enabler 2 (HTTPScaledObject) existed —
+        # no commit ever added a native build (Enabler 1), so the claimed "native
+        # cold-start SLO gate passed in sandbox" never happened. Corrected 2026-07-05.
+        # Update 2026-07-06: Enabler 1 (native build) is now real and its two native-only
+        # bugs are fixed (bad Mutiny/coroutine bridge, missing @RegisterForReflection —
+        # verified working end-to-end in a scratch namespace, #253) — but the ADR-0083
+        # promotion gate (native cold start ≤ ~300-500ms p95) was MEASURED and FAILS:
+        # 5 scale-0->1 cycles landed at 3.5-8.8s, dominated by Kubernetes Pod scheduling /
+        # image-pull / readiness-probe overhead, not the ~200ms application start. Stays
+        # Update 2026-07-06 (2): the gate is now redefined (ADR-0083) as two components —
+        # process start ≤500ms p95 (met, ~0.2-0.3s) and end-to-end scale-from-zero with
+        # tuned probes ≤5s p95 (met on a small sample, ~4.4s avg/5.0s worst-of-3; probe
+        # tuning alone cut ~28% off the untuned 3.5-8.8s, the residual ~4s floor is
+        # Kubernetes control-plane + admission-webhook overhead, not the image). Stays
+        # unclassified — T1 requires the live gitops Deployment to actually run the native
+        # image + tuned probes (a separate, deliberate infra cutover, not implied by this
+        # scratch measurement) plus a burn-in window per the ADR's Pilot plan steps 4-6.
 
       # Keep-honest classifier: reads measured signals (HTTP rate/idle ratio, Kafka lag +
       # active fraction, CPU/replica utilisation), emits a recommended tier + realised
@@ -1289,6 +1392,8 @@ data:
       # tracking issue (ADR-0052), not a silent drift.
       gate: finops-tier-drift
       enforced: advisory                      # ADR-0057; -> block when the classifier lands
+      target_enforce_date: "2026-09-30"   # ADR-0144
+      blocked_on: "the measured-signal classifier (http_request_rate, kafka_consumer_lag, cpu/replica utilisation) has not shipped yet — only 2 services have a declared tier today (notification-service, product-catalog)"
 
     # ---------------------------------------------------------------------------------------
     # FinOps cost-allocation groups — showback business flows (ADR-0062). The /api/finops/costs
