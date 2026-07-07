@@ -41,11 +41,13 @@ allow := {
 	"policy_version": policy_version,
 } if {
 	count(allowed_reasons) > 0
+
 	# Defense-in-depth: a prohibited action (e.g. flipping off SCA/sanctions via a feature
 	# flag, issue #419) can never be granted by ANY reason — not even operator-on-own-tenant
 	# with a tenant-matched resource. Gating the allow head, not each reason, makes this
 	# impossible to bypass by enriching the input (the prohibition is not just surfaced).
 	not prohibited
+
 	# Pick the lexicographically smallest reason so the complete rule produces a single
 	# deterministic output even when multiple allowed_reasons rules fire simultaneously
 	# (e.g. operator-on-own-tenant + operator-read-any for a tenant-scoped read).
@@ -69,6 +71,7 @@ policy_version := data.openbank.bundle.version
 allowed_reasons contains "operator-on-own-tenant" if {
 	input.principal.type == "HUMAN"
 	"ROLE_OPERATOR" in input.principal.roles
+
 	# Resource-scoped actions must target the operator's tenant; non-scoped
 	# (system-wide) actions are not granted by this rule.
 	input.resource
@@ -86,10 +89,13 @@ allowed_reasons contains "compliance-read-any" if {
 # duplicate the charter logic — call it through the unified package boundary.
 allowed_reasons contains "agent-charter-allows" if {
 	input.principal.type == "AI_AGENT"
-	# Translate the REST input into the MCP input shape and reuse agents.allow.
-	# Kept tight on purpose: only proceeds if the agent has an EXPLICIT allow
-	# from its charter, not just absence-of-deny.
-	data.openbank.agents.charter_allowed with input as {
+
+	# Translate the REST input into the MCP input shape and reuse agents.allow --
+	# NOT charter_allowed: agents.allow ALSO applies hard_denied / charter_denied /
+	# skill_ok, none of which charter_allowed alone consults. Calling charter_allowed
+	# directly would let a fleet-wide hard-denied tool tier, or an agent's own
+	# tools.deny glob, silently reach a REST action anyway.
+	data.openbank.agents.allow with input as {
 		"agent": input.principal.id,
 		"tool": input.action,
 		"resource": input.resource,
