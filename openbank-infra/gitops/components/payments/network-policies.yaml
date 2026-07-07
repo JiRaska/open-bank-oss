@@ -322,6 +322,8 @@ spec:
       ports:
         - protocol: TCP
           port: 8115
+        - protocol: TCP
+          port: 8181
     - from:
         - namespaceSelector:
             matchLabels:
