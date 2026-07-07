@@ -197,6 +197,40 @@ class AccountServiceLifecycleTest {
         assertThat(statusChanged.reason).isEqualTo("alert cleared")
     }
 
+    @Test
+    fun `unfreezeAccount rejects an account that is not FROZEN`() {
+        val acc = account(status = AccountStatus.ACTIVE)
+        coEvery { accountRepository.findById(acc.id) } returns acc
+
+        assertThatThrownBy {
+            runBlocking {
+                service.unfreezeAccount(
+                    UnfreezeAccountCommand(accountId = acc.id, reason = "alert cleared", requestedBy = UUID.randomUUID()),
+                )
+            }
+        }.isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("Cannot unfreeze")
+
+        coVerify(exactly = 0) { accountRepository.update(any()) }
+    }
+
+    @Test
+    fun `unfreezeAccount throws AccountNotFoundException for an unknown account`() {
+        val accountId = UUID.randomUUID()
+        coEvery { accountRepository.findById(accountId) } returns null
+
+        assertThatThrownBy {
+            runBlocking {
+                service.unfreezeAccount(
+                    UnfreezeAccountCommand(accountId = accountId, reason = "alert cleared", requestedBy = UUID.randomUUID()),
+                )
+            }
+        }.isInstanceOf(AccountNotFoundException::class.java)
+            .hasMessageContaining(accountId.toString())
+
+        coVerify(exactly = 0) { accountRepository.update(any()) }
+    }
+
     // ── Close ─────────────────────────────────────────────────────────────────
 
     @Test
@@ -450,6 +484,26 @@ class AccountServiceLifecycleTest {
 
         assertThat(page.pagination.limit).isEqualTo(AccountService.MAX_SEARCH_LIMIT)
         coVerify(exactly = 1) { accountRepository.searchByIban("0800", AccountService.MAX_SEARCH_LIMIT + 1, null) }
+    }
+
+    @Test
+    fun `searchAccounts floors a non-positive requested page size at 1`(): Unit = runBlocking {
+        coEvery { accountRepository.searchByIban("0800", 2, null) } returns emptyList()
+
+        val page = service.searchAccounts(SearchAccountsQuery(query = "0800", limit = -5))
+
+        assertThat(page.pagination.limit).isEqualTo(1)
+        coVerify(exactly = 1) { accountRepository.searchByIban("0800", 2, null) }
+    }
+
+    @Test
+    fun `searchAccounts queries at exactly MIN_SEARCH_FRAGMENT length (inclusive boundary)`(): Unit = runBlocking {
+        coEvery { accountRepository.searchByIban("CZ", 21, null) } returns emptyList()
+
+        val page = service.searchAccounts(SearchAccountsQuery(query = "cz", limit = 20))
+
+        assertThat(page.data).isEmpty()
+        coVerify(exactly = 1) { accountRepository.searchByIban("CZ", 21, null) }
     }
 
     // ── Fixtures ──────────────────────────────────────────────────────────────
