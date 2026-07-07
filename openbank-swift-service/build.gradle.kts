@@ -37,6 +37,8 @@ dependencies {
     implementation(project(":openbank-libs-runtime"))
     implementation(libs.quarkus.scheduler)
     testImplementation(libs.quarkus.junit5)
+    // @TestSecurity for the ADR-0034 Phase 5 advisory-mode authz regression test.
+    testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
@@ -94,22 +96,23 @@ tasks.withType<Test> {
         // Re-enable once the pact-publish CI step is wired per #2404.
         exclude("**/SwiftEventPactConsumerTest*")
 
-        // CI hang #4 (#2404): test JVM hangs 43+ min AFTER all tests complete, in
-        // TestWorker$3.run() → LauncherSession.close() → CustomLauncherInterceptor
-        // .launcherSessionClosed() → FacadeClassLoader.close() → URLClassLoader.close().
+        // CI hang #4 (#2404) background: test JVM used to hang 43+ min AFTER all tests
+        // completed, in TestWorker$3.run() → LauncherSession.close() → CustomLauncherInterceptor
+        // .launcherSessionClosed() → FacadeClassLoader.close() → URLClassLoader.close() blocking
+        // on JAR locks still held by ForkJoinPool threads. The fix at the time was
+        // `prod.mode.tests=true`, which prevents FacadeClassLoader from ever being created —
+        // safe ONLY because every @QuarkusTest in this module was excluded from CI above.
         //
-        // quarkus-junit registers CustomLauncherInterceptor as a LauncherSessionListener via
-        // ServiceLoader; JUnit5 loads it for EVERY run, even without @QuarkusTest.
-        // launcherDiscoveryStarted() installs FacadeClassLoader + QuarkusForkJoinWorkerThreadFactory.
-        // At session close, FacadeClassLoader.close() calls URLClassLoader.close(), which acquires
-        // JAR locks and blocks indefinitely while ForkJoinPool threads still hold those locks.
-        //
-        // prod.mode.tests=true makes isProductionModeTests() return true in CustomLauncherInterceptor,
-        // which prevents FacadeClassLoader from being created at all → close() is never called →
-        // the test JVM exits cleanly. Safe in CI because all @QuarkusTest classes are excluded above.
-        // quarkus.devservices.enabled=false is belt-and-suspenders: suppresses any dev-service
-        // thread that could also hold resources open.
-        systemProperty("prod.mode.tests", "true")
+        // SwiftResourceAuthzTest (ADR-0034 Phase 5, issue #266) is a real @QuarkusTest that DOES
+        // need to run in CI, so that invariant no longer holds: `prod.mode.tests=true` disables
+        // the QuarkusClassLoader machinery @QuarkusTest itself depends on, and every run fails
+        // with "should have been loaded with a QuarkusClassLoader ... FacadeClassLoader not
+        // correctly identifying this class as a QuarkusTest" (PR #418). Dropped here — every
+        // other service in the fleet runs real @QuarkusTest classes in CI without this hang, so
+        // the deadlock was specific to an installed-but-unused FacadeClassLoader, not to
+        // FacadeClassLoader use in general. quarkus.devservices.enabled=false stays: it only
+        // suppresses Quarkus's auto-provisioned dev services, unrelated to the classloader bug,
+        // and SwiftResourceAuthzTest brings its own Testcontainers resource explicitly.
         jvmArgs("-Dquarkus.devservices.enabled=false")
     }
 }
