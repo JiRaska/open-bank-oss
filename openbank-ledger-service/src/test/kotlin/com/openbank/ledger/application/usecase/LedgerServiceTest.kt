@@ -416,6 +416,24 @@ class LedgerServiceTest {
         }
 
         @Test
+        fun `throws a reversal conflict when the journal is already REVERSED`(): Unit = runBlocking {
+            // Deterministic 409 (#465): a dedicated conflict type, not IllegalStateException —
+            // that type has two competing mappers (libs 422 vs service 409, ADR-0049 D4).
+            val original = postedEntry().copy(status = JournalStatus.REVERSED)
+            coEvery { journalRepository.findById(original.id) } returns original
+
+            val command = ReverseJournalCommand(
+                journalId = original.id,
+                reason = "Repeat",
+                reversedBy = UUID.randomUUID(),
+            )
+
+            assertThatThrownBy { runBlocking { service.reverseJournal(command) } }
+                .isInstanceOf(JournalReversalConflictException::class.java)
+            coVerify(exactly = 0) { journalRepository.saveReversal(any(), any(), any(), any()) }
+        }
+
+        @Test
         fun `reversal of a deposit-control posting emits a negated AccountBookedChanged`(): Unit = runBlocking {
             val subAccount = UUID.randomUUID()
             val original = postedEntryWithDepositControlLeg(subAccount) // credit on subAccount = +1000
