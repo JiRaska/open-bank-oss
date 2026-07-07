@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.7.6...sepa-payment-v0.8.0) (2026-07-07)
+
+
+### Features
+
+* **libs:** add opt-in four-eyes enforcement, pilot on sepa-payment ([#408](https://github.com/JiRaska/open-bank-oss/issues/408)) ([e64bfaa](https://github.com/JiRaska/open-bank-oss/commit/e64bfaa174e17a299d3a1639c4e531f57ecc0152))
+
+
+### Security
+
+* **sepa-payment:** enforce OPA authorization on payment endpoints (ADR-0034 Phase 5) ([#394](https://github.com/JiRaska/open-bank-oss/issues/394)) ([d4e88ad](https://github.com/JiRaska/open-bank-oss/commit/d4e88adbd90b6e7656db7963fa1cb436be378697))
+
 ## [0.7.6](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.7.5...sepa-payment-v0.7.6) (2026-07-03)
 
 
