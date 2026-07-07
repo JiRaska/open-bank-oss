@@ -5,7 +5,7 @@ openapi: 3.1.0
 info:
   title: Billing Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.1.0
+  version: 1.1.1
   description: >-
     Runtime product fee assessment and posting (ADR-0143). Phase 2c read path: POST
     /api/v1/fees/assess computes an account's fee assessment from live account/balance/catalog
@@ -36,6 +36,8 @@ paths:
           description: Missing required query parameter.
         "401":
           description: Unauthenticated.
+        "403":
+          description: Authenticated but denied by the OPA authorization policy (ADR-0034).
 components:
   securitySchemes:
     bearerAuth:
