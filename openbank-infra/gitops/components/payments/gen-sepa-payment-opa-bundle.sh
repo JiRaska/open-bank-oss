@@ -56,14 +56,29 @@ allowed_reasons contains "operator-sepa-payment-write" if {
 # @RolesAllowed does not even admit ROLE_SERVICE) and stays human-only; sepaPayment.list
 # has no M2M caller either (admin-ui lists with the operator's own token). A blanket
 # SERVICE allow would open every @Authorize endpoint on a payment rail to any M2M client.
-allowed_reasons contains "service-sepa-payment-m2m" if {
-	input.principal.type == "SERVICE"
-	"ROLE_SERVICE" in input.principal.roles
+#
+# NOTE (found post-merge, issue tracked separately): AuthorizeInterceptor never
+# emits principal.type == "SERVICE" — M2M callers authenticate via Keycloak
+# client_credentials JWTs, which the interceptor classifies as HUMAN. Split into
+# two rules since the two callers use different Keycloak clients:
+#   - customer-edge has its own dedicated client, identity
+#     `service-account-openbank-edge`.
+#   - clearing-simulator shares the `openbank-services` client (like nearly every
+#     other backend service), identity `service-account-openbank-services` —
+#     not unique to clearing-simulator, documented inline.
+allowed_reasons contains "service-sepa-payment-edge-m2m" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-edge"
 	input.action in {
 		"sepaPayment.create",
 		"sepaPayment.read",
-		"sepaPayment.handleReturn",
 	}
+}
+
+allowed_reasons contains "service-sepa-payment-shared-client-m2m" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-services"
+	input.action == "sepaPayment.handleReturn"
 }
 REGO
 )
