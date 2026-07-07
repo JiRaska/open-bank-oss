@@ -44,27 +44,44 @@ allowed_reasons contains "operator-sca-write" if {
 	startswith(input.action, family)
 }
 
-# M2M callers in the SCA ceremony (both verified in-repo):
-#   - customer-edge (UpstreamClient, client_credentials SERVICE token): initiate a
-#     challenge for the authenticated customer, poll it (read), record the device
-#     decision, and consume the approved challenge as the payment settlement gate
-#     (ADR-0021 — scaGate runs before every money-path forward).
-#   - consent-service (ScaChallengeClient): read a challenge to activate/reject a
-#     PENDING_SCA consent (scaChallenge.read only).
+# M2M callers in the SCA ceremony (both verified in-repo).
+#
+# NOTE (found post-merge, issue tracked separately): AuthorizeInterceptor never
+# emits principal.type == "SERVICE" — M2M callers authenticate via Keycloak
+# client_credentials JWTs, which the interceptor classifies as HUMAN. Gate on
+# the verified client identity instead:
+#   - customer-edge uses its own Keycloak client, identity
+#     `service-account-openbank-edge` — initiate a challenge for the
+#     authenticated customer, poll it (read), record the device decision, and
+#     consume the approved challenge as the payment settlement gate (ADR-0021 —
+#     scaGate runs before every money-path forward).
+#   - consent-service shares the `openbank-services` client (like nearly every
+#     other backend service), identity `service-account-openbank-services` —
+#     reads a challenge to activate/reject a PENDING_SCA consent
+#     (scaChallenge.read only). This identity is NOT unique to consent-service:
+#     any other backend service using the shared client would also match this
+#     rule for scaChallenge.read — documented limitation, not fixable without a
+#     per-service client or audience claim.
 # Deliberately narrow: scaChallenge.verify (the OTP fallback) has NO in-repo M2M
-# caller and stays human-channel-only — a blanket SERVICE allow would open every
+# caller and stays human-channel-only — a blanket allow would open every
 # @Authorize endpoint to any M2M client (edge-service-notification's stance).
 # device.enroll for the edge is already granted by edge-service-notification in
 # base rest.rego — not duplicated here.
-allowed_reasons contains "service-sca-m2m" if {
-	input.principal.type == "SERVICE"
-	"ROLE_SERVICE" in input.principal.roles
+allowed_reasons contains "service-sca-edge-m2m" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-edge"
 	input.action in {
 		"scaChallenge.initiate",
 		"scaChallenge.read",
 		"scaChallenge.decide",
 		"scaChallenge.consume",
 	}
+}
+
+allowed_reasons contains "service-sca-shared-client-m2m" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-services"
+	input.action == "scaChallenge.read"
 }
 REGO
 )
