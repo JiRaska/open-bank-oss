@@ -54,6 +54,7 @@ class ConsentResource(
 
     @Operation(summary = "Create a new consent (PENDING_SCA); idempotent via tppTransactionId / X-Request-ID")
     @POST
+    @Authorize(action = "consent.create")
     suspend fun create(
         request: CreateConsentRequest?,
         @HeaderParam("X-Request-ID") xRequestId: String?,
@@ -104,17 +105,20 @@ class ConsentResource(
     @Operation(summary = "Get consent by ID")
     @GET
     @Path("/{id}")
+    @Authorize(action = "consent.read", resource = "#id")
     suspend fun getById(@PathParam("id") id: UUID): ConsentResponse = ConsentResponse.from(getConsent.getConsent(id))
 
     @Operation(summary = "List all consents for a party")
     @GET
     @Path("/party/{partyId}")
+    @Authorize(action = "consent.list", resource = "#partyId")
     suspend fun listByParty(@PathParam("partyId") partyId: UUID): List<ConsentResponse> =
         getConsent.listConsentsForParty(partyId).map { ConsentResponse.from(it) }
 
     @Operation(summary = "List all consents granted to a TPP / grantee")
     @GET
     @Path("/grantee/{granteeId}")
+    @Authorize(action = "consent.list", resource = "#granteeId")
     suspend fun listByGrantee(@PathParam("granteeId") granteeId: String): List<ConsentResponse> =
         getConsent.listConsentsForGrantee(granteeId).map { ConsentResponse.from(it) }
 
@@ -135,18 +139,21 @@ class ConsentResource(
     @Operation(summary = "Activate a PENDING_SCA consent after SCA challenge completes")
     @POST
     @Path("/{id}/activate")
+    @Authorize(action = "consent.activate", resource = "#id")
     suspend fun activate(@PathParam("id") id: UUID, @QueryParam("scaSessionId") scaSessionId: UUID): ConsentResponse =
         ConsentResponse.from(activateConsent.activateConsent(id, scaSessionId))
 
     @Operation(summary = "Reject a PENDING_SCA consent (e.g. customer cancelled SCA); transitions to REJECTED")
     @POST
     @Path("/{id}/reject")
+    @Authorize(action = "consent.reject", resource = "#id")
     suspend fun reject(@PathParam("id") id: UUID, @QueryParam("reason") reason: String): ConsentResponse =
         ConsentResponse.from(activateConsent.rejectConsent(id, reason))
 
     @Operation(summary = "Validate whether a consent covers the requested scope and account (resource servers)")
     @POST
     @Path("/{id}/validate")
+    @Authorize(action = "consent.validate", resource = "#id")
     suspend fun validate(@PathParam("id") id: UUID, request: ValidateConsentRequest?): ConsentValidationResponse {
         requireNotNull(request) { "request body is required" }
         val result = validateConsent.validateConsent(

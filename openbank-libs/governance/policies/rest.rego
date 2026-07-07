@@ -39,18 +39,32 @@ allow := {
 	"allow": true,
 	"reason": reason,
 	"policy_version": policy_version,
+	"attributes": response_attributes,
 } if {
 	count(allowed_reasons) > 0
+
 	# Defense-in-depth: a prohibited action (e.g. flipping off SCA/sanctions via a feature
 	# flag, issue #419) can never be granted by ANY reason — not even operator-on-own-tenant
 	# with a tenant-matched resource. Gating the allow head, not each reason, makes this
 	# impossible to bypass by enriching the input (the prohibition is not just surfaced).
 	not prohibited
+
 	# Pick the lexicographically smallest reason so the complete rule produces a single
 	# deterministic output even when multiple allowed_reasons rules fire simultaneously
 	# (e.g. operator-on-own-tenant + operator-read-any for a tenant-scoped read).
 	reason := min(allowed_reasons)
 }
+
+# Surfaced on the allow object so OpaSidecarPolicyDecisionPoint (which reads
+# `result.attributes` generically) actually delivers it to AuthzDecision.attributes.
+# A fleet audit (issue #395) found four_eyes_required was computed below but never
+# reached this object — "attributes" was simply absent from the allow head — so no
+# caller anywhere could ever have acted on it, independent of any money_path_scopes
+# naming mismatch. Sparse on purpose: omitted (not `false`) when not required, matching
+# this file's existing audit-attribute style (cf. default policy_version above).
+default response_attributes := {}
+
+response_attributes := {"four_eyes_required": true} if four_eyes_required
 
 # policy_version is audit METADATA, never a gate. Resolve it via a defaulted rule so
 # a bundle that omits openbank.bundle.version cannot turn a legitimate allow into an
@@ -69,6 +83,7 @@ policy_version := data.openbank.bundle.version
 allowed_reasons contains "operator-on-own-tenant" if {
 	input.principal.type == "HUMAN"
 	"ROLE_OPERATOR" in input.principal.roles
+
 	# Resource-scoped actions must target the operator's tenant; non-scoped
 	# (system-wide) actions are not granted by this rule.
 	input.resource
@@ -86,10 +101,13 @@ allowed_reasons contains "compliance-read-any" if {
 # duplicate the charter logic — call it through the unified package boundary.
 allowed_reasons contains "agent-charter-allows" if {
 	input.principal.type == "AI_AGENT"
-	# Translate the REST input into the MCP input shape and reuse agents.allow.
-	# Kept tight on purpose: only proceeds if the agent has an EXPLICIT allow
-	# from its charter, not just absence-of-deny.
-	data.openbank.agents.charter_allowed with input as {
+
+	# Translate the REST input into the MCP input shape and reuse agents.allow --
+	# NOT charter_allowed: agents.allow ALSO applies hard_denied / charter_denied /
+	# skill_ok, none of which charter_allowed alone consults. Calling charter_allowed
+	# directly would let a fleet-wide hard-denied tool tier, or an agent's own
+	# tools.deny glob, silently reach a REST action anyway.
+	data.openbank.agents.allow with input as {
 		"agent": input.principal.id,
 		"tool": input.action,
 		"resource": input.resource,
@@ -131,15 +149,32 @@ allowed_reasons contains "customer-self-action" if {
 	startswith(input.action, "customer.")
 }
 
-# The customer-edge's M2M identity (ROLE_SERVICE) calling notification-service on a
-# customer's behalf. The edge authenticates the CUSTOMER itself (customer-self-action
-# above + per-handler IDOR guards) and injects the authoritative partyId query param the
-# downstream handlers scope by — so this check only needs to recognise the edge principal.
-# Deliberately narrow: just the notification/device families notification-service exposes;
-# a blanket SERVICE allow would open every @Authorize endpoint to any M2M client.
+# The customer-edge's M2M identity calling notification-service on a customer's behalf.
+# The edge authenticates the CUSTOMER itself (customer-self-action above + per-handler
+# IDOR guards) and injects the authoritative partyId query param the downstream handlers
+# scope by — so this check only needs to recognise the edge principal.
+#
+# NOTE (found during ADR-0034 Phase 5 rollout, issue #266): AuthorizeInterceptor never
+# produces principal.type == "SERVICE" — M2M calls authenticate with a Keycloak
+# client_credentials JWT (openbank-edge), which the interceptor's principalType()
+# classifies as HUMAN (see AuthorizeInterceptor.kt), and the realm never issues a
+# ROLE_SERVICE role to any client — only ROLE_OPERATOR. A SERVICE-gated rule is therefore
+# structurally unreachable dead code.
+#
+# Gating on HUMAN + ROLE_OPERATOR alone is NOT safe here: real operator/admin staff also
+# carry ROLE_OPERATOR, and this rule's action families include device.enroll (SCA-service's
+# WebAuthn device registration) — granting that to any staff member is an account-takeover
+# primitive (an operator could enrol their own authenticator against a victim's account).
+# test_deny_operator_read_any_does_not_cover_write encodes exactly this invariant.
+#
+# Instead, match the edge's client_credentials principal precisely by identity:
+# AuthorizeInterceptor sets principal.id from the JWT's preferred_username, which for a
+# Keycloak service-account token is deterministically "service-account-<clientId>"
+# (verified against a live token from the openbank-edge client, ADR-0065/0034 issue #266)
+# — not forgeable by a human session, which authenticates through a different client.
 allowed_reasons contains "edge-service-notification" if {
-	input.principal.type == "SERVICE"
-	"ROLE_SERVICE" in input.principal.roles
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-edge"
 	some family in {"notification.", "device."}
 	startswith(input.action, family)
 }
@@ -152,10 +187,27 @@ allowed_reasons contains "edge-service-notification" if {
 # Money-path service scopes, normalised to the action namespace: money_path_services in
 # rules.yaml uses the module name (openbank-ledger-service) but an action prefix is the
 # commit scope (ledger). Strip the `openbank-` prefix and a trailing `-service` so the
-# two align (e.g. openbank-ledger-service -> ledger; openbank-sepa-payment -> sepa-payment).
+# two align (e.g. openbank-ledger-service -> ledger).
+#
+# Five services' real @Authorize action prefix does NOT match that derived name (a
+# fleet audit, issue #395, found this silently disabled four-eyes for every one of
+# them): sepa-payment -> sepaPayment, sepa-instant -> sctInstPayment, domestic-payment
+# -> domesticPayment, clearing -> clearingBatch, sca -> device / scaChallenge. Two of
+# those aren't even a casing variant of the derived name, so this uses an explicit
+# override table (rules.yaml: money_path_action_prefixes) rather than a camelCase
+# guess — self-documenting, and rest_test.rego pins it so a future rename can't
+# silently drift back out of sync.
 money_path_scopes contains scope if {
 	some svc in data.rules.money_path_services
-	scope := trim_suffix(trim_prefix(svc, "openbank-"), "-service")
+	derived := trim_suffix(trim_prefix(svc, "openbank-"), "-service")
+	not data.rules.money_path_action_prefixes[derived]
+	scope := derived
+}
+
+money_path_scopes contains scope if {
+	some svc in data.rules.money_path_services
+	derived := trim_suffix(trim_prefix(svc, "openbank-"), "-service")
+	some scope in data.rules.money_path_action_prefixes[derived]
 }
 
 four_eyes_required if {

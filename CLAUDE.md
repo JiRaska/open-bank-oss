@@ -95,11 +95,36 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   both pull every pact the broker holds and collide; use a single test that picks the target per
   interaction in `@BeforeEach`. Provider tests are gated on `pactbroker.url` and run only in CI.
 
+### OPA / authorization
+- **`input.principal.type == "SERVICE"` can never fire — don't write it.** `AuthorizeInterceptor`
+  only ever emits `ANONYMOUS`/`AI_AGENT`/`HUMAN`; M2M callers authenticate with a Keycloak
+  client_credentials JWT, which the interceptor classifies as `HUMAN`, and no realm client is ever
+  granted `ROLE_SERVICE`. A rego rule gated on a `SERVICE` principal type is structurally
+  unreachable dead code that silently denies its intended M2M caller once `AUTHZ_ENFORCE` flips to
+  `true` (found live in the shared `rest.rego` `edge-service-notification` rule, ADR-0034 Phase 5,
+  issue #266). Identify a specific M2M caller by `input.principal.id` (Keycloak's
+  `service-account-<clientId>` convention) instead — gating on `HUMAN` + `ROLE_OPERATOR` alone is
+  NOT equivalent, since real staff also carry `ROLE_OPERATOR` and would over-grant. Enforced by
+  `.github/scripts/check-no-service-principal-type.sh` (`rules.yaml: authz_policy`).
+
 ### GitOps / Kubernetes
 - **`strategy.type: Recreate` + Server-Side Apply = HTTP 403.** Use `RollingUpdate` with
   `maxSurge: 0 / maxUnavailable: 1` for identical zero-concurrency behaviour.
 - **Use explicit registry prefixes for container images** (`docker.io/library/<image>` for official
   images) so the cluster's pull-through/rewrite policies apply.
+
+### OPA / Rego policies (ADR-0031/ADR-0034)
+- **An `AI_AGENT` principal's id carries an `agent:` prefix on the REST path, but not on the
+  MCP path.** `AuthorizeInterceptor.principalType()` classifies `AI_AGENT` from a JWT `sub`
+  prefixed `agent:`, and `principal.id` is that sub verbatim — but `openbank-agent-service`
+  sets `agent` to a bare charter id (`"ui-assistant"`) directly from its own config on the MCP
+  `/tools/call` path. A charter lookup that compares `principal.id`/`input.agent` straight
+  against `agents.yaml` ids must strip the prefix first (`trim_prefix(input.agent, "agent:")`,
+  a no-op when absent) or it silently never matches for every real REST call.
+- **`rest.rego` must delegate AI-agent REST calls to `agents.allow`, never `agents.charter_allowed`
+  directly.** Only `allow` also applies `hard_denied` / `charter_denied` / `skill_ok` — calling
+  `charter_allowed` alone lets a fleet-wide hard-denied tool tier or a charter's own `tools.deny`
+  glob silently reach a REST action anyway.
 
 ### Reviewing a diff
 - **Use 3-dot diff for pre-merge review:** `git diff origin/main...origin/<branch>` is the actual

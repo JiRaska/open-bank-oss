@@ -57,6 +57,7 @@ class DomesticPaymentResource(
 
     @POST
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
+    @Authorize(action = "domestic-payment.create")
     @Operation(summary = "Create a domestic payment")
     suspend fun createPayment(
         request: CreateDomesticPaymentRequest,
@@ -84,12 +85,14 @@ class DomesticPaymentResource(
     @GET
     @Path("/{paymentId}")
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
+    @Authorize(action = "domestic-payment.read", resource = "#paymentId")
     @Operation(summary = "Get a domestic payment by ID")
     suspend fun getPayment(@PathParam("paymentId") paymentId: UUID): Response =
         Response.ok(paymentUseCase.getPayment(paymentId).toResponse()).build()
 
     @GET
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_SERVICE")
+    @Authorize(action = "domestic-payment.list")
     @Operation(summary = "List domestic payments")
     suspend fun listPayments(
         @QueryParam("status") status: String?,
@@ -111,7 +114,12 @@ class DomesticPaymentResource(
     @PATCH
     @Path("/{paymentId}/status")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
-    @Authorize(action = "domesticPayment.transitionStatus", resource = "#paymentId")
+    // Action namespace is the money-path scope (`domestic-payment.`, rules.yaml
+    // money_path_services normalised) — NOT camelCase — so the base rest.rego
+    // four_eyes rule can flag any future four-eyes verb (transfer/release/...)
+    // on this rail. Renamed from `domesticPayment.transitionStatus` while the
+    // service was still advisory-only (no behavioral change, ADR-0034 Phase 5).
+    @Authorize(action = "domestic-payment.transitionStatus", resource = "#paymentId")
     @Operation(summary = "Transition domestic payment status")
     suspend fun transitionStatus(
         @PathParam("paymentId") paymentId: UUID,

@@ -100,6 +100,21 @@ runtime SBOM drift detection.
 - **DAST** (OWASP ZAP baseline) against ephemeral service instances in CI, seeded from each service's
   OpenAPI spec, on a scheduled cadence (not every PR — cost). Findings feed the D1 lifecycle.
 
+> **Realization (2026-07-07, mutation re-verified + DAST first cut, issue #265).** Mutation
+> testing: the fleet rollout (`.github/workflows/pitest.yml`, #317/#318) already covers 9/15
+> money-path services with substantive domain math (ledger, balance, account, transaction,
+> fx, sepa-payment, sepa-instant, domestic-payment, fraud); re-verified against a fresh
+> `origin/main` checkout that the remaining 6 (sca, consent, billing, clearing, swift,
+> lending) still have only 1-2 domain files of plain data models, so the ADR-0063
+> thin-domain exclusion still holds — no expansion needed at this time, only confirmed.
+> DAST: `.github/workflows/dast-zap-baseline.yml` runs OWASP ZAP baseline
+> (`zaproxy/action-baseline`, pinned) weekly against `openbank-ledger-service` (booted via the
+> existing `openbank-infra/docker-compose.yml`), scanning its documented unauthenticated
+> public paths. Report-only (`fail_action: false`), feeding the D1 lifecycle. Full
+> `customer-edge` (the true internet-facing edge, ADR-0065) and an authenticated crawl remain
+> follow-up — `customer-edge` is a gitops-only proxy with no Gradle/image build in this repo,
+> and fleet-wide boot is too heavy for a CI job.
+
 ### D4 — Admission control: verify provenance at deploy
 
 - The GitOps deploy path (ArgoCD, ADR-0027) gains an **admission policy** (Kyverno or OPA/Gatekeeper)

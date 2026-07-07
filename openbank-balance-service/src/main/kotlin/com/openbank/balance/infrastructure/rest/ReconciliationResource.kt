@@ -5,6 +5,7 @@
 package com.openbank.balance.infrastructure.rest
 
 import com.openbank.balance.application.port.`in`.ReconcileBalancesUseCase
+import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.GET
@@ -35,12 +36,14 @@ class ReconciliationResource(private val reconcile: ReconcileBalancesUseCase, pr
     @GET
     @Path("/latest")
     @RolesAllowed(Roles.SERVICE, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "balance.reconciliation.read")
     suspend fun latest(): Response = reconcile.latest()
         ?.let { Response.ok(it).build() }
         ?: Response.status(Response.Status.NOT_FOUND).build()
 
     @POST
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "balance.reconciliation.run")
     suspend fun run(@QueryParam("asOf") asOf: String?): Response {
         val date = asOf?.let { LocalDate.parse(it) } ?: LocalDate.now(clock)
         val report = reconcile.reconcile(date)

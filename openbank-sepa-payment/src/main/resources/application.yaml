@@ -191,3 +191,11 @@ opa:
   timeout-ms: "${OPA_TIMEOUT_MS:500}"
 authz:
   enforce: "${AUTHZ_ENFORCE:false}"
+  # ADR-0155: four-eyes ENFORCEMENT (blocking a maker's request pending a second
+  # approver), independent of the base allow/deny enforce toggle above. Stays false
+  # here even though rest.rego now correctly computes four_eyes_required for
+  # sepaPayment.transitionStatus (issue #395) — flipping this is a deliberate,
+  # separate follow-up once the maker/checker runbook is reviewed, not bundled with
+  # the ApprovalStore wiring itself.
+  four-eyes:
+    enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"

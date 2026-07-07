@@ -398,6 +398,19 @@ jobs:
       - name: "gate graduation guard (ADR-0144, enforced)"
         run: bash .github/scripts/check-gate-graduation.sh
 
+      # No dead-code SERVICE-principal rego rule (ADR-0034 Phase 5, issue #266,
+      # rules.yaml: authz_policy). AuthorizeInterceptor never emits
+      # principal.type == "SERVICE" and no Keycloak client is ever granted
+      # ROLE_SERVICE, so a rego rule gated on it can never fire — found live in the
+      # shared rest.rego edge-service-notification rule (deployed, AUTHZ_ENFORCE
+      # defaulting true) and pre-merge in the sca/domestic-payment Phase-5 PRs.
+      # Scans standalone .rego, gen-*-opa-bundle.sh generator heredocs, and
+      # committed *-opa-bundle.yaml ConfigMaps — path-unscoped so it also catches
+      # the pattern in a brand-new service's bundle, not just the four wired into
+      # opa-policy.yml. ENFORCED.
+      - name: "no dead-code SERVICE-principal rego rule (enforced)"
+        run: bash .github/scripts/check-no-service-principal-type.sh .
+
       # openbank.outbox.dispatch-enabled guard (the CLAUDE.md "outbox footgun":
       # a service whose OutboxDispatcher actually gates on this flag silently
       # never dispatches if it's left at its false default — no error,

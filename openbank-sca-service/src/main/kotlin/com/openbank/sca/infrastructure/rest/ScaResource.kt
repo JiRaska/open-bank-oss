@@ -5,17 +5,55 @@
 package com.openbank.sca.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.openbank.sca.application.port.`in`.*
-import com.openbank.sca.domain.model.*
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
 import com.openbank.libs.authz.Authorize
-import com.openbank.sca.application.usecase.*
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.sca.application.port.`in`.ConsumeScaCommand
+import com.openbank.sca.application.port.`in`.ConsumeScaUseCase
+import com.openbank.sca.application.port.`in`.EnrollDeviceCommand
+import com.openbank.sca.application.port.`in`.EnrollDeviceUseCase
+import com.openbank.sca.application.port.`in`.GetScaUseCase
+import com.openbank.sca.application.port.`in`.InitiateScaCommand
+import com.openbank.sca.application.port.`in`.InitiateScaUseCase
+import com.openbank.sca.application.port.`in`.ListDevicesQuery
+import com.openbank.sca.application.port.`in`.ListDevicesUseCase
+import com.openbank.sca.application.port.`in`.RecordDeviceDecisionCommand
+import com.openbank.sca.application.port.`in`.RecordDeviceDecisionUseCase
+import com.openbank.sca.application.port.`in`.VerifyScaCommand
+import com.openbank.sca.application.port.`in`.VerifyScaUseCase
+import com.openbank.sca.application.usecase.CredentialAlreadyEnrolledException
+import com.openbank.sca.application.usecase.DeviceNotEnrolledException
+import com.openbank.sca.application.usecase.DeviceOwnershipMismatchException
+import com.openbank.sca.application.usecase.InvalidDeviceAssertionException
+import com.openbank.sca.application.usecase.ScaChallengeAlreadyConsumedException
+import com.openbank.sca.application.usecase.ScaChallengeExpiredException
+import com.openbank.sca.application.usecase.ScaChallengeMaxAttemptsException
+import com.openbank.sca.application.usecase.ScaChallengeNotApprovedException
+import com.openbank.sca.application.usecase.ScaChallengeNotAwaitingException
+import com.openbank.sca.application.usecase.ScaChallengeNotFoundException
+import com.openbank.sca.application.usecase.ScaChallengePartyMismatchException
+import com.openbank.sca.application.usecase.ScaDynamicLinkingMismatchException
+import com.openbank.sca.application.usecase.ScaVerificationFailedException
+import com.openbank.sca.domain.model.DeviceDecisionType
+import com.openbank.sca.domain.model.DynamicLinkingData
+import com.openbank.sca.domain.model.EnrolledDevice
+import com.openbank.sca.domain.model.ScaChallenge
+import com.openbank.sca.domain.model.ScaMethod
+import com.openbank.sca.domain.model.ScaPurpose
+import com.openbank.sca.domain.model.ScaStatus
+import com.openbank.sca.domain.model.SignatureAlgorithm
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
-import jakarta.ws.rs.*
+import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.ForbiddenException
+import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
+import jakarta.ws.rs.POST
+import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
+import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
@@ -27,19 +65,16 @@ data class InitiateScaRequest(
     val purpose: ScaPurpose,
     val preferredMethod: ScaMethod?,
     val dynamicLinkingData: DynamicLinkingData?,
-    val redirectUrl: String?
+    val redirectUrl: String?,
 )
 
-data class VerifyScaRequest(
-    val partyId: UUID,
-    val otp: String?
-)
+data class VerifyScaRequest(val partyId: UUID, val otp: String?)
 
 data class EnrollDeviceRequest(
     val credentialId: String,
     /** Base64 X.509 SubjectPublicKeyInfo of the device public key. */
     val publicKey: String,
-    val algorithm: SignatureAlgorithm
+    val algorithm: SignatureAlgorithm,
 )
 
 data class EnrolledDeviceResponse(
@@ -59,7 +94,7 @@ data class RecordDecisionRequest(
     val credentialId: String,
     val decision: DeviceDecisionType,
     /** Base64 signature over the challenge's dynamic-linking payload. */
-    val signature: String
+    val signature: String,
 )
 
 data class ScaChallengeResponse(
@@ -72,7 +107,7 @@ data class ScaChallengeResponse(
     val completedAt: String?,
     val consumedAt: String?,
     val attemptCount: Int,
-    val maxAttempts: Int
+    val maxAttempts: Int,
 ) {
     companion object {
         fun from(c: ScaChallenge) = ScaChallengeResponse(
@@ -85,7 +120,7 @@ data class ScaChallengeResponse(
             completedAt = c.completedAt?.toString(),
             consumedAt = c.consumedAt?.toString(),
             attemptCount = c.attemptCount,
-            maxAttempts = c.maxAttempts
+            maxAttempts = c.maxAttempts,
         )
     }
 }
@@ -100,7 +135,7 @@ data class ConsumeScaRequest(
     val partyId: UUID,
     val amount: String? = null,
     val currency: String? = null,
-    val creditor: String? = null
+    val creditor: String? = null,
 )
 
 @Path("/api/v1/sca")
@@ -116,18 +151,20 @@ class ScaResource(
     private val recordDecision: RecordDeviceDecisionUseCase,
     private val consumeSca: ConsumeScaUseCase,
     private val idempotencyStore: IdempotencyStore,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
 ) {
     // SecurityIdentity carries the authenticated principal across coroutine dispatch
     // (smallrye-context-propagation). Used for ownership enforcement on device enrollment.
     @Inject
     lateinit var identity: SecurityIdentity
+
     @POST
     @Path("/challenges")
+    @Authorize(action = "scaChallenge.initiate")
     suspend fun initiate(
         request: InitiateScaRequest,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
-        @HeaderParam("X-Request-ID") xRequestId: String?
+        @HeaderParam("X-Request-ID") xRequestId: String?,
     ): Response {
         val requestKey = idempotencyKey?.takeIf { it.isNotBlank() } ?: xRequestId?.takeIf { it.isNotBlank() }
         requestKey?.let { key ->
@@ -146,8 +183,8 @@ class ScaResource(
                 purpose = request.purpose,
                 preferredMethod = request.preferredMethod,
                 dynamicLinkingData = request.dynamicLinkingData,
-                redirectUrl = request.redirectUrl
-            )
+                redirectUrl = request.redirectUrl,
+            ),
         )
         val responseBody = ScaChallengeResponse.from(challenge)
         requestKey?.let { key ->
@@ -155,7 +192,7 @@ class ScaResource(
                 scaCreateKey(request.partyId, key),
                 201,
                 objectMapper.writeValueAsString(responseBody),
-                300
+                300,
             )
         }
         return Response.status(201).entity(responseBody).build()
@@ -171,6 +208,7 @@ class ScaResource(
 
     @GET
     @Path("/challenges/{id}")
+    @Authorize(action = "scaChallenge.read", resource = "#id")
     suspend fun get(@PathParam("id") id: UUID): ScaChallengeResponse =
         ScaChallengeResponse.from(getSca.getChallenge(id))
 
@@ -210,8 +248,8 @@ class ScaResource(
                 partyId = partyId,
                 credentialId = request.credentialId,
                 publicKeySpkiB64 = request.publicKey,
-                algorithm = request.algorithm
-            )
+                algorithm = request.algorithm,
+            ),
         )
         return Response.status(201).entity(EnrolledDeviceResponse.from(device)).build()
     }
@@ -230,8 +268,8 @@ class ScaResource(
                 challengeId = id,
                 credentialId = request.credentialId,
                 decision = request.decision,
-                signatureB64 = request.signature
-            )
+                signatureB64 = request.signature,
+            ),
         )
         return ScaChallengeResponse.from(challenge)
     }
@@ -253,8 +291,8 @@ class ScaResource(
                 expectedPartyId = request.partyId,
                 amount = request.amount,
                 currency = request.currency,
-                creditor = request.creditor
-            )
+                creditor = request.creditor,
+            ),
         )
         return ScaChallengeResponse.from(challenge)
     }
