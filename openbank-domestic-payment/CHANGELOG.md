@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.10](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.8.9...domestic-payment-v0.8.10) (2026-07-07)
+
+
+### Bug Fixes
+
+* **account:** ktlintFormat AccountServiceLifecycleTest — Fleet lint red on main ([#480](https://github.com/JiRaska/open-bank-oss/issues/480)) ([37d303e](https://github.com/JiRaska/open-bank-oss/commit/37d303ef3e804f4cc30b79d8f0632ccfc2d942e7)), closes [#479](https://github.com/JiRaska/open-bank-oss/issues/479)
+
 ## [0.8.9](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.8.8...domestic-payment-v0.8.9) (2026-07-07)
 
 
