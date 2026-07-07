@@ -61,7 +61,10 @@ kover {
         verify {
             rule {
                 bound {
-                    minValue = 35
+                    // Ratchet-only floor (issue #321 Q3 milestone asked for 55; measured line
+                    // coverage is 84% after the unit-test sweep, so the floor is pinned a few
+                    // points below measured). Never lower this value.
+                    minValue = 80
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }
