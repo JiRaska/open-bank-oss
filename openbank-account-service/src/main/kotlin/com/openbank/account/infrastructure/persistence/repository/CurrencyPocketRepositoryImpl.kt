@@ -13,10 +13,11 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.Clock
 import java.util.UUID
 
 @ApplicationScoped
-class CurrencyPocketRepositoryImpl :
+class CurrencyPocketRepositoryImpl(private val clock: Clock) :
     CurrencyPocketRepository,
     PanacheRepository<AccountPocketEntity> {
 
@@ -31,6 +32,11 @@ class CurrencyPocketRepositoryImpl :
 
     override suspend fun save(pocket: CurrencyPocket): CurrencyPocket {
         val entity = pocket.toEntity()
+        // Audit timestamps come from the injected Clock here, not the entity (ADR-0100): the
+        // column DEFAULT never applies because Hibernate writes every insertable column.
+        val now = clock.instant()
+        entity.createdAt = now
+        entity.updatedAt = now
         return Panache.withTransaction { persist(entity).replaceWith(entity) }.awaitSuspending().toDomain()
     }
 
@@ -40,6 +46,7 @@ class CurrencyPocketRepositoryImpl :
             existing.status = pocket.status.name
             existing.closedAt = pocket.closedAt
             existing.version = pocket.version
+            existing.updatedAt = clock.instant()
             io.smallrye.mutiny.Uni.createFrom().item(existing)
         }
     }.awaitSuspending().toDomain()

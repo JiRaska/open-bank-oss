@@ -16,10 +16,11 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.Clock
 import java.util.UUID
 
 @ApplicationScoped
-class AccountRepositoryImpl :
+class AccountRepositoryImpl(private val clock: Clock) :
     AccountRepository,
     PanacheRepository<AccountEntity> {
 
@@ -66,6 +67,11 @@ class AccountRepositoryImpl :
 
     override suspend fun save(account: Account): Account {
         val entity = account.toEntity()
+        // Audit timestamps come from the injected Clock here, not the entity (ADR-0100): the
+        // column DEFAULT never applies because Hibernate writes every insertable column.
+        val now = clock.instant()
+        entity.createdAt = now
+        entity.updatedAt = now
         return Panache.withTransaction { persist(entity).replaceWith(entity) }.awaitSuspending().toDomain()
     }
 
@@ -90,6 +96,7 @@ class AccountRepositoryImpl :
                 existing.goalName = entity.goalName
                 existing.goalTargetMinorUnits = entity.goalTargetMinorUnits
                 existing.goalTargetDate = entity.goalTargetDate
+                existing.updatedAt = clock.instant()
                 io.smallrye.mutiny.Uni.createFrom().item(existing)
             }
         }.awaitSuspending().toDomain()
@@ -103,9 +110,10 @@ class AccountRepositoryImpl :
     // the erased party.
     override suspend fun anonymizeByPartyId(partyId: UUID): Int = Panache.withTransaction {
         update(
-            "legalName = null, goalName = null, goalTargetMinorUnits = null, goalTargetDate = null " +
-                "WHERE partyId = ?1",
+            "legalName = null, goalName = null, goalTargetMinorUnits = null, goalTargetDate = null, " +
+                "updatedAt = ?2 WHERE partyId = ?1",
             partyId,
+            clock.instant(),
         )
     }.awaitSuspending()
 
