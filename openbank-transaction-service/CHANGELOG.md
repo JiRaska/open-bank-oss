@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.4](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.12.3...transaction-service-v1.12.4) (2026-07-07)
+
+
+### Security
+
+* **transaction:** enforce OPA authorization on transaction endpoints (ADR-0034 Phase 5) ([#414](https://github.com/JiRaska/open-bank-oss/issues/414)) ([b63d1c4](https://github.com/JiRaska/open-bank-oss/commit/b63d1c49562a1552c6fed27492655374370ebcf7)), closes [#266](https://github.com/JiRaska/open-bank-oss/issues/266)
+
 ## [1.12.3](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.12.2...transaction-service-v1.12.3) (2026-07-03)
 
 
