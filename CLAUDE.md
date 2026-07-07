@@ -101,6 +101,19 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
 - **Use explicit registry prefixes for container images** (`docker.io/library/<image>` for official
   images) so the cluster's pull-through/rewrite policies apply.
 
+### OPA / Rego policies (ADR-0031/ADR-0034)
+- **An `AI_AGENT` principal's id carries an `agent:` prefix on the REST path, but not on the
+  MCP path.** `AuthorizeInterceptor.principalType()` classifies `AI_AGENT` from a JWT `sub`
+  prefixed `agent:`, and `principal.id` is that sub verbatim — but `openbank-agent-service`
+  sets `agent` to a bare charter id (`"ui-assistant"`) directly from its own config on the MCP
+  `/tools/call` path. A charter lookup that compares `principal.id`/`input.agent` straight
+  against `agents.yaml` ids must strip the prefix first (`trim_prefix(input.agent, "agent:")`,
+  a no-op when absent) or it silently never matches for every real REST call.
+- **`rest.rego` must delegate AI-agent REST calls to `agents.allow`, never `agents.charter_allowed`
+  directly.** Only `allow` also applies `hard_denied` / `charter_denied` / `skill_ok` — calling
+  `charter_allowed` alone lets a fleet-wide hard-denied tool tier or a charter's own `tools.deny`
+  glob silently reach a REST action anyway.
+
 ### Reviewing a diff
 - **Use 3-dot diff for pre-merge review:** `git diff origin/main...origin/<branch>` is the actual
   squash delta; 2-dot includes main's post-divergence commits and makes stale branches look like
