@@ -11,14 +11,13 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
-import au.com.dius.pact.provider.junitsupport.loader.PactBroker
+import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.account.domain.event.AccountCreatedEvent
 import com.openbank.account.domain.model.AccountType
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
-import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
 import java.util.UUID
 
@@ -33,14 +32,25 @@ import java.util.UUID
  * emit, and Pact checks it against the consumer contract. Messages are built from real domain
  * types and serialized with the same Jackson modules so the contract verifies the real wire shape.
  *
- * Pacts are fetched from the Pact Broker (`@PactBroker`, configured via `pactbroker.*` system
- * properties from CI `-D`) and the result published back for `can-i-deploy`. Gated on
- * `pactbroker.url`: skipped locally, where committed `pacts/` (git-pact) stays the fallback.
+ * Reads the consumer pact from the git-pact folder (`@PactFolder`, resolved relative to this
+ * module's working directory at `../pacts` = the monorepo-root `pacts/` dir) and replays each
+ * interaction. This always runs — no broker, no gate, no CI secret required (ADR-0063 chose
+ * git-pact over a Pact Broker for exactly this reason: zero new infra dependency), matching the
+ * pattern already applied to `LedgerPactProviderVerificationTest` (openbank-ledger-service) and
+ * `PartyEventPactProviderVerificationTest` (openbank-party-service).
+ *
+ * IMPORTANT: if `AccountCreatedMessagePactConsumerTest` (openbank-balance-service) changes the
+ * contract, regenerate the pact JSON (`./gradlew :openbank-balance-service:test --tests
+ * "*AccountCreatedMessagePactConsumerTest*"`) and commit the updated `pacts/openbank-balance-
+ * service-openbank-account-service.json` in the same PR, or this test will fail against a stale
+ * contract.
+ *
+ * `@IgnoreNoPactsToVerify(ignoreIoErrors)` makes a missing/unreadable pact file a skip, not a
+ * failure — relevant if the folder is ever emptied ahead of a broker migration.
  */
 @Provider("openbank-account-service")
-@PactBroker
+@PactFolder("../pacts")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
-@EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class AccountEventPactProviderVerificationTest {
 
     private val objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())

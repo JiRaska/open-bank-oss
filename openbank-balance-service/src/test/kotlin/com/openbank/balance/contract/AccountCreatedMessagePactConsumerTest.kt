@@ -25,9 +25,17 @@ import java.util.UUID
  *
  * This is the first async (message) pact in the repo — it asserts the event carries the three fields
  * the consumer actually reads (`eventType`, `aggregateId`, `currency`); the producer (account-service)
- * verifies it via AccountEventPactProviderVerificationTest. The generated pact is committed to
+ * verifies it via `AccountEventPactProviderVerificationTest` (`@PactFolder("../pacts")` — always
+ * runs, no Pact Broker involved). The generated pact is committed to
  * `pacts/openbank-balance-service-openbank-account-service.json` (git-pact, ADR-0063) — a new
  * consumer/provider pair, so it does not collide with the existing balance→ledger REST pact.
+ *
+ * IMPORTANT — regenerate on change: if this test's `@Pact` methods change (new interaction,
+ * different matcher, renamed field), re-run this test (`./gradlew :openbank-balance-service:test
+ * --tests "*AccountCreatedMessagePactConsumerTest*"`) and commit the updated
+ * `pacts/openbank-balance-service-openbank-account-service.json` in the same PR. There is no CI
+ * drift check yet (ADR-0063 Phase 2) — an un-regenerated pact file silently verifies the OLD
+ * contract on the provider side.
  */
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(

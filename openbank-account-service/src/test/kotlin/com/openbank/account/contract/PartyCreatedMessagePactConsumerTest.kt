@@ -26,7 +26,17 @@ import java.util.UUID
  * - PARTY_CREATED → open a PENDING_ACTIVATION account (P1 contract)
  * - PARTY_UPDATED / KYC_STATUS_CHANGED → reconcile account status via `status` field (P2 extension)
  *
- * party-service verifies all three via PartyEventPactProviderVerificationTest.
+ * party-service verifies all three via `PartyEventPactProviderVerificationTest`
+ * (`@PactFolder("../pacts")` — always runs, no Pact Broker involved).
+ *
+ * IMPORTANT — regenerate on change: if this test's `@Pact` methods change (new interaction,
+ * different matcher, renamed field), re-run this test (`./gradlew :openbank-account-service:test
+ * --tests "*PartyCreatedMessagePactConsumerTest*"`) and commit the updated
+ * `pacts/openbank-account-service-openbank-party-service.json` in the same PR. There is no CI
+ * drift check yet (ADR-0063 Phase 2) — an un-regenerated pact file silently verifies the OLD
+ * contract on the provider side (this is exactly what had happened here: the committed pact was
+ * missing the KYC_STATUS_CHANGED interaction this test already generates — regenerated and
+ * recommitted alongside this doc comment).
  */
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(
