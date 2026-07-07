@@ -26,6 +26,7 @@ keywords = ["openbank_secret", "admin_secret", "openbank-vault-root-token", "ope
   paths = [
     '''(^|/)openbank-[a-z0-9-]+-service/src/main/resources/application\.yaml$''',
     '''(^|/)\.github/workflows/_service-ci\.yml$''',
+    '''(^|/)\.github/workflows/dast-zap-baseline\.yml$''',
     '''(^|/)openbank-infra/docker-compose\.yml$''',
   ]
 
