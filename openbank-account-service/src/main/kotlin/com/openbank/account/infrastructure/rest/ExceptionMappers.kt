@@ -7,6 +7,7 @@ package com.openbank.account.infrastructure.rest
 import com.openbank.account.application.usecase.AccountNotFoundException
 import com.openbank.account.application.usecase.AccountUpdateConflictException
 import com.openbank.libs.api.error.ApiError
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
@@ -39,7 +40,7 @@ class AccountUpdateConflictExceptionMapper : ExceptionMapper<AccountUpdateConfli
         Response.status(Response.Status.CONFLICT)
             .entity(
                 ApiError(
-                    traceId = UUID.randomUUID().toString(),
+                    traceId = Ids.randomId().toString(),
                     status = 409,
                     code = "CONCURRENT_MODIFICATION",
                     message = exception.message ?: "Account was modified concurrently",

@@ -24,6 +24,7 @@ import com.openbank.libs.api.pagination.CursorEncoder
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.api.pagination.PageInfo
 import com.openbank.libs.domain.account.Iban
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.observability.DomainMetrics
 import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
@@ -344,7 +345,7 @@ class AccountService(
 
     /** The single-IBAN account opens with one primary pocket in its own currency (ADR-0024). */
     private fun primaryPocketFor(account: Account): CurrencyPocket = CurrencyPocket(
-        id = UUID.randomUUID(),
+        id = Ids.newId(),
         accountId = account.id,
         currency = account.currency,
         isPrimary = true,
