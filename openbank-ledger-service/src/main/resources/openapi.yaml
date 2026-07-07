@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Ledger Service API
-  version: 1.5.1
+  version: 1.5.2
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -43,6 +43,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JournalPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/journals/{journalId}:
     get:
@@ -63,6 +67,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JournalEntryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -94,6 +102,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SubLedgerBalancesResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/journals/transaction/{transactionId}:
     get:
@@ -116,6 +128,10 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/JournalEntryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/control-accounts/{controlAccountId}/tie-out:
     get:
@@ -176,6 +192,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FiscalYearTrialBalanceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/ledger/close/{fiscalYear}:
     get:
@@ -191,6 +211,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/YearCloseRecordResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
     post:
@@ -210,6 +234,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/YearCloseRecordResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
 
@@ -233,6 +261,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/YearCloseRecordResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -257,6 +289,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/YearCloseVerificationResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
