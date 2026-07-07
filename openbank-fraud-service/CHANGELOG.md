@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.5.0...fraud-service-v0.5.1) (2026-07-07)
+
+
+### Security
+
+* **fraud:** enforce OPA authorization on fraud endpoints (ADR-0034 Phase 5) ([#388](https://github.com/JiRaska/open-bank-oss/issues/388)) ([7703fa9](https://github.com/JiRaska/open-bank-oss/commit/7703fa97961206acae4899b30d197296b7b418f2))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.4.3...fraud-service-v0.5.0) (2026-06-30)
 
 
