@@ -1000,7 +1000,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-clearing-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "32bf1c1404057a88" # clearing-opa-bundle
+        openbank.tech/policy-checksum: "841e47f4d768cb2b" # clearing-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true

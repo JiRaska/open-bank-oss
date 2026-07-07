@@ -82,9 +82,19 @@ allowed_reasons contains "viewer-clearing-read" if {
 #     rail is forbidden (rules.yaml / ADR-0034). The resource's own @RolesAllowed also
 #     admits ROLE_SERVICE on getItem/getItemsByPayment/getPositions, but there is NO
 #     in-repo M2M caller for those today — they stay human-only until one exists.
+# NOTE (found post-merge, issue tracked separately): AuthorizeInterceptor never
+# emits principal.type == "SERVICE" — M2M callers authenticate via Keycloak
+# client_credentials JWTs, which the interceptor classifies as HUMAN.
+# agent-service shares the `openbank-services` client (like nearly every other
+# backend service) — gate on that identity instead. Not unique to
+# agent-service; documented inline. (Separate, more severe known issue: this
+# same shared-client token is also misclassified in a way that over-grants
+# agent-service full HUMAN+ROLE_OPERATOR access via the base operator rule
+# already — tracked independently, not fixed here; this rule's narrow scoping
+# is still correct in its own right.)
 allowed_reasons contains "service-clearing-m2m" if {
-	input.principal.type == "SERVICE"
-	"ROLE_SERVICE" in input.principal.roles
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-services"
 	input.action in {
 		"clearingBatch.list",
 		"clearingBatch.read",
