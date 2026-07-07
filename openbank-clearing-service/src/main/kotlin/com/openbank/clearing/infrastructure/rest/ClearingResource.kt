@@ -4,13 +4,30 @@
 
 package com.openbank.clearing.infrastructure.rest
 
-import com.openbank.clearing.application.port.`in`.*
-import com.openbank.clearing.domain.model.*
+import com.openbank.clearing.application.port.`in`.GetBatchUseCase
+import com.openbank.clearing.application.port.`in`.GetItemUseCase
+import com.openbank.clearing.application.port.`in`.GetPositionsUseCase
+import com.openbank.clearing.application.port.`in`.ReconcileUseCase
+import com.openbank.clearing.application.port.`in`.SubmitPaymentUseCase
+import com.openbank.clearing.application.port.`in`.TriggerClearingUseCase
+import com.openbank.clearing.domain.model.ClearingBatch
+import com.openbank.clearing.domain.model.ClearingItem
+import com.openbank.clearing.domain.model.ClearingStatus
+import com.openbank.clearing.domain.model.PaymentRail
+import com.openbank.clearing.domain.model.SettlementPosition
+import com.openbank.clearing.domain.model.SubmitPaymentRequest
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import io.smallrye.mutiny.Uni
 import jakarta.annotation.security.RolesAllowed
-import jakarta.ws.rs.*
+import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.GET
+import jakarta.ws.rs.POST
+import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
+import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
@@ -24,6 +41,15 @@ import java.util.UUID
  * and operators; **settlement and cycle triggering are restricted to payment-ops/admin** (these are
  * the high-blast-radius actions — four-eyes via ADR-0034 MakerChecker is a tracked follow-up).
  * Enforced by Quarkus OIDC and locked by ClearingResourceSecurityTest.
+ *
+ * ADR-0034 Phase 5 (issue #266): every endpoint now also carries `@Authorize` under the
+ * `clearingBatch.*` action namespace — the pre-existing convention from `settleBatch`
+ * (`clearingBatch.settle`), kept as-is rather than renamed to the `clearing.` money-path
+ * scope. `rules.yaml` normalises `openbank-clearing-service` to the `clearing` scope for
+ * the base `four_eyes` rule, so a fleet-wide prefix fix (tracked separately, issue #395/#396)
+ * is needed before four-eyes can auto-fire for this rail; until then dual-control on
+ * `settleBatch`/`triggerCycle` is enforced only via the narrow `clearing_rest_ext.rego`
+ * role checks below, not the shared `four_eyes_required` augmentation.
  */
 @Path("/api/v1/clearing")
 @Produces(MediaType.APPLICATION_JSON)
@@ -41,6 +67,7 @@ class ClearingResource(
     @POST
     @Path("/submit")
     @RolesAllowed(Roles.SERVICE, Roles.PAYMENTS, Roles.ADMIN)
+    @Authorize(action = "clearingBatch.submit")
     @Operation(summary = "Submit payment for clearing")
     fun submit(request: SubmitPaymentRequest): Uni<Response> = submitUseCase.submit(request)
         .map { Response.status(Response.Status.CREATED).entity(it).build() }
@@ -49,6 +76,7 @@ class ClearingResource(
     @GET
     @Path("/batches")
     @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
+    @Authorize(action = "clearingBatch.list")
     @Operation(summary = "List clearing batches")
     fun listBatches(
         @QueryParam("status") status: String?,
@@ -59,6 +87,7 @@ class ClearingResource(
     @GET
     @Path("/batches/{id}")
     @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
+    @Authorize(action = "clearingBatch.read", resource = "#id")
     @Operation(summary = "Get clearing batch by ID")
     fun getBatch(@PathParam("id") id: UUID): Uni<Response> = getBatchUseCase.getBatch(id)
         .map { it?.let { b -> Response.ok(b).build() } ?: Response.status(404).build() }
@@ -66,6 +95,7 @@ class ClearingResource(
     @GET
     @Path("/batches/{id}/items")
     @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
+    @Authorize(action = "clearingBatch.readItems", resource = "#id")
     @Operation(summary = "List items in a clearing batch")
     fun getBatchItems(@PathParam("id") id: UUID): Uni<List<ClearingItem>> = getItemUseCase.listItemsByBatch(id)
 
@@ -81,6 +111,7 @@ class ClearingResource(
     @POST
     @Path("/cycle/trigger")
     @RolesAllowed(Roles.PAYMENTS, Roles.ADMIN)
+    @Authorize(action = "clearingBatch.triggerCycle")
     @Operation(summary = "Trigger a clearing cycle for a payment rail")
     fun triggerCycle(@QueryParam("rail") @DefaultValue("SEPA_SCT") rail: String): Uni<Response> =
         triggerUseCase.triggerClearingCycle(PaymentRail.valueOf(rail))
@@ -90,6 +121,7 @@ class ClearingResource(
     @GET
     @Path("/positions/{cycleId}")
     @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
+    @Authorize(action = "clearingBatch.readPositions")
     @Operation(summary = "Get settlement positions for a cycle")
     fun getPositions(@PathParam("cycleId") cycleId: String): Uni<List<SettlementPosition>> =
         positionsUseCase.getPositions(cycleId)
@@ -97,6 +129,7 @@ class ClearingResource(
     @GET
     @Path("/items/{id}")
     @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
+    @Authorize(action = "clearingBatch.readItem", resource = "#id")
     @Operation(summary = "Get clearing item by ID")
     fun getItem(@PathParam("id") id: UUID): Uni<Response> = getItemUseCase.getItem(id)
         .map { it?.let { i -> Response.ok(i).build() } ?: Response.status(404).build() }
@@ -104,6 +137,7 @@ class ClearingResource(
     @GET
     @Path("/items/by-payment/{paymentId}")
     @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
+    @Authorize(action = "clearingBatch.readItemsByPayment", resource = "#paymentId")
     @Operation(summary = "Get clearing items by payment ID")
     fun getItemsByPayment(@PathParam("paymentId") paymentId: UUID): Uni<List<ClearingItem>> =
         getItemUseCase.listItemsByPayment(paymentId)
@@ -111,6 +145,7 @@ class ClearingResource(
     @GET
     @Path("/batches/{id}/reconcile")
     @RolesAllowed(Roles.PAYMENTS, Roles.ADMIN)
+    @Authorize(action = "clearingBatch.reconcile", resource = "#id")
     @Operation(summary = "Run internal reconciliation check for a settled batch")
     fun reconcile(@PathParam("id") id: UUID): Uni<Response> = reconcileUseCase.reconcileBatch(id)
         .map { report ->
