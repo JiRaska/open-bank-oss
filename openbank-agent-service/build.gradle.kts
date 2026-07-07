@@ -59,23 +59,18 @@ dependencies {
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
 }
 
+// Coverage floor (ADR-0020, ratchet-only — sweep #466: was a placebo minValue = 0
+// gate that could never fail). Measured 75.8% LINE coverage (1344/1772) at
+// introduction, no filter excludes; floor set at 70, raise-only from here.
 kover {
     reports {
         verify {
             rule {
                 bound {
-                    minValue = 0
+                    minValue = 70
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }
         }
     }
-}
-
-tasks.named("koverVerify") {
-    enabled = true
-}
-
-tasks.named("check") {
-    dependsOn(tasks.named("koverVerify"))
 }
