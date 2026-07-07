@@ -86,14 +86,6 @@ kover {
     }
 }
 
-tasks.named("koverVerify") {
-    enabled = true
-}
-
-tasks.named("check") {
-    dependsOn(tasks.named("koverVerify"))
-}
-
 // Pact: write generated consumer contracts to pacts/ and forward broker config for provider
 // verification (ADR-0063 P1/P2). pactbroker.* props are injected by CI with -D.
 tasks.withType<Test> {

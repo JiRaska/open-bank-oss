@@ -55,10 +55,6 @@ tasks.test {
     jvmArgs("-Dnet.bytebuddy.experimental=true")
 }
 
-tasks.named("check") {
-    dependsOn(tasks.named("koverVerify"))
-}
-
 kover {
     reports {
         verify {

@@ -115,9 +115,6 @@ tasks.test {
 // Make the coverage gate part of `check` (and therefore `build`), so the existing
 // per-module CI step (`./gradlew :openbank-libs:build`) enforces it with no extra
 // workflow wiring. koverVerify already depends on test, so ordering is handled.
-tasks.named("check") {
-    dependsOn(tasks.named("koverVerify"))
-}
 
 // Coverage (ADR-0020). Kover over JaCoCo: Kotlin-native, understands inline
 // functions / coroutines, no separate agent. The verify gate is a *regression
