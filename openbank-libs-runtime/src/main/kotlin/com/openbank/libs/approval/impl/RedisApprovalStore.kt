@@ -6,6 +6,7 @@ package com.openbank.libs.approval.impl
 
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
+import com.openbank.libs.approval.InvalidApprovalStateException
 import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import com.openbank.libs.domain.identifiers.Ids
@@ -62,6 +63,12 @@ class RedisApprovalStore(private val redis: ReactiveRedisDataSource, private val
     override suspend fun decide(id: String, decidedBy: String, approve: Boolean): PendingApproval? {
         val approval = find(id) ?: return null
         if (decidedBy == approval.makerId) throw SelfApprovalNotAllowedException(approval.makerId)
+        // Code review finding: without this, an already APPROVED/REJECTED/EXECUTED approval
+        // could be re-decided — flipping an EXECUTED record back to APPROVED and letting the
+        // maker replay the original request through AuthorizeInterceptor a second time.
+        if (approval.status != ApprovalStatus.PENDING) {
+            throw InvalidApprovalStateException(id, ApprovalStatus.PENDING, approval.status)
+        }
         val decided = approval.copy(
             status = if (approve) ApprovalStatus.APPROVED else ApprovalStatus.REJECTED,
             decidedBy = decidedBy,
@@ -73,6 +80,12 @@ class RedisApprovalStore(private val redis: ReactiveRedisDataSource, private val
 
     override suspend fun markExecuted(id: String): PendingApproval? {
         val approval = find(id) ?: return null
+        // Defense-in-depth: AuthorizeInterceptor only calls this after its own status==APPROVED
+        // check, but a second concurrent consumption attempt on the same approval must not
+        // silently succeed twice — reject instead of overwriting an already-EXECUTED record.
+        if (approval.status != ApprovalStatus.APPROVED) {
+            throw InvalidApprovalStateException(id, ApprovalStatus.APPROVED, approval.status)
+        }
         val executed = approval.copy(status = ApprovalStatus.EXECUTED)
         save(executed, DECIDED_TTL_SECONDS)
         return executed

@@ -32,20 +32,38 @@ data class PendingApproval(
 class SelfApprovalNotAllowedException(makerId: String) :
     IllegalStateException("principal '$makerId' cannot approve/reject their own request (segregation of duties)")
 
+/**
+ * A [PendingApproval] was not in the required status for the attempted transition
+ * (code review finding: without this, [ApprovalStore.decide] could re-decide an
+ * already-EXECUTED approval, flipping it back to APPROVED and letting the maker
+ * replay the original request a second time — the "one-time consumption" contract
+ * on [ApprovalStore.markExecuted] was documented but not actually enforced).
+ */
+class InvalidApprovalStateException(id: String, expected: ApprovalStatus, actual: ApprovalStatus) :
+    IllegalStateException("approval '$id' must be $expected for this operation, but is $actual")
+
 interface ApprovalStore {
     suspend fun create(action: String, resourceId: String?, makerId: String, ttlSeconds: Long = 86400): PendingApproval
 
     suspend fun find(id: String): PendingApproval?
 
     /**
-     * Records a checker's decision.
+     * Records a checker's decision. An approval can only ever be decided once.
      *
      * @throws SelfApprovalNotAllowedException if [decidedBy] is the original maker —
      *   enforced here, not just by the caller's REST layer, so segregation of duties
      *   holds even if a service's endpoint forgets to re-check it.
+     * @throws InvalidApprovalStateException if the approval is not currently PENDING —
+     *   prevents re-deciding an already APPROVED/REJECTED/EXECUTED approval, which would
+     *   otherwise let a consumed approval be replayed.
      */
     suspend fun decide(id: String, decidedBy: String, approve: Boolean): PendingApproval?
 
-    /** One-time consumption: an EXECUTED approval can never be replayed. */
+    /**
+     * One-time consumption: an EXECUTED approval can never be replayed.
+     *
+     * @throws InvalidApprovalStateException if the approval is not currently APPROVED —
+     *   e.g. a concurrent second consumption attempt on the same approval.
+     */
     suspend fun markExecuted(id: String): PendingApproval?
 }

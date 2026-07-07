@@ -6,7 +6,9 @@ package com.openbank.libs.authz
 
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
+import com.openbank.libs.approval.InvalidApprovalStateException
 import com.openbank.libs.approval.PendingApproval
+import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.security.identity.SecurityIdentity
@@ -275,6 +277,10 @@ class AuthorizeInterceptorTest {
 
         override suspend fun decide(id: String, decidedBy: String, approve: Boolean): PendingApproval? {
             val approval = approvals[id] ?: return null
+            if (decidedBy == approval.makerId) throw SelfApprovalNotAllowedException(approval.makerId)
+            if (approval.status != ApprovalStatus.PENDING) {
+                throw InvalidApprovalStateException(id, ApprovalStatus.PENDING, approval.status)
+            }
             val decided = approval.copy(
                 status = if (approve) ApprovalStatus.APPROVED else ApprovalStatus.REJECTED,
                 decidedBy = decidedBy,
@@ -285,6 +291,9 @@ class AuthorizeInterceptorTest {
 
         override suspend fun markExecuted(id: String): PendingApproval? {
             val approval = approvals[id] ?: return null
+            if (approval.status != ApprovalStatus.APPROVED) {
+                throw InvalidApprovalStateException(id, ApprovalStatus.APPROVED, approval.status)
+            }
             val executed = approval.copy(status = ApprovalStatus.EXECUTED)
             approvals[id] = executed
             return executed
@@ -355,6 +364,37 @@ class AuthorizeInterceptorTest {
         val result = interceptor.authorize(makeCtx(annotatedMethod))
         assertThat(result).isEqualTo("ok")
         assertThat(runBlocking { store.find(pending.id) }?.status).isEqualTo(ApprovalStatus.EXECUTED)
+    }
+
+    @Test
+    fun `code review fix - decide on an already-EXECUTED approval throws instead of replaying it`() {
+        // Regression test for the replay bug: decide() used to unconditionally overwrite
+        // status, so re-deciding an EXECUTED approval flipped it back to APPROVED and let the
+        // maker replay the same X-Approval-Id to execute the gated action a second time.
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val store = FakeApprovalStore()
+        wirePdpAndStore(store)
+
+        val pending = runBlocking { store.create("party.read", null, "user-42") }
+        runBlocking { store.decide(pending.id, "checker-99", approve = true) }
+        interceptor.httpHeaders = mockk {
+            every { isResolvable } returns true
+            every { get() } returns mockk { every { getRequestHeader("X-Approval-Id") } returns listOf(pending.id) }
+        }
+        interceptor.authorize(makeCtx(annotatedMethod)) // consumes it: APPROVED -> EXECUTED
+
+        assertThatThrownBy { runBlocking { store.decide(pending.id, "checker-100", approve = true) } }
+            .isInstanceOf(InvalidApprovalStateException::class.java)
+        assertThat(runBlocking { store.find(pending.id) }?.status).isEqualTo(ApprovalStatus.EXECUTED)
+    }
+
+    @Test
+    fun `code review fix - markExecuted throws when the approval is not APPROVED`() {
+        val store = FakeApprovalStore()
+        val pending = runBlocking { store.create("party.read", null, "user-42") } // still PENDING
+
+        assertThatThrownBy { runBlocking { store.markExecuted(pending.id) } }
+            .isInstanceOf(InvalidApprovalStateException::class.java)
     }
 
     @Test

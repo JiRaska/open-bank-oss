@@ -222,7 +222,22 @@ class AuthorizeInterceptor {
         decision: AuthzDecision,
     ): Any? {
         val fourEyesRequired = decision.attributes["four_eyes_required"] == true
-        if (!fourEyesRequired || !fourEyesEnforce || !approvalStore.isResolvable) {
+        if (!fourEyesRequired || !fourEyesEnforce) {
+            return ctx.proceed()
+        }
+        if (!approvalStore.isResolvable) {
+            // Code review finding: this used to fall into the same silent-proceed branch as
+            // "four-eyes not required" / "not enforced", with no log at all — indistinguishable
+            // from a service correctly not opting in. Mirrors the log.errorf the PDP-missing
+            // branch above already uses for an analogous misconfiguration; still proceeds
+            // (ADR-0155 D3 deliberately keeps this a no-op, not a fail-closed 503) but now at
+            // least leaves an operator-visible trail that four-eyes was supposed to gate this.
+            log.errorf(
+                "four-eyes: action=%s is flagged four_eyes_required with authz.four-eyes.enforce=true, " +
+                    "but no ApprovalStore bean is wired — proceeding WITHOUT the second-approver gate. " +
+                    "Wire an ApprovalStore for this service or set authz.four-eyes.enforce=false until it is.",
+                annotation.action,
+            )
             return ctx.proceed()
         }
         val store = approvalStore.get()
