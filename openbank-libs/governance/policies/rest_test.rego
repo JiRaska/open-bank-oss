@@ -29,11 +29,30 @@ rules := {
 }
 
 # Mock mirroring the REAL rules.yaml shape — money_path_services uses the module name
-# (openbank-ledger-service), which rest.rego normalises to the action scope (ledger).
-# Also carries the feature_flags block (issue #419).
+# (openbank-ledger-service), which rest.rego normalises to the action scope (ledger), or
+# the money_path_action_prefixes override for the 5 services whose real @Authorize
+# prefix differs from that derived name (issue #395). Also carries the feature_flags
+# block (issue #419).
 rules_real := {
-	"money_path_services": ["openbank-ledger-service", "openbank-sepa-payment"],
-	"four_eyes": {"verbs": ["transfer", "post", "flip"]},
+	"money_path_services": [
+		"openbank-ledger-service",
+		"openbank-sepa-payment",
+		"openbank-sepa-instant",
+		"openbank-domestic-payment",
+		"openbank-clearing-service",
+		"openbank-sca-service",
+	],
+	"money_path_action_prefixes": {
+		"sepa-payment": ["sepaPayment"],
+		"sepa-instant": ["sctInstPayment"],
+		"domestic-payment": ["domesticPayment"],
+		"clearing": ["clearingBatch"],
+		"sca": ["device", "scaChallenge"],
+	},
+	"four_eyes": {"verbs": [
+		"transfer", "post", "reverse", "freeze", "release", "flip",
+		"transitionStatus", "recall", "settle", "disburse", "send", "credit", "debit",
+	]},
 	"feature_flags": {
 		"prohibited_flag_combinations": [
 			"sca-enforcement-disabled",
@@ -223,15 +242,95 @@ test_four_eyes_not_required_for_ledger_read if {
 # Name normalisation (issue #419): the REAL rules.yaml lists money_path_services as module
 # names (openbank-ledger-service); rest.rego must normalise them to the action scope so the
 # four-eyes prefix match still fires. Without normalisation these would silently not match.
+# Uses "ledger.reverse" — the actual @Authorize string in LedgerResource.kt (issue #395;
+# "ledger.post" was never a real action, so a passing test here previously proved nothing
+# about the fleet).
 # ---------------------------------------------------------------------------------------
 test_four_eyes_required_with_real_module_names if {
-	rest.four_eyes_required with input as {"action": "ledger.post"}
+	rest.four_eyes_required with input as {"action": "ledger.reverse"}
 		with data.rules as rules_real
 }
 
-test_four_eyes_required_sepa_payment_real_names if {
-	rest.four_eyes_required with input as {"action": "sepa-payment.transfer"}
+# ---------------------------------------------------------------------------------------
+# money_path_action_prefixes override (issue #395): pins each overridden service's REAL
+# @Authorize action against the actual source file, so a future rename that isn't matched
+# by an update here goes red instead of silently disabling four-eyes again.
+# ---------------------------------------------------------------------------------------
+test_four_eyes_required_sepa_payment_real_action if {
+	# SepaPaymentResource.kt: @Authorize(action = "sepaPayment.transitionStatus", ...)
+	rest.four_eyes_required with input as {"action": "sepaPayment.transitionStatus"}
 		with data.rules as rules_real
+}
+
+test_four_eyes_required_sepa_instant_real_action if {
+	# SctInstResource.kt: @Authorize(action = "sctInstPayment.recall", ...)
+	rest.four_eyes_required with input as {"action": "sctInstPayment.recall"}
+		with data.rules as rules_real
+}
+
+test_four_eyes_required_domestic_payment_real_action if {
+	# DomesticPaymentResource.kt: @Authorize(action = "domesticPayment.transitionStatus", ...)
+	rest.four_eyes_required with input as {"action": "domesticPayment.transitionStatus"}
+		with data.rules as rules_real
+}
+
+test_four_eyes_required_clearing_real_action if {
+	# ClearingResource.kt: @Authorize(action = "clearingBatch.settle", ...)
+	rest.four_eyes_required with input as {"action": "clearingBatch.settle"}
+		with data.rules as rules_real
+}
+
+# money_path_scopes uses the override prefix INSTEAD OF the derived name — the derived
+# name never appears in any real @Authorize action for these 5 services, so keeping it
+# in the set too would just be dead weight.
+test_money_path_scopes_uses_override_prefix_not_derived_name if {
+	"sepaPayment" in rest.money_path_scopes with data.rules as rules_real
+	not "sepa-payment" in rest.money_path_scopes with data.rules as rules_real
+}
+
+# A service with no override keeps using its derived name (unaffected by the override table).
+test_money_path_scopes_keeps_derived_name_when_no_override if {
+	"ledger" in rest.money_path_scopes with data.rules as rules_real
+}
+
+# sca's override lists TWO real prefixes (device, scaChallenge) — neither is a casing
+# variant of "sca", which never appears as an action prefix in the real service at all.
+test_money_path_scopes_supports_multiple_override_prefixes if {
+	"device" in rest.money_path_scopes with data.rules as rules_real
+	"scaChallenge" in rest.money_path_scopes with data.rules as rules_real
+	not "sca" in rest.money_path_scopes with data.rules as rules_real
+}
+
+# ---------------------------------------------------------------------------------------
+# End-to-end wiring (issue #395): four_eyes_required must reach the actual `allow` object
+# an OpaSidecarPolicyDecisionPoint caller receives, not just the standalone rule — the
+# bug this closes was that `allow` never carried an "attributes" key at all.
+# ---------------------------------------------------------------------------------------
+test_allow_attributes_surface_four_eyes_required if {
+	decision := rest.allow with input as {
+		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "attributes": {"tenant": "t-1"}},
+		"action": "ledger.reverse",
+		"resource": {"type": "ledger", "id": "j-1", "attributes": {"tenant": "t-1"}},
+	}
+		with data.openbank.bundle as bundle
+		with data.rules as rules_real
+
+	decision.allow == true
+	decision.attributes.four_eyes_required == true
+}
+
+# Sparse by design: no attributes key content when four-eyes isn't required.
+test_allow_attributes_empty_when_four_eyes_not_required if {
+	decision := rest.allow with input as {
+		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "attributes": {"tenant": "t-1"}},
+		"action": "party.update",
+		"resource": {"type": "party", "id": "p-1", "attributes": {"tenant": "t-1"}},
+	}
+		with data.openbank.bundle as bundle
+		with data.rules as rules_real
+
+	decision.allow == true
+	decision.attributes == {}
 }
 
 # ---------------------------------------------------------------------------------------
@@ -337,12 +436,16 @@ test_operator_own_tenant_may_flip_non_prohibited if {
 }
 
 # ---------------------------------------------------------------------------------------
-# edge-service-notification: the customer-edge M2M principal (ROLE_SERVICE) may call the
-# notification/device families on the customer's behalf; anything else stays denied.
+# edge-service-notification: the customer-edge M2M caller presents a client_credentials
+# JWT that AuthorizeInterceptor classifies as HUMAN, principal.id
+# "service-account-openbank-edge" (Keycloak never issues ROLE_SERVICE, and
+# principalType() never emits "SERVICE" — see rest.rego). The rule matches on that exact
+# identity, NOT on ROLE_OPERATOR alone — a real operator/admin also carries ROLE_OPERATOR
+# and must NOT gain this rule's device.enroll reach (test_deny_operator_* below).
 # ---------------------------------------------------------------------------------------
 test_allow_service_notification_mark_read if {
 	decision := rest.allow with input as {
-		"principal": {"id": "svc-edge", "type": "SERVICE", "roles": ["ROLE_SERVICE"]},
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "notification.mark-read",
 		"resource": {"type": "notification", "id": "n-1"},
 	}
@@ -354,7 +457,7 @@ test_allow_service_notification_mark_read if {
 
 test_allow_service_notification_list if {
 	decision := rest.allow with input as {
-		"principal": {"id": "svc-edge", "type": "SERVICE", "roles": ["ROLE_SERVICE"]},
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "notification.list",
 	}
 		with data.openbank.bundle as bundle
@@ -364,7 +467,7 @@ test_allow_service_notification_list if {
 
 test_allow_service_device_list if {
 	decision := rest.allow with input as {
-		"principal": {"id": "svc-edge", "type": "SERVICE", "roles": ["ROLE_SERVICE"]},
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "device.list",
 	}
 		with data.openbank.bundle as bundle
@@ -372,19 +475,21 @@ test_allow_service_device_list if {
 	decision.allow == true
 }
 
-# The rule must NOT open other action families to M2M callers (deny-by-default holds).
+# The rule must NOT open other action families to the edge M2M caller (deny-by-default
+# holds) — operator-read-any also does not cover a write like party.update.
 test_deny_service_outside_notification_family if {
 	not rest.allow with input as {
-		"principal": {"id": "svc-edge", "type": "SERVICE", "roles": ["ROLE_SERVICE"]},
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "party.update",
 		"resource": {"type": "party", "id": "p-1"},
 	}
 }
 
-# A SERVICE principal WITHOUT ROLE_SERVICE gets nothing from this rule.
-test_deny_service_without_role if {
+# A SERVICE-typed principal (should one ever reach OPA) gets NOTHING from this rule —
+# it is intentionally HUMAN-only, matching what AuthorizeInterceptor actually emits.
+test_deny_service_typed_principal_never_matches if {
 	not rest.allow with input as {
-		"principal": {"id": "svc-x", "type": "SERVICE", "roles": []},
+		"principal": {"id": "service-account-openbank-edge", "type": "SERVICE", "roles": ["ROLE_OPERATOR"]},
 		"action": "notification.list",
 	}
 }
@@ -487,4 +592,28 @@ test_deny_ai_agent_charter_denied_tool_via_bridge if {
 			],
 			"tool_tiers": {"deny": []},
 		}
+}
+
+# A real operator/admin staff member (ROLE_OPERATOR, but NOT the edge's identity) must
+# NOT gain this rule's reach — critically, must NOT be able to device.enroll (SCA
+# WebAuthn registration is an account-takeover primitive if grantable to arbitrary staff).
+# See also test_deny_operator_read_any_does_not_cover_write above for the same invariant.
+test_deny_human_operator_who_is_not_the_edge if {
+	not rest.allow with input as {
+		"principal": {"id": "operator-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "device.enroll",
+		"resource": {"type": "device", "id": "any-party-id"},
+	}
+}
+
+# A HUMAN caller with the edge's identity but somehow missing ROLE_OPERATOR is still
+# irrelevant to this rule — it gates on identity, not role, and must still allow.
+test_allow_edge_identity_without_explicit_operator_role_check if {
+	decision := rest.allow with input as {
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": []},
+		"action": "notification.list",
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
 }

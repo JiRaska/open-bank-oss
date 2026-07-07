@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.6](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.6.5...clearing-service-v0.6.6) (2026-07-07)
+
+
+### Security
+
+* **clearing:** enforce OPA authorization on clearing endpoints (ADR-0034 Phase 5) ([#405](https://github.com/JiRaska/open-bank-oss/issues/405)) ([eafc348](https://github.com/JiRaska/open-bank-oss/commit/eafc3482cb94a03efa9705f829ec0608a560487c))
+
 ## [0.6.5](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.6.4...clearing-service-v0.6.5) (2026-07-02)
 
 

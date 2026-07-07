@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SEPA Payment Service API
-  version: 1.2.0
+  version: 1.2.1
   description: >-
     SEPA credit transfer lifecycle — create, query, status transitions. On create, debtor and
     creditor names are synchronously screened against the sanctions lists (ADR-0032): a clean payment
@@ -47,6 +47,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SepaPaymentResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '409':
           description: Idempotent replay
     get:
@@ -83,6 +85,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/SepaPaymentResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/sepa-payments/returns:
     post:
@@ -107,6 +111,8 @@ paths:
                 $ref: '#/components/schemas/SepaPaymentResponse'
         '400':
           description: Invalid pacs.004 or unknown endToEndId
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -126,6 +132,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SepaPaymentResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -151,6 +159,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SepaPaymentResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
 components:
   securitySchemes:
@@ -169,6 +179,12 @@ components:
         format: uuid
 
   responses:
+    Forbidden:
+      description: Authenticated but denied by the OPA authorization policy (ADR-0034)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
     NotFound:
       description: Not found
       content:

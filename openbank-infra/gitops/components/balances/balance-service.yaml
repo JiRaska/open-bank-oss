@@ -4,8 +4,9 @@
 # the Strimzi Kafka bus. OIDC bearer-token validation points at Keycloak over the
 # in-cluster http leg. account-service seeds pocket balances here on account open
 # (best-effort) and the balance projection also reconstructs from
-# `openbank.accounts.account.created`. Endpoints are unsecured for now (no
-# @RolesAllowed) — reachable only in-cluster via ClusterIP, no ingress.
+# `openbank.accounts.account.created`. Every endpoint is @RolesAllowed AND, as of
+# ADR-0034 Phase 5 (issue #266), OPA-enforced (AUTHZ_ENFORCE=true) — reachable
+# only in-cluster via ClusterIP, no ingress.
 # Progressive delivery: Deployment→Rollout (ADR-0098 Phase 3). Dual Services preserve DNS.
 apiVersion: argoproj.io/v1alpha1
 kind: Rollout
@@ -30,6 +31,10 @@ spec:
       labels:
         app.kubernetes.io/name: balance-service
         app.kubernetes.io/part-of: balances
+      annotations:
+        # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-balance-opa-bundle.sh (do not hand-edit).
+        openbank.tech/policy-checksum: "2602d9cef2f2d216"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -113,6 +118,13 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
+            # enables the @Authorize HTTP interceptor to enforce decisions from
+            # data.openbank.rest.allow. RBAC via OIDC remains the outer gate; OPA is the
+            # fine-grained PEP. The money-path canary analysis (openbank-money-path-canary)
+            # aborts the rollout if enforce regresses the error rate.
+            - name: AUTHZ_ENFORCE
+              value: "true"
           startupProbe:
             tcpSocket:
               port: management
@@ -156,9 +168,87 @@ spec:
             limits:
               cpu: "1"
               memory: 768Mi
+        # OPA policy-decision sidecar (ADR-0034). Serves data.openbank.rest.allow for
+        # all @Authorize-annotated endpoints in balance-service (balance.*). Bundle
+        # mounted from balance-opa-bundle ConfigMap (gen-balance-opa-bundle.sh).
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            # Bind on the pod network (not 127.0.0.1) so kubelet httpGet probes reach
+            # /health. The image is scratch (no shell), so an exec probe isn't possible.
+            # Reachability is fenced by the NetworkPolicy; OPA serves only policy decisions.
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/balance_rest_ext.rego
+              subPath: balance_rest_ext.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            # OPA writes temp files during bundle load — required with readOnlyRootFilesystem.
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: balance-opa-bundle
         - name: kafka-keystore
           secret:
             secretName: balance-service-kafka-keystore

@@ -65,6 +65,7 @@ jobs:
           # Digest comes straight from the buildx push metadata — no aws CLI /
           # ECR describe round-trip (jq is baked into the runner image).
           DIGEST="$(jq -r '."containerimage.digest"' /tmp/buildx-meta.json)"
+          echo "IMAGE_DIGEST_REF=${IMAGE}@${DIGEST}" >> "$GITHUB_ENV"
           {
             echo "## Runner image pushed"
             echo ""
@@ -72,3 +73,36 @@ jobs:
             echo ""
             echo "Pin this digest in \`local.runner_image\` (arc-runners.tf) and \`tofu apply\`."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Supply-chain provenance for the runner image itself (ADR-0030 D4 step 4, issue #310).
+      # The kyverno attestation policy (verify-openbank-image-sbom-attestation, Audit) matches
+      # openbank-* — the ci-runner image was the last fleet image with neither a signature nor
+      # a CycloneDX SBOM attestation, so the Audit PolicyReport could never reach 0 fail and the
+      # Enforce graduation stayed blocked. Same KMS key + trivy pattern as auto-deploy.yml.
+      # Non-fatal (continue-on-error): a cosign/trivy hiccup must never block a runner rebuild;
+      # the PolicyReport surfaces a missed attestation on the next audit pass anyway.
+      - name: Sign + attest runner image SBOM (cosign + KMS)
+        timeout-minutes: 15
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          COSIGN_KEY="awskms:///alias/openbank-cosign-signing"
+          COSIGN_VERSION="v2.4.3"
+          arch="$(uname -m)"; case "$arch" in aarch64) arch=arm64 ;; x86_64) arch=amd64 ;; esac
+          bin="$(command -v cosign || true)"
+          if ! { [ -n "$bin" ] && cosign version 2>/dev/null | grep -Eq 'GitVersion:[[:space:]]*v2\.'; }; then
+            bin="${RUNNER_TEMP}/cosign2"
+            curl -fsSL -o "$bin" "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-${arch}"
+            chmod +x "$bin"
+          fi
+          echo "==> cosign sign ${IMAGE_DIGEST_REF}"
+          COSIGN_YES=true "$bin" sign --key "$COSIGN_KEY" "$IMAGE_DIGEST_REF" \
+            || echo "::warning::cosign sign failed"
+          sbom="${RUNNER_TEMP}/ci-runner.cdx.json"
+          if trivy image --format cyclonedx --output "$sbom" "$IMAGE_DIGEST_REF" 2>/dev/null; then
+            echo "==> cosign attest (cyclonedx) ${IMAGE_DIGEST_REF}"
+            COSIGN_YES=true "$bin" attest --key "$COSIGN_KEY" --type cyclonedx --predicate "$sbom" "$IMAGE_DIGEST_REF" \
+              || echo "::warning::cosign attest failed"
+          else
+            echo "::warning::trivy image SBOM generation failed — attestation skipped"
+          fi
