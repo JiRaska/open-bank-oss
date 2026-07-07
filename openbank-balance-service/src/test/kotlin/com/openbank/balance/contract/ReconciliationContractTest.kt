@@ -22,8 +22,9 @@ class ReconciliationContractTest {
     @Test
     fun `contract version is bumped for the reconciliation change`() {
         val version = Regex("""(?m)^\s+version:\s*"?([^"\s]+)"?\s*$""").find(openapi)?.groupValues?.get(1)
-        // 1.4.0: minor bump for the documented credit/debit idempotency-on-referenceId guarantee.
-        assertEquals("1.4.0", version)
+        // 1.4.1: editorial bump for the 403 Forbidden documentation added across every operation
+        // (ADR-0034 Phase 5, issue #266 — OPA enforcement). No schema/behavior change.
+        assertEquals("1.4.1", version)
     }
 
     @Test
