@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.3](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.10.2...ledger-service-v1.10.3) (2026-07-07)
+
+
+### Security
+
+* **ledger:** enforce OPA authorization on ledger endpoints (ADR-0034 Phase 5) ([#411](https://github.com/JiRaska/open-bank-oss/issues/411)) ([73a4771](https://github.com/JiRaska/open-bank-oss/commit/73a47711b52583dfb97b57c3130031449c90df09)), closes [#266](https://github.com/JiRaska/open-bank-oss/issues/266)
+
 ## [1.10.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.10.1...ledger-service-v1.10.2) (2026-07-07)
 
 
