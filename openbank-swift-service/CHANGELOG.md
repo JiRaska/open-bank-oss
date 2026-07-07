@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.8](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.6.7...swift-service-v0.6.8) (2026-07-07)
+
+
+### Security
+
+* **swift:** enforce OPA authorization on SWIFT endpoints (ADR-0034 Phase 5) ([#418](https://github.com/JiRaska/open-bank-oss/issues/418)) ([cf4f060](https://github.com/JiRaska/open-bank-oss/commit/cf4f06089ec728020ad8db545b8b1a78c26066e8))
+
 ## [0.6.7](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.6.6...swift-service-v0.6.7) (2026-07-03)
 
 
