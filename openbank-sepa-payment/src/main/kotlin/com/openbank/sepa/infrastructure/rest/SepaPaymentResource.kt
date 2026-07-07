@@ -44,6 +44,7 @@ class SepaPaymentResource(
 
     @POST
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
+    @Authorize(action = "sepaPayment.create")
     @Operation(summary = "Create a SEPA payment")
     suspend fun createPayment(
         request: CreateSepaPaymentRequest,
@@ -71,12 +72,14 @@ class SepaPaymentResource(
     @GET
     @Path("/{paymentId}")
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
+    @Authorize(action = "sepaPayment.read", resource = "#paymentId")
     @Operation(summary = "Get a SEPA payment by ID")
     suspend fun getPayment(@PathParam("paymentId") paymentId: UUID): Response =
         Response.ok(paymentUseCase.getPayment(paymentId).toResponse()).build()
 
     @GET
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_SERVICE")
+    @Authorize(action = "sepaPayment.list")
     @Operation(summary = "List SEPA payments")
     suspend fun listPayments(
         @QueryParam("status") status: String?,
@@ -113,6 +116,7 @@ class SepaPaymentResource(
     @Consumes(MediaType.APPLICATION_XML)
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed("ROLE_SERVICE", "ROLE_ADMIN")
+    @Authorize(action = "sepaPayment.handleReturn")
     @Operation(summary = "Handle inbound pacs.004 payment return from clearing")
     suspend fun handlePaymentReturn(pacs004Xml: String): Response {
         val payment = paymentUseCase.handlePaymentReturn(HandlePaymentReturnCommand(pacs004Xml))
