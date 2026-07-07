@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.10.1...ledger-service-v1.10.2) (2026-07-07)
+
+
+### Bug Fixes
+
+* **ledger:** define missing Unauthorized/Forbidden response components in openapi.yaml ([#306](https://github.com/JiRaska/open-bank-oss/issues/306)) ([7513884](https://github.com/JiRaska/open-bank-oss/commit/7513884dbc4aaf5e1a9a3bda37518724029cbd1d))
+
 ## [1.10.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.10.0...ledger-service-v1.10.1) (2026-07-02)
 
 
