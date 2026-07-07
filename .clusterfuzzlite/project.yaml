@@ -1,0 +1,2 @@
+# ClusterFuzzLite project config — language selects the Jazzer/JVM toolchain.
+language: jvm
