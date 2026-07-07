@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: FX Service API
-  version: 1.2.0
+  version: 1.2.1
   description: >-
     Foreign exchange rates and currency conversion. On convert, the converting party's name is
     synchronously screened against the sanctions lists (ADR-0032): a clean party settles the
@@ -28,6 +28,8 @@ paths:
       responses:
         '200':
           description: All rates
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/fx/rates/{base}/{quote}:
     get:
@@ -56,6 +58,8 @@ paths:
                 $ref: '#/components/schemas/ExchangeRateResponse'
         '404':
           $ref: '#/components/responses/NotFound'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/fx/convert:
     post:
@@ -81,6 +85,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConversionResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/fx/rates/{base}/{quote}/history:
     get:
@@ -133,6 +139,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/fx/conversions/{id}:
     get:
@@ -153,11 +161,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConversionResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
 components:
   responses:
     NotFound:
       description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Forbidden:
+      description: Forbidden — the OPA policy decision denied this action (ADR-0034)
       content:
         application/json:
           schema:
