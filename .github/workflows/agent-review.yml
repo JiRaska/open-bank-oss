@@ -166,7 +166,7 @@ jobs:
         id: ghmodels
         if: steps.scope.outputs.skip == 'false'
         continue-on-error: true   # any failure → Claude fallback
-        uses: actions/ai-inference@v1
+        uses: actions/ai-inference@v2
         with:
           model: openai/gpt-4o
           prompt-file: /tmp/prompt.txt
