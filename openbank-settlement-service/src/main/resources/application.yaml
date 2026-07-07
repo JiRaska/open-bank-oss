@@ -43,6 +43,13 @@ openbank:
       debit-account-id: "${SETTLEMENT_GL_DEBIT_ACCOUNT_ID:a0000000-0000-0000-0000-000000000002}"
       credit-account-id: "${SETTLEMENT_GL_CREDIT_ACCOUNT_ID:a0000000-0000-0000-0000-000000000002}"
 
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:false}"
+
 "%test":
   quarkus:
     oidc:
