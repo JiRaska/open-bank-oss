@@ -14,6 +14,10 @@ import io.mockk.verify
 import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.security.KeyPairGenerator
+import java.security.spec.ECGenParameterSpec
+import java.util.Base64
+import java.util.Optional
 
 class PushSenderTest {
 
@@ -24,6 +28,23 @@ class PushSenderTest {
 
     private fun msg(platform: PushPlatform) =
         PushMessage(platform, "tok", "Title", "Body", mapOf("template" to "WELCOME"))
+
+    /** A syntactically valid (but freshly generated, throwaway) PKCS#8 RSA private key, base64. */
+    private fun fakeRsaPkcs8Base64(): String {
+        val pair = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
+        return Base64.getEncoder().encodeToString(pair.private.encoded)
+    }
+
+    /**
+     * A syntactically valid (but freshly generated, throwaway) PKCS#8 EC (P-256) private key, as
+     * PEM text — [ApnsPushSender.parseKey] only skips its (buggy for bare base64) double-decode
+     * path when the value contains a "BEGIN" marker, matching how a real .p8 file is supplied.
+     */
+    private fun fakeEcPkcs8Pem(): String {
+        val gen = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }
+        val b64 = Base64.getEncoder().encodeToString(gen.generateKeyPair().private.encoded)
+        return "-----BEGIN PRIVATE KEY-----\n$b64\n-----END PRIVATE KEY-----"
+    }
 
     // --- FCM response mapping ---
 
@@ -63,6 +84,38 @@ class PushSenderTest {
         assertThat(result.skipped).isTrue()
     }
 
+    @Test
+    fun `fcm enabled but no service account configured fails closed with a CONFIG error`() {
+        val result = fcm().also { it.enabled = true }.send(msg(PushPlatform.FCM)).await().indefinitely()
+        assertThat(result.success).isFalse()
+        assertThat(result.errorCode).isEqualTo("CONFIG")
+    }
+
+    @Test
+    fun `fcm enabled with an unparsable service account JSON fails closed instead of throwing`() {
+        val result = fcm().also {
+            it.enabled = true
+            it.serviceAccountJson = Optional.of("not valid json")
+        }.send(msg(PushPlatform.FCM)).await().indefinitely()
+
+        assertThat(result.success).isFalse()
+        assertThat(result.errorCode).isEqualTo("CONFIG")
+    }
+
+    @Test
+    fun `fcm enabled with a service account that has no projectId and no override fails closed`() {
+        val result = fcm().also {
+            it.enabled = true
+            it.serviceAccountJson = Optional.of(
+                """{"client_email":"sa@x.iam.gserviceaccount.com","private_key":"${fakeRsaPkcs8Base64()}"}""",
+            )
+        }.send(msg(PushPlatform.FCM)).await().indefinitely()
+
+        assertThat(result.success).isFalse()
+        assertThat(result.errorCode).isEqualTo("CONFIG")
+        assertThat(result.errorMessage).contains("projectId")
+    }
+
     // --- APNs response mapping ---
 
     @Test
@@ -97,6 +150,36 @@ class PushSenderTest {
         val result = apns().also { it.enabled = false }.send(msg(PushPlatform.APNS)).await().indefinitely()
         assertThat(result.success).isTrue()
         assertThat(result.skipped).isTrue()
+    }
+
+    @Test
+    fun `apns enabled but no signing key configured fails closed with a CONFIG error`() {
+        val result = apns().also { it.enabled = true }.send(msg(PushPlatform.APNS)).await().indefinitely()
+        assertThat(result.success).isFalse()
+        assertThat(result.errorCode).isEqualTo("CONFIG")
+    }
+
+    @Test
+    fun `apns enabled with an unparsable signing key fails closed instead of throwing`() {
+        val result = apns().also {
+            it.enabled = true
+            it.privateKeyPem = Optional.of("not a valid key")
+        }.send(msg(PushPlatform.APNS)).await().indefinitely()
+
+        assertThat(result.success).isFalse()
+        assertThat(result.errorCode).isEqualTo("CONFIG")
+    }
+
+    @Test
+    fun `apns enabled with a valid key but missing keyId and teamId fails closed`() {
+        val result = apns().also {
+            it.enabled = true
+            it.privateKeyPem = Optional.of(fakeEcPkcs8Pem())
+        }.send(msg(PushPlatform.APNS)).await().indefinitely()
+
+        assertThat(result.success).isFalse()
+        assertThat(result.errorCode).isEqualTo("CONFIG")
+        assertThat(result.errorMessage).contains("keyId")
     }
 
     // --- Router ---
