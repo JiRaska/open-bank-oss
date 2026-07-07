@@ -152,7 +152,7 @@ jobs:
             http://localhost:8080/realms/openbank/protocol/openid-connect/token \
             -d grant_type=client_credentials \
             -d client_id=openbank-services \
-            -d client_secret="${OIDC_CLIENT_SECRET}" | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')"
+            -d client_secret="${OIDC_CLIENT_SECRET}" | jq -r '.access_token')"
           if [ -z "${TOKEN:-}" ] || [ "$TOKEN" = "None" ]; then
             echo "::error::could not obtain a bearer token from Keycloak"; exit 1
           fi
