@@ -372,6 +372,8 @@ spec:
       ports:
         - protocol: TCP
           port: 8138
+        - protocol: TCP
+          port: 8181
     - from:
         - namespaceSelector:
             matchLabels:
