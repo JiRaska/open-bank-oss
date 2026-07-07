@@ -113,3 +113,12 @@ OUT=$REPO/openbank-infra/gitops/components/pid/pid-opa-bundle.yaml
 } > "$OUT"
 
 echo "wrote $OUT (checksum $CHECKSUM)"
+
+# Sync the Deployment pod-roll annotation so a policy change always triggers a rollout
+# (subPath mounts do NOT hot-reload — a stale annotation means pods keep the old policy).
+DEPLOY=$REPO/openbank-infra/gitops/components/pid/pid-service.yaml
+if [ -f "$DEPLOY" ]; then
+  sed -i.bak "s|openbank.tech/policy-checksum: \"[^\"]*\"|openbank.tech/policy-checksum: \"$CHECKSUM\"|" "$DEPLOY"
+  rm -f "${DEPLOY}.bak"
+  echo "patched $DEPLOY annotation → $CHECKSUM"
+fi
