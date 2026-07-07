@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: lending-service
     app.kubernetes.io/part-of: lending
   annotations:
-    openbank.tech/policy-checksum: "724d123298c17601"
+    openbank.tech/policy-checksum: "142ddf605fe0eba7"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -996,6 +996,25 @@ data:
           - "docs/threat-models/<service>.md present/updated"   # ADR-0030 D2
         gate: threat-model
         enforced: enforce                   # check-threat-models.py live in CI; all 13 money-path services have valid threat models
+      trust_boundary_diff_change:
+        # ADR-0030 D2, diff-aware half (issue #265). The coverage gate above proves a threat
+        # model EXISTS; this one proves it is UPDATED in the same PR when a money-path
+        # service's trust boundaries move: new/changed inbound REST endpoints
+        # (infrastructure/rest/**), a new outbound HTTP/gRPC edge (infrastructure/client/**,
+        # client-flavoured adapters), authn/listener/transport keys
+        # (oidc|auth|authz|opa|http|kafka|security) in application.yaml, or the service's
+        # NetworkPolicy / Deployment/Rollout manifest under openbank-infra/gitops/components/.
+        detect: ["money-path <service> trust-boundary paths in the PR diff"]
+        require:
+          - "docs/threat-models/<service>.md updated in the SAME PR"   # ADR-0030 D2
+        gate: threat-model-diff
+        enforced: advisory
+        target_enforce_date: "2026-09-15"   # ADR-0144
+        # CI producer is LIVE (advisory): openbank-infra/scripts/check-threat-model-diff.py runs
+        # in the "Validate manifests" job on every PR, right after the coverage gate — diff-scoped
+        # (3-dot against the PR base). Findings are ::warning annotations. Flip to enforced =
+        # pass --enforce to the script in ci.yml (one-line change).
+        ci_producer: "openbank-infra/scripts/check-threat-model-diff.py"
       new_service_with_outbox:
         # A service that extends AbstractOutboxEntity / uses OutboxDispatcher but does NOT
         # set openbank.outbox.dispatch-enabled=true silently never dispatches events —
