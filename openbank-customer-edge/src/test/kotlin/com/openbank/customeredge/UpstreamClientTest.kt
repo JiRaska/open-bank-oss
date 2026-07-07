@@ -10,6 +10,7 @@ import com.sun.net.httpserver.HttpServer
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.net.InetSocketAddress
+import java.util.concurrent.atomic.AtomicInteger
 
 class UpstreamClientTest {
 
@@ -38,7 +39,7 @@ class UpstreamClientTest {
             tokenResponse = """{"access_token":"test-token","expires_in":300}""",
             docBytes = pdfBytes,
             docContentType = "application/pdf",
-        ) { client, baseUrl ->
+        ) { client, baseUrl, _ ->
             val response = client.getRaw("$baseUrl/statements/s1/document", "party-1", "*/*")
 
             assertThat(response.status).isEqualTo(200)
@@ -57,7 +58,7 @@ class UpstreamClientTest {
             tokenResponse = """{"access_token":"test-token","expires_in":300}""",
             docBytes = xml.toByteArray(Charsets.UTF_8),
             docContentType = "application/xml",
-        ) { client, baseUrl ->
+        ) { client, baseUrl, _ ->
             val response = client.getRaw("$baseUrl/statements/s1/document", "party-1", "*/*")
 
             assertThat(response.status).isEqualTo(200)
@@ -66,23 +67,192 @@ class UpstreamClientTest {
         }
     }
 
+    @Test
+    fun `get sends the bearer token, party header and Accept json to the upstream`() {
+        withServer { client, baseUrl, requests ->
+            val response = client.get("$baseUrl/statements", "party-9")
+
+            assertThat(response.status).isEqualTo(200)
+            val req = requests.single { it.path == "/statements" }
+            assertThat(req.method).isEqualTo("GET")
+            assertThat(req.headers["authorization"]).isEqualTo("Bearer test-token")
+            assertThat(req.headers["x-customer-party-id"]).isEqualTo("party-9")
+            assertThat(req.headers["accept"]).isEqualTo("application/json")
+        }
+    }
+
+    @Test
+    fun `postAnonymous sends a generated Idempotency-Key and no party header`() {
+        withServer { client, baseUrl, requests ->
+            val response = client.postAnonymous("$baseUrl/parties", """{"name":"Jana"}""")
+
+            assertThat(response.status).isEqualTo(200)
+            val req = requests.single { it.path == "/parties" }
+            assertThat(req.method).isEqualTo("POST")
+            assertThat(req.body).isEqualTo("""{"name":"Jana"}""")
+            assertThat(req.headers["idempotency-key"]).isNotBlank()
+            assertThat(req.headers).doesNotContainKey("x-customer-party-id")
+        }
+    }
+
+    @Test
+    fun `patch sends no body with the party header`() {
+        withServer { client, baseUrl, requests ->
+            val response = client.patch("$baseUrl/notifications/1", "party-9")
+
+            assertThat(response.status).isEqualTo(200)
+            val req = requests.single { it.path == "/notifications/1" }
+            assertThat(req.method).isEqualTo("PATCH")
+            assertThat(req.body).isEmpty()
+            assertThat(req.headers["x-customer-party-id"]).isEqualTo("party-9")
+        }
+    }
+
+    @Test
+    fun `put forwards the body with the party header`() {
+        withServer { client, baseUrl, requests ->
+            val response = client.put("$baseUrl/savings-goal", "party-9", """{"target":1000}""")
+
+            assertThat(response.status).isEqualTo(200)
+            val req = requests.single { it.path == "/savings-goal" }
+            assertThat(req.method).isEqualTo("PUT")
+            assertThat(req.body).isEqualTo("""{"target":1000}""")
+        }
+    }
+
+    @Test
+    fun `delete sends the party header and no body`() {
+        withServer { client, baseUrl, requests ->
+            val response = client.delete("$baseUrl/standing-orders/1", "party-9")
+
+            assertThat(response.status).isEqualTo(200)
+            val req = requests.single { it.path == "/standing-orders/1" }
+            assertThat(req.method).isEqualTo("DELETE")
+        }
+    }
+
+    @Test
+    fun `post uses the caller-supplied Idempotency-Key when non-blank`() {
+        withServer { client, baseUrl, requests ->
+            client.post("$baseUrl/payments", "party-9", "{}", idempotencyKey = "client-key-1")
+
+            val req = requests.single { it.path == "/payments" }
+            assertThat(req.headers["idempotency-key"]).isEqualTo("client-key-1")
+        }
+    }
+
+    @Test
+    fun `post generates an Idempotency-Key when the caller supplies a blank one`() {
+        withServer { client, baseUrl, requests ->
+            client.post("$baseUrl/payments", "party-9", "{}", idempotencyKey = "   ")
+
+            val req = requests.single { it.path == "/payments" }
+            assertThat(req.headers["idempotency-key"]).isNotBlank().isNotEqualTo("   ")
+        }
+    }
+
+    @Test
+    fun `post with extraHeaders forwards them and applies them after the standard headers`() {
+        withServer { client, baseUrl, requests ->
+            client.post(
+                "$baseUrl/cards",
+                "party-9",
+                "{}",
+                idempotencyKey = "key-1",
+                extraHeaders = mapOf("X-Operator-Id" to "op-42"),
+            )
+
+            val req = requests.single { it.path == "/cards" }
+            assertThat(req.headers["x-operator-id"]).isEqualTo("op-42")
+            assertThat(req.headers["x-customer-party-id"]).isEqualTo("party-9")
+        }
+    }
+
+    @Test
+    fun `reuses the cached token across calls instead of re-authenticating every request`() {
+        withServer { client, baseUrl, _ ->
+            client.get("$baseUrl/a", "party-1")
+            client.get("$baseUrl/b", "party-1")
+
+            assertThat(tokenHits.get()).isEqualTo(1)
+        }
+    }
+
+    @Test
+    fun `re-authenticates once the cached token is within the expiry refresh buffer`() {
+        withServer(tokenResponse = """{"access_token":"test-token","expires_in":1}""") { client, baseUrl, _ ->
+            client.get("$baseUrl/a", "party-1")
+            client.get("$baseUrl/b", "party-1")
+
+            assertThat(tokenHits.get()).isEqualTo(2)
+        }
+    }
+
+    @Test
+    fun `rejects a disallowed host without making any network call and degrades to a 502`() {
+        withServer { client, _, requests ->
+            val response = client.get("http://evil.example.com/steal", "party-1")
+
+            assertThat(response.status).isEqualTo(502)
+            assertThat(response.entity as String).contains("upstream unavailable")
+            assertThat(requests).isEmpty()
+        }
+    }
+
+    @Test
+    fun `degrades to a 502 JSON error when the upstream connection fails`() {
+        withServer { client, _, _ ->
+            // Nothing listens on this port on loopback — an allowed host per the SSRF allowlist,
+            // but the connection itself fails, exercising the outer catch block rather than validatedUri.
+            val response = client.get("http://127.0.0.1:1/unreachable", "party-1")
+
+            assertThat(response.status).isEqualTo(502)
+            assertThat(response.mediaType.toString()).isEqualTo("application/json")
+            assertThat(response.entity as String).contains("upstream unavailable")
+        }
+    }
+
+    // --- test harness ------------------------------------------------------------------
+
+    data class CapturedRequest(val method: String, val path: String, val headers: Map<String, String>, val body: String)
+
+    private val tokenHits = AtomicInteger(0)
+
     /**
      * Spins up a throwaway JDK HTTP server (HTTP/1.1, no extra test deps) that answers the
-     * client_credentials token fetch and serves the document, runs [block] against an
-     * [UpstreamClient] wired to it, and tears the server down afterwards.
+     * client_credentials token fetch and echoes every other request into the captured-request
+     * list handed to [block], and tears the server down afterwards.
      */
     private fun withServer(
-        tokenResponse: String,
-        docBytes: ByteArray,
-        docContentType: String,
-        block: (UpstreamClient, String) -> Unit,
+        tokenResponse: String = """{"access_token":"test-token","expires_in":300}""",
+        docBytes: ByteArray? = null,
+        docContentType: String = "application/json",
+        block: (UpstreamClient, String, List<CapturedRequest>) -> Unit,
     ) {
+        tokenHits.set(0)
+        val requests = mutableListOf<CapturedRequest>()
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/realms/openbank/protocol/openid-connect/token") { exchange ->
+            tokenHits.incrementAndGet()
             respond(exchange, 200, "application/json", tokenResponse.toByteArray(Charsets.UTF_8))
         }
-        server.createContext("/statements") { exchange ->
-            respond(exchange, 200, docContentType, docBytes)
+        if (docBytes != null) {
+            server.createContext("/statements") { exchange ->
+                respond(exchange, 200, docContentType, docBytes)
+            }
+        }
+        server.createContext("/") { exchange ->
+            synchronized(requests) {
+                requests.add(
+                    CapturedRequest(
+                        method = exchange.requestMethod,
+                        path = exchange.requestURI.path,
+                        headers = exchange.requestHeaders.entries.associate { (k, v) -> k.lowercase() to v.first() },
+                        body = exchange.requestBody.readBytes().toString(Charsets.UTF_8),
+                    ),
+                )
+            }
+            respond(exchange, 200, "application/json", "{}".toByteArray(Charsets.UTF_8))
         }
         server.start()
         try {
@@ -91,10 +261,10 @@ class UpstreamClientTest {
                 tokenEndpointBase = "$baseUrl/realms/openbank"
                 clientId = "openbank-edge"
                 clientSecret = "test-secret"
-                connectTimeoutMs = 5000
-                requestTimeoutMs = 5000
+                connectTimeoutMs = 2000
+                requestTimeoutMs = 2000
             }
-            block(client, baseUrl)
+            block(client, baseUrl, requests)
         } finally {
             server.stop(0)
         }
