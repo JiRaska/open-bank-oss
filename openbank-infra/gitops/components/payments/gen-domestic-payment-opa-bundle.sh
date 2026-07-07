@@ -72,9 +72,15 @@ allowed_reasons contains "viewer-domestic-payment-read" if {
 # rides the human operator token) have NO in-repo M2M caller and stay human-only.
 # standing-order executes via the Kafka standing-order.due.v1 event, not REST.
 # A blanket SERVICE allow on a payment rail is forbidden (rules.yaml / ADR-0034).
+#
+# NOTE (found post-merge, issue tracked separately): AuthorizeInterceptor never
+# emits principal.type == "SERVICE" — M2M callers authenticate via Keycloak
+# client_credentials JWTs, which the interceptor classifies as HUMAN.
+# customer-edge uses its OWN Keycloak client (unlike most backend services,
+# which share `openbank-services`) — gate on its verified identity instead.
 allowed_reasons contains "service-domestic-payment-m2m" if {
-	input.principal.type == "SERVICE"
-	"ROLE_SERVICE" in input.principal.roles
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-edge"
 	input.action in {
 		"domestic-payment.create",
 		"domestic-payment.read",
