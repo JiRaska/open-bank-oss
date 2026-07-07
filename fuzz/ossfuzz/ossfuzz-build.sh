@@ -24,13 +24,25 @@ cd "$SRC/open-bank-oss"
 cp fuzz/ossfuzz/build/libs/ossfuzz-all.jar "$OUT/openbank.jar"
 
 for fuzzer in Pacs008ReaderFuzzer RodneCisloFuzzer; do
+  # The "LLVMFuzzerTestOneInput" comment below is a REQUIRED magic marker, not doc:
+  # OSS-Fuzz/CIFuzz recognizes a file in $OUT as a fuzz target only if its CONTENT
+  # contains that string (infra/utils.py is_fuzz_target_local, FUZZ_TARGET_SEARCH_STRING)
+  # — without it check_build fails with "No fuzz targets found". Same canonical wrapper
+  # (incl. the ASan-headroom -Xmx/-Xss settings) as google/oss-fuzz JVM projects.
   cat > "$OUT/$fuzzer" <<SH
 #!/usr/bin/env bash
+# LLVMFuzzerTestOneInput for fuzzer detection.
 this_dir=\$(dirname "\$0")
+if [[ "\$@" =~ (^| )-runs=[0-9]+(\$| ) ]]; then
+  mem_settings='-Xmx1900m:-Xss900k'
+else
+  mem_settings='-Xmx2048m:-Xss1024k'
+fi
 LD_LIBRARY_PATH="\$JVM_LD_LIBRARY_PATH" \\
   "\$this_dir/jazzer_driver" --agent_path="\$this_dir/jazzer_agent_deploy.jar" \\
   --cp="\$this_dir/openbank.jar" \\
   --target_class=com.openbank.fuzz.$fuzzer \\
+  --jvm_args="\$mem_settings" \\
   "\$@"
 SH
   chmod +x "$OUT/$fuzzer"
