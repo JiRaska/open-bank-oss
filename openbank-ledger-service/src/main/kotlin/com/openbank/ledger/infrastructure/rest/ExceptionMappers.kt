@@ -7,6 +7,7 @@ package com.openbank.ledger.infrastructure.rest
 import com.openbank.ledger.application.usecase.ClosedFiscalPeriodException
 import com.openbank.ledger.application.usecase.GlAccountValidationException
 import com.openbank.ledger.application.usecase.JournalNotFoundException
+import com.openbank.ledger.application.usecase.JournalReversalConflictException
 import com.openbank.ledger.application.usecase.YearCloseConflictException
 import com.openbank.ledger.application.usecase.YearCloseNotFoundException
 import jakarta.ws.rs.core.MediaType
@@ -52,6 +53,18 @@ class IllegalStateExceptionMapper : ExceptionMapper<IllegalStateException> {
             .type(MediaType.APPLICATION_JSON)
             .build()
     }
+}
+
+// 409 reversal conflict (#465): repeated or concurrent reversal of the same journal entry.
+// Dedicated type so the status is deterministic — IllegalStateException has TWO registered
+// mappers (libs-runtime 422 vs this service's 409) and JAX-RS picks between same-type
+// providers non-deterministically (ADR-0049 D4).
+@Provider
+class JournalReversalConflictExceptionMapper : ExceptionMapper<JournalReversalConflictException> {
+    override fun toResponse(exception: JournalReversalConflictException): Response = Response.status(CONFLICT)
+        .entity(mapOf("error" to (exception.message ?: "Journal already reversed")))
+        .type(MediaType.APPLICATION_JSON)
+        .build()
 }
 
 @Provider
