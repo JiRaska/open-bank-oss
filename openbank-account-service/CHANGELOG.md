@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.12.0...account-service-v0.12.1) (2026-07-07)
+
+
+### Security
+
+* **account:** enforce OPA authorization on account endpoints (ADR-0034 Phase 5) ([#412](https://github.com/JiRaska/open-bank-oss/issues/412)) ([0398bfc](https://github.com/JiRaska/open-bank-oss/commit/0398bfcb0a0f6cebc6779c5748b5b221ce31c243)), closes [#266](https://github.com/JiRaska/open-bank-oss/issues/266)
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.11.4...account-service-v0.12.0) (2026-07-04)
 
 
