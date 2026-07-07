@@ -2,7 +2,7 @@
 
 Date: 2026-06-02
 Status: Accepted
-Delivery-Status: Partial
+Delivery-Status: Shipped
 Author(s): Jiri Raska
 
 > **Correction (2026-07-05).** A prior edit (#2800, 2026-06-30) marked this ADR
@@ -136,6 +136,38 @@ Author(s): Jiri Raska
 > number it accidentally shared with the (more widely referenced) outbound-oversight-webhooks
 > ADR, which keeps 0059. Historical references to "ADR-0059" in a scale-to-zero / FinOps-tier
 > context mean this document.
+
+> **Update (2026-07-07) — promotion gate measured against the live deployment; T1
+> declared, Delivery-Status: Shipped (issue #253).** The sandbox `accounts/product-catalog`
+> Deployment already runs the native image (`native-a2e14752`) with the tuned probes
+> recommended above (`startupProbe`/`readinessProbe`: `periodSeconds: 1`,
+> `failureThreshold: 10`). A 10-sample end-to-end scale-from-zero series through the KEDA
+> HTTP interceptor (force-scale to 0, wait for endpoint drain, time first byte of
+> `GET /api/v1/products`) measured:
+>
+> | | value |
+> |---|---|
+> | median TTFB | 5.29 s |
+> | avg (excl. one outlier) | 5.19 s |
+> | p95 | ~5.4 s (9.1 s including one sample that likely captured a cold node-local image pull) |
+>
+> This is marginally over the redefined **≤ 5 s p95** end-to-end target (process start
+> ≤ 500 ms p95 remains comfortably met, unchanged at ~0.2-0.3 s). Maintainer decision
+> (#253): **accept as met and declare T1.** Rationale — the miss is small (~0.3-0.4 s on
+> median), and for this specific service (non-money-path, rarely-hit admin/fees read
+> endpoint) the KEDA HTTP interceptor's entire purpose is absorbing that wait as a slow
+> first click rather than a 5xx; the FinOps trade (near-zero idle cost vs. a several-second
+> parked latency on the first request after an idle period) still holds at this margin.
+> `rules.yaml:finops_tiers.declared` now carries `openbank-product-catalog: T1` with this
+> measurement cited directly.
+>
+> **Caveat carried forward, not closed:** this is a single n=10 sample on one day, not the
+> originally-specified 48h burn-in window (Pilot plan step 5). Re-validate over a longer
+> window before treating this as permanently locked in — a real regression (e.g. from
+> cluster changes affecting admission-webhook or scheduling latency) should prompt a
+> re-measurement and, if warranted, a re-declaration (this is a non-money-path service, so
+> demoting off T1 does not need the `t0_baseline` 2-approval bar — a straightforward
+> `rules.yaml` edit with the new measurement suffices).
 
 ## Context
 
