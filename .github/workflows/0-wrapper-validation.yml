@@ -1,0 +1,56 @@
+# -----------------------------------------------------------------------------
+# Gradle wrapper validation — the workflow OpenSSF Scorecard's Binary-Artifacts
+# check keys on (ADR-0124; issue #285 made validation fleet-wide).
+#
+# BOTH unusual properties of this file are load-bearing:
+#
+# 1. THE FILENAME MUST SORT FIRST. Scorecard exempts gradle-wrapper.jar files
+#    only for the FIRST workflow (git tree order = byte-order) under
+#    .github/workflows/ that uses the wrapper-validation action, and then
+#    requires a SUCCESSFUL RUN OF THAT VERY WORKFLOW on the latest main commit
+#    (checks/raw/binary_artifact.go, gradleWrapperValidated). Today the first
+#    match is `_service-ci.yml` ('_' = 0x5F sorts before every lowercase name) —
+#    a reusable workflow whose runs are attributed to its CALLERS, so the check
+#    can never pass. The leading '0' (0x30) makes THIS file win instead. Do not
+#    rename it, and do not add another wrapper-validation usage in a file that
+#    sorts before this one.
+#
+# 2. IT MUST RUN ON EVERY PUSH TO MAIN — no path filter. The check demands a
+#    successful run whose head SHA equals the LATEST commit on main at scan
+#    time; a path-scoped trigger would leave gaps. The job is ~15 s and hosted
+#    runners are free on a public repo.
+#
+# The fleet-wide wrapper-validation steps inside the build workflows
+# (_service-ci.yml etc.) remain the actual SECURITY control on the hot path;
+# this workflow is the always-on attestation of the same invariant.
+# -----------------------------------------------------------------------------
+name: Gradle wrapper validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "**/gradle/wrapper/**"
+      - "**/gradlew"
+      - "**/gradlew.bat"
+      - ".github/workflows/0-wrapper-validation.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wrapper-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate Gradle wrappers
+    runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Validate all gradle-wrapper.jar checksums
+        uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
