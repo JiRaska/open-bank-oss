@@ -175,6 +175,25 @@ change_requirements:
       - "docs/threat-models/<service>.md present/updated"   # ADR-0030 D2
     gate: threat-model
     enforced: enforce                   # check-threat-models.py live in CI; all 13 money-path services have valid threat models
+  trust_boundary_diff_change:
+    # ADR-0030 D2, diff-aware half (issue #265). The coverage gate above proves a threat
+    # model EXISTS; this one proves it is UPDATED in the same PR when a money-path
+    # service's trust boundaries move: new/changed inbound REST endpoints
+    # (infrastructure/rest/**), a new outbound HTTP/gRPC edge (infrastructure/client/**,
+    # client-flavoured adapters), authn/listener/transport keys
+    # (oidc|auth|authz|opa|http|kafka|security) in application.yaml, or the service's
+    # NetworkPolicy / Deployment/Rollout manifest under openbank-infra/gitops/components/.
+    detect: ["money-path <service> trust-boundary paths in the PR diff"]
+    require:
+      - "docs/threat-models/<service>.md updated in the SAME PR"   # ADR-0030 D2
+    gate: threat-model-diff
+    enforced: advisory
+    target_enforce_date: "2026-09-15"   # ADR-0144
+    # CI producer is LIVE (advisory): openbank-infra/scripts/check-threat-model-diff.py runs
+    # in the "Validate manifests" job on every PR, right after the coverage gate — diff-scoped
+    # (3-dot against the PR base). Findings are ::warning annotations. Flip to enforced =
+    # pass --enforce to the script in ci.yml (one-line change).
+    ci_producer: "openbank-infra/scripts/check-threat-model-diff.py"
   new_service_with_outbox:
     # A service that extends AbstractOutboxEntity / uses OutboxDispatcher but does NOT
     # set openbank.outbox.dispatch-enabled=true silently never dispatches events —
@@ -530,6 +549,20 @@ vuln_management:
   sla_days: { critical: 7, high: 30, medium: 90, low: 180 }
   triage_owner: CODEOWNERS
   surfaced_in: admin-ui-governance
+  vex_format: openvex                   # OpenVEX 0.2.0; one doc per component per release
+  vex_store: openbank-libs/governance/vex/<component>.openvex.json   # human-triaged overlay
+  # D1 is SHIPPED (PR #325 image-rescan.yml, PR #315 vex-triage.yml + vex-triage.py /
+  # vex-inventory.py). Not a PR-blocking gate — a scheduled lifecycle: vex-triage.yml
+  # (weekly) opens/closes `vex-triage`-labelled GitHub issues per queued CVE (the issue's
+  # creation date IS the SLA clock) and the job itself goes red (::error, non-zero exit)
+  # when an open issue's age exceeds sla_days for its OSV-derived severity — that red run
+  # is the enforcement signal, same forcing-function shape as ADR-0144 gate graduation,
+  # but on a cron rather than a PR check. image-rescan.yml (weekly) additionally passes
+  # each component's VEX overlay to `trivy image --vex`, so a human `not_affected`/`fixed`
+  # verdict suppresses re-alarming on an already-triaged finding.
+  gate: vex-triage
+  enforced: active                      # producer is wired and the weekly job enforces its own SLA
+  ci_producer: ".github/scripts/vex-triage.py (+ vex-inventory.py), .github/workflows/vex-triage.yml"
 
 # ---------------------------------------------------------------------------------------
 # CI runner governance (ADR-0053, supersedes ADR-0082). Per-job EPHEMERAL ARC runner

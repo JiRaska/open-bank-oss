@@ -5,14 +5,14 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): jiri.raska
 
-**Delivery note (updated 2026-07-05):**
+**Delivery note (updated 2026-07-07):**
 - **D2 (threat-model CI gate)** — ✅ Shipped: `check-threat-models.py` runs as a required check in `Validate manifests`; all 13 money-path services have STRIDE/DFD threat models at `docs/threat-models/<service>.md`; adding a money-path service without a threat model blocks merge. Diff-aware rule (trust-boundary changes) ⬜ pending.
 - **D4 (Kyverno admission control)** — ✅ Shipped, further along than the previous note said: trust root chosen (AWS KMS key `alias/openbank-cosign-signing`), `build-push-{service,admin-ui}.sh` sign every pushed image, and `verify-images-policy.yaml`'s image-signature rule is **Enforce** fleet-wide (verified while auditing ADR delivery status, 2026-07-05 — see `openbank-infra/gitops/components/kyverno/verify-images-policy.yaml`). What remains: a **second** `verifyImages` rule requiring SBOM attestation specifically (not just the signature) at admission — still "(planned)" in that same policy file (tracked in ADR-0121, whose Axis 2 covers this).
-- **D1 (VEX + vulnerability-management lifecycle)** — ⬜ Pending: CycloneDX/OpenVEX documents not yet published alongside SBOMs; SLA-tracked triage workflow not yet implemented.
+- **D1 (VEX + vulnerability-management lifecycle)** — ✅ Shipped (2026-07-06, PR #315 + PR #325): `build-release-evidence.sh` emits an OpenVEX 0.2.0 document (`<tag>.vex.json`, cosign-signed) per release, merging Trivy's `under_investigation` inventory with human-triaged verdicts from `openbank-libs/governance/vex/<component>.openvex.json`. `image-rescan.yml` (weekly) rescans every published GHCR image and passes each component's VEX overlay to `trivy image --vex` so triaged findings don't re-alarm. `vex-triage.yml` (weekly) closes the loop: `vex-inventory.py` aggregates the fleet's `under_investigation` queue, `vex-triage.py` opens one SLA-tracked GitHub issue per CVE (severity from a real CVSS v3.1 base-score computation off api.osv.dev, `rules.yaml: vuln_management.sla_days` is the clock), auto-closes issues whose CVE left the queue, and fails the weekly run (`::error`, non-zero exit) on any SLA breach. `rules.yaml: vuln_management` now carries `gate`/`enforced: active`/`ci_producer` for this lifecycle. Not covered: Trivy's *own* CI gate (`security.yml`) does not yet consume the VEX overlay to suppress already-triaged findings at PR time — only the two scheduled workflows do.
 - **D3 (mutation testing + DAST)** — ⬜ Pending: pitest configured for `openbank-lending-service` domain; DAST (OWASP ZAP baseline) not yet deployed.
 - **D5 (runtime SBOM drift detection)** — ⬜ Pending.
 
-Remaining D1/D3/D5 (+ D2's diff-aware rule) tracked in issue #265.
+Remaining D3/D5 (+ D2's diff-aware rule) tracked in issue #265.
 
 > **Accepted (2026-06-11).** Status raised from Proposed to reflect established practice:
 > this ADR is partially implemented and load-bearing — the money-path threat-model gate
