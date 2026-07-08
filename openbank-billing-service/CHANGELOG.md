@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.5.1...billing-service-v0.5.2) (2026-07-08)
+
+
+### Security
+
+* **billing:** inline log sanitization so CodeQL actually recognizes it ([#597](https://github.com/JiRaska/open-bank-oss/issues/597)) ([f28d932](https://github.com/JiRaska/open-bank-oss/commit/f28d9320fdd0ca0c2ebabae86dedadb8b87be048))
+
 ## [0.5.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.5.0...billing-service-v0.5.1) (2026-07-08)
 
 
