@@ -1,7 +1,7 @@
 {
   "schema": "openbank.infra-lifecycle/v1",
   "source": "endoflife.date + GitOps image tags — ADR-0079",
-  "generatedAt": "2026-07-08T06:01:47.551Z",
+  "generatedAt": "2026-07-08T16:46:30.748Z",
   "components": [
     {
       "id": "postgres",
