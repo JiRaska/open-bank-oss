@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.6](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.12.5...transaction-service-v1.12.6) (2026-07-08)
+
+
+### Bug Fixes
+
+* **transaction:** optimistic locking on state transitions + idempotent concurrent initiation ([#579](https://github.com/JiRaska/open-bank-oss/issues/579)) ([8185b5c](https://github.com/JiRaska/open-bank-oss/commit/8185b5cbf1b1e4e4a27c14eda8d711c5b96aed80)), closes [#465](https://github.com/JiRaska/open-bank-oss/issues/465)
+
 ## [1.12.5](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.12.4...transaction-service-v1.12.5) (2026-07-07)
 
 
