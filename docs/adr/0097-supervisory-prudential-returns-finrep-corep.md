@@ -2,14 +2,23 @@
 
 Date: 2026-06-16
 Status: Accepted
-Delivery-Status: Planned
+Delivery-Status: Partial
 
 Phase 1 implemented: openbank-finrep-service derives F01.01+F02.00 from ledger trial balance. Phase 2 (COREP+XBRL transmission) tracked separately.
 Author(s): @JiRaska
 
-**Delivery note (updated 2026-06-30):**
-- **Phase 1 (FINREP core)** — ✅ Designed: F 01.01 balance sheet and F 02.00 P&L templates sourced from attested close; tie-out to statements designed; ready to ship once ADR-0096 entity-level close lands.
-- **Phase 2 (COREP)** — ⬜ Deferred: C 01.00 own funds, capital adequacy, risk-weighting data, EBA XBRL/DPM taxonomy mapping, and ČNB transmission channel depend on ADR-0096 close; Phase 2 explicitly deferred.
+**Delivery note (updated 2026-07-07):**
+- **Phase 1 (FINREP core) — deployment** — ✅ Shipped: `openbank-finrep-service` is registered with ArgoCD
+  (`openbank-infra/gitops/apps/finrep.yaml`) alongside its existing Deployment/Service/Namespace/NetworkPolicy
+  manifests under `openbank-infra/gitops/components/finrep/` — the service now actually syncs instead of
+  sitting code-only and undeployed.
+- **Phase 1 (FINREP core) — report logic** — 🟡 Partial: `F0101Mapper`/`F0200Mapper` compute F 01.01
+  (balance sheet) and F 02.00 (P&L) cells from `GET /api/v1/ledger/trial-balance`, a **live/point-in-time**
+  ledger query — not yet the frozen, attested `ClosedPeriod` this ADR calls for (ADR-0096's entity-level
+  close is not yet consumed here). The statements tie-out check and the ADR-0096 wiring remain open work.
+- **Phase 2 (COREP)** — ⬜ Deferred, not started: no C 01.00 own-funds/capital-adequacy mapper, no
+  risk-weighting/capital-instrument data model, no EBA XBRL/DPM taxonomy mapping, and no ČNB transmission
+  adapter exist in the codebase yet. This remains explicitly out of scope until Phase 2 is picked up.
 
 Depends on: ADR-0096 (entity-level statutory close — the attested source of truth).
 Relates to: ADR-0037 (AnaCredit render-only — the reporting-service template + its transmission gap),
