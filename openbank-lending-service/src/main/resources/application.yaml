@@ -127,11 +127,20 @@ lending:
       interest-income: ${LENDING_GL_INTEREST_INCOME:a0000000-0000-0000-0000-000000004100}
       interest-receivable: ${LENDING_GL_INTEREST_RECEIVABLE:a0000000-0000-0000-0000-000000001300}
       loan-loss-expense: ${LENDING_GL_LOAN_LOSS_EXPENSE:a0000000-0000-0000-0000-000000005100}
+      loan-loss-allowance: ${LENDING_GL_LOAN_LOSS_ALLOWANCE:a0000000-0000-0000-0000-000000001400}
   # Servicing posting loop: scheduled accrual-basis interest recognition (ADR-0028 Phase 2).
   servicing:
     accrual:
       every: ${LENDING_ACCRUAL_EVERY:24h}
       batch-size: ${LENDING_ACCRUAL_BATCH_SIZE:500}
+  # IFRS 9 provisioning cycle (ADR-0028 Phase 3): scheduled stage/ECL re-bucketing over the live book,
+  # posting only the delta versus the last cycle's ECL per loan. PD/LGD are the conservative
+  # placeholders from RiskParameterSource (ConservativeRiskParameterSource) until a real risk-parameter
+  # adapter is bound — see the ADR for the explicit "not production-calibrated" caveat.
+  provisioning:
+    cycle:
+      every: ${LENDING_PROVISIONING_EVERY:720h} # ~30 days; a monthly-cadence batch, not calendar-month aware
+      batch-size: ${LENDING_PROVISIONING_BATCH_SIZE:500}
 
 mp:
   messaging:

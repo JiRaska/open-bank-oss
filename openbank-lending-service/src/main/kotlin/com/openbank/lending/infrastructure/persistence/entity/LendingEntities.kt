@@ -7,7 +7,10 @@ package com.openbank.lending.infrastructure.persistence.entity
 import com.openbank.lending.domain.model.ApplicationStatus
 import com.openbank.lending.domain.model.CollateralType
 import com.openbank.lending.domain.model.LoanStatus
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.lending.AmortizationMethod
+import com.openbank.libs.lending.DelinquencyBucket
+import com.openbank.libs.lending.Ifrs9Stage
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
@@ -15,6 +18,7 @@ import jakarta.persistence.EnumType
 import jakarta.persistence.Enumerated
 import jakarta.persistence.Id
 import jakarta.persistence.Table
+import jakarta.persistence.UniqueConstraint
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -196,6 +200,56 @@ class CollateralEntity : PanacheEntityBase() {
 
     @Column(name = "valued_at")
     var valuedAt: OffsetDateTime = OffsetDateTime.MIN
+
+    @Column(name = "created_at")
+    var createdAt: OffsetDateTime = OffsetDateTime.MIN
+}
+
+/**
+ * One IFRS 9 stage/ECL record per loan per reporting period (ADR-0028 Phase 3). The scheduled
+ * provisioning cycle reads the prior period's row as the delta baseline before inserting a new one;
+ * `UNIQUE(loan_id, period)` is both the natural key and the pass's idempotency guard (a re-run for a
+ * period that already has a row is a no-op re-read, never a duplicate insert — see
+ * `ProvisioningRepositoryImpl.findByLoanAndPeriod`).
+ */
+@Entity
+@Table(
+    name = "loan_provisioning",
+    uniqueConstraints = [UniqueConstraint(columnNames = ["loan_id", "period"])],
+)
+class LoanProvisioningEntity : PanacheEntityBase() {
+    @Id
+    @Column(columnDefinition = "uuid")
+    var id: UUID = Ids.newId()
+
+    @Column(name = "loan_id", columnDefinition = "uuid")
+    var loanId: UUID = Ids.newId()
+
+    @Column(name = "period", length = 7)
+    var period: String = ""
+
+    @Column(name = "as_of")
+    var asOf: LocalDate = LocalDate.EPOCH
+
+    @Column(name = "outstanding_balance", precision = 20, scale = 2)
+    var outstandingBalance: BigDecimal = BigDecimal.ZERO
+
+    @Column(name = "currency", length = 3)
+    var currency: String = "EUR"
+
+    @Column(name = "days_past_due")
+    var daysPastDue: Int = 0
+
+    @Column(name = "bucket")
+    @Enumerated(EnumType.STRING)
+    var bucket: DelinquencyBucket = DelinquencyBucket.CURRENT
+
+    @Column(name = "stage")
+    @Enumerated(EnumType.STRING)
+    var stage: Ifrs9Stage = Ifrs9Stage.STAGE_1
+
+    @Column(name = "expected_credit_loss", precision = 20, scale = 2)
+    var expectedCreditLoss: BigDecimal = BigDecimal.ZERO
 
     @Column(name = "created_at")
     var createdAt: OffsetDateTime = OffsetDateTime.MIN

@@ -43,6 +43,7 @@ class RestLedgerPostingAdapterTest {
         interestIncome = UUID.fromString("a0000000-0000-0000-0000-000000004100"),
         interestReceivable = UUID.fromString("a0000000-0000-0000-0000-000000001300"),
         loanLossExpense = UUID.fromString("a0000000-0000-0000-0000-000000005100"),
+        loanLossAllowance = UUID.fromString("a0000000-0000-0000-0000-000000001400"),
     )
     private val actor = UUID.fromString("00000000-0000-0000-0000-0000000000aa")
     private val partyId = UUID.fromString("55555555-5555-5555-5555-555555555555")
@@ -100,6 +101,7 @@ class RestLedgerPostingAdapterTest {
                 override fun interestIncome(): UUID = accounts.interestIncome
                 override fun interestReceivable(): UUID = accounts.interestReceivable
                 override fun loanLossExpense(): UUID = accounts.loanLossExpense
+                override fun loanLossAllowance(): UUID = accounts.loanLossAllowance
             }
         }
 

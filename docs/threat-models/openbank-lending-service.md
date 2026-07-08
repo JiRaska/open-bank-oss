@@ -14,7 +14,8 @@
 | Cash events posted to the ledger | Real money movement (disbursement, repayment split, write-off). Integrity here is the money-path invariant. |
 | Credit decisions (maker / checker) | Governed origination (EBA/GL/2020/06); a forged or single-actor approval is a control failure. |
 | Collateral register & valuations | Drives LGD / haircut and capital; tampering understates risk. |
-| Risk parameters (PD / LGD / bureau data) | Inputs to ECL; manipulation distorts impairment and capital. |
+| Risk parameters (PD / LGD / bureau data) | Inputs to ECL; manipulation distorts impairment and capital. **Currently flat, conservative placeholder constants (`ConservativeRiskParameterSource`), not a calibrated risk model — see 06 — Compliance for the explicit non-production caveat.** |
+| IFRS 9 provisioning history (`loan_provisioning`) | Per-loan-per-period stage/ECL record; the delta baseline for the next cycle's ledger posting and (per ADR-0028) a future AnaCredit/FINREP input. Corruption or a skipped row causes silent under/over-provisioning. |
 
 ## 2. Trust boundaries
 
@@ -49,6 +50,25 @@
 - **Offline-buildable defaults.** No-op `@Default` ports mean the service boots with zero external
   dependency; real integrations are explicit build-time opt-ins.
 - **Secrets.** No hardcoded credentials; config values are env-var placeholders.
+- **Provisioning cycle integrity (ADR-0028 Phase 3, new this slice).** The scheduled IFRS 9 provisioning
+  pass (`ProvisioningCycleScheduler` → `LendingService.runProvisioningCycle`) is a system-actor process,
+  not user-triggered — there is no REST endpoint that lets a caller invoke it or supply its inputs. Its
+  three specific risks and the mitigation each gets:
+  - **Under-provisioning via wrong stage bucketing.** Stage 2/3 boundaries (30/90 DPD) are the pure,
+    unit-tested `Ifrs9.stage`/`Delinquency.isDefaulted` primitives — the same math `GET
+    .../provisioning` already exposes for inspection — not re-derived ad hoc in the scheduler. Boundary
+    cases (exactly 30, exactly 90 DPD) are explicitly unit-tested.
+  - **Double-provisioning via a missed delta calculation.** The cycle always posts `newEcl − priorEcl`
+    (`postProvisioningDelta`), never the full ECL, and `(loanId, period)` is `UNIQUE` in `loan_provisioning`
+    — a re-run for an already-provisioned period is a verified no-op (`findByLoanAndPeriod` short-circuits
+    before any read of risk parameters or any ledger call), not merely "unlikely to happen twice."
+  - **Wrong-direction journal.** `LendingJournalFactory.buildProvisioningLines` is unit-tested for both
+    signs explicitly (increase: DEBIT expense / CREDIT allowance; decrease: reversed) and asserts the
+    loan principal GL (Loans Receivable) is never touched by a provisioning entry.
+  - **Roadmap gap, not yet mitigated:** the batch scan (`LoanRepository.findActive(limit)`) is a single
+    page with no continuation cursor — a book larger than `limit` silently leaves the tail unprovisioned
+    for that cycle with no alert. Acceptable for a first increment on a small loan book; needs a
+    pagination/completeness check before the book grows past one batch.
 
 ## 4. STRIDE summary
 
@@ -67,11 +87,18 @@
   machine (ADR-0028 D6). Until then four-eyes is enforced at decision/disburse but the full UI cycle is
   scaffolded.
 - **Risk-parameter provenance** — when the no-op PD/LGD/bureau ports are replaced by real adapters, each
-  becomes a trust boundary needing its own authn, integrity and audit treatment.
+  becomes a trust boundary needing its own authn, integrity and audit treatment. Until then, the
+  provisioning cycle's ECL is only as good as `ConservativeRiskParameterSource`'s flat constants — a
+  **model-risk gap**, not a security control gap, but load-bearing enough to call out here: do not treat
+  the provisioning cycle's output as an examiner-ready capital number.
+- **Provisioning batch completeness** — `LoanRepository.findActive(limit)` has no pagination/continuation;
+  a book larger than one batch silently under-provisions the tail with no alert (see §3).
 - **Impairment-movement immutability** — append-only / tamper-evident storage for IFRS 9 stage and ECL
-  movements feeding FINREP F 12, to strengthen the tampering/repudiation posture at rest.
+  movements feeding FINREP F 12, to strengthen the tampering/repudiation posture at rest. `loan_provisioning`
+  is insert-only from the application code today, but nothing at the DB level prevents an UPDATE/DELETE.
 - **Money-path mutation testing** — pitest on the journal/amortization domain math (rules.yaml
-  `money_path_depth`, currently `planned`).
+  `money_path_depth`, currently `planned`) — should extend to `LendingJournalFactory.buildProvisioningLines`
+  and the delta calculation once adopted.
 
 ## 6. Out of scope
 

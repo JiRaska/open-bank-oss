@@ -24,6 +24,8 @@ The resource class is role-gated; the **acting principal is always the authentic
 | `/loans/{id}/collateral` | `GET` | (class roles) | List collateral |
 | `/loans/{id}/provisioning` | `GET` | `ROLE_CREDIT_RISK`, `ROLE_COMPLIANCE`, `ROLE_ADMIN` | IFRS 9 staging + ECL. Optional `asOf` (date). 200 / 404 |
 
+The scheduled monthly IFRS 9 provisioning cycle (ADR-0028 Phase 3, `ProvisioningCycleScheduler`) is **not** REST-triggered in this increment — it runs only on `lending.provisioning.cycle.every`. `GET /loans/{id}/provisioning` remains the on-demand, non-persisted read; the persisted per-period history it does not yet expose lives in `loan_provisioning` (no read endpoint over it yet — a natural small follow-up).
+
 ## Four-eyes / segregation of duties
 
 Origination is a maker-checker-disburser chain enforced server-side (ADR-0028 D5, EBA/GL/2020/06):
