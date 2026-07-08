@@ -40,10 +40,14 @@ interface ParsedAgents {
   agents?: Record<string, unknown>[]
 }
 
+export interface AgentSchedule { daily: string | null; reactive: string | null }
+
 export interface AgentCharter {
   id: string; plane: string; charter: string; owns: string[]; skills: string[]
   dataRead: string[]; pii: string; toolsAllow: string[]; toolsDeny: string[]
   requiresHuman: string[]; tokensPerRun: number | null; runsPerDay: number | null
+  /** Only finops-agent/devops-agent declare this today — most agents run on-demand, not on a clock. */
+  schedule: AgentSchedule | null
 }
 
 export interface AgentCharterRegistry {
@@ -76,6 +80,13 @@ export async function loadAgentCharters(): Promise<AgentCharterRegistry> {
     const tools = (ag.tools ?? {}) as Record<string, unknown>
     const limits = (ag.limits ?? {}) as Record<string, unknown>
     const dataScope = (ag.data_scope ?? {}) as Record<string, unknown>
+    const scheduleRaw = ag.schedule as Record<string, unknown> | undefined
+    const schedule: AgentSchedule | null = scheduleRaw
+      ? {
+          daily: typeof scheduleRaw.daily === 'string' ? scheduleRaw.daily : null,
+          reactive: typeof scheduleRaw.reactive === 'string' ? scheduleRaw.reactive : null,
+        }
+      : null
     return {
       id: String(ag.id ?? 'unknown'),
       plane: String(ag.plane ?? '—'),
@@ -90,6 +101,7 @@ export async function loadAgentCharters(): Promise<AgentCharterRegistry> {
         typeof r === 'string' ? r : Object.entries(r as Record<string, unknown>).map(([k, v]) => `${k}: ${v}`).join(' ')) : [],
       tokensPerRun: typeof limits.tokens_per_run === 'number' ? limits.tokens_per_run : null,
       runsPerDay: typeof limits.runs_per_day === 'number' ? limits.runs_per_day : null,
+      schedule,
     }
   })
 

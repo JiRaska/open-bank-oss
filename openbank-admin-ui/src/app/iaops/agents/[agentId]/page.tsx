@@ -14,10 +14,12 @@ import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 
 // ── Types (mirror /api/iaops/agents/[agentId]) ─────────────────────────────
+interface Schedule { daily: string | null; reactive: string | null }
 interface Charter {
   id: string; plane: string; charter: string; owns: string[]; skills: string[]
   dataRead: string[]; pii: string; toolsAllow: string[]; toolsDeny: string[]
   requiresHuman: string[]; tokensPerRun: number | null; runsPerDay: number | null
+  schedule: Schedule | null
 }
 interface Narrative { title: string; adr: string; plane: string; body: string }
 interface ProposalSummary { id: string; title: string; state: string; proposedAt: string; decidedAt: string | null }
@@ -28,16 +30,80 @@ interface AgentDetail {
   proposals: { available: boolean; items: ProposalSummary[]; pendingCount: number }
 }
 
-// The narrative charter's Mission section is authored with soft (mid-paragraph) line
-// wraps for source readability; collapse those to spaces so prose flows, while keeping
-// blank-line paragraph breaks.
-function missionSummary(body: string): string {
-  const section = (body.split(/\n##\s/)[0] ?? '').replace(/^##?\s*Mission\s*\n/i, '').trim()
-  return section
-    .split(/\n{2,}/)
-    .map(p => p.replace(/\n/g, ' ').trim())
-    .join('\n\n')
-    .slice(0, 600)
+// ── Narrative body renderer ─────────────────────────────────────────────────
+// docs/agents/<id>.md is authored as "## Section" blocks with soft (mid-paragraph)
+// line wraps for source readability and light inline markdown (`code`, **bold**).
+// No markdown library — the source is small and controlled (our own charter docs),
+// so a compact parser covers it: split into "## "-headed sections, each section into
+// blank-line-separated blocks, each block into either a "- " bullet list or a
+// flowing paragraph.
+interface NarrativeBlock { type: 'p' | 'ul'; text?: string; items?: string[] }
+interface NarrativeSection { heading: string; blocks: NarrativeBlock[] }
+
+function parseNarrativeSections(body: string): NarrativeSection[] {
+  return body
+    .trim()
+    .split(/\n(?=##\s)/)
+    .map(part => {
+      const headingMatch = part.match(/^##\s*(.+?)\s*\n/)
+      const heading = headingMatch ? headingMatch[1].trim() : ''
+      const content = (headingMatch ? part.slice(headingMatch[0].length) : part).trim()
+      const blocks: NarrativeBlock[] = content
+        .split(/\n{2,}/)
+        .filter(Boolean)
+        .map(chunk => {
+          if (/^-\s/.test(chunk.trim())) {
+            const items = chunk
+              .split(/\n(?=-\s)/)
+              .map(li => li.replace(/^-\s*/, '').replace(/\n\s*/g, ' ').trim())
+            return { type: 'ul' as const, items }
+          }
+          return { type: 'p' as const, text: chunk.replace(/\n/g, ' ').trim() }
+        })
+      return { heading, blocks }
+    })
+    .filter(s => s.blocks.length > 0)
+}
+
+// Inline `code` and **bold** — the only two markers used in docs/agents/*.md.
+function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
+  return text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).map((part, i) => {
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return <code key={`${keyPrefix}-${i}`} style={{ fontFamily: 'monospace', fontSize: '11px', background: 'var(--surface-3)', padding: '1px 4px', borderRadius: '4px' }}>{part.slice(1, -1)}</code>
+    }
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={`${keyPrefix}-${i}`}>{part.slice(2, -2)}</strong>
+    }
+    return part
+  })
+}
+
+function NarrativeSections({ body }: { body: string }) {
+  const sections = parseNarrativeSections(body)
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      {sections.map((s, si) => (
+        <div key={s.heading || si}>
+          {s.heading && (
+            <div style={{ fontSize: '12px', fontWeight: 700, color: '#6366f1', marginBottom: '6px' }}>{s.heading}</div>
+          )}
+          {s.blocks.map((b, bi) => b.type === 'ul' ? (
+            <ul key={bi} style={{ margin: '0 0 8px', paddingLeft: '16px' }}>
+              {(b.items ?? []).map((item, ii) => (
+                <li key={ii} style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '4px' }}>
+                  {renderInline(item, `${si}-${bi}-${ii}`)}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p key={bi} style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.6, margin: '0 0 8px' }}>
+              {renderInline(b.text ?? '', `${si}-${bi}`)}
+            </p>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function Chips({ items, tone }: { items: string[]; tone: 'allow' | 'deny' | 'neutral' }) {
@@ -152,44 +218,58 @@ function AgentDetailContent() {
             </div>
           )}
 
-          {/* Charter + narrative */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px', marginBottom: '20px' }}>
-            {data.charter && (
-              <Card>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                  <Lock size={14} style={{ color: '#6366f1' }} />
-                  <span style={{ fontSize: '13px', fontWeight: 700 }}>{t('Nástroje (agents.yaml)', 'Tools (agents.yaml)')}</span>
+          {/* Tools + operating profile (agents.yaml — enforced fields) */}
+          {data.charter && (
+            <Card>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                <Lock size={14} style={{ color: '#6366f1' }} />
+                <span style={{ fontSize: '13px', fontWeight: 700 }}>{t('Nástroje a provoz (agents.yaml)', 'Tools and operation (agents.yaml)')}</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', fontSize: '11px' }}>
+                <div>
+                  <div style={{ color: 'var(--text-tertiary)', marginBottom: '3px' }}>{t('Smí', 'Allowed')}</div>
+                  <Chips items={data.charter.toolsAllow} tone="allow" />
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '11px' }}>
+                <div>
+                  <div style={{ color: 'var(--text-tertiary)', marginBottom: '3px' }}>{t('Zakázáno', 'Denied')}</div>
+                  <Chips items={data.charter.toolsDeny} tone="deny" />
+                </div>
+                {data.charter.skills.length > 0 && (
                   <div>
-                    <div style={{ color: 'var(--text-tertiary)', marginBottom: '3px' }}>{t('Smí', 'Allowed')}</div>
-                    <Chips items={data.charter.toolsAllow} tone="allow" />
+                    <div style={{ color: 'var(--text-tertiary)', marginBottom: '3px' }}>{t('Skilly (run.skill)', 'Skills (run.skill)')}</div>
+                    <Chips items={data.charter.skills} tone="neutral" />
                   </div>
-                  <div>
-                    <div style={{ color: 'var(--text-tertiary)', marginBottom: '3px' }}>{t('Zakázáno', 'Denied')}</div>
-                    <Chips items={data.charter.toolsDeny} tone="deny" />
-                  </div>
-                  <div style={{ display: 'flex', gap: '12px', paddingTop: '8px', borderTop: '1px solid var(--border)', color: 'var(--text-tertiary)' }}>
-                    <span>{t('Limit', 'Budget')}: <strong style={{ color: 'var(--text-secondary)' }}>
-                      {data.charter.tokensPerRun ? `${(data.charter.tokensPerRun / 1000).toFixed(0)}k tok/run` : '—'}
-                    </strong></span>
-                    <span><strong style={{ color: 'var(--text-secondary)' }}>{data.charter.runsPerDay ?? '—'}</strong> {t('běhů/den', 'runs/day')}</span>
-                  </div>
-                </div>
-              </Card>
-            )}
-            {data.narrative && (
-              <Card>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                  <FileText size={14} style={{ color: '#6366f1' }} />
-                  <span style={{ fontSize: '13px', fontWeight: 700 }}>{t('Charter — mise', 'Charter — mission')}</span>
-                </div>
-                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0, whiteSpace: 'pre-wrap' }}>
-                  {missionSummary(data.narrative.body)}
-                </p>
-              </Card>
-            )}
-          </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', paddingTop: '10px', marginTop: '12px', borderTop: '1px solid var(--border)', color: 'var(--text-tertiary)', fontSize: '11px' }}>
+                <span>{t('Limit', 'Budget')}: <strong style={{ color: 'var(--text-secondary)' }}>
+                  {data.charter.tokensPerRun ? `${(data.charter.tokensPerRun / 1000).toFixed(0)}k tok/run` : '—'}
+                </strong></span>
+                <span><strong style={{ color: 'var(--text-secondary)' }}>{data.charter.runsPerDay ?? '—'}</strong> {t('běhů/den', 'runs/day')}</span>
+                <span>
+                  {t('Spouští se', 'Runs')}: <strong style={{ color: 'var(--text-secondary)' }}>
+                    {data.charter.schedule
+                      ? [
+                          data.charter.schedule.daily && t(`denně ${data.charter.schedule.daily}`, `daily ${data.charter.schedule.daily}`),
+                          data.charter.schedule.reactive && t(`reaktivně (${data.charter.schedule.reactive})`, `reactive (${data.charter.schedule.reactive})`),
+                        ].filter(Boolean).join(' · ') || '—'
+                      : t('na vyžádání / dle scheduleru operátora', 'on demand / per operator schedule')}
+                  </strong>
+                </span>
+              </div>
+            </Card>
+          )}
+
+          {/* Full narrative charter (docs/agents/<id>.md) — mission, why, human-oversight story, known gaps */}
+          {data.narrative && (
+            <Card>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+                <FileText size={14} style={{ color: '#6366f1' }} />
+                <span style={{ fontSize: '13px', fontWeight: 700 }}>{t('Charter — role a chování', 'Charter — role and behaviour')}</span>
+              </div>
+              <NarrativeSections body={data.narrative.body} />
+            </Card>
+          )}
 
           {data.charter && (data.charter.dataRead.length > 0 || data.charter.requiresHuman.length > 0) && (
             <Card>
