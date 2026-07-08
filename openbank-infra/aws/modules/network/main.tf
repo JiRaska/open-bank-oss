@@ -252,7 +252,6 @@ locals {
   interface_endpoints = [
     "ecr.api",
     "ecr.dkr",
-    "sts",
     # ssm/ssmmessages/ec2messages removed (FinOps 2026-06-05): these were added
     # for the retired EC2 self-hosted runner model (ADR-0082). With EKS+kubectl
     # node access and ARC ephemeral runners gone, SSM Session Manager is not
@@ -269,6 +268,27 @@ locals {
     # (dominant volume = 10+ GB/day), remaining api+authenticator volume is tiny
     # and can go via NAT ($0.045/GB vs endpoint standing charge $0.72/day).
     # Fluent Bit ships to in-cluster Loki (not CloudWatch), so no other consumer.
+    #
+    # sts removed (FinOps #444, 2026-07-08): post-#198 hosted-runner migration
+    # audit. CloudWatch AWS/PrivateLinkEndpoints BytesProcessed showed ~0.23 GB
+    # over the trailing 14 days (~0.5 GB/month) — NAT-equivalent cost ~$0.02/mo
+    # vs the ~$23/mo fixed cost of the endpoint (3 AZs × $0.0105/h × 730h).
+    # IRSA/STS token exchange still works fine over the NAT path (STS is a
+    # low-volume, small-payload auth API, not a bulk-data one) — no security
+    # posture change, just no longer routed privately. Watch
+    # openbank-nat-egress-daily; if this regresses, revert is a one-line list
+    # entry (see open-bank-oss#444).
+    #
+    # ecr.api / ecr.dkr KEPT despite also being low-traffic on this measurement
+    # window (ecr.api ~0.2 GB/14d, ecr.dkr ~25.5 GB/14d but bursty up to
+    # 6-10 GB on deploy/Karpenter-churn days): both are the transport for the
+    # ECR pull-through cache (envs/sandbox-platform/ecr-pull-through-cache.tf)
+    # that every Karpenter node image pull depends on. ecr.dkr carries the
+    # actual layer bytes; ecr.api carries the paired auth/manifest calls for
+    # the same flow. Removing either pushes ALL node image pulls back onto
+    # NAT, which is the exact cost this pair was built to eliminate — traffic
+    # here scales with deploy/node-churn activity, not a flat baseline, so a
+    # quiet 14-day sample understates its long-run value.
   ]
 }
 
