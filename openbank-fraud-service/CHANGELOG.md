@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.5.2...fraud-service-v0.6.0) (2026-07-08)
+
+
+### Features
+
+* **fraud:** expand rule engine to v3 with amount-based rules ([#546](https://github.com/JiRaska/open-bank-oss/issues/546)) ([3f8f8be](https://github.com/JiRaska/open-bank-oss/commit/3f8f8be91db9584c9e873367f16a17a1fb735d78)), closes [#529](https://github.com/JiRaska/open-bank-oss/issues/529)
+
 ## [0.5.2](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.5.1...fraud-service-v0.5.2) (2026-07-07)
 
 
