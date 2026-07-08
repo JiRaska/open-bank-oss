@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: billing-service
     app.kubernetes.io/part-of: billing
   annotations:
-    openbank.tech/policy-checksum: "4555643a6d6630c8"
+    openbank.tech/policy-checksum: "c25f754c13617733"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1074,9 +1074,16 @@ data:
     money_path_action_prefixes:
       sepa-payment: [sepaPayment]
       sepa-instant: [sctInstPayment]
-      domestic-payment: [domesticPayment]
       clearing: [clearingBatch]
       sca: [device, scaChallenge]
+      # domestic-payment: intentionally NOT listed here (removed 2026-07-08, found while
+      # auditing issue #413). Its @Authorize actions were independently renamed from
+      # domesticPayment.* to domestic-payment.* (kebab-case, matching the derived scope)
+      # by a later change — the override entry this table used to carry (domesticPayment)
+      # had gone stale and was silently breaking the scope match again (input.action
+      # "domestic-payment.transitionStatus" no longer starts with the overridden
+      # "domesticPayment." scope). Now correctly covered by the default derived-name rule
+      # below — do not re-add an override here unless the action prefix diverges again.
 
     # ---------------------------------------------------------------------------------------
     # Four-eyes (dual control) for the unified OPA authz PEP (ADR-0034 D1; rest.rego reads
