@@ -33,27 +33,32 @@ class SwiftResource(private val useCase: SwiftUseCase) {
 
     @GET
     @Path("/messages")
+    @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "swift.list", resource = "")
     suspend fun listAll() = useCase.listAll().map { it.toResponse() }
 
     @GET
     @Path("/{id}")
+    @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "swift.read", resource = "#id")
     suspend fun get(@PathParam("id") id: UUID) = useCase.getById(id) ?: throw NotFoundException()
 
     @GET
     @Path("/status/{status}")
+    @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "swift.list", resource = "")
     suspend fun listByStatus(@PathParam("status") status: SwiftStatus) = useCase.listByStatus(status)
 
     @POST
     @Path("/{id}/ack")
+    @RolesAllowed(Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "swift.acknowledge", resource = "#id")
     suspend fun ack(@PathParam("id") id: UUID, body: Map<String, String>) =
         useCase.acknowledge(id, body["ackRef"] ?: "")
 
     @POST
     @Path("/{id}/reject")
+    @RolesAllowed(Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "swift.reject", resource = "#id")
     suspend fun reject(@PathParam("id") id: UUID, body: Map<String, String>) = useCase.reject(id, body["reason"] ?: "")
 }
