@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: KYC Service API
-  version: 1.4.0
+  version: 1.5.0
   description: Know Your Customer case management — open cases, run checks, approve/reject.
   license:
     name: Apache-2.0
@@ -162,6 +162,40 @@ paths:
         '422':
           $ref: '#/components/responses/InvalidStateTransition'
 
+  /api/v1/kyc/cases/{caseId}/pep-rescreen:
+    post:
+      tags: [KYC]
+      summary: Re-screen a KYC case's party name against the PEP_GLOBAL list (first increment, ADR-0116)
+      operationId: rescreenKycCasePep
+      description: >
+        Screens openbank-sanctions-service's OpenSanctions-derived PEP_GLOBAL list only — this is
+        a first, free-data-source PEP check, not a paid commercial vendor feed
+        (Refinitiv/ComplyAdvantage/etc.), not identity-document verification, and not continuous
+        real-time monitoring. Operator-triggered, distinct from the periodic re-KYC programme
+        (ADR-0116 §5), which still requires a Temporal scheduled workflow. A match sets
+        PEP_SCREENING to MANUAL_REVIEW and escalates riskLevel to at least HIGH.
+      parameters:
+        - $ref: '#/components/parameters/caseIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PepRescreenRequest'
+      responses:
+        '200':
+          description: Case re-screened
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KycCaseResponse'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden — caller lacks ROLE_OPERATOR, ROLE_ADMIN, ROLE_KYC_OPENER or ROLE_COMPLIANCE
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/kyc/cases/{caseId}/reject:
     post:
       tags: [KYC]
@@ -280,6 +314,16 @@ components:
             Mandatory explanation for the approval/rejection decision. Minimum 10 characters.
             Stored in the KYC case audit trail to satisfy ČNB AML/KYC §8 documentation obligations
             (AML Act No. 253/2008 Coll.).
+
+    PepRescreenRequest:
+      type: object
+      required: [partyName]
+      description: >
+        Party legal name to screen against openbank-sanctions-service's PEP_GLOBAL list. Kept out
+        of KycCaseResponse (the case aggregate carries no party name — see ADR-0116).
+      properties:
+        partyName:
+          type: string
 
     KycCaseResponse:
       type: object

@@ -2,6 +2,7 @@
 package com.openbank.kyc.application
 
 import com.openbank.kyc.application.port.out.KycCaseRepository
+import com.openbank.kyc.application.port.out.PepScreeningStatus
 import com.openbank.kyc.domain.model.CheckStatus
 import com.openbank.kyc.domain.model.CheckType
 import com.openbank.kyc.domain.model.KycCase
@@ -453,6 +454,145 @@ class KycServiceTest {
         val result = service.getCaseByParty(partyId)
 
         assertThat(result).isNull()
+    }
+
+    // ── applyPepScreeningResult — first-increment PEP check (ADR-0116 delivery note) ────
+    // Screens against openbank-sanctions-service's OpenSanctions-derived PEP_GLOBAL list only;
+    // not a paid commercial vendor feed, not identity-document verification, not continuous
+    // real-time monitoring (see PepScreeningService / SanctionsScreeningAdapter kdoc).
+
+    @Test
+    fun `applyPepScreeningResult PASSES the check and leaves risk level unchanged on a clear screen`(): Unit =
+        runBlocking {
+            val caseId = UUID.randomUUID()
+            val existing = kycCase(
+                id = caseId,
+                checks = listOf(check(caseId, CheckType.PEP_SCREENING, CheckStatus.PENDING)),
+            )
+            coEvery { repo.findById(caseId) } returns existing
+            coEvery { repo.update(any<KycCase>()) } answers { firstArg<KycCase>() }
+            every { eventPublisher.publishCaseStatusChanged(any()) } just runs
+
+            val result = service.applyPepScreeningResult(caseId, PepScreeningStatus.CLEAR, 0.1, null)
+
+            val pepCheck = result.checks.single { it.checkType == CheckType.PEP_SCREENING }
+            assertThat(pepCheck.status).isEqualTo(CheckStatus.PASSED)
+            assertThat(pepCheck.provider).isEqualTo("openbank-sanctions-service:PEP_GLOBAL")
+            assertThat(result.riskLevel).isEqualTo(RiskLevel.MEDIUM)
+        }
+
+    @Test
+    fun `applyPepScreeningResult escalates risk to HIGH and routes to MANUAL_REVIEW on a known-PEP match`(): Unit =
+        runBlocking {
+            val caseId = UUID.randomUUID()
+            val existing = kycCase(
+                id = caseId,
+                checks = listOf(check(caseId, CheckType.PEP_SCREENING, CheckStatus.PENDING)),
+            ).copy(riskLevel = RiskLevel.MEDIUM)
+            coEvery { repo.findById(caseId) } returns existing
+            coEvery { repo.update(any<KycCase>()) } answers { firstArg<KycCase>() }
+            every { eventPublisher.publishCaseStatusChanged(any()) } just runs
+
+            val result = service.applyPepScreeningResult(caseId, PepScreeningStatus.MATCH, 0.97, "Andrej Babiš")
+
+            val pepCheck = result.checks.single { it.checkType == CheckType.PEP_SCREENING }
+            assertThat(pepCheck.status).isEqualTo(CheckStatus.MANUAL_REVIEW)
+            assertThat(pepCheck.result).contains("Andrej Babiš")
+            assertThat(result.riskLevel).isEqualTo(RiskLevel.HIGH)
+            verify(exactly = 1) { eventPublisher.publishCaseStatusChanged(any()) }
+        }
+
+    @Test
+    fun `applyPepScreeningResult never downgrades an already VERY_HIGH risk level on a match`(): Unit = runBlocking {
+        val caseId = UUID.randomUUID()
+        val existing = kycCase(
+            id = caseId,
+            checks = listOf(check(caseId, CheckType.PEP_SCREENING, CheckStatus.PENDING)),
+        ).copy(riskLevel = RiskLevel.VERY_HIGH)
+        coEvery { repo.findById(caseId) } returns existing
+        coEvery { repo.update(any<KycCase>()) } answers { firstArg<KycCase>() }
+        every { eventPublisher.publishCaseStatusChanged(any()) } just runs
+
+        val result = service.applyPepScreeningResult(caseId, PepScreeningStatus.MATCH, 0.99, "Some PEP")
+
+        assertThat(result.riskLevel).isEqualTo(RiskLevel.VERY_HIGH)
+    }
+
+    @Test
+    fun `applyPepScreeningResult routes a POTENTIAL_MATCH to MANUAL_REVIEW and escalates risk too`(): Unit =
+        runBlocking {
+            val caseId = UUID.randomUUID()
+            val existing = kycCase(
+                id = caseId,
+                checks = listOf(check(caseId, CheckType.PEP_SCREENING, CheckStatus.PENDING)),
+            )
+            coEvery { repo.findById(caseId) } returns existing
+            coEvery { repo.update(any<KycCase>()) } answers { firstArg<KycCase>() }
+            every { eventPublisher.publishCaseStatusChanged(any()) } just runs
+
+            val result = service.applyPepScreeningResult(
+                caseId,
+                PepScreeningStatus.POTENTIAL_MATCH,
+                0.7,
+                "Similar Name",
+            )
+
+            val pepCheck = result.checks.single { it.checkType == CheckType.PEP_SCREENING }
+            assertThat(pepCheck.status).isEqualTo(CheckStatus.MANUAL_REVIEW)
+            assertThat(result.riskLevel).isEqualTo(RiskLevel.HIGH)
+        }
+
+    @Test
+    fun `applyPepScreeningResult routes UNAVAILABLE to MANUAL_REVIEW instead of a silent PASSED`(): Unit = runBlocking {
+        val caseId = UUID.randomUUID()
+        val existing = kycCase(
+            id = caseId,
+            checks = listOf(check(caseId, CheckType.PEP_SCREENING, CheckStatus.PENDING)),
+        )
+        coEvery { repo.findById(caseId) } returns existing
+        coEvery { repo.update(any<KycCase>()) } answers { firstArg<KycCase>() }
+        every { eventPublisher.publishCaseStatusChanged(any()) } just runs
+
+        val result = service.applyPepScreeningResult(caseId, PepScreeningStatus.UNAVAILABLE, 0.0, null)
+
+        val pepCheck = result.checks.single { it.checkType == CheckType.PEP_SCREENING }
+        assertThat(pepCheck.status).isEqualTo(CheckStatus.MANUAL_REVIEW)
+        assertThat(pepCheck.status).isNotEqualTo(CheckStatus.PASSED)
+        // Unavailability alone is not a PEP hit — it must not misrepresent risk as escalated.
+        assertThat(result.riskLevel).isEqualTo(RiskLevel.MEDIUM)
+    }
+
+    @Test
+    fun `applyPepScreeningResult a clean re-screen after a prior match does not re-escalate further`(): Unit =
+        runBlocking {
+            // Simulates re-screening (operator-triggered pep-rescreen endpoint) once the PEP list
+            // has been updated/corrected: a case already HIGH from a prior match stays HIGH (never
+            // silently downgraded here — an operator must still clear the case explicitly), but a
+            // fresh CLEAR result does move the check itself back to PASSED.
+            val caseId = UUID.randomUUID()
+            val existing = kycCase(
+                id = caseId,
+                checks = listOf(check(caseId, CheckType.PEP_SCREENING, CheckStatus.MANUAL_REVIEW)),
+            ).copy(riskLevel = RiskLevel.HIGH)
+            coEvery { repo.findById(caseId) } returns existing
+            coEvery { repo.update(any<KycCase>()) } answers { firstArg<KycCase>() }
+            every { eventPublisher.publishCaseStatusChanged(any()) } just runs
+
+            val result = service.applyPepScreeningResult(caseId, PepScreeningStatus.CLEAR, 0.05, null)
+
+            val pepCheck = result.checks.single { it.checkType == CheckType.PEP_SCREENING }
+            assertThat(pepCheck.status).isEqualTo(CheckStatus.PASSED)
+            assertThat(result.riskLevel).isEqualTo(RiskLevel.HIGH)
+        }
+
+    @Test
+    fun `applyPepScreeningResult throws KycCaseNotFoundException when case does not exist`(): Unit = runBlocking {
+        val caseId = UUID.randomUUID()
+        coEvery { repo.findById(caseId) } returns null
+
+        assertThatThrownBy {
+            runBlocking { service.applyPepScreeningResult(caseId, PepScreeningStatus.CLEAR, 0.0, null) }
+        }.isInstanceOf(KycCaseNotFoundException::class.java)
     }
 
     private fun kycCase(id: UUID = UUID.randomUUID(), checks: List<KycCheck>) = KycCase(
