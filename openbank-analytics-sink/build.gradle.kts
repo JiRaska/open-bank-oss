@@ -11,6 +11,8 @@ plugins {
     // Static analysis gate (detekt + ktlint, ratchet via baselines) — same
     // convention the services get through openbank.quarkus-service.
     id("openbank.static-analysis")
+    // Fleet-wide Netty/Jackson/etc. patch-version floors (issue #461).
+    id("openbank.dependency-vulnerability-pins")
 }
 group = "com.openbank"
 version = "0.1.0-SNAPSHOT"
