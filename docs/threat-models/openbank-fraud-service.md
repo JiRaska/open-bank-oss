@@ -146,3 +146,19 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
   under the existing money-path 2-approval gate. Rollback: revert `FraudRuleEngine` to `v2`
   (`ScoreRequest.velocityH1TotalAmount` defaults to zero and is additive/backward-compatible, so no
   data cleanup is required on rollback).
+
+- **2026-07-08** — ADR-0084 §3 v3 follow-up (PR #546, adversarial review finding): cross-currency
+  false-ALLOW fixed, no new trust boundary. The initial v3 cut compared raw `BigDecimal` amounts
+  against a single currency-blind threshold per rule — a large EUR payment (e.g. EUR 480,000,
+  worth roughly CZK 12,000,000) could sail under a CZK-calibrated cap (CZK 500,000), a genuine
+  T1-class verdict-integrity gap (false ALLOW on a large payment). Both v3 rules now key their
+  threshold off `ScoreRequest.currency` via a `Map<String, BigDecimal>` (CZK/EUR populated; see
+  ADR-0084 for the exact figures). **An unmapped currency now fails CLOSED** — the rule fires
+  REVIEW unconditionally rather than silently never firing — consistent with this service's
+  existing "no silent pass on missing signal" posture (velocity rules are silent-on-zero only for
+  *mapped* currencies; the count is genuinely known to be zero, whereas an unmapped currency means
+  the rule has no calibrated threshold at all and cannot be trusted to stay silent). This changes
+  no data source, no endpoint, and no trust boundary — asset/threat inventory (§1–§4) unchanged.
+  Deliberately did **not** add a synchronous FX-conversion call into the scoring path (would be a
+  new cross-service dependency with its own fail-open/closed decision — out of scope for this fix).
+  Rollback: revert to the single-threshold v3 rules (git revert this commit); no data migration.

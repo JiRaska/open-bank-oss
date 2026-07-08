@@ -17,10 +17,11 @@ class FraudRuleEngineTest {
         velocityH1Count: Long = 0,
         velocityH24Count: Long = 0,
         amount: BigDecimal = BigDecimal("1250.00"),
+        currency: String = "CZK",
         velocityH1TotalAmount: BigDecimal = BigDecimal.ZERO,
     ) = ScoreRequest(
         amount = amount,
-        currency = "CZK",
+        currency = currency,
         rail = "SEPA_INSTANT",
         accountId = UUID.randomUUID(),
         counterpartyId = UUID.randomUUID(),
@@ -166,6 +167,44 @@ class FraudRuleEngineTest {
         assertThat(hit).isNull()
     }
 
+    @Test
+    fun `LargeSingleTransactionReviewRule does not fire below the EUR threshold`() {
+        val hit = LargeSingleTransactionReviewRule.evaluate(request(amount = BigDecimal("19999.99"), currency = "EUR"))
+        assertThat(hit).isNull()
+    }
+
+    @Test
+    fun `LargeSingleTransactionReviewRule fires at exactly the EUR threshold`() {
+        val hit = LargeSingleTransactionReviewRule.evaluate(request(amount = BigDecimal("20000"), currency = "EUR"))
+
+        assertThat(hit).isNotNull
+        assertThat(hit!!.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(hit.scoreDelta).isEqualTo(25)
+        assertThat(hit.reason).isEqualTo("large-single-transaction")
+    }
+
+    @Test
+    fun `LargeSingleTransactionReviewRule catches a large EUR transaction that would sail under the CZK threshold`() {
+        // The exact false-ALLOW scenario flagged in review: EUR 480,000 is well under the raw CZK
+        // 500,000 figure but is worth roughly CZK 12,000,000 — a currency-blind threshold would miss
+        // it entirely. With the EUR-specific threshold (20,000) it must fire.
+        val hit = LargeSingleTransactionReviewRule.evaluate(request(amount = BigDecimal("480000"), currency = "EUR"))
+
+        assertThat(hit).isNotNull
+        assertThat(hit!!.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(hit.reason).isEqualTo("large-single-transaction")
+    }
+
+    @Test
+    fun `LargeSingleTransactionReviewRule fails closed for an unmapped currency regardless of amount`() {
+        val hit = LargeSingleTransactionReviewRule.evaluate(request(amount = BigDecimal("1.00"), currency = "USD"))
+
+        assertThat(hit).isNotNull
+        assertThat(hit!!.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(hit.scoreDelta).isEqualTo(25)
+        assertThat(hit.reason).isEqualTo("large-single-transaction-unmapped-currency")
+    }
+
     // ── VelocityH1HighValueReviewRule ────────────────────────────────────────
 
     @Test
@@ -195,6 +234,40 @@ class FraudRuleEngineTest {
     fun `VelocityH1HighValueReviewRule is silent when no signal (zero total)`() {
         val hit = VelocityH1HighValueReviewRule.evaluate(request(velocityH1TotalAmount = BigDecimal.ZERO))
         assertThat(hit).isNull()
+    }
+
+    @Test
+    fun `VelocityH1HighValueReviewRule does not fire below the EUR cap`() {
+        val hit = VelocityH1HighValueReviewRule.evaluate(
+            request(velocityH1TotalAmount = BigDecimal("39999.99"), currency = "EUR"),
+        )
+        assertThat(hit).isNull()
+    }
+
+    @Test
+    fun `VelocityH1HighValueReviewRule fires at exactly the EUR cap`() {
+        val hit = VelocityH1HighValueReviewRule.evaluate(
+            request(velocityH1TotalAmount = BigDecimal("40000"), currency = "EUR"),
+        )
+
+        assertThat(hit).isNotNull
+        assertThat(hit!!.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(hit.scoreDelta).isEqualTo(35)
+        assertThat(hit.reason).isEqualTo("velocity-h1-amount-cap")
+    }
+
+    @Test
+    fun `VelocityH1HighValueReviewRule fails closed for an unmapped currency even at zero total`() {
+        // Unlike the CZK/EUR silent-on-zero contract, an unmapped currency cannot be trusted to mean
+        // "no signal yet" — it means the rule has no calibrated threshold at all, so it must flag.
+        val hit = VelocityH1HighValueReviewRule.evaluate(
+            request(velocityH1TotalAmount = BigDecimal.ZERO, currency = "USD"),
+        )
+
+        assertThat(hit).isNotNull
+        assertThat(hit!!.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(hit.scoreDelta).isEqualTo(35)
+        assertThat(hit.reason).isEqualTo("velocity-h1-amount-cap-unmapped-currency")
     }
 
     // ── Engine integration ───────────────────────────────────────────────────
@@ -297,5 +370,34 @@ class FraudRuleEngineTest {
         assertThat(result.verdict).isEqualTo(FraudVerdict.ALLOW)
         assertThat(result.score).isZero()
         assertThat(result.reasons).containsExactly("baseline-allow")
+    }
+
+    @Test
+    fun `engine returns REVIEW for a large EUR transaction that a currency-blind threshold would have missed`() {
+        // Regression test for the cross-currency false-ALLOW finding: EUR 480,000 (~CZK 12,000,000)
+        // must trip the large-transaction rule even though it is far below the raw CZK 500,000 figure.
+        val result = FraudRuleEngine.score(request(amount = BigDecimal("480000"), currency = "EUR"))
+
+        assertThat(result.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(result.reasons).contains("large-single-transaction")
+    }
+
+    @Test
+    fun `engine still ALLOWs a modest EUR transaction below the EUR threshold`() {
+        val result = FraudRuleEngine.score(request(amount = BigDecimal("500.00"), currency = "EUR"))
+
+        assertThat(result.verdict).isEqualTo(FraudVerdict.ALLOW)
+        assertThat(result.score).isZero()
+    }
+
+    @Test
+    fun `engine fails closed to REVIEW for any amount in an unmapped currency`() {
+        val result = FraudRuleEngine.score(request(amount = BigDecimal("1.00"), currency = "USD"))
+
+        assertThat(result.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(result.reasons).contains(
+            "large-single-transaction-unmapped-currency",
+            "velocity-h1-amount-cap-unmapped-currency",
+        )
     }
 }
