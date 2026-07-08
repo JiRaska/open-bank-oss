@@ -9,6 +9,7 @@ import com.openbank.lending.application.port.`in`.ApplyForLoanUseCase
 import com.openbank.lending.application.port.`in`.CollateralUseCase
 import com.openbank.lending.application.port.`in`.DisburseLoanUseCase
 import com.openbank.lending.application.port.`in`.ProvisioningUseCase
+import com.openbank.lending.application.port.`in`.RunProvisioningCycleUseCase
 import com.openbank.lending.application.port.`in`.ServicingUseCase
 import com.openbank.lending.application.port.`in`.WriteOffLoanUseCase
 import com.openbank.lending.application.port.out.CollateralRepository
@@ -21,6 +22,7 @@ import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanEventEmitter
 import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.application.port.out.PostingKind
+import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
 import com.openbank.lending.domain.model.AccrualOutcome
 import com.openbank.lending.domain.model.ApplicationStatus
@@ -31,7 +33,9 @@ import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.LoanInstallment
+import com.openbank.lending.domain.model.LoanProvisioningRecord
 import com.openbank.lending.domain.model.LoanStatus
+import com.openbank.lending.domain.model.ProvisioningRunOutcome
 import com.openbank.lending.domain.model.ProvisioningSnapshot
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.libs.domain.identifiers.LoanApplicationId
@@ -66,13 +70,15 @@ class LendingService(
     private val riskParameters: RiskParameterSource,
     private val events: LoanEventEmitter,
     private val clock: Clock,
+    private val provisioning: ProvisioningRepository,
 ) : ApplyForLoanUseCase,
     DisburseLoanUseCase,
     ServicingUseCase,
     AccrueInterestUseCase,
     WriteOffLoanUseCase,
     CollateralUseCase,
-    ProvisioningUseCase {
+    ProvisioningUseCase,
+    RunProvisioningCycleUseCase {
 
     // --- Origination --------------------------------------------------------------------------------
 
@@ -390,24 +396,105 @@ class LendingService(
             if (loan == null) {
                 Uni.createFrom().failure(IllegalArgumentException("Loan not found: $loanId"))
             } else {
-                installments.findByLoan(loanId).flatMap { schedule ->
-                    val outstanding = outstandingBalance(loan, schedule)
-                    val oldestUnpaidDue = schedule.filter { !it.paid }.minByOrNull { it.dueDate }?.dueDate
-                    val dpd = Delinquency.daysPastDue(oldestUnpaidDue, asOf)
-                    riskParameters.parametersFor(loan, outstanding).map { inputs ->
-                        val ecl = Ifrs9.assess(daysPastDue = dpd, inputs = inputs)
-                        ProvisioningSnapshot(
-                            loanId = loanId,
-                            asOf = asOf,
-                            outstandingBalance = outstanding,
-                            daysPastDue = dpd,
-                            bucket = Delinquency.bucket(dpd),
-                            stage = ecl.stage,
-                            horizon = ecl.horizon,
-                            expectedCreditLoss = ecl.expectedCreditLoss,
+                snapshotFor(loan, asOf)
+            }
+        }
+
+    /** The IFRS 9 stage/ECL computation shared by the on-demand [assess] read and the scheduled cycle. */
+    private fun snapshotFor(loan: Loan, asOf: LocalDate): Uni<ProvisioningSnapshot> =
+        installments.findByLoan(loan.id).flatMap { schedule ->
+            val outstanding = outstandingBalance(loan, schedule)
+            val oldestUnpaidDue = schedule.filter { !it.paid }.minByOrNull { it.dueDate }?.dueDate
+            val dpd = Delinquency.daysPastDue(oldestUnpaidDue, asOf)
+            riskParameters.parametersFor(loan, outstanding).map { inputs ->
+                val ecl = Ifrs9.assess(daysPastDue = dpd, inputs = inputs)
+                ProvisioningSnapshot(
+                    loanId = loan.id,
+                    asOf = asOf,
+                    outstandingBalance = outstanding,
+                    daysPastDue = dpd,
+                    bucket = Delinquency.bucket(dpd),
+                    stage = ecl.stage,
+                    horizon = ecl.horizon,
+                    expectedCreditLoss = ecl.expectedCreditLoss,
+                )
+            }
+        }
+
+    // --- Provisioning cycle: scheduled IFRS 9 stage/ECL re-bucketing, delta-vs-prior-period posting ---
+
+    /**
+     * Re-buckets every ACTIVE loan's IFRS 9 stage/ECL for [period] and posts only the **delta** versus
+     * the loan's most recent earlier period to the ledger (mirrors the FX-revaluation delta pattern in
+     * `openbank-ledger-service`: a signed movement, zero-delta skipped, never a full re-post). Idempotent
+     * per `(loanId, period)` — a loan already provisioned for [period] is left untouched.
+     */
+    override fun runProvisioningCycle(period: String, asOf: LocalDate, limit: Int): Uni<ProvisioningRunOutcome> =
+        loans.findActive(limit).flatMap { active ->
+            Multi.createFrom().iterable(active)
+                .onItem().transformToUniAndConcatenate { loan -> provisionOne(loan, period, asOf) }
+                .collect().asList()
+                .map { results ->
+                    ProvisioningRunOutcome(
+                        period = period,
+                        loansAssessed = results.size,
+                        journalsPosted = results.count { it },
+                    )
+                }
+        }
+
+    /** Provisions one loan for [period]; returns whether a ledger delta was posted (for the outcome tally). */
+    private fun provisionOne(loan: Loan, period: String, asOf: LocalDate): Uni<Boolean> =
+        provisioning.findByLoanAndPeriod(loan.id, period).flatMap { already ->
+            if (already != null) {
+                // Idempotent re-run: this loan is already provisioned for this period — do nothing.
+                Uni.createFrom().item(false)
+            } else {
+                snapshotFor(loan, asOf).flatMap { snapshot -> postProvisioningDelta(loan, period, snapshot) }
+            }
+        }
+
+    private fun postProvisioningDelta(loan: Loan, period: String, snapshot: ProvisioningSnapshot): Uni<Boolean> =
+        provisioning.findLatestBefore(loan.id, period).flatMap { prior ->
+            val priorEcl = prior?.expectedCreditLoss ?: Money.zero(snapshot.expectedCreditLoss.currency.code)
+            val delta = snapshot.expectedCreditLoss.minus(priorEcl)
+            val record = LoanProvisioningRecord(
+                loanId = loan.id,
+                period = period,
+                asOf = snapshot.asOf,
+                outstandingBalance = snapshot.outstandingBalance,
+                daysPastDue = snapshot.daysPastDue,
+                bucket = snapshot.bucket,
+                stage = snapshot.stage,
+                expectedCreditLoss = snapshot.expectedCreditLoss,
+                createdAt = OffsetDateTime.now(clock),
+            )
+            if (delta.isZero()) {
+                // Stage/ECL unchanged since the last cycle: keep the audit-trail row, post nothing.
+                provisioning.save(record).map { false }
+            } else {
+                ledger.post(
+                    LedgerPosting(
+                        "loan:${loan.id.value}:provisioning:$period",
+                        loan.partyId,
+                        delta,
+                        PostingKind.PROVISIONING,
+                    ),
+                )
+                    .flatMap { provisioning.save(record) }
+                    .flatMap {
+                        events.emit(
+                            LendingOutboxMessage(
+                                aggregateId = loan.id.value,
+                                eventType = "loan.provisioned",
+                                payload = """{"loanId":"${loan.id.value}","period":"$period",""" +
+                                    """"stage":"${snapshot.stage}",""" +
+                                    """"expectedCreditLoss":"${snapshot.expectedCreditLoss}",""" +
+                                    """"delta":"$delta"}""",
+                            ),
                         )
                     }
-                }
+                    .map { true }
             }
         }
 

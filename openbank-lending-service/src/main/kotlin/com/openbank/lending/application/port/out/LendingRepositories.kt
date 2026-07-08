@@ -8,6 +8,7 @@ import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanInstallment
+import com.openbank.lending.domain.model.LoanProvisioningRecord
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import io.smallrye.mutiny.Uni
@@ -25,6 +26,9 @@ interface LoanRepository {
     fun findById(id: LoanId): Uni<Loan?>
     fun findByParty(partyId: UUID): Uni<List<Loan>>
     fun update(loan: Loan): Uni<Loan>
+
+    /** ACTIVE loans still on the books, ordered deterministically — drives the provisioning cycle scan. */
+    fun findActive(limit: Int): Uni<List<Loan>>
 }
 
 interface InstallmentRepository {
@@ -45,4 +49,18 @@ interface InstallmentRepository {
 interface CollateralRepository {
     fun save(collateral: Collateral): Uni<Collateral>
     fun findByLoan(loanId: LoanId): Uni<List<Collateral>>
+}
+
+/**
+ * Persisted IFRS 9 stage/ECL history (ADR-0028 Phase 3). One row per `(loanId, period)`; the scheduled
+ * provisioning cycle reads the prior period's row to compute the ledger delta, then inserts the new one.
+ */
+interface ProvisioningRepository {
+    /** The most recent record strictly before [period] for this loan, if any — the delta baseline. */
+    fun findLatestBefore(loanId: LoanId, period: String): Uni<LoanProvisioningRecord?>
+
+    /** The record for this exact `(loanId, period)`, if the cycle already ran for it (idempotency check). */
+    fun findByLoanAndPeriod(loanId: LoanId, period: String): Uni<LoanProvisioningRecord?>
+
+    fun save(record: LoanProvisioningRecord): Uni<LoanProvisioningRecord>
 }
