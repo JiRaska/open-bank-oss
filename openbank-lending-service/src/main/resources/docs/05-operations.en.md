@@ -21,9 +21,11 @@
 | `LEDGER_SERVICE_URL` | `http://localhost:8101` | ledger-service REST client base |
 | `LENDING_LEDGER_BACKEND` | `none` | `rest` activates `RestLedgerPostingAdapter` (build-time gated) |
 | `LENDING_LEDGER_SYSTEM_ACTOR_ID` | `…00aa` | `createdBy` on ledger journals |
-| `LENDING_GL_*` | (UUID defaults) | GL leaf accounts: loans-receivable, funding-clearing, interest-income, interest-receivable, loan-loss-expense |
+| `LENDING_GL_*` | (UUID defaults) | GL leaf accounts: loans-receivable, funding-clearing, interest-income, interest-receivable, loan-loss-expense, loan-loss-allowance |
 | `LENDING_ACCRUAL_EVERY` | `24h` | Interest-accrual pass interval |
 | `LENDING_ACCRUAL_BATCH_SIZE` | `500` | Installments per accrual pass |
+| `LENDING_PROVISIONING_EVERY` | `720h` (~30d) | IFRS 9 provisioning cycle interval (ADR-0028 Phase 3); a plain duration, not calendar-month-aware |
+| `LENDING_PROVISIONING_BATCH_SIZE` | `500` | ACTIVE loans scanned per provisioning cycle (no pagination beyond this — see threat model §5) |
 
 `LENDING_LEDGER_BACKEND` is **build-time** (`@IfBuildProperty`): it selects the adapter at image build, not at runtime.
 
@@ -62,6 +64,9 @@ When `LENDING_LEDGER_BACKEND=rest`, postings go through `LedgerCallGuard` (fault
 
 ### Interest accrual pass not running / lagging
 Check the `InterestAccrualScheduler` logs ("interest accrual pass: N installments accrued"). Interval is `LENDING_ACCRUAL_EVERY` (default 24h, delayed 30s). The pass is idempotent (`interest_accrued` flag); a missed window self-heals on the next tick because it selects all due-but-unaccrued installments.
+
+### IFRS 9 provisioning cycle not running / no delta posted
+Check the `ProvisioningCycleScheduler` logs ("IFRS 9 provisioning cycle {period}: N loans assessed, M provisioning journals posted"). Interval is `LENDING_PROVISIONING_EVERY` (default ~720h/30d, delayed 60s). Zero journals posted for a period with loans assessed is **expected and correct** when no loan's stage/ECL changed since the prior period — check the `loan_provisioning` table for the period's rows before assuming a failure. The pass is idempotent per `(loan_id, period)`; a missed window self-heals on the next tick, but a book larger than `LENDING_PROVISIONING_BATCH_SIZE` is only partially covered per tick (no continuation cursor yet — tracked in the threat model).
 
 ### Flyway checksum mismatch on startup
 Never rewrite an applied migration. Set `QUARKUS_FLYWAY_REPAIR_AT_START=true` transiently, let the DB settle, then remove it.

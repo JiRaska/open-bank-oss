@@ -8,10 +8,12 @@ import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanInstallment
+import com.openbank.lending.domain.model.LoanProvisioningRecord
 import com.openbank.lending.infrastructure.persistence.entity.CollateralEntity
 import com.openbank.lending.infrastructure.persistence.entity.InstallmentEntity
 import com.openbank.lending.infrastructure.persistence.entity.LoanApplicationEntity
 import com.openbank.lending.infrastructure.persistence.entity.LoanEntity
+import com.openbank.lending.infrastructure.persistence.entity.LoanProvisioningEntity
 import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
@@ -118,6 +120,33 @@ class LendingMapper {
         marketValue = Money.of(e.marketValue, e.currency),
         haircut = e.haircut,
         valuedAt = e.valuedAt,
+        createdAt = e.createdAt,
+    )
+
+    fun toEntity(p: LoanProvisioningRecord) = LoanProvisioningEntity().also {
+        it.id = p.id
+        it.loanId = p.loanId.value
+        it.period = p.period
+        it.asOf = p.asOf
+        it.outstandingBalance = p.outstandingBalance.amount
+        it.currency = p.outstandingBalance.currency.code
+        it.daysPastDue = p.daysPastDue
+        it.bucket = p.bucket
+        it.stage = p.stage
+        it.expectedCreditLoss = p.expectedCreditLoss.amount
+        it.createdAt = p.createdAt
+    }
+
+    fun toDomain(e: LoanProvisioningEntity) = LoanProvisioningRecord(
+        id = e.id,
+        loanId = LoanId(e.loanId),
+        period = e.period,
+        asOf = e.asOf,
+        outstandingBalance = Money.of(e.outstandingBalance, e.currency),
+        daysPastDue = e.daysPastDue,
+        bucket = e.bucket,
+        stage = e.stage,
+        expectedCreditLoss = Money.of(e.expectedCreditLoss, e.currency),
         createdAt = e.createdAt,
     )
 }

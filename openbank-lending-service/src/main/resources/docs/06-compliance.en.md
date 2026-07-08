@@ -91,6 +91,30 @@ All three identities are the authenticated JWT subject captured server-side — 
 
 `GET /loans/{id}/provisioning?asOf=` returns a point-in-time snapshot: outstanding balance, days-past-due, delinquency bucket, IFRS 9 stage, ECL horizon and Expected Credit Loss. The ECL math is the pure `libs.lending.Ifrs9` primitive fed by `RiskParameterSource` (conservative no-op defaults today: PD12m 0.03, PD-lifetime 0.20, LGD 0.45 — a real PD model is a wiring change). Stage 3 uncollectible loans terminate via `POST /loans/{id}/writeoff` → `WRITE_OFF` posting (DR Loan Loss Expense / CR Loans Receivable) and derecognition.
 
+### Stage bucketing (ADR-0028 Phase 3)
+
+`Ifrs9.stage(daysPastDue, …)` buckets purely on days-past-due (the practical proxy this ADR uses in place of a full "significant increase in credit risk" model, which needs data this repo does not yet have):
+
+- **Stage 1** (performing, 12-month ECL) — DPD ≤ 30.
+- **Stage 2** (SICR, lifetime ECL) — 30 < DPD ≤ 90.
+- **Stage 3** (credit-impaired / default, lifetime ECL) — DPD > 90, matching the CRR Art. 178 / EBA default-definition threshold (`Delinquency.isDefaulted`).
+
+DPD is derived from the existing repayment schedule (`installment.due_date` / `paid`) — no new column was needed for stage bucketing itself.
+
+### Scheduled provisioning cycle & ledger posting (ADR-0028 Phase 3)
+
+`ProvisioningCycleScheduler` re-buckets every ACTIVE loan monthly (`lending.provisioning.cycle.every`) and posts only the ECL **delta** versus the loan's prior period — never the full ECL again — as a `PROVISIONING` journal (DR Loan Loss Expense / CR Loan Loss Allowance on an increase; reversed on a decrease/release). History is persisted in `loan_provisioning` (one row per loan per `yyyy-MM` period), which is both the delta baseline and the idempotency guard for a re-run of an already-provisioned period.
+
+### ⚠️ Explicit limitation — simplified, non-production PD/LGD/EAD
+
+**The PD and LGD parameters this increment uses are simplified placeholders, not regulatory-grade risk parameters:**
+
+- **EAD** = outstanding principal balance (no discounting to the effective interest rate — the `Ifrs9` primitive leaves that to the caller and none is applied here).
+- **PD** = a flat rate per IFRS 9 stage (`RiskParameterSource.DEFAULT_PD_12M = 0.03`, `DEFAULT_PD_LIFETIME = 0.20`), identical for every loan regardless of borrower, product, vintage or macroeconomic conditions.
+- **LGD** = a flat `0.45` for every loan, ignoring collateral, seniority or recovery history.
+
+There is **no behavioral/statistical PD model, no macroeconomic overlay or forward-looking scenario weighting, and no collateral-adjusted LGD** (collateral valuation exists in this service for AnaCredit protection-category tracking, D1, but is not yet wired into LGD). These parameters **must be calibrated by the actuarial/risk team against real portfolio loss history before any production use** — this is a structural first increment (a working stage-bucketing → ECL → ledger pipeline), not a regulatory-grade IFRS 9 implementation. Swapping the conservative constants for a real risk-parameter adapter is a wiring change (`RiskParameterSource`, ADR-0028 D4), not a domain change.
+
 ## Audit trail
 
 Every state-changing operation (disburse, accrue, write-off) emits a domain event to `lending_outbox` → Kafka `openbank.lending.events`, persisted by `audit-service`. Decision metadata (`proposed_by`, `decided_by`, `decision_reason`, `decided_at`) is retained on the application row.

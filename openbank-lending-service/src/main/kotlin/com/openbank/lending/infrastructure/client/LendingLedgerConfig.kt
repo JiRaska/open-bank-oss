@@ -36,6 +36,10 @@ interface LendingLedgerConfig {
 
         @WithDefault("a0000000-0000-0000-0000-000000005100")
         fun loanLossExpense(): UUID
+
+        /** Contra-asset carrying accumulated IFRS 9 impairment (ADR-0028 Phase 3). */
+        @WithDefault("a0000000-0000-0000-0000-000000001400")
+        fun loanLossAllowance(): UUID
     }
 
     /** Snapshot the GL accounts into the plain holder the pure factory consumes. */
@@ -45,5 +49,6 @@ interface LendingLedgerConfig {
         interestIncome = gl().interestIncome(),
         interestReceivable = gl().interestReceivable(),
         loanLossExpense = gl().loanLossExpense(),
+        loanLossAllowance = gl().loanLossAllowance(),
     )
 }

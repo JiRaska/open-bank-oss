@@ -24,6 +24,8 @@ Třída resource je role-gated; **jednající principal je vždy ověřený JWT 
 | `/loans/{id}/collateral` | `GET` | (role třídy) | Seznam zajištění |
 | `/loans/{id}/provisioning` | `GET` | `ROLE_CREDIT_RISK`, `ROLE_COMPLIANCE`, `ROLE_ADMIN` | IFRS 9 stage + ECL. Volitelný `asOf` (datum). 200 / 404 |
 
+Naplánovaný měsíční cyklus IFRS 9 provisioningu (ADR-0028 Fáze 3, `ProvisioningCycleScheduler`) **není** v tomto přírůstku spouštěn přes REST — běží pouze podle `lending.provisioning.cycle.every`. `GET /loans/{id}/provisioning` zůstává on-demand, nepersistovaným čtením; persistovaná historie po období, kterou zatím nevystavuje, žije v `loan_provisioning` (zatím bez read endpointu — přirozený malý follow-up).
+
 ## Čtyřoč princip / segregace odpovědností
 
 Vznik úvěru je řetězec maker-checker-disburser vynucený na serveru (ADR-0028 D5, EBA/GL/2020/06):

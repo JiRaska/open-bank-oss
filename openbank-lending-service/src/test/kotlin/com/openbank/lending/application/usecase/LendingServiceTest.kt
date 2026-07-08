@@ -14,6 +14,7 @@ import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanEventEmitter
 import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.application.port.out.PostingKind
+import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
 import com.openbank.lending.domain.model.ApplicationStatus
 import com.openbank.lending.domain.model.DecisionRequest
@@ -21,6 +22,7 @@ import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.LoanInstallment
+import com.openbank.lending.domain.model.LoanProvisioningRecord
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.libs.domain.identifiers.LoanApplicationId
@@ -57,6 +59,7 @@ class LendingServiceTest {
     private val riskParameters = mockk<RiskParameterSource>()
     private val events = mockk<LoanEventEmitter>()
     private val clock = Clock.fixed(Instant.parse("2024-01-01T00:00:00Z"), ZoneOffset.UTC)
+    private val provisioning = mockk<ProvisioningRepository>()
 
     private val service = LendingService(
         applications,
@@ -68,6 +71,7 @@ class LendingServiceTest {
         riskParameters,
         events,
         clock,
+        provisioning,
     )
 
     private val partyId = UUID.fromString("11111111-1111-1111-1111-111111111111")
@@ -397,6 +401,7 @@ class LendingServiceTest {
     fun `provisioning of a current loan is Stage 1 on the full outstanding balance`() {
         val loanId = LoanId.random()
         val loan = Loan(
+            id = loanId,
             applicationId = LoanApplicationId.random(),
             partyId = partyId,
             principal = eur("12000.00"),
@@ -438,5 +443,204 @@ class LendingServiceTest {
         assertThat(snapshot.outstandingBalance).isEqualTo(eur("12000.00"))
         // Stage 1 ECL = 0.02 * 0.45 * 12000 = 108.00
         assertThat(snapshot.expectedCreditLoss).isEqualTo(eur("108.00"))
+    }
+
+    // --- Provisioning cycle: scheduled delta-vs-prior-period posting ---------------------------------
+
+    private fun currentLoanWithSchedule(loanId: LoanId): Pair<Loan, List<LoanInstallment>> {
+        val loan = Loan(
+            id = loanId,
+            applicationId = LoanApplicationId.random(),
+            partyId = partyId,
+            principal = eur("12000.00"),
+            nominalAnnualRate = BigDecimal("0.12"),
+            termPeriods = 12,
+            method = AmortizationMethod.ANNUITY,
+            firstDueDate = firstDue,
+            disbursedAt = fixedNow,
+            createdAt = fixedNow,
+        )
+        val schedule = listOf(
+            LoanInstallment(
+                loanId = loanId,
+                number = 1,
+                dueDate = firstDue,
+                openingBalance = eur("12000.00"),
+                principal = eur("946.19"),
+                interest = eur("120.00"),
+                payment = eur("1066.19"),
+                closingBalance = eur("11053.81"),
+            ),
+        )
+        return loan to schedule
+    }
+
+    private fun mockRiskParameters(loan: Loan, pd12m: String) {
+        every { riskParameters.parametersFor(loan, eur("12000.00")) } returns Uni.createFrom().item(
+            EclInputs(
+                pd12Month = BigDecimal(pd12m),
+                pdLifetime = BigDecimal("0.20"),
+                lgd = BigDecimal("0.45"),
+                exposureAtDefault = eur("12000.00"),
+            ),
+        )
+    }
+
+    @Test
+    fun `first provisioning cycle for a loan posts the full ECL as the delta`() {
+        val loanId = LoanId.random()
+        val (loan, schedule) = currentLoanWithSchedule(loanId)
+        val postings = mutableListOf<LedgerPosting>()
+        val savedRecords = mutableListOf<LoanProvisioningRecord>()
+        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        mockRiskParameters(loan, "0.02")
+        every { provisioning.findByLoanAndPeriod(loanId, "2026-06") } returns Uni.createFrom().nullItem()
+        every { provisioning.findLatestBefore(loanId, "2026-06") } returns Uni.createFrom().nullItem()
+        every { ledger.post(capture(postings)) } returns Uni.createFrom().item(Unit)
+        every { provisioning.save(capture(savedRecords)) } answers { Uni.createFrom().item(savedRecords.last()) }
+        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+
+        val outcome = service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 500)
+            .await().indefinitely()
+
+        assertThat(outcome.loansAssessed).isEqualTo(1)
+        assertThat(outcome.journalsPosted).isEqualTo(1)
+        // No prior period: the whole Stage 1 ECL (108.00) is the delta, never a partial amount.
+        assertThat(postings).hasSize(1)
+        assertThat(postings.single().kind).isEqualTo(PostingKind.PROVISIONING)
+        assertThat(postings.single().amount).isEqualTo(eur("108.00"))
+        assertThat(postings.single().reference).isEqualTo("loan:${loanId.value}:provisioning:2026-06")
+        assertThat(savedRecords.single().expectedCreditLoss).isEqualTo(eur("108.00"))
+        verify(exactly = 1) { events.emit(any<LendingOutboxMessage>()) }
+    }
+
+    @Test
+    fun `provisioning cycle posts only the increase since the prior period`() {
+        val loanId = LoanId.random()
+        val (loan, schedule) = currentLoanWithSchedule(loanId)
+        val prior = LoanProvisioningRecord(
+            loanId = loanId,
+            period = "2026-05",
+            asOf = LocalDate.parse("2026-05-01"),
+            outstandingBalance = eur("12000.00"),
+            daysPastDue = 0,
+            bucket = com.openbank.libs.lending.DelinquencyBucket.CURRENT,
+            stage = Ifrs9Stage.STAGE_1,
+            expectedCreditLoss = eur("108.00"),
+            createdAt = fixedNow,
+        )
+        val postings = mutableListOf<LedgerPosting>()
+        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        // Deteriorated: higher 12m PD this cycle, so the ECL (and thus the delta) increases.
+        mockRiskParameters(loan, "0.04")
+        every { provisioning.findByLoanAndPeriod(loanId, "2026-06") } returns Uni.createFrom().nullItem()
+        every { provisioning.findLatestBefore(loanId, "2026-06") } returns Uni.createFrom().item(prior)
+        every { ledger.post(capture(postings)) } returns Uni.createFrom().item(Unit)
+        every { provisioning.save(any()) } answers { Uni.createFrom().item(firstArg<LoanProvisioningRecord>()) }
+        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+
+        val outcome = service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 500)
+            .await().indefinitely()
+
+        // New ECL = 0.04 * 0.45 * 12000 = 216.00; prior = 108.00 -> delta = +108.00, not the full 216.00.
+        assertThat(outcome.journalsPosted).isEqualTo(1)
+        assertThat(postings.single().amount).isEqualTo(eur("108.00"))
+        assertThat(postings.single().amount.isPositive()).isTrue()
+    }
+
+    @Test
+    fun `provisioning cycle posts a negative delta when risk improves (partial release)`() {
+        val loanId = LoanId.random()
+        val (loan, schedule) = currentLoanWithSchedule(loanId)
+        val prior = LoanProvisioningRecord(
+            loanId = loanId,
+            period = "2026-05",
+            asOf = LocalDate.parse("2026-05-01"),
+            outstandingBalance = eur("12000.00"),
+            daysPastDue = 0,
+            bucket = com.openbank.libs.lending.DelinquencyBucket.CURRENT,
+            stage = Ifrs9Stage.STAGE_1,
+            expectedCreditLoss = eur("216.00"),
+            createdAt = fixedNow,
+        )
+        val postings = mutableListOf<LedgerPosting>()
+        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        mockRiskParameters(loan, "0.02")
+        every { provisioning.findByLoanAndPeriod(loanId, "2026-06") } returns Uni.createFrom().nullItem()
+        every { provisioning.findLatestBefore(loanId, "2026-06") } returns Uni.createFrom().item(prior)
+        every { ledger.post(capture(postings)) } returns Uni.createFrom().item(Unit)
+        every { provisioning.save(any()) } answers { Uni.createFrom().item(firstArg<LoanProvisioningRecord>()) }
+        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+
+        val outcome = service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 500)
+            .await().indefinitely()
+
+        // New ECL = 108.00; prior = 216.00 -> delta = -108.00 (a release).
+        assertThat(outcome.journalsPosted).isEqualTo(1)
+        assertThat(postings.single().amount).isEqualTo(eur("-108.00"))
+        assertThat(postings.single().amount.isNegative()).isTrue()
+    }
+
+    @Test
+    fun `provisioning cycle posts nothing and skips the event when the ECL is unchanged`() {
+        val loanId = LoanId.random()
+        val (loan, schedule) = currentLoanWithSchedule(loanId)
+        val prior = LoanProvisioningRecord(
+            loanId = loanId,
+            period = "2026-05",
+            asOf = LocalDate.parse("2026-05-01"),
+            outstandingBalance = eur("12000.00"),
+            daysPastDue = 0,
+            bucket = com.openbank.libs.lending.DelinquencyBucket.CURRENT,
+            stage = Ifrs9Stage.STAGE_1,
+            expectedCreditLoss = eur("108.00"),
+            createdAt = fixedNow,
+        )
+        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        mockRiskParameters(loan, "0.02")
+        every { provisioning.findByLoanAndPeriod(loanId, "2026-06") } returns Uni.createFrom().nullItem()
+        every { provisioning.findLatestBefore(loanId, "2026-06") } returns Uni.createFrom().item(prior)
+        every { provisioning.save(any()) } answers { Uni.createFrom().item(firstArg<LoanProvisioningRecord>()) }
+
+        val outcome = service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 500)
+            .await().indefinitely()
+
+        assertThat(outcome.loansAssessed).isEqualTo(1)
+        assertThat(outcome.journalsPosted).isEqualTo(0)
+        verify(exactly = 0) { ledger.post(any()) }
+        verify(exactly = 0) { events.emit(any<LendingOutboxMessage>()) }
+        verify(exactly = 1) { provisioning.save(any()) }
+    }
+
+    @Test
+    fun `provisioning cycle is idempotent - a loan already provisioned this period is skipped`() {
+        val loanId = LoanId.random()
+        val (loan, _) = currentLoanWithSchedule(loanId)
+        val already = LoanProvisioningRecord(
+            loanId = loanId,
+            period = "2026-06",
+            asOf = LocalDate.parse("2026-06-01"),
+            outstandingBalance = eur("12000.00"),
+            daysPastDue = 0,
+            bucket = com.openbank.libs.lending.DelinquencyBucket.CURRENT,
+            stage = Ifrs9Stage.STAGE_1,
+            expectedCreditLoss = eur("108.00"),
+            createdAt = fixedNow,
+        )
+        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { provisioning.findByLoanAndPeriod(loanId, "2026-06") } returns Uni.createFrom().item(already)
+
+        val outcome = service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 500)
+            .await().indefinitely()
+
+        assertThat(outcome.loansAssessed).isEqualTo(1)
+        assertThat(outcome.journalsPosted).isEqualTo(0)
+        verify(exactly = 0) { installments.findByLoan(any()) }
+        verify(exactly = 0) { ledger.post(any()) }
+        verify(exactly = 0) { provisioning.save(any()) }
     }
 }

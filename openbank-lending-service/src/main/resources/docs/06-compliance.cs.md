@@ -91,6 +91,30 @@ Všechny tři identity jsou ověřený JWT subjekt zachycený na serveru — nik
 
 `GET /loans/{id}/provisioning?asOf=` vrací bodový snímek: zbývající zůstatek, dny po splatnosti, bucket delikvence, IFRS 9 stage, ECL horizont a očekávanou úvěrovou ztrátu. ECL matematika je čistá primitiva `libs.lending.Ifrs9` živená `RiskParameterSource` (dnes konzervativní no-op výchozí: PD12m 0.03, PD-lifetime 0.20, LGD 0.45 — reálný PD model je otázka zapojení). Stage 3 nevymahatelné úvěry končí přes `POST /loans/{id}/writeoff` → zápis `WRITE_OFF` (MD Loan Loss Expense / DAL Loans Receivable) a derecognition.
 
+### Stage bucketing (ADR-0028 Fáze 3)
+
+`Ifrs9.stage(daysPastDue, …)` třídí čistě podle dnů po splatnosti (praktická náhrada, kterou toto ADR používá místo plného modelu "významného nárůstu úvěrového rizika", jenž vyžaduje data, která tento repozitář zatím nemá):
+
+- **Stage 1** (splácející se, 12měsíční ECL) — DPD ≤ 30.
+- **Stage 2** (SICR, celoživotní ECL) — 30 < DPD ≤ 90.
+- **Stage 3** (znehodnocený / default, celoživotní ECL) — DPD > 90, odpovídá prahu definice defaultu dle CRR čl. 178 / EBA (`Delinquency.isDefaulted`).
+
+DPD se odvozuje z existujícího splátkového kalendáře (`installment.due_date` / `paid`) — pro samotné stage bucketing nebyl potřeba žádný nový sloupec.
+
+### Naplánovaný cyklus provisioningu a účetní zápis (ADR-0028 Fáze 3)
+
+`ProvisioningCycleScheduler` měsíčně přehodnotí stage/ECL každého ACTIVE úvěru (`lending.provisioning.cycle.every`) a zaúčtuje pouze **deltu** ECL oproti předchozímu období úvěru — nikdy celé ECL znovu — jako zápis `PROVISIONING` (MD Loan Loss Expense / DAL Loan Loss Allowance při nárůstu; obráceně při poklesu/rozpuštění). Historie se ukládá do `loan_provisioning` (jeden řádek na úvěr a období `yyyy-MM`), což slouží jako základ pro deltu i jako idempotenční pojistka proti opakování už provisionovaného období.
+
+### ⚠️ Explicitní omezení — zjednodušené, neprodukční PD/LGD/EAD
+
+**Parametry PD a LGD použité v tomto přírůstku jsou zjednodušené zástupné hodnoty, nikoli regulatorně kvalitní rizikové parametry:**
+
+- **EAD** = zbývající jistina (bez diskontování na efektivní úrokovou sazbu — primitivum `Ifrs9` to ponechává na volajícím a zde se neaplikuje).
+- **PD** = plochá sazba podle IFRS 9 stage (`RiskParameterSource.DEFAULT_PD_12M = 0.03`, `DEFAULT_PD_LIFETIME = 0.20`), identická pro každý úvěr bez ohledu na dlužníka, produkt, vintage nebo makroekonomické podmínky.
+- **LGD** = plochých `0.45` pro každý úvěr, bez ohledu na zajištění, senioritu nebo historii návratnosti.
+
+**Neexistuje žádný behaviorální/statistický PD model, žádný makroekonomický overlay ani forward-looking scénářové vážení, a žádné LGD upravené o zajištění** (oceňování zajištění v této službě existuje pro sledování kategorií ochrany AnaCredit, D1, ale zatím není napojeno na LGD). Tyto parametry **musí být před jakýmkoli produkčním použitím kalibrovány aktuárským/risk týmem podle reálné historie ztrát portfolia** — jde o strukturální první přírůstek (funkční pipeline stage-bucketing → ECL → účetní zápis), nikoli o regulatorně kvalitní implementaci IFRS 9. Výměna konzervativních konstant za reálný adaptér rizikových parametrů je otázka zapojení (`RiskParameterSource`, ADR-0028 D4), ne doménová změna.
+
 ## Auditní stopa
 
 Každá stavotvorná operace (disburse, accrue, write-off) emituje doménovou událost do `lending_outbox` → Kafka `openbank.lending.events`, persistovanou `audit-service`. Metadata rozhodnutí (`proposed_by`, `decided_by`, `decision_reason`, `decided_at`) zůstávají na řádku žádosti.
