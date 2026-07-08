@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: copilot-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "25fff627d747fd1b"
+    openbank.tech/policy-checksum: "859ef7da650985b3"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1162,6 +1162,7 @@ data:
       - openbank-fraud-service                # ADR-0084: first executable landed (Phase 1 skeleton)
       - openbank-billing-service              # ADR-0143: fee posting to the ledger (Phase 2b skeleton)
       - openbank-settlement-service           # issue #307: debit->credit->ledger-booking saga (ADR-0101)
+      - openbank-sanctions-service             # ADR-0116: real feed screening; already required by four_eyes below (issue #554)
     review:
       default_approvals: 1
       money_path_approvals: 2               # CONTRIBUTING.md + branch protection
