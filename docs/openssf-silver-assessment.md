@@ -14,7 +14,7 @@ Legend: **Met** — paste the justification; **Unmet** — the honest gap and wh
 |---|---|---|
 | `governance` | **Met** | GOVERNANCE.md documents the decision model: single-maintainer beta with ADRs (docs/adr/, 140+) as the binding decision mechanism, 2-approval rule for money-path code, 24-hour PR hold, and the documented path to distributed governance. |
 | `roles_responsibilities` | **Met** | GOVERNANCE.md + CODEOWNERS define maintainer duties; money-path services require maintainer + external technical reviewer (2 approvals). |
-| `access_continuity` | **Unmet** (honest) | Bus factor 1 is stated openly in GOVERNANCE.md and ADR-0146. Closing requires a second maintainer with owner access — tracked as the top governance follow-up of the 2026-07 SSDLC audit. |
+| `access_continuity` | **Met** (2026-07-08) | GOVERNANCE.md § "Continuity if the maintainer is incapacitated": a designated trusted contact holds time-delayed emergency access to the maintainer's credential vault (repo owner account + recovery codes + signing keys); releases are fully automated (release-please), so merge rights alone suffice to release; public Apache-2.0 repo is the fork backstop. |
 | `bus_factor` | **Unmet** (honest) | Same as `access_continuity`; the criterion needs ≥2 significant contributors. |
 | `documentation_roadmap` | **Met** | Governance follow-ups live as labeled GitHub issues (ADR-0052 backlog discipline); the coverage/mutation roadmap is issue #321; rules.yaml `target_enforce_date` fields (ADR-0144) are the enforcement roadmap, machine-readable. |
 | `documentation_architecture` | **Met** | docs/adr/ — 140+ Architecture Decision Records with status + delivery tracking; per-service CLAUDE.md; hexagonal architecture spec in ADR-0002. |
@@ -48,7 +48,7 @@ Legend: **Met** — paste the justification; **Unmet** — the honest gap and wh
 | `regression_tests_added50` | **Met** | Bug-class regressions get dedicated CI guards (duplicate-YAML-keys, outbox dispatch flag, DomainEvent ctor, runBlocking Unit…) — regression tests are the house style. |
 | `test_policy_mandated` | **Met** | CONTRIBUTING.md DoD: "Test the new behavior"; coverage is ratchet-only (never lower), enforced by koverVerify per service. |
 | `test_most` | **Met** | Coverage ratchet + per-service floors (e.g. transaction 85, fraud 85, domestic-payment 75); mutation testing (pitest) on 9 money-path services weekly. |
-| `test_statement_coverage80` / `test_branch_coverage80` / `test_statement_coverage90` | **Unmet** (honest) | Fleet-wide 80% statement coverage is not yet reached; the ratchet roadmap (#321) drives money-path floors to ≥70% and beyond, quarterly. |
+| `test_statement_coverage80` / `test_branch_coverage80` / `test_statement_coverage90` | **Unmet** (honest) | Fleet-wide statement coverage is 58.7% (codecov, 2026-07-08) — below the 80% bar. The ratchet roadmap (#321) drives money-path floors to ≥70% and beyond, quarterly. This is the single remaining Silver blocker (98% cap until closed). |
 | `coding_standards` / `coding_standards_enforced` | **Met** | detekt (maxIssues=0 vs baseline) + ktlint wired into `check`; path-scoped CI enforces on every PR. |
 | `build_standard_variables` / `build_non_recursive` | **Met** | Standard Gradle conventions; convention plugins in build-logic/; no recursive make. |
 | `build_preserve_debug` | **Met** | JVM bytecode retains debug info by default; fast-jar packaging does not strip. |
@@ -73,7 +73,7 @@ Legend: **Met** — paste the justification; **Unmet** — the honest gap and wh
 | `crypto_verification_private` | **Met** | Private keys never in repo (gitleaks custom rules + push protection); signing via cloud KMS only. |
 | `security_review` | **Met** | External pen-test performed (P0–P2 findings remediated, README); continuous CodeQL + Trivy + weekly Scorecard; threat models per money-path service. |
 | `hardening` | **Met** | Non-root containers, digest-pinned bases, Kyverno admission (signature Enforce, SBOM attestation Audit), NetworkPolicies generated from declared edges (ADR-0081), least-privilege workflow tokens. |
-| `assurance_case` | **Unmet** (honest) | No single assurance-case document yet. Candidate: docs/assurance-case.md tying threat models + gates + evidence bundles into one argument. Most raw material exists. |
+| `assurance_case` | **Met** (2026-07-08) | docs/assurance-case.md — claim→argument→evidence: security requirements, STRIDE threat-model inventory (33 models, CI-gated on money path), trust-boundary table (B1–B6), secure-design argument (deny-by-default OPA, hexagonal domain purity, defense-in-depth on money verbs, tamper-evident audit), common-weaknesses table (SAST, fuzzing, dependency posture, secrets, crypto). |
 | `copyright_per_file` / `license_per_file` | **Met** | SPDX headers fleet-wide (`SPDX-License-Identifier` in every source file). |
 
 ## Gold-only (listed for completeness)
