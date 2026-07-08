@@ -11,6 +11,7 @@ import com.openbank.billing.domain.PostingStatus
 import com.openbank.billing.infrastructure.persistence.entity.AssessedFeeEntity
 import com.openbank.billing.infrastructure.persistence.entity.BillingCycleAssessmentEntity
 import com.openbank.billing.infrastructure.persistence.entity.BillingOutboxEntity
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import com.openbank.libs.product.WaiveReason
 import io.smallrye.mutiny.Uni
@@ -88,7 +89,7 @@ class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, pri
 
         val outboxEntities = feeEntities.filter { it.postingStatus == PostingStatus.PENDING }.map { fee ->
             BillingOutboxEntity().apply {
-                eventId = UUID.randomUUID()
+                eventId = Ids.newId()
                 aggregateId = fee.id
                 eventType = "billing.fee.post-intent.v1"
                 payload = feePostIntentPayload(fee)

@@ -5,8 +5,8 @@
 package com.openbank.billing
 
 import com.openbank.billing.domain.FeeJournalCommand
-import com.openbank.billing.infrastructure.client.BillingLedgerConfig
 import com.openbank.billing.infrastructure.client.BillingJournalFactory
+import com.openbank.billing.infrastructure.client.BillingLedgerConfig
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal

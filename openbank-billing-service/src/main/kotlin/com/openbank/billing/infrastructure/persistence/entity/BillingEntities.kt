@@ -5,6 +5,7 @@
 package com.openbank.billing.infrastructure.persistence.entity
 
 import com.openbank.billing.domain.PostingStatus
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
@@ -30,7 +31,7 @@ import java.util.UUID
 class BillingCycleAssessmentEntity : PanacheEntityBase() {
     @Id
     @Column(columnDefinition = "uuid")
-    var id: UUID = UUID.randomUUID()
+    var id: UUID = Ids.newId()
 
     @Column(name = "cycle_id", nullable = false)
     lateinit var cycleId: String
@@ -70,7 +71,7 @@ class BillingCycleAssessmentEntity : PanacheEntityBase() {
 class AssessedFeeEntity : PanacheEntityBase() {
     @Id
     @Column(columnDefinition = "uuid")
-    var id: UUID = UUID.randomUUID()
+    var id: UUID = Ids.newId()
 
     @Column(name = "assessment_id", nullable = false, columnDefinition = "uuid")
     lateinit var assessmentId: UUID
