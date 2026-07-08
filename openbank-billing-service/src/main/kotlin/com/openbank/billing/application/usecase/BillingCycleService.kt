@@ -36,13 +36,19 @@ class BillingCycleService(
 ) {
     private val log = Logger.getLogger(BillingCycleService::class.java)
 
+    // cycleId/accountId/currency below trace back to caller input (the REST POST /fees/post
+    // endpoint and the scheduled cycle trigger's account list) and are logged with the CR/LF
+    // stripped inline (CodeQL java/log-injection, CWE-117 log forging) rather than through a
+    // shared helper: CodeQL's log-injection sanitizer check is a local syntactic match on the
+    // replace() call at the sink itself, not an interprocedural summary, so a wrapper function
+    // is an opaque call to it and leaves the alert open (confirmed against this exact file).
     suspend fun assessAndPost(cycleId: String, accountId: String, currency: String): BillingAssessment {
         repository.findExisting(cycleId, accountId, currency)?.let {
             log.debugf(
                 "billing cycle %s account %s currency %s already assessed — returning existing (idempotent replay)",
-                cycleId.sanitizeForLog(),
-                accountId.sanitizeForLog(),
-                currency.sanitizeForLog(),
+                cycleId.replace('\n', '_').replace('\r', '_'),
+                accountId.replace('\n', '_').replace('\r', '_'),
+                currency.replace('\n', '_').replace('\r', '_'),
             )
             return it
         }
@@ -65,17 +71,12 @@ class BillingCycleService(
                     log.errorf(
                         ex,
                         "billing cycle %s account %s currency %s failed — continuing with the rest of the batch",
-                        cycleId.sanitizeForLog(),
-                        accountId.sanitizeForLog(),
-                        currency.sanitizeForLog(),
+                        cycleId.replace('\n', '_').replace('\r', '_'),
+                        accountId.replace('\n', '_').replace('\r', '_'),
+                        currency.replace('\n', '_').replace('\r', '_'),
                     )
                 }
         }
         return processed
     }
 }
-
-// CodeQL java/log-injection: cycleId/accountId/currency ultimately trace back to caller input
-// (the REST POST /fees/post endpoint and the scheduled cycle trigger's account list). Strip
-// CR/LF so an attacker-controlled value can't forge additional log lines (log forging, CWE-117).
-private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
