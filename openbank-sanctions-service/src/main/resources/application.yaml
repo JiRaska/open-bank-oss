@@ -78,6 +78,11 @@ quarkus:
   quarkus:
     oidc:
       enabled: false
+    # Keep the scheduledRefresh() @Scheduled tick from firing during tests — otherwise it could
+    # race test assertions and would attempt live outbound calls to OFAC/OpenSanctions on a real
+    # timer. Same pattern as openbank-statement-service's scheduled-close disable under %test.
+    scheduler:
+      enabled: false
 
 kafka:
   bootstrap:
