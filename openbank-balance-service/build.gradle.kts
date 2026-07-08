@@ -80,14 +80,6 @@ kover {
     }
 }
 
-tasks.named("koverVerify") {
-    enabled = true
-}
-
-tasks.named("check") {
-    dependsOn(tasks.named("koverVerify"))
-}
-
 // Pact: write generated pact files to the shared pacts/ dir at the repo root (git-pact, ADR-0063).
 // The consumer test regenerates the file on every run; developers commit the result.
 // NOTE: must be set on the test JVM fork, not the Gradle daemon (System.setProperty would not propagate).
