@@ -22,23 +22,21 @@ import java.util.UUID
  * the shared `AuthorizeInterceptor`'s own suite in openbank-libs-runtime, plus the
  * decision assertions in openbank-infra/gitops/components/payments/gen-swift-opa-bundle.sh).
  *
- * SwiftResource has NO `@RolesAllowed` outer gate (unlike sca/domestic-payment) — OPA
- * is the only authz PEP on this rail. An anonymous call therefore reaches the handler
- * in advisory mode too (there is no coarse role check to answer 401 first).
+ * Every SwiftResource endpoint now also carries `@RolesAllowed` (2026-07-08, PR #568/#571)
+ * — like sca/domestic-payment, that outer gate answers 401 before `@Authorize` ever runs.
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresRedisTestResource::class)
 class SwiftResourceAuthzTest {
 
     @Test
-    fun `anonymous request still reaches the handler in advisory mode`() {
-        // No @RolesAllowed gate exists on SwiftResource, so an anonymous caller reaches
-        // the handler's own not-found path in advisory mode — proving @Authorize did not
-        // short-circuit the call even without an authenticated principal.
+    fun `anonymous request is rejected by the RBAC outer gate, not the interceptor`() {
+        // No identity at all: @RolesAllowed answers 401 BEFORE @Authorize runs — the
+        // advisory interceptor must not turn that into a 403/500 of its own.
         Given { this } When {
             get("/api/v1/swift/${UUID.randomUUID()}")
         } Then {
-            statusCode(404)
+            statusCode(401)
         }
     }
 
