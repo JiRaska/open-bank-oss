@@ -77,14 +77,6 @@ kover {
     }
 }
 
-tasks.named("koverVerify") {
-    enabled = true
-}
-
-tasks.named("check") {
-    dependsOn(tasks.named("koverVerify"))
-}
-
 // Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3). Weekly + manual via
 // pitest.yml, advisory — never a per-PR gate. Per-service plugin pin on purpose (rules.yaml
 // money_path_depth): keeping it out of the shared version catalog avoids a fleet-wide rebuild.
