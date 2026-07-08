@@ -50,10 +50,29 @@ permissions:
 jobs:
   agent-review:
     # Skip drafts; skip the release-please bot (its PRs are machine-generated and
-    # gated separately). Everything else is evaluated.
+    # gated separately); skip the admin-ui-deploy GitOps PR (also machine-generated
+    # — image-tag bump plus a regenerated derived catalog, ADR-0029 Layer B).
+    #
+    # The admin-ui-deploy skip is branch-pattern-based, not actor-based like the
+    # release-please one: that pipeline opens its PR via GITOPS_PR_TOKEN (a PAT
+    # under the repo owner's own account, so further workflows actually trigger),
+    # so `github.actor` here is the owner, not a bot — the actor check alone can't
+    # tell "automated deploy" apart from "a human's PR". Real-world cost of that
+    # gap (2026-07-08): three deploy PRs (#596, #608, #609) piled up unmerged
+    # because the reviewer kept flagging the SAME false positive on every one —
+    # reviewing cluster-topology.json/infra-lifecycle.json (CI-regenerated
+    # governance-as-code catalogs, not hand-authored) as if a namespace/role entry
+    # appearing in the derived report were a new infra decision this PR made,
+    # when the only substantive diff line is the image tag in admin-ui.yaml. That
+    # silently broke the "auto-merged once CI is green, no human step" promise
+    # documented in admin-ui-deploy.yml — required_status_checks (all-green,
+    # Validate manifests, Gitleaks, issue-hygiene) already gate every merge, same
+    # as a release-please PR; this workflow doesn't need to gate a second time on
+    # a mechanical GitOps bump it has no code-judgment basis to review.
     if: >-
       github.event.pull_request.draft == false &&
-      github.actor != 'github-actions[bot]'
+      github.actor != 'github-actions[bot]' &&
+      !startsWith(github.head_ref, 'chore/admin-ui-deploy-')
     runs-on: ubuntu-latest
     # secrets context isn't available in a step-level `if:` — expose it as a
     # job-level boolean env so the Claude fallback can gate on its presence.
