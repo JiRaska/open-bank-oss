@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.12.3](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.12.2...account-service-v0.12.3) (2026-07-08)
+
+
+### Bug Fixes
+
+* **account:** stamp audit timestamps from the injected Clock instead of EPOCH ([#540](https://github.com/JiRaska/open-bank-oss/issues/540)) ([39c296c](https://github.com/JiRaska/open-bank-oss/commit/39c296c0ec88b7209cac4f42f1a053aed6f41f0a))
+* **account:** stamp audit timestamps on the transactional open path ([#562](https://github.com/JiRaska/open-bank-oss/issues/562)) ([5738301](https://github.com/JiRaska/open-bank-oss/commit/573830144703e5146f5cd7df112f286b9c9cea37)), closes [#533](https://github.com/JiRaska/open-bank-oss/issues/533)
+* **account:** transactional idempotent opening + version-guarded lifecycle updates ([#541](https://github.com/JiRaska/open-bank-oss/issues/541)) ([7612ee7](https://github.com/JiRaska/open-bank-oss/commit/7612ee7bd8a65116c6d4305d184a6f2873324a37))
+
 ## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.12.1...account-service-v0.12.2) (2026-07-07)
 
 
