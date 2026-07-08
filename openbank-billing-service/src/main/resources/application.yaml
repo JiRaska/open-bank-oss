@@ -21,13 +21,24 @@ quarkus:
         value: "max-age=31536000; includeSubDomains"
   log:
     level: INFO
+    console:
+      json: true
   smallrye-openapi:
     path: /q/openapi
   swagger-ui:
     always-include: true
     path: /api/docs
+  scheduler:
+    enabled: true
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
 
-  # Inbound resource-server: the assess endpoint requires a valid token.
+  # Inbound resource-server: the assess/post endpoints require a valid token.
   oidc:
     auth-server-url: http://localhost:8080/realms/openbank
     client-id: openbank-services
@@ -36,8 +47,8 @@ quarkus:
     tls:
       verification: ${OIDC_TLS_VERIFICATION:none}
 
-  # Outbound service-to-service auth (client-credentials). The PII read clients
-  # (@RegisterProvider OidcClientRequestReactiveFilter) mint an openbank-services token.
+  # Outbound service-to-service auth (client-credentials). The PII read clients and the ledger
+  # posting client (@RegisterProvider OidcClientRequestReactiveFilter) mint an openbank-services token.
   oidc-client:
     auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
     client-id: openbank-services
@@ -55,6 +66,30 @@ quarkus:
       url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
     balance-service:
       url: ${BALANCE_SERVICE_URL:http://localhost:8103}
+    ledger-service:
+      url: ${LEDGER_SERVICE_URL:http://localhost:8101}
+
+  # Persistence (ADR-0143 phase 2c): billing_cycle_assessment / assessed_fee / billing_outbox.
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: postgresql://localhost:5432/openbank_billing
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_billing
+  flyway:
+    migrate-at-start: true
+    validate-on-migrate: false
+    connect-retries: 10
+    connect-retries-interval: 2S
+  hibernate-orm:
+    database:
+      generation: none
+
+  # Four-eyes ApprovalStore backing store (ADR-0155).
+  redis:
+    hosts: redis://localhost:6379
 
 opa:
   url: "${OPA_URL:http://localhost:8181}"
@@ -62,6 +97,54 @@ opa:
   timeout-ms: "${OPA_TIMEOUT_MS:500}"
 authz:
   enforce: "${AUTHZ_ENFORCE:false}"
+  # ADR-0155: four-eyes ENFORCEMENT (blocking a maker's request pending a second approver),
+  # independent of the base allow/deny enforce toggle above. Stays false by default — same
+  # deliberate, separate rollout decision every other money-path service in the fleet makes
+  # (sepa-payment's application.yaml has the identical comment); flipping this is a runbook-gated
+  # follow-up, not bundled with the ApprovalStore wiring itself.
+  four-eyes:
+    enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
+
+billing:
+  ledger:
+    # System-actor id recorded as the journal's createdBy (ADR-0143 step 4) and the two leaf GL
+    # accounts every fee journal debits/credits. Placeholder defaults (the "a0000000-…" family the
+    # ledger seeds, see LendingLedgerConfig for the identical convention); operators override to
+    # the real chart of accounts per environment.
+    system-actor-id: ${BILLING_LEDGER_SYSTEM_ACTOR_ID:00000000-0000-0000-0000-0000000000bb}
+    gl:
+      fee-receivable: ${BILLING_GL_FEE_RECEIVABLE_ACCOUNT_ID:a0000000-0000-0000-0000-000000001400}
+      fee-income: ${BILLING_GL_FEE_INCOME_ACCOUNT_ID:a0000000-0000-0000-0000-000000004001}
+
+openbank:
+  outbox:
+    # Bare literal `true` (not an env-var-with-default) — matches every other dispatch-gated
+    # service in the fleet (interest/sepa-payment/standing-order) and satisfies
+    # check-outbox-dispatch-enabled.sh's regression guard, which only recognizes a literal
+    # `true`/`"true"` here by design: the flag must be baked into the image, not left to an
+    # environment that might forget to set an override env var (the exact footgun the check
+    # exists to catch — a silently-false default with attempt_count stuck at 0, no error).
+    dispatch-enabled: true
+    poll-interval: 5s
+    initial-delay: 5s
+  billing:
+    scheduler:
+      # Disabled by default: the account batch is operator-configured (no fleet-wide account
+      # discovery port exists yet — see BillingCycleScheduler's KDoc). Flip on and set
+      # account-ids only after that follow-up lands or for a deliberately scoped manual run.
+      enabled: "${BILLING_SCHEDULER_ENABLED:false}"
+      cron: "${BILLING_SCHEDULER_CRON:0 0 3 1 * ?}"
+      account-ids: "${BILLING_SCHEDULER_ACCOUNT_IDS:}"
+      currency: "${BILLING_SCHEDULER_CURRENCY:CZK}"
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+    oidc:
+      enabled: false
 
 "%test":
   quarkus:
@@ -69,4 +152,19 @@ authz:
       enabled: false
     # No Keycloak under @QuarkusTest — the boot smoke does not drive the security layer.
     oidc:
+      enabled: false
+    oidc-client:
+      enabled: false
+    datasource:
+      username: openbank
+      password: openbank_secret
+      reactive:
+        url: postgresql://localhost:5432/openbank_billing_it
+      jdbc:
+        url: jdbc:postgresql://localhost:5432/openbank_billing_it
+    devservices:
+      enabled: false
+    # ADR-0050: disable the @Scheduled outbox/cycle ticks under test so an IT drives the dispatch
+    # explicitly and never races the assertions (mirrors openbank-interest-service).
+    scheduler:
       enabled: false

@@ -4,12 +4,16 @@
 openapi: 3.1.0
 info:
   title: Billing Service API
-  # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.1.1
+  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.1 -> 1.2): additive
+  # endpoints only (POST /fees/post, PATCH /fees/approvals/{id}) — phase 2c-ii, no breaking change.
+  version: 1.2.0
   description: >-
-    Runtime product fee assessment and posting (ADR-0143). Phase 2c read path: POST
-    /api/v1/fees/assess computes an account's fee assessment from live account/balance/catalog
-    reads and returns it (dry run — no ledger posting yet; posting is phase 2c-ii).
+    Runtime product fee assessment and posting (ADR-0143). POST /api/v1/fees/assess computes an
+    account's fee assessment from live account/balance/catalog reads and returns it (dry run — no
+    ledger posting). POST /api/v1/fees/post (phase 2c-ii) persists the assessment and commits the
+    atomic intent-to-post to the transactional outbox, which then posts a balanced journal to the
+    ledger; it carries the four-eyes `billing.post` action (maker != checker), decided via PATCH
+    /api/v1/fees/approvals/{id}.
 servers:
   - url: http://localhost:8132
     description: Local development
@@ -38,6 +42,56 @@ paths:
           description: Unauthenticated.
         "403":
           description: Authenticated but denied by the OPA authorization policy (ADR-0034).
+  /api/v1/fees/post:
+    post:
+      summary: >-
+        Assess and commit the intent-to-post for a billing cycle/account/currency (ADR-0143
+        phase 2c-ii). Idempotent: a second call for the same cycle/account/currency returns the
+        already-persisted assessment. Subject to the four-eyes `post` verb — a maker's call may
+        be paused (202, PendingApproval) pending a distinct checker's decision via
+        /fees/approvals/{id}, then retried with an X-Approval-Id header.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: cycleId, in: query, required: true, schema: { type: string } }
+        - { name: accountId, in: query, required: true, schema: { type: string } }
+        - { name: currency, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The persisted assessment (assessed fees, each with its posting status).
+        "202":
+          description: Four-eyes pending — a second, distinct principal must approve via /fees/approvals/{id}.
+        "400":
+          description: Missing required query parameter.
+        "401":
+          description: Unauthenticated.
+        "403":
+          description: Authenticated but denied by the OPA authorization policy (ADR-0034).
+  /api/v1/fees/approvals/{id}:
+    patch:
+      summary: Approve or reject a pending four-eyes approval for a fee posting (ADR-0155).
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                approve: { type: boolean }
+              required: [approve]
+      responses:
+        "200":
+          description: The decided approval.
+        "401":
+          description: Unauthenticated.
+        "403":
+          description: Authenticated but denied by the OPA authorization policy (ADR-0034).
+        "404":
+          description: No pending approval with that id.
 components:
   securitySchemes:
     bearerAuth:
