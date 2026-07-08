@@ -63,9 +63,20 @@ class LedgerPostingAdapter(
         return response.id
     }
 
-    @Retry(maxRetries = 3, delay = 500, jitter = 100)
-    @Timeout(2000)
-    @CircuitBreaker(requestVolumeThreshold = 5, failureRatio = 0.5, delay = 10000)
+    @Retry(maxRetries = MAX_RETRIES, delay = RETRY_DELAY_MS, jitter = RETRY_JITTER_MS)
+    @Timeout(CALL_TIMEOUT_MS)
+    @CircuitBreaker(requestVolumeThreshold = CB_VOLUME_THRESHOLD, failureRatio = CB_FAILURE_RATIO, delay = CB_DELAY_MS)
     fun postWithResilience(request: LedgerPostJournalRequest): Uni<LedgerJournalEntryResponse> =
         ledgerClient.postJournal(request)
+
+    private companion object {
+        // Resilience tuning — mirrors LedgerCallGuard (openbank-lending-service).
+        const val MAX_RETRIES = 3
+        const val RETRY_DELAY_MS = 500L
+        const val RETRY_JITTER_MS = 100L
+        const val CALL_TIMEOUT_MS = 2000L
+        const val CB_VOLUME_THRESHOLD = 5
+        const val CB_FAILURE_RATIO = 0.5
+        const val CB_DELAY_MS = 10000L
+    }
 }

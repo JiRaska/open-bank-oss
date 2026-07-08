@@ -118,7 +118,13 @@ billing:
 
 openbank:
   outbox:
-    dispatch-enabled: "${BILLING_OUTBOX_DISPATCH_ENABLED:true}"
+    # Bare literal `true` (not an env-var-with-default) — matches every other dispatch-gated
+    # service in the fleet (interest/sepa-payment/standing-order) and satisfies
+    # check-outbox-dispatch-enabled.sh's regression guard, which only recognizes a literal
+    # `true`/`"true"` here by design: the flag must be baked into the image, not left to an
+    # environment that might forget to set an override env var (the exact footgun the check
+    # exists to catch — a silently-false default with attempt_count stuck at 0, no error).
+    dispatch-enabled: true
     poll-interval: 5s
     initial-delay: 5s
   billing:

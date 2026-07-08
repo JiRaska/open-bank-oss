@@ -4,6 +4,8 @@
 
 package com.openbank.billing.infrastructure.outbox
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.billing.application.port.out.BillingAssessmentRepository
 import com.openbank.billing.infrastructure.persistence.entity.BillingOutboxEntity
 import com.openbank.libs.persistence.outbox.OutboxEntry
@@ -30,6 +32,8 @@ import java.util.UUID
 class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepository) :
     OutboxRepository,
     PanacheRepository<BillingOutboxEntity> {
+
+    private val mapper = jacksonObjectMapper().findAndRegisterModules()
 
     override suspend fun listProcessable(limit: Int): List<OutboxEntry> = Panache.withSession {
         find(
@@ -75,8 +79,14 @@ class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepo
         deadRowIdempotencyKey.awaitSuspending()?.let { assessments.markFailed(it) }
     }
 
+    /**
+     * Proper Jackson deserialization (fix-review finding) rather than a regex against raw JSON —
+     * [LedgerOutboxEventPublisher] already deserializes this same `billing.fee.post-intent.v1`
+     * payload shape via Jackson; reusing that approach here keeps both readers equally robust to
+     * whitespace/field-order/escaping rather than depending on a hand-rolled pattern.
+     */
     private fun extractIdempotencyKey(payload: String): String? =
-        Regex("\"idempotencyKey\":\"([^\"]+)\"").find(payload)?.groupValues?.get(1)
+        runCatching { mapper.readValue(payload, IdempotencyKeyOnly::class.java).idempotencyKey }.getOrNull()
 
     /** Record a publish failure (ADR-0050 N5) — same policy every service's outbox repo applies. */
     private fun applyFailure(e: BillingOutboxEntity, error: String, at: Instant) {
@@ -101,3 +111,7 @@ class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepo
         private val log: Logger = Logger.getLogger(BillingOutboxRepositoryImpl::class.java)
     }
 }
+
+/** Reads only the one field this repository needs from the `billing.fee.post-intent.v1` payload. */
+@JsonIgnoreProperties(ignoreUnknown = true)
+private data class IdempotencyKeyOnly(val idempotencyKey: String)

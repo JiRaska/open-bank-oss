@@ -11,6 +11,8 @@ import com.openbank.billing.it.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import jakarta.inject.Inject
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -64,5 +66,27 @@ class BillingCycleServiceIT {
         val assessment = runBlocking { billingCycleService.assessAndPost(cycleId, "another-missing-account", "CZK") }
 
         assertThat(assessment.assessedFees).allMatch { it.postingStatus == PostingStatus.NOT_APPLICABLE }
+    }
+
+    @Test
+    fun `two concurrent assessAndPost calls for the same key both succeed — the loser recovers via findExisting`() {
+        // Fix-review finding: findExisting-then-persistWithPostingIntent is a check-then-act race.
+        // Firing both calls genuinely concurrently (kotlinx.coroutines async, not sequential
+        // runBlocking) exercises BillingAssessmentRepositoryImpl.recoverConcurrentReplay against
+        // the real uq_billing_cycle_assessment constraint — neither call may throw, and both must
+        // return the same (skipped) result rather than one winning and one 500ing.
+        val cycleId = "it-cycle-race-${System.nanoTime()}"
+        val accountId = "race-account"
+
+        val results = runBlocking {
+            val first = async { billingCycleService.assessAndPost(cycleId, accountId, "CZK") }
+            val second = async { billingCycleService.assessAndPost(cycleId, accountId, "CZK") }
+            listOf(first, second).awaitAll()
+        }
+
+        assertThat(results).hasSize(2)
+        results.forEach { assertThat(it.skipped).isTrue() }
+        assertThat(results[0].cycleId).isEqualTo(results[1].cycleId)
+        assertThat(results[0].accountId).isEqualTo(results[1].accountId)
     }
 }

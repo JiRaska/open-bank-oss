@@ -13,8 +13,11 @@ import com.openbank.billing.infrastructure.persistence.entity.BillingCycleAssess
 import com.openbank.billing.infrastructure.persistence.entity.BillingOutboxEntity
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import com.openbank.libs.product.WaiveReason
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
+import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.PersistenceException
 import org.hibernate.reactive.mutiny.Mutiny
 import java.time.Clock
 import java.time.Instant
@@ -96,13 +99,41 @@ class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, pri
             }
         }
 
-        sf.withTransaction { s, _ ->
-            s.persist(assessmentEntity)
-                .chain { _ -> s.persistAll(*feeEntities.toTypedArray()) }
-                .chain { _ -> s.persistAll(*outboxEntities.toTypedArray()) }
-        }.awaitSuspending()
+        // Individual chained s.persist() calls, not persistAll(vararg) — avoids a spread
+        // operator over a to-typed-array (detekt SpreadOperator) and mirrors this repo's own
+        // multi-entity-one-transaction convention (see ComplaintRepositoryImpl.save:
+        // s.persist(entity).flatMap { s.persist(outbox.toEntity()) }).
+        val allEntities: List<Any> = listOf(assessmentEntity) + feeEntities + outboxEntities
+        try {
+            sf.withTransaction { s, _ ->
+                allEntities.fold(Uni.createFrom().voidItem() as Uni<*>) { acc, entity ->
+                    acc.chain { _ -> s.persist(entity) }
+                }
+            }.awaitSuspending()
+        } catch (e: PersistenceException) {
+            return recoverConcurrentReplay(e, assessment)
+        } catch (e: PgException) {
+            return recoverConcurrentReplay(e, assessment)
+        }
 
         return assessmentEntity.toDomain(feeEntities)
+    }
+
+    /**
+     * TOCTOU recovery (fix-review finding): [BillingCycleService.assessAndPost] calls
+     * [findExisting] then [persistWithPostingIntent] as two separate operations, so two
+     * concurrent calls for the same `(cycleId, accountId, currency)` can both observe "no
+     * existing assessment" and both attempt this insert. The DB's
+     * `uq_billing_cycle_assessment` unique constraint lets exactly one of them win; the loser
+     * recovers into the same idempotent-replay contract as a sequential re-run (mirrors
+     * `AccountService.recoverConcurrentReplay` for `account_idempotency`) instead of surfacing an
+     * unhandled 500. A conflict on any OTHER constraint is a real bug and must not be swallowed.
+     */
+    private suspend fun recoverConcurrentReplay(e: RuntimeException, assessment: BillingAssessment): BillingAssessment {
+        val isAssessmentConflict = generateSequence<Throwable>(e) { it.cause.takeIf { c -> c !== it } }
+            .any { it.message?.contains("uq_billing_cycle_assessment", ignoreCase = true) == true }
+        if (!isAssessmentConflict) throw e
+        return findExisting(assessment.cycleId, assessment.accountId, assessment.currency) ?: throw e
     }
 
     override suspend fun markPosted(idempotencyKey: String, journalId: UUID) {

@@ -49,10 +49,10 @@ class BillingOutboxDispatcher(
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
         identity = "billing-outbox-dispatcher",
     )
-    @Bulkhead(1)
-    @CircuitBreaker(requestVolumeThreshold = 10, failureRatio = 0.5, delay = 5000)
-    @Retry(maxRetries = 2, delay = 200, jitter = 100)
-    @Timeout(30000)
+    @Bulkhead(BULKHEAD_CONCURRENT_CALLS)
+    @CircuitBreaker(requestVolumeThreshold = CB_VOLUME_THRESHOLD, failureRatio = CB_FAILURE_RATIO, delay = CB_DELAY_MS)
+    @Retry(maxRetries = MAX_RETRIES, delay = RETRY_DELAY_MS, jitter = RETRY_JITTER_MS)
+    @Timeout(DISPATCH_TIMEOUT_MS)
     suspend fun dispatch() {
         if (dispatchEnabled) dispatchScheduledBatch()
     }
@@ -60,9 +60,22 @@ class BillingOutboxDispatcher(
     /** Exposed for ITs: drives one dispatch cycle without the `@Scheduled` / resilience annotations. */
     public override suspend fun dispatchScheduledBatch() = super.dispatchScheduledBatch()
 
-    @Bulkhead(1)
-    @CircuitBreaker(requestVolumeThreshold = 10, failureRatio = 0.5, delay = 5000)
-    @Retry(maxRetries = 2, delay = 200, jitter = 100)
-    @Timeout(5000)
+    @Bulkhead(BULKHEAD_CONCURRENT_CALLS)
+    @CircuitBreaker(requestVolumeThreshold = CB_VOLUME_THRESHOLD, failureRatio = CB_FAILURE_RATIO, delay = CB_DELAY_MS)
+    @Retry(maxRetries = MAX_RETRIES, delay = RETRY_DELAY_MS, jitter = RETRY_JITTER_MS)
+    @Timeout(PUBLISH_TIMEOUT_MS)
     override suspend fun publishWithResilience(entry: OutboxEntry): Unit = publisher.publish(entry)
+
+    private companion object {
+        // Resilience tuning (ADR-0050 / mirrors InterestOutboxDispatcher / LendingOutboxDispatcher).
+        const val BULKHEAD_CONCURRENT_CALLS = 1
+        const val CB_VOLUME_THRESHOLD = 10
+        const val CB_FAILURE_RATIO = 0.5
+        const val CB_DELAY_MS = 5000L
+        const val MAX_RETRIES = 2
+        const val RETRY_DELAY_MS = 200L
+        const val RETRY_JITTER_MS = 100L
+        const val DISPATCH_TIMEOUT_MS = 30000L
+        const val PUBLISH_TIMEOUT_MS = 5000L
+    }
 }

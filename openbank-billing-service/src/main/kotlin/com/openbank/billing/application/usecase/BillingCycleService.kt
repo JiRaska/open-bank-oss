@@ -20,6 +20,14 @@ import org.jboss.logging.Logger
  * the previously persisted assessment rather than assessing (and posting) again — a fee already
  * marked PENDING/POSTED/FAILED never gets a second outbox row, since the whole assessment row is
  * looked up first.
+ *
+ * **Concurrent-call race (fix-review finding):** [BillingAssessmentRepository.findExisting] then
+ * [BillingAssessmentRepository.persistWithPostingIntent] is a check-then-act pair — two
+ * concurrent calls for the same key can both observe "no existing row" here. That race is closed
+ * one layer down: `BillingAssessmentRepositoryImpl.persistWithPostingIntent` catches the DB's
+ * unique-constraint conflict and recovers into the same idempotent-replay return value, so this
+ * method never needs its own retry — the repository already guarantees at most one persisted
+ * assessment per key regardless of how many callers race here.
  */
 @ApplicationScoped
 class BillingCycleService(
