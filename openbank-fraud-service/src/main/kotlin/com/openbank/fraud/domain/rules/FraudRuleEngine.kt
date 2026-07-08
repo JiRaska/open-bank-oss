@@ -63,35 +63,72 @@ object VelocityH24ReviewRule : FraudRule {
 
 /**
  * Phase 2 v3 — ADR-0084 §3 ("high-amount" single-transaction heuristic from the roadmap).
- * REVIEW when a single transaction's amount reaches the large-transaction threshold, regardless of
- * account velocity history. Uses only [ScoreRequest.amount], present on every request since Phase 1 —
- * no new signal needed. Currency-neutral: the threshold is a deliberately conservative round number
- * chosen to catch outlier transactions across the platform's supported currencies (CZK/EUR) without
- * a per-currency FX lookup, which is out of scope for a deterministic rule (ADR-0084 §3).
+ * REVIEW when a single transaction's amount reaches the large-transaction threshold for its
+ * currency, regardless of account velocity history. Uses only [ScoreRequest.amount]/[ScoreRequest.currency],
+ * present on every request since Phase 1 — no new signal needed.
+ *
+ * **Per-currency, not a single global figure** (fixed after adversarial review of the initial PR:
+ * a currency-neutral raw-amount threshold let a large EUR payment sail under a CZK-calibrated cap —
+ * CZK and EUR differ by roughly 25x). [THRESHOLDS_BY_CURRENCY] are a first-pass calibration, not
+ * regulatorily-derived figures — same disclosure spirit as the PD/LGD placeholders in the lending
+ * ADRs — and are expected to be tuned once shadow-mode metrics establish a false-positive baseline.
+ *
+ * **Fails CLOSED for an unmapped currency** (REVIEW fires unconditionally), matching the existing
+ * fail-closed convention elsewhere in the repo (e.g. `WaiverEvaluator`): what the rule cannot safely
+ * evaluate is flagged for a human, never silently waived through.
  */
 object LargeSingleTransactionReviewRule : FraudRule {
-    private val LARGE_AMOUNT_THRESHOLD = BigDecimal("500000")
+    // First-pass calibration only — not risk-team-approved figures. CZK/EUR chosen to roughly track
+    // the ~25x CZK:EUR value gap so the same real-world risk tier trips both currencies alike.
+    private val THRESHOLDS_BY_CURRENCY: Map<String, BigDecimal> = mapOf(
+        "CZK" to BigDecimal("500000"),
+        "EUR" to BigDecimal("20000"),
+    )
 
     override fun evaluate(request: ScoreRequest): RuleHit? {
-        if (request.amount < LARGE_AMOUNT_THRESHOLD) return null
+        val threshold = THRESHOLDS_BY_CURRENCY[request.currency]
+            ?: return RuleHit(
+                scoreDelta = 25,
+                verdict = FraudVerdict.REVIEW,
+                reason = "large-single-transaction-unmapped-currency",
+            )
+        if (request.amount < threshold) return null
         return RuleHit(scoreDelta = 25, verdict = FraudVerdict.REVIEW, reason = "large-single-transaction")
     }
 }
 
 /**
  * Phase 2 v3 — ADR-0084 §3: REVIEW when the rolling 1-hour *transacted amount* (not just count) for
- * this account/currency bucket reaches the threshold. Complements [VelocityH1ReviewRule] (count-based):
- * a burst of many small transactions is caught by the count rule, while a smaller number of
- * high-value transactions within the hour — which would not trip the count cap — is caught here.
- * Reads [ScoreRequest.velocityH1TotalAmount], sourced from the same `velocity_aggregates` row the
- * H1 count comes from (no new signal or migration). Silent when zero (no signal yet), same contract
- * as the count-based velocity rules.
+ * this account/currency bucket reaches the threshold for its currency. Complements
+ * [VelocityH1ReviewRule] (count-based): a burst of many small transactions is caught by the count
+ * rule, while a smaller number of high-value transactions within the hour — which would not trip the
+ * count cap — is caught here. Reads [ScoreRequest.velocityH1TotalAmount], sourced from the same
+ * `velocity_aggregates` row the H1 count comes from (no new signal or migration).
+ *
+ * **Per-currency, not a single global figure** — same cross-currency fix and disclosure as
+ * [LargeSingleTransactionReviewRule]; see that rule's doc for the full rationale.
+ *
+ * Silent when the total is zero (no signal yet) for a *mapped* currency — same contract as the
+ * count-based velocity rules. **Fails CLOSED for an unmapped currency** (REVIEW fires
+ * unconditionally, even at zero) — an unmapped currency means the rule cannot tell whether a real
+ * velocity signal is small or simply absent, so it does not get the silent-on-zero benefit of the
+ * doubt.
  */
 object VelocityH1HighValueReviewRule : FraudRule {
-    private val H1_AMOUNT_CAP = BigDecimal("1000000")
+    // First-pass calibration only — not risk-team-approved figures. See LargeSingleTransactionReviewRule.
+    private val THRESHOLDS_BY_CURRENCY: Map<String, BigDecimal> = mapOf(
+        "CZK" to BigDecimal("1000000"),
+        "EUR" to BigDecimal("40000"),
+    )
 
     override fun evaluate(request: ScoreRequest): RuleHit? {
-        if (request.velocityH1TotalAmount < H1_AMOUNT_CAP) return null
+        val threshold = THRESHOLDS_BY_CURRENCY[request.currency]
+            ?: return RuleHit(
+                scoreDelta = 35,
+                verdict = FraudVerdict.REVIEW,
+                reason = "velocity-h1-amount-cap-unmapped-currency",
+            )
+        if (request.velocityH1TotalAmount < threshold) return null
         return RuleHit(scoreDelta = 35, verdict = FraudVerdict.REVIEW, reason = "velocity-h1-amount-cap")
     }
 }
