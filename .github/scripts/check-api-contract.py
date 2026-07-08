@@ -22,6 +22,11 @@ verified by the CI step that installs it).
 Usage:
     check-api-contract.py --base <sha> [--enforce] [--oasdiff <path>]
 
+--base must be the CURRENT merge-base with the base branch (ci.yml resolves it
+from the PR merge ref's first parent), NOT github.event.pull_request.base.sha —
+that sha is frozen at PR creation and misclassifies once a competing PR moves
+the same spec on main first (the #524 × #481 ledger race, fixed in #534).
+
 Modes (ADR-0144 gate graduation):
     default    advisory — findings are ::warning annotations, exit 0
     --enforce  findings are ::error annotations, exit 1
