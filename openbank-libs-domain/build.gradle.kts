@@ -7,6 +7,8 @@ plugins {
     alias(libs.plugins.jandex)
     alias(libs.plugins.kover)
     id("openbank.static-analysis")
+    // Fleet-wide Netty/Jackson/etc. patch-version floors (issue #461).
+    id("openbank.dependency-vulnerability-pins")
     `java-library`
     `maven-publish`
 }

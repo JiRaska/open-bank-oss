@@ -1,0 +1,255 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+#
+# osv-scanner config for gradle/verification-metadata.xml (issue #461).
+#
+# Gradle's dependency verification file is a supply-chain INTEGRITY manifest, not a
+# resolved-dependency lockfile: it records a checksum for every artifact Gradle ever
+# downloads while resolving a BOM's <dependencyManagement> constraints, even versions
+# that resolutionStrategy.force() later overrides and that never land on any classpath.
+# Those entries carry only a `.pom` checksum (no `.jar`) — verifiable directly in
+# verification-metadata.xml. osv-scanner reads the file as a flat lockfile and cannot
+# tell "constraint bookkeeping" from "actually resolved", so it flags both. The
+# PackageOverrides below suppress that structural false-positive class for every
+# pom-only entry confirmed via the fleet-wide regeneration on 2026-07-07 (after the
+# resolutionStrategy.force() pins in build-logic/src/main/kotlin/
+# openbank.dependency-vulnerability-pins.gradle.kts took effect). Re-verify the
+# .jar-vs-.pom-only split before extending this list — see the PR for issue #461.
+#
+# A second, smaller group below is genuinely resolved (has a .jar entry) but has no
+# available fix compatible with Quarkus 3.33.2 today; each has its own reason.
+
+# --- Netty 4.1.1xx.Final pre-patch stubs (real classpath floor: 4.1.135.Final) ---
+[[PackageOverrides]]
+name = "io.netty:netty-codec"
+version = "4.1.100.Final"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath (issue #461)"
+
+[[PackageOverrides]]
+name = "io.netty:netty-codec"
+version = "4.1.108.Final"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath (issue #461)"
+
+[[PackageOverrides]]
+name = "io.netty:netty-codec-http"
+version = "4.1.100.Final"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath (issue #461)"
+
+[[PackageOverrides]]
+name = "io.netty:netty-codec-http"
+version = "4.1.106.Final"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath (issue #461)"
+
+[[PackageOverrides]]
+name = "io.netty:netty-codec-http2"
+version = "4.1.100.Final"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath (issue #461)"
+
+[[PackageOverrides]]
+name = "io.netty:netty-codec-http2"
+version = "4.1.106.Final"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath (issue #461)"
+
+[[PackageOverrides]]
+name = "io.netty:netty-common"
+version = "4.1.100.Final"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath (issue #461)"
+
+[[PackageOverrides]]
+name = "io.netty:netty-common"
+version = "4.1.108.Final"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath (issue #461)"
+
+[[PackageOverrides]]
+name = "io.netty:netty-handler"
+version = "4.1.108.Final"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath (issue #461)"
+
+[[PackageOverrides]]
+name = "io.netty:netty-handler-proxy"
+version = "4.1.100.Final"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath (issue #461)"
+
+[[PackageOverrides]]
+name = "io.netty:netty-transport-native-epoll"
+version = "4.1.106.Final"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath (issue #461)"
+
+[[PackageOverrides]]
+name = "io.netty:netty-transport-native-kqueue"
+version = "4.1.106.Final"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath (issue #461)"
+
+[[PackageOverrides]]
+name = "io.grpc:grpc-netty-shaded"
+version = "1.54.1"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath (issue #461)"
+
+# --- Jackson / other pom-only pre-patch stubs ---
+[[PackageOverrides]]
+name = "com.fasterxml.jackson.core:jackson-core"
+version = "2.14.2"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath (issue #461)"
+
+[[PackageOverrides]]
+name = "com.fasterxml.jackson.core:jackson-databind"
+version = "2.14.2"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath (issue #461)"
+
+[[PackageOverrides]]
+name = "com.google.protobuf:protobuf-java"
+version = "3.25.3"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath (issue #461)"
+
+[[PackageOverrides]]
+name = "commons-beanutils:commons-beanutils"
+version = "1.9.4"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath — real floor is 1.11.0 (issue #461)"
+
+[[PackageOverrides]]
+name = "commons-io:commons-io"
+version = "1.3.2"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath (issue #461)"
+
+[[PackageOverrides]]
+name = "commons-io:commons-io"
+version = "2.11.0"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath (issue #461)"
+
+[[PackageOverrides]]
+name = "net.minidev:json-smart"
+version = "2.5.0"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath — real floor is 2.5.2 (issue #461)"
+
+[[PackageOverrides]]
+name = "org.apache.commons:commons-compress"
+version = "1.24.0"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath — real floor is 1.28.0 (issue #461)"
+
+[[PackageOverrides]]
+name = "org.apache.commons:commons-io"
+version = "1.3.2"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only stub of a squatted GA coordinate (org.apache.commons:commons-io has never published beyond 1.3.2 on Maven Central; real Commons IO ships as commons-io:commons-io) — never resolved on any classpath (issue #461)"
+
+[[PackageOverrides]]
+name = "org.apache.commons:commons-lang3"
+version = "3.12.0"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath — real floor is 3.20.0 (issue #461)"
+
+[[PackageOverrides]]
+name = "org.apache.commons:commons-lang3"
+version = "3.14.0"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only BOM constraint stub, never resolved on any classpath — real floor is 3.20.0 (issue #461)"
+
+[[PackageOverrides]]
+name = "org.codehaus.plexus:plexus-utils"
+version = "3.3.1"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only stub of the cyclonedx Gradle plugin's own classpath (never a project dependency) — see the org.cyclonedx:cyclonedx-core-java entry below for the same-root-cause resolved artifact (issue #461)"
+
+[[PackageOverrides]]
+name = "org.cyclonedx:cyclonedx-core-java"
+version = "10.2.1"
+ecosystem = "Maven"
+ignore = true
+reason = "pom-only stub of the cyclonedx Gradle plugin's own classpath (never a project dependency) — never resolved on any classpath (issue #461)"
+
+# --- Genuinely resolved (has a .jar entry), no fix available today ---
+[[PackageOverrides]]
+name = "com.fasterxml.jackson.core:jackson-databind"
+version = "2.21.2"
+ecosystem = "Maven"
+ignore = true
+reason = "genuinely resolved by a handful of configurations that predate the 2.21.5 floor's propagation; the specific GHSAs it carries beyond GHSA-5jmj-h7xm-6q6v (see the 2.21.5 entry) are fixed at 2.21.4+, i.e. by the fleet floor — kept as an override rather than chased further since jackson-databind 2.x cannot fully clear GHSA-5jmj-h7xm-6q6v regardless (issue #461)"
+
+[[PackageOverrides]]
+name = "com.fasterxml.jackson.core:jackson-databind"
+version = "2.21.5"
+ecosystem = "Maven"
+ignore = true
+reason = "GHSA-5jmj-h7xm-6q6v has no fix on the Jackson 2.x line — OSV lists 'fixed' only for tools.jackson.core (Jackson 3.x groupId), a major-version migration Quarkus 3.33.2 does not support. Accepted risk (issue #461)."
+
+[[PackageOverrides]]
+name = "org.hibernate.reactive:hibernate-reactive-core"
+version = "3.2.11.Final"
+ecosystem = "Maven"
+ignore = true
+reason = "GHSA-frpp-8pwq-hjrx (connection-pool-exhaustion DoS) fixes only at 4.2.1; even the newest Quarkus platform BOM available today (3.37.1) still manages 3.4.1.Final. No fix path via Quarkus exists yet. Accepted risk (issue #461)."
+
+[[PackageOverrides]]
+name = "io.opentelemetry:opentelemetry-api"
+version = "1.57.0"
+ecosystem = "Maven"
+ignore = true
+reason = "GHSA-rcgg-9c38-7xpx fixes at 1.62.0, but OTel API/SDK versions must stay coherent with the Quarkus-managed OTel stack; forcing the API alone risks a runtime NoSuchMethodError. Needs a full Quarkus platform bump to fix properly — out of scope here. Accepted risk (issue #461)."
+
+[[PackageOverrides]]
+name = "org.apache.tika:tika-core"
+version = "2.9.1"
+ecosystem = "Maven"
+ignore = true
+reason = "transitive dependency of the cyclonedx Gradle plugin's own SBOM-generation classpath (file-type detection), not a project/runtime dependency of any service — resolutionStrategy.force() in project configurations cannot reach a plugin's own classpath. The fix (3.2.2) is also a breaking major bump. Needs a cyclonedx plugin version bump (separate follow-up). Accepted risk (issue #461)."
+
+[[PackageOverrides]]
+name = "org.apache.tika:tika-core"
+version = "2.9.2"
+ecosystem = "Maven"
+ignore = true
+reason = "same as tika-core 2.9.1 above — cyclonedx plugin classpath, not project-resolvable (issue #461)."
+
+[[PackageOverrides]]
+name = "org.codehaus.plexus:plexus-utils"
+version = "4.0.2"
+ecosystem = "Maven"
+ignore = true
+reason = "cyclonedx Gradle plugin's own classpath dependency, not project-resolvable via force(). Fix is 4.0.3, a one-patch bump — tracked for the same cyclonedx plugin version bump follow-up as tika-core/cyclonedx-core-java (issue #461)."
