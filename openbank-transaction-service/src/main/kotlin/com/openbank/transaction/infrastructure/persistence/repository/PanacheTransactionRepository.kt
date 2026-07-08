@@ -8,6 +8,7 @@ import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.transaction.application.port.out.TransactionRepository
+import com.openbank.transaction.application.usecase.TransactionUpdateConflictException
 import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionStatus
 import com.openbank.transaction.domain.model.TransactionType
@@ -57,37 +58,66 @@ class PanacheTransactionRepository(private val outboxRepository: TransactionOutb
 
     override suspend fun update(
         transaction: com.openbank.transaction.domain.model.Transaction,
-    ): com.openbank.transaction.domain.model.Transaction = Panache.withTransaction {
-        find("id", transaction.id).firstResult()
-            .invoke { entity ->
-                entity?.apply {
-                    status = transaction.status.name
-                    completedAt = transaction.completedAt
-                    failedAt = transaction.failedAt
-                    failureReason = transaction.failureReason
-                    version = transaction.version
-                }
-            }
-            .replaceWith(transaction)
-    }.awaitSuspending()
+    ): com.openbank.transaction.domain.model.Transaction = translatingConflict(transaction) {
+        Panache.withTransaction {
+            versionMatched(transaction).replaceWith(transaction.copy(version = transaction.version + 1))
+        }.awaitSuspending()
+    }
 
     override suspend fun update(
         transaction: com.openbank.transaction.domain.model.Transaction,
         outboxMessage: OutboxMessage,
-    ): com.openbank.transaction.domain.model.Transaction = Panache.withTransaction {
-        find("id", transaction.id).firstResult()
+    ): com.openbank.transaction.domain.model.Transaction = translatingConflict(transaction) {
+        Panache.withTransaction {
+            versionMatched(transaction)
+                .flatMap { outboxRepository.persistMessageUni(outboxMessage) }
+                .replaceWith(transaction.copy(version = transaction.version + 1))
+        }.awaitSuspending()
+    }
+
+    // Truly simultaneous writers both pass the version-matched read before either commits; the
+    // loser's flush then fails the @Version check (0 rows). Same conflict, same 409 (#465).
+    private suspend fun translatingConflict(
+        transaction: com.openbank.transaction.domain.model.Transaction,
+        block: suspend () -> com.openbank.transaction.domain.model.Transaction,
+    ): com.openbank.transaction.domain.model.Transaction = try {
+        block()
+    } catch (e: jakarta.persistence.OptimisticLockException) {
+        throw TransactionUpdateConflictException(
+            "Transaction ${transaction.id} was modified concurrently (flush-time version check)",
+            e,
+        )
+    } catch (e: org.hibernate.StaleObjectStateException) {
+        throw TransactionUpdateConflictException(
+            "Transaction ${transaction.id} was modified concurrently (flush-time version check)",
+            e,
+        )
+    }
+
+    // Optimistic guard (#465): TransactionEntity.version is a plain column (no @Version), so the
+    // old read-copy-write update was pure last-write-wins — two racing reversals both read
+    // COMPLETED, both flipped it, and BOTH initiated a reversal credit (double refund). Matching
+    // on the version the caller's domain object was read at makes the loser fail with a clean
+    // conflict before it can act on the stale state; the version increments here, not in the
+    // domain (transitions are status-only copies).
+    private fun versionMatched(transaction: com.openbank.transaction.domain.model.Transaction) =
+        find("id = ?1 and version = ?2", transaction.id, transaction.version).firstResult()
             .invoke { entity ->
-                entity?.apply {
+                if (entity == null) {
+                    throw TransactionUpdateConflictException(
+                        "Transaction ${transaction.id} was modified concurrently " +
+                            "(expected version ${transaction.version})",
+                    )
+                }
+                entity.apply {
                     status = transaction.status.name
                     completedAt = transaction.completedAt
                     failedAt = transaction.failedAt
                     failureReason = transaction.failureReason
-                    version = transaction.version
+                    // version is @Version-managed: Hibernate bumps it at flush and guards the
+                    // UPDATE with WHERE version = <read version> — never set it manually.
                 }
             }
-            .flatMap { outboxRepository.persistMessageUni(outboxMessage) }
-            .replaceWith(transaction)
-    }.awaitSuspending()
 
     // Extended search — BIAN aligned
     suspend fun search(query: TransactionSearchQuery): List<com.openbank.transaction.domain.model.Transaction> {
