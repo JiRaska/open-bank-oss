@@ -9,6 +9,7 @@ import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.LoanProvisioningRecord
+import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import io.smallrye.mutiny.Uni
@@ -48,7 +49,9 @@ interface InstallmentRepository {
 
 interface CollateralRepository {
     fun save(collateral: Collateral): Uni<Collateral>
+    fun findById(id: CollateralId): Uni<Collateral?>
     fun findByLoan(loanId: LoanId): Uni<List<Collateral>>
+    fun update(collateral: Collateral): Uni<Collateral>
 }
 
 /**

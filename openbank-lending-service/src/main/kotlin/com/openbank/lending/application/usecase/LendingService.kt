@@ -27,7 +27,9 @@ import com.openbank.lending.application.port.out.RiskParameterSource
 import com.openbank.lending.domain.model.AccrualOutcome
 import com.openbank.lending.domain.model.ApplicationStatus
 import com.openbank.lending.domain.model.Collateral
+import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
+import com.openbank.lending.domain.model.CollateralStatus
 import com.openbank.lending.domain.model.DecisionRequest
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
@@ -38,6 +40,7 @@ import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.ProvisioningRunOutcome
 import com.openbank.lending.domain.model.ProvisioningSnapshot
 import com.openbank.lending.domain.model.WriteOffRequest
+import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.domain.money.Money
@@ -367,12 +370,13 @@ class LendingService(
             }
         }
 
-    // --- Collateral ---------------------------------------------------------------------------------
+    // --- Collateral (four-eyes, ADR-0028 follow-up issue #621) --------------------------------------
 
-    override fun register(loanId: LoanId, request: CollateralRequest): Uni<Collateral> {
+    override fun register(loanId: LoanId, request: CollateralRequest, registeredBy: String): Uni<Collateral> {
         require(request.haircut.signum() >= 0 && request.haircut <= BigDecimal.ONE) {
             "Haircut must be within [0,1]: ${request.haircut}"
         }
+        require(registeredBy.isNotBlank()) { "Registrant identity is required" }
         val now = OffsetDateTime.now(clock)
         return valuation.revalue(request.type.name, request.marketValue).flatMap { valued ->
             collateral.save(
@@ -383,11 +387,42 @@ class LendingService(
                     marketValue = valued,
                     haircut = request.haircut,
                     valuedAt = now,
+                    // Four-eyes: registration alone does not make the collateral usable to reduce a
+                    // loan's LGD — see applyCollateral, which only sums APPROVED items.
+                    status = CollateralStatus.PENDING,
+                    registeredBy = registeredBy,
                     createdAt = now,
                 ),
             )
         }
     }
+
+    override fun decide(id: CollateralId, decision: CollateralDecisionRequest, decidedBy: String): Uni<Collateral> =
+        collateral.findById(id).flatMap { existing ->
+            when {
+                existing == null ->
+                    Uni.createFrom().failure(IllegalArgumentException("Collateral not found: $id"))
+                existing.status != CollateralStatus.PENDING ->
+                    Uni.createFrom().failure(
+                        IllegalStateException("Collateral is not awaiting a decision: ${existing.status}"),
+                    )
+                decidedBy.isBlank() ->
+                    Uni.createFrom().failure(IllegalArgumentException("Decider identity is required"))
+                // Four-eyes: the decider must not be the maker who registered it. Both identities are the
+                // authenticated JWT subject (never client-supplied), so this cannot be spoofed.
+                decidedBy == existing.registeredBy ->
+                    Uni.createFrom().failure(
+                        IllegalStateException("Four-eyes violation: approver must differ from registrant"),
+                    )
+                else -> collateral.update(
+                    existing.copy(
+                        status = if (decision.approve) CollateralStatus.APPROVED else CollateralStatus.REJECTED,
+                        decidedBy = decidedBy,
+                        decidedAt = OffsetDateTime.now(clock),
+                    ),
+                )
+            }
+        }
 
     override fun list(loanId: LoanId): Uni<List<Collateral>> = collateral.findByLoan(loanId)
 
@@ -427,15 +462,20 @@ class LendingService(
         }
 
     /**
-     * Collateral-adjusted LGD (ADR-0028 D1, first increment). Sums every [registered] collateral item's
-     * haircut-adjusted value (`marketValue * (1 - haircut)`, all items must share [inputs]'
-     * `exposureAtDefault` currency — the loan book is single-currency) and reduces [inputs]' flat LGD by
-     * that cover relative to the exposure, via the pure [Ifrs9.collateralAdjustedLgd]. PD is deliberately
-     * left untouched by this increment.
+     * Collateral-adjusted LGD (ADR-0028 D1, first increment; four-eyes-filtered per the ADR-0028
+     * follow-up, issue #621). Sums every **APPROVED** [registered] collateral item's haircut-adjusted
+     * value (`marketValue * (1 - haircut)`, all items must share [inputs]' `exposureAtDefault` currency —
+     * the loan book is single-currency) and reduces [inputs]' flat LGD by that cover relative to the
+     * exposure, via the pure [Ifrs9.collateralAdjustedLgd]. PD is deliberately left untouched by this
+     * increment.
      *
-     * A loan with no registered collateral (the common/default case today) takes the `registered.isEmpty()`
-     * short-circuit and returns [inputs] unchanged — byte-identical to pre-collateral behaviour, no
-     * regression for the existing loan book.
+     * A [CollateralStatus.PENDING] or [CollateralStatus.REJECTED] item is excluded: a single maker
+     * registering an inflated collateral value must not be able to unilaterally lower a loan's
+     * provisioning before a different checker approves it (the four-eyes gap this increment closes).
+     *
+     * A loan with no APPROVED collateral (the common/default case today, and every loan before this
+     * increment shipped) takes the empty-after-filter short-circuit and returns [inputs] unchanged —
+     * byte-identical to pre-collateral behaviour, no regression for the existing loan book.
      *
      * **First-pass caveats (see [Ifrs9.collateralAdjustedLgd] and the ADR-0028 delivery note):** no
      * real-time revaluation — this reads whatever `marketValue`/`haircut` was last declared/revalued at
@@ -443,9 +483,10 @@ class LendingService(
      * registered collateral row is a data claim, not a confirmed enforceable priority.
      */
     private fun applyCollateral(inputs: EclInputs, registered: List<Collateral>): EclInputs {
-        if (registered.isEmpty()) return inputs
+        val approved = registered.filter { it.status == CollateralStatus.APPROVED }
+        if (approved.isEmpty()) return inputs
         val currency = inputs.exposureAtDefault.currency
-        val haircutAdjustedTotal = registered
+        val haircutAdjustedTotal = approved
             .filter { it.marketValue.currency == currency }
             .fold(BigDecimal.ZERO) { acc, item ->
                 acc + item.marketValue.amount.multiply(BigDecimal.ONE - item.haircut)
