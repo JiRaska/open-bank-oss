@@ -3,10 +3,11 @@
 openapi: 3.1.0
 info:
   title: Dispute Service API
-  version: 1.1.0
+  version: 1.2.0
   description: >-
-    Payment dispute management — open, evidence, escalate, withdraw, timeline — plus
-    regulatory complaints handling with a statutory deadline clock (ADR-0085).
+    Payment dispute management — open, evidence, escalate, withdraw, resolve, timeline — plus
+    regulatory complaints handling with a statutory deadline clock (ADR-0085). Evidence is a
+    tamper-evident hash chain and resolution emits a remediation event (ADR-0117 hardening).
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -162,6 +163,33 @@ paths:
         '200':
           description: Escalated
 
+  /api/v1/disputes/{id}/resolve:
+    post:
+      tags: [Disputes]
+      summary: Record a dispute's remediation outcome
+      description: >-
+        Evidence-backed resolution (UPHELD/REJECTED/PARTIAL, ADR-0117 hardening). An UPHELD or
+        PARTIAL outcome emits a `dispute.remediation_requested` event for a future downstream
+        consumer (e.g. a billing/ledger reversal flow) — this service does not itself post to
+        the ledger. Only reachable from an evidence-gathering status (OPEN, UNDER_REVIEW,
+        PENDING_CUSTOMER, PENDING_MERCHANT).
+      operationId: resolveDispute
+      parameters:
+        - $ref: '#/components/parameters/disputeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveDisputeRequest'
+      responses:
+        '200':
+          description: Resolved dispute
+        '409':
+          description: Dispute is not in an evidence-gathering status
+        '422':
+          description: Invalid request (e.g. PARTIAL outcome without a valid remediationAmount)
+
   /api/v1/disputes/{id}/timeline:
     get:
       tags: [Disputes]
@@ -172,6 +200,24 @@ paths:
       responses:
         '200':
           description: Timeline events
+
+  /api/v1/disputes/{id}/evidence/verify:
+    get:
+      tags: [Disputes]
+      summary: Walk and verify a dispute's evidence hash chain
+      description: >-
+        Recomputes each evidence item's record_hash from (prevHash + content) and reports the
+        first broken link, if any (ADR-0117 §2 / ADR-0133 pattern applied per-dispute).
+      operationId: verifyEvidenceChain
+      parameters:
+        - $ref: '#/components/parameters/disputeId'
+      responses:
+        '200':
+          description: Chain verification result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvidenceChainVerification'
 
   /api/v1/complaints:
     post:
@@ -352,15 +398,80 @@ components:
 
     DisputeEvidence:
       type: object
-      required: [type, content]
+      description: >-
+        An append-only, tamper-evident evidence item (ADR-0117 §2/§4). sequence/prevHash/recordHash
+        are stamped by the service on submission and form a per-dispute SHA-256 hash chain (the
+        ADR-0133 pattern applied per-dispute rather than globally); clients only need to supply
+        submittedBy/evidenceType/description/fileReference.
+      required: [submittedBy, evidenceType]
       properties:
-        type:
+        id:
           type: string
-          enum: [DOCUMENT, SCREENSHOT, STATEMENT, OTHER]
-        content:
+          format: uuid
+        disputeId:
           type: string
-        mimeType:
+          format: uuid
+        submittedBy:
           type: string
+        evidenceType:
+          type: string
+          description: Free-text category, e.g. DOCUMENT, SCREENSHOT, STATEMENT, TRANSACTION_REF, PSD2_MESSAGE_ID.
+        description:
+          type: string
+          nullable: true
+        fileReference:
+          type: string
+          nullable: true
+          description: Opaque reference to supporting material (e.g. an object-storage key or URL). No blob storage is implemented by this service.
+        submittedAt:
+          type: string
+          format: date-time
+          readOnly: true
+        sequence:
+          type: integer
+          format: int64
+          readOnly: true
+          description: 0-based position in this dispute's evidence chain.
+        prevHash:
+          type: string
+          readOnly: true
+          nullable: true
+        recordHash:
+          type: string
+          readOnly: true
+          nullable: true
+
+    ResolveDisputeRequest:
+      type: object
+      required: [outcome, resolvedBy]
+      properties:
+        outcome:
+          type: string
+          enum: [UPHELD, REJECTED, PARTIAL]
+        remediationAmount:
+          type: number
+          nullable: true
+          description: Required and must be in (0, claimAmount) when outcome is PARTIAL.
+        resolvedBy:
+          type: string
+        notes:
+          type: string
+          nullable: true
+
+    EvidenceChainVerification:
+      type: object
+      properties:
+        disputeId:
+          type: string
+          format: uuid
+        intact:
+          type: boolean
+        itemsChecked:
+          type: integer
+        firstBrokenEvidenceId:
+          type: string
+          format: uuid
+          nullable: true
 
     FileComplaintRequest:
       type: object

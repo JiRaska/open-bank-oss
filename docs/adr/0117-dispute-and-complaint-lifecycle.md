@@ -5,9 +5,27 @@ Author: Claude (paired with Jiří Raška)
 Status: Accepted
 Delivery-Status: Partial
 
-**Delivery note (updated 2026-06-30):**
+**Delivery note (updated 2026-07-09):**
 - **Core domain logic** — ✅ Shipped: `Dispute` + `Complaint` aggregates in `openbank-dispute-service`; PSD2 deadline mechanics (15/35 BD), `BusinessCalendar` domain logic, breach derivation (lazy per-read), and `DomainMetrics` live.
-- **Hardening** — ⬜ Pending: evidence chain storage, Financial Arbitrator escalation endpoint, deterministic complaint reference (currently timestamp-based), and FK constraint on dispute-transaction linkage not yet hardened.
+- **Evidence chain (first increment)** — ✅ Shipped: `DisputeEvidence` is now a tamper-evident,
+  per-dispute SHA-256 hash chain (`EvidenceChain.kt`) — monotonic `sequence` + `prevHash` +
+  `recordHash` per item, verified via `GET /api/v1/disputes/{id}/evidence/verify`. This is a
+  bespoke, self-contained implementation local to `openbank-dispute-service` (no shared
+  `openbank-libs` hash-chain primitive existed to reuse — `openbank-audit-service`'s ADR-0133
+  chain is itself service-local); a future hardening pass could promote the shape to a shared
+  libs primitive once a second service needs it. Unlike ADR-0133's single global chain, this
+  chain is scoped **per dispute**, matching evidence's natural unit of tamper-evidence.
+- **Remediation workflow (first increment)** — ✅ Shipped: `POST /api/v1/disputes/{id}/resolve`
+  records an evidence-backed `RemediationOutcome` (UPHELD/REJECTED/PARTIAL) and transitions the
+  case to a terminal resolved status. An UPHELD/PARTIAL outcome emits a
+  `dispute.remediation_requested` outbox event describing the compensating action warranted —
+  **no consumer exists yet**. ADR-0143's billing-service fee-reversal flow (phase 2e) remains an
+  open gap (issue #548); this service does not call into billing/ledger itself
+  (`openbank-dispute-service` is not a money-path service, `rules.yaml: money_path_services`).
+- **Hardening still pending** — ⬜: Financial Arbitrator escalation endpoint, deterministic
+  complaint reference (currently timestamp-based), FK constraint on dispute-transaction linkage,
+  a downstream consumer for `dispute.remediation_requested`, and promoting the evidence chain to
+  a cross-service `openbank-libs` primitive if a second service needs the same shape.
 
 ## Context
 
@@ -114,8 +132,11 @@ changes status and emits an event.
 
 - `openbank-dispute-service/src/main/kotlin/.../usecase/ComplaintService.kt`
 - `openbank-dispute-service/src/main/kotlin/.../usecase/DisputeService.kt`
+- `openbank-dispute-service/src/main/kotlin/.../domain/model/EvidenceChain.kt` (evidence hash chain)
 - `openbank-dispute-service/src/main/kotlin/.../observability/ComplaintDeadlineGauge.kt`
 - ADR-0085 (complaints handling — high-level intent)
 - ADR-0100 (clock injection — deterministic `Clock` for deadline calculation)
+- ADR-0133 (tamper-evident audit chain — the hash-chain pattern this ADR's evidence chain applies per-dispute)
+- ADR-0143 (billing fee posting — the sibling reversal mechanism `dispute.remediation_requested` targets, phase 2e still pending)
 - PSD2 Art. 101 (complaint handling statutory deadlines)
 - EBA/GL/2012/07 (EBA Guidelines on Complaints Handling)

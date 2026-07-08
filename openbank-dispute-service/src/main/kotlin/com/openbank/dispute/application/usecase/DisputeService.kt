@@ -15,13 +15,20 @@ import com.openbank.dispute.domain.model.DisputeEvidence
 import com.openbank.dispute.domain.model.DisputeResolution
 import com.openbank.dispute.domain.model.DisputeStatus
 import com.openbank.dispute.domain.model.DisputeTimelineEvent
+import com.openbank.dispute.domain.model.EvidenceChain
+import com.openbank.dispute.domain.model.EvidenceChainVerification
 import com.openbank.dispute.domain.model.OpenDisputeRequest
+import com.openbank.dispute.domain.model.RemediationOutcome
+import com.openbank.dispute.domain.model.ResolveDisputeRequest
 import com.openbank.dispute.domain.model.UpdateDisputeRequest
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import java.math.BigDecimal
 import java.time.Clock
+import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -120,18 +127,32 @@ class DisputeService(
             }
         }
 
-    override fun addEvidence(disputeId: UUID, evidence: DisputeEvidence): Uni<DisputeEvidence> = evidenceRepo.save(
-        evidence.copy(disputeId = disputeId, submittedAt = OffsetDateTime.now(clock)),
-    ).flatMap { saved ->
-        val event = DisputeTimelineEvent(
-            disputeId = disputeId,
-            eventType = "EVIDENCE_ADDED",
-            description = "Evidence added: ${evidence.evidenceType}",
-            actor = evidence.submittedBy,
-            createdAt = OffsetDateTime.now(clock),
-        )
-        timelineRepo.save(event).map { saved }
-    }
+    /**
+     * Append an evidence item to the dispute's tamper-evident chain (ADR-0117 hardening §1/§2).
+     * Reads the chain tail (highest [DisputeEvidence.sequence] so far), stamps the new item with
+     * the next sequence + prevHash via [EvidenceChain.append], and persists it. Concurrency note:
+     * two concurrent `addEvidence` calls for the SAME dispute racing on the same tail read could
+     * both compute the same next sequence — the unique `(dispute_id, sequence)` index added in
+     * V6 turns that race into a persist-time constraint violation rather than a silently corrupted
+     * chain, matching the "detect, don't silently accept" spirit of ADR-0133. Serializing writes
+     * per-dispute (mutex/advisory lock, as audit-service does globally) is a follow-up if this
+     * proves to matter at this service's evidence-submission volume.
+     */
+    override fun addEvidence(disputeId: UUID, evidence: DisputeEvidence): Uni<DisputeEvidence> =
+        evidenceRepo.findLatestByDisputeId(disputeId).flatMap { previous ->
+            val stamped = evidence.copy(disputeId = disputeId, submittedAt = OffsetDateTime.now(clock))
+            val chained = EvidenceChain.append(stamped, previous)
+            evidenceRepo.save(chained).flatMap { saved ->
+                val event = DisputeTimelineEvent(
+                    disputeId = disputeId,
+                    eventType = "EVIDENCE_ADDED",
+                    description = "Evidence added: ${evidence.evidenceType}",
+                    actor = evidence.submittedBy,
+                    createdAt = OffsetDateTime.now(clock),
+                )
+                timelineRepo.save(event).map { saved }
+            }
+        }
 
     override fun withdraw(id: UUID, actor: String): Uni<Dispute> = update(
         id,
@@ -145,6 +166,111 @@ class DisputeService(
     override fun escalate(id: UUID, actor: String): Uni<Dispute> =
         update(id, UpdateDisputeRequest(status = DisputeStatus.ESCALATED, resolvedBy = actor))
 
+    /**
+     * Record the remediation verdict (ADR-0117 hardening §3). Only reachable from an
+     * evidence-gathering state ([RESOLVABLE_FROM]); a case already terminal (resolved, withdrawn,
+     * escalated) cannot be re-resolved through this path. [RemediationOutcome.PARTIAL] requires a
+     * [ResolveDisputeRequest.remediationAmount] strictly between zero and the dispute's claimed
+     * amount.
+     *
+     * On [RemediationOutcome.UPHELD] or [RemediationOutcome.PARTIAL], emits a
+     * `dispute.remediation_requested` event alongside `dispute.resolved` in the SAME transaction
+     * (transactional outbox) describing the compensating action a downstream consumer may take.
+     * **No consumer exists yet** — ADR-0143's billing-service fee-reversal flow (phase 2e) is
+     * still an open gap (issue #548) and no other service currently subscribes to this event
+     * type; this service's job per ADR-0117 is to emit it, not to call a ledger/billing reversal
+     * itself (dispute-service is not a money-path service).
+     */
+    override fun resolve(id: UUID, request: ResolveDisputeRequest): Uni<Dispute> =
+        disputeRepo.findById(id).flatMap { dispute ->
+            when {
+                dispute == null -> Uni.createFrom().failure(IllegalArgumentException("Dispute not found: $id"))
+                dispute.status !in RESOLVABLE_FROM -> Uni.createFrom().failure(
+                    IllegalStateException(
+                        "Dispute $id cannot be resolved from status ${dispute.status}; " +
+                            "must be one of $RESOLVABLE_FROM",
+                    ),
+                )
+                request.outcome == RemediationOutcome.PARTIAL &&
+                    !isValidPartialAmount(request.remediationAmount, dispute.amount) ->
+                    Uni.createFrom().failure(
+                        IllegalArgumentException(
+                            "PARTIAL remediation requires remediationAmount in (0, ${dispute.amount})",
+                        ),
+                    )
+                else -> doResolve(dispute, request)
+            }
+        }
+
+    private fun doResolve(dispute: Dispute, request: ResolveDisputeRequest): Uni<Dispute> {
+        val now = OffsetDateTime.now(clock)
+        val remediationAmount = when (request.outcome) {
+            RemediationOutcome.UPHELD -> dispute.amount
+            RemediationOutcome.PARTIAL -> request.remediationAmount
+            RemediationOutcome.REJECTED -> null
+        }
+        val resolvedStatus = if (request.outcome == RemediationOutcome.REJECTED) {
+            DisputeStatus.RESOLVED_MERCHANT
+        } else {
+            DisputeStatus.RESOLVED_CUSTOMER
+        }
+        val updated = dispute.copy(
+            status = resolvedStatus,
+            remediationOutcome = request.outcome,
+            remediationAmount = remediationAmount,
+            resolvedAt = now,
+            resolvedBy = request.resolvedBy,
+            updatedAt = now,
+        )
+        val messages = buildList {
+            add(resolvedOutboxMessage(updated))
+            if (request.outcome != RemediationOutcome.REJECTED) {
+                add(remediationRequestedOutboxMessage(updated))
+            }
+        }
+        return disputeRepo.update(updated, messages).flatMap { saved ->
+            val event = DisputeTimelineEvent(
+                disputeId = saved.id,
+                eventType = "RESOLVED",
+                description = "Resolved: ${request.outcome.name}" + (request.notes?.let { " — $it" } ?: ""),
+                actor = request.resolvedBy,
+                createdAt = OffsetDateTime.now(clock),
+            )
+            timelineRepo.save(event).map { saved }
+        }
+    }
+
+    private fun isValidPartialAmount(amount: BigDecimal?, claimAmount: BigDecimal): Boolean =
+        amount != null && amount > BigDecimal.ZERO && amount < claimAmount
+
+    private fun resolvedOutboxMessage(dispute: Dispute): OutboxMessage = OutboxMessage(
+        aggregateId = dispute.id,
+        eventType = "dispute.resolved",
+        payload = """{"eventType":"dispute.resolved","disputeId":"${dispute.id}",""" +
+            """"reference":"${dispute.reference}","outcome":"${dispute.remediationOutcome}",""" +
+            """"status":"${dispute.status}","resolvedAt":"${dispute.resolvedAt}"}""",
+        createdAt = Instant.now(clock),
+    )
+
+    /**
+     * A downstream-facing event describing the compensating action warranted by this dispute's
+     * outcome. Deliberately does NOT reference a ledger journal, GL account, or any billing-service
+     * concept — this service has no visibility into those and must not assume a specific consumer
+     * shape. `amount`/`currency` are the compensation amount (full claim for UPHELD, the partial
+     * amount for PARTIAL); `accountId`/`transactionId` let a consumer resolve which account/payment
+     * to compensate.
+     */
+    private fun remediationRequestedOutboxMessage(dispute: Dispute): OutboxMessage = OutboxMessage(
+        aggregateId = dispute.id,
+        eventType = "dispute.remediation_requested",
+        payload = """{"eventType":"dispute.remediation_requested","disputeId":"${dispute.id}",""" +
+            """"reference":"${dispute.reference}","accountId":"${dispute.accountId}",""" +
+            """"transactionId":"${dispute.transactionId}","partyId":"${dispute.partyId}",""" +
+            """"outcome":"${dispute.remediationOutcome}","amount":${dispute.remediationAmount},""" +
+            """"currency":"${dispute.currency}"}""",
+        createdAt = Instant.now(clock),
+    )
+
     override fun getDispute(id: UUID): Uni<Dispute?> = disputeRepo.findById(id)
     override fun getByReference(reference: String): Uni<Dispute?> = disputeRepo.findByReference(reference)
     override fun listByAccount(accountId: UUID): Uni<List<Dispute>> = disputeRepo.findByAccountId(accountId)
@@ -152,7 +278,20 @@ class DisputeService(
     override fun getTimeline(disputeId: UUID): Uni<List<DisputeTimelineEvent>> = timelineRepo.findByDisputeId(disputeId)
     override fun getEvidence(disputeId: UUID): Uni<List<DisputeEvidence>> = evidenceRepo.findByDisputeId(disputeId)
 
+    override fun verifyEvidenceChain(disputeId: UUID): Uni<EvidenceChainVerification> =
+        evidenceRepo.findByDisputeIdOrderedBySequence(disputeId).map { items ->
+            EvidenceChain.verify(disputeId, items)
+        }
+
     companion object {
         private val BANK_TIME: ZoneId = ZoneId.of("Europe/Prague")
+
+        /** States from which a remediation resolution may be recorded (evidence-gathering states). */
+        internal val RESOLVABLE_FROM = setOf(
+            DisputeStatus.OPEN,
+            DisputeStatus.UNDER_REVIEW,
+            DisputeStatus.PENDING_CUSTOMER,
+            DisputeStatus.PENDING_MERCHANT,
+        )
     }
 }

@@ -8,14 +8,20 @@ import com.openbank.dispute.application.port.out.DisputeEvidenceRepository
 import com.openbank.dispute.application.port.out.DisputeRepository
 import com.openbank.dispute.application.port.out.DisputeTimelineRepository
 import com.openbank.dispute.domain.model.Dispute
+import com.openbank.dispute.domain.model.DisputeEvidence
 import com.openbank.dispute.domain.model.DisputeResolution
 import com.openbank.dispute.domain.model.DisputeStatus
 import com.openbank.dispute.domain.model.DisputeTimelineEvent
 import com.openbank.dispute.domain.model.DisputeType
+import com.openbank.dispute.domain.model.EvidenceChain
 import com.openbank.dispute.domain.model.OpenDisputeRequest
+import com.openbank.dispute.domain.model.RemediationOutcome
+import com.openbank.dispute.domain.model.ResolveDisputeRequest
 import com.openbank.dispute.domain.model.UpdateDisputeRequest
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import io.mockk.verify
 import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
@@ -150,5 +156,174 @@ class DisputeServiceTest {
         verify(exactly = 1) { disputeRepo.findById(id) }
         verify(exactly = 1) { disputeRepo.update(any()) }
         verify(exactly = 1) { timelineRepo.save(any()) }
+    }
+
+    @Test
+    fun `addEvidence chains the first item from genesis`() {
+        val disputeId = UUID.randomUUID()
+        val submitted = DisputeEvidence(disputeId = disputeId, submittedBy = "customer", evidenceType = "STATEMENT")
+
+        every { evidenceRepo.findLatestByDisputeId(disputeId) } returns Uni.createFrom().item(null as DisputeEvidence?)
+        every { evidenceRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeEvidence>()) }
+        every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
+
+        val result = service.addEvidence(disputeId, submitted).await().indefinitely()
+
+        assertThat(result.sequence).isEqualTo(0)
+        assertThat(result.prevHash).isEqualTo(EvidenceChain.GENESIS_HASH)
+        assertThat(result.recordHash).isNotNull()
+    }
+
+    @Test
+    fun `addEvidence chains a second item from the stored tail`() {
+        val disputeId = UUID.randomUUID()
+        val previous = EvidenceChain.append(
+            DisputeEvidence(
+                disputeId = disputeId,
+                submittedBy = "customer",
+                evidenceType = "STATEMENT",
+                submittedAt = now,
+            ),
+            previous = null,
+        )
+        val submitted = DisputeEvidence(disputeId = disputeId, submittedBy = "ops", evidenceType = "TRANSACTION_REF")
+
+        every { evidenceRepo.findLatestByDisputeId(disputeId) } returns Uni.createFrom().item(previous)
+        every { evidenceRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeEvidence>()) }
+        every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
+
+        val result = service.addEvidence(disputeId, submitted).await().indefinitely()
+
+        assertThat(result.sequence).isEqualTo(1)
+        assertThat(result.prevHash).isEqualTo(previous.recordHash)
+    }
+
+    @Test
+    fun `resolve with UPHELD transitions to RESOLVED_CUSTOMER and emits both outbox events`() {
+        val id = UUID.randomUUID()
+        val existing = Dispute(
+            id = id,
+            reference = "DSP-3000",
+            transactionId = UUID.randomUUID(),
+            accountId = UUID.randomUUID(),
+            partyId = UUID.randomUUID(),
+            disputeType = DisputeType.UNAUTHORIZED,
+            status = DisputeStatus.UNDER_REVIEW,
+            amount = BigDecimal("50.00"),
+            transactionDate = today,
+            filingDate = today,
+            resolutionDeadline = today.plusDays(45),
+            createdAt = now,
+            updatedAt = now,
+        )
+        val request = ResolveDisputeRequest(outcome = RemediationOutcome.UPHELD, resolvedBy = "caseworker")
+        val messagesSlot = slot<List<OutboxMessage>>()
+
+        every { disputeRepo.findById(id) } returns Uni.createFrom().item(existing)
+        every { disputeRepo.update(any(), capture(messagesSlot)) } answers
+            { Uni.createFrom().item(firstArg<Dispute>()) }
+        every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
+
+        val result = service.resolve(id, request).await().indefinitely()
+
+        assertThat(result.status).isEqualTo(DisputeStatus.RESOLVED_CUSTOMER)
+        assertThat(result.remediationOutcome).isEqualTo(RemediationOutcome.UPHELD)
+        assertThat(result.remediationAmount).isEqualByComparingTo(BigDecimal("50.00"))
+        assertThat(result.resolvedAt).isNotNull()
+
+        val eventTypes = messagesSlot.captured.map { it.eventType }
+        assertThat(eventTypes).containsExactlyInAnyOrder("dispute.resolved", "dispute.remediation_requested")
+        val remediationEvent = messagesSlot.captured.first { it.eventType == "dispute.remediation_requested" }
+        assertThat(remediationEvent.payload).contains(existing.accountId.toString())
+        assertThat(remediationEvent.payload).contains("\"amount\":50.00")
+    }
+
+    @Test
+    fun `resolve with REJECTED emits only the resolved event, no remediation amount`() {
+        val id = UUID.randomUUID()
+        val existing = Dispute(
+            id = id,
+            reference = "DSP-3001",
+            transactionId = UUID.randomUUID(),
+            accountId = UUID.randomUUID(),
+            partyId = UUID.randomUUID(),
+            disputeType = DisputeType.OTHER,
+            status = DisputeStatus.OPEN,
+            amount = BigDecimal("75.00"),
+            transactionDate = today,
+            filingDate = today,
+            resolutionDeadline = today.plusDays(45),
+            createdAt = now,
+            updatedAt = now,
+        )
+        val request = ResolveDisputeRequest(outcome = RemediationOutcome.REJECTED, resolvedBy = "caseworker")
+        val messagesSlot = slot<List<OutboxMessage>>()
+
+        every { disputeRepo.findById(id) } returns Uni.createFrom().item(existing)
+        every { disputeRepo.update(any(), capture(messagesSlot)) } answers
+            { Uni.createFrom().item(firstArg<Dispute>()) }
+        every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
+
+        val result = service.resolve(id, request).await().indefinitely()
+
+        assertThat(result.status).isEqualTo(DisputeStatus.RESOLVED_MERCHANT)
+        assertThat(result.remediationAmount).isNull()
+        assertThat(messagesSlot.captured.map { it.eventType }).containsExactly("dispute.resolved")
+    }
+
+    @Test
+    fun `resolve with PARTIAL requires a valid remediationAmount`() {
+        val id = UUID.randomUUID()
+        val existing = Dispute(
+            id = id,
+            reference = "DSP-3002",
+            transactionId = UUID.randomUUID(),
+            accountId = UUID.randomUUID(),
+            partyId = UUID.randomUUID(),
+            disputeType = DisputeType.OTHER,
+            status = DisputeStatus.OPEN,
+            amount = BigDecimal("100.00"),
+            transactionDate = today,
+            filingDate = today,
+            resolutionDeadline = today.plusDays(45),
+            createdAt = now,
+            updatedAt = now,
+        )
+        every { disputeRepo.findById(id) } returns Uni.createFrom().item(existing)
+
+        val tooHigh = ResolveDisputeRequest(
+            outcome = RemediationOutcome.PARTIAL,
+            remediationAmount = BigDecimal("100.00"),
+            resolvedBy = "caseworker",
+        )
+        val missing = ResolveDisputeRequest(outcome = RemediationOutcome.PARTIAL, resolvedBy = "caseworker")
+
+        assertThat(runCatching { service.resolve(id, tooHigh).await().indefinitely() }.isFailure).isTrue()
+        assertThat(runCatching { service.resolve(id, missing).await().indefinitely() }.isFailure).isTrue()
+    }
+
+    @Test
+    fun `resolve rejects a dispute that is already terminal`() {
+        val id = UUID.randomUUID()
+        val existing = Dispute(
+            id = id,
+            reference = "DSP-3003",
+            transactionId = UUID.randomUUID(),
+            accountId = UUID.randomUUID(),
+            partyId = UUID.randomUUID(),
+            disputeType = DisputeType.OTHER,
+            status = DisputeStatus.WITHDRAWN,
+            amount = BigDecimal("10.00"),
+            transactionDate = today,
+            filingDate = today,
+            resolutionDeadline = today.plusDays(45),
+            createdAt = now,
+            updatedAt = now,
+        )
+        every { disputeRepo.findById(id) } returns Uni.createFrom().item(existing)
+
+        val request = ResolveDisputeRequest(outcome = RemediationOutcome.UPHELD, resolvedBy = "caseworker")
+
+        assertThat(runCatching { service.resolve(id, request).await().indefinitely() }.isFailure).isTrue()
     }
 }
