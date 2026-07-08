@@ -4,8 +4,12 @@
 
 package com.openbank.billing.application.port.out
 
+import com.openbank.billing.domain.AssessedFee
 import com.openbank.billing.domain.BillableFee
+import com.openbank.billing.domain.BillingAssessment
+import com.openbank.billing.domain.FeeJournalCommand
 import com.openbank.libs.product.FeeContext
+import java.util.UUID
 
 /**
  * The account's product identity plus the resolved fee-evaluation context for a currency.
@@ -29,4 +33,39 @@ interface AccountContextPort {
  */
 interface ProductCatalogPort {
     suspend fun billableFees(productId: String, currency: String): List<BillableFee>
+}
+
+/**
+ * Persists a [BillingAssessment] (ADR-0143 phase 2c): the cycle/account/currency assessment row
+ * plus one row per [AssessedFee]. **Idempotent** — re-running a cycle for the same
+ * `(cycleId, accountId, currency)` returns the previously persisted assessment rather than
+ * inserting new ones (the unique constraint on `(cycle_id, account_id, currency)` /
+ * `(cycle_id, account_id, fee_id, currency)` is the enforcement backstop).
+ */
+interface BillingAssessmentRepository {
+    /** The persisted assessment for this cycle/account/currency, if one already exists. */
+    suspend fun findExisting(cycleId: String, accountId: String, currency: String): BillingAssessment?
+
+    /**
+     * Persist the assessment and, in the SAME transaction, append one outbox row per chargeable
+     * (non-waived, non-zero) fee — the atomic "assessment commits with the intent-to-post"
+     * required by ADR-0143 step 2. Returns the persisted assessment with each chargeable fee's
+     * [AssessedFee.postingStatus] set to `PENDING`.
+     */
+    suspend fun persistWithPostingIntent(assessment: BillingAssessment): BillingAssessment
+
+    /** Mark one fee POSTED with the ledger's returned journal id (called by the outbox publisher). */
+    suspend fun markPosted(idempotencyKey: String, journalId: UUID)
+
+    /** Mark one fee FAILED — its outbox row reached a terminal DEAD state without posting. */
+    suspend fun markFailed(idempotencyKey: String)
+}
+
+/** Outbound port to the ledger's journal-posting endpoint (ADR-0143 step 2 / ADR-0039). */
+interface LedgerPostingPort {
+    /**
+     * Posts a balanced fee journal; returns the ledger's journal id. Idempotent on
+     * [FeeJournalCommand.idempotencyKey].
+     */
+    suspend fun post(command: FeeJournalCommand): UUID
 }

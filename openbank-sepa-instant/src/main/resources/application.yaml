@@ -180,3 +180,10 @@ opa:
   timeout-ms: "${OPA_TIMEOUT_MS:500}"
 authz:
   enforce: "${AUTHZ_ENFORCE:false}"
+  # ADR-0155: four-eyes ENFORCEMENT (blocking a maker's request pending a second
+  # approver), independent of the base allow/deny enforce toggle above. Stays false
+  # here — this PR only wires the ApprovalStore/endpoint mechanism (mirroring the
+  # sepa-payment pilot), not the OPA rest.rego four_eyes_required scope/verb match or
+  # the decision to flip enforcement on.
+  four-eyes:
+    enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"

@@ -9,6 +9,7 @@ import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -16,6 +17,7 @@ import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import java.math.BigDecimal
+import java.util.UUID
 
 /** A product's fee definition as returned by product-catalog `GET /api/v1/products/{id}/fees`. */
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -70,4 +72,50 @@ interface BalanceRestClient {
     @GET
     @Path("/balances/{accountId}/{currency}")
     fun getBalance(@PathParam("accountId") accountId: String, @PathParam("currency") currency: String): Uni<BalanceDto>
+}
+
+// --- Ledger posting (ADR-0143 phase 2c-ii) --------------------------------------------------
+
+/**
+ * Mirrors `openbank-ledger-service`'s `JournalLineRequest` field-for-field
+ * (see `LedgerResource.PostJournalLineRequest`).
+ */
+data class LedgerJournalLineRequest(
+    val glAccountId: UUID,
+    val side: String,
+    val amount: BigDecimal,
+    val currencyCode: String,
+    val baseAmount: BigDecimal,
+    val baseCurrencyCode: String,
+    val subAccountId: UUID? = null,
+)
+
+/** Mirrors `openbank-ledger-service`'s `PostJournalRequest` (`POST /api/v1/journals`). */
+data class LedgerPostJournalRequest(
+    val idempotencyKey: String,
+    val transactionId: UUID,
+    val entryDate: String,
+    val valueDate: String,
+    val description: String? = null,
+    val createdBy: UUID,
+    val lines: List<LedgerJournalLineRequest>,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class LedgerJournalEntryResponse(val id: UUID, val transactionId: UUID, val status: String)
+
+/**
+ * Ledger journal posting — a money-path call, so it propagates an OIDC client-credentials
+ * token (ADR-0143 step 4: `postedBy` is the billing service's authenticated caller, forwarded
+ * as [LedgerPostJournalRequest.createdBy]; the ledger records who posted, billing does not
+ * re-derive it).
+ */
+@RegisterRestClient(configKey = "ledger-service")
+@RegisterProvider(OidcClientRequestReactiveFilter::class)
+@Path("/api/v1/journals")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+interface LedgerRestClient {
+    @POST
+    fun postJournal(body: LedgerPostJournalRequest): Uni<LedgerJournalEntryResponse>
 }
