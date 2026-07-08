@@ -38,6 +38,12 @@ data class ScoreRequest(
     // ADR-0084 §2: rolling velocity counters read from the async signal plane before scoring
     val velocityH1Count: Long = 0,
     val velocityH24Count: Long = 0,
+    // ADR-0084 §3 v3: rolling 1h total transacted amount for this account/currency bucket, read
+    // from the same VelocityAggregate the counters above come from (VelocityAggregate.totalAmount
+    // was already persisted by the signal plane in V2__create_velocity_aggregates.sql; this just
+    // surfaces it to the rule engine — no new migration). Zero when no aggregate exists yet (no
+    // signal has arrived) — same silent-on-zero contract as the counters above.
+    val velocityH1TotalAmount: BigDecimal = BigDecimal.ZERO,
 )
 
 /**
