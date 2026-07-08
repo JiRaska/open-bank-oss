@@ -164,23 +164,21 @@ class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, pri
         }.awaitSuspending()
     }
 
-    private fun feePostIntentPayload(fee: AssessedFeeEntity): String =
-        "{\"schemaVersion\":1," +
-            "\"idempotencyKey\":\"${fee.idempotencyKey}\",\"cycleId\":\"${fee.cycleId}\"," +
-            "\"accountId\":\"${fee.accountId}\",\"feeId\":\"${fee.feeId}\"," +
-            "\"amount\":\"${fee.chargedAmount}\",\"currency\":\"${fee.currency}\"," +
-            "\"description\":\"Fee charge: ${fee.feeName}\"}"
+    private fun feePostIntentPayload(fee: AssessedFeeEntity): String = "{\"schemaVersion\":1," +
+        "\"idempotencyKey\":\"${fee.idempotencyKey}\",\"cycleId\":\"${fee.cycleId}\"," +
+        "\"accountId\":\"${fee.accountId}\",\"feeId\":\"${fee.feeId}\"," +
+        "\"amount\":\"${fee.chargedAmount}\",\"currency\":\"${fee.currency}\"," +
+        "\"description\":\"Fee charge: ${fee.feeName}\"}"
 }
 
-private fun BillingCycleAssessmentEntity.toDomain(fees: List<AssessedFeeEntity>): BillingAssessment =
-    BillingAssessment(
-        cycleId = cycleId,
-        accountId = accountId,
-        currency = currency,
-        skipped = skipped,
-        skipReason = skipReason,
-        assessedFees = fees.map { it.toDomain() },
-    )
+private fun BillingCycleAssessmentEntity.toDomain(fees: List<AssessedFeeEntity>): BillingAssessment = BillingAssessment(
+    cycleId = cycleId,
+    accountId = accountId,
+    currency = currency,
+    skipped = skipped,
+    skipReason = skipReason,
+    assessedFees = fees.map { it.toDomain() },
+)
 
 private fun AssessedFeeEntity.toDomain(): AssessedFee = AssessedFee(
     cycleId = cycleId,
