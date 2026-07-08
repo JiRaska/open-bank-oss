@@ -10,9 +10,6 @@ import com.openbank.sanctions.domain.model.UpdateSanctionsListRequest
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsListRepositoryImpl
 import io.quarkus.logging.Log
 import io.quarkus.scheduler.Scheduled
-import io.smallrye.common.annotation.NonBlocking
-import io.smallrye.mutiny.Multi
-import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.NotFoundException
@@ -83,34 +80,33 @@ class SanctionsListService(
     /**
      * Scheduled refresh: checks cron schedule per list, calls the real importer.
      * Runs every 60s but only triggers a list when its cron time matches.
+     *
+     * Implemented as a plain `suspend fun` (Quarkus's scheduler has native Kotlin-coroutine
+     * support — same pattern as [com.openbank.libs.persistence.outbox.AbstractOutboxDispatcher]
+     * subclasses fleet-wide). An earlier Uni-pipeline version could not call the suspend
+     * [SanctionsImportService.importList] from inside a `transformToUniAndConcatenate` lambda and
+     * was left as a stub that always fed `0` into the importer branch — so the scheduled path
+     * never actually imported anything, even once real source URLs were registered. Each due
+     * list is refreshed sequentially and a failure on one list is logged and does not stop the
+     * others (a network hiccup on one feed must not block the rest of the fleet's screening data).
      */
     @Scheduled(every = "60s", delayed = "30s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
-    @NonBlocking
-    fun scheduledRefresh(): Uni<Void> {
+    suspend fun scheduledRefresh() {
         val now = ZonedDateTime.now(clock).withSecond(0).withNano(0)
-        return repo.listSanctionsListsUni()
-            .onItem().transformToMulti { lists ->
-                Multi.createFrom().iterable(lists.filter { it.isDueForScheduledRefresh(now) })
+        val due = repo.listSanctionsLists().filter { it.isDueForScheduledRefresh(now) }
+        for (list in due) {
+            Log.infof("Scheduled refresh for %s", list.listType)
+            try {
+                refresh(list.listType)
+            } catch (ex: Exception) {
+                Log.warnf(
+                    "Scheduled refresh failed for %s (%s: %s) — will retry next due tick",
+                    list.listType,
+                    ex.javaClass.simpleName,
+                    ex.message,
+                )
             }
-            .onItem().transformToUniAndConcatenate { list ->
-                Log.infof("Scheduled refresh for %s", list.listType)
-                val enumType = runCatching { SanctionsListType.valueOf(list.listType) }.getOrNull()
-                val importUni: Uni<Int> = if (enumType != null) {
-                    Uni.createFrom().item(0) // importer is suspend — invoke via separate coroutine in prod
-                } else {
-                    Uni.createFrom().item(list.lastEntryCount ?: 0)
-                }
-                importUni.flatMap { imported ->
-                    val count = if (imported > 0) imported else (list.lastEntryCount ?: 0)
-                    repo.markUpdatedUni(list.listType, count, now.toInstant())
-                        .onItem().ifNull().failWith(
-                            IllegalStateException("Failed to persist refresh for ${list.listType}"),
-                        )
-                        .replaceWithVoid()
-                }
-            }
-            .collect().asList()
-            .replaceWithVoid()
+        }
     }
 
     private fun normalizeCronDays(raw: String?): String? {
