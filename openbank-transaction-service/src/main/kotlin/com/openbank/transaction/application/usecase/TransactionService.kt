@@ -26,8 +26,10 @@ import com.openbank.transaction.domain.settlement.SettlementDateResolver
 import com.openbank.transaction.infrastructure.temporal.TemporalConfig
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
+import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import jakarta.persistence.PersistenceException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.math.RoundingMode
@@ -135,14 +137,20 @@ class TransactionService(
             instructionType = command.instructionType,
         )
 
-        val saved = transactionRepository.save(
-            transaction = transaction,
-            outboxMessage = OutboxMessage(
-                aggregateId = transaction.id,
-                eventType = TRANSACTION_INITIATED_EVENT,
-                payload = eventPublisher.initiatedPayload(transaction),
-            ),
-        )
+        val saved = try {
+            transactionRepository.save(
+                transaction = transaction,
+                outboxMessage = OutboxMessage(
+                    aggregateId = transaction.id,
+                    eventType = TRANSACTION_INITIATED_EVENT,
+                    payload = eventPublisher.initiatedPayload(transaction),
+                ),
+            )
+        } catch (e: PersistenceException) {
+            return recoverConcurrentReplay(e, command.idempotencyKey)
+        } catch (e: PgException) {
+            return recoverConcurrentReplay(e, command.idempotencyKey)
+        }
 
         // ADR-0120 Phase 5: Temporal is the sole orchestrator — PaymentSagaOrchestrator removed.
         // stub.execute(...) is a blocking Temporal client call; offload the blocking wait to the IO dispatcher.
@@ -272,6 +280,23 @@ class TransactionService(
         return rate.askRate to Money.of(baseAmount, settlementCcy)
     }
 
+    /**
+     * The loser of a concurrent duplicate-submission race: both contenders passed the replay
+     * check before either committed, and this transaction died on uq_transactions_idempotency.
+     * Recover to the same contract as the sequential path — return the winner's transaction and
+     * start no second payment workflow. Anything that is not the idempotency-key conflict
+     * propagates untouched.
+     */
+    private suspend fun recoverConcurrentReplay(e: RuntimeException, idempotencyKey: String): Transaction {
+        // transactions is range-partitioned by booking_date: the violation surfaces under the
+        // per-partition auto-generated name (transactions_<year>_idempotency_key_booking_date_key),
+        // not the parent's uq_transactions_idempotency — match the column, not one spelling.
+        val isIdempotencyKeyConflict = generateSequence<Throwable>(e) { it.cause.takeIf { c -> c !== it } }
+            .any { it.message?.contains("idempotency", ignoreCase = true) == true }
+        if (!isIdempotencyKeyConflict) throw e
+        return transactionRepository.findByIdempotencyKey(idempotencyKey) ?: throw e
+    }
+
     private fun generateReferenceNumber(): String {
         val timestamp = clock.millis().toString()
         val random = (1000..9999).random()
@@ -280,4 +305,13 @@ class TransactionService(
 }
 
 class TransactionNotFoundException(message: String) : RuntimeException(message)
+
+/**
+ * A transaction update raced a concurrent modification (#465): the caller's domain object was
+ * read at a version the row no longer has — e.g. two reversals with distinct idempotency keys
+ * both saw COMPLETED, and only the winner may flip it (each extra winner would initiate one
+ * extra reversal credit). Dedicated type (not IllegalStateException — two competing mappers,
+ * libs 422 vs service, non-deterministic per request; see issue #526) mapped to 409.
+ */
+class TransactionUpdateConflictException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 class FxRateUnavailableException(message: String) : RuntimeException(message)
