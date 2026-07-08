@@ -32,6 +32,8 @@ management, item lifecycle. Aggregates many payments into settlement — high bl
   cycle/trigger are restricted to `@RolesAllowed(PAYMENTS, ADMIN)`** (locked by
   `ClearingResourceSecurityTest`). `settle` additionally carries `@Authorize(clearingBatch.settle)`
   (OPA, ADR-0034) in **advisory** mode, graduating to enforce in Phase 5.
+- Four-eyes approval-decide endpoint: same role set as the gated `settle` action, plus a
+  domain-level segregation-of-duties check (checker id != maker id) — see §4a.
 
 ## 4. STRIDE
 
@@ -44,14 +46,52 @@ management, item lifecycle. Aggregates many payments into settlement — high bl
 | **D**oS | Batch flooding delays a cycle | Rate limit submit; bounded batch size |
 | **E**oP | Submitter triggers settlement | Distinct role for `cycle/trigger` + `settle`; deny-by-default |
 
+## 4a. Four-eyes approval (ADR-0155) — STRIDE supplement
+
+`POST /batches/{id}/settle` (`clearingBatch.settle`) is the money-path action this rollout
+targets (issue #413). New endpoint `PATCH /api/v1/clearing/approvals/{id}` lets a DIFFERENT
+operator decide the resulting `PendingApproval`; the maker retries `POST
+/batches/{id}/settle` with an `X-Approval-Id` header. **`authz.four-eyes.enforce` stays
+`false` in this PR** — the `ApprovalStore`/endpoint are wired, but blocking is a deliberate
+follow-up flip, not bundled here (see ADR-0155; also note `rules.yaml`'s `clearingBatch.*`
+→ `clearing` scope normalisation, tracked separately in issue #395/#396, gates when
+`four_eyes_required` can actually auto-fire from OPA for this rail).
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **S**poofing | A caller other than payment-ops/admin decides an approval | `@RolesAllowed(Roles.PAYMENTS, Roles.ADMIN)` + OPA `@Authorize(action="clearingBatch.approval.decide")` on the decide endpoint |
+| **E**oP | The maker approves their own settlement request (self-approval defeats maker-checker) | `ApprovalStore.decide` throws `SelfApprovalNotAllowedException` (mapped to 403) when `decidedBy == makerId` — enforced in the domain port itself, not just the REST layer, and `makerId`/`decidedBy` both resolve via the same `.principal.name` extraction (interceptor vs. `SecurityIdentity`) so the comparison can't silently mismatch for the same real person |
+| **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different batch settlement | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
+| **R**epudiation | No record of who approved a gated settlement | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see ADR-0155 Negative consequences: not yet a permanent audit trail) |
+| **I**nfo disclosure | Approval id enumeration reveals batch/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random UUID (`RedisApprovalStore`, not sequential) |
+| **D**oS | Flooding `POST /batches/{id}/settle` to exhaust Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
+
+**DFD update:** adds `Operator (checker) → PATCH /api/v1/clearing/approvals/{id} → Redis
+(approval:*)` alongside the existing `settle` edge; the maker's retry reuses the existing DFD
+edge.
+**Risk class:** integrity (segregation of duties) + confidentiality (approval record scope).
+**Rollback:** `authz.four-eyes.enforce=false` (default) — the endpoint and store exist but do
+not change any existing request's outcome until explicitly flipped.
+
 ## 5. Residual risks / assumptions
 
 - **Double-settlement** must be impossible — idempotent cycle/settle keyed by cycle id.
 - Consider four-eyes (MakerChecker, ADR-0034) for `settle`.
 - Graduate OPA authz from advisory to enforce (Phase 5) so `@Authorize` denies are blocked, not just logged.
+- **Four-eyes `PendingApproval` records are TTL-bounded (Redis), not a permanent audit
+  trail** (ADR-0155) — a durable-audit requirement for "who approved what, forever" would
+  need an additional store; not implemented in this PR.
 
 ## 6. Change log
 
 - **2026-05-30** — Added `clearing_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/
   surface/boundary. Risk class = **availability**, mitigated by `HibernateSequenceGuardTest`.
   Rollback: `DROP SEQUENCE`.
+- **2026-07-08** — ADR-0155 four-eyes enforcement rollout (issue #413), mirroring the
+  sepa-payment pilot. New endpoint `PATCH /api/v1/clearing/approvals/{id}` +
+  `ApprovalConfig` (Redis-backed `ApprovalStore`) + `AuthorizeInterceptor` four-eyes gate
+  (openbank-libs-runtime, shared, opt-in) on `clearingBatch.settle`. New STRIDE supplement
+  §4a. `authz.four-eyes.enforce` defaults `false` — no behavior change to any existing
+  request in this PR; flipping it is a tracked follow-up. No DB schema change (Redis,
+  TTL-bounded); rollback = revert the commit (or leave `authz.four-eyes.enforce=false`, its
+  default).
