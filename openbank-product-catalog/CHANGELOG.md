@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.4](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.8.3...product-catalog-v0.8.4) (2026-07-07)
+
+
+### Bug Fixes
+
+* **account:** ktlintFormat AccountServiceLifecycleTest — Fleet lint red on main ([#480](https://github.com/JiRaska/open-bank-oss/issues/480)) ([37d303e](https://github.com/JiRaska/open-bank-oss/commit/37d303ef3e804f4cc30b79d8f0632ccfc2d942e7)), closes [#479](https://github.com/JiRaska/open-bank-oss/issues/479)
+
 ## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.8.2...product-catalog-v0.8.3) (2026-07-06)
 
 
