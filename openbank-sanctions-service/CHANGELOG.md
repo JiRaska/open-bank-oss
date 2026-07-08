@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.5](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.6.4...sanctions-service-v0.6.5) (2026-07-08)
+
+
+### Bug Fixes
+
+* **sanctions:** wire scheduled refresh to the real feed importer ([#550](https://github.com/JiRaska/open-bank-oss/issues/550)) ([e4773f2](https://github.com/JiRaska/open-bank-oss/commit/e4773f268077c481b4e05c463da29d3812e25a4c))
+
 ## [0.6.4](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.6.3...sanctions-service-v0.6.4) (2026-07-07)
 
 

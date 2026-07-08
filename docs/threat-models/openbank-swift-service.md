@@ -34,6 +34,9 @@ heists). Message authenticity is paramount.
 
 - Send/ack/reject must be role-gated (operator/payments) + OPA enforce; inbound ack/reject must be
   authenticated to the gateway identity (mTLS allow-list).
+- `send` carries `@RolesAllowed(Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)` (2026-07-08 fix, see
+  §6) in addition to the OPA `@Authorize(action = "swift.send")` check. `ack`/`reject`/list/read
+  endpoints still rely on OPA alone — tracked as a separate follow-up, not fixed by this change.
 
 ## 4. STRIDE
 
@@ -72,3 +75,12 @@ heists). Message authenticity is paramount.
   by OIDC CC + cluster-only ingress). **DFD update**: added `clearing-simulator` edge (see §2).
   Added `quarkus-oidc-client-reactive-filter` + `quarkus-rest-client-reactive` deps to
   `build.gradle.kts`. No DB schema change; rollback = flag OFF.
+- **2026-07-08** — Fixed **E**oP gap found during the issue #413 four-eyes audit: `POST
+  /api/v1/swift` (`send`, action `swift.send`) had no `@RolesAllowed` at all — this section
+  already documented "role-gated (operator/payments)" as a control, but it was never wired on
+  the endpoint, so any caller clearing the OPA `@Authorize` check could initiate an outbound
+  wire regardless of role. Added `@RolesAllowed(Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)` to
+  `send`, matching the `create` convention on sibling money-path payment services
+  (domestic-payment, sepa-payment). No DFD/schema change; rollback = revert the annotation.
+  **Not addressed here** (separate finding): `ack`/`reject`/`get`/`listAll`/`listByStatus` on the
+  same resource are also missing `@RolesAllowed` and rely on OPA alone.
