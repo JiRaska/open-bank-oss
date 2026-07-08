@@ -61,8 +61,16 @@ class ProposalResource {
 
     @GET
     @Blocking
-    fun list(@QueryParam("state") @DefaultValue("pending") state: String): List<ProposalDto> {
-        val rows = if (state.equals("all", ignoreCase = true)) service.listAll(100) else service.listPending()
+    fun list(
+        @QueryParam("state") @DefaultValue("pending") state: String,
+        @QueryParam("agentId") agentId: String?,
+    ): List<ProposalDto> {
+        val filter = agentId?.trim()?.takeIf { it.isNotEmpty() }
+        val rows = if (state.equals("all", ignoreCase = true)) {
+            service.listAll(100, filter)
+        } else {
+            service.listPending(filter)
+        }
         return rows.map { it.toDto() }
     }
 
