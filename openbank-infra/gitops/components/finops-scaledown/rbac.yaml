@@ -37,12 +37,13 @@ rules:
 # ServiceAccount even if they were accidentally added to the ConfigMap —
 # RBAC is the authoritative boundary, the ConfigMap is the readable summary.
 #
-# NOTE: `accounts`, `balances` and `ledger` namespaces intentionally have NO
-# RoleBinding — account-service, balance-service and ledger-service moved to
-# the keep-alive allowlist (see configmap-allowlist.yaml's standing-order-
-# service cron-collision note) and each of those three namespaces had no
-# other scale-down target, so the whole RoleBinding was removed rather than
-# left dangling and unused.
+# NOTE: `accounts`, `balances`, `ledger` and `kyc` namespaces intentionally
+# have NO RoleBinding — account-service, balance-service, ledger-service
+# (standing-order-service cron-collision note) and kyc-service (its own,
+# separate cron-collision note) all moved to the keep-alive allowlist in
+# configmap-allowlist.yaml, and each of those four namespaces had no other
+# scale-down target, so the whole RoleBinding was removed rather than left
+# dangling and unused.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
@@ -156,18 +157,6 @@ kind: RoleBinding
 metadata:
   name: finops-scaledown
   namespace: fx
-  labels: { app.kubernetes.io/part-of: finops-scaledown }
-roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
-subjects:
-  - kind: ServiceAccount
-    name: finops-scaledown
-    namespace: finops-scaledown
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: finops-scaledown
-  namespace: kyc
   labels: { app.kubernetes.io/part-of: finops-scaledown }
 roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
 subjects:

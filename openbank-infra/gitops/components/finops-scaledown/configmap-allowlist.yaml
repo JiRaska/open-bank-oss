@@ -45,21 +45,39 @@
 #     services (sepa-payment, sepa-instant, domestic-payment, clearing,
 #     swift, fx, lending, sca, consent, fraud, billing, settlement) are
 #     still scaled down.
+#   - kyc-service: same fixed-once-daily-cron bug, found during the same
+#     audit that caught standing-order-service above. KycRetentionScheduler
+#     enforces the AML Act §16 5-year KYC-case hard-delete retention policy,
+#     `enabled=true` by default (openbank.retention.kyc.enabled), fixed cron
+#     at 03:30 UTC (openbank.retention.kyc.cron) — inside the down window
+#     every night, same silent-never-fires risk as standing-order-service,
+#     except this one is a REGULATORY retention control (ADR-0118 SS5), not
+#     just a demo feature. Unlike standing-order-service, kyc-service has no
+#     synchronous cross-service dependency for this job (it only touches its
+#     own Postgres), so no dependency chain needed — kyc-service alone moves
+#     to keep-alive. It was the only scale-down target in the `kyc`
+#     namespace, so that RoleBinding was removed entirely (same as
+#     accounts/balances/ledger above).
 #
-# OTHER SCHEDULED-JOB / DOWN-WINDOW COLLISIONS CHECKED (grep for
-# `@Scheduled(cron` across every service), not exempted:
+# OTHER SCHEDULED-JOB / DOWN-WINDOW COLLISIONS CHECKED (grepped for every
+# `@Scheduled` in the fleet, not just the single-line `@Scheduled(cron`
+# pattern — the multi-line annotation form used by most of these was missed
+# by the first pass), not exempted:
 #   - onboarding-service AbandonedRegistrationCleaner: real, unconditional,
 #     fixed cron at 02:00 UTC (0 0 2 * * ?) — same "fixed once-daily inside
-#     the window" shape as standing-order-service above, but NOT exempted:
-#     the job only suspends registrations stuck >=30 days in early KYC, a
-#     housekeeping sweep with no money movement, fully idempotent, and
-#     reversible by an operator from the admin-UI (ADR-0068). Missing a
-#     night (or every night, worst case) delays a 30-day-stale cleanup by a
-#     few hours to a day — judged acceptable for a no-SLA sandbox, unlike a
-#     payment-execution job. Flagged here for visibility, not fixed.
+#     the window" shape as standing-order-service/kyc-service above, but
+#     NOT exempted: the job only suspends registrations stuck >=30 days in
+#     early KYC, a housekeeping sweep with no money movement, fully
+#     idempotent, and reversible by an operator from the admin-UI
+#     (ADR-0068). Missing a night (or every night, worst case) delays a
+#     30-day-stale cleanup by a few hours to a day — judged acceptable for
+#     a no-SLA sandbox, unlike a payment-execution or regulatory-retention
+#     job. Flagged here for visibility, not fixed.
 #   - agent-service OversightService (agent.oversight.cron, sandbox default
-#     `*/30 * * * *`) and consent-service ConsentExpirationJob (`0 5 * * *`,
-#     hourly): both are RECURRING (every 30 min / every hour), not a single
+#     `*/30 * * * *`), consent-service ConsentExpirationJob (`0 5 * * *`,
+#     hourly), lending-service InterestAccrualScheduler and
+#     ProvisioningCycleScheduler (both `every = ...`, fixed-RATE not
+#     fixed-cron): all RECURRING (every N minutes/hours), not a single
 #     fixed daily window, so scaling to 0 overnight just pauses the ticks —
 #     they resume on schedule once the pod is back at replicas=1. This is
 #     the intended, graceful degradation the whole PR relies on, not a bug.
@@ -67,6 +85,32 @@
 #     UTC) and DeviceTokenSweepJob (03:00 UTC): both real fixed-time crons,
 #     but notification-service is already KEDA-managed with
 #     minReplicaCount: 1 (see below) — never at 0 replicas, no collision.
+#   - card-issuance-service CardPiiRetentionScheduler (03:00 UTC,
+#     enabled=true, AML Act SS16 card-PII anonymisation — same regulatory
+#     shape as kyc-service's job above): already on the keep-alive list
+#     because it's KEDA HTTPScaledObject-managed (T1), so THIS CronJob
+#     never touches it — no collision from this PR. (KEDA's own
+#     scale-to-zero-on-idle is a separate, pre-existing mechanism outside
+#     this PR's scope; not introduced or changed here.)
+#   - ledger-service TieOutScheduler (06:00 UTC) and FxRevaluationScheduler
+#     (15:00 UTC), balance-service BalanceReconciliationScheduler (23:30
+#     UTC): all real fixed-time crons, but ledger-service and
+#     balance-service are BOTH already on the keep-alive list (the
+#     standing-order-service fix above) — no collision.
+#   - fx-service CnbRateIngestionScheduler (14:40 UTC): real fixed-time
+#     cron, but 14:40 UTC (15:40/16:40 Prague) falls OUTSIDE the 22:00-07:00
+#     down window entirely — no collision regardless of fx-service being
+#     scaled down.
+#   - billing-service BillingCycleScheduler (monthly, 03:00 UTC on the 1st):
+#     confirmed DISABLED by default (openbank.billing.scheduler.enabled
+#     defaults to "false", not overridden in gitops; the KDoc explains the
+#     account-batch has no fleet-wide account-discovery port yet) — dead
+#     code today, no live collision.
+#   - audit-service SessionLogRetentionScheduler (04:00 UTC): confirmed
+#     DISABLED by default (openbank.retention.session-log.enabled defaults
+#     to "false", deliberately — the KDoc says merging must not itself
+#     cause any deletion against a brand-new table) — dead code today, no
+#     live collision.
 #   - statement-service PeriodCloseScheduler and sdd-service
 #     MandateExpiryScheduler: confirmed DISABLED by default
 #     (openbank.statement.scheduled-close.enabled / openbank.sdd.expiry.enabled,
@@ -102,14 +146,17 @@
 # sepa-instant, domestic-payment, clearing, swift, fx, lending, sca,
 # consent, fraud, billing, settlement) — EXCEPT ledger, transaction,
 # account and balance, which moved to the keep-alive list above (see the
-# standing-order-service cron-collision note). This is still deliberate per
-# issue #446: the sandbox has NO SLA (ADR-0057) and no real money moves
-# through it, so money-path services that need 2 approvals + a threat model
-# to touch in rules.yaml are explicitly fine to scale to zero overnight here
-# — the ADR-0030 threat-model gate governs CODE/CONFIG changes to these
-# services, not a sandbox's off-hours compute floor. The four exempted
-# services are kept alive purely for the cron-correctness reason above, not
-# because they're money-path (that would have been true of ALL thirteen).
+# standing-order-service cron-collision note), and EXCEPT kyc-service
+# (its own, separate cron-collision note just above). This is still
+# deliberate per issue #446: the sandbox has NO SLA (ADR-0057) and no real
+# money moves through it, so money-path services that need 2 approvals + a
+# threat model to touch in rules.yaml are explicitly fine to scale to zero
+# overnight here — the ADR-0030 threat-model gate governs CODE/CONFIG
+# changes to these services, not a sandbox's off-hours compute floor. The
+# exempted services are kept alive purely for the cron-correctness reason
+# above, not because they're money-path (kyc-service isn't even on the
+# money-path list; that reasoning would have applied to all thirteen
+# money-path services otherwise).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -134,7 +181,6 @@ data:
     finrep/deployment/finrep-service
     fraud/rollout/fraud-service
     fx/rollout/fx-service
-    kyc/rollout/kyc-service
     lending/rollout/lending-service
     onboarding/rollout/onboarding-service
     party/rollout/party-service
