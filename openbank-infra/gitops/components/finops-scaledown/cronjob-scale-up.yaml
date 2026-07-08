@@ -1,0 +1,109 @@
+# Off-hours scale-UP CronJob (issue #446) — the counterpart to
+# cronjob-scale-down.yaml. Restores every DOWNSCALE_TARGETS workload to its
+# GitOps-declared replica count (1 — every target in the allowlist is a
+# single-replica Deployment/Rollout, confirmed against each component's own
+# manifest) so the fleet is warm again for EU business hours.
+#
+# SCHEDULE / TIMEZONE: same Europe/Prague `timeZone` field as the scale-down
+# job (see its comment for the CET/CEST UTC-offset table) — 07:00 local,
+# Monday-Friday only. Weekday-only is deliberate: per the issue's plan
+# ("22:00-07:00 CET + weekends"), the fleet should ALSO stay down through
+# Saturday/Sunday, not just wake up every morning including weekends. The
+# scale-down job (schedule "0 22 * * *") still runs every night including
+# Fri/Sat/Sun nights, so Saturday and Sunday simply never get a matching
+# scale-up and the fleet rides at the downscaled floor until Monday 07:00.
+#
+# Argo Rollouts caveat: scaling a Rollout back up from 0->1 starts a fresh
+# rollout at the CURRENT `stable` revision (no canary/analysis re-run for a
+# pure replica-count change — that only triggers on a new pod template
+# hash), so this is a plain capacity restore, not a redeploy.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: finops-scale-up
+  namespace: finops-scaledown
+  labels:
+    app.kubernetes.io/part-of: finops-scaledown
+    app.kubernetes.io/component: scale-up
+spec:
+  # 07:00 Europe/Prague, Monday-Friday only (see comment above for why
+  # weekends are deliberately excluded).
+  schedule: "0 7 * * 1-5"
+  timeZone: "Europe/Prague"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 900
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: finops-scale-up
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: finops-scaledown
+          automountServiceAccountToken: true
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: scale-up
+              # See cronjob-scale-down.yaml for why alpine/k8s (not rancher/kubectl
+              # or bitnami/kubectl) is the image here — needs a real shell + kubectl
+              # on a pinned semver tag, which neither alternative offers today.
+              image: docker.io/alpine/k8s:1.34.9
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: TARGET_REPLICAS
+                  value: "1"
+                - name: HOME
+                  value: /tmp
+              volumeMounts:
+                - name: allowlist
+                  mountPath: /etc/finops-scaledown
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -uo pipefail
+                  fail=0
+                  while IFS='/' read -r ns kind name; do
+                    [ -z "$ns" ] && continue
+                    echo "{\"event\":\"scale-up\",\"namespace\":\"${ns}\",\"kind\":\"${kind}\",\"name\":\"${name}\",\"replicas\":${TARGET_REPLICAS}}"
+                    if ! kubectl scale "${kind}/${name}" -n "${ns}" --replicas="${TARGET_REPLICAS}"; then
+                      echo "{\"event\":\"scale-up-error\",\"namespace\":\"${ns}\",\"kind\":\"${kind}\",\"name\":\"${name}\"}"
+                      fail=1
+                    fi
+                  done < /etc/finops-scaledown/DOWNSCALE_TARGETS
+                  exit $fail
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+          volumes:
+            - name: allowlist
+              configMap:
+                name: finops-scaledown-allowlist
+            - name: tmp
+              emptyDir: {}
+          nodeSelector:
+            workload: observability
+          tolerations:
+            - key: workload
+              operator: Equal
+              value: observability
+              effect: NoSchedule

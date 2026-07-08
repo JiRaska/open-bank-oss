@@ -1,0 +1,108 @@
+# Explicit, human-reviewable allowlist/denylist for the off-hours scale-down
+# (issue #446). This ConfigMap is the single source of truth both CronJobs
+# read from — edit THIS file to add/remove a target, never the CronJob
+# command inline. RBAC (rbac.yaml) is the actual enforcement boundary: a
+# namespace added here without a matching RoleBinding will just fail closed
+# (kubectl returns Forbidden, the job logs it and moves on — see
+# concurrencyPolicy/errexit notes in the CronJobs).
+#
+# KEEP-ALIVE (never listed in DOWNSCALE_TARGETS below), and why:
+#   - admin-ui           : task requirement — the demo's own front door.
+#   - customer-edge      : task requirement — sole internet->cluster path for
+#                          the retail-app showcase (ADR-0065).
+#   - iam (Keycloak)      : both of the above do a live OIDC handshake against
+#                          it on every login; scaling it down 500s every
+#                          "browsable" claim above it.
+#   - observability       : Prometheus/Grafana/Loki/Tempo/Alertmanager run on
+#                          their OWN dedicated on-demand NodePool already
+#                          (components/observability/nodepool-observability.yaml)
+#                          precisely so they are never subject to spot/
+#                          consolidation churn — scaling them down here would
+#                          fight that isolation for a stack that is already
+#                          FinOps-lean (single replica, 12h retention) and is
+#                          what makes the demo "look alive" in the first place.
+#                          Deliberately whole-namespace excluded rather than
+#                          cherry-picking Helm-generated Deployment names,
+#                          which are chart-version-fragile.
+#
+# ALSO EXCLUDED (not app-plane, or already self-managing scale-to-zero):
+#   - product-catalog, interest-service, sdd-service, card-issuance-service:
+#     already KEDA HTTPScaledObject-managed (ADR-0057 T1). A CronJob forcing
+#     replicas=0 would race the KEDA-managed HPA that owns their replica
+#     count; excluded so the two controllers never fight over the same field.
+#   - notification-service: KEDA ScaledObject with minReplicaCount:1 (the
+#     customer-edge notification feed is a synchronous read) — same reason.
+#   - Kafka (Strimzi KafkaNodePool), Temporal (Helm release), CNPG Postgres
+#     clusters: stateful, operator-managed, NOT a plain Deployment/Rollout —
+#     `kubectl scale` does not apply the same way, and a broker/DB restart
+#     risk (WAL replay, Multi-Attach EBS, per ADR-0082's own postmortem on
+#     the observability NodePool) outweighs the modest saving here. Left for
+#     a future, deliberate change (KEDA Kafka-lag scaling per ADR-0057 T2),
+#     not a blunt cron.
+#   - pact-broker, reposilite, registry-cache, gradle-build-cache: CI-adjacent
+#     caches that a CI run may need at any hour (contract verification,
+#     dependency resolution), independent of EU daytime demo traffic.
+#   - external-dns, external-secrets, kyverno, argo-rollouts (controllers):
+#     cluster platform plumbing, not app-plane; near-zero idle cost and other
+#     components' reconciliation depends on them being up continuously.
+#
+# SCALE-DOWN TARGETS: every remaining app-plane service, INCLUDING every
+# money-path service in openbank-libs/governance/rules.yaml:money_path_services
+# (ledger, transaction, account, balance, sepa-payment, sepa-instant,
+# domestic-payment, clearing, swift, fx, lending, sca, consent, fraud,
+# billing, settlement). This is deliberate per issue #446: the sandbox has
+# NO SLA (ADR-0057) and no real money moves through it, so the same
+# money-path services that need 2 approvals + a threat model to touch in
+# rules.yaml are explicitly fine to scale to zero overnight here — the
+# ADR-0030 threat-model gate governs CODE/CONFIG changes to these services,
+# not a sandbox's off-hours compute floor.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: finops-scaledown-allowlist
+  namespace: finops-scaledown
+  labels:
+    app.kubernetes.io/part-of: finops-scaledown
+data:
+  # Format: one "<namespace>/<kind>/<name>" entry per line. <kind> is
+  # "deployment" or "rollout" (both support the `scale` subresource, so
+  # `kubectl scale <kind>/<name> -n <namespace> --replicas=N` works
+  # identically for either — ADR-0098 notes Rollout is a drop-in
+  # Deployment replacement including the scale subresource).
+  DOWNSCALE_TARGETS: |
+    accounts/rollout/account-service
+    aml/deployment/aml-service
+    anacredit/deployment/anacredit-service
+    audit/deployment/audit-service
+    balances/rollout/balance-service
+    billing/deployment/billing-service
+    consent/rollout/consent-service
+    developer-portal/deployment/developer-portal
+    dispute/deployment/dispute-service
+    finrep/deployment/finrep-service
+    fraud/rollout/fraud-service
+    fx/rollout/fx-service
+    kyc/rollout/kyc-service
+    ledger/rollout/ledger-service
+    lending/rollout/lending-service
+    onboarding/rollout/onboarding-service
+    party/rollout/party-service
+    payments/rollout/transaction-service
+    payments/rollout/sepa-payment
+    payments/rollout/domestic-payment
+    payments/rollout/sepa-instant
+    payments/rollout/clearing-service
+    payments/deployment/standing-order-service
+    payments/rollout/settlement-service
+    payments/deployment/clearing-simulator
+    payments/rollout/swift-service
+    pid/deployment/pid-service
+    psd2/deployment/psd2-service
+    sanctions/rollout/sanctions-service
+    sca/rollout/sca-service
+    statements/deployment/statement-service
+    tpp-registry/deployment/tpp-registry-service
+    platform/deployment/agent-service
+    platform/deployment/copilot-service
+    devops-agent/deployment/devops-agent
+    finops-agent/deployment/finops-agent
