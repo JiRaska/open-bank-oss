@@ -28,6 +28,18 @@ interface AgentDetail {
   proposals: { available: boolean; items: ProposalSummary[]; pendingCount: number }
 }
 
+// The narrative charter's Mission section is authored with soft (mid-paragraph) line
+// wraps for source readability; collapse those to spaces so prose flows, while keeping
+// blank-line paragraph breaks.
+function missionSummary(body: string): string {
+  const section = (body.split(/\n##\s/)[0] ?? '').replace(/^##?\s*Mission\s*\n/i, '').trim()
+  return section
+    .split(/\n{2,}/)
+    .map(p => p.replace(/\n/g, ' ').trim())
+    .join('\n\n')
+    .slice(0, 600)
+}
+
 function Chips({ items, tone }: { items: string[]; tone: 'allow' | 'deny' | 'neutral' }) {
   const map = {
     allow:   { color: '#16a34a', bg: '#dcfce7' },
@@ -173,7 +185,7 @@ function AgentDetailContent() {
                   <span style={{ fontSize: '13px', fontWeight: 700 }}>{t('Charter — mise', 'Charter — mission')}</span>
                 </div>
                 <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0, whiteSpace: 'pre-wrap' }}>
-                  {(data.narrative.body.split(/\n##\s/)[0] ?? '').replace(/^##?\s*Mission\s*\n/i, '').trim().slice(0, 600)}
+                  {missionSummary(data.narrative.body)}
                 </p>
               </Card>
             )}

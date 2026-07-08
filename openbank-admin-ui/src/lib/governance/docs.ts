@@ -224,7 +224,7 @@ function parseAgentCharter(id: string, md: string): AgentCharterDoc {
   const fm = fmMatch?.[1] ?? ''
   const plane = fm.match(/^plane:\s*(.+)$/m)?.[1]?.trim() ?? '—'
   const adr = fm.match(/^adr:\s*(.+)$/m)?.[1]?.trim() ?? '—'
-  const withoutFrontmatter = fmMatch ? md.slice(fmMatch[0].length) : md
+  const withoutFrontmatter = (fmMatch ? md.slice(fmMatch[0].length) : md).replace(/^\s+/, '')
   const title = firstHeading(withoutFrontmatter, id)
   const body = withoutFrontmatter.replace(/^#\s+.+?\r?\n/, '').replace(/^\s+/, '')
   return { id, plane, adr, title, body }
