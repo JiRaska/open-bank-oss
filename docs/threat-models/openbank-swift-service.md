@@ -34,13 +34,13 @@ heists). Message authenticity is paramount.
 
 - Send/ack/reject must be role-gated (operator/payments) + OPA enforce; inbound ack/reject must be
   authenticated to the gateway identity (mTLS allow-list).
-- `ack`/`reject`/`get`/`listAll`/`listByStatus` carry `@RolesAllowed` (2026-07-08 fix, see §6) in
-  addition to the OPA `@Authorize` check, matching `send`'s fix from the same day. No `ROLE_SERVICE`
-  is granted on any endpoint: a repo-wide sweep (issue #266, `security/swift-opa-enforce`) found no
-  in-repo REST client or Kafka consumer calling `openbank-swift-service` — send/list/read/ack/reject
-  are human-only today. Adding `ROLE_SERVICE` without a caller or a matching OPA rule would be an
-  untested, misleading grant; revisit if/when a real M2M caller (e.g. a SWIFT gateway adapter) is
-  introduced, gating the corresponding OPA rule on `principal.id`, not `principal.type == "SERVICE"`
+- `send`/`ack`/`reject`/`get`/`listAll`/`listByStatus` all carry `@RolesAllowed` (2026-07-08 fix,
+  see §6) in addition to the OPA `@Authorize` check. No `ROLE_SERVICE` is granted on any endpoint:
+  a repo-wide sweep (issue #266, `security/swift-opa-enforce`) found no in-repo REST client or
+  Kafka consumer calling `openbank-swift-service` — every endpoint is human-only today. Adding
+  `ROLE_SERVICE` without a caller or a matching OPA rule would be an untested, misleading grant;
+  revisit if/when a real M2M caller (e.g. a SWIFT gateway adapter) is introduced, gating the
+  corresponding OPA rule on `principal.id`, not `principal.type == "SERVICE"`
   (`AuthorizeInterceptor.principalType()` never emits `SERVICE`).
 
 ## 4. STRIDE
@@ -80,6 +80,15 @@ heists). Message authenticity is paramount.
   by OIDC CC + cluster-only ingress). **DFD update**: added `clearing-simulator` edge (see §2).
   Added `quarkus-oidc-client-reactive-filter` + `quarkus-rest-client-reactive` deps to
   `build.gradle.kts`. No DB schema change; rollback = flag OFF.
+- **2026-07-08** — Fixed **E**oP gap found during the issue #413 four-eyes audit: `POST
+  /api/v1/swift` (`send`, action `swift.send`) had no `@RolesAllowed` at all — this section
+  already documented "role-gated (operator/payments)" as a control, but it was never wired on
+  the endpoint, so any caller clearing the OPA `@Authorize` check could initiate an outbound
+  wire regardless of role. Added `@RolesAllowed(Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)` to
+  `send`, matching the `create` convention on sibling money-path payment services
+  (domestic-payment, sepa-payment). No DFD/schema change; rollback = revert the annotation.
+  **Not addressed here** (separate finding): `ack`/`reject`/`get`/`listAll`/`listByStatus` on the
+  same resource are also missing `@RolesAllowed` and rely on OPA alone (PR #568).
 - **2026-07-08** — Follow-up to the `send` **E**oP fix (PR #568, same day): `ack`, `reject`, `get`,
   `listAll`, `listByStatus` on `SwiftResource` also had no `@RolesAllowed` and relied on OPA
   `@Authorize` alone. Added `@RolesAllowed(Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)` to the
@@ -90,4 +99,5 @@ heists). Message authenticity is paramount.
   `ROLE_SERVICE` — investigated and deliberately omitted (see §3): no in-repo caller of any
   SWIFT endpoint exists yet, human-only per the OPA policy landed the day before
   (`security/swift-opa-enforce`, issue #266). No DFD/schema change; rollback = revert the
-  annotations.
+  annotations. Also updated `SwiftResourceAuthzTest`'s anonymous-access assertion (404 -> 401)
+  to match the new `@RolesAllowed` outer gate.

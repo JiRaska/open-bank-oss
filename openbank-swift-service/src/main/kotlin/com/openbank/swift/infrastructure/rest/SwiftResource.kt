@@ -27,6 +27,7 @@ import java.util.UUID
 @Consumes(MediaType.APPLICATION_JSON)
 class SwiftResource(private val useCase: SwiftUseCase) {
     @POST
+    @RolesAllowed(Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "swift.send", resource = "")
     suspend fun send(cmd: SendSwiftCommand) = Response.status(201).entity(useCase.send(cmd)).build()
 
