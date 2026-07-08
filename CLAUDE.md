@@ -131,6 +131,16 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   squash delta; 2-dot includes main's post-divergence commits and makes stale branches look like
   regressions.
 
+### API contract (ADR-0048)
+- **Two racing spec PRs can both claim the same `info.version` — and both pass the gate.** The
+  api-contract gate classifies against the PR's *creation-time* base
+  (`github.event.pull_request.base.sha`), so a competing bump that merges first is invisible to
+  the second PR: it lands with new endpoints under an unchanged version (#481 vs #524 on the
+  ledger spec, corrected by #534). After any competing `openapi.yaml` change merges — including
+  when you resolve a merge conflict against `main` — re-check `info.version` against the *current*
+  `main` and re-bump; whoever lands second takes the next version. A matching version line merging
+  "cleanly" is the trap: git sees identical text, not a taken version.
+
 ## Capturing what we learn
 
 A corrected non-obvious mistake or a hard-won lesson belongs **in the repo**, where every contributor

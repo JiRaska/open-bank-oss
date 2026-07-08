@@ -77,9 +77,9 @@ class AccountServiceTest {
 
             coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
             every { ibanGenerator.generate(command.currency) } returns iban
+            coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
             coEvery { accountRepository.existsByIban(iban) } returns false
-            coEvery { accountRepository.save(any()) } answers { firstArg() }
-            coEvery { pocketRepository.save(any()) } answers { firstArg() }
+            coEvery { accountRepository.saveNewAccount(any(), any(), any()) } answers { firstArg() }
             coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
 
             val result = service.openAccount(command)
@@ -88,13 +88,15 @@ class AccountServiceTest {
             assertThat(result.status).isEqualTo(AccountStatus.ACTIVE)
 
             coVerify {
-                accountRepository.save(
+                accountRepository.saveNewAccount(
                     match {
                         it.partyId == command.partyId &&
                             it.productId == command.productId &&
                             it.currency == command.currency &&
                             it.status == AccountStatus.ACTIVE
                     },
+                    match { it.isPrimary && it.currency == command.currency },
+                    eq(command.idempotencyKey),
                 )
                 eventPublisher.publish(
                     "openbank.accounts.account.created",
@@ -120,6 +122,7 @@ class AccountServiceTest {
         val iban = Iban.of("CZ6508000000192000145399")
         val command = openAccountCommand()
 
+        coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
         coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
         every { ibanGenerator.generate(command.currency) } returns iban
         coEvery { accountRepository.existsByIban(iban) } returns true
@@ -129,7 +132,7 @@ class AccountServiceTest {
             .hasMessageContaining("IBAN collision")
 
         coVerify(exactly = 0) {
-            accountRepository.save(any())
+            accountRepository.saveNewAccount(any(), any(), any())
             balancePort.initialize(any(), any(), any())
             eventPublisher.publish(any(), any(), any())
         }
@@ -204,39 +207,42 @@ class AccountServiceTest {
     fun `openAccount is blocked when sanctions screening returns HIT`() {
         val command = openAccountCommand(legalName = "Sanctioned Person")
 
+        coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
         coEvery { sanctionsScreening.screen(any(), any()) } returns
             SanctionsScreenResult("HIT", 0.98, "Sanctioned Person")
 
         assertThatThrownBy { runBlocking { service.openAccount(command) } }
             .isInstanceOf(AccountOpeningBlockedByScreeningException::class.java)
 
-        coVerify(exactly = 0) { accountRepository.save(any()) }
+        coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any()) }
     }
 
     @Test
     fun `openAccount is blocked when sanctions screening returns REVIEW`() {
         val command = openAccountCommand(legalName = "Fuzzy Match Person")
 
+        coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
         coEvery { sanctionsScreening.screen(any(), any()) } returns
             SanctionsScreenResult("REVIEW", 0.72, "Fuzzy Match Person")
 
         assertThatThrownBy { runBlocking { service.openAccount(command) } }
             .isInstanceOf(AccountOpeningBlockedByScreeningException::class.java)
 
-        coVerify(exactly = 0) { accountRepository.save(any()) }
+        coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any()) }
     }
 
     @Test
     fun `openAccount fails closed when sanctions service is unavailable`() {
         val command = openAccountCommand(legalName = "Test Customer")
 
+        coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
         coEvery { sanctionsScreening.screen(any(), any()) } throws
             AccountScreeningUnavailableException(RuntimeException("timeout"))
 
         assertThatThrownBy { runBlocking { service.openAccount(command) } }
             .isInstanceOf(AccountScreeningUnavailableException::class.java)
 
-        coVerify(exactly = 0) { accountRepository.save(any()) }
+        coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any()) }
     }
 
     @Test
@@ -244,12 +250,12 @@ class AccountServiceTest {
         val iban = Iban.of("CZ6508000000192000145399")
         val command = openAccountCommand(legalName = "Clean Customer")
 
+        coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
         coEvery { sanctionsScreening.screen("Clean Customer", any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
         every { ibanGenerator.generate(command.currency) } returns iban
         coEvery { accountRepository.existsByIban(iban) } returns false
-        coEvery { accountRepository.save(any()) } answers { firstArg() }
+        coEvery { accountRepository.saveNewAccount(any(), any(), any()) } answers { firstArg() }
         coEvery { balancePort.initialize(any(), any(), any()) } returns Unit
-        coEvery { pocketRepository.save(any()) } answers { firstArg() }
         coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
 
         val result = service.openAccount(command)
@@ -264,12 +270,12 @@ class AccountServiceTest {
         val command = openAccountCommand(legalName = "Alice Example")
         val savedSlot = slot<Account>()
 
+        coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
         coEvery { sanctionsScreening.screen("Alice Example", any()) } returns SanctionsScreenResult("CLEAR", 0.05, null)
         every { ibanGenerator.generate(command.currency) } returns iban
         coEvery { accountRepository.existsByIban(iban) } returns false
-        coEvery { accountRepository.save(capture(savedSlot)) } answers { firstArg() }
+        coEvery { accountRepository.saveNewAccount(capture(savedSlot), any(), any()) } answers { firstArg() }
         coEvery { balancePort.initialize(any(), any(), any()) } returns Unit
-        coEvery { pocketRepository.save(any()) } answers { firstArg() }
         coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
 
         service.openAccount(command)
@@ -284,9 +290,9 @@ class AccountServiceTest {
         val command = openAccountCommand()
         coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
         every { ibanGenerator.generate(command.currency) } returns iban
+        coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
         coEvery { accountRepository.existsByIban(iban) } returns false
-        coEvery { accountRepository.save(any()) } answers { firstArg() }
-        coEvery { pocketRepository.save(any()) } answers { firstArg() }
+        coEvery { accountRepository.saveNewAccount(any(), any(), any()) } answers { firstArg() }
         coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
 
         service.openAccount(command)

@@ -22,6 +22,11 @@ plugins {
     alias(libs.plugins.kover)
     // Same static-analysis gate (detekt + ktlint) the rest of the fleet runs.
     id("openbank.static-analysis")
+    // Fleet-wide Netty/Jackson/etc. patch-version floors (issue #461). This module pulls
+    // several services in via project(...) and independently re-resolves their transitive
+    // graph (a producer's own resolutionStrategy.force() does not propagate to a project(...)
+    // consumer), so it needs the same floor those services get through openbank.quarkus-service.
+    id("openbank.dependency-vulnerability-pins")
 }
 
 group = "com.openbank"
@@ -79,4 +84,21 @@ tasks.test {
     // ADR-0115: let CI / a deep manual run dial the seed count (`-Pseed.count=N`). Absent the
     // property the test falls back to its built-in default, so a plain `:test` stays reproducible.
     providers.gradleProperty("seed.count").orNull?.let { systemProperty("seed.count", it) }
+}
+
+// Coverage floor (ADR-0020, ratchet-only — sweep #466). The DST harness is tooling, but its
+// invariant checkers ARE the safety net for the money-path domain semantics — an untested
+// checker is a checker that silently stops checking. Measured 96.0% LINE (457/476) at
+// introduction; floor 90, raise-only from here.
+kover {
+    reports {
+        verify {
+            rule {
+                bound {
+                    minValue = 90
+                    coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
+                }
+            }
+        }
+    }
 }
