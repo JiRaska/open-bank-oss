@@ -13,14 +13,20 @@ import java.util.UUID
 
 class FraudRuleEngineTest {
 
-    private fun request(velocityH1Count: Long = 0, velocityH24Count: Long = 0) = ScoreRequest(
-        amount = BigDecimal("1250.00"),
+    private fun request(
+        velocityH1Count: Long = 0,
+        velocityH24Count: Long = 0,
+        amount: BigDecimal = BigDecimal("1250.00"),
+        velocityH1TotalAmount: BigDecimal = BigDecimal.ZERO,
+    ) = ScoreRequest(
+        amount = amount,
         currency = "CZK",
         rail = "SEPA_INSTANT",
         accountId = UUID.randomUUID(),
         counterpartyId = UUID.randomUUID(),
         velocityH1Count = velocityH1Count,
         velocityH24Count = velocityH24Count,
+        velocityH1TotalAmount = velocityH1TotalAmount,
     )
 
     @Test
@@ -36,7 +42,7 @@ class FraudRuleEngineTest {
     fun `score pins the current rule version`() {
         val result = FraudRuleEngine.score(request())
 
-        assertThat(result.ruleVersion).isEqualTo("v2")
+        assertThat(result.ruleVersion).isEqualTo("v3")
         assertThat(result.ruleVersion).isEqualTo(FraudRuleEngine.RULE_VERSION)
     }
 
@@ -129,6 +135,68 @@ class FraudRuleEngineTest {
         assertThat(hit).isNull()
     }
 
+    // ── LargeSingleTransactionReviewRule ─────────────────────────────────────
+
+    @Test
+    fun `LargeSingleTransactionReviewRule does not fire below threshold`() {
+        val hit = LargeSingleTransactionReviewRule.evaluate(request(amount = BigDecimal("499999.99")))
+        assertThat(hit).isNull()
+    }
+
+    @Test
+    fun `LargeSingleTransactionReviewRule fires at exactly the threshold`() {
+        val hit = LargeSingleTransactionReviewRule.evaluate(request(amount = BigDecimal("500000")))
+
+        assertThat(hit).isNotNull
+        assertThat(hit!!.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(hit.scoreDelta).isEqualTo(25)
+        assertThat(hit.reason).isEqualTo("large-single-transaction")
+    }
+
+    @Test
+    fun `LargeSingleTransactionReviewRule fires above threshold`() {
+        val hit = LargeSingleTransactionReviewRule.evaluate(request(amount = BigDecimal("1500000")))
+        assertThat(hit).isNotNull
+        assertThat(hit!!.verdict).isEqualTo(FraudVerdict.REVIEW)
+    }
+
+    @Test
+    fun `LargeSingleTransactionReviewRule is silent for typical small amounts`() {
+        val hit = LargeSingleTransactionReviewRule.evaluate(request(amount = BigDecimal("1250.00")))
+        assertThat(hit).isNull()
+    }
+
+    // ── VelocityH1HighValueReviewRule ────────────────────────────────────────
+
+    @Test
+    fun `VelocityH1HighValueReviewRule does not fire below cap`() {
+        val hit = VelocityH1HighValueReviewRule.evaluate(request(velocityH1TotalAmount = BigDecimal("999999.99")))
+        assertThat(hit).isNull()
+    }
+
+    @Test
+    fun `VelocityH1HighValueReviewRule fires at exactly the cap`() {
+        val hit = VelocityH1HighValueReviewRule.evaluate(request(velocityH1TotalAmount = BigDecimal("1000000")))
+
+        assertThat(hit).isNotNull
+        assertThat(hit!!.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(hit.scoreDelta).isEqualTo(35)
+        assertThat(hit.reason).isEqualTo("velocity-h1-amount-cap")
+    }
+
+    @Test
+    fun `VelocityH1HighValueReviewRule fires above cap`() {
+        val hit = VelocityH1HighValueReviewRule.evaluate(request(velocityH1TotalAmount = BigDecimal("5000000")))
+        assertThat(hit).isNotNull
+        assertThat(hit!!.verdict).isEqualTo(FraudVerdict.REVIEW)
+    }
+
+    @Test
+    fun `VelocityH1HighValueReviewRule is silent when no signal (zero total)`() {
+        val hit = VelocityH1HighValueReviewRule.evaluate(request(velocityH1TotalAmount = BigDecimal.ZERO))
+        assertThat(hit).isNull()
+    }
+
     // ── Engine integration ───────────────────────────────────────────────────
 
     @Test
@@ -162,5 +230,72 @@ class FraudRuleEngineTest {
 
         assertThat(result.verdict).isEqualTo(FraudVerdict.ALLOW)
         assertThat(result.score).isZero()
+    }
+
+    @Test
+    fun `engine returns REVIEW when the large single-transaction threshold is breached`() {
+        val result = FraudRuleEngine.score(request(amount = BigDecimal("750000")))
+
+        assertThat(result.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(result.reasons).contains("large-single-transaction")
+    }
+
+    @Test
+    fun `engine returns REVIEW when the h1 high-value velocity cap is breached`() {
+        val result = FraudRuleEngine.score(request(velocityH1TotalAmount = BigDecimal("1200000")))
+
+        assertThat(result.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(result.reasons).contains("velocity-h1-amount-cap")
+    }
+
+    @Test
+    fun `engine combines score across all firing rules in a mixed scenario`() {
+        val result = FraudRuleEngine.score(
+            request(
+                velocityH1Count = 10,
+                velocityH24Count = 50,
+                amount = BigDecimal("600000"),
+                velocityH1TotalAmount = BigDecimal("1000000"),
+            ),
+        )
+
+        // 0 (baseline) + 30 (h1 count) + 20 (h24 count) + 25 (large single tx) + 35 (h1 amount)
+        assertThat(result.score).isEqualTo(110)
+        assertThat(result.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(result.reasons).contains(
+            "baseline-allow",
+            "velocity-h1-cap",
+            "velocity-h24-cap",
+            "large-single-transaction",
+            "velocity-h1-amount-cap",
+        )
+    }
+
+    @Test
+    fun `engine severity ordering picks REVIEW as the most severe verdict across a mix of firing rules`() {
+        // ALLOW (baseline) mixed with multiple REVIEW-firing rules must still resolve to REVIEW —
+        // the engine takes the max-severity verdict, not the first or last rule's verdict.
+        val result = FraudRuleEngine.score(
+            request(velocityH1Count = 10, amount = BigDecimal("600000")),
+        )
+
+        assertThat(result.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(result.reasons).contains("baseline-allow", "velocity-h1-cap", "large-single-transaction")
+    }
+
+    @Test
+    fun `engine ALLOWs when no threshold or cap is breached across all v3 rules`() {
+        val result = FraudRuleEngine.score(
+            request(
+                velocityH1Count = 5,
+                velocityH24Count = 30,
+                amount = BigDecimal("1250.00"),
+                velocityH1TotalAmount = BigDecimal("100000"),
+            ),
+        )
+
+        assertThat(result.verdict).isEqualTo(FraudVerdict.ALLOW)
+        assertThat(result.score).isZero()
+        assertThat(result.reasons).containsExactly("baseline-allow")
     }
 }

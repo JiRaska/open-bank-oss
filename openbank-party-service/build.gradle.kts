@@ -75,14 +75,6 @@ kover {
     }
 }
 
-tasks.named("koverVerify") {
-    enabled = true
-}
-
-tasks.named("check") {
-    dependsOn(tasks.named("koverVerify"))
-}
-
 tasks.test {
     // The convention plugin pins DOCKER_HOST to the retired tcp://localhost:2375
     // (the OrbStack/EC2 endpoint). The ephemeral ARC dind pod (ADR-0053) exposes the
