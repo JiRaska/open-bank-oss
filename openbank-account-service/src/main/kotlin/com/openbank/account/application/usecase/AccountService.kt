@@ -24,8 +24,11 @@ import com.openbank.libs.api.pagination.CursorEncoder
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.api.pagination.PageInfo
 import com.openbank.libs.domain.account.Iban
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.observability.DomainMetrics
+import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.PersistenceException
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
@@ -44,6 +47,11 @@ class AccountService(
 ) : AccountUseCase {
 
     override suspend fun openAccount(command: OpenAccountCommand): Account {
+        // Idempotent replay (#465): a repeated key returns the original account and never opens
+        // a second one. The Redis record in the REST layer is only a response cache — this DB
+        // check (and the transactional key insert in saveNewAccount) is the source of truth.
+        accountRepository.findByIdempotencyKey(command.idempotencyKey)?.let { return it }
+
         // ADR-0032 §C: Sanctions gate — fails closed.
         // HIT: confirmed match — hard block.
         // REVIEW: also blocked (Sprint 1 conservative). Sprint 2 will introduce a
@@ -85,21 +93,17 @@ class AccountService(
             legalName = command.legalName.ifBlank { null },
         )
 
-        val saved = accountRepository.save(account)
-
-        // The single-IBAN account opens with one primary pocket in its own currency (ADR-0024).
-        pocketRepository.save(
-            CurrencyPocket(
-                id = UUID.randomUUID(),
-                accountId = saved.id,
-                currency = saved.currency,
-                isPrimary = true,
-                status = PocketStatus.ACTIVE,
-                openedAt = Instant.now(clock),
-                closedAt = null,
-                version = 0L,
-            ),
-        )
+        // Account + pocket + idempotency key commit in ONE transaction (#465). A concurrent
+        // duplicate submission dies on the account_idempotency primary key — recover it into
+        // the same contract as the sequential replay above: return the winner's account,
+        // publish no second event, count no second metric.
+        val saved = try {
+            accountRepository.saveNewAccount(account, primaryPocketFor(account), command.idempotencyKey)
+        } catch (e: PersistenceException) {
+            return recoverConcurrentReplay(e, command.idempotencyKey)
+        } catch (e: PgException) {
+            return recoverConcurrentReplay(e, command.idempotencyKey)
+        }
 
         // Operational money lives in the balance-service (N3 / ADR-0024). Balance init is
         // event-driven (ADR-0073): balance-service's BalanceInitConsumer creates the zero
@@ -339,6 +343,31 @@ class AccountService(
     private suspend fun requireAccount(id: UUID): Account = accountRepository.findById(id)
         ?: throw AccountNotFoundException("Account not found: $id")
 
+    /** The single-IBAN account opens with one primary pocket in its own currency (ADR-0024). */
+    private fun primaryPocketFor(account: Account): CurrencyPocket = CurrencyPocket(
+        id = Ids.newId(),
+        accountId = account.id,
+        currency = account.currency,
+        isPrimary = true,
+        status = PocketStatus.ACTIVE,
+        openedAt = Instant.now(clock),
+        closedAt = null,
+        version = 0L,
+    )
+
+    /**
+     * The loser of a concurrent duplicate-open race: both contenders passed the replay check
+     * before either committed, and this transaction died on the account_idempotency primary
+     * key. Recover by returning the winner's account. Anything that is not the idempotency-key
+     * conflict propagates untouched.
+     */
+    private suspend fun recoverConcurrentReplay(e: RuntimeException, idempotencyKey: String): Account {
+        val isIdempotencyKeyConflict = generateSequence<Throwable>(e) { it.cause.takeIf { c -> c !== it } }
+            .any { it.message?.contains("account_idempotency", ignoreCase = true) == true }
+        if (!isIdempotencyKeyConflict) throw e
+        return accountRepository.findByIdempotencyKey(idempotencyKey) ?: throw e
+    }
+
     companion object {
         /** Matches the goal_name VARCHAR(120) column (ADR-0153, V13) — validated app-side too. */
         const val GOAL_NAME_MAX_LENGTH = 120
@@ -370,6 +399,14 @@ class AccountService(
 }
 
 class AccountNotFoundException(message: String) : RuntimeException(message)
+
+/**
+ * A lifecycle update raced a concurrent modification of the same account (#465): the caller's
+ * domain object was read at a version the row no longer has. Dedicated type (not
+ * IllegalStateException — that has two competing mappers, libs 422 vs service, picked
+ * non-deterministically per request; see issue #526) mapped to 409.
+ */
+class AccountUpdateConflictException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
 class AccountOpeningBlockedByScreeningException(partyId: UUID, matchedName: String?) :
     RuntimeException("Account opening blocked by sanctions screening for party $partyId (matched: $matchedName)")
