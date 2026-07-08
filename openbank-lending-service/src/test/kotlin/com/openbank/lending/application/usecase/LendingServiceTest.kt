@@ -17,6 +17,8 @@ import com.openbank.lending.application.port.out.PostingKind
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
 import com.openbank.lending.domain.model.ApplicationStatus
+import com.openbank.lending.domain.model.Collateral
+import com.openbank.lending.domain.model.CollateralType
 import com.openbank.lending.domain.model.DecisionRequest
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
@@ -435,6 +437,8 @@ class LendingServiceTest {
                 exposureAtDefault = eur("12000.00"),
             ),
         )
+        // No collateral registered: LGD must stay the flat, unadjusted placeholder (no regression).
+        every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(emptyList())
 
         val snapshot = service.assess(loanId, LocalDate.parse("2026-06-01")).await().indefinitely()
 
@@ -443,6 +447,216 @@ class LendingServiceTest {
         assertThat(snapshot.outstandingBalance).isEqualTo(eur("12000.00"))
         // Stage 1 ECL = 0.02 * 0.45 * 12000 = 108.00
         assertThat(snapshot.expectedCreditLoss).isEqualTo(eur("108.00"))
+    }
+
+    // --- Collateral-adjusted LGD (ADR-0028 D1, first increment) -----------------------------------
+
+    private fun collateralItem(loanId: LoanId, marketValue: Money, haircut: BigDecimal, type: CollateralType) =
+        Collateral(
+            loanId = loanId,
+            type = type,
+            marketValue = marketValue,
+            haircut = haircut,
+            valuedAt = fixedNow,
+            createdAt = fixedNow,
+        )
+
+    @Test
+    fun `registered collateral reduces the ECL proportionally to its haircut-adjusted cover`() {
+        val loanId = LoanId.random()
+        val loan = Loan(
+            id = loanId,
+            applicationId = LoanApplicationId.random(),
+            partyId = partyId,
+            principal = eur("12000.00"),
+            nominalAnnualRate = BigDecimal("0.12"),
+            termPeriods = 12,
+            method = AmortizationMethod.ANNUITY,
+            firstDueDate = firstDue,
+            disbursedAt = fixedNow,
+            createdAt = fixedNow,
+        )
+        val schedule = listOf(
+            LoanInstallment(
+                loanId = loanId,
+                number = 1,
+                dueDate = firstDue,
+                openingBalance = eur("12000.00"),
+                principal = eur("946.19"),
+                interest = eur("120.00"),
+                payment = eur("1066.19"),
+                closingBalance = eur("11053.81"),
+            ),
+        )
+        every { loans.findById(loanId) } returns Uni.createFrom().item(loan)
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        every { riskParameters.parametersFor(loan, eur("12000.00")) } returns Uni.createFrom().item(
+            EclInputs(
+                pd12Month = BigDecimal("0.02"),
+                pdLifetime = BigDecimal("0.20"),
+                lgd = BigDecimal("0.45"),
+                exposureAtDefault = eur("12000.00"),
+            ),
+        )
+        // Real estate, declared 15000.00, 20% haircut -> haircut-adjusted cover = 12000.00.
+        // Coverage ratio = 12000 / 12000 = 1.00 -> effective LGD = max(0, 0.45 - 1.00) = 0.
+        every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(
+            listOf(collateralItem(loanId, eur("15000.00"), BigDecimal("0.20"), CollateralType.REAL_ESTATE)),
+        )
+
+        val snapshot = service.assess(loanId, LocalDate.parse("2026-06-01")).await().indefinitely()
+
+        assertThat(snapshot.expectedCreditLoss.isZero()).isTrue()
+    }
+
+    @Test
+    fun `partial collateral cover reduces but does not zero out the ECL`() {
+        val loanId = LoanId.random()
+        val loan = Loan(
+            id = loanId,
+            applicationId = LoanApplicationId.random(),
+            partyId = partyId,
+            principal = eur("12000.00"),
+            nominalAnnualRate = BigDecimal("0.12"),
+            termPeriods = 12,
+            method = AmortizationMethod.ANNUITY,
+            firstDueDate = firstDue,
+            disbursedAt = fixedNow,
+            createdAt = fixedNow,
+        )
+        val schedule = listOf(
+            LoanInstallment(
+                loanId = loanId,
+                number = 1,
+                dueDate = firstDue,
+                openingBalance = eur("12000.00"),
+                principal = eur("946.19"),
+                interest = eur("120.00"),
+                payment = eur("1066.19"),
+                closingBalance = eur("11053.81"),
+            ),
+        )
+        every { loans.findById(loanId) } returns Uni.createFrom().item(loan)
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        every { riskParameters.parametersFor(loan, eur("12000.00")) } returns Uni.createFrom().item(
+            EclInputs(
+                pd12Month = BigDecimal("0.02"),
+                pdLifetime = BigDecimal("0.20"),
+                lgd = BigDecimal("0.45"),
+                exposureAtDefault = eur("12000.00"),
+            ),
+        )
+        // Vehicle, declared 5000.00, 40% haircut -> haircut-adjusted cover = 3000.00.
+        // Coverage ratio = 3000 / 12000 = 0.25 -> effective LGD = 0.45 - 0.25 = 0.20.
+        every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(
+            listOf(collateralItem(loanId, eur("5000.00"), BigDecimal("0.40"), CollateralType.VEHICLE)),
+        )
+
+        val snapshot = service.assess(loanId, LocalDate.parse("2026-06-01")).await().indefinitely()
+
+        // Stage 1 ECL = 0.02 * 0.20 * 12000 = 48.00 (versus the unsecured 108.00).
+        assertThat(snapshot.expectedCreditLoss).isEqualTo(eur("48.00"))
+    }
+
+    @Test
+    fun `multiple collateral items sum their haircut-adjusted value before reducing LGD`() {
+        val loanId = LoanId.random()
+        val loan = Loan(
+            id = loanId,
+            applicationId = LoanApplicationId.random(),
+            partyId = partyId,
+            principal = eur("12000.00"),
+            nominalAnnualRate = BigDecimal("0.12"),
+            termPeriods = 12,
+            method = AmortizationMethod.ANNUITY,
+            firstDueDate = firstDue,
+            disbursedAt = fixedNow,
+            createdAt = fixedNow,
+        )
+        val schedule = listOf(
+            LoanInstallment(
+                loanId = loanId,
+                number = 1,
+                dueDate = firstDue,
+                openingBalance = eur("12000.00"),
+                principal = eur("946.19"),
+                interest = eur("120.00"),
+                payment = eur("1066.19"),
+                closingBalance = eur("11053.81"),
+            ),
+        )
+        every { loans.findById(loanId) } returns Uni.createFrom().item(loan)
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        every { riskParameters.parametersFor(loan, eur("12000.00")) } returns Uni.createFrom().item(
+            EclInputs(
+                pd12Month = BigDecimal("0.02"),
+                pdLifetime = BigDecimal("0.20"),
+                lgd = BigDecimal("0.45"),
+                exposureAtDefault = eur("12000.00"),
+            ),
+        )
+        // Vehicle 5000.00 @ 40% haircut = 3000.00, plus cash deposit 2000.00 @ 0% haircut = 2000.00.
+        // Summed haircut-adjusted cover = 5000.00. Coverage ratio = 5000/12000 -> LGD 0.45 - 0.41(6..) ~ 0.0333.
+        every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(
+            listOf(
+                collateralItem(loanId, eur("5000.00"), BigDecimal("0.40"), CollateralType.VEHICLE),
+                collateralItem(loanId, eur("2000.00"), BigDecimal.ZERO, CollateralType.CASH_DEPOSIT),
+            ),
+        )
+
+        val snapshot = service.assess(loanId, LocalDate.parse("2026-06-01")).await().indefinitely()
+
+        // effective LGD = 0.45 - (5000/12000) = 0.45 - 0.416666... = 0.033333...
+        // ECL = 0.02 * 0.033333... * 12000 = 8.00
+        assertThat(snapshot.expectedCreditLoss).isEqualTo(eur("8.00"))
+    }
+
+    @Test
+    fun `haircut-adjusted collateral exceeding exposure floors ECL at zero, never negative`() {
+        val loanId = LoanId.random()
+        val loan = Loan(
+            id = loanId,
+            applicationId = LoanApplicationId.random(),
+            partyId = partyId,
+            principal = eur("12000.00"),
+            nominalAnnualRate = BigDecimal("0.12"),
+            termPeriods = 12,
+            method = AmortizationMethod.ANNUITY,
+            firstDueDate = firstDue,
+            disbursedAt = fixedNow,
+            createdAt = fixedNow,
+        )
+        val schedule = listOf(
+            LoanInstallment(
+                loanId = loanId,
+                number = 1,
+                dueDate = firstDue,
+                openingBalance = eur("12000.00"),
+                principal = eur("946.19"),
+                interest = eur("120.00"),
+                payment = eur("1066.19"),
+                closingBalance = eur("11053.81"),
+            ),
+        )
+        every { loans.findById(loanId) } returns Uni.createFrom().item(loan)
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        every { riskParameters.parametersFor(loan, eur("12000.00")) } returns Uni.createFrom().item(
+            EclInputs(
+                pd12Month = BigDecimal("0.02"),
+                pdLifetime = BigDecimal("0.20"),
+                lgd = BigDecimal("0.45"),
+                exposureAtDefault = eur("12000.00"),
+            ),
+        )
+        // Massively over-collateralized: 100000.00 cash, zero haircut, far exceeds the 12000.00 exposure.
+        every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(
+            listOf(collateralItem(loanId, eur("100000.00"), BigDecimal.ZERO, CollateralType.CASH_DEPOSIT)),
+        )
+
+        val snapshot = service.assess(loanId, LocalDate.parse("2026-06-01")).await().indefinitely()
+
+        assertThat(snapshot.expectedCreditLoss.isZero()).isTrue()
+        assertThat(snapshot.expectedCreditLoss.isNegative()).isFalse()
     }
 
     // --- Provisioning cycle: scheduled delta-vs-prior-period posting ---------------------------------
@@ -484,6 +698,8 @@ class LendingServiceTest {
                 exposureAtDefault = eur("12000.00"),
             ),
         )
+        // No collateral registered on these loans: LGD stays the flat placeholder (no regression).
+        every { collateral.findByLoan(loan.id) } returns Uni.createFrom().item(emptyList())
     }
 
     @Test
