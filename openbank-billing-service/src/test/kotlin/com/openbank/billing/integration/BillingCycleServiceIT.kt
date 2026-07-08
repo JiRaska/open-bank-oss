@@ -5,6 +5,7 @@
 package com.openbank.billing.integration
 
 import com.openbank.billing.application.usecase.BillingCycleService
+import com.openbank.billing.domain.BillingAssessment
 import com.openbank.billing.domain.PostingStatus
 import com.openbank.billing.infrastructure.outbox.BillingOutboxRepositoryImpl
 import com.openbank.billing.it.PostgresRedisTestResource
@@ -16,10 +17,11 @@ import jakarta.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * Integration coverage against real Postgres (ADR-0143 phase 2c): the assessment row, its
@@ -91,24 +93,37 @@ class BillingCycleServiceIT {
     }
 
     @Test
-    fun `two concurrent assessAndPost calls for the same key both succeed, no TOCTOU 500`(): Unit = onVertxContext {
+    fun `two concurrent assessAndPost calls for the same key both succeed, no TOCTOU 500`() {
         // Fix-review finding: findExisting-then-persistWithPostingIntent is a check-then-act race.
-        // Firing both calls genuinely concurrently (kotlinx.coroutines async, not sequential)
-        // exercises BillingAssessmentRepositoryImpl.recoverConcurrentReplay against the real
+        // Each call gets its OWN Vert.x duplicated context on its OWN OS thread (a single shared
+        // context is single-threaded by design and isn't a realistic concurrency test); a
+        // CountDownLatch lines both threads up at the starting gate to maximize the chance of a
+        // genuine race on the DB constraint. Exercises
+        // BillingAssessmentRepositoryImpl.recoverConcurrentReplay against the real
         // uq_billing_cycle_assessment constraint — neither call may throw, and both must return
         // the same (skipped) result rather than one winning and one 500ing.
         val cycleId = "it-cycle-race-${System.nanoTime()}"
         val accountId = "race-account"
+        val startingGate = CountDownLatch(2)
+        val pool = Executors.newFixedThreadPool(2)
 
-        val results = coroutineScope {
-            val first = async { billingCycleService.assessAndPost(cycleId, accountId, "CZK") }
-            val second = async { billingCycleService.assessAndPost(cycleId, accountId, "CZK") }
-            listOf(first, second).awaitAll()
+        fun call(): BillingAssessment = onVertxContext {
+            startingGate.countDown()
+            startingGate.await(5, TimeUnit.SECONDS)
+            billingCycleService.assessAndPost(cycleId, accountId, "CZK")
         }
 
-        assertThat(results).hasSize(2)
-        results.forEach { assertThat(it.skipped).isTrue() }
-        assertThat(results[0].cycleId).isEqualTo(results[1].cycleId)
-        assertThat(results[0].accountId).isEqualTo(results[1].accountId)
+        try {
+            val first = pool.submit<BillingAssessment> { call() }
+            val second = pool.submit<BillingAssessment> { call() }
+            val results = listOf(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS))
+
+            assertThat(results).hasSize(2)
+            results.forEach { assertThat(it.skipped).isTrue() }
+            assertThat(results[0].cycleId).isEqualTo(results[1].cycleId)
+            assertThat(results[0].accountId).isEqualTo(results[1].accountId)
+        } finally {
+            pool.shutdown()
+        }
     }
 }
