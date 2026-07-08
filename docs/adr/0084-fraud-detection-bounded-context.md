@@ -15,6 +15,18 @@ Author(s): Jiří Raška
 >   `openbank.transactions.transaction.initiated`; per-account rolling velocity windows H1/H24/D7
 >   (per-currency buckets); `VelocityH1ReviewRule` (≥10/h) + `VelocityH24ReviewRule` (≥50/24h)
 >   in shadow mode. Threat model updated with new Kafka trust boundary + currency-isolation invariant.
+>
+> **Update 2026-07-07 — rule set expanded to `ruleVersion = "v3"` (issue #529).** Two new
+> deterministic rules added to `FraudRuleEngine`, both grounded in signals already available —
+> no new Kafka producer, no schema change: `LargeSingleTransactionReviewRule` (REVIEW when a single
+> transaction's amount reaches a large absolute threshold, using `ScoreRequest.amount` already
+> present since Phase 1) and `VelocityH1HighValueReviewRule` (REVIEW when the rolling 1-hour
+> *transacted amount* for the account/currency bucket reaches a cap, complementing the existing
+> count-based `VelocityH1ReviewRule` — a smaller number of high-value transactions within the hour
+> now also trips a control). The amount signal (`VelocityAggregate.totalAmount` per window) was
+> already persisted by the Kafka signal plane in Flyway `V2__create_velocity_aggregates.sql`; this
+> change only surfaces it to the rule engine via a new `ScoreRequest.velocityH1TotalAmount` field —
+> **no new migration**. Still shadow mode only; no payment surface honours the verdict yet.
 
 ## Context
 
