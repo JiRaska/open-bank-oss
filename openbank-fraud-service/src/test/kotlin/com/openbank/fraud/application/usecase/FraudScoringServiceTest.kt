@@ -141,13 +141,15 @@ class FraudScoringServiceTest {
         val req = request(accountId = accountId)
         val savedReq = slot<ScoreRequest>()
         coEvery { repository.save(capture(savedReq), any()) } returns UUID.randomUUID()
+        // Kept comfortably below the EUR high-value cap (40,000) so this test isolates enrichment
+        // plumbing from rule-firing behaviour (covered separately below).
         coEvery { velocityRepo.findAggregate(accountId, VelocityWindow.H1, "EUR") } returns
-            velocityAggregate(accountId, VelocityWindow.H1, count = 3L, totalAmount = BigDecimal("42000.50"))
+            velocityAggregate(accountId, VelocityWindow.H1, count = 3L, totalAmount = BigDecimal("4200.50"))
         coEvery { velocityRepo.findAggregate(accountId, VelocityWindow.H24, "EUR") } returns null
 
         service.score(req)
 
-        assertThat(savedReq.captured.velocityH1TotalAmount).isEqualByComparingTo(BigDecimal("42000.50"))
+        assertThat(savedReq.captured.velocityH1TotalAmount).isEqualByComparingTo(BigDecimal("4200.50"))
     }
 
     @Test
@@ -166,9 +168,9 @@ class FraudScoringServiceTest {
     }
 
     @Test
-    fun `returns REVIEW when a single large transaction breaches the amount threshold`(): Unit = runBlocking {
+    fun `returns REVIEW when a single large transaction breaches the EUR amount threshold`(): Unit = runBlocking {
         val req = ScoreRequest(
-            amount = BigDecimal("600000"),
+            amount = BigDecimal("25000"),
             currency = "EUR",
             rail = "SEPA",
             accountId = UUID.randomUUID(),
@@ -180,6 +182,47 @@ class FraudScoringServiceTest {
 
         assertThat(result.verdict).isEqualTo(FraudVerdict.REVIEW)
         assertThat(result.reasons).contains("large-single-transaction")
+    }
+
+    @Test
+    fun `returns REVIEW for a large EUR transaction that a currency-blind threshold would have missed`(): Unit =
+        runBlocking {
+            // Regression test for the cross-currency false-ALLOW finding from adversarial review:
+            // EUR 480,000 (~CZK 12,000,000) is far below the raw CZK-calibrated figure (500,000) but
+            // must still trip REVIEW once the threshold is per-currency.
+            val req = ScoreRequest(
+                amount = BigDecimal("480000"),
+                currency = "EUR",
+                rail = "SEPA",
+                accountId = UUID.randomUUID(),
+            )
+            coEvery { repository.save(any(), any()) } returns UUID.randomUUID()
+            coEvery { velocityRepo.findAggregate(any(), any(), any()) } returns null
+
+            val result = service.score(req)
+
+            assertThat(result.verdict).isEqualTo(FraudVerdict.REVIEW)
+            assertThat(result.reasons).contains("large-single-transaction")
+        }
+
+    @Test
+    fun `fails closed to REVIEW for an unmapped currency regardless of amount`(): Unit = runBlocking {
+        val req = ScoreRequest(
+            amount = BigDecimal("1.00"),
+            currency = "USD",
+            rail = "SEPA",
+            accountId = UUID.randomUUID(),
+        )
+        coEvery { repository.save(any(), any()) } returns UUID.randomUUID()
+        coEvery { velocityRepo.findAggregate(any(), any(), any()) } returns null
+
+        val result = service.score(req)
+
+        assertThat(result.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(result.reasons).contains(
+            "large-single-transaction-unmapped-currency",
+            "velocity-h1-amount-cap-unmapped-currency",
+        )
     }
 
     @Test
