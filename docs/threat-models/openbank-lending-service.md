@@ -13,8 +13,8 @@
 | Loan book (application, loan, schedule, stage) | Customer financial data (GDPR); the source of AnaCredit / FINREP / IFRS 9 returns. |
 | Cash events posted to the ledger | Real money movement (disbursement, repayment split, write-off). Integrity here is the money-path invariant. |
 | Credit decisions (maker / checker) | Governed origination (EBA/GL/2020/06); a forged or single-actor approval is a control failure. |
-| Collateral register & valuations | Drives LGD / haircut and capital; tampering understates risk. |
-| Risk parameters (PD / LGD / bureau data) | Inputs to ECL; manipulation distorts impairment and capital. **Currently flat, conservative placeholder constants (`ConservativeRiskParameterSource`), not a calibrated risk model — see 06 — Compliance for the explicit non-production caveat.** |
+| Collateral register & valuations | Drives LGD / haircut and capital; tampering (or a fabricated declared value / haircut) understates risk and, since Phase 3 increment 2, is now **wired into** the ECL calc via `Ifrs9.collateralAdjustedLgd` — a bad registration directly and immediately reduces the reported ECL, not just an AnaCredit field. Registration is gated the same way every other lending write is: `@RolesAllowed` + `@Authorize`; **it is not yet under the four-eyes/maker-checker control that origination and disbursement have** (see §5). |
+| Risk parameters (PD / LGD / bureau data) | Inputs to ECL; manipulation distorts impairment and capital. **Currently flat, conservative placeholder constants (`ConservativeRiskParameterSource`), not a calibrated risk model — see 06 — Compliance for the explicit non-production caveat.** The collateral-adjusted effective LGD (Phase 3 increment 2) is *derived* from these same constants plus the collateral register — a bad collateral entry does not invent a new attack surface on PD/LGD itself, but it does change what "distorts impairment" means: `haircutAdjustedCollateralValue` is now a second untrusted-input path into the LGD term, not just `lgd` itself. |
 | IFRS 9 provisioning history (`loan_provisioning`) | Per-loan-per-period stage/ECL record; the delta baseline for the next cycle's ledger posting and (per ADR-0028) a future AnaCredit/FINREP input. Corruption or a skipped row causes silent under/over-provisioning. |
 
 ## 2. Trust boundaries
@@ -69,6 +69,34 @@
     page with no continuation cursor — a book larger than `limit` silently leaves the tail unprovisioned
     for that cycle with no alert. Acceptable for a first increment on a small loan book; needs a
     pagination/completeness check before the book grows past one batch.
+- **Collateral-adjusted LGD correctness (ADR-0028 Phase 3 increment 2, new this slice).** The pure
+  `Ifrs9.collateralAdjustedLgd` function and its call site in `LendingService.applyCollateral` carry
+  their own specific risks and mitigations:
+  - **Negative LGD from over-collateralization.** The function is unit-tested to floor the result at
+    zero when haircut-adjusted collateral cover exceeds EAD — a negative LGD has no economic meaning and
+    would invert the ECL sign; `collateralAdjustedLgd` clamps to `[0, lgd]` (`coerceIn`), never returning
+    a value outside that range regardless of input magnitude.
+  - **Regression for the existing (uncollateralized) loan book.** `applyCollateral` short-circuits on
+    `registered.isEmpty()` and returns the risk-parameter source's `EclInputs` unchanged — a loan with no
+    collateral registered is byte-identical to pre-increment behavior; covered explicitly by a
+    no-regression unit test, not merely an absence of a new test failure.
+  - **A currency mismatch silently corrupting the sum.** `applyCollateral` filters registered collateral
+    to items whose `marketValue.currency` matches the loan's exposure currency before summing — a
+    mis-registered collateral item in a different currency is excluded from the cover calculation rather
+    than throwing (the loan book is single-currency per ADR-0028 D3, so this is a defensive filter against
+    a data-entry error, not an expected path) or, worse, silently mixing currency amounts in the sum.
+  - **Roadmap gap, not yet mitigated — collateral registration has no four-eyes control.** Unlike credit
+    decisioning (`lending.approve`) and disbursement (`lending.disburse`), `POST .../collateral` is a
+    single-actor write: any principal holding `lending.create` on the loan can register collateral whose
+    declared value/haircut now directly reduces the reported ECL. A single compromised or careless
+    officer account can therefore understate provisioning without a second reviewer. Tracked as a roadmap
+    item (see §5) — the same shared `ApprovalStore`/`AuthorizeInterceptor` mechanism used for disbursement
+    (§7) is the natural extension point.
+  - **Roadmap gap, not yet mitigated — no staleness bound on collateral valuation.** `marketValue` is
+    whatever was declared (or externally revalued, if `CollateralValuationPort`'s no-op default is ever
+    replaced) at registration time; there is no re-validation, expiry, or staleness flag, so an LGD
+    reduction can be based on an arbitrarily old valuation. See the ADR-0028 delivery note's explicit
+    "no real-time revaluation" caveat.
 
 ## 4. STRIDE summary
 
@@ -99,6 +127,20 @@
 - **Money-path mutation testing** — pitest on the journal/amortization domain math (rules.yaml
   `money_path_depth`, currently `planned`) — should extend to `LendingJournalFactory.buildProvisioningLines`
   and the delta calculation once adopted.
+- **Collateral registration has no four-eyes control (ADR-0028 Phase 3 increment 2, new this slice).**
+  `POST /api/v1/lending/loans/{id}/collateral` is gated by role (`@RolesAllowed`/`@Authorize`) like every
+  other lending write, but — unlike credit decisioning and disbursement — a single principal can both
+  register collateral and have it immediately reduce the reported ECL on the next provisioning pass. Now
+  that collateral is wired into LGD (rather than being inert AnaCredit metadata), this is a genuine
+  provisioning-integrity gap, not just a data-quality one: it should get the same maker-checker treatment
+  origination/disbursement have (§7's `ApprovalStore`/`AuthorizeInterceptor` mechanism is the natural
+  extension point) before this is relied on for anything beyond a first-pass estimate.
+- **No collateral valuation staleness bound.** `marketValue`/`haircut` are read as-declared at
+  registration time with no expiry, re-validation, or staleness flag on the LGD reduction — see §3 and
+  the ADR-0028 delivery note.
+- **Haircut calibration is a placeholder, not a risk model.** Per-`CollateralType` haircuts are supplied
+  by the caller at registration time (`CollateralRequest.haircut`) with no platform-enforced or
+  actuarially-derived table — see the ADR-0028 delivery note's explicit non-calibration caveat.
 
 ## 6. Out of scope
 
@@ -154,3 +196,12 @@ an additional store; not implemented in this PR.
   defaults `false` — no behavior change to any existing request in this PR; flipping it is a
   tracked follow-up. No DB schema change (Redis, TTL-bounded); rollback = revert the commit (or
   leave `authz.four-eyes.enforce=false`, its default).
+- **2026-07-08** — ADR-0028 Phase 3 increment 2 (issue #604): collateral-adjusted LGD. The pure
+  `Ifrs9.collateralAdjustedLgd` (openbank-libs-domain) + `LendingService.applyCollateral` wire the
+  already-registered collateral into the ECL calculation for the first time — previously it was
+  recorded but never consulted. Updated §1 (Collateral register & valuations, Risk parameters
+  assets), §3 (new control block: negative-LGD floor, no-regression guarantee, currency-mismatch
+  filter), §5 (new roadmap gaps: collateral registration has no four-eyes control, no valuation
+  staleness bound, haircut calibration is a placeholder). No DB schema change (reads the existing
+  `collateral` table); no new endpoint; rollback = revert the commit (LGD reverts to the flat
+  placeholder for every loan, identical to before this increment).

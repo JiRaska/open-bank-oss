@@ -421,6 +421,7 @@ class LendingServiceEdgeCasesTest {
                 exposureAtDefault = eur("12000.00"),
             ),
         )
+        every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(emptyList())
 
         val snapshot = service.assess(loanId, LocalDate.parse("2026-10-08")).await().indefinitely()
 
@@ -447,6 +448,7 @@ class LendingServiceEdgeCasesTest {
                 exposureAtDefault = Money.zero("EUR"),
             ),
         )
+        every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(emptyList())
 
         val snapshot = service.assess(loanId, LocalDate.parse("2026-10-08")).await().indefinitely()
 
