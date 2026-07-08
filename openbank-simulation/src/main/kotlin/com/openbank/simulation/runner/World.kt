@@ -12,6 +12,7 @@ import com.openbank.simulation.adapters.SimEventBus
 import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.model.BalanceStore
+import com.openbank.simulation.model.BillingFeeLedger
 import com.openbank.simulation.model.LedgerState
 import com.openbank.simulation.model.SimPaymentSaga
 import java.math.BigDecimal
@@ -50,6 +51,11 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     // here so the Layer-3 invariants can assert every one reaches a terminal state.
     val sepaPayments = mutableListOf<SepaPayment>()
     val settlements = mutableListOf<Settlement>()
+
+    // ADR-0143 phase 2d: the billing fee-conservation invariant's state (Σ fees assessed == Σ fee
+    // journals posted per cycle/account/fee/currency). Populated by whatever scenario drives
+    // billing fee charges through a seeded run; empty (trivially satisfied) otherwise.
+    val billingFees = BillingFeeLedger()
 
     val customerAccounts: List<UUID>
     val currency: String = config.currency
