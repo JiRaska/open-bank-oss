@@ -41,8 +41,14 @@ class CurrencyPocketRepositoryImpl(private val clock: Clock) :
     }
 
     /** Persist within the caller's transaction (#465: account + pocket + idempotency commit atomically). */
-    fun persistInTransaction(pocket: CurrencyPocket): io.smallrye.mutiny.Uni<Void> =
-        persist(pocket.toEntity()).replaceWithVoid()
+    fun persistInTransaction(pocket: CurrencyPocket): io.smallrye.mutiny.Uni<Void> {
+        val entity = pocket.toEntity()
+        // Same Clock stamping as save() (ADR-0100 / #540) — this path bypasses save() entirely.
+        val now = clock.instant()
+        entity.createdAt = now
+        entity.updatedAt = now
+        return persist(entity).replaceWithVoid()
+    }
 
     override suspend fun update(pocket: CurrencyPocket): CurrencyPocket = Panache.withTransaction {
         find("id", pocket.id).firstResult().flatMap { existing ->
