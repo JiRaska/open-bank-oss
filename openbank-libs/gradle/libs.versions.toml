@@ -21,7 +21,14 @@ wiremock = "3.9.2"
 avro = "1.11.3"
 apicurio-registry = "2.6.2.Final"
 testcontainers = "1.20.4"
-pact = "4.6.17"
+# 4.7.3 (issue #461 follow-up): the only route org.apache.tika:tika-core enters the
+# project dependency graph as a real classpath dependency (pact-consumer/pact-provider
+# pull it transitively for content-type matching) — 4.6.17 resolves tika-core 2.9.1,
+# vulnerable to GHSA-f58c-gq56-vjjf (XXE, critical). 4.7.3 resolves tika-core 3.2.3.
+# Distinct from the tika-core pulled by the cyclonedx Gradle plugin's own SBOM
+# classpath (gradle/osv-scanner.toml) — that one is a separate, non-project-resolvable
+# occurrence and still needs a cyclonedx plugin version bump.
+pact = "4.7.3"
 # Static analysis (SAST gate — detekt for correctness rules, ktlint for formatting).
 # detekt 1.23.8 bundles its own kotlin-compiler-embeddable, so it parses sources
 # independently of the project Kotlin version (2.3.x here).
