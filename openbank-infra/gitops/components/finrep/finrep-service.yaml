@@ -1,3 +1,10 @@
+# finrep-service has never been built/pushed via openbank-infra/scripts/build-push-service.sh
+# (this is its first ArgoCD registration, ADR-0097). The image tag below is a placeholder,
+# following the same first-registration pattern as developer-portal's `sandbox-sec1` — it
+# does NOT point at a real pushed image yet. Run `build-push-service.sh finrep --bump` (or the
+# CI auto-deploy pipeline) to build+push the real `sandbox-<git-sha>` image and rewrite this
+# tag before relying on this Deployment actually coming up (ArgoCD will otherwise report
+# ImagePullBackOff — see PR #547 reviewer notes).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -26,7 +33,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: finrep-service
-          image: openbank-finrep-service:0.1.0
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-finrep-service:sandbox-init
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
