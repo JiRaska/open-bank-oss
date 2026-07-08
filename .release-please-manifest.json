@@ -18,7 +18,7 @@
   "openbank-domestic-payment": "0.8.10",
   "openbank-finops-agent": "0.2.3",
   "openbank-finrep-service": "0.4.0",
-  "openbank-fraud-service": "0.5.2",
+  "openbank-fraud-service": "0.6.0",
   "openbank-fx-service": "0.7.6",
   "openbank-interest-service": "0.7.1",
   "openbank-kyc-service": "0.9.1",
