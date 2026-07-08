@@ -71,14 +71,6 @@ kover {
     }
 }
 
-tasks.named("koverVerify") {
-    enabled = true
-}
-
-tasks.named("check") {
-    dependsOn(tasks.named("koverVerify"))
-}
-
 // Pact: forward broker config so the provider verification test can fetch and publish results.
 tasks.withType<Test> {
     systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")

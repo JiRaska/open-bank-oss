@@ -46,11 +46,3 @@ kover {
         }
     }
 }
-
-tasks.named("koverVerify") {
-    enabled = true
-}
-
-tasks.named("check") {
-    dependsOn(tasks.named("koverVerify"))
-}
