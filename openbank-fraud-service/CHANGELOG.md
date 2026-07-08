@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.6.0...fraud-service-v0.6.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* **fraud:** per-currency amount thresholds, fail closed on unmapped currency ([#565](https://github.com/JiRaska/open-bank-oss/issues/565)) ([8af2672](https://github.com/JiRaska/open-bank-oss/commit/8af2672aa6a89c00591086b8656b00bf07351df1))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.5.2...fraud-service-v0.6.0) (2026-07-08)
 
 
