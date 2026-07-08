@@ -13,10 +13,11 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.Clock
 import java.util.UUID
 
 @ApplicationScoped
-class CurrencyPocketRepositoryImpl :
+class CurrencyPocketRepositoryImpl(private val clock: Clock) :
     CurrencyPocketRepository,
     PanacheRepository<AccountPocketEntity> {
 
@@ -31,12 +32,23 @@ class CurrencyPocketRepositoryImpl :
 
     override suspend fun save(pocket: CurrencyPocket): CurrencyPocket {
         val entity = pocket.toEntity()
+        // Audit timestamps come from the injected Clock here, not the entity (ADR-0100): the
+        // column DEFAULT never applies because Hibernate writes every insertable column.
+        val now = clock.instant()
+        entity.createdAt = now
+        entity.updatedAt = now
         return Panache.withTransaction { persist(entity).replaceWith(entity) }.awaitSuspending().toDomain()
     }
 
     /** Persist within the caller's transaction (#465: account + pocket + idempotency commit atomically). */
-    fun persistInTransaction(pocket: CurrencyPocket): io.smallrye.mutiny.Uni<Void> =
-        persist(pocket.toEntity()).replaceWithVoid()
+    fun persistInTransaction(pocket: CurrencyPocket): io.smallrye.mutiny.Uni<Void> {
+        val entity = pocket.toEntity()
+        // Same Clock stamping as save() (ADR-0100 / #540) — this path bypasses save() entirely.
+        val now = clock.instant()
+        entity.createdAt = now
+        entity.updatedAt = now
+        return persist(entity).replaceWithVoid()
+    }
 
     override suspend fun update(pocket: CurrencyPocket): CurrencyPocket = Panache.withTransaction {
         find("id", pocket.id).firstResult().flatMap { existing ->
@@ -44,6 +56,7 @@ class CurrencyPocketRepositoryImpl :
             existing.status = pocket.status.name
             existing.closedAt = pocket.closedAt
             existing.version = pocket.version
+            existing.updatedAt = clock.instant()
             io.smallrye.mutiny.Uni.createFrom().item(existing)
         }
     }.awaitSuspending().toDomain()
