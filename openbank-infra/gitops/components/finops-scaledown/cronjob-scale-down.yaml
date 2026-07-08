@@ -1,0 +1,124 @@
+# Off-hours scale-DOWN CronJob (issue #446, ~$100-200/mo target).
+#
+# SCHEDULE / TIMEZONE (ADR-0100 discipline: do the DST math explicitly, don't
+# assume UTC==local): the cluster runs Kubernetes 1.34 (see
+# components/admin-ui/cost-collector.yaml), and CronJob `spec.timeZone` has
+# been GA since 1.27 — so, like cost-collector, we set `timeZone` directly
+# instead of hand-converting CET/CEST to a UTC offset. The kube-controller-
+# manager evaluates `schedule` in the given IANA zone and follows its DST
+# transitions automatically (Europe/Prague observes the same CET/CEST
+# transitions as the rest of the EU). Concretely:
+#   - "0 22 * * *" @ Europe/Prague = 22:00 local every day.
+#     - CET  (winter, UTC+1): 22:00 local = 21:00 UTC.
+#     - CEST (summer, UTC+2): 22:00 local = 20:00 UTC.
+#   The whole point of `timeZone` over a hardcoded UTC cron is that we do
+#   NOT have to hand-re-derive that UTC offset twice a year — the field
+#   owns the seasonal drift so 22:00 stays 22:00 local across the
+#   March/October changeovers, which a bare UTC schedule cannot do.
+# Weekends: scale-down re-runs every night including Fri/Sat/Sun, and
+# scale-up (cronjob-scale-up.yaml) is skipped Sat/Sun (see its schedule) —
+# so the fleet also stays down for the whole weekend, per the issue's
+# "nights + weekends are ~70% of wall-clock hours" framing, without a
+# separate weekend-specific schedule.
+#
+# The allowlist ConfigMap (configmap-allowlist.yaml) is the single source of
+# truth for WHAT gets scaled — this CronJob only mounts and iterates it.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: finops-scale-down
+  namespace: finops-scaledown
+  labels:
+    app.kubernetes.io/part-of: finops-scaledown
+    app.kubernetes.io/component: scale-down
+spec:
+  # 22:00 Europe/Prague, every day (nights + the whole weekend).
+  schedule: "0 22 * * *"
+  timeZone: "Europe/Prague"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 900
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: finops-scale-down
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: finops-scaledown
+          automountServiceAccountToken: true
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: scale-down
+              # alpine/k8s ships BOTH `kubectl` and a real shell (bash/coreutils) on a
+              # proper semver tag (1.34.9 tracks the cluster's 1.34 minor). The
+              # official `rancher/kubectl` image was tried first and rejected: it is
+              # kubectl-only with no shell at all (exec: "/bin/sh": no such file or
+              # directory), so it cannot run the loop below. `bitnami/kubectl` was
+              # also tried and rejected: Bitnami's "Secure Images" migration removed
+              # every semver tag from the free tier — only `latest` (mutable) and
+              # content-addressed sha256 tags remain, which fights this repo's
+              # pin-everything discipline (ADR-0121 / Scorecard Pinned-Dependencies).
+              image: docker.io/alpine/k8s:1.34.9
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: TARGET_REPLICAS
+                  value: "0"
+                - name: HOME
+                  value: /tmp
+              volumeMounts:
+                - name: allowlist
+                  mountPath: /etc/finops-scaledown
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -uo pipefail
+                  fail=0
+                  while IFS='/' read -r ns kind name; do
+                    # Skip blank lines / stray whitespace from the ConfigMap.
+                    [ -z "$ns" ] && continue
+                    echo "{\"event\":\"scale-down\",\"namespace\":\"${ns}\",\"kind\":\"${kind}\",\"name\":\"${name}\",\"replicas\":${TARGET_REPLICAS}}"
+                    if ! kubectl scale "${kind}/${name}" -n "${ns}" --replicas="${TARGET_REPLICAS}"; then
+                      echo "{\"event\":\"scale-down-error\",\"namespace\":\"${ns}\",\"kind\":\"${kind}\",\"name\":\"${name}\"}"
+                      fail=1
+                    fi
+                  done < /etc/finops-scaledown/DOWNSCALE_TARGETS
+                  # Don't let one missing/renamed workload fail the whole job silently —
+                  # but DO surface a non-zero exit so failedJobsHistoryLimit/alerting
+                  # can catch a persistent drift between the allowlist and the cluster.
+                  exit $fail
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+          volumes:
+            - name: allowlist
+              configMap:
+                name: finops-scaledown-allowlist
+            - name: tmp
+              emptyDir: {}
+          nodeSelector:
+            workload: observability
+          tolerations:
+            - key: workload
+              operator: Equal
+              value: observability
+              effect: NoSchedule

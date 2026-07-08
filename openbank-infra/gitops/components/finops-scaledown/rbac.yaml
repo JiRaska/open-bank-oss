@@ -1,0 +1,321 @@
+# Least-privilege identity for the scale-down/scale-up CronJobs (issue #446).
+#
+# The ClusterRole only grants `get`/`list`/`patch` on the `scale` subresource
+# of Deployments and Argo Rollouts (ADR-0098 — money-path services use
+# Rollout, not Deployment, as their workload kind) — no exec, no secrets, no
+# writes to the pod spec itself. Same pattern as admin-ui-discovery
+# (components/admin-ui/admin-ui.yaml): the ClusterRole is defined once and
+# bound with a per-namespace RoleBinding, never a ClusterRoleBinding, so a
+# compromised ServiceAccount cannot scale workloads outside the namespaces
+# explicitly listed below. Adding a namespace to the scale-down set is a
+# reviewed two-line change: a RoleBinding here AND an entry in the
+# allowlist ConfigMap's DOWNSCALE_TARGETS.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: finops-scaledown
+  namespace: finops-scaledown
+  labels:
+    app.kubernetes.io/part-of: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: finops-scaledown
+  labels:
+    app.kubernetes.io/part-of: finops-scaledown
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/scale"]
+    verbs: ["get", "list", "patch"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["rollouts", "rollouts/scale"]
+    verbs: ["get", "list", "patch"]
+---
+# One RoleBinding per namespace that appears in the allowlist ConfigMap's
+# DOWNSCALE_TARGETS. Namespaces NOT listed here cannot be touched by this
+# ServiceAccount even if they were accidentally added to the ConfigMap —
+# RBAC is the authoritative boundary, the ConfigMap is the readable summary.
+#
+# NOTE: `accounts`, `balances`, `ledger` and `kyc` namespaces intentionally
+# have NO RoleBinding — account-service, balance-service, ledger-service
+# (standing-order-service cron-collision note) and kyc-service (its own,
+# separate cron-collision note) all moved to the keep-alive allowlist in
+# configmap-allowlist.yaml, and each of those four namespaces had no other
+# scale-down target, so the whole RoleBinding was removed rather than left
+# dangling and unused.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: aml
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: anacredit
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: audit
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: billing
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: consent
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: developer-portal
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: dispute
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: finrep
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: fraud
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: fx
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: lending
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: onboarding
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: party
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: payments
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: pid
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: psd2
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: sanctions
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: sca
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: statements
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: tpp-registry
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: platform
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: devops-agent
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaledown
+  namespace: finops-agent
+  labels: { app.kubernetes.io/part-of: finops-scaledown }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaledown
+    namespace: finops-scaledown

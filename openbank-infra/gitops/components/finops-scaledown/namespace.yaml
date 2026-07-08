@@ -1,0 +1,22 @@
+# Off-hours app-plane scale-down (issue #446, ADR-0057 "coarse backstop").
+#
+# ADR-0057 classifies services into T0-T3 FinOps tiers and explicitly names a
+# blunt scheduled scale-down as a REJECTED *primary* mechanism ("does not
+# generalise to per-service bursty load") but calls it out as "useful only as
+# a coarse backstop, subsumed by per-service scale-to-zero." That is exactly
+# what this component is: a time-based floor for services that have NOT (yet)
+# been given a KEDA ScaledObject/HTTPScaledObject, sitting alongside — not
+# instead of — the per-service T1/T2 scale-to-zero already shipped for
+# product-catalog, interest-service, sdd-service, card-issuance-service and
+# notification-service (see cronjob-scale-down.yaml's exclusion list).
+#
+# This is a sandbox/demo-only cost lever (no SLA, ADR-0057 workload tiers) —
+# it deliberately scales money-path services to zero overnight/weekends,
+# which would NEVER be acceptable in a real production tier (ADR-0030).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: finops-scaledown
+  labels:
+    app.kubernetes.io/part-of: finops-scaledown
+    app.kubernetes.io/managed-by: argocd

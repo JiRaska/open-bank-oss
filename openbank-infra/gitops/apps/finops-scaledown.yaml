@@ -1,0 +1,35 @@
+# ArgoCD app for the off-hours app-plane scale-down (issue #446, ADR-0057
+# "coarse backstop"). Two CronJobs (22:00 / 07:00 Europe/Prague) that scale
+# the Deployments/Rollouts listed in configmap-allowlist.yaml to 0/1
+# replicas. Namespace-scoped RBAC only (rbac.yaml) — this Application does
+# NOT touch any other Application's resources; it only reads its own
+# manifests here and, at runtime, patches the `scale` subresource of the
+# workloads named in the allowlist ConfigMap.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: finops-scaledown
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/finops-scaledown
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: finops-scaledown
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
