@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.3.3...finrep-service-v0.4.0) (2026-07-08)
+
+
+### Features
+
+* **finrep:** register ArgoCD Application so finrep-service actually deploys ([#547](https://github.com/JiRaska/open-bank-oss/issues/547)) ([b10d63c](https://github.com/JiRaska/open-bank-oss/commit/b10d63cfe1e1a8ba5117248622fdb8aedae12ec2)), closes [#530](https://github.com/JiRaska/open-bank-oss/issues/530)
+
 ## [0.3.3](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.3.2...finrep-service-v0.3.3) (2026-07-07)
 
 
