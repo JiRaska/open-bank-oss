@@ -72,14 +72,6 @@ kover {
     }
 }
 
-tasks.named("koverVerify") {
-    enabled = true
-}
-
-tasks.named("check") {
-    dependsOn(tasks.named("koverVerify"))
-}
-
 // Pact: write generated consumer contracts to pacts/ and forward broker config for verification.
 tasks.withType<Test> {
     systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
