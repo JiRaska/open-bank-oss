@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.7.0...lending-service-v0.8.0) (2026-07-08)
+
+
+### Features
+
+* **lending:** collateral-adjusted LGD in IFRS 9 ECL (ADR-0028 D1) ([#607](https://github.com/JiRaska/open-bank-oss/issues/607)) ([7a5b639](https://github.com/JiRaska/open-bank-oss/commit/7a5b63925c07f460c13dc9285c09578801bb88c4)), closes [#604](https://github.com/JiRaska/open-bank-oss/issues/604)
+* **lending:** IFRS 9 provisioning first increment — stage bucketing, delta ECL, ledger posting ([#535](https://github.com/JiRaska/open-bank-oss/issues/535)) ([31c2490](https://github.com/JiRaska/open-bank-oss/commit/31c249055de124e628c445c372c2dca798aed51f)), closes [#532](https://github.com/JiRaska/open-bank-oss/issues/532)
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.6.6...lending-service-v0.7.0) (2026-07-08)
 
 
