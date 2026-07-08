@@ -40,9 +40,9 @@ class BillingCycleService(
         repository.findExisting(cycleId, accountId, currency)?.let {
             log.debugf(
                 "billing cycle %s account %s currency %s already assessed — returning existing (idempotent replay)",
-                cycleId,
-                accountId,
-                currency,
+                cycleId.sanitizeForLog(),
+                accountId.sanitizeForLog(),
+                currency.sanitizeForLog(),
             )
             return it
         }
@@ -65,12 +65,17 @@ class BillingCycleService(
                     log.errorf(
                         ex,
                         "billing cycle %s account %s currency %s failed — continuing with the rest of the batch",
-                        cycleId,
-                        accountId,
-                        currency,
+                        cycleId.sanitizeForLog(),
+                        accountId.sanitizeForLog(),
+                        currency.sanitizeForLog(),
                     )
                 }
         }
         return processed
     }
 }
+
+// CodeQL java/log-injection: cycleId/accountId/currency ultimately trace back to caller input
+// (the REST POST /fees/post endpoint and the scheduled cycle trigger's account list). Strip
+// CR/LF so an attacker-controlled value can't forge additional log lines (log forging, CWE-117).
+private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')

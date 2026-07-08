@@ -64,8 +64,18 @@ dependencies {
 // different: build-logic declares io.quarkus:io.quarkus.gradle.plugin as a plain
 // `implementation` dependency of *this* project (see above), so build-logic's own
 // resolutionStrategy applies directly to it.
+//
+// jackson-databind/jackson-core: gradle/verification-metadata.xml still carries a real
+// (jar-backed, not pom-only stub) 2.21.2 resolution alongside the fleet-wide 2.21.5 floor
+// from openbank.dependency-vulnerability-pins — every service and openbank-simulation
+// already apply that plugin, so the lingering 2.21.2 is most likely the same class of gap
+// as plexus-utils above: the Quarkus Gradle plugin's own devtools/registry-client tooling
+// pulls Jackson for its own use, on a classpath a service's force() cannot reach. Floor it
+// here too on the off chance that's the source; harmless no-op otherwise.
 configurations.all {
     resolutionStrategy {
         force("org.codehaus.plexus:plexus-utils:4.0.3")
+        force("com.fasterxml.jackson.core:jackson-databind:2.21.5")
+        force("com.fasterxml.jackson.core:jackson-core:2.21.5")
     }
 }
