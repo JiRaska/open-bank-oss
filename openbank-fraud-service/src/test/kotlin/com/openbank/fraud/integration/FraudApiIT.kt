@@ -50,7 +50,7 @@ class FraudApiIT {
         } Then {
             statusCode(200)
             body("verdict", equalTo("ALLOW"))
-            body("ruleVersion", equalTo("v3"))
+            body("ruleVersion", equalTo("v4"))
             body("score", equalTo(0))
         }
     }

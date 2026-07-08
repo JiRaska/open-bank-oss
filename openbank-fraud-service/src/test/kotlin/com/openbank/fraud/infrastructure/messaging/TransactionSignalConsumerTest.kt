@@ -7,6 +7,7 @@ package com.openbank.fraud.infrastructure.messaging
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.kotlinModule
+import com.openbank.fraud.application.port.out.PayeeHistoryRepository
 import com.openbank.fraud.application.port.out.VelocityAggregateRepository
 import com.openbank.fraud.application.usecase.FeatureOnlineUpdater
 import io.mockk.coEvery
@@ -16,18 +17,23 @@ import io.mockk.slot
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Clock
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 
 class TransactionSignalConsumerTest {
 
     private val velocityRepo = mockk<VelocityAggregateRepository>(relaxed = true)
+    private val payeeHistoryRepo = mockk<PayeeHistoryRepository>(relaxed = true)
     private val featureUpdater = mockk<FeatureOnlineUpdater>(relaxed = true)
     private val objectMapper = ObjectMapper()
         .registerModule(kotlinModule())
         .registerModule(JavaTimeModule())
+    private val fixedClock = Clock.fixed(Instant.parse("2026-07-09T00:00:00Z"), ZoneOffset.UTC)
 
-    private val consumer = TransactionSignalConsumer(velocityRepo, featureUpdater, objectMapper)
+    private val consumer =
+        TransactionSignalConsumer(velocityRepo, payeeHistoryRepo, featureUpdater, objectMapper, fixedClock)
 
     @Test
     fun `happy path records velocity for valid signal`() {
@@ -123,5 +129,84 @@ class TransactionSignalConsumerTest {
 
         // Must not throw
         consumer.onTransactionInitiated(payload)
+    }
+
+    // ── Payee history (ADR-0084 §3 v4) ────────────────────────────────────────
+
+    @Test
+    fun `records payee history when targetAccountId is present`() {
+        val accountId = UUID.randomUUID()
+        val targetAccountId = UUID.randomUUID()
+        val transactionId = UUID.randomUUID()
+        val occurredAt = Instant.parse("2026-06-29T10:30:00Z")
+        val payload = """
+            {
+              "aggregateId": "$transactionId",
+              "sourceAccountId": "$accountId",
+              "targetAccountId": "$targetAccountId",
+              "amount": "250.00",
+              "currencyCode": "CZK",
+              "occurredAt": "$occurredAt"
+            }
+        """.trimIndent()
+
+        consumer.onTransactionInitiated(payload)
+
+        coVerify(exactly = 1) {
+            payeeHistoryRepo.recordPayment(accountId, targetAccountId.toString(), transactionId, occurredAt)
+        }
+    }
+
+    @Test
+    fun `falls back to the injected clock when occurredAt is absent for payee history`() {
+        val accountId = UUID.randomUUID()
+        val targetAccountId = UUID.randomUUID()
+        val payload = """
+            {
+              "sourceAccountId": "$accountId",
+              "targetAccountId": "$targetAccountId",
+              "amount": "250.00",
+              "currencyCode": "CZK"
+            }
+        """.trimIndent()
+
+        consumer.onTransactionInitiated(payload)
+
+        coVerify(exactly = 1) {
+            payeeHistoryRepo.recordPayment(accountId, targetAccountId.toString(), null, fixedClock.instant())
+        }
+    }
+
+    @Test
+    fun `skips payee history when targetAccountId is absent`() {
+        val accountId = UUID.randomUUID()
+        val payload = """{"sourceAccountId": "$accountId", "amount": "100.00", "currencyCode": "EUR"}"""
+
+        consumer.onTransactionInitiated(payload)
+
+        coVerify(exactly = 0) { payeeHistoryRepo.recordPayment(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `payee history exception is caught and does not propagate`() {
+        val accountId = UUID.randomUUID()
+        val targetAccountId = UUID.randomUUID()
+        coEvery {
+            payeeHistoryRepo.recordPayment(any(), any(), any(), any())
+        } throws RuntimeException("DB down")
+
+        val payload = """
+            {
+              "sourceAccountId": "$accountId",
+              "targetAccountId": "$targetAccountId",
+              "amount": "100.00",
+              "currencyCode": "CZK"
+            }
+        """.trimIndent()
+
+        // Must not throw, and must not prevent the velocity path from running
+        consumer.onTransactionInitiated(payload)
+
+        coVerify(exactly = 1) { velocityRepo.recordTransaction(accountId, BigDecimal("100.00"), "CZK") }
     }
 }

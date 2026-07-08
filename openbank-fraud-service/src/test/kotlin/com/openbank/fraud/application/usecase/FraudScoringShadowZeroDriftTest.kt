@@ -7,6 +7,7 @@ package com.openbank.fraud.application.usecase
 import com.openbank.fraud.application.port.out.FraudMetricsPort
 import com.openbank.fraud.application.port.out.FraudScoreRepository
 import com.openbank.fraud.application.port.out.MlModelPort
+import com.openbank.fraud.application.port.out.PayeeHistoryRepository
 import com.openbank.fraud.application.port.out.VelocityAggregateRepository
 import com.openbank.fraud.domain.model.ScoreRequest
 import com.openbank.fraud.domain.rules.FraudRuleEngine
@@ -42,9 +43,24 @@ class FraudScoringShadowZeroDriftTest {
         val repository = mockk<FraudScoreRepository>()
         val metrics = mockk<FraudMetricsPort>(relaxed = true)
         val velocityRepo = mockk<VelocityAggregateRepository>()
+        val payeeHistoryRepo = mockk<PayeeHistoryRepository>()
         coEvery { repository.save(any(), any()) } returns UUID.randomUUID()
         coEvery { velocityRepo.findAggregate(any(), any(), any()) } returns null
-        return FraudScoringService(repository, metrics, velocityRepo, featureStore, mlModel, clock, shadowEnabled)
+        // Stubbed identically for both shadowOn/shadowOff service() calls in every test below, so
+        // isNewPayee enrichment is consistent across both sides of each zero-drift comparison — this
+        // suite is about shadow-plane zero-drift, not the new-payee rule itself (covered separately
+        // in FraudRuleEngineTest / FraudScoringServiceTest).
+        coEvery { payeeHistoryRepo.findHistory(any(), any()) } returns null
+        return FraudScoringService(
+            repository,
+            metrics,
+            velocityRepo,
+            payeeHistoryRepo,
+            featureStore,
+            mlModel,
+            clock,
+            shadowEnabled,
+        )
     }
 
     private fun requests(): List<ScoreRequest> = buildList {

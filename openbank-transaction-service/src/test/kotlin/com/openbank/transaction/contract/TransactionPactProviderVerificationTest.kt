@@ -103,7 +103,9 @@ class TransactionPactProviderVerificationTest {
             referenceNumber = "TXN-PACT-001",
             type = TransactionType.DEBIT,
             sourceAccountId = UUID.fromString("22222222-2222-2222-2222-222222222222"),
-            targetAccountId = null,
+            // ADR-0084 §3 v4: non-null so the fraud-service consumer pact (which now asserts
+            // targetAccountId is a present UUID) verifies against a realistic payload.
+            targetAccountId = UUID.fromString("33333333-3333-3333-3333-333333333333"),
             amount = BigDecimal("250.00"),
             currencyCode = "CZK",
             rail = PaymentRail.INTERNAL,

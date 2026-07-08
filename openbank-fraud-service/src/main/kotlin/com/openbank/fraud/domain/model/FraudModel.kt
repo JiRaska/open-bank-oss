@@ -44,6 +44,13 @@ data class ScoreRequest(
     // surfaces it to the rule engine — no new migration). Zero when no aggregate exists yet (no
     // signal has arrived) — same silent-on-zero contract as the counters above.
     val velocityH1TotalAmount: BigDecimal = BigDecimal.ZERO,
+    // ADR-0084 §3 v4: whether counterpartyId has never been paid from accountId before, read from
+    // the new payee_history signal (V3__create_payee_history.sql / PayeeHistoryRepository) —
+    // server-enriched the same way the velocity fields above are, never accepted from the caller
+    // (FraudScoringService.enrichWithPayeeHistory). Defaults false (== "established payee") when no
+    // accountId/counterpartyId pair is present to look up, matching the fail-silent-until-enriched
+    // contract the velocity fields already established.
+    val isNewPayee: Boolean = false,
 )
 
 /**
