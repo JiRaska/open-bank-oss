@@ -1,9 +1,9 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-07-07T22:52:40.447Z",
+  "generatedAt": "2026-07-08T04:07:46.024Z",
   "counts": {
-    "namespaces": 55,
+    "namespaces": 56,
     "networkPolicies": 74,
     "externalSecrets": 108,
     "clusterPolicies": 4
@@ -167,6 +167,12 @@
       "name": "finops-agent",
       "group": "domain",
       "role": "finops-agent",
+      "declared": true
+    },
+    {
+      "name": "finrep",
+      "group": "domain",
+      "role": "finrep",
       "declared": true
     },
     {
@@ -400,7 +406,7 @@
       "analogy": "Zamčené dveře mezi patry — bez propustky se mezi odděleními neprojde.",
       "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 74 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
       "controls": [
-        "NetworkPolicy (74 / 55)",
+        "NetworkPolicy (74 / 56)",
         "per-namespace deny-by-default (cíl)"
       ],
       "adr": [
@@ -558,13 +564,13 @@
     {
       "item": "Namespace segmentace",
       "plan": "Doménová izolace, 1 ns / doména",
-      "reality": "55 namespaců",
+      "reality": "56 namespaců",
       "status": "live"
     },
     {
       "item": "NetworkPolicy (east-west)",
       "plan": "deny-by-default v každém ns",
-      "reality": "74 / 55 ns má NetworkPolicy → většina provozu otevřená",
+      "reality": "74 / 56 ns má NetworkPolicy → většina provozu otevřená",
       "status": "planned"
     },
     {
