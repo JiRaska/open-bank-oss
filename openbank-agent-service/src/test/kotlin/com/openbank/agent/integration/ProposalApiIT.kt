@@ -5,11 +5,13 @@
 
 package com.openbank.agent.integration
 
+import com.openbank.agent.application.ProposalService
 import com.openbank.agent.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
+import jakarta.inject.Inject
 import org.hamcrest.Matchers.anyOf
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.`is`
@@ -25,6 +27,9 @@ import org.junit.jupiter.api.Test
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
 class ProposalApiIT {
+
+    @Inject
+    lateinit var service: ProposalService
 
     @Test
     @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
@@ -42,5 +47,34 @@ class ProposalApiIT {
             .`when`().get("/api/v1/proposals?state=pending")
             .then()
             .statusCode(anyOf(equalTo(401), equalTo(403)))
+    }
+
+    @Test
+    @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
+    fun `GET proposals with agentId only returns that agent's own proposals`() {
+        service.create(
+            title = "finops proposal",
+            rationale = "r",
+            suggestedAction = "a",
+            proposedBy = "finops-agent-itest",
+            modelId = null,
+            correlationId = null,
+        )
+        service.create(
+            title = "devops proposal",
+            rationale = "r",
+            suggestedAction = "a",
+            proposedBy = "devops-agent-itest",
+            modelId = null,
+            correlationId = null,
+        )
+
+        given()
+            .`when`().get("/api/v1/proposals?state=all&agentId=finops-agent-itest")
+            .then()
+            .statusCode(200)
+            .body("size()", `is`(1))
+            .body("[0].proposedBy", `is`("finops-agent-itest"))
+            .body("[0].title", `is`("finops proposal"))
     }
 }
