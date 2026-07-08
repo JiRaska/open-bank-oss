@@ -39,7 +39,10 @@ class AccountIdempotencyRepository(private val clock: Clock) :
 
 @ApplicationScoped
 class AccountRepositoryImpl(
-    private val clock: Clock,
+    // internal, not private: the file-scope versionMatchedUpdate extension below (#465,
+    // outside the class body) stamps updatedAt from this clock — Kotlin's `private` on a
+    // class member is invisible even to same-file top-level declarations.
+    internal val clock: Clock,
     private val idempotencyRepository: AccountIdempotencyRepository,
     private val pocketRepository: CurrencyPocketRepositoryImpl,
 ) : AccountRepository,
