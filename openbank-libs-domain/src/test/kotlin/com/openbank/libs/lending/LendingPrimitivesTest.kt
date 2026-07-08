@@ -157,6 +157,72 @@ class LendingPrimitivesTest {
         }.isInstanceOf(IllegalArgumentException::class.java)
     }
 
+    // --- Collateral-adjusted LGD (ADR-0028 D1, first increment) ----------------------------------
+
+    @Test
+    fun `zero collateral leaves LGD unchanged`() {
+        val lgd = Ifrs9.collateralAdjustedLgd(
+            lgd = BigDecimal("0.45"),
+            haircutAdjustedCollateralValue = BigDecimal.ZERO,
+            exposureAtDefault = BigDecimal("10000.00"),
+        )
+        assertThat(lgd).isEqualByComparingTo(BigDecimal("0.45"))
+    }
+
+    @Test
+    fun `partial collateral cover reduces LGD proportionally to the exposure`() {
+        // Coverage ratio = 4000 / 10000 = 0.40 -> LGD 0.45 - 0.40 = 0.05
+        val lgd = Ifrs9.collateralAdjustedLgd(
+            lgd = BigDecimal("0.45"),
+            haircutAdjustedCollateralValue = BigDecimal("4000.00"),
+            exposureAtDefault = BigDecimal("10000.00"),
+        )
+        assertThat(lgd).isEqualByComparingTo(BigDecimal("0.05"))
+    }
+
+    @Test
+    fun `over-collateralization floors LGD at zero, never negative`() {
+        val lgd = Ifrs9.collateralAdjustedLgd(
+            lgd = BigDecimal("0.45"),
+            haircutAdjustedCollateralValue = BigDecimal("50000.00"),
+            exposureAtDefault = BigDecimal("10000.00"),
+        )
+        assertThat(lgd.signum()).isGreaterThanOrEqualTo(0)
+        assertThat(lgd).isEqualByComparingTo(BigDecimal.ZERO)
+    }
+
+    @Test
+    fun `collateral cover never pushes LGD above its unsecured input value`() {
+        // A pathological coverage ratio would only ever subtract; the result is clamped to [0, lgd].
+        val lgd = Ifrs9.collateralAdjustedLgd(
+            lgd = BigDecimal("0.45"),
+            haircutAdjustedCollateralValue = BigDecimal.ZERO,
+            exposureAtDefault = BigDecimal("10000.00"),
+        )
+        assertThat(lgd).isLessThanOrEqualTo(BigDecimal("0.45"))
+    }
+
+    @Test
+    fun `a zero exposure returns LGD unchanged rather than dividing by zero`() {
+        val lgd = Ifrs9.collateralAdjustedLgd(
+            lgd = BigDecimal("0.45"),
+            haircutAdjustedCollateralValue = BigDecimal("1000.00"),
+            exposureAtDefault = BigDecimal.ZERO,
+        )
+        assertThat(lgd).isEqualByComparingTo(BigDecimal("0.45"))
+    }
+
+    @Test
+    fun `collateral-adjusted LGD rejects an out-of-range lgd or a negative collateral value`() {
+        assertThatThrownBy {
+            Ifrs9.collateralAdjustedLgd(BigDecimal("1.5"), BigDecimal.ZERO, BigDecimal("100.00"))
+        }.isInstanceOf(IllegalArgumentException::class.java)
+
+        assertThatThrownBy {
+            Ifrs9.collateralAdjustedLgd(BigDecimal("0.45"), BigDecimal("-1.00"), BigDecimal("100.00"))
+        }.isInstanceOf(IllegalArgumentException::class.java)
+    }
+
     // --- Delinquency ----------------------------------------------------------------------------
 
     @Test
