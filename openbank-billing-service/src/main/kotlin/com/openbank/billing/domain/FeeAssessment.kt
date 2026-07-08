@@ -36,6 +36,8 @@ data class AssessedFee(
     val chargedAmount: BigDecimal,
     val waived: Boolean,
     val reason: WaiveReason,
+    val postingStatus: PostingStatus = PostingStatus.NOT_APPLICABLE,
+    val journalId: java.util.UUID? = null,
 ) {
     val idempotencyKey: String get() = "fee-$cycleId-$accountId-$feeId-$currency"
 }
@@ -46,12 +48,23 @@ data class AssessedFee(
  */
 data class FeeJournalCommand(
     val idempotencyKey: String,
+    val cycleId: String,
     val accountId: String,
     val feeId: String,
     val amount: BigDecimal,
     val currency: String,
     val description: String,
 )
+
+/**
+ * The lifecycle of one [AssessedFee]'s ledger posting (ADR-0143 phase 2c). A waived or
+ * zero-amount fee never posts a journal and stays [NOT_APPLICABLE]. A chargeable fee starts
+ * [PENDING] the moment its outbox row commits atomically with the assessment (ADR-0143 step 2),
+ * moves to [POSTED] once the outbox dispatcher's ledger call succeeds (journalId recorded), or
+ * [FAILED] once the outbox row is exhausted (terminal DEAD, `OutboxFailurePolicy`) without ever
+ * reaching the ledger — an operator-visible signal distinct from "still in flight".
+ */
+enum class PostingStatus { NOT_APPLICABLE, PENDING, POSTED, FAILED }
 
 /**
  * The result of assessing all of an account's fees for a cycle. [skipped] is set (with
@@ -72,6 +85,7 @@ data class BillingAssessment(
         .map { fee ->
             FeeJournalCommand(
                 idempotencyKey = fee.idempotencyKey,
+                cycleId = fee.cycleId,
                 accountId = fee.accountId,
                 feeId = fee.feeId,
                 amount = fee.chargedAmount,
