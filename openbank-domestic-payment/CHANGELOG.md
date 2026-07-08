@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.8.10...domestic-payment-v0.9.0) (2026-07-08)
+
+
+### Features
+
+* **domestic-payment:** wire four-eyes enforcement mechanism (ADR-0155) ([#560](https://github.com/JiRaska/open-bank-oss/issues/560)) ([1f5e900](https://github.com/JiRaska/open-bank-oss/commit/1f5e9003ca5ee7c26d75f8d174daf4c5fc0dce86)), closes [#413](https://github.com/JiRaska/open-bank-oss/issues/413)
+
 ## [0.8.10](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.8.9...domestic-payment-v0.8.10) (2026-07-07)
 
 
