@@ -25,11 +25,24 @@ module "eks" {
   admin_access_principal_arns = var.admin_access_principal_arns
 
   # Bootstrap pool: small on-demand Graviton, just enough for system pods +
-  # Karpenter controller + ArgoCD. Karpenter provisions everything else.
-  # Downsized t4g.large → t4g.medium (FinOps 2026-06-05): bootstrap nodes run
-  # at <16% CPU / <80% RAM. t4g.medium (2 vCPU / 4 GB) fits all system pods;
-  # saves ~$22/month (2× on-demand delta: $0.0336 vs $0.0672/h per node).
-  node_instance_types = ["t4g.medium"]
+  # Karpenter controller + ArgoCD. Karpenter provisions everything else; this
+  # pool stays on-demand deliberately (Karpenter needs a stable node to run on
+  # before it can provision anything else — it can't provision its own home).
+  #
+  # t4g.medium → c7g.large (FinOps issue #445, 2026-07-08): the 2026-06-05
+  # downsize to t4g.medium (<16% CPU at the time) has since regressed — fleet
+  # growth pushed sustained CPU to ~40% average with bursts to 95-98%
+  # (CloudWatch, 14-day window) and CPUCreditBalance is permanently at 0,
+  # meaning the node runs entirely on paid CPUSurplusCreditBalance (June's
+  # ~$28/mo `CPUCredits:t4g` Cost Explorer line). A burstable type is the
+  # wrong instance family for a node that is chronically above its baseline —
+  # switch to c7g.large: same 2 vCPU as t4g.medium but non-burstable
+  # (compute-optimized, no credit mechanism at all), so the CPUCredits line
+  # goes to zero. BoxUsage rises (~$0.0344/h -> ~$0.0774/h per node) but the
+  # $28/mo CPUCredits burn (100% avoidable, was pure inefficiency tax) is
+  # eliminated outright, and headroom removes the risk of kubelet/CDI thrash
+  # under load spikes on the node running Karpenter's own controller.
+  node_instance_types = ["c7g.large"]
   node_desired_size   = 2
   node_min_size       = 2
   node_max_size       = 4
