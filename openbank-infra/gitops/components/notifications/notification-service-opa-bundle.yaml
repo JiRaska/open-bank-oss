@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: notification-service
     app.kubernetes.io/part-of: notifications
   annotations:
-    openbank.tech/policy-checksum: "66a6d800720a64a7"
+    openbank.tech/policy-checksum: "c65803d619d66641"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -727,6 +727,7 @@ data:
       - openbank-fraud-service                # ADR-0084: first executable landed (Phase 1 skeleton)
       - openbank-billing-service              # ADR-0143: fee posting to the ledger (Phase 2b skeleton)
       - openbank-settlement-service           # issue #307: debit->credit->ledger-booking saga (ADR-0101)
+      - openbank-sanctions-service             # ADR-0116: real feed screening; already required by four_eyes below (issue #554)
     review:
       default_approvals: 1
       money_path_approvals: 2               # CONTRIBUTING.md + branch protection

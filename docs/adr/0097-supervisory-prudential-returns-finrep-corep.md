@@ -7,18 +7,32 @@ Delivery-Status: Partial
 Phase 1 implemented: openbank-finrep-service derives F01.01+F02.00 from ledger trial balance. Phase 2 (COREP+XBRL transmission) tracked separately.
 Author(s): @JiRaska
 
-**Delivery note (updated 2026-07-07):**
+**Delivery note (updated 2026-07-08):**
 - **Phase 1 (FINREP core) — deployment** — ✅ Shipped: `openbank-finrep-service` is registered with ArgoCD
   (`openbank-infra/gitops/apps/finrep.yaml`) alongside its existing Deployment/Service/Namespace/NetworkPolicy
   manifests under `openbank-infra/gitops/components/finrep/` — the service now actually syncs instead of
   sitting code-only and undeployed.
-- **Phase 1 (FINREP core) — report logic** — 🟡 Partial: `F0101Mapper`/`F0200Mapper` compute F 01.01
-  (balance sheet) and F 02.00 (P&L) cells from `GET /api/v1/ledger/trial-balance`, a **live/point-in-time**
-  ledger query — not yet the frozen, attested `ClosedPeriod` this ADR calls for (ADR-0096's entity-level
-  close is not yet consumed here). The statements tie-out check and the ADR-0096 wiring remain open work.
-- **Phase 2 (COREP)** — ⬜ Deferred, not started: no C 01.00 own-funds/capital-adequacy mapper, no
-  risk-weighting/capital-instrument data model, no EBA XBRL/DPM taxonomy mapping, and no ČNB transmission
-  adapter exist in the codebase yet. This remains explicitly out of scope until Phase 2 is picked up.
+- **Phase 1 (FINREP core) — report logic** — 🟡 Partial, unchanged by this update: `F0101Mapper`/`F0200Mapper`
+  compute F 01.01 (balance sheet) and F 02.00 (P&L) cells from `GET /api/v1/ledger/trial-balance`, a
+  **live/point-in-time** ledger query — not yet the frozen, attested `ClosedPeriod` this ADR calls for
+  (ADR-0096's entity-level close is not yet consumed here). The statements tie-out check and the ADR-0096
+  wiring remain open work.
+- **Phase 2 (COREP)** — 🟡 First increment landed, most of the phase still not started: `openbank-finrep-service`
+  now has a `C0100Mapper` + `GET /api/v1/corep/templates/{templateId}` producing **C 01.00 (Own Funds)** as
+  structured Kotlin data (`CorepTemplate`/`CorepCell`), same live-trial-balance source as Phase 1 (same
+  ADR-0096 gap applies). Own-funds template selection rationale: C 01.00 is the template ADR-0097 names as
+  the Phase 2 starting point, and no *other* real COREP template turns out to be free of the same
+  capital/risk-weighting dependency — geographical-breakdown and ALMM/maturity-ladder templates were
+  evaluated and rejected for the same reason one layer down (exposure-class/RW data, or contractual
+  maturity-bucket data, that this platform also does not have). **Capital-structure GL data does not exist
+  in `openbank-ledger-service` today** (no share capital, share premium, retained earnings, or reserve
+  accounts are seeded anywhere; `GlAccountType.EQUITY` is a valid enum value but is never populated by any
+  Flyway migration) — every own-funds row is therefore reported as an **explicit, flagged zero**
+  (`CorepCell.isDataGap = true` with a `gapReason`), never a silently omitted row or a guessed value. The
+  mapper picks up real EQUITY-typed lines automatically (and clears the gap flag) the day the ledger gains
+  real capital accounts, with no mapper code change needed. **Still not built, at all:** every other COREP
+  template (C 02.00 requirements, C 05.01 transitional provisions, large exposures, leverage ratio, etc.),
+  EBA XBRL/DPM taxonomy output, and the ČNB transmission channel. Tracked in issue #605.
 
 Depends on: ADR-0096 (entity-level statutory close — the attested source of truth).
 Relates to: ADR-0037 (AnaCredit render-only — the reporting-service template + its transmission gap),
