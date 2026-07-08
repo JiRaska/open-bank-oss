@@ -51,12 +51,48 @@ to a beneficiary — a primary fraud target.
 | **D**oS | Initiation flooding | Rate limit; idempotency |
 | **E**oP | Viewer initiates payment | Distinct `ROLE_PAYMENTS`; deny-by-default |
 
+## 4a. Four-eyes approval (ADR-0155) — STRIDE supplement
+
+`PATCH /status` (`domestic-payment.transitionStatus`) is a money-path action OPA (`rest.rego`)
+flags `four_eyes_required`. New endpoint `PATCH /api/v1/domestic-payments/approvals/{id}` lets a
+DIFFERENT operator decide the resulting `PendingApproval`; the maker retries `PATCH /status` with
+an `X-Approval-Id` header. **`authz.four-eyes.enforce` stays `false` in this PR** — the
+`ApprovalStore`/endpoint are wired and tested, but blocking is a deliberate follow-up flip,
+not bundled here (see ADR-0155).
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **S**poofing | A caller other than an operator decides an approval | `@RolesAllowed("ROLE_OPERATOR","ROLE_ADMIN","ROLE_PAYMENTS")` + OPA `@Authorize(action="domestic-payment.approval.decide")` on the decide endpoint |
+| **E**oP | The maker approves their own request (self-approval defeats maker-checker) | `ApprovalStore.decide` throws `SelfApprovalNotAllowedException` (mapped to 403) when `decidedBy == makerId` — enforced in the domain port itself, not just the REST layer, and `makerId`/`decidedBy` both resolve via the same `.principal.name` extraction (interceptor vs. `SecurityIdentity`) so the comparison can't silently mismatch for the same real person |
+| **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different request | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
+| **R**epudiation | No record of who approved a gated transition | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see ADR-0155 Negative consequences: not yet a permanent audit trail) |
+| **I**nfo disclosure | Approval id enumeration reveals payment/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random UUID (`RedisApprovalStore`, not sequential) |
+| **D**oS | Flooding `PATCH /status` to exhaust Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
+
+**DFD update:** adds `Operator (checker) → PATCH /api/v1/domestic-payments/approvals/{id} → Redis (approval:*)`
+alongside the existing `PATCH /status` edge; the maker's retry reuses the existing DFD edge.
+**Risk class:** integrity (segregation of duties) + confidentiality (approval record scope).
+**Rollback:** `authz.four-eyes.enforce=false` (default) — the endpoint and store exist but do
+not change any existing request's outcome until explicitly flipped.
+
 ## 5. Residual risks / assumptions
 
 - **Idempotency-key required** — duplicate payment on retry must be rejected.
 - SCA (sca-service) must gate customer-initiated transfers.
+- **Four-eyes `PendingApproval` records are TTL-bounded (Redis), not a permanent audit
+  trail** (ADR-0155) — a durable-audit requirement for "who approved what, forever" would
+  need an additional store; not implemented in this PR.
 
 ## 6. Change log
+
+- **2026-07-08** — ADR-0155 rollout (issue #413): wired the four-eyes maker-checker mechanism
+  piloted on sepa-payment. New `ApprovalConfig` (`ApprovalStore` via `RedisApprovalStore`) and
+  new checker-facing endpoint `PATCH /api/v1/domestic-payments/approvals/{id}`
+  (`@RolesAllowed("ROLE_OPERATOR","ROLE_ADMIN","ROLE_PAYMENTS")`,
+  `@Authorize(action="domestic-payment.approval.decide")`). Two new exception mappers
+  (`SelfApprovalNotAllowedMapper` → 403, `InvalidApprovalStateMapper` → 409). New config key
+  `authz.four-eyes.enforce` (default `false`, no behavior change — see §4a). No DB schema
+  change; rollback = `authz.four-eyes.enforce=false` (already the default) or revert the commit.
 
 - **2026-06-11** — Added the `openbank.outbox.backlog` domain-metric gauge (PENDING+FAILED outbox
   rows) tagged only by `service="domestic"` (ADR-0077 / ADR-0079), with a `countProcessable()` port
