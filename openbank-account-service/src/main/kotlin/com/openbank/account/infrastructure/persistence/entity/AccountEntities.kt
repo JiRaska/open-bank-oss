@@ -9,7 +9,6 @@ import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
 import jakarta.persistence.Index
-import jakarta.persistence.PreUpdate
 import jakarta.persistence.Table
 import jakarta.persistence.Version
 import java.time.Instant
@@ -83,16 +82,12 @@ class AccountEntity : PanacheEntityBase {
     @Column(name = "goal_target_date")
     var goalTargetDate: LocalDate? = null
 
+    /** Stamped from the injected [java.time.Clock] in the repository layer (ADR-0100 — no wall-clock reads here). */
     @Column(name = "created_at", nullable = false, updatable = false)
     var createdAt: Instant = Instant.EPOCH
 
     @Column(name = "updated_at", nullable = false)
     var updatedAt: Instant = Instant.EPOCH
-
-    @PreUpdate
-    fun onUpdate() {
-        updatedAt = Instant.EPOCH
-    }
 }
 
 @Entity
@@ -129,16 +124,12 @@ class AccountPocketEntity : PanacheEntityBase {
     @Column(name = "version", nullable = false)
     var version: Long = 0
 
+    /** Stamped from the injected [java.time.Clock] in the repository layer (ADR-0100 — no wall-clock reads here). */
     @Column(name = "created_at", nullable = false, updatable = false)
     var createdAt: Instant = Instant.EPOCH
 
     @Column(name = "updated_at", nullable = false)
     var updatedAt: Instant = Instant.EPOCH
-
-    @PreUpdate
-    fun onUpdate() {
-        updatedAt = Instant.EPOCH
-    }
 }
 
 /**

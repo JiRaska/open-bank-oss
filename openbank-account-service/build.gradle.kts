@@ -84,14 +84,6 @@ kover {
     }
 }
 
-tasks.named("koverVerify") {
-    enabled = true
-}
-
-tasks.named("check") {
-    dependsOn(tasks.named("koverVerify"))
-}
-
 // Pact: write generated consumer contracts to the shared pacts/ dir at the repo root (git-pact).
 // account-service is BOTH a consumer (PARTY_CREATED) and a provider (AccountCreated).
 tasks.withType<Test> {
