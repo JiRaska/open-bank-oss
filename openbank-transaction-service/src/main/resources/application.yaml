@@ -176,6 +176,10 @@ openbank:
       enabled: false
   openbank:
     transaction:
+      worker:
+        # The in-process TestWorkflowEnvironment registers its own deterministic no-op worker;
+        # a second (real) worker on the same queue makes dispatch a lottery (#465).
+        enabled: false
       orchestration:
         temporal:
           server-url: localhost:7233
