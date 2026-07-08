@@ -30,6 +30,12 @@ data class LedgerPosting(val reference: String, val partyId: UUID, val amount: M
  * receivable when cash arrives. [INTEREST] is the direct cash-basis recognition used only when an
  * installment is repaid *before* it has been accrued (early/on-time payment) — so interest income is
  * always recognized exactly once.
+ *
+ * [PROVISIONING] books the **delta** in IFRS 9 expected credit loss between one scheduled provisioning
+ * cycle and the last one for the same loan (ADR-0028 Phase 3) — never the full ECL again. An increase
+ * (more provision required) debits the loss-provision expense and credits the loan-loss allowance (a
+ * contra-asset); a decrease (partial release) is the reverse. The loan principal GL is never touched by
+ * a provisioning entry — provisioning is an impairment overlay, not a change to the recognized asset.
  */
 enum class PostingKind {
     DISBURSEMENT,
@@ -38,6 +44,7 @@ enum class PostingKind {
     INTEREST_ACCRUAL,
     INTEREST_SETTLEMENT,
     WRITE_OFF,
+    PROVISIONING,
 }
 
 /** Posts loan cash events to the ledger (via the outbox in the real adapter). */

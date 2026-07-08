@@ -4,10 +4,13 @@ Date: 2026-05-30
 Status: Accepted
 Delivery-Status: Partial
 
-**Delivery note (updated 2026-07-01):**
+**Delivery note (updated 2026-07-07):**
 - **Phase 0 (domain primitives in libs)** — ✅ Shipped: `Amortization` (three methods: annuity, equal-principal, bullet), `Ifrs9` (three-stage ECL), `Delinquency` (DPD, CRR Art. 178 90-day trigger), typesafe identifiers (`LoanApplicationId`, `LoanId`, `CollateralId`); `LendingPrimitivesTest` green.
 - **Phase 2 (service + ledger integration)** — ✅ Shipped: `openbank-lending-service` with origination four-eyes flow (maker/checker/disburser), `RestLedgerPostingAdapter`, scheduled servicing posting, interest accrual scheduler, and write-off (`WriteOffLoanUseCase`).
-- **Phase 3 (provisioning + AnaCredit/FINREP feeds)** — ⬜ Pending: IFRS 9 staging read-model, ECL batch, AnaCredit/FINREP F-18/F-12 field-level mapping; deferred until a live loan book exists (tracked in ADR-0097).
+- **Phase 3 (provisioning + AnaCredit/FINREP feeds)** — 🟡 Partial, first increment shipped:
+  - ✅ **Shipped:** IFRS 9 stage bucketing (DPD-based, `Ifrs9.stage`) and a simplified ECL (EAD × flat-PD-by-stage × flat-LGD) computed over the existing repayment-schedule data (no new column needed for DPD); a persisted per-loan-per-period history (`loan_provisioning`, ADR migration V4); a scheduled monthly provisioning cycle (`ProvisioningCycleScheduler`, mirroring `InterestAccrualScheduler`'s Clock/`@Scheduled` structure) that re-buckets every ACTIVE loan and posts only the **delta** ECL versus the prior period to the ledger via the existing `RestLedgerPostingAdapter`/`LendingJournalFactory` (new `PROVISIONING` `PostingKind`, new `loan-loss-allowance` GL account); idempotent per `(loanId, period)`.
+  - ⚠️ **Explicitly not production-grade:** the PD/LGD are flat, conservative, non-calibrated placeholder constants (`RiskParameterSource.DEFAULT_PD_12M/DEFAULT_PD_LIFETIME/DEFAULT_LGD` — unchanged from Phase 1/2, not newly introduced here), not a behavioral/statistical PD model; no macroeconomic overlay or forward-looking scenario weighting; no collateral-adjusted LGD (collateral valuation is tracked for AnaCredit protection categories but not wired into LGD). Actuarial/risk-team calibration is required before any production use — see `06-compliance.md`.
+  - ⬜ **Still pending:** AnaCredit/FINREP F-18/F-12 field-level mapping and the cross-service wiring to `openbank-anacredit-service` (which today has no stage/DPD logic of its own — a natural, small follow-up: lending could publish a `loan.provisioned`/stage-changed outbox event for anacredit to consume, but that integration is not built here); collateral valuation is a separate, not-yet-built capability (per this ADR's original scope); full behavioral PD models remain deferred until a live loan book with real loss history exists (tracked in ADR-0097).
 
 ## Context
 
@@ -201,10 +204,20 @@ change, not a domain change.
   by an idempotent `interest_accrued` flag on the installment (a `markAccrued` mutation guarded
   `WHERE interest_accrued = false`, plus a partial index for the accruable scan). Zero-interest legs are
   flagged without a ledger posting. Each accrual emits a `loan.interest_accrued` outbox event.
-- **Phase 3 — provisioning + AnaCredit/FINREP feeds. ⬜.** Scheduled IFRS 9 staging/ECL pass over the
-  live book writing the per-exposure stage + accumulated impairment, exposed (role-gated, ADR-0026
-  shape) as the source for AnaCredit and FINREP F 18/F 12. This is the payoff that closes the
-  downstream reporting/ICAAP gaps — but only after the book exists and posts cleanly.
+- **Phase 3 — provisioning + AnaCredit/FINREP feeds. 🟡 first increment DONE, feeds pending.** The
+  scheduled IFRS 9 staging/ECL pass over the live book is **built**: `ProvisioningCycleScheduler` (mirrors
+  `InterestAccrualScheduler`'s Clock-injected `@Scheduled` structure) re-buckets every ACTIVE loan monthly
+  using the existing `Ifrs9`/`Delinquency` primitives over the existing repayment-schedule data (DPD
+  needed no new column), persists the per-exposure stage + ECL to a new `loan_provisioning` history table
+  (one row per loan per `yyyy-MM` period — both the delta baseline and the idempotency guard), and posts
+  only the **delta** ECL versus the prior period as a new `PROVISIONING` journal (DEBIT loan-loss-expense /
+  CREDIT loan-loss-allowance on an increase, reversed on a release) via the existing
+  `RestLedgerPostingAdapter` + an extended `LendingJournalFactory` — no second ledger client. PD/LGD remain
+  the flat, conservative placeholder constants from Phase 1 (`RiskParameterSource`), **explicitly not
+  recalibrated or made production-grade by this increment** — see the Delivery note and `06-compliance.md`
+  for the caveat. **Not yet built:** AnaCredit/FINREP F 18/F 12 field-level mapping and the cross-service
+  event wiring to `openbank-anacredit-service` (which has no stage/DPD logic of its own today) — this is
+  the remaining payoff that closes the downstream reporting/ICAAP gaps, tracked as a follow-up.
 
 ## Consequences
 

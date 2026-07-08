@@ -11,6 +11,7 @@ import com.openbank.lending.application.port.out.LedgerPostingPort
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanEventEmitter
 import com.openbank.lending.application.port.out.LoanRepository
+import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
 import com.openbank.lending.domain.model.ApplicationStatus
 import com.openbank.lending.domain.model.Collateral
@@ -64,6 +65,7 @@ class LendingServiceEdgeCasesTest {
     private val riskParameters = mockk<RiskParameterSource>()
     private val events = mockk<LoanEventEmitter>()
     private val clock = Clock.fixed(Instant.parse("2024-01-01T00:00:00Z"), ZoneOffset.UTC)
+    private val provisioning = mockk<ProvisioningRepository>()
 
     private val service = LendingService(
         applications,
@@ -75,6 +77,7 @@ class LendingServiceEdgeCasesTest {
         riskParameters,
         events,
         clock,
+        provisioning,
     )
 
     private val partyId = UUID.fromString("22222222-2222-2222-2222-222222222222")

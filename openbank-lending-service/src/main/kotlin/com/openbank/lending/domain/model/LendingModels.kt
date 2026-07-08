@@ -5,6 +5,7 @@
 package com.openbank.lending.domain.model
 
 import com.openbank.libs.domain.identifiers.CollateralId
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.domain.money.Money
@@ -154,3 +155,29 @@ data class ProvisioningSnapshot(
     val horizon: EclHorizon,
     val expectedCreditLoss: Money,
 )
+
+/**
+ * A persisted IFRS 9 stage/ECL record for one loan for one reporting [period] (the scheduled
+ * provisioning cycle, ADR-0028 Phase 3). One row per `(loanId, period)`: the prior period's row is the
+ * baseline the next cycle's delta is computed against (see [ProvisioningRunOutcome]), never a full
+ * re-post of the whole ECL.
+ *
+ * [period] is the reporting period key, `yyyy-MM` (calendar month) — a simple, sortable, unique-per-loan
+ * string rather than a new date-truncation concept.
+ */
+data class LoanProvisioningRecord(
+    // Durable/indexed key (ADR-0106) — UUIDv7, time-ordered.
+    val id: UUID = Ids.newId(),
+    val loanId: LoanId,
+    val period: String,
+    val asOf: LocalDate,
+    val outstandingBalance: Money,
+    val daysPastDue: Int,
+    val bucket: DelinquencyBucket,
+    val stage: Ifrs9Stage,
+    val expectedCreditLoss: Money,
+    val createdAt: OffsetDateTime,
+)
+
+/** Outcome of one scheduled IFRS 9 provisioning pass over the live book. */
+data class ProvisioningRunOutcome(val period: String, val loansAssessed: Int, val journalsPosted: Int)

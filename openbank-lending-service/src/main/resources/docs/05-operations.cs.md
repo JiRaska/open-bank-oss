@@ -21,9 +21,11 @@
 | `LEDGER_SERVICE_URL` | `http://localhost:8101` | base REST klienta ledger-service |
 | `LENDING_LEDGER_BACKEND` | `none` | `rest` aktivuje `RestLedgerPostingAdapter` (build-time přepínač) |
 | `LENDING_LEDGER_SYSTEM_ACTOR_ID` | `…00aa` | `createdBy` na ledger zápisech |
-| `LENDING_GL_*` | (UUID výchozí) | GL leaf účty: loans-receivable, funding-clearing, interest-income, interest-receivable, loan-loss-expense |
+| `LENDING_GL_*` | (UUID výchozí) | GL leaf účty: loans-receivable, funding-clearing, interest-income, interest-receivable, loan-loss-expense, loan-loss-allowance |
 | `LENDING_ACCRUAL_EVERY` | `24h` | Interval akruálního průchodu úročení |
 | `LENDING_ACCRUAL_BATCH_SIZE` | `500` | Počet splátek na akruální průchod |
+| `LENDING_PROVISIONING_EVERY` | `720h` (~30d) | Interval cyklu IFRS 9 provisioningu (ADR-0028 Fáze 3); obyčejná doba trvání, ne kalendářní měsíc |
+| `LENDING_PROVISIONING_BATCH_SIZE` | `500` | Počet ACTIVE úvěrů zpracovaných za jeden cyklus provisioningu (bez stránkování nad tento limit — viz threat model §5) |
 
 `LENDING_LEDGER_BACKEND` je **build-time** (`@IfBuildProperty`): vybírá adaptér při sestavení image, ne za běhu.
 
@@ -62,6 +64,9 @@ Při `LENDING_LEDGER_BACKEND=rest` jdou zápisy přes `LedgerCallGuard` (fault t
 
 ### Akruální průchod úročení neběží / má zpoždění
 Zkontroluj logy `InterestAccrualScheduler` ("interest accrual pass: N installments accrued"). Interval je `LENDING_ACCRUAL_EVERY` (výchozí 24h, delayed 30s). Průchod je idempotentní (příznak `interest_accrued`); zmeškané okno se samo zhojí dalším tikem, protože vybírá všechny splatné-ale-nenaběhnuté splátky.
+
+### Cyklus IFRS 9 provisioningu neběží / nezaúčtoval deltu
+Zkontroluj logy `ProvisioningCycleScheduler` ("IFRS 9 provisioning cycle {period}: N loans assessed, M provisioning journals posted"). Interval je `LENDING_PROVISIONING_EVERY` (výchozí ~720h/30d, delayed 60s). Nula zaúčtovaných zápisů při nenulovém počtu zpracovaných úvěrů je **očekávané a správné**, pokud se stage/ECL žádného úvěru od minulého období nezměnilo — než usoudíš na chybu, zkontroluj řádky v `loan_provisioning` pro dané období. Průchod je idempotentní podle `(loan_id, period)`; zmeškané okno se samo zhojí dalším tikem, ale kniha větší než `LENDING_PROVISIONING_BATCH_SIZE` je za jeden tik pokryta jen částečně (zatím bez kurzoru pro pokračování — sledováno v threat modelu).
 
 ### Flyway checksum mismatch při startu
 Nikdy nepřepisuj nasazenou migraci. Nastav dočasně `QUARKUS_FLYWAY_REPAIR_AT_START=true`, nech DB ustálit a pak odstraň.
