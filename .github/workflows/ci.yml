@@ -387,6 +387,25 @@ jobs:
       - name: release-registration consistency (rule 3, ADR-0029)
         run: python3 openbank-infra/scripts/check-release-registration.py
 
+      # rules.yaml change_requirements.release_scope_mismatch / CLAUDE.md rule 2: release-please
+      # attributes a commit to a component by the FILES IT TOUCHES under that component's
+      # directory, regardless of the typed scope (RELEASE.md) — so a feat/fix/perf/security PR
+      # that touches a service directory only outside <service>/src/main/** (a src/test-only
+      # boot smoke test, an openapi.yaml-only edit, gitops-only files) still makes release-please
+      # propose a version bump for an artifact that didn't actually change. Observed live: PR #547
+      # (feat(finrep): register ArgoCD Application, src/test + gitops/docs only) -> PR #551
+      # (finrep-service 0.4.0). Harmless but noisy; classifies from the PR title since the squash
+      # commit doesn't exist yet at PR-CI time. PR-only: no PR title to classify on a push to main.
+      - name: "release-scope-mismatch gate (rules.yaml release_scope_mismatch, advisory)"
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          python3 openbank-infra/scripts/check-release-scope-mismatch.py \
+            --title "${PR_TITLE}" --body "${PR_BODY}" --base "${PR_DIFF_BASE}"
+
       # ADR-0067 §3/§5/§7 / issue #419: every *.flagd.json file with an `openbank`
       # metadata block must satisfy FlagDefinition.validate() — non-blank owner,
       # MONEY_PATH → fourEyes=true, expiresAt in the future, no prohibited keys.
