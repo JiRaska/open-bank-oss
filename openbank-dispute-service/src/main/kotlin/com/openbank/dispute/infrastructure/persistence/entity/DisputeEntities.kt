@@ -4,9 +4,18 @@
 
 package com.openbank.dispute.infrastructure.persistence.entity
 
-import com.openbank.dispute.domain.model.*
+import com.openbank.dispute.domain.model.DisputeResolution
+import com.openbank.dispute.domain.model.DisputeStatus
+import com.openbank.dispute.domain.model.DisputeType
+import com.openbank.dispute.domain.model.RemediationOutcome
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
-import jakarta.persistence.*
+import jakarta.persistence.Column
+import jakarta.persistence.Entity
+import jakarta.persistence.EnumType
+import jakarta.persistence.Enumerated
+import jakarta.persistence.Id
+import jakarta.persistence.Table
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -17,19 +26,19 @@ import java.util.UUID
 class DisputeEntity : PanacheEntityBase() {
     @Id
     @Column(columnDefinition = "uuid")
-    var id: UUID = UUID.randomUUID()
+    var id: UUID = Ids.newId()
 
     @Column(name = "reference", unique = true)
     var reference: String = ""
 
     @Column(name = "transaction_id", columnDefinition = "uuid")
-    var transactionId: UUID = UUID.randomUUID()
+    var transactionId: UUID = Ids.newId()
 
     @Column(name = "account_id", columnDefinition = "uuid")
-    var accountId: UUID = UUID.randomUUID()
+    var accountId: UUID = Ids.newId()
 
     @Column(name = "party_id", columnDefinition = "uuid")
-    var partyId: UUID = UUID.randomUUID()
+    var partyId: UUID = Ids.newId()
 
     @Column(name = "dispute_type")
     @Enumerated(EnumType.STRING)
@@ -95,10 +104,10 @@ class DisputeEntity : PanacheEntityBase() {
 class DisputeEvidenceEntity : PanacheEntityBase() {
     @Id
     @Column(columnDefinition = "uuid")
-    var id: UUID = UUID.randomUUID()
+    var id: UUID = Ids.newId()
 
     @Column(name = "dispute_id", columnDefinition = "uuid")
-    var disputeId: UUID = UUID.randomUUID()
+    var disputeId: UUID = Ids.newId()
 
     @Column(name = "submitted_by")
     var submittedBy: String = ""
@@ -130,10 +139,10 @@ class DisputeEvidenceEntity : PanacheEntityBase() {
 class DisputeTimelineEntity : PanacheEntityBase() {
     @Id
     @Column(columnDefinition = "uuid")
-    var id: UUID = UUID.randomUUID()
+    var id: UUID = Ids.newId()
 
     @Column(name = "dispute_id", columnDefinition = "uuid")
-    var disputeId: UUID = UUID.randomUUID()
+    var disputeId: UUID = Ids.newId()
 
     @Column(name = "event_type")
     var eventType: String = ""
