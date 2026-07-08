@@ -77,3 +77,53 @@
 
 Infrastructure-layer controls (network egress, secret storage, runtime isolation) are covered by the
 platform substrate (ADR-0027) and the unified authz layer (ADR-0034), not duplicated here.
+
+## 7. Four-eyes approval (ADR-0155) — STRIDE supplement
+
+`POST /applications/{id}/disburse` (`lending.disburse`) is the money-path action being wired into
+the shared, opt-in four-eyes mechanism (rollout tracked in issue #413; sepa-payment's `PATCH
+/status` was the pilot). Disbursement books the loan and its schedule and is the point at which
+funds actually move (`LedgerCallGuard` → `ledger-service`), so it is framed here as an **outbound
+money-movement action**, same risk class as the SEPA pilot's status transition. New endpoint
+`PATCH /api/v1/lending/approvals/{id}` lets a DIFFERENT lending officer decide the resulting
+`PendingApproval`; the maker retries `POST /applications/{id}/disburse` with an `X-Approval-Id`
+header. **`authz.four-eyes.enforce` stays `false` in this PR** — the `ApprovalStore`/endpoint are
+wired, but blocking is a deliberate follow-up flip, not bundled here (see ADR-0155).
+
+Note: lending already has an *application-level* maker-checker control on the origination
+decision (`lending.approve`, §3 above — decide must differ from the application's maker). The
+ADR-0155 mechanism here is a second, independent control specifically on **disbursement**: even
+after a valid checker approved origination, releasing the funds is itself now gate-able by a
+second approver via the shared `ApprovalStore`/`AuthorizeInterceptor` path (currently advisory,
+`enforce=false`).
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **S**poofing | A caller other than a lending officer decides an approval | `@RolesAllowed("ROLE_LENDING_OFFICER","ROLE_ADMIN")` + OPA `@Authorize(action="lending.approval.decide")` on the decide endpoint |
+| **E**oP | The maker approves their own disbursement request (self-approval defeats maker-checker) | `ApprovalStore.decide` throws `SelfApprovalNotAllowedException` (mapped to 403) when `decidedBy == makerId` — enforced in the domain port itself, not just the REST layer, and `makerId`/`decidedBy` both resolve via the same `.principal.name` extraction (interceptor vs. `SecurityIdentity`) so the comparison can't silently mismatch for the same real person |
+| **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different disbursement | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
+| **R**epudiation | No record of who approved a gated disbursement | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see Residual risks below: not yet a permanent audit trail) |
+| **I**nfo disclosure | Approval id enumeration reveals loan/action metadata to an unauthorized caller | `decide` requires the caller to already hold a valid, role-gated session; the id itself is a random UUID (`RedisApprovalStore`, not sequential) |
+| **D**oS | Flooding `POST /applications/{id}/disburse` to exhaust Redis with pending approvals | Bounded by the same rate-limit controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
+
+**DFD update:** adds `Lending officer (checker) → PATCH /api/v1/lending/approvals/{id} → Redis
+(approval:*)` alongside the existing `POST /applications/{id}/disburse` edge; the maker's retry
+reuses the existing DFD edge.
+**Risk class:** integrity (segregation of duties, disbursement) + confidentiality (approval
+record scope).
+**Rollback:** `authz.four-eyes.enforce=false` (default) — the endpoint and store exist but do not
+change any existing request's outcome until explicitly flipped.
+
+**Residual risk:** four-eyes `PendingApproval` records are TTL-bounded (Redis), not a permanent
+audit trail (ADR-0155) — a durable-audit requirement for "who approved what, forever" would need
+an additional store; not implemented in this PR.
+
+## 8. Change log
+
+- **2026-07-08** — ADR-0155 four-eyes enforcement rollout (issue #413), mirroring the
+  sepa-payment pilot. New endpoint `PATCH /api/v1/lending/approvals/{id}` + `ApprovalConfig`
+  (Redis-backed `ApprovalStore`) + `AuthorizeInterceptor` four-eyes gate on `lending.disburse`
+  (openbank-libs-runtime, shared, opt-in). New STRIDE supplement §7. `authz.four-eyes.enforce`
+  defaults `false` — no behavior change to any existing request in this PR; flipping it is a
+  tracked follow-up. No DB schema change (Redis, TTL-bounded); rollback = revert the commit (or
+  leave `authz.four-eyes.enforce=false`, its default).
