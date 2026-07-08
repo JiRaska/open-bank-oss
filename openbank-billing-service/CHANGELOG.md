@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.5.0...billing-service-v0.5.1) (2026-07-08)
+
+
+### Security
+
+* **billing:** sanitize logged values (CodeQL java/log-injection) ([#588](https://github.com/JiRaska/open-bank-oss/issues/588)) ([060b5f6](https://github.com/JiRaska/open-bank-oss/commit/060b5f697ee4ed3d3aa22f2072b1388d2a3d6c6b))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.4.2...billing-service-v0.5.0) (2026-07-08)
 
 
