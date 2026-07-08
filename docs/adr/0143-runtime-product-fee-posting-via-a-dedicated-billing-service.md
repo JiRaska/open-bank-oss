@@ -2,12 +2,43 @@
 
 Date: 2026-06-29
 Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only; phases 1a/1b/2a/2b/2c-i merged; 2c-ii (ledger posting) deploy-gated; billing-service Dockerfile + GitOps added PR #2813 -->
+Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only; phases 1a/1b/2a/2b/2c/2c-ii/2d implemented pending money-path review (PR TBD); phase 2e (reversal) required before production -->
 Author(s): Jiri Raska
 
-**Delivery note (updated 2026-06-30):**
+**Delivery note (updated 2026-07-07):**
 - **Service skeleton and logic** — ✅ Shipped: `openbank-billing-service` Dockerfile + GitOps added (PR #2813); phases 1a/1b/2a/2b/2c-i merged; four-eyes `post` verb, `@RestClient` ledger posting, idempotency, balance/account context reads designed.
-- **Money-path go-live** — ⬜ Deploy-gated: Phase 2c-ii (ledger posting itself) and Phase 2d (DST invariant) behind money-path controls; fee reversal/refund flow (Phase 2e) required before production.
+- **Phase 2c (persistence + outbox + ledger posting + scheduled trigger)** — ✅ Implemented, pending
+  the required 2-approval + threat-model money-path review (ADR-0030) before merge: Flyway
+  migrations (`billing_cycle_assessment`, `assessed_fee`, `billing_outbox`), a `@RestClient` ledger
+  posting adapter (`LedgerPostingAdapter`/`BillingJournalFactory`, mirrors
+  `openbank-settlement-service`/`openbank-lending-service`), the transactional outbox
+  (`BillingOutboxDispatcher`/`LedgerOutboxEventPublisher`, built on `openbank-libs`'
+  `AbstractOutbox*` primitives — assessment + intent-to-post commit atomically in one
+  `sf.withTransaction`), and a `@Scheduled` monthly cycle trigger (`BillingCycleScheduler`,
+  injected `Clock`, ADR-0100).
+- **Phase 2c-ii (four-eyes authorization)** — ✅ Implemented: `POST /api/v1/fees/post` carries
+  `@Authorize(action = "billing.post")` (**not** the literal `"ledger.post"` this ADR's step 4
+  originally specified — see the threat model §3 for why `billing.post` is the action that
+  actually activates `rest.rego`'s four-eyes gate for this service) + a Redis-backed
+  `ApprovalStore` (ADR-0155); `authz.four-eyes.enforce` stays `false` by default pending a
+  runbook-gated rollout, same as every other money-path service.
+- **Phase 2d (DST invariant)** — ✅ Implemented: `billing-fee-conservation` in
+  `openbank-simulation` (`MoneyPathInvariants`), asserting *Σ fees assessed == Σ fee journals
+  posted* per cycle/account/fee/currency; unit-tested in isolation
+  (`BillingFeeConservationInvariantTest`). **Not yet wired to a seeded `BillingScenario`** — no
+  such scenario exists, so the invariant is registered but trivially holds until one drives real
+  assess/post traffic through it (a follow-up, tracked in the same issue as the account-discovery
+  gap below).
+- **Known gaps, honestly scoped (not blockers for this PR, but block production go-live):**
+  fee reversal/refund (phase 2e) is not built; there is no fleet-wide "list every billable
+  account" read port, so `BillingCycleScheduler`'s account batch is operator-configured rather
+  than autonomously discovered (disabled by default); `authz.four-eyes.enforce` needs a deliberate
+  flip once the maker/checker runbook is reviewed; the DST invariant needs a `BillingScenario` to
+  exercise it against simulated traffic rather than empty state.
+- **Money-path go-live** — ⬜ Still deploy-gated pending: real-environment (sandbox) e2e
+  verification of a charged + a waived fee reconciling to the ledger, the four-eyes enforcement
+  flip, and phase 2e (fee reversal/refund), all required before production per this ADR's
+  Delivery milestones section.
 
 ## Context
 

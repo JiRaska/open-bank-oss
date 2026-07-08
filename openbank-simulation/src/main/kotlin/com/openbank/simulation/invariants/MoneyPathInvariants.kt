@@ -152,6 +152,34 @@ object MoneyPathInvariants {
         }
     }
 
+    /**
+     * ADR-0143 phase 2d: *Σ fees assessed == Σ fee journals posted* per cycle/account/fee/
+     * currency — the same double-charge/replay threat the idempotency key
+     * (`fee-{cycleId}-{accountId}-{feeId}-{currency}`) is designed to prevent, checked here as a
+     * global conservation law rather than a per-request property. A waived or zero-amount fee
+     * assesses `0` and posts nothing, so it already satisfies the equality without a separate
+     * case; a fee stuck PENDING (outbox not yet dispatched) would also fail this until it lands,
+     * which is correct — the invariant is checked after the scheduler drains, i.e. once a step
+     * has fully settled (mirrors [settlementCompleteness]/[sepaPaymentCompleteness]'s "settled"
+     * semantics, not "eventually consistent mid-flight").
+     */
+    val billingFeeConservation = object : Invariant {
+        override val name = "billing-fee-conservation"
+        override fun check(world: World): Violation? {
+            world.billingFees.keys().forEach { key ->
+                val assessedAmount = world.billingFees.assessedAmount(key)
+                val postedAmount = world.billingFees.postedAmount(key)
+                if (assessedAmount.compareTo(postedAmount) != 0) {
+                    return Violation(
+                        name,
+                        "fee $key assessed=$assessedAmount but posted=$postedAmount",
+                    )
+                }
+            }
+            return null
+        }
+    }
+
     /** All Layer-3 invariants, in check order. */
     val ALL: List<Invariant> = listOf(
         conservationOfMoney,
@@ -161,6 +189,7 @@ object MoneyPathInvariants {
         auditCompleteness,
         sepaPaymentCompleteness,
         settlementCompleteness,
+        billingFeeConservation,
     )
 
     /** A terminal-state guard used by the saga orchestrator. */
