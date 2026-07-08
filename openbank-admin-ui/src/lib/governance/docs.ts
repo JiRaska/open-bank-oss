@@ -2,9 +2,10 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-// Server-side governance-docs loader. Surfaces the repo's two governance
-// corpora — Architecture Decision Records (docs/adr) and per-service threat
-// models (docs/threat-models) — in the operator console.
+// Server-side governance-docs loader. Surfaces the repo's three governance
+// corpora — Architecture Decision Records (docs/adr), per-service threat
+// models (docs/threat-models), and AI agent charters (docs/agents, ADR-0156)
+// — in the operator console.
 //
 // READ-ONLY consumer (CLAUDE rule #3): the admin-ui *displays* governance
 // artifacts, it never authors them. The .md files in the repo are the source of
@@ -12,8 +13,8 @@
 //
 // Sourcing mirrors the SBOM/docs bundle pattern (lib/services/docs.ts): the repo
 // root docs/ tree is .dockerignore'd out of the runtime fs, so the Dockerfile's
-// `governance-collector` stage bakes docs/adr + docs/threat-models into an
-// immutable /app/governance-bundle. First existing candidate wins:
+// `governance-collector` stage bakes docs/adr + docs/threat-models + docs/agents
+// into an immutable /app/governance-bundle. First existing candidate wins:
 //   1. $OPENBANK_GOVERNANCE_DOCS   (explicit override; set in the image)
 //   2. <cwd>/governance-bundle     (image-baked bundle)
 //   3. <cwd>/../docs               (local dev: `npm run dev` sees the repo root)
@@ -70,8 +71,8 @@ async function isDir(p: string): Promise<boolean> {
   try { return (await fs.stat(p)).isDirectory() } catch { return false }
 }
 
-/** Resolve a governance sub-corpus dir ("adr" | "threat-models") or null. */
-async function corpusDir(sub: 'adr' | 'threat-models'): Promise<string | null> {
+/** Resolve a governance sub-corpus dir ("adr" | "threat-models" | "agents") or null. */
+async function corpusDir(sub: 'adr' | 'threat-models' | 'agents'): Promise<string | null> {
   const candidates = [
     process.env.OPENBANK_GOVERNANCE_DOCS && path.join(process.env.OPENBANK_GOVERNANCE_DOCS, sub),
     path.resolve(process.cwd(), 'governance-bundle', sub),
@@ -195,4 +196,63 @@ export async function loadThreatModel(service: string): Promise<ThreatModelDoc |
 export async function missingThreatModels(): Promise<string[]> {
   const present = new Set((await loadThreatModelIndex()).map(m => m.service))
   return [...MONEY_PATH].filter(s => !present.has(s)).sort()
+}
+
+// ── Agent charters (docs/agents, ADR-0156) — the narrative companion to the
+// enforced openbank-libs/governance/agents.yaml registry. Frontmatter carries
+// only navigation identifiers (id/plane/adr), never policy data — see
+// docs/agents/README.md for why. `check-agent-charter-registry.sh` guarantees
+// every agents.yaml id has a matching file here, so `id` below is trusted to
+// be the filename without a fallback. ──
+
+export interface AgentCharterDocMeta {
+  /** Matches an agents.yaml agents[].id, e.g. "finops-agent". */
+  id: string
+  plane: string
+  /** Primary governing ADR, e.g. "ADR-0112". */
+  adr: string
+  title: string
+}
+
+export interface AgentCharterDoc extends AgentCharterDocMeta {
+  /** Body markdown with the frontmatter block and leading H1 stripped. */
+  body: string
+}
+
+function parseAgentCharter(id: string, md: string): AgentCharterDoc {
+  const fmMatch = md.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/)
+  const fm = fmMatch?.[1] ?? ''
+  const plane = fm.match(/^plane:\s*(.+)$/m)?.[1]?.trim() ?? '—'
+  const adr = fm.match(/^adr:\s*(.+)$/m)?.[1]?.trim() ?? '—'
+  const withoutFrontmatter = fmMatch ? md.slice(fmMatch[0].length) : md
+  const title = firstHeading(withoutFrontmatter, id)
+  const body = withoutFrontmatter.replace(/^#\s+.+?\r?\n/, '').replace(/^\s+/, '')
+  return { id, plane, adr, title, body }
+}
+
+export async function loadAgentCharterDocIndex(): Promise<AgentCharterDocMeta[]> {
+  const dir = await corpusDir('agents')
+  if (!dir) return []
+  const files = (await fs.readdir(dir)).filter(f => f.endsWith('.md') && f !== 'README.md')
+  const metas = await Promise.all(
+    files.map(async f => {
+      const id = f.replace(/\.md$/, '')
+      const md = await fs.readFile(path.join(dir, f), 'utf-8')
+      const { body: _body, ...meta } = parseAgentCharter(id, md)
+      return meta
+    }),
+  )
+  return metas.sort((a, b) => a.id.localeCompare(b.id))
+}
+
+export async function loadAgentCharterDoc(id: string): Promise<AgentCharterDoc | null> {
+  if (!SLUG_RE.test(id)) return null
+  const dir = await corpusDir('agents')
+  if (!dir) return null
+  try {
+    const md = await fs.readFile(path.join(dir, `${id}.md`), 'utf-8')
+    return parseAgentCharter(id, md)
+  } catch {
+    return null
+  }
 }

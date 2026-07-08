@@ -3,33 +3,19 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { NextResponse } from 'next/server'
-import { promises as fs } from 'fs'
-import path from 'path'
-import { parse as parseYaml } from 'yaml'
+import { loadAgentCharters } from '@/lib/governance/agentCharters'
 
 export const dynamic = 'force-dynamic'
-
-// Normalises a tools.allow / tools.deny list that may contain either flat strings
-// (standard agents) or tier-object entries (e.g. finops-agent uses {tier, resources}).
-function normalizeToolList(items: unknown[]): string[] {
-  return items.flatMap(item => {
-    if (typeof item === 'string') return [item]
-    if (item && typeof item === 'object') {
-      const o = item as Record<string, unknown>
-      const tier = typeof o.tier === 'string' ? o.tier : ''
-      const resources = Array.isArray(o.resources) ? (o.resources as unknown[]).map(String) : []
-      return resources.length ? resources.map(r => `${tier}:${r}`) : tier ? [tier] : []
-    }
-    return []
-  })
-}
 
 // ── AI governance snapshot for the IAOps section (ADR-0031) ──────────────────
 //
 // Two kinds of data, both grounded in repo sources (never fabricated):
 //  1. CHARTERS — parsed live from the bundled agents.yaml (the machine-readable
-//     source of truth, ADR-0031 D1). The image bakes it (Dockerfile COPY); the
-//     route parses it so the UI can't drift from the policy the OPA gate uses.
+//     source of truth, ADR-0031 D1) via lib/governance/agentCharters.ts, shared
+//     with the per-agent detail route (/api/iaops/agents/[agentId], ADR-0156)
+//     so there is one parser, not two. The image bakes agents.yaml (Dockerfile
+//     COPY); the route parses it so the UI can't drift from the policy the OPA
+//     gate uses.
 //  2. DECISIONS / COMPLIANCE / AUDIT — the ADR-0031 plan and its compliance
 //     surface. ADR-0031 is itself the source of truth for the roadmap, so we
 //     encode D1–D9 + the regulatory mapping here with statuses reflecting the
@@ -37,30 +23,6 @@ function normalizeToolList(items: unknown[]): string[] {
 //
 // If agents.yaml is absent (not bundled), charters degrade to an empty list with
 // chartersAvailable:false — the static ADR content still renders. Never invents.
-
-function agentsFile(): string {
-  return process.env.OPENBANK_AGENTS_FILE
-    ?? path.resolve(process.cwd(), 'agents.yaml')
-}
-
-interface ParsedAgents {
-  defaults?: Record<string, unknown>
-  runtime?: Record<string, unknown>
-  model_gateway?: Record<string, unknown>
-  tool_tiers?: Record<string, string[]>
-  agents?: Record<string, unknown>[]
-}
-
-async function readCharters(): Promise<{ available: boolean; data: ParsedAgents | null }> {
-  try {
-    const raw = await fs.readFile(agentsFile(), 'utf-8')
-    const data = parseYaml(raw) as ParsedAgents
-    if (data && Array.isArray(data.agents)) return { available: true, data }
-    return { available: false, data: null }
-  } catch {
-    return { available: false, data: null }
-  }
-}
 
 // ADR-0031 D1–D9 with status reflecting current reality. Statuses verified
 // against the codebase (agent-service, agents.yaml, agents.rego, AuditEvent):
@@ -116,35 +78,12 @@ const AUDIT_TRAIL = {
 }
 
 export async function GET() {
-  const charters = await readCharters()
-  const d = charters.data
+  const registry = await loadAgentCharters()
 
   // Posture: read live from agents.yaml defaults where possible.
-  const defaults = (d?.defaults ?? {}) as Record<string, unknown>
+  const defaults = registry.defaults
   const enforced = typeof defaults.enforced === 'string' ? defaults.enforced : 'advisory'
   const policyDecision = typeof defaults.policy_decision === 'string' ? defaults.policy_decision : 'deny'
-
-  const agents = (d?.agents ?? []).map(a => {
-    const ag = a as Record<string, unknown>
-    const tools = (ag.tools ?? {}) as Record<string, unknown>
-    const limits = (ag.limits ?? {}) as Record<string, unknown>
-    const dataScope = (ag.data_scope ?? {}) as Record<string, unknown>
-    return {
-      id: String(ag.id ?? 'unknown'),
-      plane: String(ag.plane ?? '—'),
-      charter: String(ag.charter ?? ''),
-      owns: Array.isArray(ag.owns) ? (ag.owns as string[]) : [],
-      skills: Array.isArray(ag.skills) ? (ag.skills as string[]) : [],
-      dataRead: Array.isArray(dataScope.read) ? (dataScope.read as string[]) : [],
-      pii: String(dataScope.pii ?? defaults.pii ?? 'masked'),
-      toolsAllow: Array.isArray(tools.allow) ? normalizeToolList(tools.allow as unknown[]) : [],
-      toolsDeny: Array.isArray(tools.deny) ? normalizeToolList(tools.deny as unknown[]) : [],
-      requiresHuman: Array.isArray(ag.requires_human) ? (ag.requires_human as unknown[]).map(r =>
-        typeof r === 'string' ? r : Object.entries(r as Record<string, unknown>).map(([k, v]) => `${k}: ${v}`).join(' ')) : [],
-      tokensPerRun: typeof limits.tokens_per_run === 'number' ? limits.tokens_per_run : null,
-      runsPerDay: typeof limits.runs_per_day === 'number' ? limits.runs_per_day : null,
-    }
-  })
 
   const builtCount = DECISIONS.filter(x => x.status === 'built').length
   const partialCount = DECISIONS.filter(x => x.status === 'partial').length
@@ -159,12 +98,12 @@ export async function GET() {
     enforcement: enforced,            // enforced (block) since #743 — deny-by-default at the gate
     policyDefault: policyDecision,    // deny
     agentsActing: 0,                  // phase 1: no agent acts yet
-    chartersAvailable: charters.available,
-    agentCount: agents.length,
-    agents,
-    toolTiers: (d?.tool_tiers ?? {}) as Record<string, string[]>,
-    runtime: (d?.runtime ?? {}) as Record<string, unknown>,
-    modelGateway: (d?.model_gateway ?? {}) as Record<string, unknown>,
+    chartersAvailable: registry.available,
+    agentCount: registry.agents.length,
+    agents: registry.agents,
+    toolTiers: registry.toolTiers,
+    runtime: registry.runtime,
+    modelGateway: registry.modelGateway,
     decisions: DECISIONS,
     decisionSummary: { built: builtCount, partial: partialCount, planned: plannedCount, total: DECISIONS.length },
     compliance: COMPLIANCE,

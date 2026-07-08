@@ -5,10 +5,12 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   Bot, RefreshCw, ScrollText, GitBranch, Scale,
   Info, CheckCircle2, CircleDashed, CircleDot, Lock, Users, Search, Loader2,
-  AlertOctagon,
+  AlertOctagon, ChevronRight,
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
@@ -139,6 +141,7 @@ function Chips({ items, tone }: { items: string[]; tone: 'allow' | 'deny' | 'neu
 // ── Main ────────────────────────────────────────────────────────────────────
 function IAOpsContent() {
   const { t, language } = useLanguage()
+  const router = useRouter()
   const [data, setData] = useState<GovData | null>(null)
   const [agentCosts, setAgentCosts] = useState<AgentCostEntry[]>([])
   const [costAnomalies, setCostAnomalies] = useState<FinOpsAnomaly[]>([])
@@ -348,7 +351,10 @@ function IAOpsContent() {
                   const isExceeded = costEntry?.burnRate === 'exceeded'
                   const isFinopsAgent = a.id === 'finops-agent'
                   return (
-                    <div key={a.id} style={{ padding: '16px', borderRadius: '12px', border: `1px solid ${isExceeded ? '#fca5a5' : 'var(--border)'}`, background: 'var(--surface-2)' }}>
+                    <div key={a.id} role="link" tabIndex={0}
+                      onClick={() => router.push(`/iaops/agents/${encodeURIComponent(a.id)}`)}
+                      onKeyDown={e => { if (e.key === 'Enter') router.push(`/iaops/agents/${encodeURIComponent(a.id)}`) }}
+                      style={{ padding: '16px', borderRadius: '12px', border: `1px solid ${isExceeded ? '#fca5a5' : 'var(--border)'}`, background: 'var(--surface-2)', cursor: 'pointer' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'monospace' }}>{a.id}</span>
@@ -368,12 +374,13 @@ function IAOpsContent() {
                           </span>
                           {isFinopsAgent && (
                             <button
-                              onClick={() => alert(t('Funkce přijde v P4 (HITL backend)', 'Feature coming in P4 (HITL backend)'))}
+                              onClick={e => { e.stopPropagation(); alert(t('Funkce přijde v P4 (HITL backend)', 'Feature coming in P4 (HITL backend)')) }}
                               style={{ fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '8px',
                                 border: '1px solid #6366f1', background: 'transparent', color: '#6366f1', cursor: 'pointer' }}>
                               {t('Spustit analýzu', 'Trigger Analysis')}
                             </button>
                           )}
+                          <ChevronRight size={14} style={{ color: 'var(--text-tertiary)' }} />
                         </div>
                       </div>
                       <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '0 0 12px', lineHeight: 1.5 }}>{a.charter}</p>
