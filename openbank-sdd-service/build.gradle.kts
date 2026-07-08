@@ -49,7 +49,9 @@ kover {
         verify {
             rule {
                 bound {
-                    minValue = 0
+                    // Ratchet floor (ADR-0020, sweep #466): measured 43.8% (219/500) LINE at introduction,
+                    // ~5 pt headroom, raise-only from here.
+                    minValue = 38
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }

@@ -31,6 +31,17 @@ interface AccountRepository {
 
     suspend fun save(account: Account): Account
 
+    /**
+     * Persist a freshly opened account, its primary currency pocket and the idempotency key in
+     * ONE transaction (#465). The key's primary key makes a concurrent duplicate submission
+     * fail atomically instead of opening a second account; the caller recovers the conflict
+     * via [findByIdempotencyKey].
+     */
+    suspend fun saveNewAccount(account: Account, primaryPocket: CurrencyPocket, idempotencyKey: String): Account
+
+    /** The account opened under this idempotency key, or null if the key is unused. */
+    suspend fun findByIdempotencyKey(idempotencyKey: String): Account?
+
     suspend fun update(account: Account): Account
 
     suspend fun existsByIban(iban: Iban): Boolean
