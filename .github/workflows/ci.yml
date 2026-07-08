@@ -334,6 +334,39 @@ jobs:
       - name: threat-model coverage (ADR-0030 D2)
         run: python3 openbank-infra/scripts/check-threat-models.py
 
+      # Shared base for every diff-scoped PR gate below (threat-model-diff,
+      # identifier-intent, api-contract, schema-compat).
+      # github.event.pull_request.base.sha is frozen at PR CREATION time and never
+      # tracks the base branch — so when a competing PR merges first, a gate diffing
+      # against that stale sha classifies against a base main no longer has. Live
+      # merge race (2026-07-07): #524 and #481 both moved the ledger openapi.yaml
+      # 1.5.2 -> 1.6.0 against the same base; #524 merged first, #481's api-contract
+      # gate still saw 1.5.2 -> 1.6.0 and passed, merging two new endpoints with no
+      # version move relative to actual main (fixed manually in #534).
+      # Fix: HEAD on a pull_request run is the PR merge ref (refs/pull/N/merge); its
+      # FIRST PARENT is the base-branch tip the merge was computed against — exactly
+      # `git merge-base origin/<base> HEAD` on a full clone, available on this
+      # shallow one after deepening HEAD by one. Falls back to the event base.sha
+      # when HEAD is not a merge commit (a checkout of the PR head instead of the
+      # merge ref). Residual gap: a PR whose last CI run predates the competing
+      # merge and that merges with no later run is still unseen by ANY run-time
+      # base choice — that needs required-up-to-date branches or a merge queue.
+      - name: "resolve PR diff base (current merge-base, not creation-time base.sha)"
+        if: github.event_name == 'pull_request'
+        env:
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          base="${EVENT_BASE_SHA}"
+          git fetch --depth=2 origin "${GITHUB_SHA}" 2>/dev/null || true
+          if git rev-parse -q --verify 'HEAD^2' >/dev/null 2>&1; then
+            base="$(git rev-parse 'HEAD^1')"
+          else
+            git fetch --depth=1 origin "${base}" 2>/dev/null || true
+          fi
+          echo "PR diff base: ${base} (event base.sha: ${EVENT_BASE_SHA})"
+          echo "PR_DIFF_BASE=${base}" >> "$GITHUB_ENV"
+
       # ADR-0030 D2, diff-aware half (issue #265): when a PR moves a money-path
       # service's TRUST BOUNDARIES — inbound REST surface, a new outbound
       # HTTP/gRPC edge, authn/listener/transport keys in application.yaml, or
@@ -341,14 +374,10 @@ jobs:
       # update docs/threat-models/<service>.md. ADVISORY until rules.yaml
       # trust_boundary_diff_change flips to enforced (target 2026-09-15,
       # ADR-0144) — findings are ::warning annotations; add --enforce to flip.
-      # PR-only: the gate diffs 3-dot against the PR base.
+      # PR-only: the gate diffs against the resolved PR diff base (see above).
       - name: "threat-model updated on trust-boundary change (ADR-0030 D2, advisory)"
         if: github.event_name == 'pull_request'
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          git fetch --depth=1 origin "${PR_BASE_SHA}" 2>/dev/null || true
-          python3 openbank-infra/scripts/check-threat-model-diff.py --base "${PR_BASE_SHA}"
+        run: python3 openbank-infra/scripts/check-threat-model-diff.py --base "${PR_DIFF_BASE}"
 
       # CLAUDE.md rule 3 / ADR-0029: a module is a released component iff it has
       # a version.txt, and must be registered in release-please-config.json AND
@@ -446,10 +475,7 @@ jobs:
       # it never trips on the ~100 pre-existing sites (those migrate to Ids as-touched)
       # nor on unrelated fleet churn. No-ops on non-PR runs. stdlib-only shell.
       - name: "identifier intent guard (ADR-0106, #1699)"
-        run: |
-          base="${{ github.event.pull_request.base.sha }}"
-          if [ -n "$base" ]; then git fetch --depth=1 origin "$base" 2>/dev/null || true; fi
-          bash .github/scripts/check-new-random-uuid.sh "$base"
+        run: bash .github/scripts/check-new-random-uuid.sh "${PR_DIFF_BASE:-}"
 
       # ADR-0048 D5: api-contract gate — classify the API-contract bump from the
       # OpenAPI diff (oasdiff), independently of the release axis (version.txt):
@@ -463,13 +489,14 @@ jobs:
       # annotations; add --enforce to the script invocation to flip.
       # oasdiff is a pinned, checksum-verified binary (OpenSSF Pinned-Dependencies),
       # same direct-CLI pattern as gitleaks (ADR-0040). PR-only: the gate diffs
-      # against the PR base; pushes to main have already been classified.
+      # against the resolved PR diff base (the CURRENT merge-base, not the
+      # creation-time event base.sha — the #524 × #481 ledger merge race);
+      # pushes to main have already been classified.
       - name: "api-contract gate — OpenAPI diff classification (ADR-0048 D5, advisory)"
         if: github.event_name == 'pull_request'
         env:
           OASDIFF_VERSION: "1.22.0"
           OASDIFF_SHA256: "8b972accaf49f984cf40702af8b29360126ac9436594ccf6ac1ae662209a5fe6"
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
           curl -fsSL -o /tmp/oasdiff.tar.gz \
@@ -477,8 +504,7 @@ jobs:
           echo "${OASDIFF_SHA256}  /tmp/oasdiff.tar.gz" | sha256sum -c -
           tar -xzf /tmp/oasdiff.tar.gz -C /tmp oasdiff
           sudo install -m 0755 /tmp/oasdiff /usr/local/bin/oasdiff
-          git fetch --depth=1 origin "${PR_BASE_SHA}" 2>/dev/null || true
-          python3 .github/scripts/check-api-contract.py --base "${PR_BASE_SHA}"
+          python3 .github/scripts/check-api-contract.py --base "${PR_DIFF_BASE}"
 
       # rules.yaml event_change / ADR-0006: schema-compat gate. The fleet's event
       # contract is the set of Kotlin data classes extending DomainEvent (JSON on
@@ -492,11 +518,7 @@ jobs:
       # (target 2026-09-15, ADR-0144) — flip = --enforce. stdlib-only.
       - name: "schema-compat gate — event backward-compatibility (event_change, advisory)"
         if: github.event_name == 'pull_request'
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          git fetch --depth=1 origin "${PR_BASE_SHA}" 2>/dev/null || true
-          python3 .github/scripts/check-event-schema-compat.py --base "${PR_BASE_SHA}"
+        run: python3 .github/scripts/check-event-schema-compat.py --base "${PR_DIFF_BASE}"
 
       # DomainEvent.occurredAt constructor guard (PR #2662 / #2709).
       # Path-scoped CI only rebuilds changed services — a new DomainEvent subclass
