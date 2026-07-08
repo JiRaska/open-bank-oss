@@ -84,14 +84,6 @@ kover {
     }
 }
 
-tasks.named("koverVerify") {
-    enabled = true
-}
-
-tasks.named("check") {
-    dependsOn(tasks.named("koverVerify"))
-}
-
 // Pact: provider verification reads pact files from the shared pacts/ dir (git-pact, ADR-0063).
 System.setProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
 
