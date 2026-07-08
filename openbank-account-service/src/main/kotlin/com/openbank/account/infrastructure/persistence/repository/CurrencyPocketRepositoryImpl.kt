@@ -40,6 +40,10 @@ class CurrencyPocketRepositoryImpl(private val clock: Clock) :
         return Panache.withTransaction { persist(entity).replaceWith(entity) }.awaitSuspending().toDomain()
     }
 
+    /** Persist within the caller's transaction (#465: account + pocket + idempotency commit atomically). */
+    fun persistInTransaction(pocket: CurrencyPocket): io.smallrye.mutiny.Uni<Void> =
+        persist(pocket.toEntity()).replaceWithVoid()
+
     override suspend fun update(pocket: CurrencyPocket): CurrencyPocket = Panache.withTransaction {
         find("id", pocket.id).firstResult().flatMap { existing ->
             if (existing == null) throw IllegalStateException("Pocket ${pocket.id} not found for update")

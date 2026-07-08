@@ -131,3 +131,24 @@ class AccountPocketEntity : PanacheEntityBase {
     @Column(name = "updated_at", nullable = false)
     var updatedAt: Instant = Instant.EPOCH
 }
+
+/**
+ * Transactional idempotency for account opening (#465): the key commits atomically with the
+ * account + primary pocket insert, so a concurrent duplicate submission dies on the primary
+ * key instead of opening a second account (the Redis record in the REST layer is only a
+ * response-replay cache and is check-then-act under concurrency).
+ */
+@Entity
+@Table(name = "account_idempotency")
+class AccountIdempotencyEntity : PanacheEntityBase {
+
+    @Id
+    @Column(name = "idempotency_key", nullable = false, length = 255)
+    lateinit var idempotencyKey: String
+
+    @Column(name = "account_id", nullable = false)
+    lateinit var accountId: UUID
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    var createdAt: Instant = Instant.EPOCH
+}

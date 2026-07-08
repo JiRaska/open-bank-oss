@@ -5,23 +5,44 @@
 package com.openbank.account.infrastructure.persistence.repository
 
 import com.openbank.account.application.port.out.AccountRepository
+import com.openbank.account.application.usecase.AccountUpdateConflictException
 import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
+import com.openbank.account.domain.model.CurrencyPocket
 import com.openbank.account.domain.model.SigningRule
 import com.openbank.account.infrastructure.persistence.entity.AccountEntity
+import com.openbank.account.infrastructure.persistence.entity.AccountIdempotencyEntity
 import com.openbank.libs.domain.account.Iban
 import com.openbank.libs.domain.money.CurrencyCode
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepositoryBase
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
+import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
-class AccountRepositoryImpl(private val clock: Clock) :
-    AccountRepository,
+class AccountIdempotencyRepository(private val clock: Clock) :
+    PanacheRepositoryBase<AccountIdempotencyEntity, String> {
+    fun persistInTransaction(key: String, accountId: UUID): io.smallrye.mutiny.Uni<Void> {
+        val e = AccountIdempotencyEntity().also {
+            it.idempotencyKey = key
+            it.accountId = accountId
+            it.createdAt = Instant.now(clock)
+        }
+        return persist(e).replaceWithVoid()
+    }
+}
+
+@ApplicationScoped
+class AccountRepositoryImpl(
+    private val clock: Clock,
+    private val idempotencyRepository: AccountIdempotencyRepository,
+    private val pocketRepository: CurrencyPocketRepositoryImpl,
+) : AccountRepository,
     PanacheRepository<AccountEntity> {
 
     override suspend fun findById(id: UUID): Account? =
@@ -75,31 +96,50 @@ class AccountRepositoryImpl(private val clock: Clock) :
         return Panache.withTransaction { persist(entity).replaceWith(entity) }.awaitSuspending().toDomain()
     }
 
+    override suspend fun saveNewAccount(
+        account: Account,
+        primaryPocket: CurrencyPocket,
+        idempotencyKey: String,
+    ): Account {
+        val entity = account.toEntity()
+        // One transaction for account + primary pocket + idempotency key (#465): previously the
+        // three writes were separate transactions, so a crash could leave an account without a
+        // pocket, and two concurrent opens with one Idempotency-Key both committed (the Redis
+        // record in the REST layer is a check-then-act cache). The PK on account_idempotency
+        // makes the concurrent loser's whole transaction roll back; the use case recovers it.
+        return Panache.withTransaction {
+            persist(entity)
+                .flatMap { pocketRepository.persistInTransaction(primaryPocket) }
+                .flatMap { idempotencyRepository.persistInTransaction(idempotencyKey, entity.id) }
+                .replaceWith(entity)
+        }.awaitSuspending().toDomain()
+    }
+
+    override suspend fun findByIdempotencyKey(idempotencyKey: String): Account? {
+        val accountId = Panache.withSession {
+            idempotencyRepository.find("idempotencyKey", idempotencyKey).firstResult()
+        }.awaitSuspending()?.accountId ?: return null
+        return findById(accountId)
+    }
+
     override suspend fun update(account: Account): Account {
         val entity = account.toEntity()
-        return Panache.withTransaction {
-            find("id", entity.id).firstResult().flatMap { existing ->
-                if (existing == null) throw IllegalStateException("Account ${entity.id} not found for update")
-                existing.accountType = entity.accountType
-                existing.partyId = entity.partyId
-                existing.productId = entity.productId
-                existing.currencyCode = entity.currencyCode
-                existing.status = entity.status
-                existing.openedAt = entity.openedAt
-                existing.closedAt = entity.closedAt
-                existing.version = entity.version
-                // Savings goal (ADR-0153) round-trips through the same generic update() the
-                // freeze/unfreeze/close use cases already call — those pass through a domain
-                // object whose goal fields are unchanged from the read, so this is a no-op for
-                // them and the only path that actually changes the goal is updateSavingsGoal/
-                // clearSavingsGoal in AccountService.
-                existing.goalName = entity.goalName
-                existing.goalTargetMinorUnits = entity.goalTargetMinorUnits
-                existing.goalTargetDate = entity.goalTargetDate
-                existing.updatedAt = clock.instant()
-                io.smallrye.mutiny.Uni.createFrom().item(existing)
-            }
-        }.awaitSuspending().toDomain()
+        return try {
+            versionMatchedUpdate(entity).awaitSuspending().toDomain()
+        } catch (e: jakarta.persistence.OptimisticLockException) {
+            // Truly simultaneous writers both pass the version-matched read (in
+            // versionMatchedUpdate) before either commits; the loser's flush then fails
+            // Hibernate's @Version check. Same conflict, same 409 (#465).
+            throw AccountUpdateConflictException(
+                "Account ${entity.id} was modified concurrently (flush-time version check)",
+                e,
+            )
+        } catch (e: org.hibernate.StaleObjectStateException) {
+            throw AccountUpdateConflictException(
+                "Account ${entity.id} was modified concurrently (flush-time version check)",
+                e,
+            )
+        }
     }
 
     override suspend fun existsByIban(iban: Iban): Boolean =
@@ -116,44 +156,83 @@ class AccountRepositoryImpl(private val clock: Clock) :
             clock.instant(),
         )
     }.awaitSuspending()
+}
 
-    private fun AccountEntity.toDomain() = Account(
-        id = id,
-        accountNumber = Iban.of(accountNumber),
-        accountType = AccountType.valueOf(accountType),
-        partyId = partyId,
-        productId = productId,
-        currency = CurrencyCode.of(currencyCode),
-        status = AccountStatus.valueOf(status),
-        signingRule = SigningRule.valueOf(signingRule),
-        openedAt = openedAt,
-        closedAt = closedAt,
-        version = version,
-        sanctionsScreenedAt = sanctionsScreenedAt,
-        sanctionsStatus = sanctionsStatus,
-        legalName = legalName,
-        goalName = goalName,
-        goalTargetMinorUnits = goalTargetMinorUnits,
-        goalTargetDate = goalTargetDate,
-    )
-
-    private fun Account.toEntity() = AccountEntity().also {
-        it.id = id
-        it.accountNumber = accountNumber.value
-        it.accountType = accountType.name
-        it.partyId = partyId
-        it.productId = productId
-        it.currencyCode = currency.code
-        it.status = status.name
-        it.signingRule = signingRule.name
-        it.openedAt = openedAt
-        it.closedAt = closedAt
-        it.version = version
-        it.sanctionsScreenedAt = sanctionsScreenedAt
-        it.sanctionsStatus = sanctionsStatus
-        it.legalName = legalName
-        it.goalName = goalName
-        it.goalTargetMinorUnits = goalTargetMinorUnits
-        it.goalTargetDate = goalTargetDate
+// File-scope extension (pure Uni assembly for update() above): keeps AccountRepositoryImpl
+// within detekt's per-class function budget, same pattern as the entity<->domain mappers below.
+private fun AccountRepositoryImpl.versionMatchedUpdate(entity: AccountEntity) = Panache.withTransaction {
+    // Optimistic guard (#465): match on the version the caller's domain object was READ
+    // at, not just the id. The previous re-read-and-copy silently applied stale domain
+    // state over a row another transaction had just changed (Hibernate's @Version check
+    // passed because the re-read was fresh) — e.g. a freeze racing a close resurrected
+    // the CLOSED account as FROZEN. 0 rows here = concurrent modification -> 409.
+    find("id = ?1 and version = ?2", entity.id, entity.version).firstResult().flatMap { existing ->
+        if (existing == null) {
+            throw AccountUpdateConflictException(
+                "Account ${entity.id} was modified concurrently (expected version ${entity.version})",
+            )
+        }
+        existing.accountType = entity.accountType
+        existing.partyId = entity.partyId
+        existing.productId = entity.productId
+        existing.currencyCode = entity.currencyCode
+        existing.status = entity.status
+        existing.openedAt = entity.openedAt
+        existing.closedAt = entity.closedAt
+        // Savings goal (ADR-0153) round-trips through the same generic update() the
+        // freeze/unfreeze/close use cases already call — those pass through a domain
+        // object whose goal fields are unchanged from the read, so this is a no-op for
+        // them and the only path that actually changes the goal is updateSavingsGoal/
+        // clearSavingsGoal in AccountService.
+        existing.goalName = entity.goalName
+        existing.goalTargetMinorUnits = entity.goalTargetMinorUnits
+        existing.goalTargetDate = entity.goalTargetDate
+        // Audit timestamp comes from the injected Clock, not the entity default (ADR-0100 /
+        // #540): the @PreUpdate callback's EPOCH default is never overwritten by the DB
+        // DEFAULT since Hibernate writes every insertable/updatable column explicitly.
+        existing.updatedAt = clock.instant()
+        io.smallrye.mutiny.Uni.createFrom().item(existing)
     }
+}
+
+// Entity<->domain mappers kept at file scope (pure functions) so AccountRepositoryImpl stays
+// within detekt's per-class function budget — same pattern as the ledger repository helpers.
+private fun AccountEntity.toDomain() = Account(
+    id = id,
+    accountNumber = Iban.of(accountNumber),
+    accountType = AccountType.valueOf(accountType),
+    partyId = partyId,
+    productId = productId,
+    currency = CurrencyCode.of(currencyCode),
+    status = AccountStatus.valueOf(status),
+    signingRule = SigningRule.valueOf(signingRule),
+    openedAt = openedAt,
+    closedAt = closedAt,
+    version = version,
+    sanctionsScreenedAt = sanctionsScreenedAt,
+    sanctionsStatus = sanctionsStatus,
+    legalName = legalName,
+    goalName = goalName,
+    goalTargetMinorUnits = goalTargetMinorUnits,
+    goalTargetDate = goalTargetDate,
+)
+
+private fun Account.toEntity() = AccountEntity().also {
+    it.id = id
+    it.accountNumber = accountNumber.value
+    it.accountType = accountType.name
+    it.partyId = partyId
+    it.productId = productId
+    it.currencyCode = currency.code
+    it.status = status.name
+    it.signingRule = signingRule.name
+    it.openedAt = openedAt
+    it.closedAt = closedAt
+    it.version = version
+    it.sanctionsScreenedAt = sanctionsScreenedAt
+    it.sanctionsStatus = sanctionsStatus
+    it.legalName = legalName
+    it.goalName = goalName
+    it.goalTargetMinorUnits = goalTargetMinorUnits
+    it.goalTargetDate = goalTargetDate
 }
