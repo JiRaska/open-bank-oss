@@ -42,6 +42,19 @@ So: **if it isn't a `feat`/`fix`/`perf`/`security` commit, it will not appear in
 commit message *is* the changelog. release-please attributes a commit to a component by the **files it
 touches** under that component's directory, regardless of the typed scope.
 
+**This means a `feat`/`fix`/`perf`/`security` PR that only touches a service directory *outside*
+`<service>/src/main/**`** — a `src/test/**`-only change, an `openapi.yaml`-only edit, a
+gitops/docs-only PR that happens to also add a file inside the service dir — **still proposes a
+release**, even though CLAUDE.md rule 2 says only `src/main/**` changes should. release-please has no
+concept of a sub-path exclusion; it only sees "a file under this component's directory changed" +
+"what type is the commit". This surfaced live in PR #547/#551 (a `src/test/**`-only boot-smoke test
+inside a gitops-registration PR proposed `finrep-service 0.4.0` for an artifact that hadn't changed).
+It's harmless — the rebuilt image is byte-identical, just re-tagged — but noisy, so
+`check-release-scope-mismatch.py` flags it as an advisory PR-time warning
+(`rules.yaml: change_requirements.release_scope_mismatch`). When it fires and the PR genuinely doesn't
+change the service's shipped code, re-type the commit (`test:`/`docs:`/`chore:`/`refactor:`/`build:`/
+`ci:`) rather than editing any release-please output by hand.
+
 ## The release_invariant (release-please + the build keep it true)
 
 For a released service these MUST be equal (`rules.yaml: versioning.release_invariant`):
