@@ -1,0 +1,29 @@
+# ArgoCD app for finrep-service (ADR-0097 Phase 1: FINREP core templates).
+# Stateless service — no Postgres, no Kafka. Reads the ledger trial balance via
+# REST to derive F 01.01 (balance sheet) and F 02.00 (P&L). COREP (own funds /
+# capital adequacy), EBA XBRL/DPM taxonomy mapping, and the ČNB transmission
+# channel are Phase 2, explicitly deferred (ADR-0097) — not shipped here.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: finrep
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/finrep
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: finrep
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
