@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.6.6...lending-service-v0.7.0) (2026-07-08)
+
+
+### Features
+
+* **lending:** wire four-eyes enforcement mechanism (ADR-0155) ([#563](https://github.com/JiRaska/open-bank-oss/issues/563)) ([df5e2ce](https://github.com/JiRaska/open-bank-oss/commit/df5e2cee5c63194553b7a7865a5f44b35d63d9cb)), closes [#413](https://github.com/JiRaska/open-bank-oss/issues/413)
+
 ## [0.6.6](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.6.5...lending-service-v0.6.6) (2026-07-07)
 
 
