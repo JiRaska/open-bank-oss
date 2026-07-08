@@ -8,7 +8,7 @@ openapi: "3.1.0"
 info:
   title: OpenBank Agent Service API (MCP)
 
-  version: "1.8.0"
+  version: "1.9.0"
   description: |
     Model Context Protocol (MCP) 2.0 server exposing OpenBank domain operations as AI-callable tools.
     All requests use JSON-RPC 2.0 over HTTP POST `/mcp`.
@@ -40,6 +40,11 @@ tags:
     description: MCP JSON-RPC 2.0 endpoint
   - name: agent
     description: Admin-UI assistant — governed, server-side chat (ADR-0031)
+  - name: proposals
+    description: >-
+      HITL approval queue (ADR-0031 D4). Requires an authenticated operator bearer
+      (ROLE_OPERATOR, ROLE_ADMIN or ROLE_COMPLIANCE) — not documented as an OpenAPI
+      security scheme yet, matching the rest of this spec.
 
 paths:
   /mcp:
@@ -242,6 +247,75 @@ paths:
                         allowed: true
                         resultPreview: "[]"
                     isProposal: false
+
+  /api/v1/proposals:
+    get:
+      tags: [proposals]
+      operationId: listProposals
+      summary: List agent proposals in the HITL approval queue
+      description: |
+        Lists proposals created by control-plane agents (ADR-0031 D4). `state=pending` (default)
+        returns only proposals awaiting a decision; `state=all` returns the most recent 100
+        regardless of state. `agentId` (ADR-0156) narrows the result to one agent's own proposals
+        — matches the agent id recorded as `proposedBy` — powering the admin-ui per-agent
+        drill-down at `/iaops/agents/<id>`. Omit it for the unfiltered fleet-wide queue.
+      parameters:
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [pending, all]
+            default: pending
+        - name: agentId
+          in: query
+          description: Filter to proposals authored by this agent id (e.g. "finops-agent").
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Matching proposals, most recent first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProposalDto'
+
+  /api/v1/proposals/{id}/decision:
+    post:
+      tags: [proposals]
+      operationId: decideProposal
+      summary: Approve or reject a pending proposal
+      description: |
+        Records a human decision on a PROPOSED proposal (ADR-0031 D4). Segregation of duties is
+        enforced: `decidedBy` must differ from the proposal's author, and a proposal already
+        decided returns 409.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecisionRequest'
+      responses:
+        "200":
+          description: The decided proposal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProposalDto'
+        "400":
+          description: Malformed id
+        "404":
+          description: Proposal not found
+        "409":
+          description: Proposal already decided, or decidedBy equals the author (segregation of duties)
 
   /q/health/ready:
     get:
@@ -497,3 +571,53 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ModelInfo'
+
+    ProposalDto:
+      type: object
+      required: [id, title, rationale, suggestedAction, proposedBy, proposedAt, state]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        rationale:
+          type: string
+          description: Why the agent is proposing this — may quote data the agent read.
+        suggestedAction:
+          type: string
+        proposedBy:
+          type: string
+          description: The proposing agent's id, e.g. "finops-agent" — matches an agents.yaml agent id.
+        proposedAt:
+          type: string
+          format: date-time
+        state:
+          type: string
+          enum: [PROPOSED, APPROVED, REJECTED]
+        decidedBy:
+          type: string
+          nullable: true
+        decidedAt:
+          type: string
+          format: date-time
+          nullable: true
+        decisionReason:
+          type: string
+          nullable: true
+        modelId:
+          type: string
+          nullable: true
+
+    DecisionRequest:
+      type: object
+      required: [approve, decidedBy]
+      properties:
+        approve:
+          type: boolean
+        decidedBy:
+          type: string
+          description: The deciding operator's identity — must differ from the proposal's proposedBy.
+        reason:
+          type: string
+          nullable: true
