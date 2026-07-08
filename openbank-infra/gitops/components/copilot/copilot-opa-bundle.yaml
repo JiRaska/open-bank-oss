@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: copilot-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "f40a7c7b8b76659c"
+    openbank.tech/policy-checksum: "25fff627d747fd1b"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1005,6 +1005,31 @@ data:
         enforced: advisory
         target_enforce_date: "2026-10-01"   # ADR-0144
         blocked_on: "the version-bump half is effectively covered by release-please + check-app-version-override.sh; 'test added for new behavior' has no automated diff-aware detector (not yet written) — may get redefined to lean on the coverage ratchet gate instead of a literal test-added check"
+      release_scope_mismatch:
+        # The inverse failure mode of service_code_change above: release-please attributes a
+        # commit to a component by the FILES IT TOUCHES under that component's directory,
+        # regardless of the typed scope (RELEASE.md) — so a feat/fix/perf/security (or
+        # breaking-marked) commit that only touches <service>/src/test/**, a root file like
+        # <service>/openapi.yaml, or gitops/docs outside the service dir entirely still makes
+        # release-please propose a release, even though only <service>/src/main/** should
+        # (rule 2). Observed live: PR #547 (feat(finrep): register ArgoCD Application — touched
+        # only a src/test boot-smoke test + gitops/docs outside the package dir) -> PR #551
+        # (finrep-service 0.4.0 proposed for an unchanged artifact). Harmless SemVer inflation,
+        # not a broken invariant — but the same mechanism misfires for any test-only or
+        # openapi.yaml-only PR typed feat/fix, so it is worth catching at PR time rather than
+        # correcting release-please output by hand (which rule 3 forbids anyway).
+        detect: ["<service>/** changed", "PR title type in {feat,fix,perf,security} or a breaking marker/footer", "no changed file under <service>/src/main/** (or openbank-admin-ui/src/**)"]
+        require:
+          - "use a non-releasing type (test/docs/chore/refactor/build/ci) when the PR doesn't touch the release-worthy subtree"
+          - "or split the src/main change and the non-src/main change into separate commits/PRs when both a release and a non-releasing change are intended"
+        gate: release-scope-mismatch
+        enforced: advisory
+        target_enforce_date: "2026-10-01"   # ADR-0144, same timeline as service_code_change (same root-cause class)
+        # CI producer is LIVE (advisory): openbank-infra/scripts/check-release-scope-mismatch.py runs
+        # in the "Validate manifests" job on every PR, right after release-registration consistency.
+        # Classifies from the PR title (the default squash-commit subject). Findings are ::warning
+        # annotations. Flip to enforced = pass --enforce to the script in ci.yml (one-line change).
+        ci_producer: "openbank-infra/scripts/check-release-scope-mismatch.py"
       service_config_change:
         # SmallRye Config / SnakeYAML do NOT merge duplicate mapping keys — the LAST
         # occurrence wins and earlier ones are SILENTLY dropped to library defaults, so
