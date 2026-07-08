@@ -103,11 +103,20 @@ class ProposalService(
         return row
     }
 
-    fun listPending(): List<AgentProposal> =
-        query("SELECT * FROM agent_proposal WHERE state = 'PROPOSED' ORDER BY proposed_at DESC")
+    /** [agentId] filters to one agent's proposals (matches proposed_by) — the /iaops/agents/<id> drill-down. */
+    fun listPending(agentId: String? = null): List<AgentProposal> {
+        val sql = "SELECT * FROM agent_proposal WHERE state = 'PROPOSED'" +
+            (if (agentId != null) " AND proposed_by = ?" else "") +
+            " ORDER BY proposed_at DESC"
+        return query(sql, agentId)
+    }
 
-    fun listAll(limit: Int): List<AgentProposal> =
-        query("SELECT * FROM agent_proposal ORDER BY proposed_at DESC LIMIT ${limit.coerceIn(1, 200)}")
+    fun listAll(limit: Int, agentId: String? = null): List<AgentProposal> {
+        val sql = "SELECT * FROM agent_proposal" +
+            (if (agentId != null) " WHERE proposed_by = ?" else "") +
+            " ORDER BY proposed_at DESC LIMIT ${limit.coerceIn(1, 200)}"
+        return query(sql, agentId)
+    }
 
     fun get(id: UUID): AgentProposal? = dataSource.connection.use { c ->
         c.prepareStatement("SELECT * FROM agent_proposal WHERE id = ?").use { ps ->
@@ -169,8 +178,10 @@ class ProposalService(
         return current.copy(state = newState, decidedBy = decidedBy, decidedAt = decidedAt, decisionReason = reason)
     }
 
-    private fun query(sql: String): List<AgentProposal> = dataSource.connection.use { c ->
+    /** [agentId] binds to the sole '?' placeholder in [sql] (proposed_by), if the caller included one. */
+    private fun query(sql: String, agentId: String? = null): List<AgentProposal> = dataSource.connection.use { c ->
         c.prepareStatement(sql).use { ps ->
+            agentId?.let { ps.setString(1, it) }
             ps.executeQuery().use { rs ->
                 buildList { while (rs.next()) add(rs.toProposal()) }
             }
