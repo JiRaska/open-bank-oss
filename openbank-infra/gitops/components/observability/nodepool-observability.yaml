@@ -1,20 +1,30 @@
-# Dedicated ON-DEMAND node pool for stateful observability (ADR-0082 / ADR-0027).
+# Dedicated node pool for stateful observability (ADR-0082 / ADR-0027).
 # The `default` pool allows spot, and spot reclamation was killing Prometheus/Tempo
 # every ~15-30 min (node dies mid-WAL-replay → stuck EBS volume → Multi-Attach). A
-# bank's monitoring plane must not ride spot. On-demand + a taint so ONLY tolerating
-# observability stateful pods land here.
+# bank's monitoring plane must not ride spot UNPROTECTED. Kept as its own pool
+# (tainted so ONLY tolerating observability stateful pods land here) even now
+# that spot is allowed, so it stays isolated from the general `default` pool's
+# bin-packing and keeps its own disruption budget/limits.
 #
-# consolidationPolicy relaxed WhenEmpty -> WhenEmptyOrUnderutilized (FinOps):
-# WhenEmpty was the right call back when Prometheus/Tempo/Loki/Alertmanager had
-# NO PodDisruptionBudget — Karpenter's voluntary consolidation-driven eviction
-# could hit the exact same failure mode as spot reclaim (a stateful pod evicted
-# mid-WAL-replay). All 4 now have a PDB (minAvailable:1 -> 0 allowed disruptions,
-# same mechanism pyroscope/glitchtip-pg/goalert-db already relied on — see the
-# observability-components PDB manifests), confirmed live via `kubectl get pdb
-# -n observability` before this change. Karpenter's disruption controller
-# respects PDBs before evicting, so consolidation can now safely bin-pack idle
-# capacity without risking the original incident. Fleet was sitting at 7
-# on-demand nodes @ 6-37% resource-request utilization before this change.
+# consolidationPolicy relaxed WhenEmpty -> WhenEmptyOrUnderutilized, and
+# capacity-type widened on-demand-only -> [spot, on-demand] (FinOps issue #445,
+# 2026-07-08): both changes rest on the same fix. WhenEmpty/on-demand-only was
+# the right call back when Prometheus/Tempo/Loki/Alertmanager had NO
+# PodDisruptionBudget — either a Karpenter consolidation eviction or a spot
+# 2-minute reclaim notice could hit the exact same failure mode (a stateful
+# pod killed mid-WAL-replay). All 4 now have a PDB (minAvailable:1 -> 0 allowed
+# disruptions, same mechanism pyroscope/glitchtip-pg/goalert-db already relied
+# on — see the observability-components PDB manifests), confirmed live via
+# `kubectl get pdb -n observability` before this change. Karpenter's disruption
+# controller (voluntary eviction) AND its spot-interruption handler (drains
+# before the 2-minute reclaim deadline) both respect PDBs, so a `minAvailable:1`
+# PDB blocks the eviction/drain from proceeding until a replacement node is
+# ready either way — spot is no longer riskier than consolidation once that
+# guard exists. June Cost Explorer: ~$69/mo on-demand BoxUsage for the
+# steady-state m6g.large alone; moving eligible instance-category/size
+# combinations to spot pricing (typically 60-70% off Graviton on-demand in
+# eu-north-1) is the intended saving. Fleet was sitting at 7 on-demand nodes @
+# 6-37% resource-request utilization before the consolidationPolicy change.
 apiVersion: karpenter.sh/v1
 kind: NodePool
 metadata:
@@ -39,7 +49,7 @@ spec:
           values: ["linux"]
         - key: karpenter.sh/capacity-type
           operator: In
-          values: ["on-demand"]
+          values: ["spot", "on-demand"]
         - key: karpenter.k8s.aws/instance-category
           operator: In
           values: ["m", "r"]

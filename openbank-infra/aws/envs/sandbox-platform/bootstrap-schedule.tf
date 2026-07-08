@@ -1,6 +1,6 @@
 # Overnight scale-down of the EKS bootstrap node group (FinOps, issue #196).
 #
-# WHY: the bootstrap pool (envs/sandbox-substrate, 2x t4g.medium on-demand,
+# WHY: the bootstrap pool (envs/sandbox-substrate, 2x c7g.large on-demand,
 # node_min_size=2) runs the cluster's own system pods — CoreDNS, the Karpenter
 # controller, ArgoCD, cert-manager — 24/7, even though Karpenter's own
 # consolidation freeze (this root's main.tf, "0 20 * * *" / 11h) already
