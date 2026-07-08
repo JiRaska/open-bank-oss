@@ -105,6 +105,11 @@ class AccountRepositoryImpl(
         idempotencyKey: String,
     ): Account {
         val entity = account.toEntity()
+        // Audit timestamps come from the injected Clock here, same as save() (ADR-0100 / #540):
+        // the column DEFAULT never applies because Hibernate writes every insertable column.
+        val now = clock.instant()
+        entity.createdAt = now
+        entity.updatedAt = now
         // One transaction for account + primary pocket + idempotency key (#465): previously the
         // three writes were separate transactions, so a crash could leave an account without a
         // pocket, and two concurrent opens with one Idempotency-Key both committed (the Redis
