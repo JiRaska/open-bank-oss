@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.6.6...sepa-instant-v0.7.0) (2026-07-08)
+
+
+### Features
+
+* **sepa-instant:** wire four-eyes enforcement mechanism (ADR-0155) ([#561](https://github.com/JiRaska/open-bank-oss/issues/561)) ([5889388](https://github.com/JiRaska/open-bank-oss/commit/58893884f12a9eb0c17a431caa24acb0408148dd)), closes [#413](https://github.com/JiRaska/open-bank-oss/issues/413)
+
 ## [0.6.6](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.6.5...sepa-instant-v0.6.6) (2026-07-07)
 
 
