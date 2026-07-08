@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.13.2...agent-service-v1.14.0) (2026-07-08)
+
+
+### Features
+
+* **agent:** filter HITL proposals by agentId, document the endpoint ([#600](https://github.com/JiRaska/open-bank-oss/issues/600)) ([59dd0e7](https://github.com/JiRaska/open-bank-oss/commit/59dd0e7d1e0381ab4c6917f1e6b8a7bb131a5201))
+
 ## [1.13.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.13.1...agent-service-v1.13.2) (2026-07-07)
 
 
