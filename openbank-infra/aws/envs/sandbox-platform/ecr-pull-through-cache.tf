@@ -94,80 +94,46 @@ resource "aws_ecr_pull_through_cache_rule" "ecr_public" {
 }
 
 # ---------------------------------------------------------------------------
-# CodeArtifact VPC Interface endpoint — keeps Maven Central proxy traffic
-# in-VPC so Gradle dependency downloads never hit the NAT gateway.
+# CodeArtifact VPC Interface endpoints — REMOVED (FinOps #444, 2026-07-08).
 #
-# Flow: ARC runner pod → codeartifact VPC endpoint → CodeArtifact proxy →
-#       S3 Gateway endpoint (free) → S3. Zero NAT for any dep cached in CA.
-# Estimated saving: ~$25/day (measured from NAT-Bytes cost before this fix).
+# Originally added to keep Maven Central proxy traffic in-VPC for in-cluster
+# ARC runners doing Gradle builds (flow: ARC runner pod → codeartifact VPC
+# endpoint → CodeArtifact proxy → S3 Gateway endpoint (free) → S3), avoiding
+# an estimated ~$25/day of NAT-Bytes cost.
 #
-# The endpoint was deleted 2026-06-15 (was showing 0 bytes because runner
-# image lacked aws CLI → token fetch failed → Maven Central fallback over NAT).
-# Root cause fixed: runner image digest bumped to ce7b1171 which includes
-# aws CLI; CodeArtifact endpoint restored here so both legs work.
+# Post-#198 hosted-runner migration audit: that in-cluster Gradle-build flow
+# has moved to GitHub-hosted runners, so the endpoints' own justification is
+# largely gone. CloudWatch AWS/PrivateLinkEndpoints BytesProcessed over the
+# trailing 14 days confirmed it: codeartifact.api ~0.06 GB (~$0.006/mo
+# NAT-equivalent), codeartifact.repositories showed ZERO bytes / no metric
+# data at all. Fixed cost was ~$23/mo EACH (3 AZs × $0.0105/h × 730h) — both
+# fail the keep test by a wide margin. Any residual CodeArtifact calls (e.g.
+# the arc-runners.tf codeartifact:GetAuthorizationToken IAM policy) now route
+# over NAT; that path is a small, infrequent auth-token call, not bulk dep
+# downloads. Watch openbank-nat-egress-daily; if this regresses, restore both
+# resources verbatim (see open-bank-oss#444 / git history of this file).
 # ---------------------------------------------------------------------------
-resource "aws_vpc_endpoint" "codeartifact_api" {
-  vpc_id              = local.s.vpc_id
-  service_name        = "com.amazonaws.${local.region}.codeartifact.api"
-  vpc_endpoint_type   = "Interface"
-  subnet_ids          = local.s.private_subnet_ids
-  security_group_ids  = [local.s.node_security_group_id]
-  private_dns_enabled = true
-
-  tags = {
-    Name      = "openbank-sandbox-codeartifact-api"
-    Project   = "openbank"
-    ManagedBy = "tofu"
-  }
-}
-
-resource "aws_vpc_endpoint" "codeartifact_repositories" {
-  vpc_id              = local.s.vpc_id
-  service_name        = "com.amazonaws.${local.region}.codeartifact.repositories"
-  vpc_endpoint_type   = "Interface"
-  subnet_ids          = local.s.private_subnet_ids
-  security_group_ids  = [local.s.node_security_group_id]
-  private_dns_enabled = true
-
-  tags = {
-    Name      = "openbank-sandbox-codeartifact-repositories"
-    Project   = "openbank"
-    ManagedBy = "tofu"
-  }
-}
 
 # ---------------------------------------------------------------------------
-# EC2 VPC Interface endpoint — eliminates NAT for aws-node (VPC CNI) EC2 API
-# calls on every cluster node.
+# EC2 VPC Interface endpoint — REMOVED (FinOps #444, 2026-07-08).
 #
-# Problem: aws-node (Amazon VPC CNI DaemonSet in kube-system) polls the EC2 API
-# continuously for ENI / IP-address management — IPAM attach/detach,
-# DescribeNetworkInterfaces, AssignPrivateIpAddresses, etc. Without this endpoint
-# every call leaves the VPC over the NAT gateway. With 15-23 nodes each polling
-# every few seconds this produces steady background NAT from kube-system that the
-# D1 FinOps detector flags as "NAT egress 2× rolling avg — kube-system".
+# Originally added to eliminate NAT for aws-node (VPC CNI) EC2 API calls
+# (IPAM attach/detach, DescribeNetworkInterfaces, AssignPrivateIpAddresses)
+# plus Karpenter (DescribeInstances/CreateFleet/TerminateInstances) and
+# ebs-csi-driver (DescribeVolumes/AttachVolume) traffic — a steady background
+# poll from kube-system that the D1 FinOps detector watches for as "NAT
+# egress 2× rolling avg — kube-system".
 #
-# Also used by: Karpenter (DescribeInstances, CreateFleet, TerminateInstances),
-# ebs-csi-driver (DescribeVolumes, AttachVolume), EKS node bootstrap.
-#
-# Fix: once private DNS resolves ec2.eu-north-1.amazonaws.com to an in-VPC IP,
-# all these components go entirely over the private endpoint — zero NAT cost.
-# ---------------------------------------------------------------------------
-resource "aws_vpc_endpoint" "ec2" {
-  vpc_id              = local.s.vpc_id
-  service_name        = "com.amazonaws.${local.region}.ec2"
-  vpc_endpoint_type   = "Interface"
-  subnet_ids          = local.s.private_subnet_ids
-  security_group_ids  = [local.s.node_security_group_id]
-  private_dns_enabled = true
-
-  tags = {
-    Name      = "openbank-sandbox-ec2"
-    Project   = "openbank"
-    ManagedBy = "tofu"
-  }
-}
-
+# Post-#198 hosted-runner migration audit: CloudWatch AWS/PrivateLinkEndpoints
+# BytesProcessed showed a steady ~100-190 MiB/day (~4 GB/month) — NAT-equivalent
+# cost ~$0.19/month vs the ~$23/month fixed cost of the endpoint (3 AZs ×
+# $0.0105/h × 730h). The traffic is real and continuous (this is NOT an idle
+# endpoint) but far too small in absolute bytes to justify the fixed cost —
+# ~150 MiB/day of added NAT baseline is well below the 20 GB/hour /
+# 2×-rolling-avg alarm thresholds. Watch openbank-nat-egress-daily and
+# openbank-nat-egress-20gb-per-hour for a "kube-system" anomaly signature; if
+# it regresses, restore this resource verbatim (see open-bank-oss#444 / git
+# history of this file).
 # ---------------------------------------------------------------------------
 # IAM: allow Karpenter nodes to create ECR repos on first pull.
 # Pull-through cache auto-creates a private repo on first use; the node role

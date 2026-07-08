@@ -1,0 +1,203 @@
+# Explicit, human-reviewable allowlist/denylist for the off-hours scale-down
+# (issue #446). This ConfigMap is the single source of truth both CronJobs
+# read from — edit THIS file to add/remove a target, never the CronJob
+# command inline. RBAC (rbac.yaml) is the actual enforcement boundary: a
+# namespace added here without a matching RoleBinding will just fail closed
+# (kubectl returns Forbidden, the job logs it and moves on — see
+# concurrencyPolicy/errexit notes in the CronJobs).
+#
+# KEEP-ALIVE (never listed in DOWNSCALE_TARGETS below), and why:
+#   - admin-ui           : task requirement — the demo's own front door.
+#   - customer-edge      : task requirement — sole internet->cluster path for
+#                          the retail-app showcase (ADR-0065).
+#   - iam (Keycloak)      : both of the above do a live OIDC handshake against
+#                          it on every login; scaling it down 500s every
+#                          "browsable" claim above it.
+#   - observability       : Prometheus/Grafana/Loki/Tempo/Alertmanager run on
+#                          their OWN dedicated on-demand NodePool already
+#                          (components/observability/nodepool-observability.yaml)
+#                          precisely so they are never subject to spot/
+#                          consolidation churn — scaling them down here would
+#                          fight that isolation for a stack that is already
+#                          FinOps-lean (single replica, 12h retention) and is
+#                          what makes the demo "look alive" in the first place.
+#                          Deliberately whole-namespace excluded rather than
+#                          cherry-picking Helm-generated Deployment names,
+#                          which are chart-version-fragile.
+#   - ledger-service, transaction-service, account-service, balance-service:
+#     added after PR review (issue #446 follow-up). standing-order-service's
+#     StandingOrderExecutionScheduler runs a REAL, enabled-by-default batch
+#     job at a FIXED time — 03:00 UTC (openbank.scheduler.execution-cron,
+#     openbank-standing-order-service/src/main/resources/application.yaml)
+#     — that posts due standing-order payments through exactly this chain.
+#     03:00 UTC = 04:00 Prague (CET) / 05:00 Prague (CEST): squarely inside
+#     the 22:00-07:00 down window, every single night. A once-daily FIXED
+#     cron (unlike a `*/30` or hourly one) has no graceful degradation: if
+#     standing-order-service itself is at 0 replicas when its one daily tick
+#     is due, the tick is simply never scheduled — Quarkus doesn't queue a
+#     missed cron for next boot, so the sweep would silently never run,
+#     indefinitely (weekday wake-up at 07:00 Prague is itself well past the
+#     day's only window, and the following night's 03:00 UTC is back inside
+#     the down period again). Rather than fight cron timing, standing-order-
+#     service AND the "core" chain nearly everything transitively depends on
+#     (ledger, transaction, account, balance) stay up continuously. This
+#     still captures most of the saving: the payment-scheme-specific
+#     services (sepa-payment, sepa-instant, domestic-payment, clearing,
+#     swift, fx, lending, sca, consent, fraud, billing, settlement) are
+#     still scaled down.
+#   - kyc-service: same fixed-once-daily-cron bug, found during the same
+#     audit that caught standing-order-service above. KycRetentionScheduler
+#     enforces the AML Act §16 5-year KYC-case hard-delete retention policy,
+#     `enabled=true` by default (openbank.retention.kyc.enabled), fixed cron
+#     at 03:30 UTC (openbank.retention.kyc.cron) — inside the down window
+#     every night, same silent-never-fires risk as standing-order-service,
+#     except this one is a REGULATORY retention control (ADR-0118 SS5), not
+#     just a demo feature. Unlike standing-order-service, kyc-service has no
+#     synchronous cross-service dependency for this job (it only touches its
+#     own Postgres), so no dependency chain needed — kyc-service alone moves
+#     to keep-alive. It was the only scale-down target in the `kyc`
+#     namespace, so that RoleBinding was removed entirely (same as
+#     accounts/balances/ledger above).
+#
+# OTHER SCHEDULED-JOB / DOWN-WINDOW COLLISIONS CHECKED (grepped for every
+# `@Scheduled` in the fleet, not just the single-line `@Scheduled(cron`
+# pattern — the multi-line annotation form used by most of these was missed
+# by the first pass), not exempted:
+#   - onboarding-service AbandonedRegistrationCleaner: real, unconditional,
+#     fixed cron at 02:00 UTC (0 0 2 * * ?) — same "fixed once-daily inside
+#     the window" shape as standing-order-service/kyc-service above, but
+#     NOT exempted: the job only suspends registrations stuck >=30 days in
+#     early KYC, a housekeeping sweep with no money movement, fully
+#     idempotent, and reversible by an operator from the admin-UI
+#     (ADR-0068). Missing a night (or every night, worst case) delays a
+#     30-day-stale cleanup by a few hours to a day — judged acceptable for
+#     a no-SLA sandbox, unlike a payment-execution or regulatory-retention
+#     job. Flagged here for visibility, not fixed.
+#   - agent-service OversightService (agent.oversight.cron, sandbox default
+#     `*/30 * * * *`), consent-service ConsentExpirationJob (`0 5 * * *`,
+#     hourly), lending-service InterestAccrualScheduler and
+#     ProvisioningCycleScheduler (both `every = ...`, fixed-RATE not
+#     fixed-cron): all RECURRING (every N minutes/hours), not a single
+#     fixed daily window, so scaling to 0 overnight just pauses the ticks —
+#     they resume on schedule once the pod is back at replicas=1. This is
+#     the intended, graceful degradation the whole PR relies on, not a bug.
+#   - notification-service NotificationOutboxDeadLetterJanitorJob (02:00
+#     UTC) and DeviceTokenSweepJob (03:00 UTC): both real fixed-time crons,
+#     but notification-service is already KEDA-managed with
+#     minReplicaCount: 1 (see below) — never at 0 replicas, no collision.
+#   - card-issuance-service CardPiiRetentionScheduler (03:00 UTC,
+#     enabled=true, AML Act SS16 card-PII anonymisation — same regulatory
+#     shape as kyc-service's job above): already on the keep-alive list
+#     because it's KEDA HTTPScaledObject-managed (T1), so THIS CronJob
+#     never touches it — no collision from this PR. (KEDA's own
+#     scale-to-zero-on-idle is a separate, pre-existing mechanism outside
+#     this PR's scope; not introduced or changed here.)
+#   - ledger-service TieOutScheduler (06:00 UTC) and FxRevaluationScheduler
+#     (15:00 UTC), balance-service BalanceReconciliationScheduler (23:30
+#     UTC): all real fixed-time crons, but ledger-service and
+#     balance-service are BOTH already on the keep-alive list (the
+#     standing-order-service fix above) — no collision.
+#   - fx-service CnbRateIngestionScheduler (14:40 UTC): real fixed-time
+#     cron, but 14:40 UTC (15:40/16:40 Prague) falls OUTSIDE the 22:00-07:00
+#     down window entirely — no collision regardless of fx-service being
+#     scaled down.
+#   - billing-service BillingCycleScheduler (monthly, 03:00 UTC on the 1st):
+#     confirmed DISABLED by default (openbank.billing.scheduler.enabled
+#     defaults to "false", not overridden in gitops; the KDoc explains the
+#     account-batch has no fleet-wide account-discovery port yet) — dead
+#     code today, no live collision.
+#   - audit-service SessionLogRetentionScheduler (04:00 UTC): confirmed
+#     DISABLED by default (openbank.retention.session-log.enabled defaults
+#     to "false", deliberately — the KDoc says merging must not itself
+#     cause any deletion against a brand-new table) — dead code today, no
+#     live collision.
+#   - statement-service PeriodCloseScheduler and sdd-service
+#     MandateExpiryScheduler: confirmed DISABLED by default
+#     (openbank.statement.scheduled-close.enabled / openbank.sdd.expiry.enabled,
+#     both default "false", not overridden in gitops) — dead code today, no
+#     live collision.
+#   - analytics-sink ReconciliationJob: the service has no
+#     openbank-infra/gitops component/Application at all — not deployed to
+#     the sandbox cluster, so not in scope.
+#
+# ALSO EXCLUDED (not app-plane, or already self-managing scale-to-zero):
+#   - product-catalog, interest-service, sdd-service, card-issuance-service:
+#     already KEDA HTTPScaledObject-managed (ADR-0057 T1). A CronJob forcing
+#     replicas=0 would race the KEDA-managed HPA that owns their replica
+#     count; excluded so the two controllers never fight over the same field.
+#   - notification-service: KEDA ScaledObject with minReplicaCount:1 (the
+#     customer-edge notification feed is a synchronous read) — same reason.
+#   - Kafka (Strimzi KafkaNodePool), Temporal (Helm release), CNPG Postgres
+#     clusters: stateful, operator-managed, NOT a plain Deployment/Rollout —
+#     `kubectl scale` does not apply the same way, and a broker/DB restart
+#     risk (WAL replay, Multi-Attach EBS, per ADR-0082's own postmortem on
+#     the observability NodePool) outweighs the modest saving here. Left for
+#     a future, deliberate change (KEDA Kafka-lag scaling per ADR-0057 T2),
+#     not a blunt cron.
+#   - pact-broker, reposilite, registry-cache, gradle-build-cache: CI-adjacent
+#     caches that a CI run may need at any hour (contract verification,
+#     dependency resolution), independent of EU daytime demo traffic.
+#   - external-dns, external-secrets, kyverno, argo-rollouts (controllers):
+#     cluster platform plumbing, not app-plane; near-zero idle cost and other
+#     components' reconciliation depends on them being up continuously.
+#
+# SCALE-DOWN TARGETS: every remaining app-plane service, INCLUDING most of
+# openbank-libs/governance/rules.yaml:money_path_services (sepa-payment,
+# sepa-instant, domestic-payment, clearing, swift, fx, lending, sca,
+# consent, fraud, billing, settlement) — EXCEPT ledger, transaction,
+# account and balance, which moved to the keep-alive list above (see the
+# standing-order-service cron-collision note), and EXCEPT kyc-service
+# (its own, separate cron-collision note just above). This is still
+# deliberate per issue #446: the sandbox has NO SLA (ADR-0057) and no real
+# money moves through it, so money-path services that need 2 approvals + a
+# threat model to touch in rules.yaml are explicitly fine to scale to zero
+# overnight here — the ADR-0030 threat-model gate governs CODE/CONFIG
+# changes to these services, not a sandbox's off-hours compute floor. The
+# exempted services are kept alive purely for the cron-correctness reason
+# above, not because they're money-path (kyc-service isn't even on the
+# money-path list; that reasoning would have applied to all thirteen
+# money-path services otherwise).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: finops-scaledown-allowlist
+  namespace: finops-scaledown
+  labels:
+    app.kubernetes.io/part-of: finops-scaledown
+data:
+  # Format: one "<namespace>/<kind>/<name>" entry per line. <kind> is
+  # "deployment" or "rollout" (both support the `scale` subresource, so
+  # `kubectl scale <kind>/<name> -n <namespace> --replicas=N` works
+  # identically for either — ADR-0098 notes Rollout is a drop-in
+  # Deployment replacement including the scale subresource).
+  DOWNSCALE_TARGETS: |
+    aml/deployment/aml-service
+    anacredit/deployment/anacredit-service
+    audit/deployment/audit-service
+    billing/deployment/billing-service
+    consent/rollout/consent-service
+    developer-portal/deployment/developer-portal
+    dispute/deployment/dispute-service
+    finrep/deployment/finrep-service
+    fraud/rollout/fraud-service
+    fx/rollout/fx-service
+    lending/rollout/lending-service
+    onboarding/rollout/onboarding-service
+    party/rollout/party-service
+    payments/rollout/sepa-payment
+    payments/rollout/domestic-payment
+    payments/rollout/sepa-instant
+    payments/rollout/clearing-service
+    payments/rollout/settlement-service
+    payments/deployment/clearing-simulator
+    payments/rollout/swift-service
+    pid/deployment/pid-service
+    psd2/deployment/psd2-service
+    sanctions/rollout/sanctions-service
+    sca/rollout/sca-service
+    statements/deployment/statement-service
+    tpp-registry/deployment/tpp-registry-service
+    platform/deployment/agent-service
+    platform/deployment/copilot-service
+    devops-agent/deployment/devops-agent
+    finops-agent/deployment/finops-agent
