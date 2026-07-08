@@ -54,3 +54,18 @@ dependencies {
     // lives in [versions] of the catalog, not on this classpath.
     implementation("org.jlleitschuh.gradle.ktlint:org.jlleitschuh.gradle.ktlint.gradle.plugin:$ktlintPluginVersion")
 }
+
+// Security floor (issue #461 follow-up): the Quarkus Gradle plugin pulls in maven-core ->
+// plexus-utils 4.0.2 transitively (its embedded Maven resolver, used for devtools/
+// registry-client), which carries a directory-traversal vulnerability in extractFile
+// (GHSA-6fmv-xxpf-w3cw, CVE-2025-67030). gradle/osv-scanner.toml notes this couldn't be
+// forced from a *service* project's resolutionStrategy — a service's configurations.all
+// cannot reach into an already-applied Gradle plugin's own classpath. This project is
+// different: build-logic declares io.quarkus:io.quarkus.gradle.plugin as a plain
+// `implementation` dependency of *this* project (see above), so build-logic's own
+// resolutionStrategy applies directly to it.
+configurations.all {
+    resolutionStrategy {
+        force("org.codehaus.plexus:plexus-utils:4.0.3")
+    }
+}
