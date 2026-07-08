@@ -43,10 +43,12 @@ import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.lending.Amortization
 import com.openbank.libs.lending.Delinquency
+import com.openbank.libs.lending.EclInputs
 import com.openbank.libs.lending.Ifrs9
 import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
+import java.math.BigDecimal
 import java.time.Clock
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -368,7 +370,7 @@ class LendingService(
     // --- Collateral ---------------------------------------------------------------------------------
 
     override fun register(loanId: LoanId, request: CollateralRequest): Uni<Collateral> {
-        require(request.haircut.signum() >= 0 && request.haircut <= java.math.BigDecimal.ONE) {
+        require(request.haircut.signum() >= 0 && request.haircut <= BigDecimal.ONE) {
             "Haircut must be within [0,1]: ${request.haircut}"
         }
         val now = OffsetDateTime.now(clock)
@@ -406,20 +408,55 @@ class LendingService(
             val outstanding = outstandingBalance(loan, schedule)
             val oldestUnpaidDue = schedule.filter { !it.paid }.minByOrNull { it.dueDate }?.dueDate
             val dpd = Delinquency.daysPastDue(oldestUnpaidDue, asOf)
-            riskParameters.parametersFor(loan, outstanding).map { inputs ->
-                val ecl = Ifrs9.assess(daysPastDue = dpd, inputs = inputs)
-                ProvisioningSnapshot(
-                    loanId = loan.id,
-                    asOf = asOf,
-                    outstandingBalance = outstanding,
-                    daysPastDue = dpd,
-                    bucket = Delinquency.bucket(dpd),
-                    stage = ecl.stage,
-                    horizon = ecl.horizon,
-                    expectedCreditLoss = ecl.expectedCreditLoss,
-                )
+            riskParameters.parametersFor(loan, outstanding).flatMap { inputs ->
+                collateral.findByLoan(loan.id).map { registered ->
+                    val adjustedInputs = applyCollateral(inputs, registered)
+                    val ecl = Ifrs9.assess(daysPastDue = dpd, inputs = adjustedInputs)
+                    ProvisioningSnapshot(
+                        loanId = loan.id,
+                        asOf = asOf,
+                        outstandingBalance = outstanding,
+                        daysPastDue = dpd,
+                        bucket = Delinquency.bucket(dpd),
+                        stage = ecl.stage,
+                        horizon = ecl.horizon,
+                        expectedCreditLoss = ecl.expectedCreditLoss,
+                    )
+                }
             }
         }
+
+    /**
+     * Collateral-adjusted LGD (ADR-0028 D1, first increment). Sums every [registered] collateral item's
+     * haircut-adjusted value (`marketValue * (1 - haircut)`, all items must share [inputs]'
+     * `exposureAtDefault` currency — the loan book is single-currency) and reduces [inputs]' flat LGD by
+     * that cover relative to the exposure, via the pure [Ifrs9.collateralAdjustedLgd]. PD is deliberately
+     * left untouched by this increment.
+     *
+     * A loan with no registered collateral (the common/default case today) takes the `registered.isEmpty()`
+     * short-circuit and returns [inputs] unchanged — byte-identical to pre-collateral behaviour, no
+     * regression for the existing loan book.
+     *
+     * **First-pass caveats (see [Ifrs9.collateralAdjustedLgd] and the ADR-0028 delivery note):** no
+     * real-time revaluation — this reads whatever `marketValue`/`haircut` was last declared/revalued at
+     * registration time, which can be stale; no legal perfection-of-security-interest verification — a
+     * registered collateral row is a data claim, not a confirmed enforceable priority.
+     */
+    private fun applyCollateral(inputs: EclInputs, registered: List<Collateral>): EclInputs {
+        if (registered.isEmpty()) return inputs
+        val currency = inputs.exposureAtDefault.currency
+        val haircutAdjustedTotal = registered
+            .filter { it.marketValue.currency == currency }
+            .fold(BigDecimal.ZERO) { acc, item ->
+                acc + item.marketValue.amount.multiply(BigDecimal.ONE - item.haircut)
+            }
+        val effectiveLgd = Ifrs9.collateralAdjustedLgd(
+            lgd = inputs.lgd,
+            haircutAdjustedCollateralValue = haircutAdjustedTotal,
+            exposureAtDefault = inputs.exposureAtDefault.amount,
+        )
+        return inputs.copy(lgd = effectiveLgd)
+    }
 
     // --- Provisioning cycle: scheduled IFRS 9 stage/ECL re-bucketing, delta-vs-prior-period posting ---
 
