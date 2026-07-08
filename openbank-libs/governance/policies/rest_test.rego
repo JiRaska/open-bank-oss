@@ -45,7 +45,9 @@ rules_real := {
 	"money_path_action_prefixes": {
 		"sepa-payment": ["sepaPayment"],
 		"sepa-instant": ["sctInstPayment"],
-		"domestic-payment": ["domesticPayment"],
+		# domestic-payment intentionally absent -- its real @Authorize prefix is now
+		# domestic-payment.* (kebab-case), matching the derived scope by default
+		# (issue #413 audit found a stale override here silently re-breaking it).
 		"clearing": ["clearingBatch"],
 		"sca": ["device", "scaChallenge"],
 	},
@@ -269,9 +271,16 @@ test_four_eyes_required_sepa_instant_real_action if {
 }
 
 test_four_eyes_required_domestic_payment_real_action if {
-	# DomesticPaymentResource.kt: @Authorize(action = "domesticPayment.transitionStatus", ...)
-	rest.four_eyes_required with input as {"action": "domesticPayment.transitionStatus"}
+	# DomesticPaymentResource.kt: @Authorize(action = "domestic-payment.transitionStatus", ...)
+	# (renamed from domesticPayment.transitionStatus since the #395/#396 fix landed —
+	# now matches the derived scope directly, no override needed; issue #413 audit.)
+	rest.four_eyes_required with input as {"action": "domestic-payment.transitionStatus"}
 		with data.rules as rules_real
+}
+
+test_money_path_scopes_domestic_payment_uses_derived_name_not_stale_override if {
+	"domestic-payment" in rest.money_path_scopes with data.rules as rules_real
+	not "domesticPayment" in rest.money_path_scopes with data.rules as rules_real
 }
 
 test_four_eyes_required_clearing_real_action if {

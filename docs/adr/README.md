@@ -105,7 +105,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0094](0094-eudi-native-identity-hub.md) | EUDI-native identity hub — eIDAS 2.0 wallet onboarding, probabilistic record linkage, and durable orchestration | Accepted | Partial | — |
 | [0095](0095-qrlesspay-ble-proximity-spayd-payments.md) | QRlessPay — BLE proximity SPAYD payments | Accepted | Partial | openbank-app |
 | [0096](0096-entity-level-statutory-accounting-close.md) | Entity-level statutory accounting close (GL period freeze, attested trial balance, financial statements, EoY) | Accepted | Planned | — |
-| [0097](0097-supervisory-prudential-returns-finrep-corep.md) | Supervisory / prudential returns (FINREP / COREP) derived from the attested close | Accepted | Planned | — |
+| [0097](0097-supervisory-prudential-returns-finrep-corep.md) | Supervisory / prudential returns (FINREP / COREP) derived from the attested close | Accepted | Partial | — |
 | [0098](0098-progressive-delivery-argo-rollouts.md) | Progressive Delivery for Money-Path Services via Argo Rollouts | Accepted | Shipped | — |
 | [0099](0099-automated-secret-rotation.md) | Automated secret rotation: OpenBao dynamic credentials + CronJob rotator | Accepted | Partial | — |
 | [0100](0100-deterministic-simulation-testing.md) | Deterministic Simulation Testing for the banking core | Accepted | Partial | — |
