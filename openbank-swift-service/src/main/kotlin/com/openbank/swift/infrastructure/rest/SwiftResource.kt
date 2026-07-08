@@ -5,10 +5,12 @@
 package com.openbank.swift.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.security.Roles
 import com.openbank.swift.application.port.`in`.SendSwiftCommand
 import com.openbank.swift.application.port.`in`.SwiftUseCase
 import com.openbank.swift.domain.model.SwiftStatus
 import com.openbank.swift.infrastructure.rest.dto.toResponse
+import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.NotFoundException
@@ -25,6 +27,7 @@ import java.util.UUID
 @Consumes(MediaType.APPLICATION_JSON)
 class SwiftResource(private val useCase: SwiftUseCase) {
     @POST
+    @RolesAllowed(Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "swift.send", resource = "")
     suspend fun send(cmd: SendSwiftCommand) = Response.status(201).entity(useCase.send(cmd)).build()
 
