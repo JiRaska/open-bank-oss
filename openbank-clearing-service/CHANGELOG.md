@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.6.7...clearing-service-v0.7.0) (2026-07-08)
+
+
+### Features
+
+* **clearing:** wire four-eyes enforcement mechanism (ADR-0155) ([#558](https://github.com/JiRaska/open-bank-oss/issues/558)) ([508be54](https://github.com/JiRaska/open-bank-oss/commit/508be54dc5bf0c06e6f70c5c622261eaff4d5e69)), closes [#413](https://github.com/JiRaska/open-bank-oss/issues/413)
+
 ## [0.6.7](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.6.6...clearing-service-v0.6.7) (2026-07-07)
 
 
