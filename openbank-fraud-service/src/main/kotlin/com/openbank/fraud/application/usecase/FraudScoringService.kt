@@ -20,6 +20,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
+import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
 
@@ -99,8 +100,12 @@ class FraudScoringService @Inject constructor(
     private suspend fun enrichWithVelocity(request: ScoreRequest): ScoreRequest {
         val accountId = request.accountId ?: return request
         val currency = request.currency
-        val h1 = velocityRepo.findAggregate(accountId, VelocityWindow.H1, currency)?.transactionCount ?: 0L
+        val h1Aggregate = velocityRepo.findAggregate(accountId, VelocityWindow.H1, currency)
         val h24 = velocityRepo.findAggregate(accountId, VelocityWindow.H24, currency)?.transactionCount ?: 0L
-        return request.copy(velocityH1Count = h1, velocityH24Count = h24)
+        return request.copy(
+            velocityH1Count = h1Aggregate?.transactionCount ?: 0L,
+            velocityH24Count = h24,
+            velocityH1TotalAmount = h1Aggregate?.totalAmount ?: BigDecimal.ZERO,
+        )
     }
 }

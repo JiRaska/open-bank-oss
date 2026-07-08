@@ -54,11 +54,16 @@ class FraudScoringServiceTest {
         counterpartyId = UUID.randomUUID(),
     )
 
-    private fun velocityAggregate(accountId: UUID, window: VelocityWindow, count: Long) = VelocityAggregate(
+    private fun velocityAggregate(
+        accountId: UUID,
+        window: VelocityWindow,
+        count: Long,
+        totalAmount: BigDecimal = BigDecimal("100.00"),
+    ) = VelocityAggregate(
         accountId = accountId,
         window = window,
         transactionCount = count,
-        totalAmount = BigDecimal("100.00"),
+        totalAmount = totalAmount,
         currency = "EUR",
         windowStart = Instant.now(),
     )
@@ -71,7 +76,7 @@ class FraudScoringServiceTest {
         val result = service.score(request())
 
         assertThat(result.verdict).isEqualTo(FraudVerdict.ALLOW)
-        assertThat(result.ruleVersion).isEqualTo("v2")
+        assertThat(result.ruleVersion).isEqualTo("v3")
     }
 
     @Test
@@ -127,6 +132,54 @@ class FraudScoringServiceTest {
 
         assertThat(savedReq.captured.velocityH1Count).isEqualTo(0L)
         assertThat(savedReq.captured.velocityH24Count).isEqualTo(0L)
+        assertThat(savedReq.captured.velocityH1TotalAmount).isEqualByComparingTo(BigDecimal.ZERO)
+    }
+
+    @Test
+    fun `enriches request with h1 total amount from the same aggregate as the h1 count`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+        val req = request(accountId = accountId)
+        val savedReq = slot<ScoreRequest>()
+        coEvery { repository.save(capture(savedReq), any()) } returns UUID.randomUUID()
+        coEvery { velocityRepo.findAggregate(accountId, VelocityWindow.H1, "EUR") } returns
+            velocityAggregate(accountId, VelocityWindow.H1, count = 3L, totalAmount = BigDecimal("42000.50"))
+        coEvery { velocityRepo.findAggregate(accountId, VelocityWindow.H24, "EUR") } returns null
+
+        service.score(req)
+
+        assertThat(savedReq.captured.velocityH1TotalAmount).isEqualByComparingTo(BigDecimal("42000.50"))
+    }
+
+    @Test
+    fun `returns REVIEW when h1 high-value velocity cap is breached`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+        val req = request(accountId = accountId)
+        coEvery { repository.save(any(), any()) } returns UUID.randomUUID()
+        coEvery { velocityRepo.findAggregate(accountId, VelocityWindow.H1, "EUR") } returns
+            velocityAggregate(accountId, VelocityWindow.H1, count = 2L, totalAmount = BigDecimal("1500000"))
+        coEvery { velocityRepo.findAggregate(accountId, VelocityWindow.H24, "EUR") } returns null
+
+        val result = service.score(req)
+
+        assertThat(result.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(result.reasons).contains("velocity-h1-amount-cap")
+    }
+
+    @Test
+    fun `returns REVIEW when a single large transaction breaches the amount threshold`(): Unit = runBlocking {
+        val req = ScoreRequest(
+            amount = BigDecimal("600000"),
+            currency = "EUR",
+            rail = "SEPA",
+            accountId = UUID.randomUUID(),
+        )
+        coEvery { repository.save(any(), any()) } returns UUID.randomUUID()
+        coEvery { velocityRepo.findAggregate(any(), any(), any()) } returns null
+
+        val result = service.score(req)
+
+        assertThat(result.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(result.reasons).contains("large-single-transaction")
     }
 
     @Test
