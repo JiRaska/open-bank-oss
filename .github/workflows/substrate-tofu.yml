@@ -185,7 +185,13 @@ jobs:
     name: tofu apply (manual dispatch)
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest # hosted-first; security boundary is the OIDC job_workflow_ref pin + manual dispatch (ADR-0060), not the runner
-    timeout-minutes: 30
+    # 2026-07-08: bumped 30->60. Two consecutive live applies (EKS nodegroup
+    # replace ~5.5min + VPC endpoint destroy ~2min, plus the rest of this
+    # root's plan/apply cycle) landed at almost exactly 30:21, hitting this
+    # timeout mid-run and reporting a misleading "cancelled" instead of the
+    # real work (which had already completed and was independently verified
+    # live via AWS API before the timeout fired).
+    timeout-minutes: 60
     # Audit trail + future reviewer gate, same pattern as platform-apply
     # (issue #282). The openbank-ci-tofu-apply-substrate trust policy accepts
     # the environment-form OIDC sub
