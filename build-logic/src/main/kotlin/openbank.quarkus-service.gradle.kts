@@ -102,13 +102,13 @@ tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
     setSchemaVersion("1.5")
 }
 
-// koverVerify is intentionally NOT wired to check here. Coverage enforcement
-// is a per-service decision: only services with an explicit
-//   tasks.named("check") { dependsOn("koverVerify") }
-// block (e.g. the 13 money-path services from #338) gate their build on coverage.
-// Wiring it fleet-wide from the convention plugin would fail services whose
-// coverage has not yet been measured / baselined.
-//
-// Kover 0.7+ auto-wires koverVerify to the check task when a verify{} block is
-// present. Disable it here so only services that explicitly depend on it run it.
-tasks.matching { it.name == "koverVerify" }.configureEach { enabled = false }
+// Coverage gate (ADR-0020, ratchet-only — sweep #466). koverVerify is wired into
+// check fleet-wide: a module with a kover verify{} rule gets its floor enforced, a
+// module without rules passes trivially — so a module cannot silently opt out of
+// the ratchet. The previous default here DISABLED koverVerify and required
+// per-service re-enable boilerplate; that made "ungated" and "gated with floor 0"
+// indistinguishable from a real gate in a green build. Floors live in each module's
+// build.gradle.kts and only ever go up.
+tasks.named("check") {
+    dependsOn("koverVerify")
+}

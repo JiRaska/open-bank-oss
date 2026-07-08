@@ -85,3 +85,20 @@ tasks.test {
     // property the test falls back to its built-in default, so a plain `:test` stays reproducible.
     providers.gradleProperty("seed.count").orNull?.let { systemProperty("seed.count", it) }
 }
+
+// Coverage floor (ADR-0020, ratchet-only — sweep #466). The DST harness is tooling, but its
+// invariant checkers ARE the safety net for the money-path domain semantics — an untested
+// checker is a checker that silently stops checking. Measured 96.0% LINE (457/476) at
+// introduction; floor 90, raise-only from here.
+kover {
+    reports {
+        verify {
+            rule {
+                bound {
+                    minValue = 90
+                    coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
+                }
+            }
+        }
+    }
+}
