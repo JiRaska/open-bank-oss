@@ -36,18 +36,13 @@ rules:
 # DOWNSCALE_TARGETS. Namespaces NOT listed here cannot be touched by this
 # ServiceAccount even if they were accidentally added to the ConfigMap —
 # RBAC is the authoritative boundary, the ConfigMap is the readable summary.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: finops-scaledown
-  namespace: accounts
-  labels: { app.kubernetes.io/part-of: finops-scaledown }
-roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
-subjects:
-  - kind: ServiceAccount
-    name: finops-scaledown
-    namespace: finops-scaledown
----
+#
+# NOTE: `accounts`, `balances` and `ledger` namespaces intentionally have NO
+# RoleBinding — account-service, balance-service and ledger-service moved to
+# the keep-alive allowlist (see configmap-allowlist.yaml's standing-order-
+# service cron-collision note) and each of those three namespaces had no
+# other scale-down target, so the whole RoleBinding was removed rather than
+# left dangling and unused.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
@@ -77,18 +72,6 @@ kind: RoleBinding
 metadata:
   name: finops-scaledown
   namespace: audit
-  labels: { app.kubernetes.io/part-of: finops-scaledown }
-roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
-subjects:
-  - kind: ServiceAccount
-    name: finops-scaledown
-    namespace: finops-scaledown
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: finops-scaledown
-  namespace: balances
   labels: { app.kubernetes.io/part-of: finops-scaledown }
 roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
 subjects:
@@ -185,18 +168,6 @@ kind: RoleBinding
 metadata:
   name: finops-scaledown
   namespace: kyc
-  labels: { app.kubernetes.io/part-of: finops-scaledown }
-roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
-subjects:
-  - kind: ServiceAccount
-    name: finops-scaledown
-    namespace: finops-scaledown
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: finops-scaledown
-  namespace: ledger
   labels: { app.kubernetes.io/part-of: finops-scaledown }
 roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: finops-scaledown }
 subjects:
