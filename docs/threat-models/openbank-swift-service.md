@@ -34,10 +34,12 @@ heists). Message authenticity is paramount.
 
 - Send/ack/reject must be role-gated (operator/payments) + OPA enforce; inbound ack/reject must be
   authenticated to the gateway identity (mTLS allow-list).
+- `send` carries `@RolesAllowed(Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)` (2026-07-08 fix, see
+  §6) in addition to the OPA `@Authorize(action = "swift.send")` check. `ack`/`reject`/list/read
+  endpoints still rely on OPA alone — tracked as a separate follow-up, not fixed by this change.
 - Four-eyes approval-decide endpoint: `@RolesAllowed("ROLE_OPERATOR","ROLE_ADMIN","ROLE_PAYMENTS")`
   (the standard checker role set), plus a domain-level segregation-of-duties check (checker id !=
-  maker id) — see §4a. Note: `send`/`ack`/`reject` on `SwiftResource` currently have no
-  `@RolesAllowed` at all (separate, already-tracked finding, not fixed in this PR — see §5).
+  maker id) — see §4a.
 
 ## 4. STRIDE
 
@@ -122,13 +124,22 @@ not change any existing request's outcome until explicitly flipped.
   by OIDC CC + cluster-only ingress). **DFD update**: added `clearing-simulator` edge (see §2).
   Added `quarkus-oidc-client-reactive-filter` + `quarkus-rest-client-reactive` deps to
   `build.gradle.kts`. No DB schema change; rollback = flag OFF.
+- **2026-07-08** — Fixed **E**oP gap found during the issue #413 four-eyes audit: `POST
+  /api/v1/swift` (`send`, action `swift.send`) had no `@RolesAllowed` at all — this section
+  already documented "role-gated (operator/payments)" as a control, but it was never wired on
+  the endpoint, so any caller clearing the OPA `@Authorize` check could initiate an outbound
+  wire regardless of role. Added `@RolesAllowed(Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)` to
+  `send`, matching the `create` convention on sibling money-path payment services
+  (domestic-payment, sepa-payment). No DFD/schema change; rollback = revert the annotation.
+  **Not addressed here** (separate finding): `ack`/`reject`/`get`/`listAll`/`listByStatus` on the
+  same resource are also missing `@RolesAllowed` and rely on OPA alone.
 - **2026-07-08** — ADR-0155 four-eyes enforcement rollout (issue #413), mirroring the
   sepa-payment pilot. New endpoint `PATCH /api/v1/swift/approvals/{id}` + `ApprovalConfig`
   (Redis-backed `ApprovalStore`) + `AuthorizeInterceptor` four-eyes gate (openbank-libs-runtime,
   shared, opt-in) on `swift.send`. New STRIDE supplement §4a; new residual risk noting
   `swift.send`'s `PendingApproval` has no `resourceId` binding (action-scoped only, no path
-  param on `send`) and the pre-existing, separately-tracked absence of `@RolesAllowed` on
-  `SwiftResource`. `authz.four-eyes.enforce` defaults `false` — no behavior change to any
-  existing request in this PR; flipping it is a tracked follow-up. No DB schema change (Redis,
-  TTL-bounded); rollback = revert the commit (or leave `authz.four-eyes.enforce=false`, its
-  default).
+  param on `send`) and the still-open, separately-tracked absence of `@RolesAllowed` on
+  `ack`/`reject`/`get`/`listAll`/`listByStatus` (send's own gap was closed by the entry above).
+  `authz.four-eyes.enforce` defaults `false` — no behavior change to any existing request in this
+  PR; flipping it is a tracked follow-up. No DB schema change (Redis, TTL-bounded); rollback =
+  revert the commit (or leave `authz.four-eyes.enforce=false`, its default).
