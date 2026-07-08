@@ -4,6 +4,8 @@
 
 package com.openbank.anacredit.integration
 
+import com.openbank.anacredit.it.PostgresTestResource
+import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
@@ -14,13 +16,15 @@ import org.junit.jupiter.api.Test
 /**
  * Boot smoke test guarding the "released-but-never-booted" defect class.
  *
- * anacredit-service is a released component (version.txt) with no GitOps deployment. It uses an
- * in-memory repository (no Postgres, no Kafka), so no Testcontainers resources are needed — a bare
- * @QuarkusTest is sufficient to boot the full application. This mirrors the pattern introduced for
- * lending-service (boot/config defects only surface at boot: duplicate YAML keys, missing CDI beans,
- * OIDC mis-wiring). The two assertions prove the wiring, config and OIDC override survive a real boot.
+ * anacredit-service is a released component (version.txt) with no GitOps deployment. As of ADR-0037
+ * v2 it is Postgres-backed (reactive Panache + Flyway), so this IT now boots the full application
+ * against a real Testcontainers PostgreSQL — catching the defect class unit tests cannot see:
+ * missing driver, a duplicate YAML config key, a bad migration, or missing CDI beans. Mirrors
+ * openbank-product-catalog's `ProductCatalogBootSmokeIT`. The two assertions prove the wiring,
+ * config, Flyway migration and OIDC override survive a real boot.
  */
 @QuarkusTest
+@QuarkusTestResource(PostgresTestResource::class)
 class AnaCreditBootSmokeIT {
 
     @Test

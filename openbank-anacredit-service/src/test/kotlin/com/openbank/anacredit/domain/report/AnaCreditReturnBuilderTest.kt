@@ -31,8 +31,18 @@ class AnaCreditReturnBuilderTest {
     fun `the 25k threshold aggregates across a debtor's instruments`() {
         // Two 15k commitments for the same debtor -> 30k total -> both clear the 25k threshold,
         // even though neither instrument reaches 25k on its own.
-        val a = Fixtures.exposure(instrumentId = "OD-A", committedAmount = BigDecimal("15000"), committedAmountEur = BigDecimal("15000"), drawnAmount = BigDecimal("5000"))
-        val b = Fixtures.exposure(instrumentId = "OD-B", committedAmount = BigDecimal("15000"), committedAmountEur = BigDecimal("15000"), drawnAmount = BigDecimal("0"))
+        val a = Fixtures.exposure(
+            instrumentId = "OD-A",
+            committedAmount = BigDecimal("15000"),
+            committedAmountEur = BigDecimal("15000"),
+            drawnAmount = BigDecimal("5000"),
+        )
+        val b = Fixtures.exposure(
+            instrumentId = "OD-B",
+            committedAmount = BigDecimal("15000"),
+            committedAmountEur = BigDecimal("15000"),
+            drawnAmount = BigDecimal("0"),
+        )
 
         val ret = AnaCreditReturnBuilder.build(listOf(a, b), refDate)
 
@@ -42,8 +52,18 @@ class AnaCreditReturnBuilderTest {
 
     @Test
     fun `a debtor whose aggregate stays below 25k is excluded with the threshold reason`() {
-        val a = Fixtures.exposure(instrumentId = "OD-A", debtorId = "LE-SMALL", committedAmount = BigDecimal("10000"), committedAmountEur = BigDecimal("10000"))
-        val b = Fixtures.exposure(instrumentId = "OD-B", debtorId = "LE-SMALL", committedAmount = BigDecimal("9000"), committedAmountEur = BigDecimal("9000"))
+        val a = Fixtures.exposure(
+            instrumentId = "OD-A",
+            debtorId = "LE-SMALL",
+            committedAmount = BigDecimal("10000"),
+            committedAmountEur = BigDecimal("10000"),
+        )
+        val b = Fixtures.exposure(
+            instrumentId = "OD-B",
+            debtorId = "LE-SMALL",
+            committedAmount = BigDecimal("9000"),
+            committedAmountEur = BigDecimal("9000"),
+        )
 
         val ret = AnaCreditReturnBuilder.build(listOf(a, b), refDate)
 
@@ -69,8 +89,17 @@ class AnaCreditReturnBuilderTest {
     @Test
     fun `mixed book partitions cleanly into reported and excluded`() {
         val big = Fixtures.exposure(instrumentId = "OD-BIG", debtorId = "LE-BIG")
-        val consumer = Fixtures.exposure(instrumentId = "OD-CONS", debtorId = "NP-JOE", debtorType = CounterpartyType.NATURAL_PERSON)
-        val small = Fixtures.exposure(instrumentId = "OD-SMALL", debtorId = "LE-SMALL", committedAmount = BigDecimal("1000"), committedAmountEur = BigDecimal("1000"))
+        val consumer = Fixtures.exposure(
+            instrumentId = "OD-CONS",
+            debtorId = "NP-JOE",
+            debtorType = CounterpartyType.NATURAL_PERSON,
+        )
+        val small = Fixtures.exposure(
+            instrumentId = "OD-SMALL",
+            debtorId = "LE-SMALL",
+            committedAmount = BigDecimal("1000"),
+            committedAmountEur = BigDecimal("1000"),
+        )
 
         val ret = AnaCreditReturnBuilder.build(listOf(big, consumer, small), refDate)
 

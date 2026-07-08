@@ -40,7 +40,7 @@ class AnaCreditResource(
     @Path("/exposures")
     @Consumes(MediaType.APPLICATION_JSON)
     @Authorize(action = "anacredit.create", resource = "")
-    fun registerExposure(request: RegisterExposureRequest): Response {
+    suspend fun registerExposure(request: RegisterExposureRequest): Response {
         val stored = register.register(request.toCommand())
         return Response.status(Response.Status.CREATED).entity(ExposureResponse.of(stored)).build()
     }
@@ -48,13 +48,13 @@ class AnaCreditResource(
     @GET
     @Path("/exposures")
     @Authorize(action = "anacredit.list", resource = "")
-    fun listAllExposures(): Response = Response.ok(listExposures.list().map(ExposureResponse::of)).build()
+    suspend fun listAllExposures(): Response = Response.ok(listExposures.list().map(ExposureResponse::of)).build()
 
     /** Render the AnaCredit credit dataset as of [referenceDate] (ISO yyyy-MM-dd, the month end). */
     @GET
     @Path("/returns/{referenceDate}")
     @Authorize(action = "anacredit.read", resource = "#referenceDate")
-    fun renderReturn(@PathParam("referenceDate") referenceDate: String): Response {
+    suspend fun renderReturn(@PathParam("referenceDate") referenceDate: String): Response {
         val date = LocalDate.parse(referenceDate)
         return Response.ok(AnaCreditReturnResponse.of(buildReturn.build(date))).build()
     }

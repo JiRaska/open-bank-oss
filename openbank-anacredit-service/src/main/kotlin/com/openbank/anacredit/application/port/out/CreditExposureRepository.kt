@@ -8,14 +8,16 @@ import com.openbank.anacredit.domain.model.CreditExposure
 /**
  * System of record for the credit exposures the AnaCredit feed derives its return from.
  *
- * v1 is fed by REST upsert and backed in-memory (the openbank-product-catalog pattern); a future
- * revision consumes balance.overdraft.* events and persists. The port keeps that swap mechanical.
+ * Exposures are fed by REST upsert (v1); a future revision may also consume balance.overdraft.*
+ * events. Backed by Postgres via reactive Panache (ADR-0037 v2, the openbank-product-catalog
+ * pattern) — durable across restarts. Methods are `suspend`: the adapter bridges its Mutiny `Uni`
+ * results onto coroutines, the fleet/libs standard.
  */
 interface CreditExposureRepository {
     /** Insert or replace the exposure keyed by [CreditExposure.instrumentId]; returns the stored value. */
-    fun upsert(exposure: CreditExposure): CreditExposure
+    suspend fun upsert(exposure: CreditExposure): CreditExposure
 
-    fun findById(instrumentId: String): CreditExposure?
+    suspend fun findById(instrumentId: String): CreditExposure?
 
-    fun listAll(): List<CreditExposure>
+    suspend fun listAll(): List<CreditExposure>
 }

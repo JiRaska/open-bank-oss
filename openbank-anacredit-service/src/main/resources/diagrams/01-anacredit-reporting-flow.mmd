@@ -5,7 +5,7 @@ sequenceDiagram
     participant KC as Keycloak<br/>(OIDC)
     participant RES as AnaCreditResource<br/>(infrastructure/rest)
     participant SVC as AnaCreditService<br/>(application)
-    participant REPO as InMemoryCreditExposureRepository<br/>(infrastructure/persistence)
+    participant REPO as PostgresCreditExposureRepository<br/>(infrastructure/persistence)
     participant POL as AnaCreditEligibilityPolicy<br/>(domain)
     participant BLD as AnaCreditReturnBuilder<br/>(domain)
 

@@ -2,7 +2,7 @@
 stateDiagram-v2
     [*] --> ExposurePending : POST /api/v1/anacredit/exposures\n(operator / upstream feed)
 
-    ExposurePending --> ExposureRegistered : upsert accepted\n(instrumentId stored in InMemoryCreditExposureRepository)
+    ExposurePending --> ExposureRegistered : upsert accepted\n(instrumentId stored in credit_exposures via PostgresCreditExposureRepository)
 
     ExposureRegistered --> ExposureRegistered : re-registered\n(idempotent upsert — same instrumentId replaces previous)
 
