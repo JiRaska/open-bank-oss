@@ -39,6 +39,10 @@ class AccountIdempotencyRepository(private val clock: Clock) :
 
 @ApplicationScoped
 class AccountRepositoryImpl(
+    // internal, not private: the file-scope versionMatchedUpdate extension below (#465,
+    // outside the class body) stamps updatedAt from this clock — Kotlin's `private` on a
+    // class member is invisible even to same-file top-level declarations.
+    internal val clock: Clock,
     private val idempotencyRepository: AccountIdempotencyRepository,
     private val pocketRepository: CurrencyPocketRepositoryImpl,
 ) : AccountRepository,
@@ -87,6 +91,11 @@ class AccountRepositoryImpl(
 
     override suspend fun save(account: Account): Account {
         val entity = account.toEntity()
+        // Audit timestamps come from the injected Clock here, not the entity (ADR-0100): the
+        // column DEFAULT never applies because Hibernate writes every insertable column.
+        val now = clock.instant()
+        entity.createdAt = now
+        entity.updatedAt = now
         return Panache.withTransaction { persist(entity).replaceWith(entity) }.awaitSuspending().toDomain()
     }
 
@@ -96,6 +105,11 @@ class AccountRepositoryImpl(
         idempotencyKey: String,
     ): Account {
         val entity = account.toEntity()
+        // Audit timestamps come from the injected Clock here, same as save() (ADR-0100 / #540):
+        // the column DEFAULT never applies because Hibernate writes every insertable column.
+        val now = clock.instant()
+        entity.createdAt = now
+        entity.updatedAt = now
         // One transaction for account + primary pocket + idempotency key (#465): previously the
         // three writes were separate transactions, so a crash could leave an account without a
         // pocket, and two concurrent opens with one Idempotency-Key both committed (the Redis
@@ -144,9 +158,10 @@ class AccountRepositoryImpl(
     // the erased party.
     override suspend fun anonymizeByPartyId(partyId: UUID): Int = Panache.withTransaction {
         update(
-            "legalName = null, goalName = null, goalTargetMinorUnits = null, goalTargetDate = null " +
-                "WHERE partyId = ?1",
+            "legalName = null, goalName = null, goalTargetMinorUnits = null, goalTargetDate = null, " +
+                "updatedAt = ?2 WHERE partyId = ?1",
             partyId,
+            clock.instant(),
         )
     }.awaitSuspending()
 }
@@ -180,6 +195,10 @@ private fun AccountRepositoryImpl.versionMatchedUpdate(entity: AccountEntity) = 
         existing.goalName = entity.goalName
         existing.goalTargetMinorUnits = entity.goalTargetMinorUnits
         existing.goalTargetDate = entity.goalTargetDate
+        // Audit timestamp comes from the injected Clock, not the entity default (ADR-0100 /
+        // #540): the @PreUpdate callback's EPOCH default is never overwritten by the DB
+        // DEFAULT since Hibernate writes every insertable/updatable column explicitly.
+        existing.updatedAt = clock.instant()
         io.smallrye.mutiny.Uni.createFrom().item(existing)
     }
 }
