@@ -133,3 +133,16 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
   contain account_id but no PII beyond what fraud_scores already held; DB access-controlled).
   Rollback: remove Kafka consumer config + revert FraudRuleEngine to v1 + drop velocity_aggregates
   table. No new HTTP endpoint; no change to `/api/v1/fraud/score` contract.
+
+- **2026-07-07** — ADR-0084 §3 v3 (issue #529): rule set expanded, no new trust boundary.
+  `FraudRuleEngine` bumped to `v3` with two amount-based rules: `LargeSingleTransactionReviewRule`
+  (single transaction ≥ threshold → REVIEW, delta 25) reading only `ScoreRequest.amount` (present
+  since Phase 1), and `VelocityH1HighValueReviewRule` (rolling 1h transacted amount ≥ cap → REVIEW,
+  delta 35) reading a new `ScoreRequest.velocityH1TotalAmount` field sourced from the *existing*
+  `velocity_aggregates.total_amount` column (already persisted by the Phase-2 signal plane, no
+  schema change). Both rules fire in shadow mode only, same as v2. No new data source, no new
+  Kafka topic, no new endpoint — asset/threat inventory (§1–§4) is unchanged. T2 (rule-set
+  tampering) mitigation continues to apply: both rules are code-as-config, reviewed in this PR
+  under the existing money-path 2-approval gate. Rollback: revert `FraudRuleEngine` to `v2`
+  (`ScoreRequest.velocityH1TotalAmount` defaults to zero and is additive/backward-compatible, so no
+  data cleanup is required on rollback).
