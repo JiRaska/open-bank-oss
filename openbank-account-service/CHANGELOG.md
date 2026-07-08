@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.12.3...account-service-v0.13.0) (2026-07-08)
+
+
+### Features
+
+* **account:** wire four-eyes enforcement mechanism (ADR-0155) ([#559](https://github.com/JiRaska/open-bank-oss/issues/559)) ([958f9a5](https://github.com/JiRaska/open-bank-oss/commit/958f9a5365c5a5e273fb64a68cddbf1221734f66)), closes [#413](https://github.com/JiRaska/open-bank-oss/issues/413)
+
 ## [0.12.3](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.12.2...account-service-v0.12.3) (2026-07-08)
 
 
