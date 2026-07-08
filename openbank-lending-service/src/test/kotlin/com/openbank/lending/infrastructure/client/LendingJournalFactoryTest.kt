@@ -21,6 +21,7 @@ class LendingJournalFactoryTest {
         interestIncome = UUID.fromString("a0000000-0000-0000-0000-000000004100"),
         interestReceivable = UUID.fromString("a0000000-0000-0000-0000-000000001300"),
         loanLossExpense = UUID.fromString("a0000000-0000-0000-0000-000000005100"),
+        loanLossAllowance = UUID.fromString("a0000000-0000-0000-0000-000000001400"),
     )
     private val partyId = UUID.fromString("11111111-1111-1111-1111-111111111111")
     private val actor = UUID.fromString("00000000-0000-0000-0000-0000000000aa")
@@ -93,6 +94,42 @@ class LendingJournalFactoryTest {
         )
         assertThat(lines.single { side(it) == "DEBIT" }.glAccountId).isEqualTo(accounts.loanLossExpense)
         assertThat(lines.single { side(it) == "CREDIT" }.glAccountId).isEqualTo(accounts.loansReceivable)
+    }
+
+    @Test
+    fun `provisioning increase debits loan loss expense and credits the allowance`() {
+        val lines = LendingJournalFactory.buildLines(
+            posting(PostingKind.PROVISIONING, "loan:1:provisioning:2026-06", amount = "50.00"),
+            accounts,
+        )
+        assertThat(lines.single { side(it) == "DEBIT" }.glAccountId).isEqualTo(accounts.loanLossExpense)
+        assertThat(lines.single { side(it) == "CREDIT" }.glAccountId).isEqualTo(accounts.loanLossAllowance)
+        assertThat(lines).allSatisfy { assertThat(it.amount).isEqualByComparingTo(BigDecimal("50.00")) }
+    }
+
+    @Test
+    fun `provisioning decrease (release) debits the allowance and credits loan loss expense`() {
+        val lines = LendingJournalFactory.buildLines(
+            posting(PostingKind.PROVISIONING, "loan:1:provisioning:2026-07", amount = "-30.00"),
+            accounts,
+        )
+        assertThat(lines.single { side(it) == "DEBIT" }.glAccountId).isEqualTo(accounts.loanLossAllowance)
+        assertThat(lines.single { side(it) == "CREDIT" }.glAccountId).isEqualTo(accounts.loanLossExpense)
+        // The ledger line carries the absolute value; the sign only decides the side.
+        assertThat(lines).allSatisfy { assertThat(it.amount).isEqualByComparingTo(BigDecimal("30.00")) }
+    }
+
+    @Test
+    fun `provisioning never touches loans receivable`() {
+        val increase = LendingJournalFactory.buildLines(
+            posting(PostingKind.PROVISIONING, "loan:1:provisioning:2026-06", amount = "50.00"),
+            accounts,
+        )
+        val decrease = LendingJournalFactory.buildLines(
+            posting(PostingKind.PROVISIONING, "loan:1:provisioning:2026-07", amount = "-30.00"),
+            accounts,
+        )
+        (increase + decrease).forEach { assertThat(it.glAccountId).isNotEqualTo(accounts.loansReceivable) }
     }
 
     @Test

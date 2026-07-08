@@ -12,6 +12,7 @@ import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.LoanInstallment
+import com.openbank.lending.domain.model.ProvisioningRunOutcome
 import com.openbank.lending.domain.model.ProvisioningSnapshot
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.libs.domain.identifiers.LoanApplicationId
@@ -71,4 +72,14 @@ interface CollateralUseCase {
 /** Provisioning: IFRS 9 staging + ECL snapshot for a loan as of a date. */
 interface ProvisioningUseCase {
     fun assess(loanId: LoanId, asOf: LocalDate): Uni<ProvisioningSnapshot>
+}
+
+/**
+ * Scheduled IFRS 9 provisioning cycle (ADR-0028 Phase 3): re-bucket every ACTIVE loan's stage/ECL for a
+ * reporting [period] and post only the **delta** versus the loan's previous period to the ledger — never
+ * the full ECL again. Idempotent per `(loanId, period)`: a re-run for an already-provisioned period is a
+ * no-op (no duplicate record, no duplicate posting).
+ */
+interface RunProvisioningCycleUseCase {
+    fun runProvisioningCycle(period: String, asOf: LocalDate, limit: Int): Uni<ProvisioningRunOutcome>
 }

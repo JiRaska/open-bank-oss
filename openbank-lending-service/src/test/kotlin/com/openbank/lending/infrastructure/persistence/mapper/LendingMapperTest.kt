@@ -10,12 +10,15 @@ import com.openbank.lending.domain.model.CollateralType
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanInstallment
+import com.openbank.lending.domain.model.LoanProvisioningRecord
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.lending.AmortizationMethod
+import com.openbank.libs.lending.DelinquencyBucket
+import com.openbank.libs.lending.Ifrs9Stage
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -174,5 +177,31 @@ class LendingMapperTest {
         )
 
         assertThat(mapper.toDomain(mapper.toEntity(item))).isEqualTo(item)
+    }
+
+    @Test
+    fun `provisioning record round-trips losslessly, including stage, bucket and period`() {
+        val record = LoanProvisioningRecord(
+            id = UUID.randomUUID(),
+            loanId = LoanId.random(),
+            period = "2026-06",
+            asOf = LocalDate.parse("2026-06-01"),
+            outstandingBalance = eur("11053.81"),
+            daysPastDue = 45,
+            bucket = DelinquencyBucket.DPD_31_60,
+            stage = Ifrs9Stage.STAGE_2,
+            expectedCreditLoss = eur("221.08"),
+            createdAt = createdAt,
+        )
+
+        val entity = mapper.toEntity(record)
+        assertThat(entity.outstandingBalance).isEqualTo(BigDecimal("11053.81"))
+        assertThat(entity.currency).isEqualTo("EUR")
+        assertThat(entity.daysPastDue).isEqualTo(45)
+        assertThat(entity.bucket).isEqualTo(DelinquencyBucket.DPD_31_60)
+        assertThat(entity.stage).isEqualTo(Ifrs9Stage.STAGE_2)
+        assertThat(entity.expectedCreditLoss).isEqualTo(BigDecimal("221.08"))
+
+        assertThat(mapper.toDomain(entity)).isEqualTo(record)
     }
 }

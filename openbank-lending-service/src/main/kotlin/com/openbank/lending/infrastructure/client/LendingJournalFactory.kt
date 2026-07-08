@@ -16,6 +16,7 @@ data class LendingGlAccounts(
     val interestIncome: UUID,
     val interestReceivable: UUID,
     val loanLossExpense: UUID,
+    val loanLossAllowance: UUID,
 )
 
 /**
@@ -31,6 +32,14 @@ data class LendingGlAccounts(
  *   INTEREST_ACCRUAL     DEBIT  Interest Receivable  CREDIT Interest Income       (income earned at due date, no cash yet)
  *   INTEREST_SETTLEMENT  DEBIT  Funding Clearing     CREDIT Interest Receivable   (cash in, accrued receivable cleared)
  *   WRITE_OFF            DEBIT  Loan Loss Expense    CREDIT Loans Receivable      (loss booked, asset off)
+ *   PROVISIONING (Δ≥0)   DEBIT  Loan Loss Expense    CREDIT Loan Loss Allowance   (impairment increases: more provision)
+ *   PROVISIONING (Δ<0)   DEBIT  Loan Loss Allowance  CREDIT Loan Loss Expense    (impairment decreases: partial release)
+ *
+ * [PROVISIONING] is the one **signed** kind: [LedgerPosting.amount] carries the delta versus the prior
+ * provisioning cycle (positive = ECL increased, negative = ECL decreased), never the full ECL again —
+ * mirroring the FX-revaluation delta pattern in `openbank-ledger-service`. The loan principal / loans
+ * receivable GL is never touched by a provisioning entry: provisioning is an impairment overlay on top
+ * of the recognized asset, not a change to it.
  */
 object LendingJournalFactory {
 
@@ -52,6 +61,7 @@ object LendingJournalFactory {
     )
 
     fun buildLines(posting: LedgerPosting, accounts: LendingGlAccounts): List<JournalLineRequest> {
+        if (posting.kind == PostingKind.PROVISIONING) return buildProvisioningLines(posting, accounts)
         val (debit, credit) = when (posting.kind) {
             PostingKind.DISBURSEMENT -> accounts.loansReceivable to accounts.fundingClearing
             PostingKind.PRINCIPAL_REPAYMENT -> accounts.fundingClearing to accounts.loansReceivable
@@ -59,9 +69,29 @@ object LendingJournalFactory {
             PostingKind.INTEREST_ACCRUAL -> accounts.interestReceivable to accounts.interestIncome
             PostingKind.INTEREST_SETTLEMENT -> accounts.fundingClearing to accounts.interestReceivable
             PostingKind.WRITE_OFF -> accounts.loanLossExpense to accounts.loansReceivable
+            PostingKind.PROVISIONING -> error("unreachable: handled above")
         }
         val ccy = posting.amount.currency.code
         val value = posting.amount.amount
+        return listOf(
+            JournalLineRequest(debit, "DEBIT", value, ccy, null, value, ccy),
+            JournalLineRequest(credit, "CREDIT", value, ccy, null, value, ccy),
+        )
+    }
+
+    /**
+     * The provisioning delta is signed: a positive amount is a larger ECL (book more expense/allowance),
+     * a negative amount is a smaller ECL (release some of the previously booked allowance/expense). The
+     * ledger line amount is always the absolute value; the sign only picks which side each account is on.
+     */
+    private fun buildProvisioningLines(posting: LedgerPosting, accounts: LendingGlAccounts): List<JournalLineRequest> {
+        val ccy = posting.amount.currency.code
+        val value = posting.amount.amount.abs()
+        val (debit, credit) = if (posting.amount.amount.signum() >= 0) {
+            accounts.loanLossExpense to accounts.loanLossAllowance
+        } else {
+            accounts.loanLossAllowance to accounts.loanLossExpense
+        }
         return listOf(
             JournalLineRequest(debit, "DEBIT", value, ccy, null, value, ccy),
             JournalLineRequest(credit, "CREDIT", value, ccy, null, value, ccy),
