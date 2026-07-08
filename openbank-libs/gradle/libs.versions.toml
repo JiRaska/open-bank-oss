@@ -3,13 +3,18 @@ kotlin = "2.3.20"
 quarkus = "3.33.2"
 quarkus-plugin = "3.33.2"
 coroutines = "1.8.1"
-jackson = "2.17.2"
+# 2.21.5 (issue #461): patch bump within the 2.21.x line — Quarkus 3.33.2's BOM already
+# resolves jackson-databind/jackson-core to 2.21.2 for service modules (enforcedPlatform);
+# this floors the modules that declare Jackson directly (libs-domain) on the same safe
+# patch, closing GHSA-hgj6-7826-r7m5 / GHSA-j3rv-43j4-c7qm / GHSA-rmj7-2vxq-3g9f / etc.
+jackson = "2.21.5"
 # JUG — UUIDv7 (RFC 9562) generation for time-ordered identifiers (ADR-0106). FasterXML,
 # Apache-2.0, same org as Jackson (already a core dep). Vetted generator instead of a
 # hand-rolled one: intra-millisecond monotonicity (RFC 9562 §6.2) is subtle to get right.
 java-uuid-generator = "5.1.0"
 junit = "5.11.0"
-assertj = "3.26.3"
+# 3.27.7 (issue #461): closes GHSA-rqfh-9r24-8c9r. Test-only dependency.
+assertj = "3.27.7"
 mockk = "1.13.12"
 kover = "0.9.1"
 wiremock = "3.9.2"

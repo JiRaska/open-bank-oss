@@ -5,7 +5,9 @@
 package com.openbank.account.infrastructure.rest
 
 import com.openbank.account.application.usecase.AccountNotFoundException
+import com.openbank.account.application.usecase.AccountUpdateConflictException
 import com.openbank.libs.api.error.ApiError
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
@@ -26,4 +28,23 @@ class AccountNotFoundExceptionMapper : ExceptionMapper<AccountNotFoundException>
             ),
         )
         .build()
+}
+
+// 409 concurrent-modification conflict (#465): a lifecycle update (freeze/unfreeze/close/
+// activate/goal) raced another writer — the caller read a version the row no longer has.
+// Dedicated type so the status is deterministic (see issue #526 on the IllegalStateException
+// mapper collision between libs-runtime and services).
+@Provider
+class AccountUpdateConflictExceptionMapper : ExceptionMapper<AccountUpdateConflictException> {
+    override fun toResponse(exception: AccountUpdateConflictException): Response =
+        Response.status(Response.Status.CONFLICT)
+            .entity(
+                ApiError(
+                    traceId = Ids.randomId().toString(),
+                    status = 409,
+                    code = "CONCURRENT_MODIFICATION",
+                    message = exception.message ?: "Account was modified concurrently",
+                ),
+            )
+            .build()
 }

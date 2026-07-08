@@ -7,11 +7,15 @@ plugins {
     alias(libs.plugins.kotlin.allopen)
     alias(libs.plugins.quarkus)
     alias(libs.plugins.cyclonedx)
+    alias(libs.plugins.kover)
     // Static analysis gate (detekt + ktlint, ratchet via baselines) — same
     // convention the services get through openbank.quarkus-service.
     id("openbank.static-analysis")
+    // Fleet-wide Netty/Jackson/etc. patch-version floors (issue #461).
+    id("openbank.dependency-vulnerability-pins")
 }
-group = "com.openbank"; version = "0.1.0-SNAPSHOT"
+group = "com.openbank"
+version = "0.1.0-SNAPSHOT"
 repositories {
     // GCS mirror of Maven Central first (#849) — shared NAT egress IP gets
     // 429-throttled by Central during fleet-wide build storms; 404 falls through.
@@ -79,4 +83,21 @@ tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
     setSkipConfigs(listOf("testCompileClasspath", "testRuntimeClasspath", "annotationProcessor", "kapt"))
     setProjectType("application")
     setSchemaVersion("1.5")
+}
+
+// Coverage floor (ADR-0020, ratchet-only — sweep #466: this module previously had no kover
+// plugin at all). Measured 56.7% LINE (538/949) at introduction, no filter excludes;
+// ~5 pt headroom, raise-only from here. Kover auto-wires koverVerify into check when a
+// verify{} rule is present (this module does not apply openbank.quarkus-service).
+kover {
+    reports {
+        verify {
+            rule {
+                bound {
+                    minValue = 51
+                    coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
+                }
+            }
+        }
+    }
 }
