@@ -46,6 +46,24 @@ The target model (to be formalized in a future governance ADR):
 4. **Technical Steering Committee (TSC)** — for large architectural decisions, once the contributor
    base exceeds ~10 regular contributors.
 
+## Continuity if the maintainer is incapacitated
+
+The project is designed to survive the loss of its single maintainer with minimal interruption
+(OpenSSF Best Practices `access_continuity`):
+
+1. **Credential continuity.** A designated trusted contact holds emergency access to the
+   maintainer's credential vault (a time-delayed grant via the vault provider's emergency-access
+   mechanism). The vault contains everything needed to assume the Maintainer role: repository owner
+   account access and recovery codes, and the release-signing key material. The identity of the
+   contact and vault specifics are deliberately not published.
+2. **No manual release machinery.** Releases are fully automated (release-please; see
+   [Release process](#release-process)) — the successor only needs merge rights to cut releases,
+   close issues, and accept changes. All CI/CD, infrastructure definitions, and governance rules
+   live in this repository as code; there are no undocumented manual steps.
+3. **Fork backstop.** Everything required to continue the project — source, documentation, CI
+   definitions, infrastructure-as-code, governance rules — is public under Apache-2.0, so the
+   community can continue the project from a fork even in the worst case.
+
 ## Decision-making
 
 - **Architectural decisions** are recorded as ADRs in `docs/adr/` (see [README](docs/adr/README.md)).
