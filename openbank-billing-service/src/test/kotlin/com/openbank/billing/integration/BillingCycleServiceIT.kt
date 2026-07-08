@@ -10,10 +10,14 @@ import com.openbank.billing.infrastructure.outbox.BillingOutboxRepositoryImpl
 import com.openbank.billing.it.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.vertx.VertxContextSupport
+import io.smallrye.mutiny.coroutines.asUni
 import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.coroutineScope
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -25,6 +29,17 @@ import org.junit.jupiter.api.Test
  * account-service/product-catalog/balance-service **stub** adapters (no network — the read-path
  * adapters resolve to `null`/empty in the `%test` profile without a WireMock stand-in), so this
  * exercises the persistence + outbox atomicity, not the read-side HTTP calls.
+ *
+ * [BillingCycleService] and [BillingOutboxRepositoryImpl] are reactive
+ * (`Panache.withSession`/`withTransaction`), so their suspend calls MUST run on a Vert.x
+ * duplicated context — a plain `runBlocking` test thread has none and fails with "No current
+ * Vertx context found" (confirmed the hard way: this exact failure surfaced in CI).
+ * [onVertxContext] bridges the suspend body onto a Vert.x context via
+ * [VertxContextSupport.subscribeAndAwait] and blocks for the result — mirrors
+ * `openbank-ledger-service`'s `JournalPartitionMaintainerIT`.
+ *
+ * Each test declares an explicit `: Unit` return — a Kotlin/JUnit5 footgun is that `fun x() = expr`
+ * inferring a non-`Unit` type makes JUnit5 silently SKIP the test.
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresRedisTestResource::class)
@@ -36,49 +51,56 @@ class BillingCycleServiceIT {
     @Inject
     lateinit var outboxRepository: BillingOutboxRepositoryImpl
 
-    @Test
-    fun `an account whose context cannot be resolved is persisted as skipped, never posts anything`() {
-        // No account-service running in this IT profile, so RestAccountContextPort.resolve()
-        // fails closed (returns null) exactly like the fail-closed unit tests assert — proving
-        // the same fail-closed skip persists correctly against a real DB, not just in-memory.
-        val cycleId = "it-cycle-${System.nanoTime()}"
-        val assessment = runBlocking { billingCycleService.assessAndPost(cycleId, "no-such-account", "CZK") }
-
-        assertThat(assessment.skipped).isTrue()
-        assertThat(assessment.skipReason).isEqualTo("ACCOUNT_CONTEXT_UNRESOLVED")
-        assertThat(assessment.assessedFees).isEmpty()
-
-        val backlogAfterSkip = runBlocking { outboxRepository.countProcessable() }
-
-        // Re-running the same cycle/account/currency is an idempotent replay: same result,
-        // no new outbox rows, no second assessment row (unique constraint would reject it).
-        val replay = runBlocking { billingCycleService.assessAndPost(cycleId, "no-such-account", "CZK") }
-        assertThat(replay.skipped).isTrue()
-        assertThat(replay.skipReason).isEqualTo(assessment.skipReason)
-
-        val backlogAfterReplay = runBlocking { outboxRepository.countProcessable() }
-        assertThat(backlogAfterReplay).isEqualTo(backlogAfterSkip)
+    // Run a reactive suspend body on a fresh Vert.x duplicated context and block for its result,
+    // so Panache.withSession/withTransaction find the context they require.
+    private fun <T> onVertxContext(block: suspend () -> T): T = VertxContextSupport.subscribeAndAwait {
+        CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni()
     }
 
     @Test
-    fun `posting_status starts NOT_APPLICABLE for a skipped assessment (nothing chargeable)`() {
+    fun `an account whose context cannot be resolved is persisted as skipped, never posts anything`(): Unit =
+        onVertxContext {
+            // No account-service running in this IT profile, so RestAccountContextPort.resolve()
+            // fails closed (returns null) exactly like the fail-closed unit tests assert — proving
+            // the same fail-closed skip persists correctly against a real DB, not just in-memory.
+            val cycleId = "it-cycle-${System.nanoTime()}"
+            val assessment = billingCycleService.assessAndPost(cycleId, "no-such-account", "CZK")
+
+            assertThat(assessment.skipped).isTrue()
+            assertThat(assessment.skipReason).isEqualTo("ACCOUNT_CONTEXT_UNRESOLVED")
+            assertThat(assessment.assessedFees).isEmpty()
+
+            val backlogAfterSkip = outboxRepository.countProcessable()
+
+            // Re-running the same cycle/account/currency is an idempotent replay: same result,
+            // no new outbox rows, no second assessment row (unique constraint would reject it).
+            val replay = billingCycleService.assessAndPost(cycleId, "no-such-account", "CZK")
+            assertThat(replay.skipped).isTrue()
+            assertThat(replay.skipReason).isEqualTo(assessment.skipReason)
+
+            val backlogAfterReplay = outboxRepository.countProcessable()
+            assertThat(backlogAfterReplay).isEqualTo(backlogAfterSkip)
+        }
+
+    @Test
+    fun `posting_status starts NOT_APPLICABLE for a skipped assessment (nothing chargeable)`(): Unit = onVertxContext {
         val cycleId = "it-cycle-skip-${System.nanoTime()}"
-        val assessment = runBlocking { billingCycleService.assessAndPost(cycleId, "another-missing-account", "CZK") }
+        val assessment = billingCycleService.assessAndPost(cycleId, "another-missing-account", "CZK")
 
         assertThat(assessment.assessedFees).allMatch { it.postingStatus == PostingStatus.NOT_APPLICABLE }
     }
 
     @Test
-    fun `two concurrent assessAndPost calls for the same key both succeed — the loser recovers via findExisting`() {
+    fun `two concurrent assessAndPost calls for the same key both succeed, no TOCTOU 500`(): Unit = onVertxContext {
         // Fix-review finding: findExisting-then-persistWithPostingIntent is a check-then-act race.
-        // Firing both calls genuinely concurrently (kotlinx.coroutines async, not sequential
-        // runBlocking) exercises BillingAssessmentRepositoryImpl.recoverConcurrentReplay against
-        // the real uq_billing_cycle_assessment constraint — neither call may throw, and both must
-        // return the same (skipped) result rather than one winning and one 500ing.
+        // Firing both calls genuinely concurrently (kotlinx.coroutines async, not sequential)
+        // exercises BillingAssessmentRepositoryImpl.recoverConcurrentReplay against the real
+        // uq_billing_cycle_assessment constraint — neither call may throw, and both must return
+        // the same (skipped) result rather than one winning and one 500ing.
         val cycleId = "it-cycle-race-${System.nanoTime()}"
         val accountId = "race-account"
 
-        val results = runBlocking {
+        val results = coroutineScope {
             val first = async { billingCycleService.assessAndPost(cycleId, accountId, "CZK") }
             val second = async { billingCycleService.assessAndPost(cycleId, accountId, "CZK") }
             listOf(first, second).awaitAll()

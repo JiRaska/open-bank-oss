@@ -16,6 +16,7 @@ import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
+import java.util.Optional
 
 /**
  * Unit coverage for [BillingCycleScheduler] (ADR-0143 phase 2c): the `yyyy-MM` cycle-id
@@ -38,7 +39,7 @@ class BillingCycleSchedulerTest {
             billingCycleService = cycleService
             clock = Clock.fixed(Instant.parse("2026-07-15T03:00:00Z"), ZoneOffset.UTC)
             enabled = false
-            accountIdsCsv = "acc-1,acc-2"
+            accountIdsCsv = Optional.of("acc-1,acc-2")
             currency = "CZK"
         }
 
@@ -54,7 +55,7 @@ class BillingCycleSchedulerTest {
             billingCycleService = cycleService
             clock = Clock.fixed(Instant.parse("2026-07-15T03:00:00Z"), ZoneOffset.UTC)
             enabled = true
-            accountIdsCsv = ""
+            accountIdsCsv = Optional.empty()
             currency = "CZK"
         }
 
@@ -71,7 +72,7 @@ class BillingCycleSchedulerTest {
             billingCycleService = cycleService
             clock = Clock.fixed(Instant.parse("2026-07-15T03:00:00Z"), ZoneOffset.UTC)
             enabled = true
-            accountIdsCsv = " acc-1 , acc-2 ,"
+            accountIdsCsv = Optional.of(" acc-1 , acc-2 ,")
             currency = "CZK"
         }
 

@@ -14,6 +14,7 @@ import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.Optional
 
 /**
  * Monthly billing cycle sweep (ADR-0143 phase 2c). Derives a stable `cycleId` from the current
@@ -43,8 +44,12 @@ class BillingCycleScheduler {
     @ConfigProperty(name = "openbank.billing.scheduler.enabled", defaultValue = "false")
     var enabled: Boolean = false
 
-    @ConfigProperty(name = "openbank.billing.scheduler.account-ids", defaultValue = "")
-    lateinit var accountIdsCsv: String
+    // Optional<String>, not a plain String (CLAUDE.md pitfall): a missing/empty-default optional
+    // config property typed as bare String throws SRCFG00040 / ConfigurationException at boot —
+    // this exact defect surfaced in CI (BillingResourceAuthzTest's @QuarkusTest container failed
+    // to deploy). No account-ids configured is the safe, expected default (see class KDoc).
+    @ConfigProperty(name = "openbank.billing.scheduler.account-ids")
+    lateinit var accountIdsCsv: Optional<String>
 
     @ConfigProperty(name = "openbank.billing.scheduler.currency", defaultValue = "CZK")
     lateinit var currency: String
@@ -63,7 +68,7 @@ class BillingCycleScheduler {
             log.debug("[billing-cycle-scheduler] Disabled — skipping sweep")
             return
         }
-        val accountIds = accountIdsCsv.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        val accountIds = accountIdsCsv.orElse("").split(",").map { it.trim() }.filter { it.isNotEmpty() }
         if (accountIds.isEmpty()) {
             log.debug("[billing-cycle-scheduler] No accounts configured — skipping sweep")
             return
