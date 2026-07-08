@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.4.2...billing-service-v0.5.0) (2026-07-08)
+
+
+### Features
+
+* **billing:** ledger fee posting via outbox, four-eyes, DST invariant ([#549](https://github.com/JiRaska/open-bank-oss/issues/549)) ([3eb8fc1](https://github.com/JiRaska/open-bank-oss/commit/3eb8fc191f31649434e786b0bae3afe6e4008fbe))
+
 ## [0.4.2](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.4.1...billing-service-v0.4.2) (2026-07-07)
 
 

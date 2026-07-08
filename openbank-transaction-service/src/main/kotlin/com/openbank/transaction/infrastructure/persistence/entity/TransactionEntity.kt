@@ -11,6 +11,7 @@ import jakarta.persistence.Entity
 import jakarta.persistence.Id
 import jakarta.persistence.IdClass
 import jakarta.persistence.Table
+import jakarta.persistence.Version
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -79,6 +80,11 @@ class TransactionEntity : PanacheEntityBase {
     @Column(name = "idempotency_key", nullable = false)
     var idempotencyKey: String = ""
 
+    // @Version (#465): without it Hibernate's flush UPDATE matches by PK only and two racing
+    // read-modify-write transactions both commit (last write wins) — e.g. two reversals with
+    // distinct idempotency keys both flipped COMPLETED and BOTH initiated a refund. With it the
+    // loser's flush matches 0 rows and surfaces as an optimistic-lock failure -> 409.
+    @Version
     @Column(name = "version", nullable = false)
     var version: Long = 0
 
