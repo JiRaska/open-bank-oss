@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.6.9...swift-service-v0.7.0) (2026-07-08)
+
+
+### Features
+
+* **swift:** wire four-eyes enforcement mechanism (ADR-0155) ([#564](https://github.com/JiRaska/open-bank-oss/issues/564)) ([b295685](https://github.com/JiRaska/open-bank-oss/commit/b295685ff4af639fd14e1de76f7057ddae6e6f60)), closes [#413](https://github.com/JiRaska/open-bank-oss/issues/413)
+
+
+### Security
+
+* **swift:** add missing @RolesAllowed guard on the send endpoint ([#568](https://github.com/JiRaska/open-bank-oss/issues/568)) ([e0eb197](https://github.com/JiRaska/open-bank-oss/commit/e0eb1978406d6a568e206e944b212e61ba9a7043))
+
 ## [0.6.9](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.6.8...swift-service-v0.6.9) (2026-07-07)
 
 
