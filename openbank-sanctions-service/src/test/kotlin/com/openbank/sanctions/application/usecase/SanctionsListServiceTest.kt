@@ -10,9 +10,7 @@ import com.openbank.sanctions.domain.model.UpdateSanctionsListRequest
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsListRepositoryImpl
 import io.mockk.coEvery
 import io.mockk.coVerify
-import io.mockk.every
 import io.mockk.mockk
-import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.NotFoundException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -243,7 +241,7 @@ class SanctionsListServiceTest {
         assertThat(service.refreshAll()).isEmpty()
     }
 
-    // ──── scheduledRefresh — Uni pipeline ──────────────────────────────────
+    // ──── scheduledRefresh ──────────────────────────────────────────────────
 
     @Test
     fun `scheduledRefresh skips lists whose cron schedule does not match now`(): Unit = runBlocking {
@@ -254,11 +252,51 @@ class SanctionsListServiceTest {
             cronMinute = 0,
             cronDays = "MON,TUE,WED,THU,FRI",
         )
-        every { repo.listSanctionsListsUni() } returns Uni.createFrom().item(listOf(notDue))
+        coEvery { repo.listSanctionsLists() } returns listOf(notDue)
 
-        service.scheduledRefresh().await().indefinitely()
+        service.scheduledRefresh()
 
-        coVerify(exactly = 0) { repo.markUpdatedUni(any(), any(), any()) }
+        coVerify(exactly = 0) { repo.findByListType(any()) }
+        coVerify(exactly = 0) { importer.importList(any(), any()) }
+    }
+
+    @Test
+    fun `scheduledRefresh imports a due list via the real importer and persists the count`(): Unit = runBlocking {
+        // clock fixed at 2024-01-15T12:00:00Z (a Monday, UTC) — matches this list's cron exactly
+        val due = sampleList(
+            listType = "OFAC_SDN",
+            sourceUrl = "https://example.com/sdn.xml",
+            cronHour = 12,
+            cronMinute = 0,
+            cronDays = "MON,TUE,WED,THU,FRI",
+        )
+        coEvery { repo.listSanctionsLists() } returns listOf(due)
+        coEvery { repo.findByListType("OFAC_SDN") } returns due
+        coEvery { importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml") } returns 123
+        coEvery { repo.markUpdated("OFAC_SDN", 123) } returns due.copy(lastEntryCount = 123)
+
+        service.scheduledRefresh()
+
+        coVerify { importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml") }
+        coVerify { repo.markUpdated("OFAC_SDN", 123) }
+    }
+
+    @Test
+    fun `scheduledRefresh logs and continues when one due list fails to refresh`(): Unit = runBlocking {
+        val failing = sampleList(listType = "OFAC_SDN", cronHour = 12, cronMinute = 0)
+        val healthy = sampleList(listType = "EU_CONSOLIDATED", cronHour = 12, cronMinute = 0)
+        coEvery { repo.listSanctionsLists() } returns listOf(failing, healthy)
+        coEvery { repo.findByListType("OFAC_SDN") } returns failing
+        coEvery { importer.importList(SanctionsListType.OFAC_SDN, any()) } throws
+            IllegalStateException("boom")
+        coEvery { repo.findByListType("EU_CONSOLIDATED") } returns healthy
+        coEvery { importer.importList(SanctionsListType.EU_CONSOLIDATED, any()) } returns 5
+        coEvery { repo.markUpdated("EU_CONSOLIDATED", 5) } returns healthy.copy(lastEntryCount = 5)
+
+        service.scheduledRefresh()
+
+        coVerify { repo.markUpdated("EU_CONSOLIDATED", 5) }
+        coVerify(exactly = 0) { repo.markUpdated("OFAC_SDN", any()) }
     }
 
     private fun sampleList(
