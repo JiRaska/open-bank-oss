@@ -91,6 +91,13 @@ class SanctionsListService(
      * others (a network hiccup on one feed must not block the rest of the fleet's screening data).
      */
     @Scheduled(every = "60s", delayed = "30s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    @Suppress("TooGenericExceptionCaught")
+    // Deliberately broad: refresh() can throw the two exceptions it documents (NotFoundException,
+    // IllegalStateException) but this scheduled loop must also survive whatever the reactive
+    // Postgres/Vert.x layer throws on a transient DB hiccup for one list — the fleet-established
+    // pattern for "one item's failure must not abort the batch" (see CopilotChatService,
+    // SepaPaymentActivitiesImpl, VerificationCaseService, and others with the same suppress). A
+    // failure here is logged and the list is simply retried on its next due tick.
     suspend fun scheduledRefresh() {
         val now = ZonedDateTime.now(clock).withSecond(0).withNano(0)
         val due = repo.listSanctionsLists().filter { it.isDueForScheduledRefresh(now) }
