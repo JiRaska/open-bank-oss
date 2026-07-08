@@ -46,10 +46,42 @@ above batch SEPA.
 | **D**oS | Flood to exhaust instant-rail capacity | Rate limit; idempotency |
 | **E**oP | Unauthorized recall to claw back funds | Recall gated by distinct authority; audit; reason required |
 
+## 4a. Four-eyes approval (ADR-0155) — STRIDE supplement
+
+`POST /{paymentId}/recall` (`sctInstPayment.recall`) is a money-path action that OPA
+(`rest.rego`) can flag `four_eyes_required` — recalling a SETTLED SCT Inst payment claws back
+funds that have already left the debtor's account on a near-real-time rail, so a single actor
+being able to trigger it unilaterally is the highest-stakes gap this service has. New endpoint
+`PATCH /api/v1/sepa-instant/approvals/{id}` lets a DIFFERENT operator decide the resulting
+`PendingApproval`; the maker retries `POST /{paymentId}/recall` with an `X-Approval-Id` header.
+**`authz.four-eyes.enforce` stays `false` in this PR** — the `ApprovalStore`/endpoint are wired
+(mirroring the sepa-payment pilot), but blocking is a deliberate follow-up flip, not bundled
+here (see ADR-0155, issue #413).
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **S**poofing | A caller other than an operator decides an approval | `@RolesAllowed("ROLE_OPERATOR","ROLE_ADMIN","ROLE_PAYMENTS")` + OPA `@Authorize(action="sctInstPayment.approval.decide")` on the decide endpoint |
+| **E**oP | The maker approves their own recall request (self-approval defeats maker-checker on an already-settled, near-irrevocable payment) | `ApprovalStore.decide` throws `SelfApprovalNotAllowedException` (mapped to 403) when `decidedBy == makerId` — enforced in the domain port itself, not just the REST layer, and `makerId`/`decidedBy` both resolve via the same `.principal.name` extraction (interceptor vs. `SecurityIdentity`) so the comparison can't silently mismatch for the same real person |
+| **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different recall | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
+| **R**epudiation | No record of who approved a recall clawing back settled funds | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see ADR-0155 Negative consequences: not yet a permanent audit trail) |
+| **I**nfo disclosure | Approval id enumeration reveals payment/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random UUID (`RedisApprovalStore`, not sequential) |
+| **D**oS | Flooding `POST /{paymentId}/recall` to exhaust Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
+
+**DFD update:** adds `Operator (checker) → PATCH /api/v1/sepa-instant/approvals/{id} → Redis
+(approval:*)` alongside the existing `POST /{paymentId}/recall` edge; the maker's retry reuses
+the existing DFD edge.
+**Risk class:** integrity (segregation of duties on a fund-clawback action) + confidentiality
+(approval record scope).
+**Rollback:** `authz.four-eyes.enforce=false` (default) — the endpoint and store exist but do
+not change any existing request's outcome until explicitly flipped.
+
 ## 5. Residual risks / assumptions
 
 - **Irrevocability** ⇒ pre-send fraud checks + SCA are the key controls; post-hoc recall is best-effort.
 - Idempotency-key mandatory (instant retries must not double-send).
+- **Four-eyes `PendingApproval` records are TTL-bounded (Redis), not a permanent audit
+  trail** (ADR-0155) — a durable-audit requirement for "who approved what, forever" would
+  need an additional store; not implemented in this PR.
 
 ## 6. Change log
 
@@ -80,3 +112,10 @@ above batch SEPA.
   both via `api()`). Pure Gradle dependency-graph change — no source import changed, no new transitive
   dependency introduced, no behavior change. Attack surface, trust boundaries, and STRIDE rows above are
   unaffected. No DB change; rollback = revert the commit.
+- **2026-07-08** — ADR-0155 four-eyes enforcement, rolled out from the sepa-payment pilot
+  (issue #413). New endpoint `PATCH /api/v1/sepa-instant/approvals/{id}` + `ApprovalConfig`
+  (Redis-backed `ApprovalStore`) + `AuthorizeInterceptor` four-eyes gate (openbank-libs-runtime,
+  shared, opt-in) on `sctInstPayment.recall`. New STRIDE supplement §4a. `authz.four-eyes.enforce`
+  defaults `false` — no behavior change to any existing request in this PR; flipping it is a
+  tracked follow-up. No DB schema change (Redis, TTL-bounded); rollback = revert the commit (or
+  leave `authz.four-eyes.enforce=false`, its default).
