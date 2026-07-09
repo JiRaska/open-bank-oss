@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.41.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.40.2...admin-ui-v0.41.0) (2026-07-09)
+
+
+### Features
+
+* **admin-ui:** bundle agent charters and add per-agent drill-down page ([#599](https://github.com/JiRaska/open-bank-oss/issues/599)) ([ef6875e](https://github.com/JiRaska/open-bank-oss/commit/ef6875ed7fe5a80173b9b678319249ec50a2d029))
+
 ## [0.40.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.40.1...admin-ui-v0.40.2) (2026-07-07)
 
 
