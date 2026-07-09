@@ -59,7 +59,7 @@ erDiagram
 
 | Script | Status |
 |---|---|
-| `V1__create_credit_exposures.sql` | Applied — creates `credit_exposures` + `idx_credit_exposures_debtor_id`. Rollback: `DROP TABLE credit_exposures;` |
+| `V2__create_credit_exposures.sql` | Applied — creates `credit_exposures` + `idx_credit_exposures_debtor_id`. Rollback: `DROP TABLE credit_exposures;` |
 
 ## Eligibility rules (the derivation that produces the data)
 

@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test
  *
  * anacredit-service is a released component (version.txt) with no GitOps deployment. It now boots
  * real infrastructure on two independent fronts: ADR-0037 v2 made `CreditExposure` Postgres-backed
- * (reactive Panache + Flyway `V1__create_credit_exposures.sql`), and the `loan.stage_changed`
+ * (reactive Panache + Flyway `V2__create_credit_exposures.sql`), and the `loan.stage_changed`
  * event-ingestion follow-up (issue #638) added a Kafka consumer (`@Incoming("lending-events-in")`)
  * plus its own Postgres-backed `loan_stage_projection` table (`V1__create_loan_stage_projection.sql`).
  * `PostgresRedpandaTestResource` covers both — Postgres and Kafka/Redpanda — so this single IT boots
