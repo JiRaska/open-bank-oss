@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.3](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.17.2...customer-edge-v0.17.3) (2026-07-09)
+
+
+### Bug Fixes
+
+* **customer-edge:** move group.id off dotted YAML keys onto env vars ([#703](https://github.com/JiRaska/open-bank-oss/issues/703)) ([bfb2c1c](https://github.com/JiRaska/open-bank-oss/commit/bfb2c1ca73084200f05443e84af091b40b9e23f8))
+
 ## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.17.1...customer-edge-v0.17.2) (2026-07-07)
 
 
