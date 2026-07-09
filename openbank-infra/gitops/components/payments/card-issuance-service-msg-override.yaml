@@ -1,0 +1,39 @@
+# Image-independent Kafka consumer config for card-issuance-service's
+# `party-events-in` channel (issue #686 sweep).
+#
+# openbank-card-issuance-service/src/main/resources/application.yaml
+# deliberately does NOT set client.id / group.id / auto.offset.reset as YAML keys
+# under mp.messaging.incoming.party-events-in — SmallRye Config's YAML source
+# unconditionally quotes any leaf map key containing a literal dot, so those keys
+# silently never resolve (see the comment there). This ConfigMap supplies them
+# instead as a Quarkus external config source.
+#
+# Why a properties FILE and not env vars: SmallRye discovers messaging channels by
+# scanning config property NAMES, and the env-var form
+# (MP_MESSAGING_INCOMING_PARTY_EVENTS_IN_*) reverse-maps ambiguously for a
+# hyphenated channel name ("party-events-in") -> a broken channel -> startup
+# crash (this is exactly #2649, reverted, documented in ADR-0137 / runbook 0008
+# and in transaction-service-msg-override.yaml). A properties file carries the
+# EXACT hyphenated keys, so channel discovery is unambiguous.
+#
+# group.id MUST match the Read grant on consumer group `cardissuance-party` in
+# this service's KafkaUser ACL (kafka-scheme-accepted-acl.yaml), or every
+# consumer poll gets Kafka's GroupAuthorizationException.
+#
+# config_ordinal=500 forces this source to outrank the baked application.yaml
+# (~254). Loaded via QUARKUS_CONFIG_LOCATIONS on the Deployment
+# (payments-services.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: card-issuance-service-msg-override
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: card-issuance-service
+    app.kubernetes.io/part-of: payments
+data:
+  override.properties: |
+    config_ordinal=500
+    mp.messaging.incoming.party-events-in.client.id=cardissuance-party-${quarkus.uuid}
+    mp.messaging.incoming.party-events-in.group.id=cardissuance-party
+    mp.messaging.incoming.party-events-in.auto.offset.reset=earliest
