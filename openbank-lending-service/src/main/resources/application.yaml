@@ -171,7 +171,12 @@ authz:
   # ADR-0155: four-eyes ENFORCEMENT (blocking a maker's request pending a second
   # approver), independent of the base allow/deny enforce toggle above. Stays false
   # here — this PR only wires the ApprovalStore/endpoint (mirrors the sepa-payment
-  # pilot); flipping it to block `lending.disburse` is a deliberate, separate
-  # follow-up once the maker/checker runbook is reviewed.
+  # pilot); flipping it to block `lending.disburse` / `lending.collateralRegister`
+  # (issue #621) is a deliberate, separate follow-up once the maker/checker runbook
+  # is reviewed. Independent of this flag, `lending.collateralRegister` is ALWAYS
+  # gated at the domain level: LendingService.decide() requires a distinct checker
+  # before a Collateral moves out of PENDING, and applyCollateral() only ever sums
+  # APPROVED collateral into the IFRS 9 LGD adjustment — so a pending registration
+  # cannot lower a loan's provisioning even while this flag is false.
   four-eyes:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"

@@ -67,4 +67,38 @@ class LendingResourceAuthzTest {
             statusCode(409)
         }
     }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_LENDING_OFFICER"])
+    fun `advisory mode does not block collateral registration - request reaches the handler`() {
+        // Unknown loan id with a well-formed body -> the FK constraint on collateral.loan_id fails
+        // the save and the handler's recoverWithItem maps it to 400, proving the
+        // lending.collateralRegister @Authorize check (ADR-0028 follow-up, issue #621) did not
+        // interfere with the call in advisory mode (a 403/500 here would mean it did).
+        Given {
+            contentType("application/json")
+            body(
+                """{"type":"VEHICLE","marketValue":{"amount":5000.00,"currency":"EUR"},"haircut":0.40}""",
+            )
+        } When {
+            post("/api/v1/lending/loans/${UUID.randomUUID()}/collateral")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_CREDIT_RISK"])
+    fun `advisory mode does not block a collateral decision - request reaches the handler`() {
+        // Unknown collateral id -> the use case fails and the handler's recoverWithItem maps
+        // it to 409, proving the lending.collateralDecide @Authorize check did not interfere.
+        Given {
+            contentType("application/json")
+            body("""{"approve":true}""")
+        } When {
+            post("/api/v1/lending/collateral/${UUID.randomUUID()}/decision")
+        } Then {
+            statusCode(409)
+        }
+    }
 }
