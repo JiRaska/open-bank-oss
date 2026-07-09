@@ -31,6 +31,7 @@ enum class DomesticRejectReason {
     AMOUNT_LIMIT_EXCEEDED,
     AML_HOLD,
     SANCTIONS_HIT,
+    FRAUD_SUSPECTED,
     TECHNICAL_ERROR,
 }
 

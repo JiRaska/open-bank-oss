@@ -153,6 +153,12 @@ openbank:
     scheme-submission:
       # ADR-0104 D4 Czech clearing pilot. OFF by default; when off, behaviour is exactly as before.
       enabled: ${DOMESTIC_SCHEME_SUBMISSION_ENABLED:false}
+    fraud:
+      # ADR-0084 §4.2: flips the fraud verdict from SHADOW (observed, logged, ignored) to
+      # ENFORCED (REVIEW/CHALLENGE hold the payment for manual release; DECLINE rejects it).
+      # OFF by default — a deliberate runbook-gated rollout flip, same convention as the
+      # four-eyes `enforce` toggle below. ALLOW always validates regardless of this flag.
+      enforcement-enabled: ${DOMESTIC_FRAUD_ENFORCEMENT_ENABLED:false}
   temporal:
     enabled: false
     server-url: temporal-frontend.temporal.svc.cluster.local:7233

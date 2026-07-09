@@ -71,21 +71,9 @@ class DomesticPaymentServiceTest {
         workflowClient = mockk()
         // temporalEnabled = false: these tests cover the synchronous screening/fraud path
         // (ADR-0101 P2 delegates to Temporal only when enabled), so workflowClient is unused.
-        service = DomesticPaymentService(
-            paymentRepository,
-            eventPublisher,
-            screeningPort,
-            amlCasePort,
-            fraudScoringPort,
-            schemeGatewayPort,
-            settlementPort,
-            accountLookupPort,
-            metrics,
-            temporalEnabled = false,
-            temporalTaskQueue = "openbank-domestic-payments",
-            schemeSubmissionEnabled = false,
-            workflowClient = workflowClient,
-        )
+        // fraudEnforcementEnabled = false here — the shadow-mode default; enforcement-specific
+        // tests rebuild the service with it on.
+        service = buildService(fraudEnforcementEnabled = false)
 
         // Account lookup for server-side transferScope derivation: default to null (INTERNAL_CLIENT).
         coEvery { accountLookupPort.findPartyByIban(any()) } returns null
@@ -100,6 +88,40 @@ class DomesticPaymentServiceTest {
         every { eventPublisher.statusChangedPayload(any(), any()) } returns "{\"event\":\"status-changed\"}"
         coJustRun { amlCasePort.openCase(any()) }
     }
+
+    private fun buildService(fraudEnforcementEnabled: Boolean): DomesticPaymentService = DomesticPaymentService(
+        paymentRepository,
+        eventPublisher,
+        screeningPort,
+        amlCasePort,
+        fraudScoringPort,
+        schemeGatewayPort,
+        settlementPort,
+        accountLookupPort,
+        metrics,
+        temporalEnabled = false,
+        temporalTaskQueue = "openbank-domestic-payments",
+        schemeSubmissionEnabled = false,
+        fraudEnforcementEnabled = fraudEnforcementEnabled,
+        workflowClient = workflowClient,
+    )
+
+    private fun buildServiceWithScheme(): DomesticPaymentService = DomesticPaymentService(
+        paymentRepository,
+        eventPublisher,
+        screeningPort,
+        amlCasePort,
+        fraudScoringPort,
+        schemeGatewayPort,
+        settlementPort,
+        accountLookupPort,
+        metrics,
+        temporalEnabled = false,
+        temporalTaskQueue = "openbank-domestic-payments",
+        schemeSubmissionEnabled = true,
+        fraudEnforcementEnabled = false,
+        workflowClient = workflowClient,
+    )
 
     private fun clear(role: ScreeningRole) = ScreeningResult("name", role, ScreeningMatchStatus.CLEAR, 0.0, null)
 
@@ -152,6 +174,75 @@ class DomesticPaymentServiceTest {
 
         assertThat(result.status).isEqualTo(DomesticPaymentStatus.VALIDATED)
         coVerify(exactly = 1) { fraudScoringPort.score(any()) }
+    }
+
+    @Test
+    fun `enforced DECLINE verdict rejects the payment and opens a CRITICAL fraud case`(): Unit = runBlocking {
+        val enforced = buildService(fraudEnforcementEnabled = true)
+        val command = createCommand()
+        coEvery { paymentRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        coEvery { screeningPort.screen(any(), any(), any()) } returns clear(ScreeningRole.DEBTOR)
+        coEvery { fraudScoringPort.score(any()) } returns
+            FraudScoreOutcome(FraudVerdict.DECLINE, 99, "v4", listOf("velocity-cap"))
+
+        val result = enforced.createPayment(command)
+
+        assertThat(result.status).isEqualTo(DomesticPaymentStatus.REJECTED)
+        assertThat(result.rejectReason).isEqualTo(DomesticRejectReason.FRAUD_SUSPECTED)
+        coVerify {
+            amlCasePort.openCase(
+                match { it.riskLevel == AmlCaseRiskLevel.CRITICAL && it.alertCode == "FRAUD_REVIEW" },
+            )
+        }
+    }
+
+    @Test
+    fun `enforced REVIEW verdict holds the payment in RECEIVED and opens a HIGH fraud case`(): Unit = runBlocking {
+        val enforced = buildService(fraudEnforcementEnabled = true)
+        val command = createCommand()
+        coEvery { paymentRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        coEvery { screeningPort.screen(any(), any(), any()) } returns clear(ScreeningRole.DEBTOR)
+        coEvery { fraudScoringPort.score(any()) } returns
+            FraudScoreOutcome(FraudVerdict.REVIEW, 60, "v4", listOf("new-payee-high-amount"))
+
+        val result = enforced.createPayment(command)
+
+        assertThat(result.status).isEqualTo(DomesticPaymentStatus.RECEIVED)
+        coVerify {
+            amlCasePort.openCase(
+                match { it.riskLevel == AmlCaseRiskLevel.HIGH && it.alertCode == "FRAUD_REVIEW" },
+            )
+        }
+        coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
+    }
+
+    @Test
+    fun `enforced CHALLENGE verdict also holds the payment for manual release`(): Unit = runBlocking {
+        val enforced = buildService(fraudEnforcementEnabled = true)
+        val command = createCommand()
+        coEvery { paymentRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        coEvery { screeningPort.screen(any(), any(), any()) } returns clear(ScreeningRole.DEBTOR)
+        coEvery { fraudScoringPort.score(any()) } returns
+            FraudScoreOutcome(FraudVerdict.CHALLENGE, 40, "v4", listOf("velocity-h1"))
+
+        val result = enforced.createPayment(command)
+
+        assertThat(result.status).isEqualTo(DomesticPaymentStatus.RECEIVED)
+        coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
+    }
+
+    @Test
+    fun `enforced ALLOW verdict validates the payment exactly like shadow mode`(): Unit = runBlocking {
+        val enforced = buildService(fraudEnforcementEnabled = true)
+        val command = createCommand()
+        coEvery { paymentRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        coEvery { screeningPort.screen(any(), any(), any()) } returns clear(ScreeningRole.DEBTOR)
+        coEvery { fraudScoringPort.score(any()) } returns FraudScoreOutcome(FraudVerdict.ALLOW, 0, "v4", emptyList())
+
+        val result = enforced.createPayment(command)
+
+        assertThat(result.status).isEqualTo(DomesticPaymentStatus.VALIDATED)
+        coVerify(exactly = 0) { amlCasePort.openCase(any()) }
     }
 
     @Test
@@ -321,21 +412,7 @@ class DomesticPaymentServiceTest {
 
     @Test
     fun `scheme ACSC followed by successful settlement transitions payment to SETTLED`(): Unit = runBlocking {
-        val serviceWithScheme = DomesticPaymentService(
-            paymentRepository,
-            eventPublisher,
-            screeningPort,
-            amlCasePort,
-            fraudScoringPort,
-            schemeGatewayPort,
-            settlementPort,
-            accountLookupPort,
-            metrics,
-            temporalEnabled = false,
-            temporalTaskQueue = "openbank-domestic-payments",
-            schemeSubmissionEnabled = true,
-            workflowClient = workflowClient,
-        )
+        val serviceWithScheme = buildServiceWithScheme()
         val command = createCommand()
         coEvery { paymentRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
         coEvery {
@@ -351,21 +428,7 @@ class DomesticPaymentServiceTest {
 
     @Test
     fun `settlement unavailable holds payment in SENT_TO_CLEARING`(): Unit = runBlocking {
-        val serviceWithScheme = DomesticPaymentService(
-            paymentRepository,
-            eventPublisher,
-            screeningPort,
-            amlCasePort,
-            fraudScoringPort,
-            schemeGatewayPort,
-            settlementPort,
-            accountLookupPort,
-            metrics,
-            temporalEnabled = false,
-            temporalTaskQueue = "openbank-domestic-payments",
-            schemeSubmissionEnabled = true,
-            workflowClient = workflowClient,
-        )
+        val serviceWithScheme = buildServiceWithScheme()
         val command = createCommand()
         coEvery { paymentRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
         coEvery {
