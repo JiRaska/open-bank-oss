@@ -10,14 +10,21 @@
 # granted Read/Describe on — every poll got a silent GroupAuthorizationException until it landed
 # inside Quarkus's synchronous startup window and became a fatal crash-loop.
 #
-# Why NOT env vars either (this superseded #685's original fix): ADR-0137's "known follow-up"
-# section documents that MP_MESSAGING_INCOMING_<CHANNEL>_* env vars were tried for a HYPHENATED
-# mp.messaging channel name (payment-scheme-accepted) and reverted (#2649 → #2659) — SmallRye's
-# channel discovery reverse-maps the env var name to a property name ambiguously and the pod fails
-# to start. `transaction-signal` is hyphenated too, and #685's own regression test
-# (TransactionSignalConsumerBootIT) injected the property directly via a
-# QuarkusTestResourceLifecycleManager config map — a different, always-safe mechanism — so it never
-# actually exercised the env var path and could not have caught this.
+# This mirrors the pre-existing pattern already used for transaction-service's
+# payment-scheme-accepted channel (transaction-service-msg-override.yaml). A properties file
+# carries the exact hyphenated/dotted property name unambiguously, avoiding any reliance on
+# MicroProfile Config's env-var-name reverse-mapping for channel discovery.
+#
+# Correction: an earlier version of this comment claimed this "superseded #685's original fix"
+# because ADR-0137's "known follow-up" section documented MP_MESSAGING_INCOMING_<CHANNEL>_* env
+# vars being tried and reverted for a hyphenated channel name, citing issues #2649/#2659 as proof.
+# Those issue numbers do not exist in this repository — a fabricated citation that propagated
+# from a stale reference in docs/adr/0137-kafka-mtls-scheme-accepted-migration.md. #685's original
+# env-var fix is independently verified to work correctly once a channel is already registered
+# via YAML connector/topic keys (which is true for `transaction-signal`) — confirmed by a
+# standalone SmallRye Config test and by PR #701 (openbank-anacredit-service)'s passing boot test
+# using the same env-var mechanism. This properties-file mechanism remains a valid, working
+# alternative — not a required correction to #685.
 #
 # A properties FILE carries the exact hyphenated/dotted property name unambiguously (no YAML
 # flattening, no env-var reverse-mapping) — the same proven pattern already live for

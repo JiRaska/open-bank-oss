@@ -299,10 +299,16 @@ mp:
         # default (latest) instead of the intended latest-is-fine-here value, but the same bug
         # class applies regardless (issue #686).
         #
-        # A properties-file override (not MP_MESSAGING_INCOMING_*_GROUP_ID env vars) is used
-        # because `oversight-events` is a hyphenated channel name: SmallRye's channel discovery
-        # cannot reliably reverse-map hyphenated MP_MESSAGING_INCOMING_OVERSIGHT_EVENTS_* env
-        # names back to the channel, and can register a broken channel that fails startup
-        # (confirmed on transaction-service's payment-scheme-accepted channel, #2649 -> reverted
-        # in #2659). A properties file carries the exact hyphenated property key, so discovery
-        # is unambiguous.
+        # A properties-file override (not MP_MESSAGING_INCOMING_*_GROUP_ID env vars) is used,
+        # matching the pattern already established for transaction-service's
+        # payment-scheme-accepted channel. A properties file carries the exact hyphenated
+        # property key unambiguously, avoiding any reliance on MicroProfile Config's env-var-name
+        # reverse-mapping for channel discovery.
+        #
+        # Correction: an earlier version of this comment claimed the env-var form was "confirmed"
+        # to break transaction-service's channel, citing issues #2649/#2659 as proof — those issue
+        # numbers do not exist in this repository (a fabricated citation that propagated from
+        # docs/adr/0137-kafka-mtls-scheme-accepted-migration.md). The plain env-var approach is
+        # independently verified to work once a channel is already registered via YAML
+        # connector/topic keys (PR #685, PR #701) — this properties-file mechanism is kept as a
+        # valid alternative, not because env vars are broken.

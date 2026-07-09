@@ -11,12 +11,21 @@
 # granted Read on group kyc-service-party — every consumer poll got a silent
 # GroupAuthorizationException.
 #
-# Why a properties FILE and not env vars: SmallRye discovers messaging channels by
-# scanning config property NAMES, and the env-var form
-# (MP_MESSAGING_INCOMING_PARTY_EVENTS_IN_*) reverse-maps ambiguously for a hyphenated
-# channel name → a broken channel → startup crash (this exact approach was tried for
-# transaction-service's payment-scheme-accepted channel and reverted, #2649→#2659). A
-# properties file carries the EXACT hyphenated/dotted keys, so discovery is unambiguous.
+# Why a properties FILE and not env vars: this mirrors the pre-existing pattern already used
+# for transaction-service's payment-scheme-accepted channel
+# (openbank-infra/gitops/components/payments/transaction-service-msg-override.yaml). A properties
+# file carries the exact hyphenated/dotted keys unambiguously, avoiding any reliance on
+# MicroProfile Config's env-var-name reverse-mapping for channel discovery.
+#
+# Correction: an earlier version of this comment cited issues #2649/#2659 as proof that the
+# env-var form was tried and reverted for transaction-service due to a startup crash on
+# hyphenated channel names. Those issue numbers do not exist in this repository — the claim was
+# a fabricated citation that had propagated from a stale reference in
+# docs/adr/0137-kafka-mtls-scheme-accepted-migration.md. The plain env-var approach is
+# independently verified to work correctly once a channel is already registered via YAML
+# connector/topic keys (which is the case here): see PR #685 (openbank-fraud-service) and PR #701
+# (openbank-anacredit-service), both merged with passing boot tests. This properties-file
+# mechanism is kept here as a valid, working alternative — not because env vars are broken.
 #
 # client.id is intentionally omitted here (and removed from application.yaml) rather than
 # reproduced: it only affects broker-side client identification in logs/JMX, not

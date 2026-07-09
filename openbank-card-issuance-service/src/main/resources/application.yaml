@@ -104,11 +104,19 @@ mp:
         # GroupAuthorizationException. auto.offset.reset would likewise silently fall back to
         # Kafka's `latest` default instead of `earliest`. Set instead via the
         # card-issuance-service-msg-override ConfigMap (QUARKUS_CONFIG_LOCATIONS,
-        # config_ordinal=500) — a properties FILE, not env vars, because the hyphenated channel
-        # name `party-events-in` breaks SmallRye's channel discovery when config is supplied as
-        # MP_MESSAGING_INCOMING_PARTY_EVENTS_IN_* env vars (tried fleet-wide for
-        # transaction-service and reverted, #2649 -> #2659; see
-        # openbank-infra/gitops/components/payments/transaction-service-msg-override.yaml).
+        # config_ordinal=500) — a properties FILE, matching the pattern already established for
+        # transaction-service's payment-scheme-accepted channel (see
+        # openbank-infra/gitops/components/payments/transaction-service-msg-override.yaml); it
+        # carries the exact hyphenated property key unambiguously, avoiding any reliance on
+        # MicroProfile Config's env-var-name reverse-mapping for channel discovery.
+        #
+        # Correction: an earlier version of this comment claimed the env-var form was tried
+        # fleet-wide and reverted for transaction-service's channel, citing issues #2649/#2659 as
+        # proof — those issue numbers do not exist in this repository (a fabricated citation that
+        # propagated from docs/adr/0137-kafka-mtls-scheme-accepted-migration.md). The plain
+        # env-var approach is independently verified to work once a channel is already registered
+        # via YAML connector/topic keys (PR #685, PR #701) — this properties-file mechanism is
+        # kept as a valid alternative, not because env vars are broken.
     outgoing:
       # ADR-0050 transactional-outbox egress. The dispatcher sets the Kafka key (= aggregate id, N2)
       # and ce-id/idempotency-key/ce-type headers (N3) via OutgoingKafkaRecordMetadata, so both a key

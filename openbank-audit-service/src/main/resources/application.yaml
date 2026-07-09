@@ -96,10 +96,18 @@ mp:
       # the audit-service KafkaUser ACL (kafka-audit-mtls.yaml) does NOT grant Read on (only
       # "audit-service" is granted) — every consumer poll got a silent
       # org.apache.kafka.common.errors.GroupAuthorizationException. A properties file (not an env
-      # var) is used because this channel name is hyphenated (audit-events-in): SmallRye's env-var
-      # reverse-mapping for hyphenated/dotted channel names is ambiguous and previously broke
-      # transaction-service's payment-scheme-accepted channel this way (reverted, #2649→#2659); a
-      # properties file carries the exact property name unambiguously. See issue #686.
+      # var) is used here, matching the pattern already established for transaction-service's
+      # payment-scheme-accepted channel; it carries the exact hyphenated/dotted property name
+      # unambiguously, avoiding any reliance on MicroProfile Config's env-var-name reverse-mapping
+      # for channel discovery. See issue #686.
+      #
+      # Correction: an earlier version of this comment claimed env vars were "previously broken"
+      # for transaction-service's channel, citing issues #2649/#2659 as proof — those issue
+      # numbers do not exist in this repository (a fabricated citation that propagated from
+      # docs/adr/0137-kafka-mtls-scheme-accepted-migration.md). The plain env-var approach is
+      # independently verified to work once a channel is already registered via YAML
+      # connector/topic keys (PR #685, PR #701) — this properties-file mechanism is kept as a
+      # valid alternative, not because env vars are broken.
       audit-events-in:
         connector: smallrye-kafka
         client.id: audit-service-${quarkus.uuid}

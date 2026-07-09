@@ -64,19 +64,21 @@ spec:
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
             # #685 originally set these as MP_MESSAGING_INCOMING_TRANSACTION_SIGNAL_* env vars.
-            # Reverted here (open-bank-oss#686 follow-up): ADR-0137's "known follow-up" section
-            # documents that this exact approach — an env var for a HYPHENATED mp.messaging
-            # channel name — was tried for `payment-scheme-accepted` and reverted (#2649→#2659):
-            # SmallRye's channel discovery reverse-maps the env var name to a property name
-            # ambiguously and the pod fails to start. `transaction-signal` is hyphenated too, and
-            # #685's own regression test (TransactionSignalConsumerBootIT) never actually exercised
-            # this env var — it injects the property directly via a
-            # QuarkusTestResourceLifecycleManager config map (a different, always-safe mechanism),
-            # so it could not have caught this. Loading a properties FILE via
-            # QUARKUS_CONFIG_LOCATIONS instead — see fraud-service-msg-override.yaml — carries the
-            # exact hyphenated/dotted property name unambiguously (no YAML flattening, no env-var
-            # reverse-mapping), matching the proven pattern already live for transaction-service
-            # (transaction-service-msg-override.yaml).
+            # Switched here to loading a properties FILE via QUARKUS_CONFIG_LOCATIONS instead —
+            # see fraud-service-msg-override.yaml — matching the pattern already established for
+            # transaction-service (transaction-service-msg-override.yaml).
+            #
+            # Correction: an earlier version of this comment claimed this change was required
+            # because ADR-0137's "known follow-up" section documented the env-var form being tried
+            # and reverted for a hyphenated channel name, citing issues #2649/#2659 as proof. Those
+            # issue numbers do not exist in this repository — a fabricated citation that propagated
+            # from a stale reference in docs/adr/0137-kafka-mtls-scheme-accepted-migration.md.
+            # #685's original env-var fix is independently verified to work correctly once a
+            # channel is already registered via YAML connector/topic keys (true for
+            # `transaction-signal`) — confirmed by a standalone SmallRye Config test and by PR #701
+            # (openbank-anacredit-service)'s passing boot test using the same env-var mechanism.
+            # This properties-file mechanism remains a valid, working alternative — not a required
+            # correction to #685.
             - name: QUARKUS_CONFIG_LOCATIONS
               value: /mnt/msg-config/override.properties
             - name: KAFKA_SECURITY_PROTOCOL

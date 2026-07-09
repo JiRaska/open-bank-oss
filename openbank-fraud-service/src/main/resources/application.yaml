@@ -90,9 +90,18 @@ mp:
         failure-strategy: dead-letter-queue
         # group.id / auto.offset.reset / dead-letter-queue.topic are deliberately NOT set as YAML
         # keys here — see openbank-infra/gitops/components/fraud-service/fraud-service-msg-override.yaml
-        # (loaded via QUARKUS_CONFIG_LOCATIONS) for why and where they're set instead. NOT env vars:
-        # that was tried (#685) and is unsafe for a hyphenated channel name like this one — see
-        # ADR-0137's "known follow-up" section (#2649 -> #2659, reverted). Summary: SmallRye Config's YAML source unconditionally quotes any leaf map key
+        # (loaded via QUARKUS_CONFIG_LOCATIONS) for why and where they're set instead, matching the
+        # pattern already established for transaction-service's payment-scheme-accepted channel.
+        #
+        # Correction: an earlier version of this comment claimed the env-var form (PR #685's
+        # original fix) was "unsafe for a hyphenated channel name" per ADR-0137's "known follow-up"
+        # section, citing issues #2649/#2659 as proof — those issue numbers do not exist in this
+        # repository (a fabricated citation that propagated from
+        # docs/adr/0137-kafka-mtls-scheme-accepted-migration.md). The plain env-var approach is
+        # independently verified to work once a channel is already registered via YAML
+        # connector/topic keys (this is exactly PR #685's original, working fix; see also PR #701)
+        # — the properties-file mechanism here is a valid alternative, not a required correction.
+        # Summary: SmallRye Config's YAML source unconditionally quotes any leaf map key
         # containing a literal dot (`group.id` becomes the registered property name `"group.id"`,
         # quotes included — true whether or not the YAML key itself is quoted), so
         # KafkaConnectorIncomingConfiguration's plain config.getOptionalValue("group.id", ...) never

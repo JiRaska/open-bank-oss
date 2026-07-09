@@ -6,10 +6,21 @@
 # external config source so the running (old) image picks them up.
 #
 # Why a properties FILE and not env vars: SmallRye discovers messaging channels by
-# scanning config property NAMES, and the env-var form
-# (MP_MESSAGING_INCOMING_PAYMENT_SCHEME_ACCEPTED_*) reverse-maps ambiguously →
-# a broken channel → startup crash (that was #2649, reverted). A properties file
-# carries the EXACT hyphenated keys, so discovery is unambiguous.
+# scanning config property NAMES; a properties file carries the exact hyphenated keys
+# unambiguously, avoiding any reliance on MicroProfile Config's env-var-name reverse-mapping
+# for channel discovery.
+#
+# Correction: an earlier version of this comment claimed the env-var form was "tried" and
+# "reverted" for this channel, citing issue #2649 as proof. That issue number does not exist in
+# this repository, and no record of an actual env-var attempt/revert for this channel could be
+# found — this appears to be the origin of a fabricated citation that was subsequently copied
+# (and elaborated on) into several other services' equivalent override files, and into
+# docs/adr/0137-kafka-mtls-scheme-accepted-migration.md. The plain env-var approach is
+# independently verified to work correctly once a channel is already registered via YAML
+# connector/topic keys: see PR #685 (openbank-fraud-service) and PR #701
+# (openbank-anacredit-service), both merged with passing boot tests. This properties-file
+# mechanism remains a valid, working choice for this channel — kept as-is (it is genuinely live
+# in production and working) — not because env vars are broken.
 #
 # config_ordinal=500 forces this source to outrank the baked application.yaml
 # (~254). Loaded via QUARKUS_CONFIG_LOCATIONS on the Rollout. Once the image is
