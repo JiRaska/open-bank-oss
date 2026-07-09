@@ -54,20 +54,26 @@ class ApicurioSchemaCatalogSourceIT {
                     Wait.forHttp("/apis/registry/v2/system/info")
                         .forPort(8080)
                         .forStatusCode(200)
-                        .withStartupTimeout(Duration.ofMinutes(8))
+                        .withStartupTimeout(Duration.ofMinutes(8)),
                 )
 
         private fun baseUrl() = "http://${apicurio.host}:${apicurio.getMappedPort(8080)}"
 
         private val http: HttpClient = HttpClient.newHttpClient()
 
-        private fun createArtifact(eventType: String, schema: String): Int =
-            send("POST", "/apis/registry/v2/groups/$GROUP/artifacts", schema,
-                mapOf("X-Registry-ArtifactId" to eventType, "X-Registry-ArtifactType" to "JSON"))
+        private fun createArtifact(eventType: String, schema: String): Int = send(
+            "POST",
+            "/apis/registry/v2/groups/$GROUP/artifacts",
+            schema,
+            mapOf("X-Registry-ArtifactId" to eventType, "X-Registry-ArtifactType" to "JSON"),
+        )
 
-        private fun addVersion(eventType: String, schema: String): Int =
-            send("POST", "/apis/registry/v2/groups/$GROUP/artifacts/$eventType/versions", schema,
-                mapOf("X-Registry-ArtifactType" to "JSON"))
+        private fun addVersion(eventType: String, schema: String): Int = send(
+            "POST",
+            "/apis/registry/v2/groups/$GROUP/artifacts/$eventType/versions",
+            schema,
+            mapOf("X-Registry-ArtifactType" to "JSON"),
+        )
 
         private fun send(method: String, path: String, body: String, headers: Map<String, String>): Int {
             var b = HttpRequest.newBuilder(URI.create("${baseUrl()}$path"))
@@ -75,7 +81,7 @@ class ApicurioSchemaCatalogSourceIT {
             headers.forEach { (k, v) -> b = b.header(k, v) }
             val resp = http.send(
                 b.method(method, HttpRequest.BodyPublishers.ofString(body)).build(),
-                HttpResponse.BodyHandlers.ofString()
+                HttpResponse.BodyHandlers.ofString(),
             )
             return resp.statusCode()
         }
@@ -92,7 +98,9 @@ class ApicurioSchemaCatalogSourceIT {
     }
 
     private fun source() = ApicurioSchemaCatalogSource().apply {
-        url = baseUrl(); group = GROUP; mapper = ObjectMapper()
+        url = baseUrl()
+        group = GROUP
+        mapper = ObjectMapper()
     }
 
     @Test

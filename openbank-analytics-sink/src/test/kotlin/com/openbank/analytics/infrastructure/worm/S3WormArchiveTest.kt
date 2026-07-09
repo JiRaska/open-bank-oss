@@ -11,6 +11,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
+import java.util.Optional
 
 /**
  * Tests for the authoritative S3 Object-Lock WORM adapter. The SigV4 signing is verified against the
@@ -37,8 +38,8 @@ class S3WormArchiveTest {
             endpoint = "https://s3.eu-central-1.amazonaws.com"
             region = "eu-central-1"
             bucket = "test-bucket"
-            accessKey = "AKIA-TEST"
-            secretKey = "secret-test"
+            accessKey = Optional.of("AKIA-TEST")
+            secretKey = Optional.of("secret-test")
             retentionYears = 10
         }
 
@@ -59,8 +60,8 @@ class S3WormArchiveTest {
         val s3 = S3WormArchive().apply {
             mapper = mapperFixture
             region = "us-east-1"
-            accessKey = "AKIDEXAMPLE"
-            secretKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+            accessKey = Optional.of("AKIDEXAMPLE")
+            secretKey = Optional.of("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
         }
         val emptyHash = s3.sha256Hex(ByteArray(0))
 

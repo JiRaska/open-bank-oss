@@ -26,6 +26,7 @@ import java.net.http.HttpResponse
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.util.Optional
 
 /**
  * OLTP **source-side** reconciliation reader (ADR-0026): the binding that finally gives
@@ -55,9 +56,11 @@ import java.time.Instant
 @IfBuildProperty(name = "openbank.analytics.reconcile.source.backend", stringValue = "http")
 open class HttpReconciliationSource : ReconciliationSource {
 
-    /** `service=baseUrl` pairs, comma-separated (e.g. `account=http://openbank-account-service:8081`). */
-    @ConfigProperty(name = "openbank.analytics.reconcile.source.endpoints", defaultValue = "")
-    lateinit var endpointsSpec: String
+    /** `service=baseUrl` pairs, comma-separated (e.g. `account=http://openbank-account-service:8081`).
+     *  Optional<String>, not a plain String (CLAUDE.md pitfall): SmallRye's built-in String converter
+     *  treats an empty-string-resolved value as "no value" and throws SRCFG00040 at boot. */
+    @ConfigProperty(name = "openbank.analytics.reconcile.source.endpoints")
+    lateinit var endpointsSpec: Optional<String>
 
     @Inject
     lateinit var mapper: ObjectMapper
@@ -91,7 +94,7 @@ open class HttpReconciliationSource : ReconciliationSource {
     }
 
     /** Parses the `service=baseUrl,...` spec, skipping blank/malformed entries (logged). */
-    internal fun endpoints(): Map<String, String> = endpointsSpec.split(',').mapNotNull { raw ->
+    internal fun endpoints(): Map<String, String> = endpointsSpec.orElse("").split(',').mapNotNull { raw ->
         val entry = raw.trim()
         if (entry.isEmpty()) return@mapNotNull null
         val sep = entry.indexOf('=')

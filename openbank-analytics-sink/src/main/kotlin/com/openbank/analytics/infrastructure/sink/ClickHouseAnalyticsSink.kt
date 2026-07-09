@@ -26,6 +26,7 @@ import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.util.Optional
 
 /**
  * Durable [AnalyticsSink] that writes the **bronze** layer into ClickHouse over its HTTP interface
@@ -64,8 +65,10 @@ open class ClickHouseAnalyticsSink : AnalyticsSink {
     @ConfigProperty(name = "openbank.analytics.clickhouse.username", defaultValue = "analytics")
     lateinit var username: String
 
-    @ConfigProperty(name = "openbank.analytics.clickhouse.password", defaultValue = "")
-    lateinit var password: String
+    // Optional<String>, not a plain String (CLAUDE.md pitfall): SmallRye's built-in String converter
+    // treats an empty-string-resolved value as "no value" and throws SRCFG00040 at boot.
+    @ConfigProperty(name = "openbank.analytics.clickhouse.password")
+    lateinit var password: Optional<String>
 
     @Inject
     lateinit var mapper: ObjectMapper
@@ -111,7 +114,7 @@ open class ClickHouseAnalyticsSink : AnalyticsSink {
             // F1 tamper-evidence: deterministic over identity + business content (excludes lineage/time).
             "record_hash" to AnalyticsIntegrity.recordHash(env),
             // payload is a String column holding the (already PII-masked) body as embedded JSON.
-            "payload" to mapper.writeValueAsString(env.payload)
+            "payload" to mapper.writeValueAsString(env.payload),
         )
         return mapper.writeValueAsString(row)
     }
@@ -126,14 +129,14 @@ open class ClickHouseAnalyticsSink : AnalyticsSink {
         val uri = URI.create("${url.trimEnd('/')}/?query=${URLEncoder.encode(query, StandardCharsets.UTF_8)}")
         val request = HttpRequest.newBuilder(uri)
             .header("X-ClickHouse-User", username)
-            .header("X-ClickHouse-Key", password)
+            .header("X-ClickHouse-Key", password.orElse(""))
             .header("Content-Type", "text/plain; charset=UTF-8")
             .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
             .build()
         val response = http.send(request, HttpResponse.BodyHandlers.ofString())
         if (response.statusCode() !in 200..299) {
             throw IllegalStateException(
-                "ClickHouse insert failed: HTTP ${response.statusCode()} ${response.body().take(500)}"
+                "ClickHouse insert failed: HTTP ${response.statusCode()} ${response.body().take(500)}",
             )
         }
     }

@@ -10,9 +10,9 @@ import com.openbank.libs.analytics.LegalBasis
 import com.openbank.libs.analytics.RetentionPolicies
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
-import org.jboss.logging.Logger
 
 /**
  * Outcome of a GDPR Art. 17 erasure request against the analytics layer (ADR-0023, F6).

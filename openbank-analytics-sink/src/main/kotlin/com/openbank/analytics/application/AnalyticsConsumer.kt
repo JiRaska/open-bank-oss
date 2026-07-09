@@ -10,15 +10,14 @@ import com.openbank.analytics.application.port.out.AnalyticsSink
 import com.openbank.analytics.application.port.out.DeadLetterRecord
 import com.openbank.analytics.application.port.out.DeadLetterSink
 import com.openbank.libs.analytics.AnalyticsEnvelope
-import com.openbank.libs.analytics.IngestSource
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import org.eclipse.microprofile.reactive.messaging.Incoming
+import org.jboss.logging.Logger
 import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
-import org.eclipse.microprofile.reactive.messaging.Incoming
-import org.jboss.logging.Logger
 
 /**
  * Consumes the same domain-event stream the audit service ingests (ADR-0003 outbox topics) and

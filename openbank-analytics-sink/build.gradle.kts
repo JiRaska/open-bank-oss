@@ -58,6 +58,7 @@ dependencies {
     // unaffected; run them explicitly with `-PwithDocker` (see tasks.test below).
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
+    testImplementation(libs.testcontainers.redpanda)
 }
 kotlin {
     jvmToolchain(25)

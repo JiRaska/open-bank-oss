@@ -38,7 +38,6 @@ class ReconciliationResource {
     @GET
     @Path("/last")
     @RolesAllowed(Roles.AUDITOR, Roles.ADMIN, Roles.COMPLIANCE)
-    fun last(): Response =
-        job.lastResult()?.let { Response.ok(it).build() }
-            ?: Response.status(Response.Status.NO_CONTENT).build()
+    fun last(): Response = job.lastResult()?.let { Response.ok(it).build() }
+        ?: Response.status(Response.Status.NO_CONTENT).build()
 }

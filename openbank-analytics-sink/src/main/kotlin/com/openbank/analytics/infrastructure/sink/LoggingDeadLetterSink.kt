@@ -27,7 +27,7 @@ class LoggingDeadLetterSink : DeadLetterSink {
             "analytics dead-letter hash=%s error=%s payload=%s",
             record.contentHash,
             record.error,
-            record.rawPayload.take(500)
+            record.rawPayload.take(500),
         )
     }
 }

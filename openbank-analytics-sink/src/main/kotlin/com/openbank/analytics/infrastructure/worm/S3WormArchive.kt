@@ -25,6 +25,7 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.util.Optional
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -70,11 +71,13 @@ open class S3WormArchive : WormArchive {
     @ConfigProperty(name = "openbank.analytics.worm.s3.bucket", defaultValue = "openbank-analytics-worm")
     lateinit var bucket: String
 
-    @ConfigProperty(name = "openbank.analytics.worm.s3.access-key", defaultValue = "")
-    lateinit var accessKey: String
+    // Optional<String>, not a plain String (CLAUDE.md pitfall): SmallRye's built-in String converter
+    // treats an empty-string-resolved value as "no value" and throws SRCFG00040 at boot.
+    @ConfigProperty(name = "openbank.analytics.worm.s3.access-key")
+    lateinit var accessKey: Optional<String>
 
-    @ConfigProperty(name = "openbank.analytics.worm.s3.secret-key", defaultValue = "")
-    lateinit var secretKey: String
+    @ConfigProperty(name = "openbank.analytics.worm.s3.secret-key")
+    lateinit var secretKey: Optional<String>
 
     /** Object-Lock retention; must be >= the bronze minimum (10y) so the seal outlives what it protects. */
     @ConfigProperty(name = "openbank.analytics.worm.s3.retention-years", defaultValue = "10")
@@ -206,8 +209,9 @@ open class S3WormArchive : WormArchive {
             scope,
             sha256Hex(canonicalRequest.toByteArray(Charsets.UTF_8)),
         ).joinToString("\n")
-        val signature = hex(hmac(signingKey(secretKey, dateStamp, region, service), stringToSign))
-        return "AWS4-HMAC-SHA256 Credential=$accessKey/$scope, SignedHeaders=$signedHeaders, Signature=$signature"
+        val signature = hex(hmac(signingKey(secretKey.orElse(""), dateStamp, region, service), stringToSign))
+        return "AWS4-HMAC-SHA256 Credential=${accessKey.orElse("")}/$scope, " +
+            "SignedHeaders=$signedHeaders, Signature=$signature"
     }
 
     internal fun signingKey(secret: String, dateStamp: String, region: String, service: String): ByteArray {

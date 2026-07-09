@@ -9,8 +9,8 @@ import com.openbank.analytics.application.port.out.IntegrityAnchor
 import com.openbank.analytics.application.port.out.WormArchive
 import com.openbank.analytics.infrastructure.clickhouse.ClickHouseClient
 import io.quarkus.arc.properties.IfBuildProperty
-import jakarta.annotation.Priority
 import jakarta.annotation.PostConstruct
+import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
 import jakarta.inject.Inject
@@ -53,7 +53,7 @@ open class ClickHouseWormArchive : WormArchive {
         log.warn(
             "Using ClickHouseWormArchive: integrity anchors are mirrored to a queryable (operator-mutable) " +
                 "ClickHouse table, NOT an immutable WORM store. Bind the S3-Object-Lock adapter for the " +
-                "authoritative seal in production (ADR-0023 F1+F2)."
+                "authoritative seal in production (ADR-0023 F1+F2).",
         )
     }
 
@@ -61,8 +61,7 @@ open class ClickHouseWormArchive : WormArchive {
         clickhouse.insert("integrity_anchors", anchorJson(anchor))
     }
 
-    override suspend fun latest(): IntegrityAnchor? =
-        parseLatest(clickhouse.query(LATEST_SQL))
+    override suspend fun latest(): IntegrityAnchor? = parseLatest(clickhouse.query(LATEST_SQL))
 
     /** Serialises an anchor into an `integrity_anchors` JSONEachRow object. Pure / unit-testable. */
     internal fun anchorJson(anchor: IntegrityAnchor): String {
@@ -72,7 +71,7 @@ open class ClickHouseWormArchive : WormArchive {
             "previous_anchor_hash" to anchor.previousAnchorHash,
             "record_count" to anchor.recordCount,
             "source" to anchor.source,
-            "sealed_at" to DT.format(anchor.sealedAt)
+            "sealed_at" to DT.format(anchor.sealedAt),
         )
         return mapper.writeValueAsString(row)
     }
@@ -89,12 +88,11 @@ open class ClickHouseWormArchive : WormArchive {
             previousAnchorHash = c[2].takeUnless { it == "\\N" },
             recordCount = c[3].toIntOrNull() ?: 0,
             source = c[4],
-            sealedAt = parseDt(c[5])
+            sealedAt = parseDt(c[5]),
         )
     }
 
-    private fun parseDt(text: String): Instant =
-        LocalDateTime.parse(text.trim(), DT_PARSE).toInstant(ZoneOffset.UTC)
+    private fun parseDt(text: String): Instant = LocalDateTime.parse(text.trim(), DT_PARSE).toInstant(ZoneOffset.UTC)
 
     private companion object {
         const val LATEST_SQL =
@@ -103,6 +101,7 @@ open class ClickHouseWormArchive : WormArchive {
 
         val DT: DateTimeFormatter =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS").withZone(ZoneOffset.UTC)
+
         // Lenient on the fractional part so a value serialised without millis still parses.
         val DT_PARSE: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss[.SSS]")
     }

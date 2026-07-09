@@ -44,7 +44,7 @@ class LoggingAnalyticsSink : AnalyticsSink {
             envelope.sourceService,
             envelope.schemaVersion,
             envelope.occurredAt,
-            envelope.traceId ?: "-"
+            envelope.traceId ?: "-",
         )
     }
 }

@@ -14,11 +14,11 @@ import com.openbank.libs.analytics.BackfillRequest
 import com.openbank.libs.analytics.IngestSource
 import com.openbank.libs.analytics.Proposal
 import com.openbank.libs.analytics.ProposalState
-import java.time.Clock
-import java.time.Instant
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Clock
+import java.time.Instant
 
 /**
  * Plain-JUnit tests for the ClickHouse-native adapters (reconciliation reader, WORM mirror, durable

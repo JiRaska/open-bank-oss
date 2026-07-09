@@ -19,6 +19,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
+import java.util.Optional
 
 /**
  * Vault-Transit-backed [CryptoErasure] (ADR-0023, F6) — GDPR Art. 17 crypto-shredding for the 10-year
@@ -51,8 +52,10 @@ open class VaultCryptoErasure : CryptoErasure {
     @ConfigProperty(name = "openbank.analytics.vault.url", defaultValue = "http://localhost:8200")
     lateinit var url: String
 
-    @ConfigProperty(name = "openbank.analytics.vault.token", defaultValue = "")
-    lateinit var token: String
+    // Optional<String>, not a plain String (CLAUDE.md pitfall): SmallRye's built-in String converter
+    // treats an empty-string-resolved value as "no value" and throws SRCFG00040 at boot.
+    @ConfigProperty(name = "openbank.analytics.vault.token")
+    lateinit var token: Optional<String>
 
     @ConfigProperty(name = "openbank.analytics.vault.transit-mount", defaultValue = "transit")
     lateinit var mount: String
@@ -79,7 +82,10 @@ open class VaultCryptoErasure : CryptoErasure {
         // Step 2: destroy the key — all ciphertext encrypted under it becomes unrecoverable.
         val (delStatus, body) = vaultRequest("DELETE", "$mount/keys/$name", null)
         return when {
-            delStatus in 200..299 -> { log.infof("crypto-shred: destroyed vault transit key '%s'", name); 1 }
+            delStatus in 200..299 -> {
+                log.infof("crypto-shred: destroyed vault transit key '%s'", name)
+                1
+            }
             delStatus == 404 -> 0
             else -> error("Vault key destruction failed for '$name': HTTP $delStatus ${body.take(300)}")
         }
@@ -91,7 +97,15 @@ open class VaultCryptoErasure : CryptoErasure {
      * the same key. Pure / unit-testable.
      */
     internal fun keyName(key: AggregateKey): String {
-        fun sanitize(s: String) = s.lowercase().map { if (it.isLetterOrDigit() || it in ".-_") it else '-' }.joinToString("")
+        fun sanitize(s: String) = s.lowercase().map {
+            if (it.isLetterOrDigit() ||
+                it in ".-_"
+            ) {
+                it
+            } else {
+                '-'
+            }
+        }.joinToString("")
         return "${sanitize(keyPrefix)}-${sanitize(key.aggregateType)}-${sanitize(key.aggregateId)}"
     }
 
@@ -100,10 +114,13 @@ open class VaultCryptoErasure : CryptoErasure {
         withContext(Dispatchers.IO) {
             val uri = URI.create("${url.trimEnd('/')}/v1/$path")
             val publisher =
-                if (body == null) HttpRequest.BodyPublishers.noBody()
-                else HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)
+                if (body == null) {
+                    HttpRequest.BodyPublishers.noBody()
+                } else {
+                    HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)
+                }
             val request = HttpRequest.newBuilder(uri)
-                .header("X-Vault-Token", token)
+                .header("X-Vault-Token", token.orElse(""))
                 .header("Content-Type", "application/json")
                 .method(method, publisher)
                 .build()

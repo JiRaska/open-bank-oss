@@ -19,6 +19,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
+import java.util.Optional
 
 /**
  * End-to-end verification of [VaultCryptoErasure] (ADR-0023 F6 — GDPR Art. 17 crypto-shredding)
@@ -51,7 +52,7 @@ class VaultCryptoErasureIT {
                 .withExposedPorts(8200)
                 .waitingFor(
                     Wait.forHttp("/v1/sys/health").forPort(8200).forStatusCode(200)
-                        .withStartupTimeout(Duration.ofMinutes(3))
+                        .withStartupTimeout(Duration.ofMinutes(3)),
                 )
 
         private fun baseUrl() = "http://${vault.host}:${vault.getMappedPort(8200)}"
@@ -80,8 +81,11 @@ class VaultCryptoErasureIT {
     private val http: HttpClient = HttpClient.newHttpClient()
 
     private fun vault(method: String, path: String, body: String?): HttpResponse<String> {
-        val publisher = if (body == null) HttpRequest.BodyPublishers.noBody()
-        else HttpRequest.BodyPublishers.ofString(body)
+        val publisher = if (body == null) {
+            HttpRequest.BodyPublishers.noBody()
+        } else {
+            HttpRequest.BodyPublishers.ofString(body)
+        }
         val req = HttpRequest.newBuilder(URI.create("${baseUrl()}/v1/$path"))
             .header("X-Vault-Token", ROOT_TOKEN)
             .header("Content-Type", "application/json")
@@ -91,7 +95,10 @@ class VaultCryptoErasureIT {
     }
 
     private fun adapter() = VaultCryptoErasure().apply {
-        url = baseUrl(); token = ROOT_TOKEN; mount = "transit"; keyPrefix = "analytics"
+        url = baseUrl()
+        token = Optional.of(ROOT_TOKEN)
+        mount = "transit"
+        keyPrefix = "analytics"
     }
 
     @Test

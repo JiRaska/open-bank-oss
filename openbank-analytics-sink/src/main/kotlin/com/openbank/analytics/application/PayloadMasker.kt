@@ -44,7 +44,7 @@ object PayloadMasker {
         "nationalid" to MaskStrategy.NATIONAL_ID,
         "birthnumber" to MaskStrategy.NATIONAL_ID,
         "rodnecislo" to MaskStrategy.NATIONAL_ID,
-        "ssn" to MaskStrategy.NATIONAL_ID
+        "ssn" to MaskStrategy.NATIONAL_ID,
     )
 
     /** Recursively converts a JSON event body into a masked `Map`, masking any [PII_KEYS] leaf. */

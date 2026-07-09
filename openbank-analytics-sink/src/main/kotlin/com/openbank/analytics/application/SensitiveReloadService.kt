@@ -10,10 +10,10 @@ import com.openbank.libs.analytics.MakerCheckerViolation
 import com.openbank.libs.analytics.Proposal
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
-import org.jboss.logging.Logger
 
 /**
  * Maker-checker orchestration for sensitive reloads (ADR-0023, finding F3).

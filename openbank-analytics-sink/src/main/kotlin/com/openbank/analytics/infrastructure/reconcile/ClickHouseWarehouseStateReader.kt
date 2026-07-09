@@ -37,32 +37,31 @@ open class ClickHouseWarehouseStateReader : WarehouseStateReader {
     override suspend fun currentVersions(): Map<AggregateKey, Long> =
         parseVersions(clickhouse.query(CURRENT_VERSIONS_SQL))
 
-    override suspend fun rowCountsByType(): Map<String, Long> =
-        parseCounts(clickhouse.query(ROW_COUNTS_SQL))
+    override suspend fun rowCountsByType(): Map<String, Long> = parseCounts(clickhouse.query(ROW_COUNTS_SQL))
 
     override suspend fun versionsByAggregate(): Map<AggregateKey, Collection<Long>> =
         parseVersionLists(clickhouse.query(VERSIONS_BY_AGGREGATE_SQL))
 
     /** `type \t id \t maxVersion` rows → `AggregateKey -> maxVersion`. */
-    internal fun parseVersions(tsv: String): Map<AggregateKey, Long> =
-        rows(tsv).mapNotNull { cols ->
-            if (cols.size < 3) null
-            else AggregateKey(cols[0], cols[1]) to (cols[2].toLongOrNull() ?: return@mapNotNull null)
-        }.toMap()
+    internal fun parseVersions(tsv: String): Map<AggregateKey, Long> = rows(tsv).mapNotNull { cols ->
+        if (cols.size < 3) {
+            null
+        } else {
+            AggregateKey(cols[0], cols[1]) to (cols[2].toLongOrNull() ?: return@mapNotNull null)
+        }
+    }.toMap()
 
     /** `type \t count` rows → `type -> count`. */
-    internal fun parseCounts(tsv: String): Map<String, Long> =
-        rows(tsv).mapNotNull { cols ->
-            if (cols.size < 2) null else cols[0] to (cols[1].toLongOrNull() ?: return@mapNotNull null)
-        }.toMap()
+    internal fun parseCounts(tsv: String): Map<String, Long> = rows(tsv).mapNotNull { cols ->
+        if (cols.size < 2) null else cols[0] to (cols[1].toLongOrNull() ?: return@mapNotNull null)
+    }.toMap()
 
     /** `type \t id \t "v1,v2,v3"` rows → `AggregateKey -> [versions]`. */
-    internal fun parseVersionLists(tsv: String): Map<AggregateKey, Collection<Long>> =
-        rows(tsv).mapNotNull { cols ->
-            if (cols.size < 3) return@mapNotNull null
-            val versions = cols[2].split(',').mapNotNull { it.trim().toLongOrNull() }
-            AggregateKey(cols[0], cols[1]) to versions
-        }.toMap()
+    internal fun parseVersionLists(tsv: String): Map<AggregateKey, Collection<Long>> = rows(tsv).mapNotNull { cols ->
+        if (cols.size < 3) return@mapNotNull null
+        val versions = cols[2].split(',').mapNotNull { it.trim().toLongOrNull() }
+        AggregateKey(cols[0], cols[1]) to versions
+    }.toMap()
 
     private fun rows(tsv: String): List<List<String>> =
         tsv.lineSequence().filter { it.isNotBlank() }.map { it.split('\t') }.toList()
@@ -81,7 +80,8 @@ open class ClickHouseWarehouseStateReader : WarehouseStateReader {
         // groupUniqArray + arraySort: the distinct, ordered version sequence per aggregate, so the
         // completeness check (F5) can spot a hole in the monotonic sequence (a provably lost event).
         const val VERSIONS_BY_AGGREGATE_SQL =
-            "SELECT aggregate_type, aggregate_id, arrayStringConcat(arraySort(groupUniqArray(aggregate_version)), ',') " +
+            "SELECT aggregate_type, aggregate_id, " +
+                "arrayStringConcat(arraySort(groupUniqArray(aggregate_version)), ',') " +
                 "FROM bronze_events GROUP BY aggregate_type, aggregate_id FORMAT TabSeparated"
     }
 }
