@@ -39,6 +39,7 @@ dependencies {
     testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.testcontainers.redpanda)
     testImplementation(libs.pact.consumer)
 }
 
