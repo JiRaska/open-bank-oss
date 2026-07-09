@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.6](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.12.5...notification-service-v0.12.6) (2026-07-09)
+
+
+### Bug Fixes
+
+* **notification-service:** fix silent Kafka group.id/auto.offset.reset config bug ([#693](https://github.com/JiRaska/open-bank-oss/issues/693)) ([1b4f2a0](https://github.com/JiRaska/open-bank-oss/commit/1b4f2a04bcb726bf1ad7421be8f1f8e4beed2a3f)), closes [#686](https://github.com/JiRaska/open-bank-oss/issues/686)
+
 ## [0.12.5](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.12.4...notification-service-v0.12.5) (2026-07-07)
 
 
