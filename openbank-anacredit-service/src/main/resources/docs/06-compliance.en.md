@@ -17,7 +17,7 @@ This service is **not** on the money-path (`rules.yaml: money_path_services`); i
 
 ### Scope of personal data
 
-The reportable AnaCredit dataset covers **legal entities only**. Natural-person (household / consumer) debtors are deliberately excluded from the rendered return with reason `HOUSEHOLD_OUT_OF_SCOPE`, so the output contains **no natural-person personal data by design**. A natural-person exposure may transiently exist in the (in-memory) exposure store if fed in, but it never reaches the return.
+The reportable AnaCredit dataset covers **legal entities only**. Natural-person (household / consumer) debtors are deliberately excluded from the rendered return with reason `HOUSEHOLD_OUT_OF_SCOPE`, so the output contains **no natural-person personal data by design**. A natural-person exposure may exist in the (now durable, PostgreSQL-backed) exposure store if fed in, but it never reaches the return.
 
 ### Lawful basis (Art. 6)
 
@@ -29,7 +29,7 @@ The reportable AnaCredit dataset covers **legal entities only**. Natural-person 
 |---|---|
 | Access (Art. 15) | for in-scope rows the subject is a legal entity (not a GDPR data subject); any incidental natural-person exposure is excluded from output |
 | Rectification (Art. 16) | re-POST the exposure (`upsert` by `instrumentId`) with corrected values |
-| Erasure (Art. 17) | **constrained** — regulatory record-keeping (`retentionPolicy: 10 years` once persisted) overrides erasure for in-scope reporting data; v1 in-memory data is volatile anyway |
+| Erasure (Art. 17) | **constrained** — regulatory record-keeping (`retentionPolicy: 10 years`, now enforced against a durable `credit_exposures` row rather than a volatile in-memory map) overrides erasure for in-scope reporting data |
 | Restriction (Art. 18) | exclusion mechanism (drop from return) provides a natural restriction surface |
 | Portability (Art. 20) | N/A — regulatory reporting, not a consumer-data service |
 
@@ -56,7 +56,7 @@ No data leaves the EU/EEA region.
 |---|---|---|
 | Art. 9 | Identification | `BuildInfo` (gitCommit, buildTime, version) in `/api/v1/info` |
 | Art. 10 | Detection | metrics + health probes (`/q/health`) |
-| Art. 11 | Response & recovery | non-durable store ⇒ recovery = re-feed exposures (runbook in [05 — Operations](./05-operations.md)); no money state at risk |
+| Art. 11 | Response & recovery | durable Postgres store (ADR-0037 v2) ⇒ recovery is a standard DB restore, not a full re-feed; runbook in [05 — Operations](./05-operations.md); no money state at risk |
 | Art. 28 | Third-party risk | no third-party SaaS — self-hosted; no external dependency at runtime |
 
 ## Audit trail
@@ -71,6 +71,6 @@ The AnaCredit return is **self-auditing**: every instrument either appears as a 
 - ✅ CORS: restricted to the admin-UI origins
 - ✅ Input validation: typed enums (`CounterpartyType`, `InstrumentType`), `BigDecimal` amounts, ISO-date parsing
 - ✅ Output safety: Jackson serialization; legal-entity-only output keeps natural-person PII out by construction
-- ⚠️ Durability: v1 in-memory store is non-durable (no persistence yet) — acceptable for batch rendering, removed by the planned `anacredit_schema` adapter
-- ⚠️ Submission: no automated ČNB transport in v1 — manual extraction, tracked as the ADR-0037 follow-up
+- ✅ Durability: PostgreSQL-backed `credit_exposures` table (ADR-0037 v2) — survives pod restarts; the v1 in-memory store has been removed
+- ⚠️ Submission: no automated ČNB transport — manual extraction, tracked as the ADR-0037 non-goal
 - N/A Idempotency keys / outbox: not needed — `upsert`-by-id registration and pure reads, no events

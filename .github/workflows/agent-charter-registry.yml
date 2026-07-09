@@ -1,0 +1,48 @@
+# -----------------------------------------------------------------------------
+# Agent charter registry gate (ADR-0031 / ADR-0156 "agent charters as markdown").
+#
+# Runs `.github/scripts/check-agent-charter-registry.sh` on every PR that touches
+# either half of the agent charter split: the enforced registry
+# (openbank-libs/governance/agents.yaml) or its narrative companion
+# (docs/agents/*.md). Enforces full id parity between the two — see the script's
+# header for the drift class this prevents. Mirrors adr-registry.yml: small,
+# named, own workflow rather than a step buried in the services-ci matrix.
+# -----------------------------------------------------------------------------
+name: Agent charter registry
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'openbank-libs/governance/agents.yaml'
+      - 'docs/agents/**'
+      - '.github/scripts/check-agent-charter-registry.sh'
+      - '.github/workflows/agent-charter-registry.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'openbank-libs/governance/agents.yaml'
+      - 'docs/agents/**'
+      - '.github/scripts/check-agent-charter-registry.sh'
+      - '.github/workflows/agent-charter-registry.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-charter-registry-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  agent-charter-registry:
+    name: agent-charter-registry
+    # Pure bash over agents.yaml + docs/agents/, no Gradle/Docker.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+      - name: Check agent charter registry parity
+        run: bash .github/scripts/check-agent-charter-registry.sh

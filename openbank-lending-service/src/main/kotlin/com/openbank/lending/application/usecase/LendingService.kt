@@ -27,7 +27,9 @@ import com.openbank.lending.application.port.out.RiskParameterSource
 import com.openbank.lending.domain.model.AccrualOutcome
 import com.openbank.lending.domain.model.ApplicationStatus
 import com.openbank.lending.domain.model.Collateral
+import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
+import com.openbank.lending.domain.model.CollateralStatus
 import com.openbank.lending.domain.model.DecisionRequest
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
@@ -38,15 +40,18 @@ import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.ProvisioningRunOutcome
 import com.openbank.lending.domain.model.ProvisioningSnapshot
 import com.openbank.lending.domain.model.WriteOffRequest
+import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.lending.Amortization
 import com.openbank.libs.lending.Delinquency
+import com.openbank.libs.lending.EclInputs
 import com.openbank.libs.lending.Ifrs9
 import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
+import java.math.BigDecimal
 import java.time.Clock
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -365,12 +370,13 @@ class LendingService(
             }
         }
 
-    // --- Collateral ---------------------------------------------------------------------------------
+    // --- Collateral (four-eyes, ADR-0028 follow-up issue #621) --------------------------------------
 
-    override fun register(loanId: LoanId, request: CollateralRequest): Uni<Collateral> {
-        require(request.haircut.signum() >= 0 && request.haircut <= java.math.BigDecimal.ONE) {
+    override fun register(loanId: LoanId, request: CollateralRequest, registeredBy: String): Uni<Collateral> {
+        require(request.haircut.signum() >= 0 && request.haircut <= BigDecimal.ONE) {
             "Haircut must be within [0,1]: ${request.haircut}"
         }
+        require(registeredBy.isNotBlank()) { "Registrant identity is required" }
         val now = OffsetDateTime.now(clock)
         return valuation.revalue(request.type.name, request.marketValue).flatMap { valued ->
             collateral.save(
@@ -381,11 +387,42 @@ class LendingService(
                     marketValue = valued,
                     haircut = request.haircut,
                     valuedAt = now,
+                    // Four-eyes: registration alone does not make the collateral usable to reduce a
+                    // loan's LGD — see applyCollateral, which only sums APPROVED items.
+                    status = CollateralStatus.PENDING,
+                    registeredBy = registeredBy,
                     createdAt = now,
                 ),
             )
         }
     }
+
+    override fun decide(id: CollateralId, decision: CollateralDecisionRequest, decidedBy: String): Uni<Collateral> =
+        collateral.findById(id).flatMap { existing ->
+            when {
+                existing == null ->
+                    Uni.createFrom().failure(IllegalArgumentException("Collateral not found: $id"))
+                existing.status != CollateralStatus.PENDING ->
+                    Uni.createFrom().failure(
+                        IllegalStateException("Collateral is not awaiting a decision: ${existing.status}"),
+                    )
+                decidedBy.isBlank() ->
+                    Uni.createFrom().failure(IllegalArgumentException("Decider identity is required"))
+                // Four-eyes: the decider must not be the maker who registered it. Both identities are the
+                // authenticated JWT subject (never client-supplied), so this cannot be spoofed.
+                decidedBy == existing.registeredBy ->
+                    Uni.createFrom().failure(
+                        IllegalStateException("Four-eyes violation: approver must differ from registrant"),
+                    )
+                else -> collateral.update(
+                    existing.copy(
+                        status = if (decision.approve) CollateralStatus.APPROVED else CollateralStatus.REJECTED,
+                        decidedBy = decidedBy,
+                        decidedAt = OffsetDateTime.now(clock),
+                    ),
+                )
+            }
+        }
 
     override fun list(loanId: LoanId): Uni<List<Collateral>> = collateral.findByLoan(loanId)
 
@@ -406,20 +443,61 @@ class LendingService(
             val outstanding = outstandingBalance(loan, schedule)
             val oldestUnpaidDue = schedule.filter { !it.paid }.minByOrNull { it.dueDate }?.dueDate
             val dpd = Delinquency.daysPastDue(oldestUnpaidDue, asOf)
-            riskParameters.parametersFor(loan, outstanding).map { inputs ->
-                val ecl = Ifrs9.assess(daysPastDue = dpd, inputs = inputs)
-                ProvisioningSnapshot(
-                    loanId = loan.id,
-                    asOf = asOf,
-                    outstandingBalance = outstanding,
-                    daysPastDue = dpd,
-                    bucket = Delinquency.bucket(dpd),
-                    stage = ecl.stage,
-                    horizon = ecl.horizon,
-                    expectedCreditLoss = ecl.expectedCreditLoss,
-                )
+            riskParameters.parametersFor(loan, outstanding).flatMap { inputs ->
+                collateral.findByLoan(loan.id).map { registered ->
+                    val adjustedInputs = applyCollateral(inputs, registered)
+                    val ecl = Ifrs9.assess(daysPastDue = dpd, inputs = adjustedInputs)
+                    ProvisioningSnapshot(
+                        loanId = loan.id,
+                        asOf = asOf,
+                        outstandingBalance = outstanding,
+                        daysPastDue = dpd,
+                        bucket = Delinquency.bucket(dpd),
+                        stage = ecl.stage,
+                        horizon = ecl.horizon,
+                        expectedCreditLoss = ecl.expectedCreditLoss,
+                    )
+                }
             }
         }
+
+    /**
+     * Collateral-adjusted LGD (ADR-0028 D1, first increment; four-eyes-filtered per the ADR-0028
+     * follow-up, issue #621). Sums every **APPROVED** [registered] collateral item's haircut-adjusted
+     * value (`marketValue * (1 - haircut)`, all items must share [inputs]' `exposureAtDefault` currency —
+     * the loan book is single-currency) and reduces [inputs]' flat LGD by that cover relative to the
+     * exposure, via the pure [Ifrs9.collateralAdjustedLgd]. PD is deliberately left untouched by this
+     * increment.
+     *
+     * A [CollateralStatus.PENDING] or [CollateralStatus.REJECTED] item is excluded: a single maker
+     * registering an inflated collateral value must not be able to unilaterally lower a loan's
+     * provisioning before a different checker approves it (the four-eyes gap this increment closes).
+     *
+     * A loan with no APPROVED collateral (the common/default case today, and every loan before this
+     * increment shipped) takes the empty-after-filter short-circuit and returns [inputs] unchanged —
+     * byte-identical to pre-collateral behaviour, no regression for the existing loan book.
+     *
+     * **First-pass caveats (see [Ifrs9.collateralAdjustedLgd] and the ADR-0028 delivery note):** no
+     * real-time revaluation — this reads whatever `marketValue`/`haircut` was last declared/revalued at
+     * registration time, which can be stale; no legal perfection-of-security-interest verification — a
+     * registered collateral row is a data claim, not a confirmed enforceable priority.
+     */
+    private fun applyCollateral(inputs: EclInputs, registered: List<Collateral>): EclInputs {
+        val approved = registered.filter { it.status == CollateralStatus.APPROVED }
+        if (approved.isEmpty()) return inputs
+        val currency = inputs.exposureAtDefault.currency
+        val haircutAdjustedTotal = approved
+            .filter { it.marketValue.currency == currency }
+            .fold(BigDecimal.ZERO) { acc, item ->
+                acc + item.marketValue.amount.multiply(BigDecimal.ONE - item.haircut)
+            }
+        val effectiveLgd = Ifrs9.collateralAdjustedLgd(
+            lgd = inputs.lgd,
+            haircutAdjustedCollateralValue = haircutAdjustedTotal,
+            exposureAtDefault = inputs.exposureAtDefault.amount,
+        )
+        return inputs.copy(lgd = effectiveLgd)
+    }
 
     // --- Provisioning cycle: scheduled IFRS 9 stage/ECL re-bucketing, delta-vs-prior-period posting ---
 
@@ -469,32 +547,54 @@ class LendingService(
                 expectedCreditLoss = snapshot.expectedCreditLoss,
                 createdAt = OffsetDateTime.now(clock),
             )
-            if (delta.isZero()) {
-                // Stage/ECL unchanged since the last cycle: keep the audit-trail row, post nothing.
-                provisioning.save(record).map { false }
-            } else {
-                ledger.post(
-                    LedgerPosting(
-                        "loan:${loan.id.value}:provisioning:$period",
-                        loan.partyId,
-                        delta,
-                        PostingKind.PROVISIONING,
+            // A genuine IFRS 9 stage transition (Stage 1/2/3) is a distinct signal from an ECL delta: ECL
+            // can move within the same stage (PD/EAD drift), and — first cycle aside — a stage can change
+            // with a zero-delta ECL in edge cases. Downstream consumers (e.g. AnaCredit's overdue/stage
+            // projection, issue #638) care about the transition itself, not the ledger movement, so this
+            // emits independently of whether a provisioning journal posts below.
+            val stageChanged = prior != null && prior.stage != snapshot.stage
+            val stageEvent = if (stageChanged) {
+                events.emit(
+                    LendingOutboxMessage(
+                        aggregateId = loan.id.value,
+                        eventType = "loan.stage_changed",
+                        payload = """{"loanId":"${loan.id.value}","previousStage":"${prior!!.stage}",""" +
+                            """"newStage":"${snapshot.stage}","daysPastDue":${snapshot.daysPastDue},""" +
+                            """"period":"$period","asOf":"${snapshot.asOf}"}""",
                     ),
                 )
-                    .flatMap { provisioning.save(record) }
-                    .flatMap {
-                        events.emit(
-                            LendingOutboxMessage(
-                                aggregateId = loan.id.value,
-                                eventType = "loan.provisioned",
-                                payload = """{"loanId":"${loan.id.value}","period":"$period",""" +
-                                    """"stage":"${snapshot.stage}",""" +
-                                    """"expectedCreditLoss":"${snapshot.expectedCreditLoss}",""" +
-                                    """"delta":"$delta"}""",
-                            ),
-                        )
-                    }
-                    .map { true }
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+            stageEvent.flatMap {
+                if (delta.isZero()) {
+                    // ECL unchanged since the last cycle: keep the audit-trail row, post nothing to the
+                    // ledger. The stage-changed event (if any) has already been emitted above.
+                    provisioning.save(record).map { false }
+                } else {
+                    ledger.post(
+                        LedgerPosting(
+                            "loan:${loan.id.value}:provisioning:$period",
+                            loan.partyId,
+                            delta,
+                            PostingKind.PROVISIONING,
+                        ),
+                    )
+                        .flatMap { provisioning.save(record) }
+                        .flatMap {
+                            events.emit(
+                                LendingOutboxMessage(
+                                    aggregateId = loan.id.value,
+                                    eventType = "loan.provisioned",
+                                    payload = """{"loanId":"${loan.id.value}","period":"$period",""" +
+                                        """"stage":"${snapshot.stage}",""" +
+                                        """"expectedCreditLoss":"${snapshot.expectedCreditLoss}",""" +
+                                        """"delta":"$delta"}""",
+                                ),
+                            )
+                        }
+                        .map { true }
+                }
             }
         }
 

@@ -5,6 +5,7 @@
 package com.openbank.kyc.application
 
 import com.openbank.kyc.application.port.out.KycCaseRepository
+import com.openbank.kyc.application.port.out.PepScreeningStatus
 import com.openbank.kyc.domain.model.CheckStatus
 import com.openbank.kyc.domain.model.CheckType
 import com.openbank.kyc.domain.model.KycCase
@@ -210,6 +211,99 @@ class KycService {
         val saved = repo.update(updated)
         if (newStatus != case.status) eventPublisher.publishCaseStatusChanged(saved)
         return saved
+    }
+
+    /**
+     * Apply the outcome of a PEP (Politically Exposed Person) screen — first increment of
+     * ADR-0116's "external watchlist: Planned" delivery note. Screens against
+     * `openbank-sanctions-service`'s already-imported OpenSanctions `PEP_GLOBAL` list only; this
+     * is a free-data-source PEP check, not a paid commercial vendor feed, not identity-document
+     * verification, and not continuous real-time monitoring (case-open time only in this
+     * increment — periodic re-screening needs the Temporal workflow already flagged in ADR-0116
+     * §5, tracked separately).
+     *
+     * A [PepScreeningStatus.MATCH] or [PepScreeningStatus.POTENTIAL_MATCH] sets the
+     * `PEP_SCREENING` check to [CheckStatus.MANUAL_REVIEW] (never auto-reject — a PEP hit needs
+     * additional four-eyes scrutiny, per ADR-0116, not an automated verdict) and escalates
+     * [KycCase.riskLevel] to at least [RiskLevel.HIGH] so the operator queue surfaces it.
+     * [PepScreeningStatus.CLEAR] passes the check without touching the risk tier.
+     * [PepScreeningStatus.UNAVAILABLE] (sanctions-service unreachable) also routes to
+     * MANUAL_REVIEW rather than a silent PASSED, so a transient outage can never look like a
+     * clean screen.
+     */
+    suspend fun applyPepScreeningResult(
+        caseId: UUID,
+        screeningStatus: PepScreeningStatus,
+        matchScore: Double,
+        matchedName: String?,
+    ): KycCase {
+        val case = repo.findById(caseId) ?: throw KycCaseNotFoundException(caseId)
+
+        val checkStatus = pepCheckStatusFor(screeningStatus)
+        val resultSummary = pepResultSummaryFor(screeningStatus, matchScore, matchedName)
+        val updatedChecks = case.checks.map {
+            if (it.checkType == CheckType.PEP_SCREENING) {
+                it.copy(
+                    status = checkStatus,
+                    result = resultSummary,
+                    provider = "openbank-sanctions-service:PEP_GLOBAL",
+                    performedAt = Instant.now(clock),
+                )
+            } else {
+                it
+            }
+        }
+
+        val escalatedRisk = if (isPepHit(screeningStatus)) escalate(case.riskLevel) else case.riskLevel
+        val newStatus = nextStatusFor(case.status, updatedChecks)
+
+        val updated = case.copy(
+            checks = updatedChecks,
+            status = newStatus,
+            riskLevel = escalatedRisk,
+            updatedAt = Instant.now(clock),
+        )
+        val saved = repo.update(updated)
+        if (newStatus != case.status || escalatedRisk != case.riskLevel) eventPublisher.publishCaseStatusChanged(saved)
+        return saved
+    }
+
+    private fun isPepHit(screeningStatus: PepScreeningStatus): Boolean =
+        screeningStatus == PepScreeningStatus.MATCH || screeningStatus == PepScreeningStatus.POTENTIAL_MATCH
+
+    /** Never auto-reject on a PEP hit — additional four-eyes scrutiny, not an automated verdict (ADR-0116). */
+    private fun pepCheckStatusFor(screeningStatus: PepScreeningStatus): CheckStatus = when (screeningStatus) {
+        PepScreeningStatus.CLEAR -> CheckStatus.PASSED
+        PepScreeningStatus.MATCH, PepScreeningStatus.POTENTIAL_MATCH, PepScreeningStatus.UNAVAILABLE ->
+            CheckStatus.MANUAL_REVIEW
+    }
+
+    private fun pepResultSummaryFor(screeningStatus: PepScreeningStatus, matchScore: Double, matchedName: String?) =
+        when (screeningStatus) {
+            PepScreeningStatus.CLEAR -> "openbank-sanctions-service:PEP_GLOBAL clear (score=$matchScore)"
+            PepScreeningStatus.MATCH ->
+                "openbank-sanctions-service:PEP_GLOBAL match — \"$matchedName\" (score=$matchScore)"
+            PepScreeningStatus.POTENTIAL_MATCH ->
+                "openbank-sanctions-service:PEP_GLOBAL potential match — \"$matchedName\" (score=$matchScore)"
+            PepScreeningStatus.UNAVAILABLE ->
+                "openbank-sanctions-service:PEP_GLOBAL unavailable — routed to manual review, not auto-cleared"
+        }
+
+    /** Same all-passed/any-failed transition rule [updateCheckStatus] uses, reused for a PEP-check update. */
+    private fun nextStatusFor(currentStatus: KycCaseStatus, checks: List<KycCheck>): KycCaseStatus {
+        val allPassed = checks.all { it.status == CheckStatus.PASSED }
+        val anyFailed = checks.any { it.status == CheckStatus.FAILED }
+        return when {
+            allPassed -> KycCaseStatus.UNDER_REVIEW
+            anyFailed -> KycCaseStatus.REJECTED
+            else -> currentStatus
+        }
+    }
+
+    /** Escalate risk one notch on a PEP hit (never downgrades); floors at [RiskLevel.HIGH] (ADR-0116). */
+    private fun escalate(current: RiskLevel): RiskLevel = when (current) {
+        RiskLevel.LOW, RiskLevel.MEDIUM, RiskLevel.HIGH -> RiskLevel.HIGH
+        RiskLevel.VERY_HIGH -> RiskLevel.VERY_HIGH
     }
 
     suspend fun approve(caseId: UUID, reviewedBy: String): KycCase {

@@ -128,7 +128,27 @@ isolation from transport/persistence.
   dedicated confidential client so a single key compromise no longer spans the money path. Sandbox
   risk-accepted; **prod go-live blocked on this or an explicit second-approver sign-off of S2.**
 - Wire signed audit / evidence bundle (ADR-0029 D2) for non-repudiation of postings.
-- Mutation testing (pitest) on `validateBalance` / reversal math (ADR-0030 D3).
+- ~~Mutation testing (pitest) on `validateBalance` / reversal math~~ — **verified (ADR-0030 D3,
+  2026-07):** ran a real, tightly-scoped `:openbank-ledger-service:pitest` locally (188 mutations
+  generated across the whole `com.openbank.ledger.domain.*` target, 124 killed = 66%, matching the
+  fleet-run baseline in `rules.yaml`). Inspected `mutations.xml` specifically for `JournalEntry`
+  (41 mutations, 34 killed = 83%) and confirmed **every mutant inside `reverse()` itself is
+  KILLED** (conditional-negation on the `POSTED` guard and the DEBIT/CREDIT side-flip, 3/3) —
+  reversal math was never the gap. The 7 `JournalEntry` survivors are either Kotlin-compiler
+  `Intrinsics.checkNotNull*` scaffolding in `bookedDeltas`/`validateBalance` (not real behavior;
+  standard pitest+Kotlin noise) or `getVersion` always-returns-0 (closed below). Closed the
+  reversal-*adjacent* gaps a mutation-style review of `LedgerService.reverseJournal` and
+  `PanacheJournalRepository.saveReversal` surfaced, none of which pitest's domain-only scope could
+  have caught (both classes sit outside `targetClasses = com.openbank.ledger.domain.*`): the
+  application layer's `entryNumber`/`createdAt` stamping onto the persisted reversal was previously
+  asserted only indirectly; the `JournalReversedEvent` outbox payload's `originalJournalId`/`reason`
+  fields were never decoded and checked; `reverse()`'s `entryDate`/`valueDate` inheritance and
+  `reversalOf` FK had no dedicated assertion; `JournalEntry.version`'s round-trip was only ever
+  checked at its default `0L` (indistinguishable from the surviving always-0 mutant); and the
+  sequential (non-race) double-reversal path — `saveReversal`'s conditional
+  `UPDATE ... WHERE status = 'POSTED'` guard plus the V12 unique-index backstop — had only a
+  concurrent-race regression test (`LedgerConcurrencyIT`), not a deterministic repeat-call one. All
+  now covered: `JournalEntryTest`, `JournalEntryPropertyTest`, `LedgerServiceTest`, `LedgerApiIT`.
 - Phase C: emit `AccountBookedChangedEvent` from ledger as the projection trigger (ADR-0039).
 
 ## 6. Tie-out endpoint (`GET /api/v1/control-accounts/{id}/tie-out`)

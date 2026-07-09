@@ -3,6 +3,8 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.anacredit.infrastructure.rest
 
+import com.openbank.anacredit.it.PostgresTestResource
+import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
@@ -11,11 +13,16 @@ import io.restassured.module.kotlin.extensions.When
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
+/** End-to-end against a real Postgres (ADR-0037 v2) — the REST resource no longer talks to an in-memory map. */
 @QuarkusTest
+@QuarkusTestResource(PostgresTestResource::class)
 class AnaCreditResourceTest {
 
     private fun register(payload: String) {
-        Given { contentType("application/json"); body(payload) } When
+        Given {
+            contentType("application/json")
+            body(payload)
+        } When
             { post("/api/v1/anacredit/exposures") } Then { statusCode(201) }
     }
 

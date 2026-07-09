@@ -416,6 +416,106 @@ class LedgerServiceTest {
         }
 
         @Test
+        fun `JournalReversed outbox payload references the ORIGINAL journal id and carries the given reason`(): Unit =
+            runBlocking {
+                // originalJournalId must point at the entry being corrected, not the new reversal
+                // entry's own id — a mutant swapping reversal.id in for original.id here would be
+                // invisible to downstream consumers only by accident (both are valid UUIDs), and no
+                // existing test decodes this field. Same for `reason`: it is operator-supplied
+                // free text with no domain validation, so only an explicit payload assertion pins it.
+                val original = postedEntry()
+                coEvery { journalRepository.findById(original.id) } returns original
+                coEvery { journalRepository.nextEntryNumber() } returns 999L
+                val outbox = slot<List<OutboxMessage>>()
+                coEvery { journalRepository.saveReversal(any(), any(), any(), capture(outbox)) } answers { firstArg() }
+
+                service.reverseJournal(
+                    ReverseJournalCommand(
+                        journalId = original.id,
+                        reason = "Duplicate charge correction",
+                        reversedBy = UUID.randomUUID(),
+                    ),
+                )
+
+                val reversedEvent = outbox.captured.single { it.eventType == "JournalReversed" }
+                val node = jsonMapper.readTree(reversedEvent.payload)
+                assertThat(node["originalJournalId"].asText()).isEqualTo(original.id.toString())
+                assertThat(node["originalJournalId"].asText()).isNotEqualTo(reversedEvent.aggregateId.toString())
+                assertThat(node["reason"].asText()).isEqualTo("Duplicate charge correction")
+                assertThat(node["transactionId"].asText()).isEqualTo(original.transactionId.toString())
+            }
+
+        @Test
+        fun `reversal saved to the repository carries its own entry number, not the original's`(): Unit = runBlocking {
+            // reverse() itself leaves entryNumber null (the domain has no sequence access); the
+            // use case must stamp the value it drew from nextEntryNumber() onto the entry it
+            // actually persists — a duplicate/null entryNumber would violate
+            // uq_journal_entry_number at the DB. A mutant that dropped the
+            // `.copy(entryNumber = ...)` override (or fed back original.entryNumber instead of the
+            // freshly drawn one) would still pass every other assertion in this class, since no
+            // other test inspects the entryNumber actually handed to saveReversal.
+            val original = postedEntry(entryNumber = 42L)
+            coEvery { journalRepository.findById(original.id) } returns original
+            coEvery { journalRepository.nextEntryNumber() } returns 777L
+            val savedReversal = slot<JournalEntry>()
+            coEvery { journalRepository.saveReversal(capture(savedReversal), any(), any(), any()) } answers
+                { firstArg() }
+
+            service.reverseJournal(
+                ReverseJournalCommand(journalId = original.id, reason = "x", reversedBy = UUID.randomUUID()),
+            )
+
+            assertThat(savedReversal.captured.entryNumber).isEqualTo(777L)
+            assertThat(savedReversal.captured.entryNumber).isNotEqualTo(original.entryNumber)
+        }
+
+        @Test
+        fun `reversal saved to the repository is stamped with a fresh createdAt, not the original's`(): Unit =
+            runBlocking {
+                // JournalEntry.reverse() inherits createdAt from the original as a domain-layer
+                // placeholder (the domain has zero clock access, ADR-0100 Layer 1); the application
+                // layer MUST override it with the injected clock before persisting, or every reversal
+                // would carry its original posting's timestamp forever. A mutant that removed the
+                // `.copy(createdAt = clock.instant())` override would silently do exactly that, and no
+                // other test here would catch it.
+                val original = postedEntry()
+                coEvery { journalRepository.findById(original.id) } returns original
+                coEvery { journalRepository.nextEntryNumber() } returns 5L
+                val savedReversal = slot<JournalEntry>()
+                coEvery { journalRepository.saveReversal(capture(savedReversal), any(), any(), any()) } answers
+                    { firstArg() }
+
+                Thread.sleep(5) // real clock tick to separate original.createdAt from the reversal's stamp
+
+                service.reverseJournal(
+                    ReverseJournalCommand(journalId = original.id, reason = "x", reversedBy = UUID.randomUUID()),
+                )
+
+                assertThat(savedReversal.captured.createdAt).isAfter(original.createdAt)
+            }
+
+        @Test
+        fun `reversal saved to the repository records the reversing operator as createdBy`(): Unit = runBlocking {
+            // reverse(reversalId, reversedBy) sets createdBy = reversedBy in the domain; this pins
+            // that the use case actually forwards command.reversedBy (not, say, original.createdBy)
+            // through to the entity that gets persisted.
+            val original = postedEntry()
+            coEvery { journalRepository.findById(original.id) } returns original
+            coEvery { journalRepository.nextEntryNumber() } returns 5L
+            val reverser = UUID.randomUUID()
+            val savedReversal = slot<JournalEntry>()
+            coEvery { journalRepository.saveReversal(capture(savedReversal), any(), any(), any()) } answers
+                { firstArg() }
+
+            service.reverseJournal(
+                ReverseJournalCommand(journalId = original.id, reason = "x", reversedBy = reverser),
+            )
+
+            assertThat(savedReversal.captured.createdBy).isEqualTo(reverser)
+            assertThat(savedReversal.captured.createdBy).isNotEqualTo(original.createdBy)
+        }
+
+        @Test
         fun `throws a reversal conflict when the journal is already REVERSED`(): Unit = runBlocking {
             // Deterministic 409 (#465): a dedicated conflict type, not IllegalStateException —
             // that type has two competing mappers (libs 422 vs service 409, ADR-0049 D4).

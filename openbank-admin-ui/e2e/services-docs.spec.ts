@@ -10,6 +10,14 @@
 // intercepted via page.route() — no live services required.
 
 import { test, expect } from '@playwright/test'
+import { signInAsOperator } from './helpers/auth'
+
+// The console gates every route on an Auth.js session (src/middleware.ts); there is no
+// Keycloak in this environment, so each test signs in via a minted session cookie instead
+// of a real OIDC flow (see helpers/auth.ts for why this is safe).
+test.beforeEach(async ({ context, baseURL }) => {
+  await signInAsOperator(context, baseURL!)
+})
 
 // Minimal DocsIndex payload that satisfies hasDocs=true (items.length > 0)
 const DOCS_INDEX = {
@@ -36,10 +44,12 @@ test.describe('/services — Service Documentation page', () => {
     )
 
     await page.goto('/services')
-    // Wait for loading to finish (coverage counter should appear)
-    await expect(page.getByText(/\d+\s*\/\s*\d+/)).toBeVisible({ timeout: 10_000 })
+    // Wait for loading to finish (coverage counter should appear). Scoped to <main> —
+    // Next.js dev mode can mount a hidden error-overlay pagination badge (also "N/M"
+    // shaped) outside the app shell, which would otherwise collide in strict mode.
+    await expect(page.locator('main').getByText(/\d+\s*\/\s*\d+/)).toBeVisible({ timeout: 10_000 })
 
-    const counterText = await page.getByText(/\d+\s*\/\s*\d+/).first().textContent()
+    const counterText = await page.locator('main').getByText(/\d+\s*\/\s*\d+/).first().textContent()
     // All services documented → numerator == denominator
     const match = counterText?.match(/(\d+)\s*\/\s*(\d+)/)
     expect(match).not.toBeNull()
@@ -58,9 +68,9 @@ test.describe('/services — Service Documentation page', () => {
     )
 
     await page.goto('/services')
-    await expect(page.getByText(/\d+\s*\/\s*\d+/)).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('main').getByText(/\d+\s*\/\s*\d+/)).toBeVisible({ timeout: 10_000 })
 
-    const counterText = await page.getByText(/\d+\s*\/\s*\d+/).first().textContent()
+    const counterText = await page.locator('main').getByText(/\d+\s*\/\s*\d+/).first().textContent()
     const match = counterText?.match(/(\d+)\s*\/\s*(\d+)/)
     expect(match).not.toBeNull()
     const documented = Number(match![1])
@@ -96,8 +106,10 @@ test.describe('/services — Service Documentation page', () => {
     )
 
     await page.goto('/services')
-    // App shell rule (ADR-0076 / graceful-state guard): sidebar must be visible
-    await expect(page.locator('nav, [data-testid="sidebar"], aside')).toBeVisible({ timeout: 10_000 })
+    // App shell rule (ADR-0076 / graceful-state guard): sidebar must be visible.
+    // The Sidebar component renders <aside><nav>…, so match the outer landmark only —
+    // matching both would be a strict-mode violation (2 elements for 1 locator).
+    await expect(page.locator('aside')).toBeVisible({ timeout: 10_000 })
   })
 
   test('gracefully handles health endpoint failure (falls back to static candidates)', async ({ page }) => {
@@ -111,7 +123,7 @@ test.describe('/services — Service Documentation page', () => {
 
     await page.goto('/services')
     // Should still render without crashing — coverage counter visible (0/N with static list)
-    await expect(page.getByText(/\d+\s*\/\s*\d+/)).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('main').getByText(/\d+\s*\/\s*\d+/)).toBeVisible({ timeout: 10_000 })
     // No raw error text leaked (graceful-state rule)
     await expect(page.getByText(/HTTP 5\d\d/)).not.toBeVisible()
   })

@@ -3,11 +3,12 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.0.1
+  version: 1.1.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
-    cash events to ledger-service and never owns balances. Credit decisions are four-eyes
-    (maker-checker), enforced server-side from the authenticated JWT subject.
+    cash events to ledger-service and never owns balances. Credit decisions and collateral
+    registration are four-eyes (maker-checker), enforced server-side from the authenticated JWT
+    subject.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -175,7 +176,11 @@ paths:
     post:
       tags: [Lending]
       operationId: registerCollateral
-      summary: Register collateral against a loan
+      summary: Register collateral against a loan (maker; PENDING until a checker approves it)
+      description: >-
+        The registrant identity is the JWT subject. The registered collateral is PENDING and is not
+        consulted by the IFRS 9 ECL calculation until a different principal approves it via
+        POST /api/v1/lending/collateral/{id}/decision.
       parameters:
         - $ref: '#/components/parameters/IdPath'
       requestBody:
@@ -185,7 +190,7 @@ paths:
             schema:
               $ref: '#/components/schemas/CollateralRequest'
       responses:
-        '201': { description: Collateral registered }
+        '201': { description: Collateral registered (PENDING) }
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -193,13 +198,33 @@ paths:
     get:
       tags: [Lending]
       operationId: listCollateral
-      summary: List collateral registered against a loan
+      summary: List collateral registered against a loan (any status)
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
         '200': { description: Collateral for the loan }
         '403':
           $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/collateral/{id}/decision:
+    post:
+      tags: [Lending]
+      operationId: decideCollateral
+      summary: Approve or reject a pending collateral registration (checker; must differ from registrant)
+      description: Requires ROLE_CREDIT_RISK or ROLE_ADMIN. The checker identity is the JWT subject.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CollateralDecisionRequest'
+      responses:
+        '200': { description: Decision applied }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/v1/lending/loans/{id}/provisioning:
     get:
       tags: [Lending]
@@ -287,6 +312,12 @@ components:
         description: { type: string, nullable: true }
         marketValue: { $ref: '#/components/schemas/Money' }
         haircut: { type: number, default: 0 }
+    CollateralDecisionRequest:
+      type: object
+      required: [approve]
+      properties:
+        approve: { type: boolean }
+        reason: { type: string, nullable: true }
     WriteOffRequest:
       type: object
       description: >-

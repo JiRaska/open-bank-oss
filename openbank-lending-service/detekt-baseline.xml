@@ -3,6 +3,9 @@
   <ManuallySuppressedIssues/>
   <CurrentIssues>
     <ID>MagicNumber:JpaLoanEventEmitter.kt$JpaLoanEventEmitter$100</ID>
+    <ID>LargeClass:LendingServiceTest.kt$LendingServiceTest</ID>
+    <ID>LongParameterList:LendingResource.kt$LendingResource$( private val apply: ApplyForLoanUseCase, private val disburse: DisburseLoanUseCase, private val servicing: ServicingUseCase, private val writeOff: WriteOffLoanUseCase, private val collateral: CollateralUseCase, private val provisioning: ProvisioningUseCase, private val identity: SecurityIdentity, )</ID>
+    <ID>LongParameterList:LendingService.kt$LendingService$( private val applications: LoanApplicationRepository, private val loans: LoanRepository, private val installments: InstallmentRepository, private val collateral: CollateralRepository, private val ledger: LedgerPostingPort, private val valuation: CollateralValuationPort, private val riskParameters: RiskParameterSource, private val events: LoanEventEmitter, private val clock: Clock, private val provisioning: ProvisioningRepository, )</ID>
     <ID>MagicNumber:LedgerCallGuard.kt$LedgerCallGuard$2000</ID>
     <ID>MagicNumber:LendingEntities.kt$LoanApplicationEntity$12</ID>
     <ID>MagicNumber:LendingEntities.kt$LoanEntity$12</ID>

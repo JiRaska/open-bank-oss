@@ -19,10 +19,10 @@ import jakarta.inject.Inject
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Table
+import org.jboss.logging.Logger
 import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
-import org.jboss.logging.Logger
 
 @Entity
 @Table(name = "kyc_cases")

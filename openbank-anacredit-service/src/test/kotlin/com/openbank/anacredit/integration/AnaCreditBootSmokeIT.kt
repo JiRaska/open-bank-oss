@@ -4,6 +4,8 @@
 
 package com.openbank.anacredit.integration
 
+import com.openbank.anacredit.it.PostgresRedpandaTestResource
+import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
@@ -14,13 +16,20 @@ import org.junit.jupiter.api.Test
 /**
  * Boot smoke test guarding the "released-but-never-booted" defect class.
  *
- * anacredit-service is a released component (version.txt) with no GitOps deployment. It uses an
- * in-memory repository (no Postgres, no Kafka), so no Testcontainers resources are needed — a bare
- * @QuarkusTest is sufficient to boot the full application. This mirrors the pattern introduced for
- * lending-service (boot/config defects only surface at boot: duplicate YAML keys, missing CDI beans,
- * OIDC mis-wiring). The two assertions prove the wiring, config and OIDC override survive a real boot.
+ * anacredit-service is a released component (version.txt) with no GitOps deployment. It now boots
+ * real infrastructure on two independent fronts: ADR-0037 v2 made `CreditExposure` Postgres-backed
+ * (reactive Panache + Flyway `V1__create_credit_exposures.sql`), and the `loan.stage_changed`
+ * event-ingestion follow-up (issue #638) added a Kafka consumer (`@Incoming("lending-events-in")`)
+ * plus its own Postgres-backed `loan_stage_projection` table (`V1__create_loan_stage_projection.sql`).
+ * `PostgresRedpandaTestResource` covers both — Postgres and Kafka/Redpanda — so this single IT boots
+ * the full application against real Testcontainers infra, catching the defect class unit tests
+ * cannot see: missing driver, a duplicate YAML config key, a bad migration, or missing CDI beans.
+ * Mirrors `openbank-product-catalog`'s `ProductCatalogBootSmokeIT` and `balance-service`/
+ * `party-service`'s Testcontainers-backed boot smoke tests. The two assertions prove the wiring,
+ * config, both Flyway migrations, the Kafka consumer, and the OIDC override all survive a real boot.
  */
 @QuarkusTest
+@QuarkusTestResource(PostgresRedpandaTestResource::class)
 class AnaCreditBootSmokeIT {
 
     @Test

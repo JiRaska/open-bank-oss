@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pid-service
     app.kubernetes.io/part-of: pid
   annotations:
-    openbank.tech/policy-checksum: "73b576f794757803"
+    openbank.tech/policy-checksum: "36759213ddc520a1"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1101,6 +1101,7 @@ data:
       - openbank-fraud-service                # ADR-0084: first executable landed (Phase 1 skeleton)
       - openbank-billing-service              # ADR-0143: fee posting to the ledger (Phase 2b skeleton)
       - openbank-settlement-service           # issue #307: debit->credit->ledger-booking saga (ADR-0101)
+      - openbank-sanctions-service             # ADR-0116: real feed screening; already required by four_eyes below (issue #554)
     review:
       default_approvals: 1
       money_path_approvals: 2               # CONTRIBUTING.md + branch protection
@@ -1160,6 +1161,7 @@ data:
         - send                              # swift: send an outbound wire message (issue #395)
         - credit                            # balance: direct ledger-balance credit adjustment (issue #395)
         - debit                             # balance: direct ledger-balance debit adjustment (issue #395)
+        - collateralRegister                # lending: collateral registration/edit feeds IFRS 9 LGD (issue #621)
 
     # ---------------------------------------------------------------------------------------
     # Feature-flag flip governance (ADR-0067 follow-up, issue #419). The OPA PEP (rest.rego)

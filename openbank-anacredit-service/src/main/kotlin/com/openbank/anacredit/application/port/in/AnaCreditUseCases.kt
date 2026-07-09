@@ -26,14 +26,14 @@ data class RegisterExposureCommand(
 )
 
 interface RegisterExposureUseCase {
-    fun register(command: RegisterExposureCommand): CreditExposure
+    suspend fun register(command: RegisterExposureCommand): CreditExposure
 }
 
 interface ListExposuresUseCase {
-    fun list(): List<CreditExposure>
+    suspend fun list(): List<CreditExposure>
 }
 
 /** Renders the AnaCredit credit-dataset return for a monthly reference date. */
 interface BuildAnaCreditReturnUseCase {
-    fun build(referenceDate: LocalDate): AnaCreditReturn
+    suspend fun build(referenceDate: LocalDate): AnaCreditReturn
 }

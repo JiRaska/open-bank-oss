@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.4.0...finrep-service-v0.5.0) (2026-07-08)
+
+
+### Features
+
+* **finrep:** add COREP C 01.00 own funds first increment ([#606](https://github.com/JiRaska/open-bank-oss/issues/606)) ([03feb29](https://github.com/JiRaska/open-bank-oss/commit/03feb29478c5f8d1ab0906b7649d235c9fb17f85)), closes [#605](https://github.com/JiRaska/open-bank-oss/issues/605)
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.3.3...finrep-service-v0.4.0) (2026-07-08)
 
 

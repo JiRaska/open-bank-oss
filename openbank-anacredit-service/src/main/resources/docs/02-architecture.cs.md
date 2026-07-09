@@ -9,7 +9,7 @@ graph LR
   fx[fx-service]
 
   ana[(anacredit-service)]:::svc
-  store[(in-memory store<br/>ConcurrentHashMap)]
+  store[(PostgreSQL<br/>credit_exposures)]
   kc[(Keycloak<br/>OIDC)]
 
   admin -- "POST /exposures<br/>GET /returns/{date}" --> ana
@@ -32,13 +32,13 @@ graph TB
     rest[REST<br/>AnaCreditResource<br/>+ DTO]
     uc[Application<br/>AnaCreditService<br/>in/out porty]
     dom[Domain<br/>CreditExposure<br/>EligibilityPolicy<br/>ReturnBuilder / Mapper]
-    persist[Persistence<br/>InMemoryCreditExposureRepository]
+    persist[Persistence<br/>PostgresCreditExposureRepository]
   end
 
   rest --> uc
   uc --> dom
   uc --> persist
-  persist -.-> store[(ConcurrentHashMap)]
+  persist -.-> store[(PostgreSQL<br/>credit_exposures)]
 ```
 
 ## Hexagonální vrstvy
@@ -61,21 +61,23 @@ com.openbank.anacredit/
 │
 └── infrastructure/                  ◄── adaptéry
     ├── rest/                        AnaCreditResource (JAX-RS), dto/AnaCreditDtos
-    └── persistence/                 InMemoryCreditExposureRepository (adaptér v1)
+    └── persistence/                 CreditExposureEntity (Panache), PostgresCreditExposureRepository
 ```
 
 **Pravidlo závislostí:** `domain` ← `application` ← `infrastructure`. Doménový kód nikdy nevidí JAX-RS, Jackson ani CDI.
 
 ## Porty
 
-| Port | Směr | Definován v | Adaptér v1 |
+| Port | Směr | Definován v | Adaptér |
 |---|---|---|---|
 | `RegisterExposureUseCase` | vstupní | `application/port/in` | `AnaCreditService` |
 | `ListExposuresUseCase` | vstupní | `application/port/in` | `AnaCreditService` |
 | `BuildAnaCreditReturnUseCase` | vstupní | `application/port/in` | `AnaCreditService` |
-| `CreditExposureRepository` (`upsert`/`findById`/`listAll`) | odchozí | `application/port/out` | `InMemoryCreditExposureRepository` |
+| `CreditExposureRepository` (`upsert`/`findById`/`listAll`, vše `suspend`) | odchozí | `application/port/out` | `PostgresCreditExposureRepository` |
 
-Výměna in-memory storu za JPA/Panache adaptér nad `anacredit_schema` je jediný nový odchozí adaptér; doménová a aplikační vrstva se nemění.
+Port udržel výměnu z in-memory `ConcurrentHashMap` (v1) na reaktivní Panache adaptér nad
+`anacredit_schema` (ADR-0037 v2) mechanickou: jediný nový odchozí adaptér; doménová a aplikační
+vrstva se nezměnily.
 
 ## Render pipeline (žádný outbox — derive-only)
 
@@ -86,7 +88,7 @@ sequenceDiagram
   participant C as Klient (operátor / auditor)
   participant R as AnaCreditResource
   participant S as AnaCreditService
-  participant ST as CreditExposureRepository (in-memory)
+  participant ST as CreditExposureRepository (PostgreSQL)
   participant B as AnaCreditReturnBuilder (čistá doména)
 
   C->>R: GET /api/v1/anacredit/returns/{referenceDate}
@@ -116,4 +118,4 @@ Práh €25 000 je test *na dlužníka*, takže `AnaCreditReturnBuilder` nejprve
 2. **Čistá doménová pravidla** — rozsah + materialita žijí v `AnaCreditEligibilityPolicy`, frameworkově nezávislém objektu s deterministickými, auditně orientovanými důvodovými kódy.
 3. **Vysvětli každé vyřazení** — reportovatelný nástroj se stane `CreditRecord`, vyřazený `ExclusionNote`. Nic nemizí tiše.
 4. **Reportují nativní částky; EUR jen brání** — řádky datového souboru nesou částky v nativní měně; `committedAmountEur` se používá pouze pro práh.
-5. **Úložiště je adaptér** — in-memory store je implementační detail za `CreditExposureRepository`; persistenci lze přidat bez zásahu do jádra.
+5. **Úložiště je adaptér** — PostgreSQL store je implementační detail za `CreditExposureRepository`; byl vyměněn za původní in-memory store bez zásahu do jádra.

@@ -41,6 +41,7 @@ rules_real := {
 		"openbank-domestic-payment",
 		"openbank-clearing-service",
 		"openbank-sca-service",
+		"openbank-lending-service",
 	],
 	"money_path_action_prefixes": {
 		"sepa-payment": ["sepaPayment"],
@@ -54,6 +55,7 @@ rules_real := {
 	"four_eyes": {"verbs": [
 		"transfer", "post", "reverse", "freeze", "release", "flip",
 		"transitionStatus", "recall", "settle", "disburse", "send", "credit", "debit",
+		"collateralRegister",
 	]},
 	"feature_flags": {
 		"prohibited_flag_combinations": [
@@ -286,6 +288,30 @@ test_money_path_scopes_domestic_payment_uses_derived_name_not_stale_override if 
 test_four_eyes_required_clearing_real_action if {
 	# ClearingResource.kt: @Authorize(action = "clearingBatch.settle", ...)
 	rest.four_eyes_required with input as {"action": "clearingBatch.settle"}
+		with data.rules as rules_real
+}
+
+test_four_eyes_required_lending_disburse_real_action if {
+	# LendingResource.kt: @Authorize(action = "lending.disburse", ...). "lending" is not in
+	# money_path_action_prefixes -- its real @Authorize prefix already matches the derived
+	# scope (openbank-lending-service -> lending), so no override entry is needed.
+	rest.four_eyes_required with input as {"action": "lending.disburse"}
+		with data.rules as rules_real
+}
+
+test_four_eyes_required_lending_collateral_register_real_action if {
+	# LendingResource.kt: @Authorize(action = "lending.collateralRegister", ...) -- collateral
+	# registration feeds the IFRS 9 LGD adjustment (ADR-0028 follow-up, issue #621); a maker
+	# registering it alone must not make it usable until a checker approves it.
+	rest.four_eyes_required with input as {"action": "lending.collateralRegister"}
+		with data.rules as rules_real
+}
+
+test_four_eyes_not_required_for_lending_collateral_decide if {
+	# The checker-decision endpoint itself (lending.collateralDecide) is not four-eyes-gated --
+	# gating the second-eye action would be circular. Mirrors lending.approve (the loan-decision
+	# checker endpoint), which is likewise absent from four_eyes.verbs.
+	not rest.four_eyes_required with input as {"action": "lending.collateralDecide"}
 		with data.rules as rules_real
 }
 

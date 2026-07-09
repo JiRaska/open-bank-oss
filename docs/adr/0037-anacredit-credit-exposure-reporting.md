@@ -101,13 +101,51 @@ dataset golden-sourcing, or the quarterly accounting dataset. Those are explicit
 - Stays off the money-path gate: derive-only, no posting, fast to ship and to reason about.
 
 **Negative**
-- Another deployable service to operate (port 8130). Mitigated by the thin, in-memory v1 shell.
+- Another deployable service to operate (port 8130). Mitigated by the thin, v1 shell (now
+  Postgres-backed — see the delivery note below — but still a single small service to run).
 - v1 renders but does not transmit — a manual/just-in-time export step remains until the ČNB
   submission channel is wired (tracked as the explicit C non-goal).
 
 **Neutral**
-- Exposure state is fed in (REST upsert) in v1 rather than consumed from `balance.overdraft.*`
-  events; event ingestion + persistence is a mechanical follow-up that does not change the domain.
+- Exposure state is fed in (REST upsert) rather than consumed from `balance.overdraft.*`
+  events — event *ingestion* for the overdraft side remains a separate, not-yet-built follow-up.
+  *Persistence* of that fed-in state, however, is durable as of v2 (below), not the in-memory map
+  v1 originally used. **Update (2026-07, issue #638):** the first slice of an *unrelated* event
+  ingestion follow-up shipped — see the loan-stage delivery note below.
+
+## Delivery note (v2 — real persistence for CreditExposure)
+
+v1 shipped with exposure state held in an in-memory `ConcurrentHashMap`
+(`InMemoryCreditExposureRepository`), explicitly framed above as a mechanical, not architectural,
+gap. v2 replaces it with a durable Postgres store: a Flyway-migrated `credit_exposures` table (one
+row per instrument, scalar columns for every `CreditExposure` field) behind a reactive-Panache
+`PostgresCreditExposureRepository` implementing the same `CreditExposureRepository` port — the
+`openbank-product-catalog` pattern. The REST upsert/list/render calling convention is unchanged;
+only the adapter behind the port moved. A Testcontainers-Postgres boot smoke test
+(`AnaCreditBootSmokeIT`) now guards the "released but never booted against real infra" defect class
+this repo has hit before.
+
+**Still not built** (unchanged from v1, tracked as future work, not this v2 increment): no consumer
+of `balance.overdraft.*` (or any other) events — exposures are still fed in exclusively via REST
+upsert; no ČNB submission transport; no counterparty reference dataset golden-sourcing; no quarterly
+accounting dataset. Event ingestion, when built, now has a durable store to land in rather than
+needing its own persistence layer as a prerequisite.
+
+## Delivery note (loan-stage event ingestion, issue #638)
+
+The first slice of a separate, event-ingestion follow-up shipped ahead of the CreditExposure
+persistence above: `anacredit-service` now consumes `openbank-lending-service`'s
+`loan.stage_changed` event (published only on a genuine IFRS 9 stage transition, ADR-0028 Phase 3)
+via a new `LoanStageEventConsumer` (`@Incoming("lending-events-in")`), and durably tracks "last
+known stage per loan" in a new `loan_stage_projection` table — this service's first persisted
+state (landed before the CreditExposure Postgres migration above, which is why each delivery note
+frames its own change as a "first"; both are independently true relative to when each was written).
+The write is idempotent and ordering-safe: it only applies an incoming event if its timestamp is
+strictly newer than the projection's current value, so an out-of-order or redelivered event can
+never regress the stage. This is intentionally narrow: the `CreditExposure` feed (the AnaCredit
+credit-dataset model itself) is untouched — wiring the stage projection into the rendered return
+(`AnaCreditReturnBuilder`, for `LOAN`-instrument-type exposures) is a separate, later increment.
+`balance.overdraft.*` event ingestion for the overdraft side remains future work.
 
 ## Compliance impact
 
