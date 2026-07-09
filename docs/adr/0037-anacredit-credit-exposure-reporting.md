@@ -108,6 +108,17 @@ dataset golden-sourcing, or the quarterly accounting dataset. Those are explicit
 **Neutral**
 - Exposure state is fed in (REST upsert) in v1 rather than consumed from `balance.overdraft.*`
   events; event ingestion + persistence is a mechanical follow-up that does not change the domain.
+  **Update (2026-07, issue #638):** the first slice of this follow-up shipped — `anacredit-service`
+  now consumes `openbank-lending-service`'s `loan.stage_changed` event (published only on a genuine
+  IFRS 9 stage transition, ADR-0028 Phase 3) via a new `LoanStageEventConsumer`
+  (`@Incoming("lending-events-in")`), and durably tracks "last known stage per loan" in a new
+  `loan_stage_projection` table — this service's **first** persisted state. The write is idempotent
+  and ordering-safe: it only applies an incoming event if its timestamp is strictly newer than the
+  projection's current value, so an out-of-order or redelivered event can never regress the stage.
+  This is intentionally narrow: the existing `CreditExposure` feed (the AnaCredit credit-dataset
+  model itself) is untouched and still in-memory/REST-fed — wiring the stage projection into the
+  rendered return (`AnaCreditReturnBuilder`, for `LOAN`-instrument-type exposures) is a separate, later
+  increment. `balance.overdraft.*` event ingestion for the overdraft side remains future work.
 
 ## Compliance impact
 

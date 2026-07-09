@@ -45,6 +45,47 @@ quarkus:
     host: 0.0.0.0
     root-path: /q
 
+  # Loan stage-changed projection only (ADR-0037 follow-up, issue #638) — the existing CreditExposure
+  # feed stays in-memory in this increment; this datasource backs `loan_stage_projection` alone.
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: postgresql://localhost:5432/openbank_anacredit
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_anacredit
+  flyway:
+    migrate-at-start: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+  hibernate-orm:
+    database:
+      generation: none
+
+mp:
+  messaging:
+    connector:
+      smallrye-kafka:
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+        ssl.keystore.location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+        ssl.keystore.type: ${KAFKA_SSL_KEYSTORE_TYPE:PKCS12}
+        ssl.keystore.password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+        ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+        ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
+        ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    incoming:
+      # loan.stage_changed -> update the durable stage projection (issue #638). earliest so a
+      # redeployed/rejoined consumer group backfills from the start of the retained topic rather than
+      # only future transitions; applyIfNewer is idempotent so replay never regresses the projection.
+      lending-events-in:
+        connector: smallrye-kafka
+        client.id: anacredit-service-lending-${quarkus.uuid}
+        group.id: anacredit-service-lending
+        topic: openbank.lending.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto.offset.reset: earliest
+
 "%test":
   quarkus:
     # No OIDC discovery at boot in tests — @TestSecurity covers auth scenarios.

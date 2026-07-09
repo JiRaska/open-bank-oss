@@ -1,0 +1,91 @@
+# Kafka mTLS identity + ACLs for openbank-anacredit-service (ADR-0137 pattern, issue #638).
+#
+# anacredit-service consumes loan.stage_changed events from openbank.lending.events (group:
+# anacredit-service-lending) to keep the loan_stage_projection read-model current (ADR-0037
+# follow-up). It publishes nothing (still derive-only, ADR-0037 D/B) — no Write ACL needed.
+#
+# Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal for all of this
+# service's Kafka traffic. These resources live in `messaging` (where the Strimzi User Operator
+# watches); the Strimzi User Operator mints a per-user Secret of the same name there (user.crt/key/p12
+# + user.password + ca.crt). Those secrets are projected into the `anacredit` namespace by External
+# Secrets below.
+---
+# ── KafkaUser: anacredit-service ────────────────────────────────────────────
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers -> Strimzi secrets -> ESO projection) must land before the
+    # anacredit Deployment rolls pods onto mTLS; lower waves sync first and ArgoCD blocks on
+    # ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: anacredit-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.lending.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: anacredit-service-lending
+          patternType: literal
+        operations: [Read]
+        host: "*"
+---
+# ── ExternalSecret: anacredit-service keystore ──────────────────────────────
+# Projects the Strimzi-minted anacredit-service Secret from `messaging` into `anacredit`.
+# `dataFrom.extract` copies every key verbatim, preserving the binary PKCS#12 payload byte-for-byte.
+# deletionPolicy: Retain so a transient store/RBAC blip never deletes a live keystore out from under
+# a running pod.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: anacredit-service-kafka-keystore
+  namespace: anacredit
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: anacredit-service-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: anacredit-service
+---
+# ── ExternalSecret: cluster CA truststore ───────────────────────────────────
+# Shared cluster-CA truststore projected into `anacredit` — identical pattern to every other
+# Kafka-connected namespace (kyc, payments, clearing, etc.).
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: anacredit
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert
