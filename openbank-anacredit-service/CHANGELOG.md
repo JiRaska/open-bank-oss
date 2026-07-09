@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/anacredit-service-v0.5.0...anacredit-service-v0.6.0) (2026-07-09)
+
+
+### Features
+
+* **anacredit:** add real Postgres persistence for credit exposures ([#633](https://github.com/JiRaska/open-bank-oss/issues/633)) ([33695af](https://github.com/JiRaska/open-bank-oss/commit/33695af7b3847758d557e96aea4c24fba71d9cb3)), closes [#623](https://github.com/JiRaska/open-bank-oss/issues/623)
+
+
+### Bug Fixes
+
+* **anacredit:** resolve Flyway V1 migration version collision ([#674](https://github.com/JiRaska/open-bank-oss/issues/674)) ([c954486](https://github.com/JiRaska/open-bank-oss/commit/c95448676191f1ee0fb25eb7382dd6439cffbc31))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/anacredit-service-v0.4.3...anacredit-service-v0.5.0) (2026-07-09)
 
 
