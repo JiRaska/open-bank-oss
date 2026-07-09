@@ -90,7 +90,16 @@ jobs:
           # and released cleanly but never deployed — "Detect changed services" always
           # printed "No deployable services changed" because the service was simply
           # never a candidate, regardless of what changed. Re-added here.
-          ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service'
+          # anacredit-service had the same gap PLUS no Dockerfile ever committed — the
+          # running sandbox pod traces back to an image built from a Dockerfile that only
+          # ever existed on someone's laptop. Neither build-push-service.sh nor this
+          # workflow's own Docker-push step read a per-service Dockerfile for the build
+          # itself (both generate their own from a canonical template); the per-service
+          # Dockerfile is only grepped for its EXPOSE line to set the container port
+          # (falls back to 8080 if absent). Added openbank-anacredit-service/Dockerfile
+          # (EXPOSE 8137, matching the gitops manifest) alongside this entry so the port
+          # extraction is correct, not just defaulted.
+          ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service'
 
           # Manual dispatch: rebuild the requested module(s), or the full deployable
           # fleet when no input is given. Only services that actually carry a gitops
