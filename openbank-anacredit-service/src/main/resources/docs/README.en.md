@@ -17,9 +17,9 @@ This documentation is published directly by the service at the management endpoi
 
 ## TL;DR
 
-- **Tech stack:** Kotlin / Quarkus 3.x / JDK 25 / RESTEasy Reactive + Jackson (pure JVM, no reactive DB)
+- **Tech stack:** Kotlin / Quarkus 3.x / JDK 25 / RESTEasy Reactive + Jackson + reactive Panache/Postgres
 - **Port:** 8137 (app + management on the same port)
-- **Persistence:** **in-memory** (`ConcurrentHashMap`, v1 — the `openbank-product-catalog` pattern). A dedicated PostgreSQL schema `anacredit_schema` is *declared* in `governance.yaml` but **not yet provisioned** (no Flyway migrations exist).
+- **Persistence:** **PostgreSQL** (`openbank_anacredit`, governance schema label `anacredit_schema`, ADR-0037 v2 — the `openbank-product-catalog` pattern). `credit_exposures` table, Flyway-migrated, reactive-Panache-backed.
 - **Outbox / events:** **none** — derive-only, the service emits no domain events and consumes none.
 - **Idempotency:** none — exposure registration is an `upsert` keyed by `instrumentId` (naturally idempotent); reads are pure.
 - **Auth:** Keycloak OIDC, roles `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_AUDITOR`, `ROLE_COMPLIANCE`, `ROLE_SERVICE`.

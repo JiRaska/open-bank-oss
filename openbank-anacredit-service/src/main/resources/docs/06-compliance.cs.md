@@ -17,7 +17,7 @@ Tato služba **není** na money-path (`rules.yaml: money_path_services`); nehýb
 
 ### Rozsah osobních údajů
 
-Reportovatelný datový soubor AnaCredit pokrývá **pouze právnické osoby**. Dlužníci fyzické osoby (domácnost / spotřebitel) jsou z vykresleného výkazu záměrně vyloučeni s důvodem `HOUSEHOLD_OUT_OF_SCOPE`, takže výstup z principu **neobsahuje žádné osobní údaje fyzických osob**. Expozice fyzické osoby může přechodně existovat v (in-memory) storu expozic, pokud je vložena, ale nikdy se nedostane do výkazu.
+Reportovatelný datový soubor AnaCredit pokrývá **pouze právnické osoby**. Dlužníci fyzické osoby (domácnost / spotřebitel) jsou z vykresleného výkazu záměrně vyloučeni s důvodem `HOUSEHOLD_OUT_OF_SCOPE`, takže výstup z principu **neobsahuje žádné osobní údaje fyzických osob**. Expozice fyzické osoby může existovat v (nyní trvanlivém, PostgreSQL) storu expozic, pokud je vložena, ale nikdy se nedostane do výkazu.
 
 ### Právní základ (čl. 6)
 
@@ -29,7 +29,7 @@ Reportovatelný datový soubor AnaCredit pokrývá **pouze právnické osoby**. 
 |---|---|
 | Přístup (čl. 15) | u reportovatelných řádků je subjektem právnická osoba (ne subjekt údajů dle GDPR); jakákoliv nahodilá expozice fyzické osoby je z výstupu vyloučena |
 | Oprava (čl. 16) | re-POST expozice (`upsert` dle `instrumentId`) s opravenými hodnotami |
-| Výmaz (čl. 17) | **omezeno** — regulatorní uchovávání záznamů (`retentionPolicy: 10 let` po persistenci) má přednost před výmazem u reportovatelných dat v rozsahu; in-memory data ve v1 jsou stejně volatilní |
+| Výmaz (čl. 17) | **omezeno** — regulatorní uchovávání záznamů (`retentionPolicy: 10 let`, nyní vynucováno nad trvanlivým řádkem `credit_exposures`, nikoliv volatilní in-memory mapou) má přednost před výmazem u reportovatelných dat v rozsahu |
 | Omezení (čl. 18) | mechanismus vyloučení (drop z výkazu) poskytuje přirozenou plochu pro omezení |
 | Přenositelnost (čl. 20) | N/A — regulatorní výkaznictví, nikoliv služba spotřebitelských dat |
 
@@ -56,7 +56,7 @@ Reportovatelný datový soubor AnaCredit pokrývá **pouze právnické osoby**. 
 |---|---|---|
 | čl. 9 | Identifikace | `BuildInfo` (gitCommit, buildTime, version) v `/api/v1/info` |
 | čl. 10 | Detekce | metriky + health probes (`/q/health`) |
-| čl. 11 | Reakce & obnova | netrvanlivý store ⇒ obnova = znovu naplnit expozice (runbook v [05 — Provoz](./05-operations.md)); v sázce není žádný peněžní stav |
+| čl. 11 | Reakce & obnova | trvanlivý Postgres store (ADR-0037 v2) ⇒ obnova je standardní DB restore, nikoliv plné znovu-naplnění (runbook v [05 — Provoz](./05-operations.md)); v sázce není žádný peněžní stav |
 | čl. 28 | Riziko třetích stran | žádný third-party SaaS — self-hosted; za běhu žádná externí závislost |
 
 ## Auditní stopa
@@ -71,6 +71,6 @@ Výkaz AnaCredit je **sebe-auditující**: každý nástroj se objeví buď jako
 - ✅ CORS: omezeno na originy admin-UI
 - ✅ Validace vstupu: typové enumy (`CounterpartyType`, `InstrumentType`), `BigDecimal` částky, parsování ISO data
 - ✅ Bezpečnost výstupu: Jackson serializace; výstup jen pro právnické osoby drží PII fyzických osob mimo z konstrukce
-- ⚠️ Trvanlivost: in-memory store ve v1 je netrvanlivý (zatím bez persistence) — přijatelné pro dávkové vykreslování, odstraní plánovaný adaptér `anacredit_schema`
-- ⚠️ Odeslání: žádný automatizovaný ČNB transport ve v1 — manuální extrakce, sledováno jako follow-up ADR-0037
+- ✅ Trvanlivost: tabulka `credit_exposures` na PostgreSQL (ADR-0037 v2) — přežije restart podu; in-memory store z v1 byl odstraněn
+- ⚠️ Odeslání: žádný automatizovaný ČNB transport — manuální extrakce, sledováno jako non-goal ADR-0037
 - N/A Idempotency klíče / outbox: nepotřebné — registrace `upsert`-dle-id a čistá čtení, žádné události

@@ -20,29 +20,29 @@ import java.time.LocalDate
  * money and emits no events (ADR-0037), so it stays off the money-path gate.
  */
 @ApplicationScoped
-class AnaCreditService(
-    private val exposures: CreditExposureRepository,
-) : RegisterExposureUseCase, ListExposuresUseCase, BuildAnaCreditReturnUseCase {
+class AnaCreditService(private val exposures: CreditExposureRepository) :
+    RegisterExposureUseCase,
+    ListExposuresUseCase,
+    BuildAnaCreditReturnUseCase {
 
-    override fun register(command: RegisterExposureCommand): CreditExposure =
-        exposures.upsert(
-            CreditExposure(
-                instrumentId = command.instrumentId,
-                debtorId = command.debtorId,
-                debtorType = command.debtorType,
-                instrumentType = command.instrumentType,
-                currency = command.currency,
-                committedAmount = command.committedAmount,
-                drawnAmount = command.drawnAmount,
-                committedAmountEur = command.committedAmountEur,
-                arrearsAmount = command.arrearsAmount,
-                defaulted = command.defaulted,
-                originationDate = command.originationDate,
-            ),
-        )
+    override suspend fun register(command: RegisterExposureCommand): CreditExposure = exposures.upsert(
+        CreditExposure(
+            instrumentId = command.instrumentId,
+            debtorId = command.debtorId,
+            debtorType = command.debtorType,
+            instrumentType = command.instrumentType,
+            currency = command.currency,
+            committedAmount = command.committedAmount,
+            drawnAmount = command.drawnAmount,
+            committedAmountEur = command.committedAmountEur,
+            arrearsAmount = command.arrearsAmount,
+            defaulted = command.defaulted,
+            originationDate = command.originationDate,
+        ),
+    )
 
-    override fun list(): List<CreditExposure> = exposures.listAll()
+    override suspend fun list(): List<CreditExposure> = exposures.listAll()
 
-    override fun build(referenceDate: LocalDate): AnaCreditReturn =
+    override suspend fun build(referenceDate: LocalDate): AnaCreditReturn =
         AnaCreditReturnBuilder.build(exposures.listAll(), referenceDate)
 }

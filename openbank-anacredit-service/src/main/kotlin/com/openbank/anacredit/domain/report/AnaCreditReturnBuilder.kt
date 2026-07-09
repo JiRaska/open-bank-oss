@@ -42,16 +42,15 @@ object AnaCreditReturnBuilder {
 /** Maps a reportable [CreditExposure] onto its AnaCredit credit/financial dataset row. */
 object AnaCreditMapper {
 
-    fun toRecord(exposure: CreditExposure, referenceDate: LocalDate): AnaCreditCreditRecord =
-        AnaCreditCreditRecord(
-            instrumentId = exposure.instrumentId,
-            debtorId = exposure.debtorId,
-            instrumentType = exposure.instrumentType,
-            currency = exposure.currency,
-            outstandingNominalAmount = exposure.drawnAmount,
-            offBalanceSheetAmount = exposure.offBalanceSheetAmount,
-            arrearsAmount = exposure.arrearsAmount,
-            defaultStatus = if (exposure.defaulted) "DEFAULT" else "NOT_IN_DEFAULT",
-            referenceDate = referenceDate,
-        )
+    fun toRecord(exposure: CreditExposure, referenceDate: LocalDate): AnaCreditCreditRecord = AnaCreditCreditRecord(
+        instrumentId = exposure.instrumentId,
+        debtorId = exposure.debtorId,
+        instrumentType = exposure.instrumentType,
+        currency = exposure.currency,
+        outstandingNominalAmount = exposure.drawnAmount,
+        offBalanceSheetAmount = exposure.offBalanceSheetAmount,
+        arrearsAmount = exposure.arrearsAmount,
+        defaultStatus = if (exposure.defaulted) "DEFAULT" else "NOT_IN_DEFAULT",
+        referenceDate = referenceDate,
+    )
 }

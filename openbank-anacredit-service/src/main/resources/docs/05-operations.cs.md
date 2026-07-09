@@ -31,24 +31,24 @@ App i management sdílí port **8137** (žádný samostatný management port).
 
 ## Konfigurace
 
-Z `application.yaml` — minimální plocha (ve v1 žádné DB / Kafka / Redis env):
+Z `application.yaml` (ADR-0037 v2 přidává datasource PostgreSQL + Flyway; žádná Kafka / Redis):
 
 | Nastavení | Hodnota | Účel |
 |---|---|---|
 | `quarkus.http.port` | `8137` | port app + management |
 | `quarkus.http.cors.origins` | `http://localhost:3000,http://openbank-admin-ui:3000` | allow-list originů admin UI |
 | security hlavičky | `X-Content-Type-Options`, `X-Frame-Options: DENY`, CSP `default-src 'self'`, HSTS atd. | zpevněné response hlavičky |
+| `quarkus.datasource.reactive.url` / `.jdbc.url` | `openbank_anacredit` (localhost default) | reaktivní Panache provoz aplikace / Flyway migrace |
+| `quarkus.flyway.migrate-at-start` | `true` | schéma aplikováno při startu |
 | `quarkus.swagger-ui.path` | `/api/docs` | Swagger UI |
 | `quarkus.smallrye-openapi.path` | `/q/openapi` | OpenAPI dokument |
 
-Auth (Keycloak OIDC issuer, realm) a případná budoucí nastavení datasource dodává deploy prostředí / defaulty `openbank-libs`, nejsou natvrdo v `application.yaml`.
+Auth (Keycloak OIDC issuer, realm) a přihlašovací údaje datasource dodává deploy prostředí, nejsou natvrdo v `application.yaml`.
 
 ## Health checky
 
 - **Liveness:** `/q/health/live` — běží JVM + ArC. Při selhání restart podu.
-- **Readiness:** `/q/health/ready` — služba připravena obsluhovat. v1 nemá závislost na externím úložišti, takže readiness negatuje na DB/Kafka pool.
-
-> **Provozní poznámka:** in-memory store je netrvanlivý — restart podu ztratí všechny registrované expozice, které je nutné znovu naplnit před vykreslením dalšího výkazu. To je pro dávkové použití ve v1 přijatelné a odstraní to plánovaná PostgreSQL persistence.
+- **Readiness:** `/q/health/ready` — služba připravena obsluhovat. Od ADR-0037 v2 readiness nyní závisí na dostupnosti reaktivního connection poolu Postgres (vestavěný datasource check SmallRye Health).
 
 ## FinOps workload tier (ADR-0057)
 
@@ -59,7 +59,7 @@ Auth (Keycloak OIDC issuer, realm) a případná budoucí nastavení datasource 
 | Tvar provozu | vzácný / nárazový — expozice se vkládají a výkazy vykreslují kolem měsíčních referenčních dat |
 | Tolerance cold-startu | vysoká — regulatorní vykreslení není latency-kritické |
 
-⇒ **Tier T1 — HTTP → 0** (škálování od/do nuly na příchozí HTTP přes KEDA HTTP add-on). Klidový náklad ≈ 0. Netrvanlivý in-memory store znamená, že každý cold start začíná prázdný; upstream feed znovu zaregistruje expozice před vyžádáním výkazu. Tier je *odvozen z naměřeného provozu*, není přiřazen ručně (ADR-0057), takže jde o doporučenou klasifikaci, podléhající CI bráně declared-vs-measured.
+⇒ **Tier T1 — HTTP → 0** (škálování od/do nuly na příchozí HTTP přes KEDA HTTP add-on). Klidový výpočetní náklad ≈ 0; instance Postgres `openbank_anacredit` samotná je nyní malá trvale běžící nákladová položka (dříve nulová u in-memory storu v1) — expozice zaregistrované před scale-to-zero nyní **přežijí** další cold start (to je smysl ADR-0037 v2). Cold start navíc potřebuje živé připojení k reaktivnímu poolu, než projde readiness. Tier je *odvozen z naměřeného provozu*, není přiřazen ručně (ADR-0057), takže jde o doporučenou klasifikaci, podléhající CI bráně declared-vs-measured.
 
 ## SLO
 
@@ -69,16 +69,16 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 | Metrika | Cíl | Poznámka |
 |---|---|---|
 | Dostupnost | best-effort (T1, ne T0) | scale-to-zero tolerováno; bez mandátu kontinuální služby |
-| Latence p95 (vykreslení výkazu) | < 200 ms warm | čistá in-memory agregace nad množinou expozic |
-| Cold-start | v rámci budgetu HTTP add-onu | Quarkus fast-jar startuje v desítkách až stovkách ms |
+| Latence p95 (vykreslení výkazu) | < 200 ms warm | reaktivní Panache dotaz nad `credit_exposures` (indexováno na `debtor_id`) |
+| Cold-start | v rámci budgetu HTTP add-onu | Quarkus fast-jar startuje v desítkách až stovkách ms; plus handshake Postgres poolu |
 | Chybovost | < 0,1 % 5xx | neočekávané chyby nesou correlation id přes libs |
 
 ## Runbooky
 
 ### Výkaz vypadá prázdný / podhodnocený po deployi
 
-1. Store ve v1 je in-memory a **ztratí se při restartu**. Ověř čerstvý pod: `kubectl get pod -l app=anacredit-service -o wide`.
-2. Znovu spusť feed expozic (re-POST expozice) před vykreslením výkazu.
+1. Expozice jsou nyní trvanlivé (ADR-0037 v2) — samotný restart podu by je **neměl** ztratit. Pokud je výkaz prázdný, nejprve ověř, že se Flyway migrace skutečně aplikovala: `SELECT * FROM flyway_schema_history;` by měla ukázat `V1__create_credit_exposures` jako `success`.
+2. Pokud migrace chybí nebo je tabulka skutečně prázdná, znovu spusť feed expozic (re-POST expozice) před vykreslením výkazu.
 3. Ověř přes `GET /api/v1/anacredit/exposures`, že očekávané nástroje jsou přítomné.
 
 ### Nástroj nečekaně vyloučen

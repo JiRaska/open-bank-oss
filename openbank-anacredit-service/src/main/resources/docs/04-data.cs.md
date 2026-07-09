@@ -1,14 +1,19 @@
 # Data
 
-## Datový model (v1)
+## Datový model (v2)
 
-anacredit-service v1 nemá **žádnou databázi**. Expozice jsou drženy v **in-memory `ConcurrentHashMap`** (`InMemoryCreditExposureRepository`), klíčované `instrumentId`, dle vzoru `openbank-product-catalog`. V této službě zatím nejsou **žádné Flyway migrace**.
-
-> **Plánováno (neprovisionováno):** `governance.yaml` *deklaruje* vyhrazené PostgreSQL schéma `anacredit_schema`, `dataClassification: restricted`, `retentionPolicy: 10 years`. To je cíl pro persistenci ve v2 (JPA/Panache adaptér za stávajícím portem `CreditExposureRepository`) a je zde zdokumentováno jako zamýšlený cílový stav, **nikoliv** jako živé schéma. Do té doby je in-memory store **netrvanlivý**: při restartu podu se ztratí a musí být znovu naplněn.
+anacredit-service je **postavená na PostgreSQL** (ADR-0037 v2). Expozice žijí v tabulce
+`credit_exposures` (databáze `openbank_anacredit`, governance schema label `anacredit_schema`),
+jeden řádek na nástroj, klíčovaný `instrumentId`, za reaktivním Panache adaptérem
+`PostgresCreditExposureRepository` implementujícím port `CreditExposureRepository` — stejný vzor
+výměny adaptéru jako u `openbank-product-catalog`. `governance.yaml` deklaruje
+`dataClassification: restricted`, `retentionPolicy: 10 years`. Expozice nyní **přežijí restart
+podu**; in-memory `ConcurrentHashMap` z v1 (`InMemoryCreditExposureRepository`) byl odstraněn.
 
 ## Logické entity
 
-Jsou to in-memory doménové objekty (ve v1 nikoliv DB tabulky):
+`CreditExposure` je nyní skutečný řádek tabulky (`CREDIT_EXPOSURE` níže); `CreditRecord` a
+`ExclusionNote` zůstávají počítané na vyžádání, nikdy neukládané:
 
 ```mermaid
 erDiagram
@@ -54,9 +59,7 @@ erDiagram
 
 | Skript | Stav |
 |---|---|
-| — | **Žádné.** Ve v1 neexistuje adresář `db/migration` (in-memory store). |
-
-Až přijde persistence, první migrace vytvoří `anacredit_schema` a tabulku `credit_exposure`, s rollback poznámkou dle migračního pravidla repozitáře.
+| `V1__create_credit_exposures.sql` | Aplikováno — vytváří `credit_exposures` + `idx_credit_exposures_debtor_id`. Rollback: `DROP TABLE credit_exposures;` |
 
 ## Pravidla způsobilosti (odvození, které produkuje data)
 
@@ -71,10 +74,10 @@ Práh €25 000 (`AnaCreditEligibilityPolicy.REPORTING_THRESHOLD_EUR`) se vyhodn
 
 ## Retence
 
-| Data | v1 (in-memory) | Plánováno (PostgreSQL) |
-|---|---|---|
-| úvěrové expozice | volatilní — drženo jen po dobu běhu podu | 10 let (`governance.yaml: retentionPolicy`), AML / regulatorní záznam |
-| vykreslené výkazy | neukládají se (přepočítány při každém požadavku) | neukládají se (odvozené) |
+| Data | Úložiště |
+|---|---|
+| úvěrové expozice | trvanlivé — tabulka `credit_exposures`, 10 let (`governance.yaml: retentionPolicy`), AML / regulatorní záznam |
+| vykreslené výkazy | neukládají se (přepočítány při každém požadavku, odvozené) |
 
 ## PII / klasifikace dat
 
@@ -91,4 +94,4 @@ Protože reportovatelný datový soubor AnaCredit pokrývá **pouze právnické 
 
 ## Lineage
 
-`governance.yaml: dataLineageRole: both` — anacredit-service je jak **konzument** dat o úvěrových expozicích (ve v1 vkládáno přes REST; výhledově má konzumovat události `balance.overdraft.*`), tak **producent** výkazu AnaCredit (odvozený regulatorní datový soubor). `evidenceExported: false` — aktuálně neexportuje důkazy do navazujícího evidence storu.
+`governance.yaml: dataLineageRole: both` — anacredit-service je jak **konzument** dat o úvěrových expozicích (vkládáno přes REST; konzument událostí `balance.overdraft.*` zůstává samostatným, zatím nepostaveným navazujícím krokem), tak **producent** výkazu AnaCredit (odvozený regulatorní datový soubor). `evidenceExported: false` — aktuálně neexportuje důkazy do navazujícího evidence storu.

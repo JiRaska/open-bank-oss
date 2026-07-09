@@ -27,12 +27,12 @@
    │ / upstream │   GET /returns/{date}        │  anacredit-service   │
    └────────────┘ ◄─────────────────────────  │  (derive-only)       │
                       vykreslený výkaz         └──────────┬───────────┘
-                                                          │ in-memory store (v1)
+                                                          │ PostgreSQL (ADR-0037 v2)
    ┌────────────┐                                         ▼
-   │ fx-service │ ─ committedAmountEur ─►          ConcurrentHashMap
-   └────────────┘   (dodá volající)           (plánováno anacredit_schema)
+   │ fx-service │ ─ committedAmountEur ─►          credit_exposures
+   └────────────┘   (dodá volající)           (anacredit_schema)
 
-   navazující odeslání regulátorovi (ČNB) = MIMO ROZSAH ve v1
+   navazující odeslání regulátorovi (ČNB) = MIMO ROZSAH
 ```
 
 ## Klíčové případy užití
@@ -53,7 +53,7 @@
 
 - **Keycloak** — OIDC autentizace / vynucení rolí.
 - **openbank-libs** — `ServiceInfoResource` (`/api/v1/info`), `DocsResource` (tato dokumentace), `BuildInfo`.
-- **Žádné** připojení k PostgreSQL za běhu ve v1 (store je in-memory), **žádná** Kafka, **žádný** Redis.
+- **PostgreSQL** (`openbank_anacredit`) za běhu pro store `credit_exposures` (ADR-0037 v2). **Žádná** Kafka, **žádný** Redis.
 - `openbank-fx-service` — pouze *logická* závislost: volající ji použije k získání `committedAmountEur` před registrací expozice; anacredit-service ji nevolá.
 
 ## Obchodní hodnota
