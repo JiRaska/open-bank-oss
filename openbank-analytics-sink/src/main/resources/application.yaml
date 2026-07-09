@@ -96,10 +96,19 @@ mp:
         #
         # This service has NO gitops manifest yet (never deployed — no version.txt, not a
         # released component). Whoever wires up its first deployment manifest MUST set these
-        # as env vars there, matching the intended values previously in this YAML block:
-        #   MP_MESSAGING_INCOMING_ANALYTICS_EVENTS_IN_GROUP_ID=analytics-sink
-        #   MP_MESSAGING_INCOMING_ANALYTICS_EVENTS_IN_AUTO_OFFSET_RESET=earliest
-        # Do not re-add them as dotted YAML keys — that reintroduces this exact bug.
+        # via a properties-file ConfigMap loaded with QUARKUS_CONFIG_LOCATIONS
+        # (config_ordinal=500), matching the intended values previously in this YAML block:
+        #   mp.messaging.incoming.analytics-events-in.group.id=analytics-sink
+        #   mp.messaging.incoming.analytics-events-in.auto.offset.reset=earliest
+        # Mirror the ConfigMap/mount/env-var structure already used by onboarding-service
+        # (openbank-infra/gitops/components/onboarding/onboarding-service-msg-override.yaml)
+        # and other services in the #686 sweep. Do NOT set these via
+        # MP_MESSAGING_INCOMING_ANALYTICS_EVENTS_IN_* env vars — SmallRye's env-var
+        # reverse-mapping is ambiguous for hyphenated channel names like
+        # analytics-events-in and can crash at boot (quarkusio/quarkus#30106,
+        # smallrye/smallrye-reactive-messaging#2028; this was tried and reverted for
+        # fraud-service, PR #685 -> #698). Do not re-add them as dotted YAML keys either —
+        # that reintroduces this exact bug.
 
 "%dev":
   quarkus:
