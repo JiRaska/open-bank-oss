@@ -7,6 +7,7 @@ package com.openbank.billing
 import com.openbank.billing.application.port.out.BillingAssessmentRepository
 import com.openbank.billing.application.port.out.LedgerPostingPort
 import com.openbank.billing.domain.FeeJournalCommand
+import com.openbank.billing.domain.FeeReversalCommand
 import com.openbank.billing.infrastructure.outbox.LedgerOutboxEventPublisher
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxStatus
@@ -80,5 +81,63 @@ class LedgerOutboxEventPublisherTest {
         }.isInstanceOf(RuntimeException::class.java).hasMessageContaining("ledger down")
 
         coVerify(exactly = 0) { assessments.markPosted(any(), any()) }
+    }
+
+    private fun reversalEntry(payload: String) = OutboxEntry(
+        eventId = UUID.randomUUID(),
+        aggregateId = UUID.randomUUID(),
+        eventType = "billing.fee.reversal-intent.v1",
+        payload = payload,
+        status = OutboxStatus.PENDING,
+        attemptCount = 0,
+        createdAt = Instant.EPOCH,
+        updatedAt = Instant.EPOCH,
+        sentAt = null,
+        lastError = null,
+    )
+
+    private fun reversalPayload(
+        idempotencyKey: String = "fee-reversal-2026-07-acc-1-f1-CZK",
+        originalIdempotencyKey: String = "fee-2026-07-acc-1-f1-CZK",
+    ) = "{\"schemaVersion\":1,\"idempotencyKey\":\"$idempotencyKey\"," +
+        "\"originalIdempotencyKey\":\"$originalIdempotencyKey\",\"cycleId\":\"2026-07\"," +
+        "\"accountId\":\"acc-1\",\"feeId\":\"f1\",\"amount\":\"150.00\",\"currency\":\"CZK\"," +
+        "\"reason\":\"waiver bug\"}"
+
+    @Test
+    fun `publishing a reversal-intent row posts the compensating journal and marks the ORIGINAL fee REVERSED`(): Unit =
+        runBlocking {
+            val ledger = mockk<LedgerPostingPort>()
+            val assessments = mockk<BillingAssessmentRepository>()
+            val reversalJournalId = UUID.randomUUID()
+            val commandSlot: CapturingSlot<FeeReversalCommand> = slot()
+            coEvery { ledger.postReversal(capture(commandSlot)) } returns reversalJournalId
+            coEvery {
+                assessments.markReversed("fee-2026-07-acc-1-f1-CZK", reversalJournalId)
+            } returns Unit
+
+            LedgerOutboxEventPublisher(ledger, assessments).publish(reversalEntry(reversalPayload()))
+
+            coVerify(exactly = 1) { ledger.postReversal(any()) }
+            coVerify(exactly = 1) { assessments.markReversed("fee-2026-07-acc-1-f1-CZK", reversalJournalId) }
+            coVerify(exactly = 0) { ledger.post(any()) }
+            coVerify(exactly = 0) { assessments.markPosted(any(), any()) }
+            val command = commandSlot.captured
+            assertThat(command.idempotencyKey).isEqualTo("fee-reversal-2026-07-acc-1-f1-CZK")
+            assertThat(command.originalIdempotencyKey).isEqualTo("fee-2026-07-acc-1-f1-CZK")
+            assertThat(command.reason).isEqualTo("waiver bug")
+        }
+
+    @Test
+    fun `a reversal ledger failure propagates and does not mark the fee reversed`() {
+        val ledger = mockk<LedgerPostingPort>()
+        val assessments = mockk<BillingAssessmentRepository>()
+        coEvery { ledger.postReversal(any()) } throws RuntimeException("ledger down")
+
+        assertThatThrownBy {
+            runBlocking { LedgerOutboxEventPublisher(ledger, assessments).publish(reversalEntry(reversalPayload())) }
+        }.isInstanceOf(RuntimeException::class.java).hasMessageContaining("ledger down")
+
+        coVerify(exactly = 0) { assessments.markReversed(any(), any()) }
     }
 }

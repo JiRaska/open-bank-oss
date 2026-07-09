@@ -5,6 +5,7 @@
 package com.openbank.billing
 
 import com.openbank.billing.domain.FeeJournalCommand
+import com.openbank.billing.domain.FeeReversalCommand
 import com.openbank.billing.infrastructure.client.BillingJournalFactory
 import com.openbank.billing.infrastructure.client.BillingLedgerConfig
 import org.assertj.core.api.Assertions.assertThat
@@ -111,5 +112,77 @@ class BillingJournalFactoryTest {
         // Deterministic: same non-UUID accountId always maps to the same synthetic UUID.
         val linesAgain = BillingJournalFactory.buildLines(cmd, accounts)
         assertThat(debit.subAccountId).isEqualTo(linesAgain.single { it.side == "DEBIT" }.subAccountId)
+    }
+
+    private fun reversalCommand(
+        idempotencyKey: String = "fee-reversal-2026-07-acc-1-f1-CZK",
+        originalIdempotencyKey: String = "fee-2026-07-acc-1-f1-CZK",
+        accountId: String = "acc-1",
+        feeId: String = "f1",
+        amount: String = "150.00",
+        currency: String = "CZK",
+    ) = FeeReversalCommand(
+        idempotencyKey = idempotencyKey,
+        originalIdempotencyKey = originalIdempotencyKey,
+        cycleId = "2026-07",
+        accountId = accountId,
+        feeId = feeId,
+        amount = BigDecimal(amount),
+        currency = currency,
+        reason = "waiver bug",
+    )
+
+    @Test
+    fun `a reversal is the exact reverse of the charge — credits fee-receivable, debits fee income`() {
+        val chargeLines = BillingJournalFactory.buildLines(command("fee-2026-07-acc-1-f1-CZK"), accounts)
+        val reversalLines = BillingJournalFactory.buildReversalLines(reversalCommand(), accounts)
+
+        val chargeDebit = chargeLines.single { it.side == "DEBIT" }
+        val chargeCredit = chargeLines.single { it.side == "CREDIT" }
+        val reversalCredit = reversalLines.single { it.side == "CREDIT" }
+        val reversalDebit = reversalLines.single { it.side == "DEBIT" }
+
+        // Same GL accounts, opposite sides.
+        assertThat(reversalCredit.glAccountId).isEqualTo(chargeDebit.glAccountId)
+        assertThat(reversalCredit.subAccountId).isEqualTo(chargeDebit.subAccountId)
+        assertThat(reversalDebit.glAccountId).isEqualTo(chargeCredit.glAccountId)
+        assertThat(reversalDebit.subAccountId).isNull()
+        assertThat(reversalCredit.amount).isEqualByComparingTo(chargeDebit.amount)
+        assertThat(reversalDebit.amount).isEqualByComparingTo(chargeCredit.amount)
+    }
+
+    @Test
+    fun `a reversal is balanced and single-currency`() {
+        val lines = BillingJournalFactory.buildReversalLines(reversalCommand(currency = "EUR"), accounts)
+        assertThat(lines).hasSize(2)
+        val debit = lines.single { it.side == "DEBIT" }.amount
+        val credit = lines.single { it.side == "CREDIT" }.amount
+        assertThat(debit).isEqualByComparingTo(credit)
+        lines.forEach {
+            assertThat(it.baseCurrencyCode).isEqualTo(it.currencyCode)
+            assertThat(it.baseAmount).isEqualByComparingTo(it.amount)
+        }
+    }
+
+    @Test
+    fun `reversal request carries its OWN idempotency key, distinct from the original charge's`() {
+        val cmd = reversalCommand(
+            idempotencyKey = "fee-reversal-2026-07-acc-1-f1-CZK",
+            originalIdempotencyKey = "fee-2026-07-acc-1-f1-CZK",
+        )
+        val request = BillingJournalFactory.buildReversalRequest(cmd, accounts, systemActorId, date)
+
+        assertThat(request.idempotencyKey).isEqualTo("fee-reversal-2026-07-acc-1-f1-CZK")
+        assertThat(request.idempotencyKey).isNotEqualTo(cmd.originalIdempotencyKey)
+        // Distinct transaction id from the original charge's — never collapses into a replay.
+        val chargeRequest = BillingJournalFactory.buildRequest(
+            command(cmd.originalIdempotencyKey, accountId = cmd.accountId, feeId = cmd.feeId),
+            accounts,
+            systemActorId,
+            date,
+        )
+        assertThat(request.transactionId).isNotEqualTo(chargeRequest.transactionId)
+        assertThat(request.createdBy).isEqualTo(systemActorId)
+        assertThat(request.lines).hasSize(2)
     }
 }

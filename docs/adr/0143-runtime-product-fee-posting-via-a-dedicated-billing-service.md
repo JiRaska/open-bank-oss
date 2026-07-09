@@ -2,7 +2,7 @@
 
 Date: 2026-06-29
 Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only; phases 1a/1b/2a/2b/2c/2c-ii/2d implemented pending money-path review (PR TBD); phase 2e (reversal) required before production -->
+Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only; phases 1a/1b/2a/2b/2c/2c-ii/2d/2e implemented pending money-path review (PR TBD); real-environment e2e verification + four-eyes enforcement flip still required before production -->
 Author(s): Jiri Raska
 
 **Delivery note (updated 2026-07-07):**
@@ -25,20 +25,37 @@ Author(s): Jiri Raska
 - **Phase 2d (DST invariant)** — ✅ Implemented: `billing-fee-conservation` in
   `openbank-simulation` (`MoneyPathInvariants`), asserting *Σ fees assessed == Σ fee journals
   posted* per cycle/account/fee/currency; unit-tested in isolation
-  (`BillingFeeConservationInvariantTest`). **Not yet wired to a seeded `BillingScenario`** — no
-  such scenario exists, so the invariant is registered but trivially holds until one drives real
-  assess/post traffic through it (a follow-up, tracked in the same issue as the account-discovery
-  gap below).
+  (`BillingFeeConservationInvariantTest`). **Now wired to a seeded `FeeBillingScenario`**
+  (`SimulationRunner.runSeed`) that actually drives assess → post → (a seeded fraction) reverse
+  traffic through `World.billingFees` every step — confirmed non-vacuous by deliberately breaking
+  the posting leg (skipping the `recordPosted` call) and observing the invariant fail, then
+  reverting; the full 300-seed happy-path `DstSimulationTest` sweep is green with the scenario
+  wired in.
+- **Phase 2e (fee reversal/refund)** — ✅ Implemented: `POST /api/v1/fees/reverse` posts a
+  compensating journal (CREDIT customer fee-receivable GL, DEBIT fee-income GL — the exact
+  reverse of the charge) for an already-POSTED `AssessedFee`, through the SAME transactional
+  outbox + `LedgerPostingAdapter.postReversal` pattern as the charge leg. Own idempotency key
+  (`fee-reversal-{cycleId}-{accountId}-{feeId}-{currency}`, distinct from the charge's) so the
+  ledger never collapses a reversal into a charge replay. Gated by `@Authorize(action =
+  "billing.reverse")` — `reverse` was already a registered `rules.yaml: four_eyes.verbs` entry,
+  so this reuses the EXISTING `AuthorizeInterceptor` + `ApprovalStore` (ADR-0155) four-eyes
+  infrastructure the charge path already wired, with no new approval mechanism. Deliberately does
+  **not** call ledger-service's own `POST /journals/{id}/reverse` (itself four-eyes gated at the
+  ledger's principal) — a service-to-service caller has no distinct human "checker" for that
+  second gate, so it would orphan a pending approval forever; billing posts its own compensating
+  journal via the plain `POST /journals` contract instead. New `PostingStatus` values
+  `REVERSAL_PENDING`/`REVERSED`; new `assessed_fee` columns (`reversal_journal_id`,
+  `reversal_reason`, `reversed_at`) via `V4__add_fee_reversal.sql`. Idempotent (re-reversing an
+  already-REVERSAL_PENDING/REVERSED fee is a no-op replay) and fails cleanly — 404 for a fee never
+  assessed, 409 for a fee never POSTED (waived/zero/still PENDING/FAILED) — never a generic 500.
 - **Known gaps, honestly scoped (not blockers for this PR, but block production go-live):**
-  fee reversal/refund (phase 2e) is not built; there is no fleet-wide "list every billable
-  account" read port, so `BillingCycleScheduler`'s account batch is operator-configured rather
-  than autonomously discovered (disabled by default); `authz.four-eyes.enforce` needs a deliberate
-  flip once the maker/checker runbook is reviewed; the DST invariant needs a `BillingScenario` to
-  exercise it against simulated traffic rather than empty state.
+  there is no fleet-wide "list every billable account" read port, so `BillingCycleScheduler`'s
+  account batch is operator-configured rather than autonomously discovered (disabled by default);
+  `authz.four-eyes.enforce` needs a deliberate flip once the maker/checker runbook is reviewed;
+  none of this has been deployed to or verified in a real environment (sandbox) yet.
 - **Money-path go-live** — ⬜ Still deploy-gated pending: real-environment (sandbox) e2e
-  verification of a charged + a waived fee reconciling to the ledger, the four-eyes enforcement
-  flip, and phase 2e (fee reversal/refund), all required before production per this ADR's
-  Delivery milestones section.
+  verification of a charged + a waived fee + a reversed fee all reconciling to the ledger, and the
+  four-eyes enforcement flip, per this ADR's Delivery milestones section.
 
 ## Context
 
@@ -173,11 +190,13 @@ ADR-0030). The threats the implementation must mitigate, decided here:
   `money_path_services` registration. No autonomous merge (2 approvals).
 - **2c** — ledger `@RestClient` posting + transactional outbox + idempotency + context read clients
   (balance/account) + the assessment trigger (scheduled cycle).
-- **2d** — DST fee-conservation invariant in `openbank-simulation`; deploy to sandbox; e2e verify a
-  charged + a waived fee reconcile to the ledger.
-- **2e** — fee **reversal / refund** flow: a wrongly-charged fee (waiver bug or bad context) must be
-  reversible via a compensating ledger journal under the four-eyes `reverse` verb. Out of scope for
-  the initial charge path but a required follow-up before any production go-live.
+- **2d** — DST fee-conservation invariant in `openbank-simulation`, wired to a seeded
+  `FeeBillingScenario` that actually exercises it (see the delivery note); sandbox deployment and
+  e2e verification of a charged + a waived fee reconciling to the ledger remain outstanding.
+- **2e** — fee **reversal / refund** flow: a wrongly-charged fee (waiver bug or bad context) is
+  reversible via a compensating ledger journal under the four-eyes `reverse` verb (see the
+  delivery note for the implementation). Sandbox e2e verification remains outstanding before any
+  production go-live.
 
 ## Compliance impact
 

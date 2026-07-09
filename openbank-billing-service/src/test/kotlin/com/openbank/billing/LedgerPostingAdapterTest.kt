@@ -5,6 +5,7 @@
 package com.openbank.billing
 
 import com.openbank.billing.domain.FeeJournalCommand
+import com.openbank.billing.domain.FeeReversalCommand
 import com.openbank.billing.infrastructure.adapter.LedgerPostingAdapter
 import com.openbank.billing.infrastructure.client.BillingLedgerConfig
 import com.openbank.billing.infrastructure.client.LedgerJournalEntryResponse
@@ -82,6 +83,45 @@ class LedgerPostingAdapterTest {
         every { ledgerClient.postJournal(any()) } returns Uni.createFrom().failure(IllegalStateException("ledger down"))
 
         assertThatThrownBy { runBlocking { adapter.post(command()) } }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("ledger down")
+    }
+
+    private fun reversalCommand(idempotencyKey: String = "fee-reversal-2026-07-acc-1-f1-CZK") = FeeReversalCommand(
+        idempotencyKey = idempotencyKey,
+        originalIdempotencyKey = "fee-2026-07-acc-1-f1-CZK",
+        cycleId = "2026-07",
+        accountId = "acc-1",
+        feeId = "f1",
+        amount = BigDecimal("150.00"),
+        currency = "CZK",
+        reason = "waiver bug",
+    )
+
+    @Test
+    fun `posts a compensating journal via the same POST journals endpoint and returns the reversal journal id`() {
+        val requestSlot: CapturingSlot<LedgerPostJournalRequest> = slot()
+        val reversalJournalId = UUID.randomUUID()
+        every { ledgerClient.postJournal(capture(requestSlot)) } returns Uni.createFrom().item(
+            LedgerJournalEntryResponse(id = reversalJournalId, transactionId = UUID.randomUUID(), status = "POSTED"),
+        )
+
+        val result = runBlocking { adapter.postReversal(reversalCommand()) }
+
+        assertThat(result).isEqualTo(reversalJournalId)
+        val request = requestSlot.captured
+        assertThat(request.idempotencyKey).isEqualTo("fee-reversal-2026-07-acc-1-f1-CZK")
+        assertThat(request.entryDate).isEqualTo("2026-07-01")
+        assertThat(request.createdBy).isEqualTo(config.systemActorId())
+        assertThat(request.lines).hasSize(2)
+        verify(exactly = 1) { ledgerClient.postJournal(any()) }
+    }
+
+    @Test
+    fun `a reversal ledger failure propagates instead of being swallowed`() {
+        every { ledgerClient.postJournal(any()) } returns Uni.createFrom().failure(IllegalStateException("ledger down"))
+
+        assertThatThrownBy { runBlocking { adapter.postReversal(reversalCommand()) } }
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("ledger down")
     }

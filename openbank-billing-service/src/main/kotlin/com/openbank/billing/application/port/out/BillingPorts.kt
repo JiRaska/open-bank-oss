@@ -8,6 +8,7 @@ import com.openbank.billing.domain.AssessedFee
 import com.openbank.billing.domain.BillableFee
 import com.openbank.billing.domain.BillingAssessment
 import com.openbank.billing.domain.FeeJournalCommand
+import com.openbank.billing.domain.FeeReversalCommand
 import com.openbank.libs.product.FeeContext
 import java.util.UUID
 
@@ -54,11 +55,30 @@ interface BillingAssessmentRepository {
      */
     suspend fun persistWithPostingIntent(assessment: BillingAssessment): BillingAssessment
 
+    /** The single [AssessedFee] with this (charge) idempotency key, if one has been persisted. */
+    suspend fun findFeeByIdempotencyKey(idempotencyKey: String): AssessedFee?
+
     /** Mark one fee POSTED with the ledger's returned journal id (called by the outbox publisher). */
     suspend fun markPosted(idempotencyKey: String, journalId: UUID)
 
     /** Mark one fee FAILED — its outbox row reached a terminal DEAD state without posting. */
     suspend fun markFailed(idempotencyKey: String)
+
+    /**
+     * Append the reversal outbox row for an already-POSTED fee, in the SAME transaction as
+     * flipping it to [com.openbank.billing.domain.PostingStatus.REVERSAL_PENDING] (ADR-0143 phase
+     * 2e) — mirrors [persistWithPostingIntent]'s atomicity for the charge leg. Returns the updated
+     * fee, or `null` if no fee with [idempotencyKey] exists (a genuinely idempotent no-op is
+     * decided one layer up, in the use-case, since it needs to distinguish "already reversed" from
+     * "never posted" to fail cleanly).
+     */
+    suspend fun persistReversalIntent(idempotencyKey: String, reason: String): AssessedFee?
+
+    /** Mark one fee REVERSED with the ledger's returned reversal-journal id. */
+    suspend fun markReversed(idempotencyKey: String, reversalJournalId: UUID)
+
+    /** Mark one fee's reversal FAILED — its reversal outbox row reached a terminal DEAD state. */
+    suspend fun markReversalFailed(idempotencyKey: String)
 }
 
 /** Outbound port to the ledger's journal-posting endpoint (ADR-0143 step 2 / ADR-0039). */
@@ -68,4 +88,11 @@ interface LedgerPostingPort {
      * [FeeJournalCommand.idempotencyKey].
      */
     suspend fun post(command: FeeJournalCommand): UUID
+
+    /**
+     * Posts the compensating (reversing) journal for an already-posted fee (ADR-0143 phase 2e);
+     * returns the ledger's journal id for the reversal. Idempotent on
+     * [FeeReversalCommand.idempotencyKey] (distinct from the original charge's key).
+     */
+    suspend fun postReversal(command: FeeReversalCommand): UUID
 }

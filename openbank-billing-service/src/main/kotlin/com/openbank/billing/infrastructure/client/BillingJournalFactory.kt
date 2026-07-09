@@ -5,6 +5,7 @@
 package com.openbank.billing.infrastructure.client
 
 import com.openbank.billing.domain.FeeJournalCommand
+import com.openbank.billing.domain.FeeReversalCommand
 import java.time.LocalDate
 import java.util.UUID
 
@@ -70,4 +71,53 @@ object BillingJournalFactory {
      */
     private fun accountIdAsUuidOrNull(accountId: String): UUID = runCatching { UUID.fromString(accountId) }
         .getOrElse { UUID.nameUUIDFromBytes(accountId.toByteArray(Charsets.UTF_8)) }
+
+    /**
+     * The compensating journal for a wrongly-charged fee (ADR-0143 phase 2e): the EXACT reverse of
+     * [buildRequest]/[buildLines] — CREDIT the customer fee-receivable GL (`subAccountId = accountId`),
+     * DEBIT the bank fee-income GL — same amount/currency, own [FeeReversalCommand.idempotencyKey]
+     * (distinct from the original charge's) so the ledger's idempotency store treats it as a new,
+     * independent posting rather than a replay of the charge.
+     */
+    fun buildReversalRequest(
+        command: FeeReversalCommand,
+        accounts: BillingLedgerConfig.Gl,
+        systemActorId: UUID,
+        date: LocalDate,
+    ): LedgerPostJournalRequest = LedgerPostJournalRequest(
+        idempotencyKey = command.idempotencyKey,
+        transactionId = UUID.nameUUIDFromBytes(command.idempotencyKey.toByteArray(Charsets.UTF_8)),
+        entryDate = date.toString(),
+        valueDate = date.toString(),
+        description = "Reversal of fee charge (${command.reason})",
+        createdBy = systemActorId,
+        lines = buildReversalLines(command, accounts),
+    )
+
+    fun buildReversalLines(
+        command: FeeReversalCommand,
+        accounts: BillingLedgerConfig.Gl,
+    ): List<LedgerJournalLineRequest> {
+        val ccy = command.currency
+        val value = command.amount
+        return listOf(
+            LedgerJournalLineRequest(
+                glAccountId = accounts.feeReceivable(),
+                side = "CREDIT",
+                amount = value,
+                currencyCode = ccy,
+                baseAmount = value,
+                baseCurrencyCode = ccy,
+                subAccountId = accountIdAsUuidOrNull(command.accountId),
+            ),
+            LedgerJournalLineRequest(
+                glAccountId = accounts.feeIncome(),
+                side = "DEBIT",
+                amount = value,
+                currencyCode = ccy,
+                baseAmount = value,
+                baseCurrencyCode = ccy,
+            ),
+        )
+    }
 }
