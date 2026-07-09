@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: notification-service
     app.kubernetes.io/part-of: notifications
   annotations:
-    openbank.tech/policy-checksum: "c65803d619d66641"
+    openbank.tech/policy-checksum: "cba7562026b4d6c9"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -787,6 +787,7 @@ data:
         - send                              # swift: send an outbound wire message (issue #395)
         - credit                            # balance: direct ledger-balance credit adjustment (issue #395)
         - debit                             # balance: direct ledger-balance debit adjustment (issue #395)
+        - collateralRegister                # lending: collateral registration/edit feeds IFRS 9 LGD (issue #621)
 
     # ---------------------------------------------------------------------------------------
     # Feature-flag flip governance (ADR-0067 follow-up, issue #419). The OPA PEP (rest.rego)

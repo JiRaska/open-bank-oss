@@ -142,7 +142,10 @@ effectiveLgd = max(0, lgd - (Σ collateral.marketValue × (1 - collateral.haircu
   figures — e.g. real estate 20%, vehicle 40%, cash 0%, securities 30% are reasonable starting
   assumptions used in this service's tests, supplied per-registration by the caller
   (`CollateralRequest.haircut`), not a platform-enforced or model-governed table.
-- **No four-eyes control on registration** (unlike origination/disbursement) — see the threat model §5/§7.
+- **Four-eyes on registration (issue #621):** a registered collateral item is `PENDING` and excluded
+  from the LGD reduction above until a DIFFERENT principal approves it via
+  `POST /api/v1/lending/collateral/{id}/decision` — mirrors origination/disbursement's maker-checker
+  shape. See the threat model §3/§7.
 
 There is **no behavioral/statistical PD model, no macroeconomic overlay or forward-looking scenario weighting**. These parameters **must be calibrated by the actuarial/risk team against real portfolio loss history before any production use** — this is a structural first increment (a working stage-bucketing → ECL → ledger pipeline with a first-pass collateral offset), not a regulatory-grade IFRS 9 implementation. Swapping the conservative constants for a real risk-parameter adapter, or the placeholder haircut table for a calibrated one, is a wiring change (`RiskParameterSource`, ADR-0028 D4), not a domain change.
 
