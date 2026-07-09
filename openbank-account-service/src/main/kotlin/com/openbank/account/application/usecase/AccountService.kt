@@ -26,6 +26,8 @@ import com.openbank.account.application.port.out.AccountSanctionsScreeningPort
 import com.openbank.account.application.port.out.BalanceQueryPort
 import com.openbank.account.application.port.out.BalanceView
 import com.openbank.account.application.port.out.CurrencyPocketRepository
+import com.openbank.account.application.port.out.ProductCatalogPort
+import com.openbank.account.application.port.out.ProductLookupResult
 import com.openbank.account.domain.event.AccountClosedEvent
 import com.openbank.account.domain.event.AccountCreatedEvent
 import com.openbank.account.domain.event.AccountStatusChangedEvent
@@ -50,6 +52,7 @@ import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
+@Suppress("LongParameterList")
 class AccountService(
     private val accountRepository: AccountRepository,
     private val balancePort: BalanceQueryPort,
@@ -57,10 +60,12 @@ class AccountService(
     private val ibanGenerator: IbanGenerator,
     private val pocketRepository: CurrencyPocketRepository,
     private val sanctionsScreening: AccountSanctionsScreeningPort,
+    private val productCatalog: ProductCatalogPort,
     private val metrics: DomainMetrics,
     private val clock: Clock,
 ) : AccountUseCase {
 
+    @Suppress("LongMethod") // issue #668: the product-catalog validation block added a few lines past threshold
     override suspend fun openAccount(command: OpenAccountCommand): Account {
         // Idempotent replay (#465): a repeated key returns the original account and never opens
         // a second one. The Redis record in the REST layer is only a response cache — this DB
@@ -83,6 +88,22 @@ class AccountService(
         )
         if (screening.status == "HIT" || screening.status == "REVIEW") {
             throw AccountOpeningBlockedByScreeningException(command.partyId, screening.matchedName)
+        }
+
+        // Issue #668: an account can no longer be opened against a product that doesn't exist or
+        // has been deactivated. Fails OPEN (proceeds, logged) when product-catalog is unreachable —
+        // reference data, not money-path; a DIFFERENT posture from the sanctions gate above.
+        when (val lookup = productCatalog.findById(command.productId)) {
+            is ProductLookupResult.NotFound ->
+                throw ProductNotEligibleException(command.productId, "product does not exist")
+            is ProductLookupResult.Found ->
+                if (lookup.product.status != "ACTIVE") {
+                    throw ProductNotEligibleException(
+                        command.productId,
+                        "product status is ${lookup.product.status}, not ACTIVE",
+                    )
+                }
+            ProductLookupResult.Unavailable -> Unit
         }
 
         val iban = ibanGenerator.generate(command.currency)
@@ -448,3 +469,14 @@ class AccountUpdateConflictException(message: String, cause: Throwable? = null) 
 
 class AccountOpeningBlockedByScreeningException(partyId: UUID, matchedName: String?) :
     RuntimeException("Account opening blocked by sanctions screening for party $partyId (matched: $matchedName)")
+
+/**
+ * Issue #668: account opening refused because product-catalog confirmed the product doesn't
+ * exist, or exists but isn't ACTIVE. Never thrown when product-catalog is merely unreachable —
+ * that fails open (see [ProductCatalogPort]). Extends [IllegalStateException] deliberately (not
+ * a bare [RuntimeException] like [AccountOpeningBlockedByScreeningException]) so it resolves to
+ * the libs-runtime `IllegalStateExceptionMapper` (422 BUSINESS_RULE_VIOLATION) instead of falling
+ * through to the generic 500 mapper.
+ */
+class ProductNotEligibleException(productId: UUID, reason: String) :
+    IllegalStateException("Cannot open account against product $productId: $reason")

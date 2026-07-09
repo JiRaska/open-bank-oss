@@ -84,6 +84,11 @@ quarkus:
       url: ${SANCTIONS_SERVICE_URL:http://openbank-sanctions-service:8110}
       connect-timeout: 3000
       read-timeout: 5000
+    # Issue #668: unauthenticated read of product-catalog reference data at account-open time.
+    "product-catalog-api":
+      url: ${PRODUCT_CATALOG_SERVICE_URL:http://openbank-product-catalog:8080}
+      connect-timeout: 3000
+      read-timeout: 5000
 
   shutdown:
     timeout: 30S

@@ -21,6 +21,7 @@ import com.openbank.account.application.port.out.AccountSanctionsScreeningPort
 import com.openbank.account.application.port.out.BalanceQueryPort
 import com.openbank.account.application.port.out.BalanceView
 import com.openbank.account.application.port.out.CurrencyPocketRepository
+import com.openbank.account.application.port.out.ProductCatalogPort
 import com.openbank.account.domain.event.AccountClosedEvent
 import com.openbank.account.domain.event.AccountStatusChangedEvent
 import com.openbank.account.domain.model.Account
@@ -62,6 +63,7 @@ class AccountServiceLifecycleTest {
     private lateinit var ibanGenerator: IbanGenerator
     private lateinit var pocketRepository: CurrencyPocketRepository
     private lateinit var sanctionsScreening: AccountSanctionsScreeningPort
+    private lateinit var productCatalog: ProductCatalogPort
     private lateinit var metrics: DomainMetrics
     private lateinit var service: AccountService
 
@@ -73,6 +75,7 @@ class AccountServiceLifecycleTest {
         ibanGenerator = mockk()
         pocketRepository = mockk()
         sanctionsScreening = mockk()
+        productCatalog = mockk()
         metrics = mockk(relaxed = true)
         service =
             AccountService(
@@ -82,6 +85,7 @@ class AccountServiceLifecycleTest {
                 ibanGenerator,
                 pocketRepository,
                 sanctionsScreening,
+                productCatalog,
                 metrics,
                 Clock.fixed(fixedInstant, ZoneOffset.UTC),
             )

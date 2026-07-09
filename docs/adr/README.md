@@ -160,10 +160,11 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0154](0154-agent-pr-approval-policy.md) | Independent agent PR approval for non-sensitive changes | Accepted | Shipped | — |
 | [0155](0155-four-eyes-enforcement-for-money-path-actions.md) | Four-eyes enforcement for money-path actions | Proposed | Partial — pilot only (openbank-sepa-payment) | — |
 | [0156](0156-agent-charters-as-markdown-alongside-agents-yaml.md) | Agent charters as Markdown alongside agents.yaml | Accepted | Shipped | — |
+| [0158](0158-account-opening-validates-against-product-catalog.md) | Account opening validates against product-catalog | Accepted | Complete | — |
 
 ---
 
-**Numbering gaps:** 0015 0127 0128 0129 0130 0131 do not correspond to a file in this repo's history —
+**Numbering gaps:** 0015 0127 0128 0129 0130 0131 0157 do not correspond to a file in this repo's history —
 confirmed by `git log --diff-filter=A` across all branches, not just an absent
 current file. ADR-0132 was one of these gaps until it was cited in code/config
 comments before the file existed and has since been written down properly
