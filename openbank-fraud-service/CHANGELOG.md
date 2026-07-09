@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.6.1...fraud-service-v0.7.0) (2026-07-09)
+
+
+### Features
+
+* **fraud:** add new-payee + high-amount REVIEW rule (v4) ([#635](https://github.com/JiRaska/open-bank-oss/issues/635)) ([ebc5dc1](https://github.com/JiRaska/open-bank-oss/commit/ebc5dc12d255a1dc46231b8c2a704b0839c556f1))
+
 ## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.6.0...fraud-service-v0.6.1) (2026-07-08)
 
 
