@@ -69,6 +69,8 @@ class DomesticPaymentService(
     private val temporalTaskQueue: String,
     @ConfigProperty(name = "openbank.domestic.scheme-submission.enabled", defaultValue = "false")
     private val schemeSubmissionEnabled: Boolean,
+    @ConfigProperty(name = "openbank.domestic.fraud.enforcement-enabled", defaultValue = "false")
+    private val fraudEnforcementEnabled: Boolean,
     private val workflowClient: WorkflowClient,
     private val clock: Clock,
 ) : DomesticPaymentUseCase {
@@ -90,11 +92,13 @@ class DomesticPaymentService(
         temporalTaskQueue: String,
         @ConfigProperty(name = "openbank.domestic.scheme-submission.enabled", defaultValue = "false")
         schemeSubmissionEnabled: Boolean,
+        @ConfigProperty(name = "openbank.domestic.fraud.enforcement-enabled", defaultValue = "false")
+        fraudEnforcementEnabled: Boolean,
         workflowClient: WorkflowClient,
     ) : this(
         paymentRepository, eventPublisher, screeningPort, amlCasePort, fraudScoringPort,
         schemeGatewayPort, settlementPort, accountLookupPort, metrics, temporalEnabled, temporalTaskQueue,
-        schemeSubmissionEnabled, workflowClient, Clock.systemUTC(),
+        schemeSubmissionEnabled, fraudEnforcementEnabled, workflowClient, Clock.systemUTC(),
     )
 
     private val log = Logger.getLogger(DomesticPaymentService::class.java)
@@ -106,6 +110,7 @@ class DomesticPaymentService(
         private const val ALERT_SANCTIONS_HIT = "SANCTIONS_HIT"
         private const val ALERT_AML_HOLD = "AML_HOLD"
         private const val ALERT_SCREENING_UNAVAILABLE = "SCREENING_UNAVAILABLE"
+        private const val ALERT_FRAUD_REVIEW = "FRAUD_REVIEW"
 
         private const val OWN_BANK_CODE = "0000"
     }
@@ -165,12 +170,10 @@ class DomesticPaymentService(
         }
 
         // ADR-0032: screening is the first processing step, run synchronously after the RECEIVED row
-        // is durably persisted (so the payment is never lost if screening then fails).
+        // is durably persisted (so the payment is never lost if screening then fails). Fraud scoring
+        // (ADR-0084 §4.2) is the second gate, consulted only for a payment screening has cleared —
+        // see applyScreening's CLEAR branch.
         val screened = applyScreening(received)
-
-        // ADR-0084 §4.1 (SHADOW): score for fraud alongside screening, log the verdict, and IGNORE it —
-        // the payment proceeds on its screening outcome. Fail-open via the adapter (never blocks/holds).
-        scoreFraudShadow(screened)
 
         return submitToScheme(screened)
     }
@@ -281,11 +284,18 @@ class DomesticPaymentService(
     }
 
     /**
-     * Fraud scoring in SHADOW mode (ADR-0084 §1/§4.1): the verdict is observed (logged here; metered +
-     * audited by fraud-service), never enforced. A non-ALLOW verdict is logged for the RTS Art. 18
-     * baseline; ALLOW is silent. The adapter is fail-open, so this can never affect the payment.
+     * The fraud gate for a payment screening has cleared (ADR-0084 §4.2). Always scores — the
+     * verdict is metered + audited by fraud-service regardless of enforcement — but only ACTS on
+     * it when `openbank.domestic.fraud.enforcement-enabled` is true (default false, a
+     * runbook-gated rollout flip, same convention as the four-eyes `enforce` toggle). With
+     * enforcement off, or verdict ALLOW, this persists VALIDATED exactly like the pre-Phase-2
+     * shadow path. REVIEW/CHALLENGE hold the payment in RECEIVED (same shape as an AML REVIEW
+     * hold: a case is opened, no further transition, a human releases it) rather than persisting
+     * anything — mirrors [applyScreening]'s own hold-vs-persist split. DECLINE rejects outright.
+     * The adapter is fail-open (`FraudScoringAdapter`), so an unreachable fraud-service always
+     * scores ALLOW here — this gate can only ever add friction, never remove availability.
      */
-    private suspend fun scoreFraudShadow(payment: DomesticPayment) {
+    private suspend fun applyFraudGate(payment: DomesticPayment): DomesticPayment {
         val outcome = fraudScoringPort.score(
             FraudScoreCommand(
                 amount = payment.amount,
@@ -295,14 +305,36 @@ class DomesticPaymentService(
                 counterpartyId = null,
             ),
         )
-        if (outcome.verdict != FraudVerdict.ALLOW) {
-            log.infof(
-                "Fraud SHADOW verdict %s (score=%d, rules=%s) for payment %s — observed, not enforced",
-                outcome.verdict,
-                outcome.score,
-                outcome.ruleVersion,
-                payment.id,
-            )
+        if (outcome.verdict == FraudVerdict.ALLOW) {
+            return persistTransition(payment, DomesticPaymentStatus.VALIDATED, null, null)
+        }
+
+        val mode = if (fraudEnforcementEnabled) "ENFORCED" else "SHADOW"
+        log.infof(
+            "Fraud %s verdict %s (score=%d, rules=%s, reasons=%s) for payment %s",
+            mode,
+            outcome.verdict,
+            outcome.score,
+            outcome.ruleVersion,
+            outcome.reasons,
+            payment.id,
+        )
+        if (!fraudEnforcementEnabled) {
+            return persistTransition(payment, DomesticPaymentStatus.VALIDATED, null, null)
+        }
+
+        val detail = "verdict=${outcome.verdict} score=${outcome.score} rules=${outcome.ruleVersion} " +
+            "reasons=${outcome.reasons.joinToString()}"
+        return when (outcome.verdict) {
+            FraudVerdict.DECLINE -> {
+                openCaseQuietly(payment, AmlCaseRiskLevel.CRITICAL, ALERT_FRAUD_REVIEW, detail, null)
+                persistTransition(payment, DomesticPaymentStatus.REJECTED, DomesticRejectReason.FRAUD_SUSPECTED, detail)
+            }
+            FraudVerdict.REVIEW, FraudVerdict.CHALLENGE -> {
+                openCaseQuietly(payment, AmlCaseRiskLevel.HIGH, ALERT_FRAUD_REVIEW, detail, null)
+                payment
+            }
+            FraudVerdict.ALLOW -> persistTransition(payment, DomesticPaymentStatus.VALIDATED, null, null)
         }
     }
 
@@ -334,8 +366,7 @@ class DomesticPaymentService(
         }
 
         return when (ScreeningPolicy.decide(results)) {
-            ScreeningDecision.CLEAR ->
-                persistTransition(payment, DomesticPaymentStatus.VALIDATED, null, null)
+            ScreeningDecision.CLEAR -> applyFraudGate(payment)
 
             ScreeningDecision.REVIEW -> {
                 results.filter {
