@@ -15,8 +15,10 @@
 import { encode } from '@auth/core/jwt'
 import type { BrowserContext } from '@playwright/test'
 
-// Must match playwright.config.ts webServer.env.NEXTAUTH_SECRET.
-const NEXTAUTH_SECRET = 'e2e-test-secret'
+// Reads the same env var playwright.config.ts injects into the dev server
+// (webServer.env.NEXTAUTH_SECRET), falling back to its default — one literal instead of
+// two copies that can silently drift apart.
+const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? 'e2e-test-secret'
 // Must match authOptions.ts cookies.sessionToken.name: NEXTAUTH_URL is http://, so
 // USE_SECURE_COOKIES is false and the cookie has no `__Secure-` prefix.
 const SESSION_COOKIE_NAME = 'authjs.session-token'

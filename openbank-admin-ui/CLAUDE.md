@@ -142,6 +142,24 @@ Any change under `src/**` bumps `version.txt` **and** `package.json` `version` (
 script enforces it). `feat`→minor, `fix`/`perf`→patch, `BREAKING CHANGE`→major. admin-ui is **not** a
 money-path service, so a non-breaking change is auto-merge-eligible after the independent review gate.
 
+## E2E tests (Playwright)
+
+- **Every route is gated on an Auth.js session** (`src/middleware.ts`), and there is no Keycloak in
+  the Playwright environment — a `page.goto()` without a session silently renders `/auth/login`
+  instead of the target page, so an assertion can time out (or worse, false-pass against login-page
+  markup) without anyone noticing. Sign in first via `signInAsOperator(context, baseURL)`
+  (`e2e/helpers/auth.ts`) in a `test.beforeEach` — it mints a real Auth.js session-token cookie
+  (`@auth/core/jwt` `encode()`, same secret/salt `authOptions.ts` uses) and injects it with
+  `context.addCookies()`. No production auth/middleware code is touched. Every new e2e spec needs
+  this same sign-in.
+- **Locators must not collide with Next.js dev-mode's own DOM.** `playwright.config.ts`'s
+  `webServer` runs `next dev`, and a hidden error/warning overlay can inject elements that match a
+  naive text regex (e.g. `/\d+\/\d+/` also matches the overlay's own pagination badge). Scope
+  assertions to `main` (page content) or a specific landmark rather than a bare `page.getByText`.
+- The `E2E tests (Playwright)` CI step is currently `continue-on-error: true` (advisory, not a merge
+  gate) pending full browser-dep provisioning across the runner pool — see `ci.yml` for the exact
+  condition to watch before tightening it.
+
 ## Build & verify
 
 ```
