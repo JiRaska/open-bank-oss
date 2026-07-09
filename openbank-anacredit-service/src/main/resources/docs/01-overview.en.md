@@ -27,12 +27,12 @@
    │ / upstream │   GET /returns/{date}        │  anacredit-service   │
    └────────────┘ ◄─────────────────────────  │  (derive-only)       │
                       rendered return          └──────────┬───────────┘
-                                                          │ in-memory store (v1)
+                                                          │ PostgreSQL (ADR-0037 v2)
    ┌────────────┐                                         ▼
-   │ fx-service │ ─ committedAmountEur ─►          ConcurrentHashMap
-   └────────────┘   (caller-supplied)         (anacredit_schema planned)
+   │ fx-service │ ─ committedAmountEur ─►          credit_exposures
+   └────────────┘   (caller-supplied)         (anacredit_schema)
 
-   downstream regulator (ČNB) submission = OUT OF SCOPE in v1
+   downstream regulator (ČNB) submission = OUT OF SCOPE
 ```
 
 ## Key use cases
@@ -53,7 +53,7 @@
 
 - **Keycloak** — OIDC authentication / role enforcement.
 - **openbank-libs** — `ServiceInfoResource` (`/api/v1/info`), `DocsResource` (this documentation), `BuildInfo`.
-- **No** PostgreSQL connection at runtime in v1 (store is in-memory), **no** Kafka, **no** Redis.
+- **PostgreSQL** (`openbank_anacredit`) at runtime for the `credit_exposures` store (ADR-0037 v2). **No** Kafka, **no** Redis.
 - `openbank-fx-service` — *logical* dependency only: the caller uses it to obtain `committedAmountEur` before registering an exposure; anacredit-service does not call it.
 
 ## Business value

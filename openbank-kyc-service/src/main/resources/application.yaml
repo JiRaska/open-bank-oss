@@ -46,6 +46,22 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     tls:
       verification: none
+  # Outbound service-to-service token for the PEP screening call to openbank-sanctions-service
+  # (ADR-0116 first-increment PEP check). Mirrors the same oidc-client block already used by
+  # openbank-domestic-payment / openbank-sepa-payment / openbank-fx-service / openbank-account-service
+  # (ADR-0032 §D) — without it the rest-client has no Authorization header and the downstream
+  # /api/v1/sanctions/screen call 401s. Disabled under %test; units mock PepScreeningPort directly.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+  rest-client:
+    sanctions-service:
+      url: ${SANCTIONS_SERVICE_URL:http://localhost:8123}
+      scope: jakarta.inject.Singleton
   smallrye-reactive-messaging:
     kafka:
       bootstrap-servers: localhost:29092
@@ -117,6 +133,8 @@ mp:
 "%test":
   quarkus:
     oidc:
+      enabled: false
+    oidc-client:
       enabled: false
 openbank:
   rate-limit:

@@ -5,15 +5,38 @@ Author: Claude (paired with Jiří Raška)
 Status: Accepted
 Delivery-Status: Shipped
 
-**Delivery note (updated 2026-06-30):**
+**Delivery note (updated 2026-07-09):**
 - **Role-split** — ✅ Shipped: `ROLE_KYC_OPENER` (case opener, check updates) and
   `ROLE_KYC_REVIEWER` (approve/reject) introduced in `openbank-libs-domain` `Roles.kt`.
   `KycResource.kt` updated: `openCase` + `updateCheck` require `KYC_OPENER`; `approveCase` +
   `rejectCase` require `KYC_REVIEWER`. Legacy `ROLE_KYC` kept on read-only endpoints and in
   the realm template (marked legacy) for backwards compat during Keycloak migration. Operator
   step: reassign existing `ROLE_KYC` users to the appropriate sub-role in Keycloak.
-- **Periodic re-KYC** (§5) — Planned: requires a Temporal scheduled workflow.
-- **External watchlist** — Planned (pre-production): `SANCTIONS_SCREENING` uses internal watchlist.
+- **Periodic re-KYC** (§5) — Planned: requires a Temporal scheduled workflow. Still not
+  implemented — the PEP screen below runs at case-open time (and on an operator-triggered manual
+  re-screen), not on the LOW=5y/MEDIUM=3y/HIGH+=1y cadence this ADR describes.
+- **PEP screening** — ✅ Shipped (first increment, free data source only): `PEP_SCREENING` (one of
+  the five mandatory checks in §2) now actually screens, instead of being a manual-only check an
+  operator updates by hand. `PartyEventConsumer` calls `PepScreeningService` when a case opens
+  (using the party's `legalName` from the `PARTY_CREATED` event), which calls
+  `openbank-sanctions-service`'s `POST /api/v1/sanctions/screen` scoped to `listTypes:
+  ["PEP_GLOBAL"]` — the dataset sanctions-service already imports from OpenSanctions'
+  free, public, dedicated PEP dataset (`https://data.opensanctions.org/datasets/latest/peps/targets.simple.csv`,
+  ~757k targets), reusing its existing `pg_trgm` fuzzy-match engine rather than importing/matching
+  independently. A match (or a downstream-unavailable outcome) sets `PEP_SCREENING` to
+  `MANUAL_REVIEW` (never auto-rejects — still needs four-eyes) and escalates `riskLevel` to at
+  least `HIGH`. An operator-triggered re-screen endpoint
+  (`POST /api/v1/kyc/cases/{caseId}/pep-rescreen`) exists for when the PEP list has since been
+  refreshed; it is NOT the periodic re-KYC programme above.
+  **Explicitly NOT delivered by this increment:** a paid commercial vendor feed (Refinitiv,
+  ComplyAdvantage, World-Check, etc.), identity-document verification, continuous/real-time
+  monitoring, or automatic periodic re-screening on the ADR-0116 §5 cadence (still needs the
+  Temporal workflow above). `openbank-kyc-service` has no threat model
+  (`docs/threat-models/`) — it is not in `rules.yaml: money_path_services`, so one is not gated,
+  but this is a compliance-relevant service handling PII and a threat model would still be good
+  practice; not written here to keep this increment bounded.
+- **External watchlist (sanctions)** — Planned (pre-production): `SANCTIONS_SCREENING` still uses
+  an internal watchlist — unchanged by this increment, which only wires up `PEP_SCREENING`.
 
 ## Context
 
@@ -107,9 +130,12 @@ scheduled workflow to identify expired approvals and re-open cases.
 **Negative**
 - A single `ROLE_KYC` user can both open and approve a case — maker-checker is organisational
   convention, not a technical guarantee. This is a gap for a production audit.
-- No integration with an external PEP/sanctions database yet — `SANCTIONS_SCREENING` delegates
-  to `openbank-sanctions-service`, which uses an internal watchlist.
-- Periodic re-KYC is not implemented.
+- `PEP_SCREENING` now screens a free, public PEP dataset (see delivery note) — a real
+  improvement, but NOT equivalent to a licensed commercial KYC vendor (no paid feed, no document
+  verification, no continuous monitoring). `SANCTIONS_SCREENING` is unaffected by this increment
+  and still delegates to `openbank-sanctions-service`'s internal watchlist only.
+- Periodic re-KYC is not implemented — the PEP screen above runs at case-open time and on
+  operator-triggered manual re-screen only, not on the ADR §5 cadence.
 
 **Neutral**
 - `riskLevel = MEDIUM` as default is conservative; operators can downgrade after check completion.
@@ -129,6 +155,9 @@ scheduled workflow to identify expired approvals and re-open cases.
 ## References
 
 - `openbank-kyc-service/src/main/kotlin/.../application/KycService.kt`
+- `openbank-kyc-service/src/main/kotlin/.../application/PepScreeningService.kt` (first-increment PEP check orchestration)
+- `openbank-kyc-service/src/main/kotlin/.../application/port/out/PepScreeningPort.kt`
+- `openbank-kyc-service/src/main/kotlin/.../infrastructure/client/SanctionsScreeningAdapter.kt` (calls openbank-sanctions-service, PEP_GLOBAL only)
 - `openbank-kyc-service/src/main/kotlin/.../domain/model/KycCase.kt`
 - `openbank-libs/src/main/kotlin/com/openbank/libs/security/Roles.kt` (single `ROLE_KYC`)
 - ADR-0068 (onboarding cockpit — four-eyes UI)

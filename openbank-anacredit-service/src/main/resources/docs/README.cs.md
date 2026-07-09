@@ -17,9 +17,9 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 
 ## TL;DR
 
-- **Tech stack:** Kotlin / Quarkus 3.x / JDK 25 / RESTEasy Reactive + Jackson (čistá JVM, žádná reaktivní DB)
+- **Tech stack:** Kotlin / Quarkus 3.x / JDK 25 / RESTEasy Reactive + Jackson + reaktivní Panache/Postgres
 - **Port:** 8137 (app i management na stejném portu)
-- **Persistence:** **in-memory** (`ConcurrentHashMap`, v1 — vzor `openbank-product-catalog`). Vyhrazené PostgreSQL schéma `anacredit_schema` je v `governance.yaml` *deklarováno*, ale **dosud neprovisionováno** (žádné Flyway migrace neexistují).
+- **Persistence:** **PostgreSQL** (`openbank_anacredit`, governance schema label `anacredit_schema`, ADR-0037 v2 — vzor `openbank-product-catalog`). Tabulka `credit_exposures`, Flyway migrace, reaktivní Panache adaptér.
 - **Outbox / události:** **žádné** — derive-only, služba neemituje žádné doménové události ani žádné nekonzumuje.
 - **Idempotence:** žádná — registrace expozice je `upsert` klíčovaný `instrumentId` (přirozeně idempotentní); čtení jsou čistá.
 - **Auth:** Keycloak OIDC, role `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_AUDITOR`, `ROLE_COMPLIANCE`, `ROLE_SERVICE`.

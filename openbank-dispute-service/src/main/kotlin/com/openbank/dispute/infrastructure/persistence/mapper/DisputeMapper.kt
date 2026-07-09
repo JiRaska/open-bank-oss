@@ -34,6 +34,8 @@ class DisputeMapper {
         it.resolvedAt = d.resolvedAt
         it.resolvedBy = d.resolvedBy
         it.chargebackAmount = d.chargebackAmount
+        it.remediationOutcome = d.remediationOutcome
+        it.remediationAmount = d.remediationAmount
         it.createdAt = d.createdAt
         it.updatedAt = d.updatedAt
     }
@@ -58,6 +60,8 @@ class DisputeMapper {
         resolvedAt = e.resolvedAt,
         resolvedBy = e.resolvedBy,
         chargebackAmount = e.chargebackAmount,
+        remediationOutcome = e.remediationOutcome,
+        remediationAmount = e.remediationAmount,
         createdAt = e.createdAt,
         updatedAt = e.updatedAt,
     )
@@ -70,6 +74,9 @@ class DisputeMapper {
         it.description = e.description
         it.fileReference = e.fileReference
         it.submittedAt = requireNotNull(e.submittedAt) { "submittedAt must be set before persisting DisputeEvidence" }
+        it.sequence = e.sequence
+        it.prevHash = e.prevHash
+        it.recordHash = requireNotNull(e.recordHash) { "recordHash must be set before persisting DisputeEvidence" }
     }
 
     fun toDomain(e: DisputeEvidenceEntity) = DisputeEvidence(
@@ -80,6 +87,9 @@ class DisputeMapper {
         description = e.description,
         fileReference = e.fileReference,
         submittedAt = e.submittedAt,
+        sequence = e.sequence,
+        prevHash = e.prevHash,
+        recordHash = e.recordHash,
     )
 
     fun toEntity(e: DisputeTimelineEvent) = DisputeTimelineEntity().also {

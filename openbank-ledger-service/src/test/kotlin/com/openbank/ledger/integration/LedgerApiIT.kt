@@ -207,4 +207,45 @@ class LedgerApiIT {
             body("status", equalTo("REVERSED"))
         }
     }
+
+    // Sequential (non-concurrent) double reversal against the real DB, ordered right after the
+    // happy-path reversal above. LedgerConcurrencyIT proves the SIMULTANEOUS race is serialized by
+    // the conditional UPDATE in PanacheJournalRepository.saveReversal (#465); this proves the plain
+    // repeat-call path also fails closed end-to-end (use-case pre-check AND the persistence guard
+    // both agree the entry is no longer POSTED) rather than silently no-op'ing or double-booking a
+    // second compensation entry. A mutant that weakened either guard (e.g. dropped `status = ?4`
+    // from the conditional UPDATE, or the use-case's own status check) would only be caught by a
+    // race under exact scheduling luck in the concurrency suite — this sequential call exercises
+    // the same guard deterministically, every run.
+    @Test
+    @Order(10)
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `POST reverse journal on an already-REVERSED entry is rejected with 409 and books no second compensation`() {
+        val id = createdJournalId ?: return
+
+        Given { this } When {
+            get("/api/v1/journals/$id")
+        } Then {
+            statusCode(200)
+            body("status", equalTo("REVERSED"))
+            body("id", equalTo(id))
+        }
+
+        Given {
+            contentType("application/json")
+            body("""{"reason": "Repeat reversal", "reversedBy": "$operatorId"}""")
+        } When {
+            post("/api/v1/journals/$id/reverse")
+        } Then {
+            statusCode(409)
+        }
+
+        // Still REVERSED — the failed repeat attempt did not flip state or leave a partial write.
+        Given { this } When {
+            get("/api/v1/journals/$id")
+        } Then {
+            statusCode(200)
+            body("status", equalTo("REVERSED"))
+        }
+    }
 }

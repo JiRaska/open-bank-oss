@@ -31,24 +31,24 @@ App and management share port **8137** (no separate management port configured).
 
 ## Configuration
 
-From `application.yaml` — minimal surface (no DB / Kafka / Redis env in v1):
+From `application.yaml` (ADR-0037 v2 adds a PostgreSQL datasource + Flyway; no Kafka / Redis):
 
 | Setting | Value | Purpose |
 |---|---|---|
 | `quarkus.http.port` | `8137` | app + management port |
 | `quarkus.http.cors.origins` | `http://localhost:3000,http://openbank-admin-ui:3000` | admin UI origin allow-list |
 | security headers | `X-Content-Type-Options`, `X-Frame-Options: DENY`, CSP `default-src 'self'`, HSTS, etc. | hardened response headers |
+| `quarkus.datasource.reactive.url` / `.jdbc.url` | `openbank_anacredit` (localhost default) | reactive Panache app traffic / Flyway migrations |
+| `quarkus.flyway.migrate-at-start` | `true` | schema applied on boot |
 | `quarkus.swagger-ui.path` | `/api/docs` | Swagger UI |
 | `quarkus.smallrye-openapi.path` | `/q/openapi` | OpenAPI document |
 
-Auth (Keycloak OIDC issuer, realm) and any future datasource settings are supplied by the deployment environment / `openbank-libs` defaults, not hard-coded in `application.yaml`.
+Auth (Keycloak OIDC issuer, realm) and the datasource credentials are supplied by the deployment environment, not hard-coded in `application.yaml`.
 
 ## Health checks
 
 - **Liveness:** `/q/health/live` — JVM + ArC running. Pod restart on failure.
-- **Readiness:** `/q/health/ready` — service ready to serve. v1 has no external datastore dependency, so readiness does not gate on a DB/Kafka pool.
-
-> **Operational note:** the in-memory store is non-durable — a pod restart loses all registered exposures, which must be re-fed before the next return is rendered. This is acceptable for v1's batch-style usage and is removed by the planned PostgreSQL persistence.
+- **Readiness:** `/q/health/ready` — service ready to serve. As of ADR-0037 v2, readiness now depends on the reactive Postgres connection pool being reachable (SmallRye Health's built-in datasource check).
 
 ## FinOps workload tier (ADR-0057)
 
@@ -59,7 +59,7 @@ Auth (Keycloak OIDC issuer, realm) and any future datasource settings are suppli
 | Traffic shape | rare / bursty — exposures fed and returns rendered around monthly reference dates |
 | Cold-start tolerance | high — regulatory rendering is not latency-critical |
 
-⇒ **Tier T1 — HTTP → 0** (scale from/to zero on inbound HTTP via the KEDA HTTP add-on). Idle cost ≈ 0. The non-durable in-memory store means each cold start begins empty; the upstream feed re-registers exposures before a return is requested. The tier is *derived from measured traffic*, not hand-assigned (ADR-0057), so this is the recommended classification, subject to the declared-vs-measured CI gate.
+⇒ **Tier T1 — HTTP → 0** (scale from/to zero on inbound HTTP via the KEDA HTTP add-on). Idle compute cost ≈ 0; the `openbank_anacredit` Postgres instance itself is now a small always-on cost line (previously zero under the in-memory v1 store) — exposures registered before a scale-to-zero event now **survive** the next cold start (this is the whole point of ADR-0037 v2). Cold start additionally needs a live reactive-pool connection before readiness passes. The tier is *derived from measured traffic*, not hand-assigned (ADR-0057), so this is the recommended classification, subject to the declared-vs-measured CI gate.
 
 ## SLO
 
@@ -69,16 +69,16 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 | Metric | Target | Note |
 |---|---|---|
 | Availability | best-effort (T1, not T0) | scale-to-zero tolerated; no continuous-service mandate |
-| Latency p95 (render return) | < 200 ms warm | pure in-memory aggregation over the exposure set |
-| Cold-start | within HTTP add-on budget | Quarkus fast-jar starts in tens to hundreds of ms |
+| Latency p95 (render return) | < 200 ms warm | reactive Panache query over `credit_exposures` (indexed on `debtor_id`) |
+| Cold-start | within HTTP add-on budget | Quarkus fast-jar starts in tens to hundreds of ms; add Postgres pool handshake |
 | Error rate | < 0.1% 5xx | unexpected errors carry a correlation id via libs |
 
 ## Runbooks
 
 ### Return looks empty / under-reports after a deploy
 
-1. v1 store is in-memory and **lost on restart**. Confirm the pod is fresh: `kubectl get pod -l app=anacredit-service -o wide`.
-2. Re-run the exposure feed (re-POST exposures) before rendering the return.
+1. Exposures are now durable (ADR-0037 v2) — a pod restart alone should **not** lose them. If the return is empty, first confirm the Flyway migration actually applied: `SELECT * FROM flyway_schema_history;` should show `V1__create_credit_exposures` as `success`.
+2. If the migration is missing or the table is genuinely empty, re-run the exposure feed (re-POST exposures) before rendering the return.
 3. Verify with `GET /api/v1/anacredit/exposures` that the expected instruments are present.
 
 ### Instrument unexpectedly excluded

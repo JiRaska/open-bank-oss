@@ -32,6 +32,29 @@ quarkus:
     tls:
       verification: none
 
+  # Single datasource backing both the CreditExposure store (ADR-0037 v2) and the
+  # loan_stage_projection read-model (ADR-0037 follow-up, issue #638) — same physical DB
+  # (anacredit-db.yaml), same `openbank` owner, two independent Flyway-migrated tables.
+  datasource:
+    db-kind: postgresql
+    username: ${POSTGRES_USER:openbank}
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    # Reactive client for the app (Panache); JDBC URL is for Flyway migrations only.
+    reactive:
+      url: ${REACTIVE_URL:postgresql://localhost:5432/openbank_anacredit}
+    jdbc:
+      url: ${JDBC_URL:jdbc:postgresql://localhost:5432/openbank_anacredit}
+  hibernate-orm:
+    # Flyway owns the schema; Hibernate validates against it, never generates.
+    database:
+      generation: none
+  flyway:
+    migrate-at-start: true
+    # Retries give the Kafka-consumer-carrying pod time to reach the DB on a cold cluster boot,
+    # where CNPG and the app can race (issue #638).
+    connect-retries: 10
+    connect-retries-interval: 2S
+
   log:
     level: INFO
   smallrye-openapi:
@@ -44,24 +67,6 @@ quarkus:
     port: 8085
     host: 0.0.0.0
     root-path: /q
-
-  # Loan stage-changed projection only (ADR-0037 follow-up, issue #638) — the existing CreditExposure
-  # feed stays in-memory in this increment; this datasource backs `loan_stage_projection` alone.
-  datasource:
-    db-kind: postgresql
-    username: openbank
-    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
-    reactive:
-      url: postgresql://localhost:5432/openbank_anacredit
-    jdbc:
-      url: jdbc:postgresql://localhost:5432/openbank_anacredit
-  flyway:
-    migrate-at-start: true
-    connect-retries: 10
-    connect-retries-interval: 2S
-  hibernate-orm:
-    database:
-      generation: none
 
 mp:
   messaging:

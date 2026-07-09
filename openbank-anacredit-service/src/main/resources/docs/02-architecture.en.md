@@ -9,7 +9,7 @@ graph LR
   fx[fx-service]
 
   ana[(anacredit-service)]:::svc
-  store[(in-memory store<br/>ConcurrentHashMap)]
+  store[(PostgreSQL<br/>credit_exposures)]
   kc[(Keycloak<br/>OIDC)]
 
   admin -- "POST /exposures<br/>GET /returns/{date}" --> ana
@@ -32,13 +32,13 @@ graph TB
     rest[REST<br/>AnaCreditResource<br/>+ DTOs]
     uc[Application<br/>AnaCreditService<br/>in/out ports]
     dom[Domain<br/>CreditExposure<br/>EligibilityPolicy<br/>ReturnBuilder / Mapper]
-    persist[Persistence<br/>InMemoryCreditExposureRepository]
+    persist[Persistence<br/>PostgresCreditExposureRepository]
   end
 
   rest --> uc
   uc --> dom
   uc --> persist
-  persist -.-> store[(ConcurrentHashMap)]
+  persist -.-> store[(PostgreSQL<br/>credit_exposures)]
 ```
 
 ## Hexagonal layers
@@ -61,21 +61,23 @@ com.openbank.anacredit/
 │
 └── infrastructure/                  ◄── adapters
     ├── rest/                        AnaCreditResource (JAX-RS), dto/AnaCreditDtos
-    └── persistence/                 InMemoryCreditExposureRepository (v1 adapter)
+    └── persistence/                 CreditExposureEntity (Panache), PostgresCreditExposureRepository
 ```
 
 **Dependency rule:** `domain` ← `application` ← `infrastructure`. Domain code never sees JAX-RS, Jackson, or CDI.
 
 ## Ports
 
-| Port | Direction | Defined in | v1 adapter |
+| Port | Direction | Defined in | Adapter |
 |---|---|---|---|
 | `RegisterExposureUseCase` | inbound | `application/port/in` | `AnaCreditService` |
 | `ListExposuresUseCase` | inbound | `application/port/in` | `AnaCreditService` |
 | `BuildAnaCreditReturnUseCase` | inbound | `application/port/in` | `AnaCreditService` |
-| `CreditExposureRepository` (`upsert`/`findById`/`listAll`) | outbound | `application/port/out` | `InMemoryCreditExposureRepository` |
+| `CreditExposureRepository` (`upsert`/`findById`/`listAll`, all `suspend`) | outbound | `application/port/out` | `PostgresCreditExposureRepository` |
 
-Swapping the in-memory store for a JPA/Panache `anacredit_schema`-backed adapter is a single new outbound adapter; the domain and application layers do not change.
+The port kept the swap from the v1 in-memory `ConcurrentHashMap` to the reactive-Panache
+`anacredit_schema`-backed adapter (ADR-0037 v2) mechanical: a single new outbound adapter; the
+domain and application layers did not change.
 
 ## The render pipeline (no outbox — derive-only)
 
@@ -86,7 +88,7 @@ sequenceDiagram
   participant C as Client (operator / auditor)
   participant R as AnaCreditResource
   participant S as AnaCreditService
-  participant ST as CreditExposureRepository (in-memory)
+  participant ST as CreditExposureRepository (PostgreSQL)
   participant B as AnaCreditReturnBuilder (pure domain)
 
   C->>R: GET /api/v1/anacredit/returns/{referenceDate}
@@ -116,4 +118,4 @@ The €25 000 threshold is a *per-debtor* test, so `AnaCreditReturnBuilder` firs
 2. **Pure domain rules** — scope + materiality live in `AnaCreditEligibilityPolicy`, a framework-free object with deterministic, audit-facing reason codes.
 3. **Explain every drop** — a reportable instrument becomes a `CreditRecord`; a dropped one becomes an `ExclusionNote`. Nothing disappears silently.
 4. **Native amounts report; EUR only gates** — the dataset rows carry native-currency amounts; `committedAmountEur` is used solely for the threshold.
-5. **Storage is an adapter** — the in-memory store is an implementation detail behind `CreditExposureRepository`; persistence can be added without touching the core.
+5. **Storage is an adapter** — the PostgreSQL store is an implementation detail behind `CreditExposureRepository`; it was swapped in from the original in-memory store without touching the core.
