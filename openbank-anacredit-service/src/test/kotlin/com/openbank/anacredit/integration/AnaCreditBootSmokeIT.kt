@@ -4,6 +4,8 @@
 
 package com.openbank.anacredit.integration
 
+import com.openbank.anacredit.it.PostgresRedpandaTestResource
+import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
@@ -14,13 +16,16 @@ import org.junit.jupiter.api.Test
 /**
  * Boot smoke test guarding the "released-but-never-booted" defect class.
  *
- * anacredit-service is a released component (version.txt) with no GitOps deployment. It uses an
- * in-memory repository (no Postgres, no Kafka), so no Testcontainers resources are needed — a bare
- * @QuarkusTest is sufficient to boot the full application. This mirrors the pattern introduced for
- * lending-service (boot/config defects only surface at boot: duplicate YAML keys, missing CDI beans,
- * OIDC mis-wiring). The two assertions prove the wiring, config and OIDC override survive a real boot.
+ * anacredit-service is a released component (version.txt) with no GitOps deployment. As of the
+ * `loan.stage_changed` event-ingestion follow-up (ADR-0037, issue #638) it now boots a real Postgres
+ * datasource (Flyway `V1__create_loan_stage_projection.sql`) and a Kafka consumer
+ * (`@Incoming("lending-events-in")`), so this mirrors `balance-service`/`party-service`'s
+ * Testcontainers-backed boot smoke test rather than the old bare-`@QuarkusTest` version (which only
+ * covered the in-memory `CreditExposure` feed). The two assertions prove the wiring, config, DB
+ * migration and OIDC override all survive a real boot against live infrastructure.
  */
 @QuarkusTest
+@QuarkusTestResource(PostgresRedpandaTestResource::class)
 class AnaCreditBootSmokeIT {
 
     @Test
