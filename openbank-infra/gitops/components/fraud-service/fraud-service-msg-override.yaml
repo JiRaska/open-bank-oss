@@ -1,0 +1,39 @@
+# Kafka `transaction-signal` channel config, loaded as an external Quarkus config source
+# (open-bank-oss#686 follow-up to #685).
+#
+# Why NOT YAML keys in application.yaml: SmallRye Config's YAML source unconditionally quotes any
+# leaf map key containing a literal dot, so `group.id: foo` registers only as the quoted property
+# `mp.messaging.incoming.transaction-signal."group.id"` — never the plain
+# `...transaction-signal.group.id` that KafkaConnectorIncomingConfiguration.getGroupId() actually
+# reads. `group.id` then silently fell back to quarkus.application.name
+# ("openbank-fraud-service"), which the fraud-service KafkaUser ACL (kafka-fraud-mtls.yaml) never
+# granted Read/Describe on — every poll got a silent GroupAuthorizationException until it landed
+# inside Quarkus's synchronous startup window and became a fatal crash-loop.
+#
+# Why NOT env vars either (this superseded #685's original fix): ADR-0137's "known follow-up"
+# section documents that MP_MESSAGING_INCOMING_<CHANNEL>_* env vars were tried for a HYPHENATED
+# mp.messaging channel name (payment-scheme-accepted) and reverted (#2649 → #2659) — SmallRye's
+# channel discovery reverse-maps the env var name to a property name ambiguously and the pod fails
+# to start. `transaction-signal` is hyphenated too, and #685's own regression test
+# (TransactionSignalConsumerBootIT) injected the property directly via a
+# QuarkusTestResourceLifecycleManager config map — a different, always-safe mechanism — so it never
+# actually exercised the env var path and could not have caught this.
+#
+# A properties FILE carries the exact hyphenated/dotted property name unambiguously (no YAML
+# flattening, no env-var reverse-mapping) — the same proven pattern already live for
+# transaction-service (see transaction-service-msg-override.yaml in the payments component).
+# config_ordinal=500 outranks the baked application.yaml (~254).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fraud-service-msg-override
+  namespace: fraud
+  labels:
+    app.kubernetes.io/name: fraud-service
+    app.kubernetes.io/part-of: fraud
+data:
+  override.properties: |
+    config_ordinal=500
+    mp.messaging.incoming.transaction-signal.group.id=openbank-fraud-service-velocity
+    mp.messaging.incoming.transaction-signal.auto.offset.reset=latest
+    mp.messaging.incoming.transaction-signal.dead-letter-queue.topic=openbank.transactions.transaction.initiated.fraud.dlq

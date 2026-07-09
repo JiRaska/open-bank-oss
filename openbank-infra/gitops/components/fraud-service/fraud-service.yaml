@@ -53,20 +53,22 @@ spec:
               valueFrom: {secretKeyRef: {name: fraud-db-app, key: password}}
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
-            # Set as env vars, not application.yaml keys: SmallRye Config's YAML source
-            # unconditionally quotes any leaf map key containing a literal dot, so
-            # `group.id`/`auto.offset.reset`/`dead-letter-queue.topic` written in
-            # openbank-fraud-service/src/main/resources/application.yaml silently never resolve
-            # (see the comment there). group.id in particular MUST match the Read/Describe grant
-            # in openbank-infra/gitops/components/fraud-service/kafka-fraud-mtls.yaml's KafkaUser
-            # ACL (openbank-fraud-service-velocity) or every consumer poll gets Kafka's
-            # GroupAuthorizationException.
-            - name: MP_MESSAGING_INCOMING_TRANSACTION_SIGNAL_GROUP_ID
-              value: openbank-fraud-service-velocity
-            - name: MP_MESSAGING_INCOMING_TRANSACTION_SIGNAL_AUTO_OFFSET_RESET
-              value: latest
-            - name: MP_MESSAGING_INCOMING_TRANSACTION_SIGNAL_DEAD_LETTER_QUEUE_TOPIC
-              value: openbank.transactions.transaction.initiated.fraud.dlq
+            # #685 originally set these as MP_MESSAGING_INCOMING_TRANSACTION_SIGNAL_* env vars.
+            # Reverted here (open-bank-oss#686 follow-up): ADR-0137's "known follow-up" section
+            # documents that this exact approach — an env var for a HYPHENATED mp.messaging
+            # channel name — was tried for `payment-scheme-accepted` and reverted (#2649→#2659):
+            # SmallRye's channel discovery reverse-maps the env var name to a property name
+            # ambiguously and the pod fails to start. `transaction-signal` is hyphenated too, and
+            # #685's own regression test (TransactionSignalConsumerBootIT) never actually exercised
+            # this env var — it injects the property directly via a
+            # QuarkusTestResourceLifecycleManager config map (a different, always-safe mechanism),
+            # so it could not have caught this. Loading a properties FILE via
+            # QUARKUS_CONFIG_LOCATIONS instead — see fraud-service-msg-override.yaml — carries the
+            # exact hyphenated/dotted property name unambiguously (no YAML flattening, no env-var
+            # reverse-mapping), matching the proven pattern already live for transaction-service
+            # (transaction-service-msg-override.yaml).
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: /mnt/msg-config/override.properties
             - name: KAFKA_SECURITY_PROTOCOL
               value: "SSL"
             - name: KAFKA_SSL_KEYSTORE_LOCATION
@@ -120,6 +122,9 @@ spec:
               readOnly: true
             - name: kafka-truststore
               mountPath: /mnt/kafka/truststore
+              readOnly: true
+            - name: msg-override
+              mountPath: /mnt/msg-config
               readOnly: true
           resources:
             requests: {cpu: 250m, memory: 310Mi}
@@ -210,6 +215,9 @@ spec:
         - name: kafka-truststore
           secret:
             secretName: kafka-cluster-ca-truststore
+        - name: msg-override
+          configMap:
+            name: fraud-service-msg-override
   strategy:
     canary:
       stableService: fraud-service
