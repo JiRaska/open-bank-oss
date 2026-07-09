@@ -58,6 +58,17 @@ spec:
           mutateDigest: false
           verifyDigest: false
           required: true
+          # useCache: false — the image-verify cache has no negative-result TTL of its
+          # own; concurrent verifyImages goroutines (this rule + the SBOM-attestation
+          # rule) race on the same ECR credential temp file ("Could not save cache: open
+          # .../.ecr/.config.json.tmp*: no such file or directory"), and whichever loses
+          # the race gets its transient failure cached as if it were a real verification
+          # result — poisoning every subsequent admission for that tag until the cache
+          # entry expires or the admission-controller pod restarts. Hit on 2026-07-09:
+          # a freshly signed, cosign-verifiable admin-ui image stayed "unverified" for
+          # 10+ retries straight because of this. Always verify fresh; correctness over
+          # the (small) admission-latency saving.
+          useCache: false
           attestors:
             - count: 1
               entries:
