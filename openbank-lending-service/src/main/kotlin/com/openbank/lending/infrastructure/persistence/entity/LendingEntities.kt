@@ -5,6 +5,7 @@
 package com.openbank.lending.infrastructure.persistence.entity
 
 import com.openbank.lending.domain.model.ApplicationStatus
+import com.openbank.lending.domain.model.CollateralStatus
 import com.openbank.lending.domain.model.CollateralType
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.libs.domain.identifiers.Ids
@@ -200,6 +201,19 @@ class CollateralEntity : PanacheEntityBase() {
 
     @Column(name = "valued_at")
     var valuedAt: OffsetDateTime = OffsetDateTime.MIN
+
+    @Column(name = "status")
+    @Enumerated(EnumType.STRING)
+    var status: CollateralStatus = CollateralStatus.PENDING
+
+    @Column(name = "registered_by")
+    var registeredBy: String = ""
+
+    @Column(name = "decided_by")
+    var decidedBy: String? = null
+
+    @Column(name = "decided_at")
+    var decidedAt: OffsetDateTime? = null
 
     @Column(name = "created_at")
     var createdAt: OffsetDateTime = OffsetDateTime.MIN

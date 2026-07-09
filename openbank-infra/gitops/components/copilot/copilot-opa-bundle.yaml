@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: copilot-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "859ef7da650985b3"
+    openbank.tech/policy-checksum: "3c155edb91dc7a1f"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1222,6 +1222,7 @@ data:
         - send                              # swift: send an outbound wire message (issue #395)
         - credit                            # balance: direct ledger-balance credit adjustment (issue #395)
         - debit                             # balance: direct ledger-balance debit adjustment (issue #395)
+        - collateralRegister                # lending: collateral registration/edit feeds IFRS 9 LGD (issue #621)
 
     # ---------------------------------------------------------------------------------------
     # Feature-flag flip governance (ADR-0067 follow-up, issue #419). The OPA PEP (rest.rego)

@@ -10,11 +10,13 @@ import com.openbank.lending.application.port.`in`.DisburseLoanUseCase
 import com.openbank.lending.application.port.`in`.ProvisioningUseCase
 import com.openbank.lending.application.port.`in`.ServicingUseCase
 import com.openbank.lending.application.port.`in`.WriteOffLoanUseCase
+import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
 import com.openbank.lending.domain.model.DecisionRequest
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import io.quarkus.security.identity.SecurityIdentity
@@ -37,7 +39,8 @@ import java.util.UUID
 
 /**
  * Lending REST surface (ADR-0028 D5). Every endpoint is role-gated with raw string literals —
- * never `@PermitAll`. Origination decisions are four-eyes (enforced in the application service).
+ * never `@PermitAll`. Origination decisions and collateral registration are four-eyes (enforced in
+ * the application service; collateral gating added in the ADR-0028 follow-up, issue #621).
  */
 @Path("/api/v1/lending")
 @Produces(MediaType.APPLICATION_JSON)
@@ -143,20 +146,30 @@ class LendingResource(
             .map { Response.ok(it).build() }
             .onFailure().recoverWithItem { e -> Response.status(409).entity(mapOf("error" to e.message)).build() }
 
-    // --- Collateral ---------------------------------------------------------------------------------
+    // --- Collateral (four-eyes: register is the maker, decide is a different checker) ---------------
 
     @POST
     @Path("/loans/{id}/collateral")
-    @Operation(summary = "Register collateral against a loan")
-    @Authorize(action = "lending.create", resource = "#id")
+    @Operation(summary = "Register collateral against a loan (maker; PENDING until a checker approves it)")
+    @Authorize(action = "lending.collateralRegister", resource = "#id")
     fun registerCollateral(@PathParam("id") id: UUID, request: CollateralRequest): Uni<Response> =
-        collateral.register(LoanId(id), request)
+        collateral.register(LoanId(id), request, actor())
             .map { Response.status(201).entity(it).build() }
             .onFailure().recoverWithItem { e -> Response.status(400).entity(mapOf("error" to e.message)).build() }
 
+    @POST
+    @Path("/collateral/{id}/decision")
+    @Operation(summary = "Approve or reject a pending collateral registration (checker; must differ from registrant)")
+    @RolesAllowed("ROLE_CREDIT_RISK", "ROLE_ADMIN")
+    @Authorize(action = "lending.collateralDecide", resource = "#id")
+    fun decideCollateral(@PathParam("id") id: UUID, decision: CollateralDecisionRequest): Uni<Response> =
+        collateral.decide(CollateralId(id), decision, actor())
+            .map { Response.ok(it).build() }
+            .onFailure().recoverWithItem { e -> Response.status(409).entity(mapOf("error" to e.message)).build() }
+
     @GET
     @Path("/loans/{id}/collateral")
-    @Operation(summary = "List collateral registered against a loan")
+    @Operation(summary = "List collateral registered against a loan (any status)")
     @Authorize(action = "lending.read", resource = "#id")
     fun listCollateral(@PathParam("id") id: UUID) = collateral.list(LoanId(id))
 
