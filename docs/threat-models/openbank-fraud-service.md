@@ -64,12 +64,15 @@ Assets protected, in priority order:
                      │                                     ▼                                       │
  [Kafka events] ──4──┼─▶ TransactionSignalConsumer ──▶ VelocityAggregateRepositoryImpl ────────  │
    transaction.init  │     (H1/H24/D7 rolling counters)    velocity_aggregates (Postgres) ──5──   │
+                     │                              └──▶ PayeeHistoryRepositoryImpl ──────────  │
+                     │                                    (per-account/payee history)  payee_history (Postgres) ──6──   │
                      └────────────────────────────────────────────────────────────────────────────┘
 ```
 
 Trust boundaries crossed: (1) external caller → REST; (3) service → Postgres;
 (4) Kafka (`openbank.transactions.transaction.initiated`) → `TransactionSignalConsumer` → (5)
-`velocity_aggregates` Postgres. Domain layer (`FraudRuleEngine`, model) has **zero** framework
+`velocity_aggregates` Postgres and (6) `payee_history` Postgres (ADR-0084 §3 v4 — same Kafka signal,
+same trust boundary, no new topic). Domain layer (`FraudRuleEngine`, model) has **zero** framework
 imports (ADR-0002), so verdict logic is unit-testable in isolation.
 
 ## 3. STRIDE analysis
@@ -116,6 +119,13 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 - **OPA enforce (S1/E1):** authz is advisory; enforce fine-grained policy (ADR-0034) before the
   enforce rollout phase.
 - **Signed audit / evidence bundle (R1, ADR-0029 D2)** for non-repudiation of verdicts.
+- **`velocity_aggregates` has no redelivery guard (v4 finding, T-class).** Unlike the new
+  `payee_history` upsert (guarded on `last_transaction_id`), a redelivered/duplicate Kafka message
+  for the same underlying transaction still double-counts `velocity_aggregates.transaction_count`
+  and `total_amount` — a pre-existing gap surfaced during the v4 work, not newly introduced. Adding
+  the same idempotency-key guard there is a follow-up, not blocking v4 (payee_history's fail mode —
+  a payee wrongly appearing established a message earlier than it should — is materially less
+  severe than velocity's — an inflated count nudging REVIEW).
 - **Load test the p99 ≤ 150 ms latency budget** before flipping any surface to challenge/enforce.
 
 ## 6. Change log
@@ -162,3 +172,30 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
   Deliberately did **not** add a synchronous FX-conversion call into the scoring path (would be a
   new cross-service dependency with its own fail-open/closed decision — out of scope for this fix).
   Rollback: revert to the single-threshold v3 rules (git revert this commit); no data migration.
+
+- **2026-07-09** — ADR-0084 §3 v4 (issue #625): new-payee + high-amount combination rule
+  implemented, closing the roadmap item deferred at Phase-1 launch for lack of a payee-history
+  signal. New asynchronous data path within the **existing** Kafka trust boundary: the same
+  `TransactionSignalConsumer` that updates `velocity_aggregates` now also reads `targetAccountId`
+  from `openbank.transactions.transaction.initiated` (already published by transaction-service,
+  simply not previously consumed) and upserts `payee_history` (V3__create_payee_history.sql) via
+  `PayeeHistoryRepositoryImpl` — a new (account_id, payee_identifier) table, no new Kafka topic, no
+  new consumer, no new HTTP endpoint. `ScoreRequest` gains `isNewPayee: Boolean` (default `false`),
+  set server-side in `FraudScoringService.enrichWithPayeeHistory` from the payee_history lookup —
+  never accepted from the caller, same non-negotiable as every other scoring input (§4 invariants).
+  `FraudRuleEngine` bumped to `v4` with `NewPayeeHighAmountReviewRule`: REVIEW when `isNewPayee` AND
+  amount exceeds a per-currency threshold set at roughly half of `LargeSingleTransactionReviewRule`'s
+  (CZK 250,000 / EUR 10,000) — same `Map<String, BigDecimal>` fail-closed-on-unmapped-currency
+  pattern as the v3 amount rules (T2 mitigation: code-as-config, reviewed under the money-path
+  2-approval gate).
+  **New consideration — idempotent replay (T-class, `payee_history` specific):** unlike the
+  pre-existing `velocity_aggregates` upsert (which has no redelivery guard and double-counts on a
+  redelivered Kafka message — a known, not newly introduced, gap), the `payee_history` upsert guards
+  on `last_transaction_id` (the signal's `aggregateId`) so a redelivered/duplicate message for the
+  same underlying transaction does not double-count `payment_count` or flip an established payee
+  back to appearing new. Verified against a real Postgres in `PayeeHistoryRepositoryImplIT`.
+  **Information disclosure (I-class):** `payee_identifier` is an internal account UUID (as text),
+  the same class of identifier already held in `fraud_scores.counterparty_id` — no new PII category.
+  Rollback: revert `FraudRuleEngine` to `v3` (`ScoreRequest.isNewPayee` defaults to `false` and is
+  additive/backward-compatible, so no data cleanup is required); `payee_history` table can be
+  dropped independently since nothing else reads it.
