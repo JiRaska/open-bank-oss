@@ -28,6 +28,15 @@ enum class LoanStatus { ACTIVE, CLOSED, WRITTEN_OFF }
 enum class CollateralType { REAL_ESTATE, VEHICLE, SECURITIES, CASH_DEPOSIT, GUARANTEE, OTHER }
 
 /**
+ * Four-eyes decision state for a registered [Collateral] (ADR-0028 follow-up, issue #621). Mirrors
+ * [ApplicationStatus]'s maker-checker shape: a registration is [PENDING] until a DIFFERENT principal
+ * than the [Collateral.registeredBy] maker decides it via the shared `ApprovalResource`/`ApprovalStore`
+ * (ADR-0155). Only [APPROVED] collateral is summed by `LendingService.applyCollateral` into the IFRS 9
+ * LGD adjustment — a pending or rejected registration must never reduce a loan's ECL.
+ */
+enum class CollateralStatus { PENDING, APPROVED, REJECTED }
+
+/**
  * A credit application moving through the four-eyes decision flow. [proposedBy] and [decidedBy] are the
  * **authenticated principals** (JWT subject) captured server-side at each step — never client-supplied —
  * and the officer who [proposedBy] cannot be the one who decides ([decidedBy]), enforced in the
@@ -94,7 +103,12 @@ data class LoanInstallment(
 /** Outcome of one scheduled interest-accrual pass over the live book (servicing posting loop). */
 data class AccrualOutcome(val asOf: LocalDate, val installmentsAccrued: Int)
 
-/** Security registered against a loan. */
+/**
+ * Security registered against a loan. Four-eyes gated (ADR-0028 follow-up, issue #621): [registeredBy]
+ * is the trusted maker (authenticated JWT subject, never client-supplied); the collateral is not usable
+ * to reduce a loan's LGD in the IFRS 9 ECL calc until a DIFFERENT principal ([decidedBy]) approves it —
+ * enforced in the application service, mirroring [LoanApplication]'s origination four-eyes flow.
+ */
 data class Collateral(
     val id: CollateralId = CollateralId.random(),
     val loanId: LoanId,
@@ -103,6 +117,10 @@ data class Collateral(
     val marketValue: Money,
     val haircut: BigDecimal = BigDecimal.ZERO,
     val valuedAt: OffsetDateTime,
+    val status: CollateralStatus = CollateralStatus.PENDING,
+    val registeredBy: String,
+    val decidedBy: String? = null,
+    val decidedAt: OffsetDateTime? = null,
     val createdAt: OffsetDateTime,
 )
 
@@ -128,12 +146,24 @@ data class LoanApplicationRequest(
  */
 data class DecisionRequest(val approve: Boolean, val reason: String? = null)
 
+/**
+ * Collateral registration intake. Note there is **no `registeredBy`**: the maker's identity is taken
+ * from the authenticated JWT subject server-side, never trusted from the request body — same pattern
+ * as [LoanApplicationRequest] (ADR-0028 follow-up, issue #621).
+ */
 data class CollateralRequest(
     val type: CollateralType,
     val description: String? = null,
     val marketValue: Money,
     val haircut: BigDecimal = BigDecimal.ZERO,
 )
+
+/**
+ * Checker decision on a pending [Collateral] registration. Note there is **no `decidedBy`**: the
+ * checker's identity is taken from the authenticated JWT subject server-side, so the four-eyes
+ * separation cannot be spoofed — same pattern as [DecisionRequest] (ADR-0028 follow-up, issue #621).
+ */
+data class CollateralDecisionRequest(val approve: Boolean, val reason: String? = null)
 
 /**
  * Terminal credit-loss event: the bank judges the loan's remaining exposure uncollectible and removes

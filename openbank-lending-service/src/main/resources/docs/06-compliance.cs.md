@@ -143,7 +143,10 @@ efektivníLGD = max(0, LGD - (Σ zajištění.tržníHodnota × (1 - zajištěn�
   papíry 30 % jsou rozumné výchozí předpoklady použité v testech této služby, dodávané volajícím při
   každé registraci (`CollateralRequest.haircut`), nikoli platformou vynucovaná nebo model-governance
   tabulka.
-- **Žádná kontrola čtyř očí při registraci** (na rozdíl od vzniku úvěru/vyplacení) — viz threat model §5/§7.
+- **Kontrola čtyř očí při registraci (issue #621):** zaregistrovaná položka zajištění je ve stavu
+  `PENDING` a je vyloučena ze snížení LGD výše, dokud ji neschválí JINÝ princip prostřednictvím
+  `POST /api/v1/lending/collateral/{id}/decision` — zrcadlí maker-checker vzor vzniku úvěru/vyplacení.
+  Viz threat model §3/§7.
 
 **Neexistuje žádný behaviorální/statistický PD model, žádný makroekonomický overlay ani forward-looking scénářové vážení.** Tyto parametry **musí být před jakýmkoli produkčním použitím kalibrovány aktuárským/risk týmem podle reálné historie ztrát portfolia** — jde o strukturální první přírůstek (funkční pipeline stage-bucketing → ECL → účetní zápis s prvním přiblížením zohlednění zajištění), nikoli o regulatorně kvalitní implementaci IFRS 9. Výměna konzervativních konstant za reálný adaptér rizikových parametrů, nebo zástupné tabulky srážek za kalibrovanou, je otázka zapojení (`RiskParameterSource`, ADR-0028 D4), ne doménová změna.
 

@@ -6,6 +6,7 @@ package com.openbank.lending.infrastructure.persistence.mapper
 
 import com.openbank.lending.domain.model.ApplicationStatus
 import com.openbank.lending.domain.model.Collateral
+import com.openbank.lending.domain.model.CollateralStatus
 import com.openbank.lending.domain.model.CollateralType
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
@@ -152,6 +153,7 @@ class LendingMapperTest {
             marketValue = eur("250000.00"),
             haircut = BigDecimal("0.20"),
             valuedAt = createdAt,
+            registeredBy = "officer-1",
             createdAt = createdAt,
         )
 
@@ -173,10 +175,35 @@ class LendingMapperTest {
             marketValue = eur("5000.00"),
             haircut = BigDecimal.ZERO,
             valuedAt = createdAt,
+            registeredBy = "officer-1",
             createdAt = createdAt,
         )
 
         assertThat(mapper.toDomain(mapper.toEntity(item))).isEqualTo(item)
+    }
+
+    @Test
+    fun `collateral four-eyes decision fields round-trip losslessly (ADR-0028 follow-up, issue #621)`() {
+        val item = Collateral(
+            id = CollateralId.random(),
+            loanId = LoanId.random(),
+            type = CollateralType.VEHICLE,
+            marketValue = eur("5000.00"),
+            haircut = BigDecimal("0.40"),
+            valuedAt = createdAt,
+            status = CollateralStatus.APPROVED,
+            registeredBy = "officer-1",
+            decidedBy = "risk-1",
+            decidedAt = createdAt,
+            createdAt = createdAt,
+        )
+
+        val entity = mapper.toEntity(item)
+        assertThat(entity.status).isEqualTo(CollateralStatus.APPROVED)
+        assertThat(entity.registeredBy).isEqualTo("officer-1")
+        assertThat(entity.decidedBy).isEqualTo("risk-1")
+
+        assertThat(mapper.toDomain(entity)).isEqualTo(item)
     }
 
     @Test
