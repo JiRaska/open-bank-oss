@@ -101,13 +101,18 @@ mp:
       # unambiguously, avoiding any reliance on MicroProfile Config's env-var-name reverse-mapping
       # for channel discovery. See issue #686.
       #
-      # Correction: an earlier version of this comment claimed env vars were "previously broken"
-      # for transaction-service's channel, citing issues #2649/#2659 as proof — those issue
-      # numbers do not exist in this repository (a fabricated citation that propagated from
-      # docs/adr/0137-kafka-mtls-scheme-accepted-migration.md). The plain env-var approach is
-      # independently verified to work once a channel is already registered via YAML
-      # connector/topic keys (PR #685, PR #701) — this properties-file mechanism is kept as a
-      # valid alternative, not because env vars are broken.
+      # Correction (round 2): an earlier version of this comment first cited nonexistent issues
+      # #2649/#2659, then over-corrected to claim env vars are "independently verified to work"
+      # here — that overstated it too. The genuine concern is real: quarkusio/quarkus#30106 and
+      # smallrye/smallrye-reactive-messaging#2028 document a live, unresolved upstream bug where
+      # an env-var override of a single leaf property (e.g. `retries`, here `group.id`/
+      # `auto.offset.reset`) on a HYPHENATED channel name crashes Quarkus at startup
+      # (`SRMSG00071`, "connector attribute must be set for channel <wrong split>") — regardless
+      # of whether the channel is already registered via YAML/annotations. Boot tests added
+      # during this sweep inject the override via a QuarkusTestResourceLifecycleManager config
+      # map, not a real OS env var, so they don't exercise this failure mode. This properties-file
+      # mechanism is the CORRECT choice for a hyphenated channel like `audit-events-in`, not
+      # merely a stylistic alternative.
       audit-events-in:
         connector: smallrye-kafka
         client.id: audit-service-${quarkus.uuid}
