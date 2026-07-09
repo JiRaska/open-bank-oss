@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.7.6...dispute-service-v0.8.0) (2026-07-09)
+
+
+### Features
+
+* **dispute:** add tamper-evident evidence chain and remediation workflow ([#632](https://github.com/JiRaska/open-bank-oss/issues/632)) ([c457800](https://github.com/JiRaska/open-bank-oss/commit/c457800466e8ca579cb546e85653df603f40c281))
+
 ## [0.7.6](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.7.5...dispute-service-v0.7.6) (2026-07-07)
 
 

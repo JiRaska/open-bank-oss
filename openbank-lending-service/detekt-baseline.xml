@@ -2,6 +2,7 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
+    <ID>MagicNumber:JpaLoanEventEmitter.kt$JpaLoanEventEmitter$100</ID>
     <ID>LargeClass:LendingServiceTest.kt$LendingServiceTest</ID>
     <ID>LongParameterList:LendingResource.kt$LendingResource$( private val apply: ApplyForLoanUseCase, private val disburse: DisburseLoanUseCase, private val servicing: ServicingUseCase, private val writeOff: WriteOffLoanUseCase, private val collateral: CollateralUseCase, private val provisioning: ProvisioningUseCase, private val identity: SecurityIdentity, )</ID>
     <ID>LongParameterList:LendingService.kt$LendingService$( private val applications: LoanApplicationRepository, private val loans: LoanRepository, private val installments: InstallmentRepository, private val collateral: CollateralRepository, private val ledger: LedgerPostingPort, private val valuation: CollateralValuationPort, private val riskParameters: RiskParameterSource, private val events: LoanEventEmitter, private val clock: Clock, private val provisioning: ProvisioningRepository, )</ID>
@@ -10,7 +11,6 @@
     <ID>MagicNumber:LendingEntities.kt$LoanEntity$12</ID>
     <ID>MagicNumber:LendingOutboxDispatcher.kt$LendingOutboxDispatcher$3000</ID>
     <ID>MagicNumber:LendingOutboxDispatcher.kt$LendingOutboxDispatcher$30000</ID>
-    <ID>MagicNumber:LendingOutboxRepositoryImpl.kt$LendingOutboxRepositoryImpl$4000</ID>
     <ID>MagicNumber:LendingResource.kt$LendingResource$201</ID>
     <ID>MagicNumber:LendingResource.kt$LendingResource$400</ID>
     <ID>MagicNumber:LendingResource.kt$LendingResource$404</ID>
