@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.8.0...lending-service-v0.9.0) (2026-07-09)
+
+
+### Features
+
+* **lending, anacredit:** loan.stage_changed event integration ([#642](https://github.com/JiRaska/open-bank-oss/issues/642)) ([d456578](https://github.com/JiRaska/open-bank-oss/commit/d456578a94dcad64ccf11ba36dc1d3886cc7cbc0))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.7.0...lending-service-v0.8.0) (2026-07-08)
 
 
