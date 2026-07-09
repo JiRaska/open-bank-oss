@@ -1,6 +1,14 @@
 quarkus:
   application:
     name: openbank-analytics-sink
+    # PRE-EXISTING ISSUE, out of scope for this fix (Refs #686): this repo's convention is to
+    # NEVER set quarkus.application.version explicitly — it should derive from version.txt at
+    # build time via the Quarkus Gradle plugin (enforced fleet-wide for released components by
+    # check-app-version-override.sh). This service has no version.txt yet (not a released
+    # component — see build.gradle.kts `version = "0.1.0-SNAPSHOT"`), so there is nothing to
+    # derive from; deleting this line now would leave the value undefined rather than fix
+    # anything. Resolve this when the service is registered as a released component
+    # (release-please-config.json + .release-please-manifest.json) by deleting this key.
     version: 0.1.0
   http:
     port: 8134
@@ -69,13 +77,29 @@ mp:
       analytics-events-in:
         connector: smallrye-kafka
         client.id: analytics-sink-${quarkus.uuid}
-        group.id: analytics-sink
         # Same domain-event topics the audit service ingests. The analytics layer is fed
         # from the existing outbox stream (ADR-0003) — it is NOT a second extraction path
         # (no Debezium/WAL CDC), so it adds no read load on the operational databases.
         topics: openbank.account.events,openbank.transaction.events,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        auto.offset.reset: earliest
+        # group.id / auto.offset.reset are deliberately NOT set as YAML keys here — see
+        # openbank-fraud-service's application.yaml / openbank-anacredit-service's
+        # application.yaml for the reference wording (Refs #686). Summary: SmallRye Config's
+        # YAML source unconditionally quotes any leaf map key containing a literal dot
+        # (`group.id` becomes the registered property name `"group.id"`, quotes included —
+        # true whether or not the YAML key itself is quoted), so
+        # KafkaConnectorIncomingConfiguration's plain config.getOptionalValue("group.id", ...)
+        # never finds it. group.id then silently falls back to Quarkus's default
+        # (quarkus.application.name), and auto.offset.reset silently falls back to Kafka's
+        # client default (latest) instead of earliest — a consumer would silently skip
+        # backlogged messages on first boot.
+        #
+        # This service has NO gitops manifest yet (never deployed — no version.txt, not a
+        # released component). Whoever wires up its first deployment manifest MUST set these
+        # as env vars there, matching the intended values previously in this YAML block:
+        #   MP_MESSAGING_INCOMING_ANALYTICS_EVENTS_IN_GROUP_ID=analytics-sink
+        #   MP_MESSAGING_INCOMING_ANALYTICS_EVENTS_IN_AUTO_OFFSET_RESET=earliest
+        # Do not re-add them as dotted YAML keys — that reintroduces this exact bug.
 
 "%dev":
   quarkus:
