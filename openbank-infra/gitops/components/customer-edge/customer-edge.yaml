@@ -73,11 +73,15 @@ spec:
             # Customer audit trail -> Strimzi bus (EdgeAuditPublisher, best-effort).
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
-            # Set as env vars, not application.yaml keys: SmallRye Config's YAML source
-            # unconditionally quotes any leaf map key containing a literal dot, so
-            # `group.id`/`auto.offset.reset` written in
-            # openbank-customer-edge/src/main/resources/application.yaml silently never resolve
-            # (see the comment there). Refs #686.
+            # issue #686: group.id / auto.offset.reset override (customer-edge-msg-override
+            # ConfigMap, mounted below) as an external Quarkus config source, since the dotted
+            # YAML keys in application.yaml silently never register as the plain MicroProfile
+            # Config property Quarkus reads (ADR-0137 pattern, see onboarding-service /
+            # transaction-service). NOT env vars: SmallRye's env-var reverse-mapping is
+            # ambiguous for hyphenated channel names like party-events-in and can crash at boot
+            # (quarkusio/quarkus#30106, smallrye/smallrye-reactive-messaging#2028).
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: /mnt/msg-config/override.properties
             #
             # NOTE (found while wiring this): unlike the rest of the fleet, customer-edge has no
             # KafkaUser ACL resource at all and is still on the anonymous plaintext :9092
@@ -90,10 +94,6 @@ spec:
             # a working KafkaUser + mTLS keystore/truststore wired for customer-edge (same pattern
             # as kafka-pid-mtls.yaml / kafka-anacredit-mtls.yaml) is a separate, larger change and
             # out of scope for this config-wiring-only fix; flagging so it isn't mistaken for done.
-            - name: MP_MESSAGING_INCOMING_PARTY_EVENTS_IN_GROUP_ID
-              value: customer-edge-onboarding-resume
-            - name: MP_MESSAGING_INCOMING_PARTY_EVENTS_IN_AUTO_OFFSET_RESET
-              value: latest
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank-customers
             - name: OIDC_CLIENT_ID
@@ -193,6 +193,10 @@ spec:
             capabilities:
               drop:
                 - ALL
+          volumeMounts:
+            - name: msg-override
+              mountPath: /mnt/msg-config
+              readOnly: true
           readinessProbe:
             httpGet:
               path: /q/health/ready
@@ -290,6 +294,9 @@ spec:
         - name: opa-bundle
           configMap:
             name: customer-edge-opa-bundle
+        - name: msg-override
+          configMap:
+            name: customer-edge-msg-override
 ---
 apiVersion: v1
 kind: Service

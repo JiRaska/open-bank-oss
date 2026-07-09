@@ -59,14 +59,22 @@ mp:
       # so a fresh deploy doesn't reprocess history; gated by openbank.edge.identity-resume-enabled.
       #
       # group.id / auto.offset.reset are deliberately NOT set as YAML keys here — see
-      # openbank-infra/gitops/components/customer-edge/customer-edge.yaml
-      # (MP_MESSAGING_INCOMING_PARTY_EVENTS_IN_* env vars) for why and where they're set instead.
-      # Summary: SmallRye Config's YAML source unconditionally quotes any leaf map key containing a
-      # literal dot (`group.id` becomes the registered property name `"group.id"`, quotes included),
-      # so KafkaConnectorIncomingConfiguration's plain config.getOptionalValue("group.id", ...) never
-      # finds it. group.id then silently falls back to Quarkus's default (quarkus.application.name =
-      # "openbank-customer-edge"), which does NOT match the intended
-      # "customer-edge-onboarding-resume" group id. Refs #686.
+      # openbank-infra/gitops/components/customer-edge/customer-edge-msg-override.yaml
+      # (a properties-file ConfigMap loaded via QUARKUS_CONFIG_LOCATIONS) for why and where
+      # they're set instead. Summary: SmallRye Config's YAML source unconditionally quotes any
+      # leaf map key containing a literal dot (`group.id` becomes the registered property name
+      # `"group.id"`, quotes included), so KafkaConnectorIncomingConfiguration's plain
+      # config.getOptionalValue("group.id", ...) never finds it. group.id then silently falls
+      # back to Quarkus's default (quarkus.application.name = "openbank-customer-edge"), which
+      # does NOT match the intended "customer-edge-onboarding-resume" group id. NOT env vars:
+      # SmallRye's env-var reverse-mapping is ambiguous for hyphenated channel names like
+      # party-events-in and can crash at boot (quarkusio/quarkus#30106,
+      # smallrye/smallrye-reactive-messaging#2028). Refs #686.
+      #
+      # NOTE: customer-edge has no KafkaUser ACL / mTLS setup yet and is still on anonymous
+      # plaintext :9092, which the cluster now denies — this config fix alone does not make
+      # this channel consumable in the live cluster (separate, out-of-scope follow-up; see
+      # the gitops manifest comment).
       party-events-in:
         connector: smallrye-kafka
         topic: party.events
