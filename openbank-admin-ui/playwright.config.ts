@@ -37,9 +37,10 @@ export default defineConfig({
     env: {
       // Point docs bundle to the repo root so libs docs are found
       OPENBANK_REPO_ROOT: '../',
-      // Disable auth for E2E tests
+      // Disable auth for E2E tests. e2e/helpers/auth.ts mints session cookies with this
+      // same secret (falls back to the same default) — keep the two in sync.
       NEXTAUTH_URL: 'http://localhost:3001',
-      NEXTAUTH_SECRET: 'e2e-test-secret',
+      NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET ?? 'e2e-test-secret',
     },
   },
 })
