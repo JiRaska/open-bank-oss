@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.10.1...card-issuance-service-v0.10.2) (2026-07-09)
+
+
+### Bug Fixes
+
+* **card-issuance-service:** provision Kafka mTLS identity + fix dotted group.id keys ([#697](https://github.com/JiRaska/open-bank-oss/issues/697)) ([331a336](https://github.com/JiRaska/open-bank-oss/commit/331a33647d5c54cc544861fcfebf3b836cf9ce11))
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.10.0...card-issuance-service-v0.10.1) (2026-07-07)
 
 
