@@ -86,21 +86,23 @@ RUN set -e; \
     find /openapi-bundle -name 'openapi.yaml' | sort
 
 # ──────────────────────────────────────────────────────────────────────
-# Stage 1d: Collect the governance corpora — ADRs (docs/adr) and per-service
-# threat models (docs/threat-models) — into /governance-bundle so the operator
-# console can surface them (read-only) at /docs/adr and /docs/threat-models.
-# Mirrors the docs/sbom/openapi collectors above. Re-uses the root .dockerignore
-# exceptions added for these two trees (!docs/adr/**, !docs/threat-models/**);
+# Stage 1d: Collect the governance corpora — ADRs (docs/adr), per-service
+# threat models (docs/threat-models), and agent charters (docs/agents) — into
+# /governance-bundle so the operator console can surface them (read-only) at
+# /docs/adr, /docs/threat-models and /iaops/agents/<id> (ADR-0156). Mirrors the
+# docs/sbom/openapi collectors above. Re-uses the root .dockerignore exceptions
+# added for these trees (!docs/adr/**, !docs/threat-models/**, !docs/agents/**);
 # the rest of docs/ + *.md stays excluded.
 # ──────────────────────────────────────────────────────────────────────
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS governance-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
-    mkdir -p /governance-bundle/adr /governance-bundle/threat-models; \
+    mkdir -p /governance-bundle/adr /governance-bundle/threat-models /governance-bundle/agents; \
     cp /repo/docs/adr/*.md /governance-bundle/adr/ 2>/dev/null || true; \
     cp /repo/docs/threat-models/*.md /governance-bundle/threat-models/ 2>/dev/null || true; \
-    echo "── governance bundle: $(ls /governance-bundle/adr | wc -l) ADR(s), $(ls /governance-bundle/threat-models | wc -l) threat model(s) ──"; \
+    cp /repo/docs/agents/*.md /governance-bundle/agents/ 2>/dev/null || true; \
+    echo "── governance bundle: $(ls /governance-bundle/adr | wc -l) ADR(s), $(ls /governance-bundle/threat-models | wc -l) threat model(s), $(ls /governance-bundle/agents | wc -l) agent charter(s) ──"; \
     find /governance-bundle -name '*.md' | sort
 
 # ──────────────────────────────────────────────────────────────────────

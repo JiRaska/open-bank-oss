@@ -102,4 +102,57 @@ object Ifrs9 {
         defaultThresholdDpd: Int = 90,
         sicrThresholdDpd: Int = 30,
     ): EclResult = ecl(stage(daysPastDue, sicr, creditImpaired, defaultThresholdDpd, sicrThresholdDpd), inputs)
+
+    /**
+     * Collateral-adjusted LGD (ADR-0028 D1, first increment — see the lending service's
+     * `RiskParameterSource`/collateral wiring for the call site).
+     *
+     * Reduces the flat/unsecured [lgd] by the loan's haircut-adjusted collateral cover relative to its
+     * exposure at default:
+     *
+     * ```
+     * effectiveLgd = max(0, lgd - (haircutAdjustedCollateralValue / exposureAtDefault))
+     * ```
+     *
+     * `haircutAdjustedCollateralValue` is the caller-supplied **sum, across every collateral item
+     * registered against the loan, of `marketValue * (1 - haircut)`** — summing before this call keeps
+     * this function a single-collateral-blind, pure ratio (it does not know or care how many items or
+     * what types back the loan).
+     *
+     * Deliberately **floored at zero, never negative**: over-collateralization (haircut-adjusted value
+     * exceeding EAD) means the loss given default approaches zero, not a negative loss — a negative LGD
+     * has no economic meaning and would invert the ECL sign. Symmetrically the result never *exceeds*
+     * the input [lgd] — collateral can only reduce loss severity in this model, never increase it (an
+     * absent or zero-value collateral registration is a strict no-op, identical to the pre-collateral
+     * flat-LGD behaviour).
+     *
+     * This is a **first-pass, data-modeling increment**, not a calibrated risk model:
+     *  - No real-time revaluation/mark-to-market — [haircutAdjustedCollateralValue] is only as fresh as
+     *    the last declared/revalued collateral entry (staleness risk owned by the caller).
+     *  - No legal perfection-of-security-interest verification — registering collateral here records a
+     *    claim, it does not establish or confirm the bank's enforceable legal priority over it.
+     *  - Haircut percentages themselves are a first-pass placeholder table set by the caller (e.g.
+     *    `CollateralType`-keyed constants) — reasonable starting assumptions, not actuarially or
+     *    regulator-calibrated figures.
+     *
+     * @param lgd the unsecured/flat loss-given-default, in [0,1].
+     * @param haircutAdjustedCollateralValue the pre-summed, haircut-adjusted collateral value backing
+     *        the loan, in the same currency as [exposureAtDefault]; must be non-negative.
+     * @param exposureAtDefault EAD, must be positive (a zero/non-positive EAD returns [lgd] unchanged —
+     *        there is no exposure to cover, so the ratio is undefined rather than infinite).
+     */
+    fun collateralAdjustedLgd(
+        lgd: BigDecimal,
+        haircutAdjustedCollateralValue: BigDecimal,
+        exposureAtDefault: BigDecimal,
+    ): BigDecimal {
+        require(lgd.signum() >= 0 && lgd <= BigDecimal.ONE) { "lgd must be within [0,1]: $lgd" }
+        require(haircutAdjustedCollateralValue.signum() >= 0) {
+            "haircutAdjustedCollateralValue cannot be negative: $haircutAdjustedCollateralValue"
+        }
+        if (exposureAtDefault.signum() <= 0) return lgd
+        val coverageRatio = haircutAdjustedCollateralValue.divide(exposureAtDefault, MC)
+        val reduced = lgd.subtract(coverageRatio, MC)
+        return reduced.coerceIn(BigDecimal.ZERO, lgd)
+    }
 }

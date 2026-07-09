@@ -110,10 +110,41 @@ DPD is derived from the existing repayment schedule (`installment.due_date` / `p
 **The PD and LGD parameters this increment uses are simplified placeholders, not regulatory-grade risk parameters:**
 
 - **EAD** = outstanding principal balance (no discounting to the effective interest rate — the `Ifrs9` primitive leaves that to the caller and none is applied here).
-- **PD** = a flat rate per IFRS 9 stage (`RiskParameterSource.DEFAULT_PD_12M = 0.03`, `DEFAULT_PD_LIFETIME = 0.20`), identical for every loan regardless of borrower, product, vintage or macroeconomic conditions.
-- **LGD** = a flat `0.45` for every loan, ignoring collateral, seniority or recovery history.
+- **PD** = a flat rate per IFRS 9 stage (`RiskParameterSource.DEFAULT_PD_12M = 0.03`, `DEFAULT_PD_LIFETIME = 0.20`), identical for every loan regardless of borrower, product, vintage or macroeconomic conditions. **Unchanged by this increment.**
+- **LGD** = a flat `0.45` for every loan, **reduced by registered collateral** (see below) but otherwise ignoring seniority or recovery history.
 
-There is **no behavioral/statistical PD model, no macroeconomic overlay or forward-looking scenario weighting, and no collateral-adjusted LGD** (collateral valuation exists in this service for AnaCredit protection-category tracking, D1, but is not yet wired into LGD). These parameters **must be calibrated by the actuarial/risk team against real portfolio loss history before any production use** — this is a structural first increment (a working stage-bucketing → ECL → ledger pipeline), not a regulatory-grade IFRS 9 implementation. Swapping the conservative constants for a real risk-parameter adapter is a wiring change (`RiskParameterSource`, ADR-0028 D4), not a domain change.
+### Collateral-adjusted LGD (ADR-0028 Phase 3 increment 2)
+
+Collateral registration (`POST /api/v1/lending/loans/{id}/collateral`) shipped earlier as AnaCredit
+protection-category data; **this increment is the first to consult it in the ECL calculation.**
+`Ifrs9.collateralAdjustedLgd` (`openbank-libs-domain`) reduces the flat LGD above by the loan's
+haircut-adjusted collateral cover relative to its exposure at default:
+
+```
+effectiveLgd = max(0, lgd - (Σ collateral.marketValue × (1 - collateral.haircut)) / exposureAtDefault)
+```
+
+- Every collateral item registered against the loan contributes `marketValue × (1 - haircut)`; the
+  items are summed **before** the reduction is applied (multiple items against one loan sum correctly).
+- The result is **clamped to `[0, lgd]`**: over-collateralization floors the loss given default at
+  (near) zero, never negative — a negative LGD has no economic meaning. A loan with no registered
+  collateral is unaffected (byte-identical to the pre-collateral calculation).
+- PD is **not** touched by this increment.
+
+**Explicit limitations of this first-pass increment (data-modeling, not a calibrated risk model):**
+- **No real-time revaluation / mark-to-market.** The reduction uses whichever `marketValue`/`haircut`
+  was last declared or externally revalued at registration time (`CollateralValuationPort`, still a
+  no-op default) — a stale valuation directly understates the reported ECL with no staleness alert.
+- **No legal perfection-of-security-interest verification.** Registering collateral records a data
+  claim against a loan; it does not establish, verify, or confirm the bank's enforceable legal priority
+  over the underlying asset.
+- **Haircut percentages are a first-pass placeholder table**, not actuarially or regulator-calibrated
+  figures — e.g. real estate 20%, vehicle 40%, cash 0%, securities 30% are reasonable starting
+  assumptions used in this service's tests, supplied per-registration by the caller
+  (`CollateralRequest.haircut`), not a platform-enforced or model-governed table.
+- **No four-eyes control on registration** (unlike origination/disbursement) — see the threat model §5/§7.
+
+There is **no behavioral/statistical PD model, no macroeconomic overlay or forward-looking scenario weighting**. These parameters **must be calibrated by the actuarial/risk team against real portfolio loss history before any production use** — this is a structural first increment (a working stage-bucketing → ECL → ledger pipeline with a first-pass collateral offset), not a regulatory-grade IFRS 9 implementation. Swapping the conservative constants for a real risk-parameter adapter, or the placeholder haircut table for a calibrated one, is a wiring change (`RiskParameterSource`, ADR-0028 D4), not a domain change.
 
 ## Audit trail
 

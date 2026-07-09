@@ -110,10 +110,42 @@ DPD se odvozuje z existujícího splátkového kalendáře (`installment.due_dat
 **Parametry PD a LGD použité v tomto přírůstku jsou zjednodušené zástupné hodnoty, nikoli regulatorně kvalitní rizikové parametry:**
 
 - **EAD** = zbývající jistina (bez diskontování na efektivní úrokovou sazbu — primitivum `Ifrs9` to ponechává na volajícím a zde se neaplikuje).
-- **PD** = plochá sazba podle IFRS 9 stage (`RiskParameterSource.DEFAULT_PD_12M = 0.03`, `DEFAULT_PD_LIFETIME = 0.20`), identická pro každý úvěr bez ohledu na dlužníka, produkt, vintage nebo makroekonomické podmínky.
-- **LGD** = plochých `0.45` pro každý úvěr, bez ohledu na zajištění, senioritu nebo historii návratnosti.
+- **PD** = plochá sazba podle IFRS 9 stage (`RiskParameterSource.DEFAULT_PD_12M = 0.03`, `DEFAULT_PD_LIFETIME = 0.20`), identická pro každý úvěr bez ohledu na dlužníka, produkt, vintage nebo makroekonomické podmínky. **Tímto přírůstkem beze změny.**
+- **LGD** = plochých `0.45` pro každý úvěr, **snížených o registrované zajištění** (viz níže), jinak bez ohledu na senioritu nebo historii návratnosti.
 
-**Neexistuje žádný behaviorální/statistický PD model, žádný makroekonomický overlay ani forward-looking scénářové vážení, a žádné LGD upravené o zajištění** (oceňování zajištění v této službě existuje pro sledování kategorií ochrany AnaCredit, D1, ale zatím není napojeno na LGD). Tyto parametry **musí být před jakýmkoli produkčním použitím kalibrovány aktuárským/risk týmem podle reálné historie ztrát portfolia** — jde o strukturální první přírůstek (funkční pipeline stage-bucketing → ECL → účetní zápis), nikoli o regulatorně kvalitní implementaci IFRS 9. Výměna konzervativních konstant za reálný adaptér rizikových parametrů je otázka zapojení (`RiskParameterSource`, ADR-0028 D4), ne doménová změna.
+### LGD upravené o zajištění (ADR-0028 fáze 3, přírůstek 2)
+
+Registrace zajištění (`POST /api/v1/lending/loans/{id}/collateral`) byla dodána dříve jako data pro
+AnaCredit kategorie ochrany; **tento přírůstek je první, který ji skutečně zohledňuje ve výpočtu ECL.**
+`Ifrs9.collateralAdjustedLgd` (`openbank-libs-domain`) sníží plochý LGD výše o zajištění úvěru
+upravené o srážku (haircut) v poměru k expozici při selhání:
+
+```
+efektivníLGD = max(0, LGD - (Σ zajištění.tržníHodnota × (1 - zajištění.srážka)) / expoziceČiPriSelhani)
+```
+
+- Každá položka zajištění registrovaná k úvěru přispívá `tržníHodnota × (1 - srážka)`; položky se
+  sečtou **před** aplikací snížení (více položek zajištění k jednomu úvěru se sečte korektně).
+- Výsledek je **omezen na rozsah `[0, LGD]`**: nadměrné zajištění srazí ztrátu při selhání na (téměř)
+  nulu, nikdy do záporu — záporné LGD nemá ekonomický smysl. Úvěr bez registrovaného zajištění zůstává
+  beze změny (bit-identické s výpočtem před tímto přírůstkem).
+- PD tímto přírůstkem **není** dotčeno.
+
+**Explicitní omezení tohoto prvního přírůstku (datové modelování, nikoli kalibrovaný rizikový model):**
+- **Žádné přeceňování v reálném čase / mark-to-market.** Snížení používá tržní hodnotu/srážku naposledy
+  deklarovanou nebo externě přeceněnou při registraci (`CollateralValuationPort`, stále no-op výchozí
+  hodnota) — zastaralé ocenění přímo podhodnocuje vykázané ECL bez jakéhokoli varování o stáří.
+- **Žádné ověření právního zajištění (perfection of security interest).** Registrace zajištění
+  zaznamenává datový nárok k úvěru; nezakládá, neověřuje ani nepotvrzuje vymahatelnou právní přednost
+  banky k podkladovému aktivu.
+- **Procenta srážek (haircut) jsou zástupná tabulka prvního přiblížení**, nikoli aktuársky nebo
+  regulatorně kalibrované hodnoty — např. nemovitosti 20 %, vozidla 40 %, hotovostní vklad 0 %, cenné
+  papíry 30 % jsou rozumné výchozí předpoklady použité v testech této služby, dodávané volajícím při
+  každé registraci (`CollateralRequest.haircut`), nikoli platformou vynucovaná nebo model-governance
+  tabulka.
+- **Žádná kontrola čtyř očí při registraci** (na rozdíl od vzniku úvěru/vyplacení) — viz threat model §5/§7.
+
+**Neexistuje žádný behaviorální/statistický PD model, žádný makroekonomický overlay ani forward-looking scénářové vážení.** Tyto parametry **musí být před jakýmkoli produkčním použitím kalibrovány aktuárským/risk týmem podle reálné historie ztrát portfolia** — jde o strukturální první přírůstek (funkční pipeline stage-bucketing → ECL → účetní zápis s prvním přiblížením zohlednění zajištění), nikoli o regulatorně kvalitní implementaci IFRS 9. Výměna konzervativních konstant za reálný adaptér rizikových parametrů, nebo zástupné tabulky srážek za kalibrovanou, je otázka zapojení (`RiskParameterSource`, ADR-0028 D4), ne doménová změna.
 
 ## Auditní stopa
 

@@ -37,9 +37,10 @@ on:
     paths:
       # Admin-UI source — includes CHANGELOG.md + version.txt (release-please merge)
       - "openbank-admin-ui/**"
-      # Governance bundles baked into the image (ADRs, threat models, flags, compliance)
+      # Governance bundles baked into the image (ADRs, threat models, agent charters, flags, compliance)
       - "docs/adr/**"
       - "docs/threat-models/**"
+      - "docs/agents/**"
       - "openbank-infra/gitops/components/*/feature-flags.yaml"
       - "openbank-libs/governance/agents.yaml"
       - "openbank-libs/governance/compliance-controls.yaml"
@@ -354,6 +355,11 @@ jobs:
           if ! node scripts/collect-prod-readiness.mjs 2>&1; then
             echo "::warning::prod-readiness collector failed — scorecard page will show no data"
           fi
+
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.72.0
 
       - name: Build, collect, push
         id: build
