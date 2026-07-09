@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.9.1...audit-service-v0.9.2) (2026-07-09)
+
+
+### Bug Fixes
+
+* **audit-service:** fix silent Kafka group.id/auto.offset.reset config bug ([#691](https://github.com/JiRaska/open-bank-oss/issues/691)) ([8c48fa1](https://github.com/JiRaska/open-bank-oss/commit/8c48fa1b62f6ae06d5e01ad02c1f28096507d66f))
+
 ## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.9.0...audit-service-v0.9.1) (2026-07-07)
 
 
