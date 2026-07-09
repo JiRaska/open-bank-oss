@@ -19,6 +19,7 @@ class FraudRuleEngineTest {
         amount: BigDecimal = BigDecimal("1250.00"),
         currency: String = "CZK",
         velocityH1TotalAmount: BigDecimal = BigDecimal.ZERO,
+        isNewPayee: Boolean = false,
     ) = ScoreRequest(
         amount = amount,
         currency = currency,
@@ -28,6 +29,7 @@ class FraudRuleEngineTest {
         velocityH1Count = velocityH1Count,
         velocityH24Count = velocityH24Count,
         velocityH1TotalAmount = velocityH1TotalAmount,
+        isNewPayee = isNewPayee,
     )
 
     @Test
@@ -43,7 +45,7 @@ class FraudRuleEngineTest {
     fun `score pins the current rule version`() {
         val result = FraudRuleEngine.score(request())
 
-        assertThat(result.ruleVersion).isEqualTo("v3")
+        assertThat(result.ruleVersion).isEqualTo("v4")
         assertThat(result.ruleVersion).isEqualTo(FraudRuleEngine.RULE_VERSION)
     }
 
@@ -270,6 +272,97 @@ class FraudRuleEngineTest {
         assertThat(hit.reason).isEqualTo("velocity-h1-amount-cap-unmapped-currency")
     }
 
+    // ── NewPayeeHighAmountReviewRule ──────────────────────────────────────────
+
+    @Test
+    fun `NewPayeeHighAmountReviewRule is silent for an established payee regardless of amount`() {
+        val hit = NewPayeeHighAmountReviewRule.evaluate(
+            request(isNewPayee = false, amount = BigDecimal("999999999")),
+        )
+        assertThat(hit).isNull()
+    }
+
+    @Test
+    fun `NewPayeeHighAmountReviewRule does not fire for a new payee below the CZK threshold`() {
+        val hit = NewPayeeHighAmountReviewRule.evaluate(
+            request(isNewPayee = true, amount = BigDecimal("249999.99")),
+        )
+        assertThat(hit).isNull()
+    }
+
+    @Test
+    fun `NewPayeeHighAmountReviewRule fires at exactly the CZK threshold for a new payee`() {
+        val hit = NewPayeeHighAmountReviewRule.evaluate(
+            request(isNewPayee = true, amount = BigDecimal("250000")),
+        )
+
+        assertThat(hit).isNotNull
+        assertThat(hit!!.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(hit.scoreDelta).isEqualTo(30)
+        assertThat(hit.reason).isEqualTo("new-payee-high-amount")
+    }
+
+    @Test
+    fun `NewPayeeHighAmountReviewRule fires above the CZK threshold for a new payee`() {
+        val hit = NewPayeeHighAmountReviewRule.evaluate(
+            request(isNewPayee = true, amount = BigDecimal("400000")),
+        )
+        assertThat(hit).isNotNull
+        assertThat(hit!!.verdict).isEqualTo(FraudVerdict.REVIEW)
+    }
+
+    @Test
+    fun `NewPayeeHighAmountReviewRule does not fire below the EUR threshold for a new payee`() {
+        val hit = NewPayeeHighAmountReviewRule.evaluate(
+            request(isNewPayee = true, amount = BigDecimal("9999.99"), currency = "EUR"),
+        )
+        assertThat(hit).isNull()
+    }
+
+    @Test
+    fun `NewPayeeHighAmountReviewRule fires at exactly the EUR threshold for a new payee`() {
+        val hit = NewPayeeHighAmountReviewRule.evaluate(
+            request(isNewPayee = true, amount = BigDecimal("10000"), currency = "EUR"),
+        )
+
+        assertThat(hit).isNotNull
+        assertThat(hit!!.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(hit.scoreDelta).isEqualTo(30)
+        assertThat(hit.reason).isEqualTo("new-payee-high-amount")
+    }
+
+    @Test
+    fun `NewPayeeHighAmountReviewRule threshold is notably lower than LargeSingleTransactionReviewRule`() {
+        // The entire point of this rule: an amount that does NOT trip the plain large-transaction
+        // rule (established-payee threshold) must still trip REVIEW when the payee is new.
+        val amount = BigDecimal("300000") // below CZK 500,000 (large-tx) but above CZK 250,000 (new-payee)
+        assertThat(LargeSingleTransactionReviewRule.evaluate(request(amount = amount, isNewPayee = true))).isNull()
+        val hit = NewPayeeHighAmountReviewRule.evaluate(request(amount = amount, isNewPayee = true))
+        assertThat(hit).isNotNull
+        assertThat(hit!!.reason).isEqualTo("new-payee-high-amount")
+    }
+
+    @Test
+    fun `NewPayeeHighAmountReviewRule fails closed for an unmapped currency when payee is new`() {
+        val hit = NewPayeeHighAmountReviewRule.evaluate(
+            request(isNewPayee = true, amount = BigDecimal("1.00"), currency = "USD"),
+        )
+
+        assertThat(hit).isNotNull
+        assertThat(hit!!.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(hit.scoreDelta).isEqualTo(30)
+        assertThat(hit.reason).isEqualTo("new-payee-high-amount-unmapped-currency")
+    }
+
+    @Test
+    fun `NewPayeeHighAmountReviewRule is silent for an unmapped currency when payee is established`() {
+        // isNewPayee=false short-circuits before the currency map is even consulted.
+        val hit = NewPayeeHighAmountReviewRule.evaluate(
+            request(isNewPayee = false, amount = BigDecimal("1.00"), currency = "USD"),
+        )
+        assertThat(hit).isNull()
+    }
+
     // ── Engine integration ───────────────────────────────────────────────────
 
     @Test
@@ -399,5 +492,47 @@ class FraudRuleEngineTest {
             "large-single-transaction-unmapped-currency",
             "velocity-h1-amount-cap-unmapped-currency",
         )
+    }
+
+    @Test
+    fun `engine also fails closed via the new-payee rule for an unmapped currency when payee is new`() {
+        val result = FraudRuleEngine.score(request(amount = BigDecimal("1.00"), currency = "USD", isNewPayee = true))
+
+        assertThat(result.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(result.reasons).contains("new-payee-high-amount-unmapped-currency")
+    }
+
+    @Test
+    fun `engine returns REVIEW when the new-payee high-amount rule is breached`() {
+        val result = FraudRuleEngine.score(request(amount = BigDecimal("300000"), isNewPayee = true))
+
+        assertThat(result.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(result.reasons).contains("new-payee-high-amount")
+    }
+
+    @Test
+    fun `engine ALLOWs the same amount for an established payee that would REVIEW for a new one`() {
+        val amount = BigDecimal("300000") // between the new-payee and large-tx CZK thresholds
+        val newPayeeResult = FraudRuleEngine.score(request(amount = amount, isNewPayee = true))
+        val establishedResult = FraudRuleEngine.score(request(amount = amount, isNewPayee = false))
+
+        assertThat(newPayeeResult.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(establishedResult.verdict).isEqualTo(FraudVerdict.ALLOW)
+    }
+
+    @Test
+    fun `engine ALLOWs when no rule is breached across all v4 rules including a new payee below threshold`() {
+        val result = FraudRuleEngine.score(
+            request(
+                velocityH1Count = 5,
+                velocityH24Count = 30,
+                amount = BigDecimal("1250.00"),
+                velocityH1TotalAmount = BigDecimal("100000"),
+                isNewPayee = true,
+            ),
+        )
+
+        assertThat(result.verdict).isEqualTo(FraudVerdict.ALLOW)
+        assertThat(result.score).isZero()
     }
 }

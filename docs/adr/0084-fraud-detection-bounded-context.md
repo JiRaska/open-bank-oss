@@ -41,6 +41,32 @@ Author(s): Jiří Raška
 > elsewhere in the repo (e.g. `WaiverEvaluator`). No FX-conversion call was added — that remains a
 > deliberately separate, bigger architectural decision (new cross-service dependency, its own
 > fail-open/closed posture) out of scope for this increment.
+>
+> **Update 2026-07-09 — rule set expanded to `ruleVersion = "v4"`: new-payee + high-amount
+> combination rule (issue #625).** Closes the last item on the §3 roadmap list that was deferred at
+> Phase-1 launch for lack of a payee-history signal. New Flyway migration
+> `V3__create_payee_history.sql` adds a `payee_history` table keyed on `(account_id,
+> payee_identifier)`, tracking first-seen timestamp, last-paid timestamp and payment count. The
+> existing `TransactionSignalConsumer` (no new Kafka topic) now also reads `targetAccountId` from
+> `openbank.transactions.transaction.initiated` — already published by transaction-service, simply
+> not previously consumed here — as the payee identifier, and upserts `payee_history` via the new
+> `PayeeHistoryRepositoryImpl`. Unlike the pre-existing `velocity_aggregates` upsert, this one is
+> **idempotent against Kafka redelivery**: it guards on the signal's `aggregateId` (stored as
+> `last_transaction_id`) so replaying the same event does not double-count `payment_count` — verified
+> against a real Postgres in `PayeeHistoryRepositoryImplIT`, not just mocked.
+> `ScoreRequest` gains a server-enriched `isNewPayee: Boolean` (default `false`, never accepted from
+> the caller — same non-negotiable as every other scoring input), set by
+> `FraudScoringService.enrichWithPayeeHistory` from a `payee_history` lookup keyed on
+> `(accountId, counterpartyId)` — a payee is "new" exactly when no history row exists yet.
+> `NewPayeeHighAmountReviewRule` fires REVIEW when `isNewPayee` is true and the amount exceeds a
+> per-currency threshold **notably lower** than `LargeSingleTransactionReviewRule`'s — CZK 250,000 /
+> EUR 10,000, roughly half of that rule's CZK 500,000 / EUR 20,000 — because a first-ever payment to
+> a never-seen payee is inherently higher-risk than the same amount to an established payee, which is
+> the entire reason this rule exists separately. **These are first-pass, non-calibrated figures**,
+> same disclosure standard as the v3 thresholds, pending shadow-mode data and risk-team input. Same
+> per-currency `Map<String, BigDecimal>` pattern as the v3 amount rules, including fail-CLOSED on an
+> unmapped currency whenever `isNewPayee` is true. Still shadow mode only; no payment surface honours
+> the verdict yet.
 
 ## Context
 
