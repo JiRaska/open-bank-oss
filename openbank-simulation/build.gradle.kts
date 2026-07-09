@@ -66,6 +66,15 @@ dependencies {
     implementation(project(":openbank-sepa-payment"))
     implementation(project(":openbank-settlement-service"))
 
+    // ADR-0143 phase 2d: the harness drives the REAL billing-service domain value objects
+    // (AssessedFee, FeeJournalCommand, FeeReversalCommand — com.openbank.billing.domain) so
+    // FeeBillingScenario exercises the exact idempotency-key/GL-direction shape production
+    // billing-service posts, not a re-model. Only the domain package is framework-free
+    // (ADR-0002); the module also carries Quarkus/Panache infrastructure classes, same as
+    // openbank-ledger-service above — pulling the whole project(...) is the established
+    // convention here (only the domain POJOs are actually referenced from this module).
+    implementation(project(":openbank-billing-service"))
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)

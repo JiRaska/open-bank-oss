@@ -6,12 +6,16 @@ package com.openbank.billing.infrastructure.rest
 
 import com.openbank.billing.application.usecase.BillingCycleService
 import com.openbank.billing.application.usecase.FeeAssessmentService
+import com.openbank.billing.application.usecase.FeeNotFoundException
+import com.openbank.billing.application.usecase.FeeNotPostedException
+import com.openbank.billing.application.usecase.FeeReversalService
 import com.openbank.libs.authz.Authorize
 import io.quarkus.security.Authenticated
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
@@ -43,11 +47,27 @@ import jakarta.ws.rs.core.Response
  * `rules.yaml: four_eyes.verbs` (`post` is listed). `postedBy` is the JWT `sub` (ADR-0143 step 4),
  * read from [SecurityIdentity] rather than `@Context SecurityContext` because this is a
  * `suspend fun` (mirrors `AccountResource.operatorId()`).
+ *
+ * `POST /api/v1/fees/reverse` (ADR-0143 phase 2e) reverses an already-POSTED fee: `action =
+ * "billing.reverse"` — `reverse` is already a registered `rules.yaml: four_eyes.verbs` entry, so
+ * this gets `four_eyes_required` from the SAME `rest.rego` rule as `billing.post`, no policy change
+ * needed. Reuses the identical `AuthorizeInterceptor` + `ApprovalStore` (ADR-0155) four-eyes
+ * infrastructure as the charge path — a maker's call is paused (202 + approval id) until a
+ * DIFFERENT operator decides it via [ApprovalResource], exactly like `billing.post`. Deliberately
+ * does NOT call ledger-service's own `POST /journals/{id}/reverse` (which is itself four-eyes
+ * gated at the ledger's principal, `ledger.reverse`) — a service-to-service caller has no distinct
+ * human "checker" to decide that second gate, so it would orphan a pending approval forever;
+ * billing posts its own compensating journal (`LedgerPostingAdapter.postReversal`) via the plain
+ * `POST /journals` contract instead, keeping the single human dual-control point at this endpoint.
  */
 @ApplicationScoped
 @Path("/api/v1/fees")
 @Produces(MediaType.APPLICATION_JSON)
-class BillingResource(private val service: FeeAssessmentService, private val cycleService: BillingCycleService) {
+class BillingResource(
+    private val service: FeeAssessmentService,
+    private val cycleService: BillingCycleService,
+    private val reversalService: FeeReversalService,
+) {
 
     @Inject
     lateinit var identity: SecurityIdentity
@@ -85,6 +105,32 @@ class BillingResource(private val service: FeeAssessmentService, private val cyc
         return Response.ok(assessment).header("X-Posted-By", postedBy).build()
     }
 
+    @POST
+    @Path("/reverse")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "billing.reverse", resource = "#idempotencyKey")
+    suspend fun reverse(
+        @QueryParam("idempotencyKey") idempotencyKey: String?,
+        request: ReverseFeeRequest?,
+    ): Response {
+        val reason = request?.reason
+        if (idempotencyKey.isNullOrBlank() || reason.isNullOrBlank()) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                .entity(mapOf("error" to "idempotencyKey (query) and reason (body) are required"))
+                .build()
+        }
+        val reversedBy = postedBy()
+        return try {
+            val fee = reversalService.reverse(idempotencyKey, reason)
+            Response.ok(fee).header("X-Reversed-By", reversedBy).build()
+        } catch (e: FeeNotFoundException) {
+            Response.status(Response.Status.NOT_FOUND).entity(mapOf("error" to e.message)).build()
+        } catch (e: FeeNotPostedException) {
+            Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
+        }
+    }
+
     private fun validateParams(
         cycleId: String?,
         accountId: String?,
@@ -105,3 +151,5 @@ class BillingResource(private val service: FeeAssessmentService, private val cyc
     // flag) a self-approval.
     private fun postedBy(): String = identity.principal?.name ?: "anonymous"
 }
+
+data class ReverseFeeRequest(val reason: String)

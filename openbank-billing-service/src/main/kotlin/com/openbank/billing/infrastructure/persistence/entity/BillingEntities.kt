@@ -113,6 +113,15 @@ class AssessedFeeEntity : PanacheEntityBase() {
     @Column(name = "posted_at")
     var postedAt: Instant? = null
 
+    @Column(name = "reversal_journal_id", columnDefinition = "uuid")
+    var reversalJournalId: UUID? = null
+
+    @Column(name = "reversal_reason")
+    var reversalReason: String? = null
+
+    @Column(name = "reversed_at")
+    var reversedAt: Instant? = null
+
     @Column(name = "created_at", nullable = false)
     lateinit var createdAt: Instant
 

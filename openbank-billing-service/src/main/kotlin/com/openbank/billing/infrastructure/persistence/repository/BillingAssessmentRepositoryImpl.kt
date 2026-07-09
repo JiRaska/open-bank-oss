@@ -164,11 +164,105 @@ class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, pri
         }.awaitSuspending()
     }
 
+    override suspend fun findFeeByIdempotencyKey(idempotencyKey: String): AssessedFee? = sf.withSession { s ->
+        s.createQuery(
+            "FROM AssessedFeeEntity WHERE idempotencyKey = :k",
+            AssessedFeeEntity::class.java,
+        ).setParameter("k", idempotencyKey).setMaxResults(1).singleResultOrNull
+    }.awaitSuspending()?.toDomain()
+
+    /**
+     * Atomically (ADR-0143 phase 2e, mirrors [persistWithPostingIntent]'s charge-leg atomicity):
+     * flip the fee POSTED -> REVERSAL_PENDING and append its compensating-journal outbox row in
+     * the SAME transaction. Guards fail cleanly rather than throwing a generic DB error:
+     *  - no fee with this key -> null (caller reports "never assessed").
+     *  - not POSTED (e.g. still PENDING, FAILED, or NOT_APPLICABLE) -> throws
+     *    [IllegalStateException] (caller reports "nothing to reverse" — a fee that was never
+     *    posted has no ledger entry to compensate).
+     *  - already REVERSAL_PENDING/REVERSED -> returns the fee UNCHANGED, no new outbox row (the
+     *    idempotent-replay contract for reversal, same shape as the charge leg's replay).
+     */
+    override suspend fun persistReversalIntent(idempotencyKey: String, reason: String): AssessedFee? {
+        val now = Instant.now(clock)
+        val updated: AssessedFeeEntity? = sf.withTransaction<AssessedFeeEntity?> { s, _ ->
+            s.createQuery(
+                "FROM AssessedFeeEntity WHERE idempotencyKey = :k",
+                AssessedFeeEntity::class.java,
+            ).setParameter("k", idempotencyKey).setMaxResults(1).singleResultOrNull.chain { fee ->
+                if (fee == null) {
+                    return@chain Uni.createFrom().nullItem()
+                }
+                if (fee.postingStatus == PostingStatus.REVERSAL_PENDING || fee.postingStatus == PostingStatus.REVERSED) {
+                    return@chain Uni.createFrom().item(fee)
+                }
+                if (fee.postingStatus != PostingStatus.POSTED) {
+                    return@chain Uni.createFrom().failure<AssessedFeeEntity>(
+                        IllegalStateException(
+                            "fee idempotencyKey=$idempotencyKey is ${fee.postingStatus}, not POSTED — nothing to reverse",
+                        ),
+                    )
+                }
+                fee.postingStatus = PostingStatus.REVERSAL_PENDING
+                fee.reversalReason = reason
+                fee.updatedAt = now
+                val outboxEntity = BillingOutboxEntity().apply {
+                    eventId = Ids.newId()
+                    aggregateId = fee.id
+                    eventType = "billing.fee.reversal-intent.v1"
+                    payload = feeReversalIntentPayload(fee, reason)
+                    status = OutboxStatus.PENDING.name
+                    attemptCount = 0
+                    createdAt = now
+                    updatedAt = now
+                }
+                s.persist(outboxEntity).replaceWith(fee)
+            }
+        }.awaitSuspending()
+        return updated?.toDomain()
+    }
+
+    override suspend fun markReversed(idempotencyKey: String, reversalJournalId: UUID) {
+        val now = Instant.now(clock)
+        sf.withTransaction { s, _ ->
+            s.createMutationQuery(
+                "UPDATE AssessedFeeEntity SET postingStatus = :st, reversalJournalId = :j, reversedAt = :p, " +
+                    "updatedAt = :u WHERE idempotencyKey = :k",
+            ).setParameter("st", PostingStatus.REVERSED)
+                .setParameter("j", reversalJournalId)
+                .setParameter("p", now)
+                .setParameter("u", now)
+                .setParameter("k", idempotencyKey)
+                .executeUpdate()
+        }.awaitSuspending()
+    }
+
+    override suspend fun markReversalFailed(idempotencyKey: String) {
+        val now = Instant.now(clock)
+        sf.withTransaction { s, _ ->
+            s.createMutationQuery(
+                "UPDATE AssessedFeeEntity SET postingStatus = :st, updatedAt = :u WHERE idempotencyKey = :k",
+            ).setParameter("st", PostingStatus.FAILED)
+                .setParameter("u", now)
+                .setParameter("k", idempotencyKey)
+                .executeUpdate()
+        }.awaitSuspending()
+    }
+
     private fun feePostIntentPayload(fee: AssessedFeeEntity): String = "{\"schemaVersion\":1," +
         "\"idempotencyKey\":\"${fee.idempotencyKey}\",\"cycleId\":\"${fee.cycleId}\"," +
         "\"accountId\":\"${fee.accountId}\",\"feeId\":\"${fee.feeId}\"," +
         "\"amount\":\"${fee.chargedAmount}\",\"currency\":\"${fee.currency}\"," +
         "\"description\":\"Fee charge: ${fee.feeName}\"}"
+
+    private fun feeReversalIntentPayload(fee: AssessedFeeEntity, reason: String): String = "{\"schemaVersion\":1," +
+        "\"idempotencyKey\":\"${fee.reversalIdempotencyKey()}\"," +
+        "\"originalIdempotencyKey\":\"${fee.idempotencyKey}\",\"cycleId\":\"${fee.cycleId}\"," +
+        "\"accountId\":\"${fee.accountId}\",\"feeId\":\"${fee.feeId}\"," +
+        "\"amount\":\"${fee.chargedAmount}\",\"currency\":\"${fee.currency}\"," +
+        "\"reason\":\"${reason.replace('\n', ' ').replace('\r', ' ').replace("\"", "'")}\"}"
+
+    private fun AssessedFeeEntity.reversalIdempotencyKey(): String =
+        "fee-reversal-$cycleId-$accountId-$feeId-$currency"
 }
 
 private fun BillingCycleAssessmentEntity.toDomain(fees: List<AssessedFeeEntity>): BillingAssessment = BillingAssessment(
@@ -191,4 +285,6 @@ private fun AssessedFeeEntity.toDomain(): AssessedFee = AssessedFee(
     reason = WaiveReason.valueOf(waiveReason),
     postingStatus = postingStatus,
     journalId = journalId,
+    reversalJournalId = reversalJournalId,
+    reversalReason = reversalReason,
 )

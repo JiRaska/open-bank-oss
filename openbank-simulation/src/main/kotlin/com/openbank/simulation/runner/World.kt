@@ -52,9 +52,9 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     val sepaPayments = mutableListOf<SepaPayment>()
     val settlements = mutableListOf<Settlement>()
 
-    // ADR-0143 phase 2d: the billing fee-conservation invariant's state (Σ fees assessed == Σ fee
-    // journals posted per cycle/account/fee/currency). Populated by whatever scenario drives
-    // billing fee charges through a seeded run; empty (trivially satisfied) otherwise.
+    // ADR-0143 phase 2d/2e: the billing fee-conservation invariant's state (Σ fees assessed == Σ
+    // fee journals posted per cycle/account/fee/currency). Populated by FeeBillingScenario every
+    // step (previously unpopulated by any scenario, which made the invariant hold vacuously).
     val billingFees = BillingFeeLedger()
 
     val customerAccounts: List<UUID>

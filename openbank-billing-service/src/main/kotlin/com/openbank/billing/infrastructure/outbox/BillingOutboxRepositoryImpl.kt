@@ -22,11 +22,13 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * [OutboxRepository] for `billing_outbox` (ADR-0143 phase 2c). Mirrors
+ * [OutboxRepository] for `billing_outbox` (ADR-0143 phase 2c/2e). Mirrors
  * `InterestOutboxRepositoryImpl` column-for-column; the one addition is [markFailed] also
  * flipping the originating [com.openbank.billing.domain.AssessedFee] to
  * [com.openbank.billing.domain.PostingStatus.FAILED] once the row goes terminal DEAD — so a
- * poison fee-posting is operator-visible on the fee itself, not only in the outbox table.
+ * poison fee-posting (or, for a `billing.fee.reversal-intent.v1` row, a poison reversal) is
+ * operator-visible on the fee itself, not only in the outbox table. Dispatch on `eventType`
+ * (rather than assuming every row is a charge) since this table now carries two payload shapes.
  */
 @ApplicationScoped
 class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepository) :
@@ -62,13 +64,17 @@ class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepo
     }
 
     override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant) {
-        val deadRowIdempotencyKey: Uni<String?> = Panache.withTransaction {
+        val deadRow: Uni<DeadRow?> = Panache.withTransaction {
             find("eventId", eventId).firstResult().map { e ->
                 if (e == null) {
                     null
                 } else {
                     applyFailure(e, error, failedAt)
-                    if (e.status == OutboxStatus.DEAD.name) extractIdempotencyKey(e.payload) else null
+                    if (e.status == OutboxStatus.DEAD.name) {
+                        DeadRow(e.eventType, extractIdempotencyKey(e.eventType, e.payload))
+                    } else {
+                        null
+                    }
                 }
             }
         }
@@ -76,17 +82,33 @@ class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepo
         // separate aggregate from the outbox row; both updates are individually durable, and a
         // crash between them just means the fee catches up to FAILED on a later markFailed retry
         // or is visible as "PENDING forever" — never silently POSTED).
-        deadRowIdempotencyKey.awaitSuspending()?.let { assessments.markFailed(it) }
+        val dead = deadRow.awaitSuspending() ?: return
+        val idempotencyKey = dead.idempotencyKey ?: return
+        if (dead.eventType == REVERSAL_INTENT_EVENT_TYPE) {
+            assessments.markReversalFailed(idempotencyKey)
+        } else {
+            assessments.markFailed(idempotencyKey)
+        }
     }
 
     /**
      * Proper Jackson deserialization (fix-review finding) rather than a regex against raw JSON —
-     * [LedgerOutboxEventPublisher] already deserializes this same `billing.fee.post-intent.v1`
-     * payload shape via Jackson; reusing that approach here keeps both readers equally robust to
-     * whitespace/field-order/escaping rather than depending on a hand-rolled pattern.
+     * [LedgerOutboxEventPublisher] already deserializes both the `billing.fee.post-intent.v1` and
+     * `billing.fee.reversal-intent.v1` payload shapes via Jackson; reusing that approach here keeps
+     * both readers equally robust to whitespace/field-order/escaping rather than depending on a
+     * hand-rolled pattern. A reversal-intent payload carries BOTH its own `idempotencyKey` (the
+     * reversal journal's key) AND `originalIdempotencyKey` (the fee being reversed) — dispatching
+     * on `eventType` (rather than "whichever field parses first") is required so a DEAD reversal
+     * row flags the ORIGINAL fee's `posting_status`, not a phantom row keyed by the reversal's own
+     * (never-persisted-as-a-fee-row) idempotency key.
      */
-    private fun extractIdempotencyKey(payload: String): String? =
+    private fun extractIdempotencyKey(eventType: String, payload: String): String? = if (eventType == REVERSAL_INTENT_EVENT_TYPE) {
+        runCatching { mapper.readValue(payload, OriginalIdempotencyKeyOnly::class.java).originalIdempotencyKey }.getOrNull()
+    } else {
         runCatching { mapper.readValue(payload, IdempotencyKeyOnly::class.java).idempotencyKey }.getOrNull()
+    }
+
+    private data class DeadRow(val eventType: String, val idempotencyKey: String?)
 
     /** Record a publish failure (ADR-0050 N5) — same policy every service's outbox repo applies. */
     private fun applyFailure(e: BillingOutboxEntity, error: String, at: Instant) {
@@ -109,9 +131,16 @@ class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepo
 
     companion object {
         private val log: Logger = Logger.getLogger(BillingOutboxRepositoryImpl::class.java)
+
+        /** Mirrors `LedgerOutboxEventPublisher.REVERSAL_INTENT_EVENT_TYPE` (ADR-0143 phase 2e). */
+        const val REVERSAL_INTENT_EVENT_TYPE = "billing.fee.reversal-intent.v1"
     }
 }
 
 /** Reads only the one field this repository needs from the `billing.fee.post-intent.v1` payload. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 private data class IdempotencyKeyOnly(val idempotencyKey: String)
+
+/** Reads only the one field this repository needs from the `billing.fee.reversal-intent.v1` payload. */
+@JsonIgnoreProperties(ignoreUnknown = true)
+private data class OriginalIdempotencyKeyOnly(val originalIdempotencyKey: String)

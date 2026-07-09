@@ -15,11 +15,15 @@ import java.math.BigDecimal
 import java.util.UUID
 
 /**
- * Unit coverage for [MoneyPathInvariants.billingFeeConservation] (ADR-0143 phase 2d). No
- * `BillingScenario` drives [World.billingFees] through the seeded runner yet (billing-service has
- * no simulation-harness scenario — see the KDoc on `World.billingFees`), so this proves the
- * invariant itself is correct in isolation, the same way a harness proof must both hold on
- * correct state AND catch a real defect (mirrors `DstSimulationTest`'s two-sided proof).
+ * Unit coverage for [MoneyPathInvariants.billingFeeConservation] (ADR-0143 phase 2d), in
+ * isolation from the seeded runner — building a [World] by hand and poking
+ * `recordAssessed`/`recordPosted` directly proves the invariant's own comparison logic is
+ * correct (per-key, not netted across fees) independent of how [World.billingFees] gets
+ * populated. `com.openbank.simulation.scenario.FeeBillingScenario` (wired into
+ * `SimulationRunner.runSeed`) is what feeds real assess/post/reverse activity into
+ * [World.billingFees] during an actual seeded run — see `FeeBillingScenarioTest` /
+ * `DstSimulationTest` for the integrated, non-vacuous proof that a broken posting leg is
+ * actually caught end-to-end.
  */
 class BillingFeeConservationInvariantTest {
 
