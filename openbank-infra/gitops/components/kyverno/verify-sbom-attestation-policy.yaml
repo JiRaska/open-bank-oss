@@ -56,6 +56,19 @@ spec:
           mutateDigest: false
           verifyDigest: false
           required: true
+          # useCache: false — mirrors the same-day fix in verify-images-policy.yaml.
+          # This rule and the signature rule race on the same ECR credential temp file
+          # inside the admission-controller pod; whichever loses the race gets its
+          # transient failure cached as if it were a real verification result, poisoning
+          # every later admission for that tag until the cache entry expires or the pod
+          # restarts. The signature policy got useCache: false today (2026-07-09) for the
+          # admin-ui hit of this bug, but this policy was left on the default (cached) —
+          # confirmed live in-cluster still denying openbank-billing-service:sandbox-16d25569
+          # on repeat ArgoCD retries although `cosign verify`/`verify-attestation` both pass
+          # against the same tag with the same key. Audit mode never blocks the pod either
+          # way, but a poisoned PolicyReport entry defeats the whole point of step 1
+          # (surfacing real violations) and would silently pass step 2's redeploy check.
+          useCache: false
           attestations:
             - predicateType: https://cyclonedx.org/bom
               attestors:
