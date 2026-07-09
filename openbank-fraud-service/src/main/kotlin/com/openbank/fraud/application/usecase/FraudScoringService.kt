@@ -8,6 +8,7 @@ import com.openbank.fraud.application.port.`in`.ScoreFraudUseCase
 import com.openbank.fraud.application.port.out.FraudMetricsPort
 import com.openbank.fraud.application.port.out.FraudScoreRepository
 import com.openbank.fraud.application.port.out.MlModelPort
+import com.openbank.fraud.application.port.out.PayeeHistoryRepository
 import com.openbank.fraud.application.port.out.VelocityAggregateRepository
 import com.openbank.fraud.domain.model.FraudScore
 import com.openbank.fraud.domain.model.ScoreRequest
@@ -31,7 +32,13 @@ import java.time.Instant
  * p99 ≤ 150 ms.
  *
  * Velocity lookups degrade gracefully — a missing aggregate (null from the repository, e.g. before
- * the first Kafka signal arrives) leaves the counter at zero so no velocity rule fires.
+ * the first Kafka signal arrives) leaves the counter at zero so no velocity rule fires. The
+ * ADR-0084 §3 v4 payee-history lookup degrades the same direction: a missing accountId/
+ * counterpartyId pair leaves [ScoreRequest.isNewPayee] at its default `false`, so
+ * [com.openbank.fraud.domain.rules.NewPayeeHighAmountReviewRule] stays silent rather than firing on
+ * a pair the service could not actually evaluate — the *absence* of history data never manufactures
+ * a REVIEW by itself. A genuinely new payee (no [com.openbank.fraud.domain.model.PayeeHistory] row
+ * for the pair) is the one case that *does* set it true — see [enrichWithPayeeHistory].
  *
  * Single CDI constructor — all dependencies are [ApplicationScoped] beans, so a plain [@Inject]
  * constructor satisfies ArC. The pure [FraudRuleEngine] is a stateless object (not a bean) and is
@@ -46,6 +53,7 @@ class FraudScoringService @Inject constructor(
     private val repository: FraudScoreRepository,
     private val metrics: FraudMetricsPort,
     private val velocityRepo: VelocityAggregateRepository,
+    private val payeeHistoryRepo: PayeeHistoryRepository,
     private val featureStore: OnlineFeatureStore,
     private val mlModel: MlModelPort,
     private val clock: Clock,
@@ -56,7 +64,7 @@ class FraudScoringService @Inject constructor(
     private val log = Logger.getLogger(FraudScoringService::class.java)
 
     override suspend fun score(request: ScoreRequest): FraudScore {
-        val enriched = enrichWithVelocity(request)
+        val enriched = enrichWithPayeeHistory(enrichWithVelocity(request))
         val result = FraudRuleEngine.score(enriched) // the ONLY thing that determines the verdict
         repository.save(enriched, result)
         metrics.recordVerdict(result.verdict, enriched.rail)
@@ -107,5 +115,19 @@ class FraudScoringService @Inject constructor(
             velocityH24Count = h24,
             velocityH1TotalAmount = h1Aggregate?.totalAmount ?: BigDecimal.ZERO,
         )
+    }
+
+    /**
+     * ADR-0084 §3 v4: sets [ScoreRequest.isNewPayee] from the payee_history signal plane. Silent
+     * (leaves the default `false`) when either half of the (account, payee) pair is missing —
+     * mirrors [enrichWithVelocity]'s "nothing to look up -> no signal" contract. A pair IS new when
+     * [PayeeHistoryRepository.findHistory] returns null (no prior payment ever recorded), which is
+     * the normal, expected state for a brand-new payee, not an error condition.
+     */
+    private suspend fun enrichWithPayeeHistory(request: ScoreRequest): ScoreRequest {
+        val accountId = request.accountId ?: return request
+        val counterpartyId = request.counterpartyId ?: return request
+        val history = payeeHistoryRepo.findHistory(accountId, counterpartyId.toString())
+        return request.copy(isNewPayee = history == null)
     }
 }

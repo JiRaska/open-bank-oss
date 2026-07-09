@@ -7,8 +7,10 @@ package com.openbank.fraud.application.usecase
 import com.openbank.fraud.application.port.out.FraudMetricsPort
 import com.openbank.fraud.application.port.out.FraudScoreRepository
 import com.openbank.fraud.application.port.out.MlModelPort
+import com.openbank.fraud.application.port.out.PayeeHistoryRepository
 import com.openbank.fraud.application.port.out.VelocityAggregateRepository
 import com.openbank.fraud.domain.model.FraudVerdict
+import com.openbank.fraud.domain.model.PayeeHistory
 import com.openbank.fraud.domain.model.ScoreRequest
 import com.openbank.fraud.domain.model.VelocityAggregate
 import com.openbank.fraud.domain.model.VelocityWindow
@@ -30,6 +32,7 @@ class FraudScoringServiceTest {
     private val repository = mockk<FraudScoreRepository>()
     private val metrics = mockk<FraudMetricsPort>(relaxed = true)
     private val velocityRepo = mockk<VelocityAggregateRepository>()
+    private val payeeHistoryRepo = mockk<PayeeHistoryRepository>()
     private val featureStore = mockk<OnlineFeatureStore>(relaxed = true)
     private val mlModel = mockk<MlModelPort>(relaxed = true)
 
@@ -40,6 +43,7 @@ class FraudScoringServiceTest {
             repository,
             metrics,
             velocityRepo,
+            payeeHistoryRepo,
             featureStore,
             mlModel,
             java.time.Clock.systemUTC(),
@@ -68,15 +72,34 @@ class FraudScoringServiceTest {
         windowStart = Instant.now(),
     )
 
+    private fun establishedPayeeHistory() = PayeeHistory(
+        accountId = UUID.randomUUID(),
+        payeeIdentifier = UUID.randomUUID().toString(),
+        firstSeenAt = Instant.now().minusSeconds(86400),
+        lastPaidAt = Instant.now(),
+        paymentCount = 3L,
+    )
+
+    /**
+     * Most tests in this class exercise a rule OTHER than [com.openbank.fraud.domain.rules.NewPayeeHighAmountReviewRule]
+     * and must not have it fire incidentally — this stubs payeeHistoryRepo as an "established payee"
+     * (a history row exists) so isNewPayee enrichment stays false by default. Tests that specifically
+     * cover the new-payee rule override this with an explicit stub.
+     */
+    private fun stubEstablishedPayee() {
+        coEvery { payeeHistoryRepo.findHistory(any(), any()) } returns establishedPayeeHistory()
+    }
+
     @Test
     fun `scores via the rule engine and returns the baseline ALLOW verdict`(): Unit = runBlocking {
         coEvery { repository.save(any(), any()) } returns UUID.randomUUID()
         coEvery { velocityRepo.findAggregate(any(), any(), any()) } returns null
+        stubEstablishedPayee()
 
         val result = service.score(request())
 
         assertThat(result.verdict).isEqualTo(FraudVerdict.ALLOW)
-        assertThat(result.ruleVersion).isEqualTo("v3")
+        assertThat(result.ruleVersion).isEqualTo("v4")
     }
 
     @Test
@@ -85,6 +108,7 @@ class FraudScoringServiceTest {
         val savedReq = slot<ScoreRequest>()
         coEvery { repository.save(capture(savedReq), any()) } returns UUID.randomUUID()
         coEvery { velocityRepo.findAggregate(any(), any(), any()) } returns null
+        stubEstablishedPayee()
 
         service.score(req)
 
@@ -98,6 +122,7 @@ class FraudScoringServiceTest {
         val req = request()
         coEvery { repository.save(any(), any()) } returns UUID.randomUUID()
         coEvery { velocityRepo.findAggregate(any(), any(), any()) } returns null
+        stubEstablishedPayee()
 
         service.score(req)
 
@@ -114,6 +139,7 @@ class FraudScoringServiceTest {
             velocityAggregate(accountId, VelocityWindow.H1, count = 7L)
         coEvery { velocityRepo.findAggregate(accountId, VelocityWindow.H24, "EUR") } returns
             velocityAggregate(accountId, VelocityWindow.H24, count = 30L)
+        stubEstablishedPayee()
 
         service.score(req)
 
@@ -127,6 +153,7 @@ class FraudScoringServiceTest {
         val savedReq = slot<ScoreRequest>()
         coEvery { repository.save(capture(savedReq), any()) } returns UUID.randomUUID()
         coEvery { velocityRepo.findAggregate(any(), any(), any()) } returns null
+        stubEstablishedPayee()
 
         service.score(req)
 
@@ -146,6 +173,7 @@ class FraudScoringServiceTest {
         coEvery { velocityRepo.findAggregate(accountId, VelocityWindow.H1, "EUR") } returns
             velocityAggregate(accountId, VelocityWindow.H1, count = 3L, totalAmount = BigDecimal("4200.50"))
         coEvery { velocityRepo.findAggregate(accountId, VelocityWindow.H24, "EUR") } returns null
+        stubEstablishedPayee()
 
         service.score(req)
 
@@ -160,6 +188,7 @@ class FraudScoringServiceTest {
         coEvery { velocityRepo.findAggregate(accountId, VelocityWindow.H1, "EUR") } returns
             velocityAggregate(accountId, VelocityWindow.H1, count = 2L, totalAmount = BigDecimal("1500000"))
         coEvery { velocityRepo.findAggregate(accountId, VelocityWindow.H24, "EUR") } returns null
+        stubEstablishedPayee()
 
         val result = service.score(req)
 
@@ -233,6 +262,7 @@ class FraudScoringServiceTest {
         coEvery { velocityRepo.findAggregate(accountId, VelocityWindow.H1, "EUR") } returns
             velocityAggregate(accountId, VelocityWindow.H1, count = 10L)
         coEvery { velocityRepo.findAggregate(accountId, VelocityWindow.H24, "EUR") } returns null
+        stubEstablishedPayee()
 
         val result = service.score(req)
 
@@ -252,5 +282,107 @@ class FraudScoringServiceTest {
         service.score(req)
 
         coVerify(exactly = 0) { velocityRepo.findAggregate(any(), any(), any()) }
+    }
+
+    @Test
+    fun `skips payee-history lookup when counterpartyId is null`(): Unit = runBlocking {
+        val req = ScoreRequest(
+            amount = BigDecimal("50.00"),
+            currency = "CZK",
+            rail = "DOMESTIC",
+            accountId = UUID.randomUUID(),
+            counterpartyId = null,
+        )
+        coEvery { repository.save(any(), any()) } returns UUID.randomUUID()
+        coEvery { velocityRepo.findAggregate(any(), any(), any()) } returns null
+
+        service.score(req)
+
+        coVerify(exactly = 0) { payeeHistoryRepo.findHistory(any(), any()) }
+    }
+
+    // ── NewPayeeHighAmountReviewRule enrichment (ADR-0084 §3 v4) ─────────────
+
+    @Test
+    fun `sets isNewPayee true when payeeHistoryRepo has no prior record for the pair`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+        val counterpartyId = UUID.randomUUID()
+        val req = ScoreRequest(
+            amount = BigDecimal("50.00"),
+            currency = "EUR",
+            rail = "SEPA",
+            accountId = accountId,
+            counterpartyId = counterpartyId,
+        )
+        val savedReq = slot<ScoreRequest>()
+        coEvery { repository.save(capture(savedReq), any()) } returns UUID.randomUUID()
+        coEvery { velocityRepo.findAggregate(any(), any(), any()) } returns null
+        coEvery { payeeHistoryRepo.findHistory(accountId, counterpartyId.toString()) } returns null
+
+        service.score(req)
+
+        assertThat(savedReq.captured.isNewPayee).isTrue()
+    }
+
+    @Test
+    fun `sets isNewPayee false when payeeHistoryRepo has a prior record for the pair`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+        val counterpartyId = UUID.randomUUID()
+        val req = ScoreRequest(
+            amount = BigDecimal("50.00"),
+            currency = "EUR",
+            rail = "SEPA",
+            accountId = accountId,
+            counterpartyId = counterpartyId,
+        )
+        val savedReq = slot<ScoreRequest>()
+        coEvery { repository.save(capture(savedReq), any()) } returns UUID.randomUUID()
+        coEvery { velocityRepo.findAggregate(any(), any(), any()) } returns null
+        coEvery { payeeHistoryRepo.findHistory(accountId, counterpartyId.toString()) } returns establishedPayeeHistory()
+
+        service.score(req)
+
+        assertThat(savedReq.captured.isNewPayee).isFalse()
+    }
+
+    @Test
+    fun `returns REVIEW for a genuinely new payee above the new-payee threshold`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+        val counterpartyId = UUID.randomUUID()
+        val req = ScoreRequest(
+            amount = BigDecimal("15000"),
+            currency = "EUR",
+            rail = "SEPA",
+            accountId = accountId,
+            counterpartyId = counterpartyId,
+        )
+        coEvery { repository.save(any(), any()) } returns UUID.randomUUID()
+        coEvery { velocityRepo.findAggregate(any(), any(), any()) } returns null
+        coEvery { payeeHistoryRepo.findHistory(accountId, counterpartyId.toString()) } returns null
+
+        val result = service.score(req)
+
+        assertThat(result.verdict).isEqualTo(FraudVerdict.REVIEW)
+        assertThat(result.reasons).contains("new-payee-high-amount")
+    }
+
+    @Test
+    fun `does NOT fire new-payee rule for an established payee at the same amount`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+        val counterpartyId = UUID.randomUUID()
+        val req = ScoreRequest(
+            amount = BigDecimal("15000"),
+            currency = "EUR",
+            rail = "SEPA",
+            accountId = accountId,
+            counterpartyId = counterpartyId,
+        )
+        coEvery { repository.save(any(), any()) } returns UUID.randomUUID()
+        coEvery { velocityRepo.findAggregate(any(), any(), any()) } returns null
+        coEvery { payeeHistoryRepo.findHistory(accountId, counterpartyId.toString()) } returns establishedPayeeHistory()
+
+        val result = service.score(req)
+
+        assertThat(result.reasons).doesNotContain("new-payee-high-amount")
     }
 }
