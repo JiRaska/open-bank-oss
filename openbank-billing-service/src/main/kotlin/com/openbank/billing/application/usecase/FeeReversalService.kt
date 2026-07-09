@@ -42,22 +42,21 @@ class FeeReversalService(private val repository: BillingAssessmentRepository) {
     // stripped inline at the log sink, same convention as BillingCycleService (CodeQL
     // java/log-injection is a local syntactic match on the replace() call at the sink itself).
     suspend fun reverse(idempotencyKey: String, reason: String): AssessedFee {
-        val existing = repository.findFeeByIdempotencyKey(idempotencyKey)
-            ?: throw FeeNotFoundException(idempotencyKey)
-
-        if (existing.postingStatus == PostingStatus.REVERSAL_PENDING || existing.postingStatus == PostingStatus.REVERSED) {
+        val existing = resolveReversible(idempotencyKey)
+        if (existing.alreadyReversed) {
             log.debugf(
                 "fee idempotencyKey=%s is already %s — returning existing (idempotent replay, no second reversal)",
                 idempotencyKey.replace('\n', '_').replace('\r', '_'),
-                existing.postingStatus,
+                existing.fee.postingStatus,
             )
-            return existing
+            return existing.fee
         }
 
-        if (existing.postingStatus != PostingStatus.POSTED) {
-            throw FeeNotPostedException(idempotencyKey, existing.postingStatus)
-        }
-
+        // The single direct throw left in this function body (detekt ThrowsCount, max 2 — the
+        // other two live in resolveReversible, mirrors KycService.validateReason/rejectCase):
+        // persistReversalIntent returning null here means the fee vanished between
+        // resolveReversible's read and this call — essentially impossible (AssessedFee rows are
+        // append-only, never deleted) but defended against rather than silently NPEing.
         val updated = repository.persistReversalIntent(idempotencyKey, reason)
             ?: throw FeeNotFoundException(idempotencyKey)
         log.infof(
@@ -67,6 +66,30 @@ class FeeReversalService(private val repository: BillingAssessmentRepository) {
         )
         return updated
     }
+
+    /**
+     * Resolves the fee for [idempotencyKey] and validates it is reversible, throwing the two
+     * "can't reverse this" exceptions the ADR calls out (extracted so [reverse]'s own body stays
+     * within detekt's `ThrowsCount` limit — mirrors `KycService.validateReason`). A single fetch:
+     * [ReversibleFee.alreadyReversed] carries the idempotent-replay outcome inline rather than
+     * forcing [reverse] to re-fetch the same row (racy and wasteful) to tell "replay" apart from
+     * "needs a fresh lookup".
+     */
+    private suspend fun resolveReversible(idempotencyKey: String): ReversibleFee {
+        val existing = repository.findFeeByIdempotencyKey(idempotencyKey)
+            ?: throw FeeNotFoundException(idempotencyKey)
+        if (existing.postingStatus == PostingStatus.REVERSAL_PENDING ||
+            existing.postingStatus == PostingStatus.REVERSED
+        ) {
+            return ReversibleFee(existing, alreadyReversed = true)
+        }
+        if (existing.postingStatus != PostingStatus.POSTED) {
+            throw FeeNotPostedException(idempotencyKey, existing.postingStatus)
+        }
+        return ReversibleFee(existing, alreadyReversed = false)
+    }
+
+    private data class ReversibleFee(val fee: AssessedFee, val alreadyReversed: Boolean)
 }
 
 /** No [AssessedFee] with this idempotency key has ever been persisted. */

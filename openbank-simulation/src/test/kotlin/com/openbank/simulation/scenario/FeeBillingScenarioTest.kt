@@ -21,7 +21,8 @@ import org.junit.jupiter.api.Test
  */
 class FeeBillingScenarioTest {
 
-    private fun newWorld(seed: Long = 42L): World = World(SimulationContext(seed, FaultProfile.NONE), SimulationConfig())
+    private fun newWorld(seed: Long = 42L): World =
+        World(SimulationContext(seed, FaultProfile.NONE), SimulationConfig())
 
     @Test
     fun `a step assesses and posts a fee, and the conservation invariant holds`() {

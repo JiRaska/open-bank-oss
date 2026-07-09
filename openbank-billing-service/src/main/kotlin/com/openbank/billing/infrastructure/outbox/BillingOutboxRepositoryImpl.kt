@@ -102,8 +102,12 @@ class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepo
      * row flags the ORIGINAL fee's `posting_status`, not a phantom row keyed by the reversal's own
      * (never-persisted-as-a-fee-row) idempotency key.
      */
-    private fun extractIdempotencyKey(eventType: String, payload: String): String? = if (eventType == REVERSAL_INTENT_EVENT_TYPE) {
-        runCatching { mapper.readValue(payload, OriginalIdempotencyKeyOnly::class.java).originalIdempotencyKey }.getOrNull()
+    private fun extractIdempotencyKey(eventType: String, payload: String): String? = if (eventType ==
+        REVERSAL_INTENT_EVENT_TYPE
+    ) {
+        runCatching {
+            mapper.readValue(payload, OriginalIdempotencyKeyOnly::class.java).originalIdempotencyKey
+        }.getOrNull()
     } else {
         runCatching { mapper.readValue(payload, IdempotencyKeyOnly::class.java).idempotencyKey }.getOrNull()
     }

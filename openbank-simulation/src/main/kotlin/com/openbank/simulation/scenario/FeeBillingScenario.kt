@@ -8,12 +8,12 @@ import com.openbank.billing.domain.AssessedFee
 import com.openbank.billing.domain.FeeJournalCommand
 import com.openbank.billing.domain.FeeReversalCommand
 import com.openbank.billing.domain.PostingStatus
-import com.openbank.libs.product.WaiveReason
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalLine
 import com.openbank.ledger.domain.model.JournalSide
 import com.openbank.ledger.domain.model.JournalStatus
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.product.WaiveReason
 import com.openbank.simulation.adapters.AccountBookedChanged
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.model.BillingFeeKey
@@ -57,12 +57,17 @@ object FeeBillingScenario {
     private val ZONE = ZoneId.of("Europe/Prague")
 
     // Mirrors BillingLedgerConfig.Gl's two leaf GL accounts (billing-service's own fixed chart-of-
-    // accounts config) — dedicated ids so this scenario's journals are trivially distinguishable
-    // from PaymentScenario's DEPOSIT_CONTROL_GL / SepaSettlementScenario's settlement legs in a
-    // trace dump.
-    private val FEE_RECEIVABLE_GL: UUID = UUID(0L, 3L)
-    private val FEE_INCOME_GL: UUID = UUID(0L, 4L)
-    private val SYSTEM_ACTOR: UUID = UUID(0L, 5L)
+    // accounts config) — dedicated, named least-significant-bits (rather than PaymentScenario's
+    // bare UUID(0L, 1L)/UUID(0L, 2L) style, which happens to fall inside detekt's default
+    // MagicNumber ignoreNumbers=[-1,0,1,2]) so this scenario's journals are trivially
+    // distinguishable from PaymentScenario's DEPOSIT_CONTROL_GL / SepaSettlementScenario's
+    // settlement legs in a trace dump, without tripping MagicNumber on the higher lsb values.
+    private const val FEE_RECEIVABLE_GL_LSB = 3L
+    private const val FEE_INCOME_GL_LSB = 4L
+    private const val SYSTEM_ACTOR_LSB = 5L
+    private val FEE_RECEIVABLE_GL: UUID = UUID(0L, FEE_RECEIVABLE_GL_LSB)
+    private val FEE_INCOME_GL: UUID = UUID(0L, FEE_INCOME_GL_LSB)
+    private val SYSTEM_ACTOR: UUID = UUID(0L, SYSTEM_ACTOR_LSB)
 
     fun step(world: World) {
         val random = world.context.random
@@ -157,7 +162,9 @@ object FeeBillingScenario {
         // phase 2e (never collapses into a replay of the charge's own idempotencyKey).
         world.ledger.post(reversalCommand.idempotencyKey, reversalEntry)
         publishBooked(world, reversalEntry)
-        world.audit.append("fee ${fee.idempotencyKey} reversed: journal ${reversalEntry.id} (${reversalCommand.reason})")
+        world.audit.append(
+            "fee ${fee.idempotencyKey} reversed: journal ${reversalEntry.id} (${reversalCommand.reason})",
+        )
         // Deliberately NOT world.billingFees.recordPosted/recordAssessed again: the reversal is an
         // ADDITIONAL, independent compensating journal, not an un-post of the original charge —
         // billing-fee-conservation only asserts the CHARGE leg balances; conservationOfMoney

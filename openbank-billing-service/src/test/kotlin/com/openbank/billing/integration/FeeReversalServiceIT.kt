@@ -69,7 +69,8 @@ class FeeReversalServiceIT {
             waived = false,
             reason = WaiveReason.NOT_WAIVABLE,
         )
-        val assessment = BillingAssessment(cycleId, accountId, "CZK", skipped = false, skipReason = null, assessedFees = listOf(fee))
+        val assessment =
+            BillingAssessment(cycleId, accountId, "CZK", skipped = false, skipReason = null, assessedFees = listOf(fee))
         repository.persistWithPostingIntent(assessment)
         repository.markPosted(fee.idempotencyKey, journalId)
         return checkNotNull(repository.findFeeByIdempotencyKey(fee.idempotencyKey))

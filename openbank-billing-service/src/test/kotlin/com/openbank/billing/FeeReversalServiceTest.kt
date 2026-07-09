@@ -43,9 +43,13 @@ class FeeReversalServiceTest {
     fun `reversing a POSTED fee commits the reversal intent and returns the updated fee`(): Unit = runBlocking {
         val repository = mockk<BillingAssessmentRepository>()
         val posted = fee(PostingStatus.POSTED)
-        val afterReversalIntent = posted.copy(postingStatus = PostingStatus.REVERSAL_PENDING, reversalReason = "waiver bug")
+        val afterReversalIntent = posted.copy(
+            postingStatus = PostingStatus.REVERSAL_PENDING,
+            reversalReason = "waiver bug",
+        )
         coEvery { repository.findFeeByIdempotencyKey("fee-2026-07-acc-1-f1-CZK") } returns posted
-        coEvery { repository.persistReversalIntent("fee-2026-07-acc-1-f1-CZK", "waiver bug") } returns afterReversalIntent
+        coEvery { repository.persistReversalIntent("fee-2026-07-acc-1-f1-CZK", "waiver bug") } returns
+            afterReversalIntent
 
         val service = FeeReversalService(repository)
         val result = service.reverse("fee-2026-07-acc-1-f1-CZK", "waiver bug")
@@ -69,17 +73,18 @@ class FeeReversalServiceTest {
         }
 
     @Test
-    fun `reversing an already-REVERSED fee is idempotent — no second reversal intent is persisted`(): Unit = runBlocking {
-        val repository = mockk<BillingAssessmentRepository>()
-        val reversed = fee(PostingStatus.REVERSED)
-        coEvery { repository.findFeeByIdempotencyKey("fee-2026-07-acc-1-f1-CZK") } returns reversed
+    fun `reversing an already-REVERSED fee is idempotent — no second reversal intent is persisted`(): Unit =
+        runBlocking {
+            val repository = mockk<BillingAssessmentRepository>()
+            val reversed = fee(PostingStatus.REVERSED)
+            coEvery { repository.findFeeByIdempotencyKey("fee-2026-07-acc-1-f1-CZK") } returns reversed
 
-        val service = FeeReversalService(repository)
-        val result = service.reverse("fee-2026-07-acc-1-f1-CZK", "second attempt")
+            val service = FeeReversalService(repository)
+            val result = service.reverse("fee-2026-07-acc-1-f1-CZK", "second attempt")
 
-        assertThat(result).isSameAs(reversed)
-        coVerify(exactly = 0) { repository.persistReversalIntent(any(), any()) }
-    }
+            assertThat(result).isSameAs(reversed)
+            coVerify(exactly = 0) { repository.persistReversalIntent(any(), any()) }
+        }
 
     @Test
     fun `reversing a fee that was never posted fails cleanly with FeeNotPostedException`(): Unit = runBlocking {

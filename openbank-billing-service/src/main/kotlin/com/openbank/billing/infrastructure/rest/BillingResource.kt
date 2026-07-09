@@ -110,10 +110,7 @@ class BillingResource(
     @Consumes(MediaType.APPLICATION_JSON)
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "billing.reverse", resource = "#idempotencyKey")
-    suspend fun reverse(
-        @QueryParam("idempotencyKey") idempotencyKey: String?,
-        request: ReverseFeeRequest?,
-    ): Response {
+    suspend fun reverse(@QueryParam("idempotencyKey") idempotencyKey: String?, request: ReverseFeeRequest?): Response {
         val reason = request?.reason
         if (idempotencyKey.isNullOrBlank() || reason.isNullOrBlank()) {
             return Response.status(Response.Status.BAD_REQUEST)

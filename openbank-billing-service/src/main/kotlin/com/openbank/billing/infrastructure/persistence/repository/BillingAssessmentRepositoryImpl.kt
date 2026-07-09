@@ -92,7 +92,7 @@ class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, pri
                 eventId = Ids.newId()
                 aggregateId = fee.id
                 eventType = "billing.fee.post-intent.v1"
-                payload = feePostIntentPayload(fee)
+                payload = AssessedFeeOutboxPayloads.postIntent(fee)
                 status = OutboxStatus.PENDING.name
                 attemptCount = 0
                 createdAt = now
@@ -192,7 +192,9 @@ class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, pri
                 if (fee == null) {
                     return@chain Uni.createFrom().nullItem()
                 }
-                if (fee.postingStatus == PostingStatus.REVERSAL_PENDING || fee.postingStatus == PostingStatus.REVERSED) {
+                if (fee.postingStatus == PostingStatus.REVERSAL_PENDING ||
+                    fee.postingStatus == PostingStatus.REVERSED
+                ) {
                     return@chain Uni.createFrom().item(fee)
                 }
                 if (fee.postingStatus != PostingStatus.POSTED) {
@@ -209,7 +211,7 @@ class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, pri
                     eventId = Ids.newId()
                     aggregateId = fee.id
                     eventType = "billing.fee.reversal-intent.v1"
-                    payload = feeReversalIntentPayload(fee, reason)
+                    payload = AssessedFeeOutboxPayloads.reversalIntent(fee, reason)
                     status = OutboxStatus.PENDING.name
                     attemptCount = 0
                     createdAt = now
@@ -247,22 +249,31 @@ class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, pri
                 .executeUpdate()
         }.awaitSuspending()
     }
+}
 
-    private fun feePostIntentPayload(fee: AssessedFeeEntity): String = "{\"schemaVersion\":1," +
+/**
+ * Serializes an [AssessedFeeEntity] into the two `billing_outbox` payload shapes (ADR-0143 steps
+ * 2/2e). Split out of [BillingAssessmentRepositoryImpl] (detekt `TooManyFunctions`, threshold 11):
+ * this is pure payload-mapping logic with no reactive/transactional concern of its own — the same
+ * "mapper lives at file scope, not on the persistence class" convention this file already used for
+ * [BillingCycleAssessmentEntity.toDomain]/[AssessedFeeEntity.toDomain] below.
+ */
+private object AssessedFeeOutboxPayloads {
+
+    fun postIntent(fee: AssessedFeeEntity): String = "{\"schemaVersion\":1," +
         "\"idempotencyKey\":\"${fee.idempotencyKey}\",\"cycleId\":\"${fee.cycleId}\"," +
         "\"accountId\":\"${fee.accountId}\",\"feeId\":\"${fee.feeId}\"," +
         "\"amount\":\"${fee.chargedAmount}\",\"currency\":\"${fee.currency}\"," +
         "\"description\":\"Fee charge: ${fee.feeName}\"}"
 
-    private fun feeReversalIntentPayload(fee: AssessedFeeEntity, reason: String): String = "{\"schemaVersion\":1," +
+    fun reversalIntent(fee: AssessedFeeEntity, reason: String): String = "{\"schemaVersion\":1," +
         "\"idempotencyKey\":\"${fee.reversalIdempotencyKey()}\"," +
         "\"originalIdempotencyKey\":\"${fee.idempotencyKey}\",\"cycleId\":\"${fee.cycleId}\"," +
         "\"accountId\":\"${fee.accountId}\",\"feeId\":\"${fee.feeId}\"," +
         "\"amount\":\"${fee.chargedAmount}\",\"currency\":\"${fee.currency}\"," +
         "\"reason\":\"${reason.replace('\n', ' ').replace('\r', ' ').replace("\"", "'")}\"}"
 
-    private fun AssessedFeeEntity.reversalIdempotencyKey(): String =
-        "fee-reversal-$cycleId-$accountId-$feeId-$currency"
+    private fun AssessedFeeEntity.reversalIdempotencyKey(): String = "fee-reversal-$cycleId-$accountId-$feeId-$currency"
 }
 
 private fun BillingCycleAssessmentEntity.toDomain(fees: List<AssessedFeeEntity>): BillingAssessment = BillingAssessment(
