@@ -85,15 +85,19 @@ mp:
       # only future transitions; applyIfNewer is idempotent so replay never regresses the projection.
       #
       # group.id / auto.offset.reset are deliberately NOT set as YAML keys here — see
-      # openbank-infra/gitops/components/anacredit/anacredit-service.yaml
-      # (MP_MESSAGING_INCOMING_LENDING_EVENTS_IN_* env vars) for why and where they're set instead.
-      # Summary: SmallRye Config's YAML source unconditionally quotes any leaf map key containing a
-      # literal dot (`group.id` becomes the registered property name `"group.id"`, quotes included),
-      # so KafkaConnectorIncomingConfiguration's plain config.getOptionalValue("group.id", ...) never
-      # finds it. group.id then falls back to Quarkus's default (quarkus.application.name =
-      # "openbank-anacredit-service"), which the anacredit-service KafkaUser ACL does NOT grant
-      # (kafka-anacredit-mtls.yaml only grants Read on group "anacredit-service-lending") — every
-      # poll would hit org.apache.kafka.common.errors.GroupAuthorizationException. Refs #686.
+      # openbank-infra/gitops/components/anacredit/anacredit-service-msg-override.yaml
+      # (a properties-file ConfigMap loaded via QUARKUS_CONFIG_LOCATIONS) for why and where
+      # they're set instead. Summary: SmallRye Config's YAML source unconditionally quotes any
+      # leaf map key containing a literal dot (`group.id` becomes the registered property name
+      # `"group.id"`, quotes included), so KafkaConnectorIncomingConfiguration's plain
+      # config.getOptionalValue("group.id", ...) never finds it. group.id then falls back to
+      # Quarkus's default (quarkus.application.name = "openbank-anacredit-service"), which the
+      # anacredit-service KafkaUser ACL does NOT grant (kafka-anacredit-mtls.yaml only grants
+      # Read on group "anacredit-service-lending") — every poll would hit
+      # org.apache.kafka.common.errors.GroupAuthorizationException. NOT env vars: SmallRye's
+      # env-var reverse-mapping is ambiguous for hyphenated channel names like
+      # lending-events-in and can crash at boot (quarkusio/quarkus#30106,
+      # smallrye/smallrye-reactive-messaging#2028). Refs #686.
       lending-events-in:
         connector: smallrye-kafka
         client.id: anacredit-service-lending-${quarkus.uuid}
