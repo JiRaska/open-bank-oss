@@ -6,6 +6,7 @@ package com.openbank.lending.application.port.`in`
 
 import com.openbank.lending.domain.model.AccrualOutcome
 import com.openbank.lending.domain.model.Collateral
+import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
 import com.openbank.lending.domain.model.DecisionRequest
 import com.openbank.lending.domain.model.Loan
@@ -15,6 +16,7 @@ import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.ProvisioningRunOutcome
 import com.openbank.lending.domain.model.ProvisioningSnapshot
 import com.openbank.lending.domain.model.WriteOffRequest
+import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import io.smallrye.mutiny.Uni
@@ -63,9 +65,15 @@ interface WriteOffLoanUseCase {
     fun writeOff(loanId: LoanId, request: WriteOffRequest): Uni<Loan>
 }
 
-/** Collateral management. */
+/**
+ * Collateral management. [register] takes the trusted maker principal; the resulting [Collateral] is
+ * [com.openbank.lending.domain.model.CollateralStatus.PENDING] until a different principal decides it
+ * via [decide] (four-eyes, ADR-0028 follow-up, issue #621) — mirrors [ApplyForLoanUseCase]'s
+ * apply/decide split.
+ */
 interface CollateralUseCase {
-    fun register(loanId: LoanId, request: CollateralRequest): Uni<Collateral>
+    fun register(loanId: LoanId, request: CollateralRequest, registeredBy: String): Uni<Collateral>
+    fun decide(id: CollateralId, decision: CollateralDecisionRequest, decidedBy: String): Uni<Collateral>
     fun list(loanId: LoanId): Uni<List<Collateral>>
 }
 
