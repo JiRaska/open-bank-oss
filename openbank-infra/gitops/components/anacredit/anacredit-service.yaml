@@ -96,6 +96,17 @@ spec:
                 secretKeyRef:
                   name: kafka-cluster-ca-truststore
                   key: ca.password
+            # Set as env vars, not application.yaml keys: SmallRye Config's YAML source
+            # unconditionally quotes any leaf map key containing a literal dot, so
+            # `group.id`/`auto.offset.reset` written in
+            # openbank-anacredit-service/src/main/resources/application.yaml silently never resolve
+            # (see the comment there). group.id MUST match the Read grant in
+            # kafka-anacredit-mtls.yaml's KafkaUser ACL (anacredit-service-lending) or every
+            # consumer poll gets Kafka's GroupAuthorizationException. Refs #686.
+            - name: MP_MESSAGING_INCOMING_LENDING_EVENTS_IN_GROUP_ID
+              value: anacredit-service-lending
+            - name: MP_MESSAGING_INCOMING_LENDING_EVENTS_IN_AUTO_OFFSET_RESET
+              value: earliest
           startupProbe:
             httpGet:
               path: /q/health/ready

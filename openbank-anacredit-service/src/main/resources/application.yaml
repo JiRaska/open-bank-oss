@@ -83,13 +83,22 @@ mp:
       # loan.stage_changed -> update the durable stage projection (issue #638). earliest so a
       # redeployed/rejoined consumer group backfills from the start of the retained topic rather than
       # only future transitions; applyIfNewer is idempotent so replay never regresses the projection.
+      #
+      # group.id / auto.offset.reset are deliberately NOT set as YAML keys here — see
+      # openbank-infra/gitops/components/anacredit/anacredit-service.yaml
+      # (MP_MESSAGING_INCOMING_LENDING_EVENTS_IN_* env vars) for why and where they're set instead.
+      # Summary: SmallRye Config's YAML source unconditionally quotes any leaf map key containing a
+      # literal dot (`group.id` becomes the registered property name `"group.id"`, quotes included),
+      # so KafkaConnectorIncomingConfiguration's plain config.getOptionalValue("group.id", ...) never
+      # finds it. group.id then falls back to Quarkus's default (quarkus.application.name =
+      # "openbank-anacredit-service"), which the anacredit-service KafkaUser ACL does NOT grant
+      # (kafka-anacredit-mtls.yaml only grants Read on group "anacredit-service-lending") — every
+      # poll would hit org.apache.kafka.common.errors.GroupAuthorizationException. Refs #686.
       lending-events-in:
         connector: smallrye-kafka
         client.id: anacredit-service-lending-${quarkus.uuid}
-        group.id: anacredit-service-lending
         topic: openbank.lending.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        auto.offset.reset: earliest
 
 "%test":
   quarkus:
