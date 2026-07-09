@@ -1,0 +1,109 @@
+# Kafka mTLS identity + ACLs for openbank-agent-service (ADR-0137 fleet gate,
+# issue #686).
+#
+# agent-service consumes compliance-officer oversight-sweep triggers from
+# openbank.oversight-triggers (group: agent-oversight-consumer, ADR-0031 D9
+# P2) to wake the scheduled oversight sweep immediately instead of waiting for
+# the 30-minute cadence. It has no other Kafka traffic (no producer side).
+#
+# Until this change, agent-service had NO KafkaUser at all and pointed its
+# consumer at the plaintext plain:9092 listener. Since the ADR-0137 fleet
+# sweep (#2665) completed, the broker authorizer runs with
+# allow.everyone.if.no.acl.found=false cluster-wide (see components/kafka/
+# kafka.yaml) — every principal, ACL'd or not, is denied on plain:9092
+# (User:ANONYMOUS). So the consumer was fully non-functional, independently
+# of the group.id YAML-quoting bug fixed alongside this file (issue #686).
+#
+# Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one
+# principal for all of this service's Kafka traffic. These resources live in
+# `messaging` (where the Strimzi User Operator watches); the User Operator
+# mints a per-user Secret of the same name there (user.crt/key/p12 +
+# user.password + ca.crt). Those secrets are projected into the `platform`
+# namespace (where agent-service runs) by External Secrets below — the SAME
+# cross-namespace pattern used for `payments` (kafka-scheme-accepted-acl.yaml)
+# and every other onboarded namespace, extended here to `platform` for the
+# first time. `platform` had no prior Kafka mTLS / ESO cert-projection wiring
+# of any kind before this change.
+---
+# ── KafkaUser: agent-service ────────────────────────────────────────────────
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers→Strimzi secrets→ESO projection) must land
+    # before the platform Deployment rolls pods onto mTLS; lower waves sync
+    # first and ArgoCD blocks on ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: agent-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.oversight-triggers
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: agent-oversight-consumer
+          patternType: literal
+        operations: [Read]
+        host: "*"
+---
+# ── ExternalSecret: agent-service keystore ──────────────────────────────────
+# Projects the Strimzi-minted agent-service Secret from `messaging` into
+# `platform`. `dataFrom.extract` copies every key verbatim, preserving the
+# binary PKCS#12 payload byte-for-byte. deletionPolicy: Retain so a transient
+# store/RBAC blip never deletes a live keystore out from under a running pod.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: agent-service-kafka-keystore
+  namespace: platform
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: agent-service-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: agent-service
+---
+# ── ExternalSecret: cluster CA truststore ───────────────────────────────────
+# Shared cluster-CA truststore projected into `platform` — identical pattern
+# to every other namespace (kyc, fraud, payments, etc.). If `platform` grows a
+# second service needing this same truststore, this ExternalSecret should be
+# shared rather than duplicated (none exists yet — agent-service is the first
+# Kafka mTLS client in this namespace).
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: platform
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert

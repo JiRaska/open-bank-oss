@@ -270,6 +270,7 @@ rules:
       - audit-service
       - kyc-service
       - anacredit-service               # issue #638: LoanStageEventConsumer (ADR-0037 follow-up)
+      - agent-service                   # issue #686: oversight-triggers consumer, ns platform (first ESO client there)
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1
