@@ -87,28 +87,33 @@ mp:
         ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    # NOTE (issue #686): group.id / auto.offset.reset (and client.id) are intentionally
+    # NOT set here for party-events-in / kyc-events-in / sca-events-in. Quarkus's YAML
+    # config source unconditionally quotes any mp.messaging.incoming.<channel> leaf key
+    # containing a literal dot when registering it as a MicroProfile Config property, so
+    # a YAML `group.id: foo` here would register as the literal property
+    # `mp.messaging.incoming.<channel>."group.id"` — never the plain
+    # `mp.messaging.incoming.<channel>.group.id` that KafkaConnectorIncomingConfiguration
+    # actually reads. group.id then silently falls back to quarkus.application.name,
+    # which the Strimzi KafkaUser ACL (kafka-onboarding-mtls.yaml) does NOT grant Read on
+    # for any of these three groups -> silent GroupAuthorizationException on every poll.
+    # These keys are instead supplied via a properties-file override
+    # (onboarding-service-msg-override ConfigMap, QUARKUS_CONFIG_LOCATIONS,
+    # config_ordinal=500) whose flat key=value lines carry the exact dotted property
+    # name unambiguously. Same pattern as transaction-service's msg-override (ADR-0137).
     incoming:
       party-events-in:
         connector: smallrye-kafka
-        client.id: onboarding-service-party-${quarkus.uuid}
-        group.id: onboarding-service-party
         topic: openbank.party.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        auto.offset.reset: earliest
       kyc-events-in:
         connector: smallrye-kafka
-        client.id: onboarding-service-kyc-${quarkus.uuid}
-        group.id: onboarding-service-kyc
         topic: openbank.kyc.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        auto.offset.reset: earliest
       sca-events-in:
         connector: smallrye-kafka
-        client.id: onboarding-service-sca-${quarkus.uuid}
-        group.id: onboarding-service-sca
         topic: openbank.sca.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        auto.offset.reset: earliest
 
 openbank:
   rate-limit:
