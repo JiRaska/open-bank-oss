@@ -85,12 +85,22 @@ mp:
       transaction-signal:
         connector: smallrye-kafka
         topic: openbank.transactions.transaction.initiated
-        group.id: openbank-fraud-service-velocity
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        auto.offset.reset: latest
         # DLQ: stale signals degrade counters gracefully; processing failures go to DLQ
         failure-strategy: dead-letter-queue
-        dead-letter-queue.topic: openbank.transactions.transaction.initiated.fraud.dlq
+        # group.id / auto.offset.reset / dead-letter-queue.topic are deliberately NOT set as YAML
+        # keys here — see openbank-infra/gitops/components/fraud-service/fraud-service.yaml
+        # (MP_MESSAGING_INCOMING_TRANSACTION_SIGNAL_* env vars) for why and where they're set
+        # instead. Summary: SmallRye Config's YAML source unconditionally quotes any leaf map key
+        # containing a literal dot (`group.id` becomes the registered property name `"group.id"`,
+        # quotes included — true whether or not the YAML key itself is quoted), so
+        # KafkaConnectorIncomingConfiguration's plain config.getOptionalValue("group.id", ...) never
+        # finds it. Confirmed empirically that all three keys silently resolved to empty this way.
+        # group.id then fell back to Quarkus's default (quarkus.application.name), which the
+        # fraud-service KafkaUser ACL never granted — every poll hit
+        # org.apache.kafka.common.errors.GroupAuthorizationException forever, fail-silent until the
+        # failure landed inside Quarkus's synchronous startup window, which is fatal (PR #635's
+        # sandbox "Failed to start application" crash-loop; PR #635 did not cause this bug).
 
 "%dev":
   quarkus:
