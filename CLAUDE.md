@@ -112,6 +112,13 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `maxSurge: 0 / maxUnavailable: 1` for identical zero-concurrency behaviour.
 - **Use explicit registry prefixes for container images** (`docker.io/library/<image>` for official
   images) so the cluster's pull-through/rewrite policies apply.
+- **`trivy image` defaults to `linux/amd64` for remote scans, regardless of host arch.** Once a build
+  moves to a native `linux/arm64` builder (sandbox nodes, arm64 hosted runners), a plain
+  `trivy image ... "${IMAGE}"` against the pushed (arm64-only) image fails with `no child with
+  platform linux/amd64 in index` — silently, if the caller only checks the exit code. Pass
+  `--platform` explicitly, matching the arch the image was actually built for. A skipped SBOM
+  attestation here means Kyverno's `verify-openbank-image-sbom-attestation` policy blocks every pod
+  admission for that image (admin-ui outage, 2026-07-09).
 
 ### OPA / Rego policies (ADR-0031/ADR-0034)
 - **An `AI_AGENT` principal's id carries an `agent:` prefix on the REST path, but not on the

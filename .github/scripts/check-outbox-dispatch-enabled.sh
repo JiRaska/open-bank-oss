@@ -27,7 +27,17 @@
 # AbstractOutboxDispatcher. A module without such a dispatcher (no gated
 # outbox, or no outbox at all) has nothing to guard and is skipped.
 #
-# stdlib-only (awk); no PyYAML/yamllint dependency, matching
+# Value resolution: the raw YAML value is judged as "enabled" if it is the
+# bare literal true/"true", OR the SmallRye env-var-with-default syntax
+# ${VAR:true}/"${VAR:true}" whose default term is true. Everything else fails
+# closed: a bare false, ${VAR:false}, an env-var with NO default (${VAR} —
+# we refuse to guess what that resolves to at deploy time), or a missing key
+# entirely. (Fixed in open-bank-oss#620 — the original literal-only match
+# false-negatived on the ${VAR:true} form, which is this repo's normal
+# pattern for a soft-toggle elsewhere, e.g. notification-service's
+# `enabled: ${SLACK_WEBHOOK_ENABLED:false}`.)
+#
+# stdlib-only (awk + shell); no PyYAML/yamllint dependency, matching
 # check-app-version-override.sh. ENFORCED — as of this script's introduction,
 # every in-scope service already sets dispatch-enabled: true (0 violations on
 # origin/main), so this is a regression guard, not a fleet-sweep-in-waiting.
@@ -67,9 +77,31 @@ while IFS= read -r moddir; do
     END { if (!found) print "MISSING" }
   ' "$yml")
 
-  if [ "$value" != "true" ] && [ "$value" != "\"true\"" ]; then
+  # Strip a single layer of surrounding double-quotes, if present, e.g.
+  # "${OPENBANK_OUTBOX_DISPATCH_ENABLED:true}" -> ${OPENBANK_OUTBOX_DISPATCH_ENABLED:true}.
+  unquoted="$value"
+  case "$unquoted" in
+    \"*\") unquoted="${unquoted#\"}"; unquoted="${unquoted%\"}" ;;
+  esac
+
+  # Resolve SmallRye env-var-with-default syntax: ${VAR:default} -> default.
+  # A bare literal (true/false/MISSING) is left untouched by this pattern and
+  # falls through to the plain comparison below. ${VAR} with NO ':default' at
+  # all does not match this case either — it stays as-is and is judged (and
+  # rejected) as an ambiguous, non-"true" value, same as today: we refuse to
+  # guess what an env-var-with-no-default resolves to at deploy time.
+  resolved="$unquoted"
+  case "$unquoted" in
+    '${'*:*'}')
+      body="${unquoted#\$\{}"   # strip leading ${
+      body="${body%\}}"          # strip trailing }
+      resolved="${body#*:}"      # everything after the first ':' is the default
+      ;;
+  esac
+
+  if [ "$resolved" != "true" ]; then
     fail=1
-    echo "::error file=$yml::$moddir has a dispatch-gated $(basename "$disp") but openbank.outbox.dispatch-enabled is '$value', not true — this service will never dispatch outbox events at runtime (no error, attempt_count stays 0). Set 'openbank: outbox: dispatch-enabled: true' in application.yaml."
+    echo "::error file=$yml::$moddir has a dispatch-gated $(basename "$disp") but openbank.outbox.dispatch-enabled is '$value' (resolves to '$resolved'), not true — this service will never dispatch outbox events at runtime (no error, attempt_count stays 0). Set 'openbank: outbox: dispatch-enabled: true' (or an env-var default that resolves to true) in application.yaml."
   fi
 done < <(
   find "$root" -maxdepth 1 -type d -name 'openbank-*' -not -path '*/.claude/*' \
