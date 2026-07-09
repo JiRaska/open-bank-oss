@@ -180,6 +180,47 @@ object MoneyPathInvariants {
         }
     }
 
+    /**
+     * ADR-0033 / issue #667: the credit-interest conservation laws, per `(account, currency)`,
+     * checked once a step has fully settled (the outbox redrive drains first — same "settled"
+     * semantics as [billingFeeConservation]):
+     *
+     * 1. `Σ capitalized gross ≤ Σ accrued` — a haléř that never accrued must never capitalize;
+     * 2. `gross == net + tax` — the statutory whole-CZK rounding inside `WithholdingTaxPolicy`
+     *    (§36/§38d) must split the gross *exactly*, never create or destroy money;
+     * 3. `Σ capitalized net == Σ net journal legs posted` and `Σ tax withheld == Σ tax legs
+     *    posted` — every capitalization landed in the ledger, on BOTH legs. Posting the net to
+     *    the customer but dropping the tax-payable leg (the classic ADR-0033 defect class:
+     *    conservation-of-money still holds because the journal balances per entry) is exactly
+     *    what the per-leg equality catches.
+     */
+    val interestCapitalizationConservation = object : Invariant {
+        override val name = "interest-capitalization-conservation"
+        override fun check(world: World): Violation? {
+            world.interest.keys().forEach { key ->
+                val accrued = world.interest.accruedAmount(key)
+                val gross = world.interest.capitalizedGrossAmount(key)
+                val net = world.interest.capitalizedNetAmount(key)
+                val tax = world.interest.taxWithheldAmount(key)
+                if (gross > accrued) {
+                    return Violation(name, "account $key capitalized $gross > accrued $accrued")
+                }
+                if (gross.compareTo(net + tax) != 0) {
+                    return Violation(name, "account $key gross=$gross but net=$net + tax=$tax")
+                }
+                val postedNet = world.interest.postedNetAmount(key)
+                if (net.compareTo(postedNet) != 0) {
+                    return Violation(name, "account $key capitalized net=$net but posted net=$postedNet")
+                }
+                val postedTax = world.interest.postedTaxAmount(key)
+                if (tax.compareTo(postedTax) != 0) {
+                    return Violation(name, "account $key withheld tax=$tax but posted tax=$postedTax")
+                }
+            }
+            return null
+        }
+    }
+
     /** All Layer-3 invariants, in check order. */
     val ALL: List<Invariant> = listOf(
         conservationOfMoney,
@@ -190,6 +231,7 @@ object MoneyPathInvariants {
         sepaPaymentCompleteness,
         settlementCompleteness,
         billingFeeConservation,
+        interestCapitalizationConservation,
     )
 
     /** A terminal-state guard used by the saga orchestrator. */

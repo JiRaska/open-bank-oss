@@ -66,6 +66,12 @@ dependencies {
     implementation(project(":openbank-sepa-payment"))
     implementation(project(":openbank-settlement-service"))
 
+    // Issue #667 (E2E money-path): the harness also drives the REAL interest domain —
+    // `InterestAccrual`/`InterestCapitalization` and the ADR-0033 `WithholdingTaxPolicy`
+    // (statutory §36/§38d withholding with whole-CZK rounding). The domain package is
+    // framework-free (ADR-0002), so only the domain POJOs land on the classpath.
+    implementation(project(":openbank-interest-service"))
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
