@@ -17,7 +17,11 @@ import type { BrowserContext } from '@playwright/test'
 
 // Reads the same env var playwright.config.ts injects into the dev server
 // (webServer.env.NEXTAUTH_SECRET), falling back to its default — one literal instead of
-// two copies that can silently drift apart.
+// two copies that can silently drift apart. This secret only ever signs cookies for the
+// ephemeral `next dev` server Playwright spawns for this test run; it is never a
+// production value and authOptions.ts refuses this exact fallback outside NODE_ENV=production
+// (requiredSecret()), so there is no fail-fast to add here — a missing env var here just
+// means "use the same harmless test default", not a misconfigured deployment.
 const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? 'e2e-test-secret'
 // Must match authOptions.ts cookies.sessionToken.name: NEXTAUTH_URL is http://, so
 // USE_SECURE_COOKIES is false and the cookie has no `__Secure-` prefix.

@@ -151,7 +151,10 @@ money-path service, so a non-breaking change is auto-merge-eligible after the in
   (`e2e/helpers/auth.ts`) in a `test.beforeEach` — it mints a real Auth.js session-token cookie
   (`@auth/core/jwt` `encode()`, same secret/salt `authOptions.ts` uses) and injects it with
   `context.addCookies()`. No production auth/middleware code is touched. Every new e2e spec needs
-  this same sign-in.
+  this same sign-in. The `NEXTAUTH_SECRET` used to sign the cookie (`e2e-test-secret` by
+  default, overridable via env) is **test-only** — it signs a session on the ephemeral
+  `next dev` server this test run spawns, never a deployed environment; `authOptions.ts`'s
+  `requiredSecret()` already refuses any dev fallback once `NODE_ENV=production`.
 - **Locators must not collide with Next.js dev-mode's own DOM.** `playwright.config.ts`'s
   `webServer` runs `next dev`, and a hidden error/warning overlay can inject elements that match a
   naive text regex (e.g. `/\d+\/\d+/` also matches the overlay's own pagination badge). Scope
