@@ -76,6 +76,27 @@ spec:
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
             - name: QUARKUS_SMALLRYE_REACTIVE_MESSAGING_KAFKA_BOOTSTRAP_SERVERS
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            # Set as env vars, not application.yaml keys: SmallRye Config's YAML source
+            # unconditionally quotes any leaf map key containing a literal dot, so
+            # `group.id`/`auto.offset.reset` written in
+            # openbank-onboarding-service/src/main/resources/application.yaml silently never
+            # resolve (see the comment there). Each group.id MUST match the Read grant in
+            # openbank-infra/gitops/components/onboarding/kafka-onboarding-mtls.yaml's KafkaUser
+            # ACL (onboarding-service-party / -kyc / -sca) or every consumer poll gets Kafka's
+            # GroupAuthorizationException. Same pattern/fix as PR #685 (openbank-fraud-service),
+            # issue #695.
+            - name: MP_MESSAGING_INCOMING_PARTY_EVENTS_IN_GROUP_ID
+              value: onboarding-service-party
+            - name: MP_MESSAGING_INCOMING_PARTY_EVENTS_IN_AUTO_OFFSET_RESET
+              value: earliest
+            - name: MP_MESSAGING_INCOMING_KYC_EVENTS_IN_GROUP_ID
+              value: onboarding-service-kyc
+            - name: MP_MESSAGING_INCOMING_KYC_EVENTS_IN_AUTO_OFFSET_RESET
+              value: earliest
+            - name: MP_MESSAGING_INCOMING_SCA_EVENTS_IN_GROUP_ID
+              value: onboarding-service-sca
+            - name: MP_MESSAGING_INCOMING_SCA_EVENTS_IN_AUTO_OFFSET_RESET
+              value: earliest
             # mTLS to Strimzi (ADR-0137). Authenticates as the KafkaUser
             # 'onboarding-service'; keystore/truststore PKCS#12 are projected from
             # messaging by External Secrets (kafka-onboarding-mtls.yaml)

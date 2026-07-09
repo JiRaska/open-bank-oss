@@ -91,24 +91,33 @@ mp:
       party-events-in:
         connector: smallrye-kafka
         client.id: onboarding-service-party-${quarkus.uuid}
-        group.id: onboarding-service-party
         topic: openbank.party.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        auto.offset.reset: earliest
+        # group.id / auto.offset.reset are deliberately NOT set as YAML keys here — see
+        # openbank-infra/gitops/components/onboarding/onboarding-service.yaml
+        # (MP_MESSAGING_INCOMING_PARTY_EVENTS_IN_* env vars) for why and where they're set
+        # instead. Summary: SmallRye Config's YAML source unconditionally quotes any leaf map key
+        # containing a literal dot (`group.id` becomes the registered property name `"group.id"`,
+        # quotes included — true whether or not the YAML key itself is quoted), so
+        # KafkaConnectorIncomingConfiguration's plain config.getOptionalValue("group.id", ...) never
+        # finds it. group.id then falls back to Quarkus's default (quarkus.application.name), which
+        # the onboarding-service KafkaUser ACL (kafka-onboarding-mtls.yaml) never granted Read on —
+        # every poll would hit org.apache.kafka.common.errors.GroupAuthorizationException. Same
+        # pattern/fix as PR #685 (openbank-fraud-service), issue #695.
       kyc-events-in:
         connector: smallrye-kafka
         client.id: onboarding-service-kyc-${quarkus.uuid}
-        group.id: onboarding-service-kyc
         topic: openbank.kyc.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        auto.offset.reset: earliest
+        # group.id / auto.offset.reset: see comment on party-events-in above — same bug, same fix
+        # (MP_MESSAGING_INCOMING_KYC_EVENTS_IN_* env vars in onboarding-service.yaml).
       sca-events-in:
         connector: smallrye-kafka
         client.id: onboarding-service-sca-${quarkus.uuid}
-        group.id: onboarding-service-sca
         topic: openbank.sca.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        auto.offset.reset: earliest
+        # group.id / auto.offset.reset: see comment on party-events-in above — same bug, same fix
+        # (MP_MESSAGING_INCOMING_SCA_EVENTS_IN_* env vars in onboarding-service.yaml).
 
 openbank:
   rate-limit:
