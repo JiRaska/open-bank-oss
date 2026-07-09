@@ -1,7 +1,7 @@
 # ArgoCD app for billing-service (ADR-0143 phase 2c: runtime fee assessment).
-# Stateless service — no Postgres, no Kafka. Reads product, account, and balance
-# state via REST to compute fee assessments; ledger posting (outbox) is the
-# phase 2c-ii follow-up gated behind a four-eyes OPA decision.
+# Postgres-backed (billing-db.yaml, single-owner CNPG cluster) — no Kafka. Reads
+# product, account, and balance state via REST to compute fee assessments; ledger
+# posting (outbox) is the phase 2c-ii follow-up gated behind a four-eyes OPA decision.
 # The OIDC_CLIENT_SECRET Secret is delivered by ESO (billing-service-oidc).
 apiVersion: argoproj.io/v1alpha1
 kind: Application

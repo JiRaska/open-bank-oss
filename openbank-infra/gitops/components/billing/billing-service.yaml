@@ -1,9 +1,11 @@
 # billing-service: runtime fee assessment and posting (ADR-0143 phase 2c).
-# Stateless — no database, no Kafka. Reads account state from account-service,
-# balance-service, and product-catalog to compute fee assessments. Phase 2c-ii
-# (ledger posting + outbox) is deploy-gated behind the four-eyes OPA gate
-# (data.openbank.billing.ledger.post.allow). OIDC bearer-token validation
-# against the Keycloak openbank realm (service-to-service client credentials).
+# Postgres-backed (billing-db.yaml, single-owner CNPG cluster) — fee posting persistence
+# landed across #549/#637/#672 (billing_cycle_assessment / assessed_fee / billing_outbox,
+# Flyway-migrated). No Kafka. Reads account state from account-service, balance-service,
+# and product-catalog to compute fee assessments. Phase 2c-ii (ledger posting + outbox) is
+# deploy-gated behind the four-eyes OPA gate (data.openbank.billing.ledger.post.allow).
+# OIDC bearer-token validation against the Keycloak openbank realm (service-to-service
+# client credentials).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -62,6 +64,21 @@ spec:
               value: http://account-service.accounts.svc:8100
             - name: BALANCE_SERVICE_URL
               value: http://balance-service.balances.svc:8103
+            # Datasource: single billing-db (billing-db.yaml). Reactive URL for the app
+            # (Panache); JDBC URL for Flyway. Both username/password variants set, matching
+            # the already-working fraud-service pattern (fraud-service.yaml).
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://billing-db-rw.billing.svc:5432/openbank_billing
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://billing-db-rw.billing.svc:5432/openbank_billing
+            - name: QUARKUS_DATASOURCE_USERNAME
+              valueFrom: {secretKeyRef: {name: billing-db-app, key: username}}
+            - name: QUARKUS_DATASOURCE_REACTIVE_USERNAME
+              valueFrom: {secretKeyRef: {name: billing-db-app, key: username}}
+            - name: QUARKUS_DATASOURCE_PASSWORD
+              valueFrom: {secretKeyRef: {name: billing-db-app, key: password}}
+            - name: QUARKUS_DATASOURCE_REACTIVE_PASSWORD
+              valueFrom: {secretKeyRef: {name: billing-db-app, key: password}}
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: http://tempo.observability.svc:4317
             - name: OTEL_TRACES_SAMPLER_ARG

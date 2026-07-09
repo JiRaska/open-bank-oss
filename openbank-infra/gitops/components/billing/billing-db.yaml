@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+# Single-owner Postgres for billing-service (cluster-wide CNPG operator, ADR-0009). Backs the
+# fee-assessment persistence added across ADR-0143 phase 2c (#549 fee posting, #637/#672 fee
+# reversal + DST scenario): billing_cycle_assessment / assessed_fee / billing_outbox
+# (V1__init_billing.sql, V2__create_billing_outbox.sql, V3__hibernate_sequences.sql,
+# V4__add_fee_reversal.sql). Generates the billing-db-app secret (username/password for the
+# `openbank` owner) and a billing-db-rw Service the Deployment uses. Must reconcile BEFORE the
+# billing-service image that carries the datasource config deploys, else Flyway-at-start fails on
+# a missing DB (same pattern as product-catalog-db.yaml / anacredit-db.yaml).
+# NOTE: no S3 WAL/backup here yet — same gap as anacredit-db, tracked as a follow-up (#863 pattern).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: billing-db
+  namespace: billing
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_billing
+      owner: openbank
