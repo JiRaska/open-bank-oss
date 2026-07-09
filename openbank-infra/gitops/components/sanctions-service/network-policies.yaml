@@ -35,13 +35,6 @@ spec:
   ingress:
     - from:
         - podSelector: {}
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: admin-ui
-      ports:
-        - protocol: TCP
-          port: 6379
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

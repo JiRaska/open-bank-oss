@@ -151,9 +151,23 @@ live (authorized producer consumed; anonymous and read-only principals denied
 consumer still uses the old group `openbank-transaction-service` (allowed because
 it carries no ACL while the gate is `true`) and SmallRye's default DLQ name.
 These converge on the next image rebuild — blocked by an unrelated Pact
-`can-i-deploy` gate, tracked in **#2664**. An env-var shortcut was tried and
-reverted (#2649 → #2659): SmallRye cannot take hyphenated `mp.messaging` *channel*
-config from env vars (channel discovery mis-maps the names and fails startup).
+`can-i-deploy` gate, tracked in **#2664**. Setting any hyphenated `mp.messaging`
+channel property via env var is unreliable, **including overriding a single
+leaf sub-property (e.g. `group.id`) on a channel already registered through
+plain YAML keys** — SmallRye Config's env-var mapping cannot tell a hyphen from
+a dot in the channel segment (`hello-world` and `hello.world` both flatten to
+`HELLO_WORLD`), so the reverse-mapping is inherently ambiguous regardless of how
+the channel was originally declared (quarkusio/quarkus#30106,
+smallrye/smallrye-reactive-messaging#2028 — the upstream reproducer is exactly
+this leaf-override-on-an-already-registered-channel case). Per
+smallrye-reactive-messaging maintainer @radcortez in that thread, the only
+disambiguation is a build-time placeholder for the *exact* dotted/hyphenated key
+in some config source — env vars alone cannot do it. **`openbank-fraud-service`
+(#685) uses this exact unsafe pattern (`MP_MESSAGING_INCOMING_TRANSACTION_SIGNAL_*`
+env vars on the hyphenated `transaction-signal` channel) and carries the same
+startup-crash risk; #698 replaces it with a mounted properties file +
+`QUARKUS_CONFIG_LOCATIONS`, the same disambiguating pattern already proven for
+`transaction-service`.**
 
 ## Compliance impact
 
@@ -170,6 +184,10 @@ config from env vars (channel discovery mis-maps the names and fails startup).
 - ADR-0037 — Domain = namespace (why KafkaUsers live in `messaging`)
 - transaction-service threat model §2a
 - #2013 / #2018 (premature ACLs), #2554 (their removal), runbook 0008 (cutover)
-- #2602 (this migration), #2649 → #2659 (reverted env-convergence shortcut)
+- #2602 (this migration), #685 (fraud-service env-var overrides — same risk as
+  the reverted #2649 → #2659 shortcut; see #698 for the properties-file fix)
+- quarkusio/quarkus#30106, smallrye/smallrye-reactive-messaging#2028 (upstream
+  hyphenated channel env-var mapping ambiguity — applies to leaf-property
+  overrides too, not just whole-channel definition)
 - #2664 (Pact gate blocking the image rebuild), #2665 (fleet-wide gate flip)
 - ADR-0005 / OpenBao + External Secrets (the cross-namespace secret pattern)

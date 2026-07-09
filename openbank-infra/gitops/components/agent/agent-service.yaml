@@ -142,10 +142,47 @@ spec:
             # ADR-0031 D9 P2 (Refs #703): Kafka event trigger for compliance-officer sweep.
             # Wakes the oversight sweep immediately when AML/sanctions events arrive, in addition
             # to the 30-minute scheduler cadence. Topic managed by Strimzi topic operator.
+            #
+            # ADR-0137 (issue #686): mTLS listener :9093, not the plaintext :9092 listener.
+            # Since the ADR-0137 fleet sweep (#2665) completed, the broker authorizer runs with
+            # allow.everyone.if.no.acl.found=false cluster-wide, so User:ANONYMOUS on :9092 is
+            # denied on every topic — the consumer would never authenticate on :9092 at all.
             - name: KAFKA_BOOTSTRAP_SERVERS
-              value: "openbank-cluster-kafka-bootstrap.messaging.svc:9092"
+              value: "openbank-cluster-kafka-bootstrap.messaging.svc:9093"
             - name: AGENT_OVERSIGHT_KAFKA_ENABLED
               value: "true"
+            # mTLS client identity (KafkaUser `agent-service`, kafka-agent-mtls.yaml) — same
+            # pattern as kyc-service / fraud-service. Keystore + cluster-CA truststore are
+            # Strimzi-minted in `messaging` and projected into `platform` by the ExternalSecrets
+            # in kafka-agent-mtls.yaml (this namespace's first ESO Kafka-cert projection).
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka-keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: agent-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka-truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
+            # Issue #686: image-independent convergence of the oversight-events consumer's
+            # group.id / auto.offset.reset (agent-service-msg-override ConfigMap, mounted
+            # below) as an external Quarkus config source, so a lagging deployed image also
+            # picks up the fix without waiting for a rebuild. Optional in spirit (see
+            # transaction-service-msg-override.yaml precedent) — if the file were absent,
+            # Quarkus just warns and continues on the baked application.yaml values.
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: /mnt/msg-config/override.properties
             # ADR-0031 D3b: pki-agent CA cert (base64-encoded PEM) — used by AgentSvidVerifier
             # to validate per-run OpenBao-issued certs. Public root; safe in the manifest.
             # Rotate by re-running the openbao-agent-identity-sync CronJob and updating here.
@@ -182,6 +219,15 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka-keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka-truststore
+              readOnly: true
+            - name: msg-override
+              mountPath: /mnt/msg-config
+              readOnly: true
           resources:
             requests:
               cpu: 250m
@@ -262,6 +308,15 @@ spec:
         - name: opa-bundle
           configMap:
             name: agent-opa-bundle
+        - name: kafka-keystore
+          secret:
+            secretName: agent-service-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
+        - name: msg-override
+          configMap:
+            name: agent-service-msg-override
 ---
 apiVersion: v1
 kind: Service

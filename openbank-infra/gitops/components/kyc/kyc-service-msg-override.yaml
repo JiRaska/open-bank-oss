@@ -1,0 +1,41 @@
+# Image-independent convergence of the party-events-in consumer settings (#686).
+#
+# application.yaml's mp.messaging.incoming.party-events-in block used plain YAML keys
+# (group.id / auto.offset.reset / client.id) containing a literal dot. Quarkus's YAML
+# config source unconditionally quotes any such leaf key when registering it as a
+# MicroProfile Config property, so it registers only as the quoted
+# mp.messaging.incoming.party-events-in."group.id" — never the plain
+# mp.messaging.incoming.party-events-in.group.id that KafkaConnectorIncomingConfiguration
+# actually reads. group.id silently fell back to quarkus.application.name
+# (openbank-kyc-service), which the kyc-service KafkaUser ACL (kafka-kyc-mtls.yaml) never
+# granted Read on group kyc-service-party — every consumer poll got a silent
+# GroupAuthorizationException.
+#
+# Why a properties FILE and not env vars: SmallRye discovers messaging channels by
+# scanning config property NAMES, and the env-var form
+# (MP_MESSAGING_INCOMING_PARTY_EVENTS_IN_*) reverse-maps ambiguously for a hyphenated
+# channel name → a broken channel → startup crash (this exact approach was tried for
+# transaction-service's payment-scheme-accepted channel and reverted, #2649→#2659). A
+# properties file carries the EXACT hyphenated/dotted keys, so discovery is unambiguous.
+#
+# client.id is intentionally omitted here (and removed from application.yaml) rather than
+# reproduced: it only affects broker-side client identification in logs/JMX, not
+# authorization, and it isn't certain the ${quarkus.uuid} expression still expands from an
+# externally-loaded properties config source the same way it does from the baked
+# application.yaml. Dropping it is cosmetic-only; re-add once verified.
+#
+# config_ordinal=500 forces this source to outrank the baked application.yaml (~254).
+# Loaded via QUARKUS_CONFIG_LOCATIONS on the Rollout.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kyc-service-msg-override
+  namespace: kyc
+  labels:
+    app.kubernetes.io/name: kyc-service
+    app.kubernetes.io/part-of: kyc
+data:
+  override.properties: |
+    config_ordinal=500
+    mp.messaging.incoming.party-events-in.group.id=kyc-service-party
+    mp.messaging.incoming.party-events-in.auto.offset.reset=earliest

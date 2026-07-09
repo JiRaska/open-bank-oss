@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.13.0...transaction-service-v1.13.1) (2026-07-09)
+
+
+### Bug Fixes
+
+* **transaction:** close auto.offset.reset gap in Kafka override ([#704](https://github.com/JiRaska/open-bank-oss/issues/704)) ([afcccc5](https://github.com/JiRaska/open-bank-oss/commit/afcccc5a16968ef76087930c77b7117dbd2cb788)), closes [#686](https://github.com/JiRaska/open-bank-oss/issues/686)
+
 ## [1.13.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.12.6...transaction-service-v1.13.0) (2026-07-09)
 
 

@@ -1,0 +1,37 @@
+# Dotted-key YAML config bug workaround (issue #686).
+#
+# Quarkus's YAML config source unconditionally quotes any `mp.messaging.incoming.<channel>`
+# YAML leaf key containing a literal dot when registering it as a MicroProfile Config
+# property. A YAML key written as `group.id: foo` under `mp.messaging.incoming.<channel>:`
+# registers ONLY as `mp.messaging.incoming.<channel>."group.id"` (literal quotes in the
+# property name) — never as the plain `mp.messaging.incoming.<channel>.group.id` that
+# `KafkaConnectorIncomingConfiguration.getGroupId()` (and `auto.offset.reset`) actually
+# read. `group.id` then silently falls back to `quarkus.application.name`
+# (openbank-notification-service), which the Strimzi KafkaUser ACL
+# (kafka-notification-mtls.yaml) does NOT grant Read on for either consumer group — every
+# poll on both channels gets a silent GroupAuthorizationException.
+#
+# Why a properties FILE and not env vars: SmallRye discovers messaging channels by
+# scanning config property NAMES, and the env-var form
+# (MP_MESSAGING_INCOMING_NOTIFICATION_EVENTS_IN_GROUP_ID) reverse-maps ambiguously for a
+# hyphenated channel name → a broken channel → startup crash (this was tried for
+# transaction-service's payment-scheme-accepted channel, #2649, and reverted). A
+# properties file carries the EXACT hyphenated/dotted keys, so discovery is unambiguous.
+#
+# config_ordinal=500 forces this source to outrank the baked application.yaml (~254).
+# Loaded via QUARKUS_CONFIG_LOCATIONS on the Deployment (notification-service.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: notification-service-msg-override
+  namespace: notifications
+  labels:
+    app.kubernetes.io/name: notification-service
+    app.kubernetes.io/part-of: notifications
+data:
+  override.properties: |
+    config_ordinal=500
+    mp.messaging.incoming.notification-events-in.group.id=notification-service
+    mp.messaging.incoming.notification-events-in.auto.offset.reset=earliest
+    mp.messaging.incoming.party-events-in.group.id=notification-service-party
+    mp.messaging.incoming.party-events-in.auto.offset.reset=earliest

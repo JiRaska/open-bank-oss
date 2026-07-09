@@ -96,6 +96,15 @@ spec:
                 secretKeyRef:
                   name: kafka-cluster-ca-truststore
                   key: ca.password
+            # issue #686: group.id / auto.offset.reset override (anacredit-service-msg-override
+            # ConfigMap, mounted below) as an external Quarkus config source, since the dotted
+            # YAML keys in application.yaml silently never register as the plain MicroProfile
+            # Config property Quarkus reads (ADR-0137 pattern, see onboarding-service /
+            # transaction-service). NOT env vars: SmallRye's env-var reverse-mapping is
+            # ambiguous for hyphenated channel names like lending-events-in and can crash at
+            # boot (quarkusio/quarkus#30106, smallrye/smallrye-reactive-messaging#2028).
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: /mnt/msg-config/override.properties
           startupProbe:
             httpGet:
               path: /q/health/ready
@@ -130,6 +139,9 @@ spec:
             - name: kafka-truststore
               mountPath: /mnt/kafka-truststore
               readOnly: true
+            - name: msg-override
+              mountPath: /mnt/msg-config
+              readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -146,6 +158,9 @@ spec:
         - name: kafka-truststore
           secret:
             secretName: kafka-cluster-ca-truststore
+        - name: msg-override
+          configMap:
+            name: anacredit-service-msg-override
 ---
 apiVersion: v1
 kind: Service

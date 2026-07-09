@@ -196,6 +196,47 @@ spec:
         operations: [Write, Describe]
         host: "*"
 ---
+# ── card-issuance-service (issue #686 sweep) ────────────────────────────────
+# First mTLS wiring for this service — it has never had a KafkaUser before now
+# (unlike the other five #686 services, which already had one with a wrong
+# ACL/group mismatch). Consumes openbank.party.events (group: cardissuance-party,
+# GDPR Art.17 erasure -> PartyEventConsumer anonymises cardholder PII) and
+# produces its own domain events to openbank.cards.events, which is unlocked
+# (no ACL needed, same identity model as every other service here). Required
+# because the cluster's allow.everyone.if.no.acl.found is "false" (kafka.yaml) —
+# without mTLS + this ACL the consumer cannot connect on tls:9093 at all, and
+# plain:9092 denies User:ANONYMOUS on every topic fleet-wide.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers→Strimzi secrets→ESO projection) must land
+    # before the payments Deployment rolls the pod onto mTLS; lower waves sync
+    # first and ArgoCD blocks on the ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: card-issuance-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.party.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: cardissuance-party
+          patternType: literal
+        operations: [Read]
+        host: "*"
+---
 # ── External Secrets reader (ADR-0137) ──────────────────────────────────────
 # The Strimzi User Operator writes the KafkaUser keystores (and the cluster CA
 # truststore) as Secrets in THIS namespace (messaging), but the services run in
@@ -270,6 +311,7 @@ rules:
       - audit-service
       - kyc-service
       - anacredit-service               # issue #638: LoanStageEventConsumer (ADR-0037 follow-up)
+      - agent-service                   # issue #686: oversight-triggers consumer, ns platform (first ESO client there)
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1

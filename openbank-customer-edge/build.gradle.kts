@@ -33,6 +33,8 @@ dependencies {
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
+    testImplementation(libs.testcontainers)
+    testImplementation(libs.testcontainers.redpanda)
 }
 
 // Coverage floor (ADR-0020, ratchet-only — sweep #466: this module previously had NO

@@ -122,6 +122,13 @@ spec:
                   name: notification-webhook
                   key: SLACK_WEBHOOK_URL
                   optional: true
+            # Dotted-key YAML config bug workaround (issue #686): load the
+            # notification-events-in / party-events-in group.id and auto.offset.reset
+            # override (notification-service-msg-override ConfigMap, mounted below) as
+            # an external Quarkus config source. See that ConfigMap's header comment
+            # for why this must be a properties file and not env vars.
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: /mnt/msg-config/override.properties
           startupProbe:
             tcpSocket:
               port: management
@@ -156,6 +163,9 @@ spec:
               readOnly: true
             - name: kafka-truststore
               mountPath: /mnt/kafka-truststore
+              readOnly: true
+            - name: msg-override
+              mountPath: /mnt/msg-config
               readOnly: true
           resources:
             requests:
@@ -251,6 +261,9 @@ spec:
             items:
               - key: ca.p12
                 path: ca.p12
+        - name: msg-override
+          configMap:
+            name: notification-service-msg-override
 ---
 apiVersion: v1
 kind: Service

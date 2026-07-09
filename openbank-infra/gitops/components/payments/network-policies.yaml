@@ -229,8 +229,6 @@ spec:
               kubernetes.io/metadata.name: admin-ui
       ports:
         - protocol: TCP
-          port: 6379
-        - protocol: TCP
           port: 9121
     - from:
         - namespaceSelector:

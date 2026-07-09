@@ -33,7 +33,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: fraud-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fraud-service:sandbox-357b9db6
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fraud-service:sandbox-771528c5
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8133}
@@ -51,6 +51,16 @@ spec:
               valueFrom: {secretKeyRef: {name: fraud-db-app, key: password}}
             - name: QUARKUS_DATASOURCE_REACTIVE_PASSWORD
               valueFrom: {secretKeyRef: {name: fraud-db-app, key: password}}
+            # ADR-0140 online feature store (FeatureStoreConfig -> ReactiveRedisDataSource).
+            # Without quarkus.redis.hosts set, Quarkus's Redis extension deactivates the
+            # `<default>` client bean entirely at build time; the resulting
+            # io.quarkus.arc.InactiveBeanException surfaced only as a bare "Failed to start
+            # application" with no cause printed, because openbank-libs-runtime's production
+            # console log format omitted %e (fixed in this same PR) — root-caused via a live
+            # QUARKUS_LOG_CONSOLE_FORMAT override that restored %e (sandbox fraud-service
+            # crash-loop, 2026-07-09).
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://redis.fraud.svc:6379
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
             # #685 originally set these as MP_MESSAGING_INCOMING_TRANSACTION_SIGNAL_* env vars.

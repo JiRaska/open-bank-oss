@@ -14,6 +14,11 @@
 # config_ordinal=500 forces this source to outrank the baked application.yaml
 # (~254). Loaded via QUARKUS_CONFIG_LOCATIONS on the Rollout. Once the image is
 # finally rebuilt from main, these equal the baked values and this can be dropped.
+#
+# Third key (issue #686): auto.offset.reset is affected by the SAME SmallRye
+# YAML-flattening bug as group.id/dead-letter-queue.topic (any dotted leaf map key
+# under mp.messaging.incoming.<channel> in YAML never resolves to its plain
+# property name) — so it belongs in this same override for the same reason.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -27,3 +32,4 @@ data:
     config_ordinal=500
     mp.messaging.incoming.payment-scheme-accepted.group.id=transaction-scheme-accepted-cg
     mp.messaging.incoming.payment-scheme-accepted.dead-letter-queue.topic=payment.scheme-accepted.dlq
+    mp.messaging.incoming.payment-scheme-accepted.auto.offset.reset=earliest

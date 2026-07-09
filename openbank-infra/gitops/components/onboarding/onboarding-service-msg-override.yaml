@@ -1,0 +1,42 @@
+# Fix for the dotted-key YAML config bug (issue #686, fleet sweep).
+#
+# Quarkus's YAML config source (quarkus-config-yaml / SmallRye YamlConfigSource#flattenYaml)
+# unconditionally quotes any mp.messaging.incoming.<channel> YAML leaf key containing a
+# literal dot when registering it as a MicroProfile Config property. A YAML key written as
+# `group.id: foo` under `mp.messaging.incoming.<channel>:` in application.yaml registers ONLY
+# as `mp.messaging.incoming.<channel>."group.id"` (literal quotes in the property name) —
+# never as the plain `mp.messaging.incoming.<channel>.group.id` that
+# KafkaConnectorIncomingConfiguration.getGroupId() (and the auto.offset.reset equivalent)
+# actually reads. group.id then silently falls back to Quarkus's default
+# (quarkus.application.name = openbank-onboarding-service), which the Strimzi KafkaUser ACL
+# (kafka-onboarding-mtls.yaml) does NOT grant Read on for any of the three groups below —
+# so every consumer poll on all three channels gets a silent GroupAuthorizationException.
+#
+# Why a properties FILE and not env vars: SmallRye discovers messaging channels by scanning
+# config property NAMES, and the env-var form (MP_MESSAGING_INCOMING_PARTY_EVENTS_IN_GROUP_ID
+# etc.) reverse-maps ambiguously for hyphenated channel names -> a broken channel -> startup
+# crash (this was tried for transaction-service's payment-scheme-accepted channel, #2649,
+# and reverted in #2659; see ADR-0137). A properties file carries the EXACT dotted/hyphenated
+# property names unambiguously, so channel discovery is unambiguous.
+#
+# config_ordinal=500 forces this source to outrank the baked application.yaml (~254).
+# Loaded via QUARKUS_CONFIG_LOCATIONS on the Rollout (onboarding-service.yaml). Same pattern
+# as transaction-service's msg-override ConfigMap
+# (openbank-infra/gitops/components/payments/transaction-service-msg-override.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: onboarding-service-msg-override
+  namespace: onboarding
+  labels:
+    app.kubernetes.io/name: onboarding-service
+    app.kubernetes.io/part-of: onboarding
+data:
+  override.properties: |
+    config_ordinal=500
+    mp.messaging.incoming.party-events-in.group.id=onboarding-service-party
+    mp.messaging.incoming.party-events-in.auto.offset.reset=earliest
+    mp.messaging.incoming.kyc-events-in.group.id=onboarding-service-kyc
+    mp.messaging.incoming.kyc-events-in.auto.offset.reset=earliest
+    mp.messaging.incoming.sca-events-in.group.id=onboarding-service-sca
+    mp.messaging.incoming.sca-events-in.auto.offset.reset=earliest
