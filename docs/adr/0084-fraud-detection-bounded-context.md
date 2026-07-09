@@ -68,6 +68,24 @@ Author(s): Jiří Raška
 > unmapped currency whenever `isNewPayee` is true. Still shadow mode only; no payment surface honours
 > the verdict yet.
 
+> **Update 2026-07-09 — §4.2: first payment surface honours the verdict (issue #667).**
+> `openbank-domestic-payment` gains an enforcement mode for the fraud gate, flag-gated by
+> `openbank.domestic.fraud.enforcement-enabled` (default `false` — a deliberate runbook-gated
+> rollout flip, same convention as the four-eyes `authz.four-eyes.enforce` toggle; see the
+> "these are first-pass, non-calibrated figures... pending risk-team input" disclosure on the v3/v4
+> thresholds above — enforcement stays off until that calibration happens). With the flag on:
+> `DomesticPaymentService.applyFraudGate` runs for every screening-cleared payment; a REVIEW or
+> CHALLENGE verdict holds the payment in `RECEIVED` (opens a `FRAUD_REVIEW` case via the existing
+> `AmlCasePort`/aml-service case store, mirroring the shape of an AML `REVIEW` hold — no new
+> case-management system) for manual release; DECLINE rejects the payment outright with the new
+> `DomesticRejectReason.FRAUD_SUSPECTED`. ALLOW — and the flag-off shadow path — validate exactly as
+> before. The `FraudScoringAdapter` fail-open contract is unchanged: an unreachable fraud-service
+> still scores ALLOW, so this gate can only ever add friction, never remove availability. Threat
+> model updated (`docs/threat-models/openbank-domestic-payment.md`); no new trust boundary or data
+> flow, same `fraud-service` call as the 2026-06-17 shadow wiring. The other three scored surfaces
+> (sepa-payment, sepa-instant, fx) remain shadow-only — extending enforcement to them is a follow-up,
+> not bundled with this increment.
+
 ## Context
 
 The platform has a **regulatory screening gate** (ADR-0032: synchronous sanctions/AML screening

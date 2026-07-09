@@ -143,3 +143,19 @@ not change any existing request's outcome until explicitly flipped.
   both via `api()`). Pure Gradle dependency-graph change — no source import changed, no new transitive
   dependency introduced, no behavior change. Attack surface, trust boundaries, and STRIDE rows above are
   unaffected. No DB change; rollback = revert the commit.
+- **2026-07-09** — ADR-0084 §4.2 (issue #667): the `domestic-payment → fraud-service` edge added
+  2026-06-17 gains an ENFORCEMENT mode, flag-gated by `openbank.domestic.fraud.enforcement-enabled`
+  (off by default — same runbook-gated-rollout posture as `authz.four-eyes.enforce`). With the flag
+  on, a non-ALLOW verdict now has a real effect: REVIEW/CHALLENGE hold the payment in RECEIVED (a
+  `FRAUD_REVIEW` case is opened via the existing `AmlCasePort`/aml-service case store — reused, not a
+  new case-management system) for manual release; DECLINE rejects the payment outright
+  (`DomesticRejectReason.FRAUD_SUSPECTED`). With the flag off, or verdict ALLOW, behavior is
+  byte-for-byte identical to the shadow-only path. **No new trust boundary or data flow** — the same
+  `fraud-service` call, same fail-open adapter contract (an unreachable fraud-service still scores
+  ALLOW, so this gate can only ever add friction, never remove availability). **Risk class = integrity**
+  (a miscalibrated non-ALLOW verdict can hold or reject a legitimate payment) — mitigated by the
+  default-off flag: ADR-0084 itself discloses the v3/v4 thresholds as "first-pass, non-calibrated
+  figures... pending shadow-mode data and risk-team input", so enforcement stays a deliberate,
+  separately-reviewed flip, not bundled with this change. No DB schema change (the AML case store's
+  `alertCode` column already accepts arbitrary values); rollback = flip the flag back to `false` or
+  revert the commit.
