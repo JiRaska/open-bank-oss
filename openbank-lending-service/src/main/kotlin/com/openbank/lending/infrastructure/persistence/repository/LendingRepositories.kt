@@ -20,6 +20,7 @@ import com.openbank.lending.infrastructure.persistence.entity.LoanApplicationEnt
 import com.openbank.lending.infrastructure.persistence.entity.LoanEntity
 import com.openbank.lending.infrastructure.persistence.entity.LoanProvisioningEntity
 import com.openbank.lending.infrastructure.persistence.mapper.LendingMapper
+import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import io.quarkus.hibernate.reactive.panache.common.WithSession
@@ -160,6 +161,9 @@ class CollateralRepositoryImpl @Inject constructor(
         return sf.withTransaction { s -> s.persist(e).map { mapper.toDomain(e) } }
     }
 
+    @WithSession override fun findById(id: CollateralId): Uni<Collateral?> =
+        sf.withSession { s -> s.find(CollateralEntity::class.java, id.value) }.map { it?.let(mapper::toDomain) }
+
     @WithSession override fun findByLoan(loanId: LoanId): Uni<List<Collateral>> = sf.withSession { s ->
         s.createQuery(
             "FROM CollateralEntity WHERE loanId = :l ORDER BY createdAt DESC",
@@ -167,6 +171,15 @@ class CollateralRepositoryImpl @Inject constructor(
         )
             .setParameter("l", loanId.value).resultList
     }.map { it.map(mapper::toDomain) }
+
+    @WithTransaction override fun update(collateral: Collateral): Uni<Collateral> = sf.withTransaction { s ->
+        s.find(CollateralEntity::class.java, collateral.id.value).flatMap { e ->
+            e!!.status = collateral.status
+            e.decidedBy = collateral.decidedBy
+            e.decidedAt = collateral.decidedAt
+            s.persist(e).map { mapper.toDomain(e) }
+        }
+    }
 }
 
 @ApplicationScoped
