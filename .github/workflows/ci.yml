@@ -436,6 +436,25 @@ jobs:
       - name: "duplicate YAML key guard (application.yaml, #1170/#1193, enforced)"
         run: bash .github/scripts/check-duplicate-yaml-keys.sh . --enforce
 
+      # Guard a different silent config footgun in the same files: quarkus-config-yaml
+      # unconditionally quotes any mp.messaging.(incoming|outgoing).<channel> leaf key
+      # that contains a literal dot (group.id, auto.offset.reset, dead-letter-queue.topic,
+      # ...) when registering it as a MicroProfile Config property name — Quarkus's Kafka
+      # connector getters read the plain unquoted key, so the value silently falls back to
+      # a default. For group.id this becomes a silent Kafka GroupAuthorizationException if
+      # the fallback (quarkus.application.name) isn't ACL-granted; for auto.offset.reset it
+      # silently skips backlogged messages on first boot. Root-caused via the
+      # openbank-fraud-service boot-crash; a fleet audit (#686) found it live (not just
+      # latent) in audit/notification/kyc/onboarding/card-issuance/agent-service, and this
+      # script additionally finds it in several services never audited by hand. Fix: move
+      # the value to an MP_MESSAGING_INCOMING_<CHANNEL>_<KEY> env var in gitops instead.
+      #
+      # ADVISORY. Unlike the duplicate-key guard above, the fleet is NOT yet clean here —
+      # this pattern predates the guard across most of the fleet. Flip to --enforce once
+      # #686's sweep + any follow-on services are confirmed clean.
+      - name: "dotted mp.messaging key guard (application.yaml, #686, advisory)"
+        run: bash .github/scripts/check-dotted-mp-messaging-keys.sh .
+
       # admin-ui version sync guard (ADR-0029 release_invariant). release-please bumps version.txt
       # but its package.json extra-file updater is replace-based and silently desyncs after a one-off
       # drift — which otherwise only surfaces at deploy (build-push-admin-ui.sh fails post-merge).
