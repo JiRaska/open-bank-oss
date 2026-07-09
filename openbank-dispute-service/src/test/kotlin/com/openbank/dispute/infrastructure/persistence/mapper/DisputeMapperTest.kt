@@ -10,6 +10,8 @@ import com.openbank.dispute.domain.model.DisputeResolution
 import com.openbank.dispute.domain.model.DisputeStatus
 import com.openbank.dispute.domain.model.DisputeTimelineEvent
 import com.openbank.dispute.domain.model.DisputeType
+import com.openbank.dispute.domain.model.EvidenceChain
+import com.openbank.dispute.domain.model.RemediationOutcome
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -52,6 +54,8 @@ class DisputeMapperTest {
             resolvedAt = now,
             resolvedBy = "caseworker-1",
             chargebackAmount = BigDecimal("100.00"),
+            remediationOutcome = RemediationOutcome.PARTIAL,
+            remediationAmount = BigDecimal("60.00"),
             createdAt = now,
             updatedAt = now,
         )
@@ -86,12 +90,14 @@ class DisputeMapperTest {
         assertThat(roundTripped.resolvedAt).isNull()
         assertThat(roundTripped.resolvedBy).isNull()
         assertThat(roundTripped.chargebackAmount).isNull()
+        assertThat(roundTripped.remediationOutcome).isNull()
+        assertThat(roundTripped.remediationAmount).isNull()
         assertThat(roundTripped).isEqualTo(dispute)
     }
 
     @Test
-    fun `dispute evidence round-trips through entity`() {
-        val evidence = DisputeEvidence(
+    fun `dispute evidence round-trips through entity including chain fields`() {
+        val raw = DisputeEvidence(
             id = UUID.randomUUID(),
             disputeId = UUID.randomUUID(),
             submittedBy = "customer",
@@ -100,10 +106,14 @@ class DisputeMapperTest {
             fileReference = "s3://bucket/receipt.png",
             submittedAt = now,
         )
+        val evidence = EvidenceChain.append(raw, previous = null)
 
         val roundTripped = mapper.toDomain(mapper.toEntity(evidence))
 
         assertThat(roundTripped).isEqualTo(evidence)
+        assertThat(roundTripped.sequence).isEqualTo(0)
+        assertThat(roundTripped.prevHash).isEqualTo(EvidenceChain.GENESIS_HASH)
+        assertThat(roundTripped.recordHash).isNotNull()
     }
 
     @Test
@@ -118,6 +128,20 @@ class DisputeMapperTest {
         assertThatThrownBy { mapper.toEntity(evidence) }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("submittedAt must be set")
+    }
+
+    @Test
+    fun `evidence without recordHash fails fast when mapped to an entity`() {
+        val evidence = DisputeEvidence(
+            disputeId = UUID.randomUUID(),
+            submittedBy = "customer",
+            evidenceType = "RECEIPT",
+            submittedAt = now,
+        )
+
+        assertThatThrownBy { mapper.toEntity(evidence) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("recordHash must be set")
     }
 
     @Test

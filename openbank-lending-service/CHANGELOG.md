@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.9.0...lending-service-v0.10.0) (2026-07-09)
+
+
+### Features
+
+* **lending:** four-eyes gate for collateral registration (ADR-0028 follow-up) ([#631](https://github.com/JiRaska/open-bank-oss/issues/631)) ([0b2ddab](https://github.com/JiRaska/open-bank-oss/commit/0b2ddabea0afcc184b6c8845c22d7022ae0e3c30)), closes [#621](https://github.com/JiRaska/open-bank-oss/issues/621)
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.8.0...lending-service-v0.9.0) (2026-07-09)
 
 

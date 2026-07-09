@@ -87,7 +87,7 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 5a. Return path (pacs.004) — STRIDE supplement
 
-Introduced by ADR-0109: `POST /api/v1/sepa-payments/returns` receives inbound `pacs.004.001.09`
+Introduced by ADR-0111: `POST /api/v1/sepa-payments/returns` receives inbound `pacs.004.001.09`
 from clearing-simulator (cluster-internal, `ROLE_SERVICE`). New trust boundary:
 `clearing-simulator → sepa-payment-service → transaction-service /reverse`.
 
@@ -127,7 +127,7 @@ from clearing-simulator (cluster-internal, `ROLE_SERVICE`). New trust boundary:
   OIDC client-credentials for service-to-service authn; fraud-service is internal, cluster-only).
   **DFD update**: added `sepa-payment → fraud-service` edge (see §2). No DB schema change;
   rollback = revert adapter + port commits.
-- **2026-06-24** — ADR-0109 R-transaction return path (pacs.004). New inbound trust boundary:
+- **2026-06-24** — ADR-0111 R-transaction return path (pacs.004). New inbound trust boundary:
   `clearing-simulator → sepa-payment /returns → transaction-service /reverse`. STRIDE supplement
   added in §5a above. **Risk class = integrity + availability**. Rollback = `openbank.sepa.returns.enabled=false`.
 - **2026-06-23** — ADR-0104 D3: real ISO 20022 `pacs.008` scheme submission via `clearing-simulator`.

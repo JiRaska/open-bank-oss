@@ -160,6 +160,17 @@ class JournalEntryTest {
         }
 
         @Test
+        fun `preserves a non-zero optimistic-lock version`() {
+            // Every other test in this file only ever checks version == 0L (the constructor
+            // default and reverse()'s hardcoded value for a NEW reversal), which cannot
+            // distinguish the real getter from one that unconditionally returns 0 — exactly the
+            // mutation pitest generates for JournalEntry.getVersion. A non-zero round-trip pins it.
+            val entry = balancedEntry().copy(version = 7L)
+
+            assertThat(entry.version).isEqualTo(7L)
+        }
+
+        @Test
         fun `handles large amounts without precision loss`() {
             val entry = balancedEntry(
                 lines = listOf(
@@ -295,6 +306,40 @@ class JournalEntryTest {
             // and the persisted reversal has zero lines — unreadable on hydration (#465).
             assertThat(reversal.lines).allSatisfy { assertThat(it.journalId).isEqualTo(reversalId) }
             assertThat(reversal.lines.map { it.id }).doesNotContainAnyElementsOf(posted.lines.map { it.id })
+        }
+
+        @Test
+        fun `reversal inherits entryDate, valueDate and links reversalOf to the original`() {
+            // entryDate specifically is load-bearing for the period lock (#869):
+            // LedgerService.requireOpenPeriod derives the fiscal year to check from the
+            // REVERSAL's entryDate, which only works if reverse() actually inherits it from the
+            // original rather than defaulting to, say, the current date. valueDate and
+            // reversalOf are asserted here too since the fixture's balancedEntry() gives
+            // entryDate == valueDate by default elsewhere in this file — a mutant swapping one
+            // for the other would be silently invisible in every other test in this class.
+            val journalId = UUID.randomUUID()
+            val posted = JournalEntry(
+                id = journalId,
+                entryNumber = 1L,
+                transactionId = UUID.randomUUID(),
+                entryDate = LocalDate.of(2026, 3, 10),
+                valueDate = LocalDate.of(2026, 3, 12),
+                description = "Test entry",
+                status = JournalStatus.POSTED,
+                lines = listOf(
+                    line(accountAsset, JournalSide.DEBIT, "500.00", sequence = 1),
+                    line(accountLiability, JournalSide.CREDIT, "500.00", sequence = 2),
+                ),
+                createdAt = Instant.now(),
+                createdBy = userId,
+                version = 0L,
+            )
+
+            val reversal = posted.reverse(UUID.randomUUID(), UUID.randomUUID())
+
+            assertThat(reversal.entryDate).isEqualTo(LocalDate.of(2026, 3, 10))
+            assertThat(reversal.valueDate).isEqualTo(LocalDate.of(2026, 3, 12))
+            assertThat(reversal.reversalOf).isEqualTo(journalId)
         }
 
         @Test

@@ -17,6 +17,15 @@ interface UpdateDisputeUseCase {
     fun addEvidence(disputeId: UUID, evidence: DisputeEvidence): Uni<DisputeEvidence>
     fun withdraw(id: UUID, actor: String): Uni<Dispute>
     fun escalate(id: UUID, actor: String): Uni<Dispute>
+
+    /**
+     * Record the remediation outcome of a dispute investigation (ADR-0117 hardening §3) and, if
+     * [ResolveDisputeRequest.outcome] is [RemediationOutcome.UPHELD] or [RemediationOutcome.PARTIAL],
+     * emit a `dispute.remediation_requested` outbox event describing the compensating action a
+     * downstream consumer (e.g. a future billing/ledger reversal flow) may act on. This service
+     * does not itself post to the ledger.
+     */
+    fun resolve(id: UUID, request: ResolveDisputeRequest): Uni<Dispute>
 }
 
 interface GetDisputeUseCase {
@@ -26,4 +35,7 @@ interface GetDisputeUseCase {
     fun listByStatus(status: DisputeStatus): Uni<List<Dispute>>
     fun getTimeline(disputeId: UUID): Uni<List<DisputeTimelineEvent>>
     fun getEvidence(disputeId: UUID): Uni<List<DisputeEvidence>>
+
+    /** Walk and verify a dispute's evidence hash chain (ADR-0117 hardening §2). */
+    fun verifyEvidenceChain(disputeId: UUID): Uni<EvidenceChainVerification>
 }

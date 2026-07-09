@@ -7,6 +7,7 @@ package com.openbank.kyc.infrastructure.kafka
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.kyc.application.KycCaseResult
 import com.openbank.kyc.application.KycService
+import com.openbank.kyc.application.PepScreeningService
 import com.openbank.kyc.application.port.out.KycCaseRepository
 import com.openbank.kyc.domain.model.KycCase
 import com.openbank.kyc.domain.model.KycCaseStatus
@@ -25,6 +26,7 @@ class PartyEventConsumerTest {
 
     private val kycService = mockk<KycService>()
     private val kycCaseRepository = mockk<KycCaseRepository>()
+    private val pepScreeningService = mockk<PepScreeningService>()
     private lateinit var consumer: PartyEventConsumer
 
     private val fixedClock = java.time.Clock.fixed(Instant.parse("2026-01-15T03:00:00Z"), java.time.ZoneOffset.UTC)
@@ -34,25 +36,58 @@ class PartyEventConsumerTest {
         consumer = PartyEventConsumer().also {
             it.kycService = kycService
             it.kycCaseRepository = kycCaseRepository
+            it.pepScreeningService = pepScreeningService
             it.objectMapper = ObjectMapper()
             it.clock = fixedClock
         }
     }
 
     @Test
-    fun `PARTY_CREATED auto-opens a KYC case for the party`(): Unit = runBlocking {
+    fun `PARTY_CREATED auto-opens a KYC case and PEP-screens the party's legal name`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
-        coEvery { kycService.openCaseForParty(partyId) } returns KycCaseResult(caseFor(partyId), created = true)
+        val case = caseFor(partyId)
+        coEvery { kycService.openCaseForParty(partyId) } returns KycCaseResult(case, created = true)
+        coEvery { pepScreeningService.screenCase(case.id, "Jane Doe") } returns case
 
         consumer.consume("""{"eventType":"PARTY_CREATED","partyId":"$partyId","legalName":"Jane Doe"}""")
 
         coVerify(exactly = 1) { kycService.openCaseForParty(partyId) }
+        coVerify(exactly = 1) { pepScreeningService.screenCase(case.id, "Jane Doe") }
     }
+
+    @Test
+    fun `PARTY_CREATED without a legalName opens the case but skips PEP screening`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        val case = caseFor(partyId)
+        coEvery { kycService.openCaseForParty(partyId) } returns KycCaseResult(case, created = true)
+
+        consumer.consume("""{"eventType":"PARTY_CREATED","partyId":"$partyId"}""")
+
+        coVerify(exactly = 1) { kycService.openCaseForParty(partyId) }
+        coVerify(exactly = 0) { pepScreeningService.screenCase(any(), any()) }
+    }
+
+    @Test
+    fun `PARTY_CREATED skips PEP screening when the sandbox auto-approve path already settled the case`(): Unit =
+        runBlocking {
+            // openbank.kyc.auto-approve=true (sandbox STP, ADR-0073) settles the case to APPROVED
+            // before this consumer ever sees it — re-screening a terminal case here would race the
+            // already-closed state rather than extend it.
+            val partyId = UUID.randomUUID()
+            val approvedCase = caseFor(partyId).copy(status = KycCaseStatus.APPROVED)
+            coEvery { kycService.openCaseForParty(partyId) } returns KycCaseResult(approvedCase, created = true)
+
+            consumer.consume("""{"eventType":"PARTY_CREATED","partyId":"$partyId","legalName":"Jane Doe"}""")
+
+            coVerify(exactly = 0) { pepScreeningService.screenCase(any(), any()) }
+        }
 
     @Test
     fun `PARTY_CREATED on an already-open party is an idempotent no-op (reuse path)`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
-        coEvery { kycService.openCaseForParty(partyId) } returns KycCaseResult(caseFor(partyId), created = false)
+        val case = caseFor(partyId)
+        coEvery { kycService.openCaseForParty(partyId) } returns KycCaseResult(case, created = false)
+        coEvery { pepScreeningService.screenCase(any(), any()) } returns case
 
         // Must not throw — the redelivered/replayed event reuses the existing case.
         consumer.consume("""{"eventType":"PARTY_CREATED","partyId":"$partyId"}""")

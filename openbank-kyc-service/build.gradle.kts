@@ -21,6 +21,12 @@ dependencies {
     implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
     implementation(libs.quarkus.oidc)
+    // First-increment PEP screening (ADR-0116): outbound call to openbank-sanctions-service's
+    // POST /api/v1/sanctions/screen, mirroring the same client stack already used by
+    // openbank-domestic-payment / openbank-sepa-payment / openbank-fx-service / openbank-account-service.
+    implementation(libs.quarkus.oidc.client.reactive.filter)
+    implementation(libs.quarkus.rest.client.reactive)
+    implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)

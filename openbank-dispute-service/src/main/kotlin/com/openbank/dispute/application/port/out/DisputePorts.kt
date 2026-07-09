@@ -8,6 +8,7 @@ import com.openbank.dispute.domain.model.Dispute
 import com.openbank.dispute.domain.model.DisputeEvidence
 import com.openbank.dispute.domain.model.DisputeStatus
 import com.openbank.dispute.domain.model.DisputeTimelineEvent
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.smallrye.mutiny.Uni
 import java.util.UUID
 
@@ -25,6 +26,14 @@ interface DisputeRepository {
     fun findByStatus(status: DisputeStatus): Uni<List<Dispute>>
 
     fun update(dispute: Dispute): Uni<Dispute>
+
+    /**
+     * Update the dispute and persist [outbox] in the SAME transaction (transactional outbox,
+     * ADR-0003/0050) — used by the resolve/remediation path so the status change and its
+     * `dispute.resolved` / `dispute.remediation_requested` event commit atomically, mirroring
+     * `ComplaintRepository.update`.
+     */
+    fun update(dispute: Dispute, outbox: List<OutboxMessage>): Uni<Dispute>
 }
 
 /** Outbound persistence port for dispute evidence artefacts. */
@@ -33,6 +42,12 @@ interface DisputeEvidenceRepository {
     fun save(evidence: DisputeEvidence): Uni<DisputeEvidence>
 
     fun findByDisputeId(disputeId: UUID): Uni<List<DisputeEvidence>>
+
+    /** Evidence ordered oldest-first by chain [DisputeEvidence.sequence] — the shape [EvidenceChain] needs. */
+    fun findByDisputeIdOrderedBySequence(disputeId: UUID): Uni<List<DisputeEvidence>>
+
+    /** The current chain tail (highest [DisputeEvidence.sequence]) for a dispute, or null if none yet. */
+    fun findLatestByDisputeId(disputeId: UUID): Uni<DisputeEvidence?>
 }
 
 /** Outbound persistence port for the dispute timeline (audit trail of lifecycle events). */

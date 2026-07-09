@@ -1,14 +1,19 @@
 # Data
 
-## Storage model (v1)
+## Storage model (v2)
 
-anacredit-service v1 has **no database**. Exposures are held in an **in-memory `ConcurrentHashMap`** (`InMemoryCreditExposureRepository`), keyed by `instrumentId`, following the `openbank-product-catalog` pattern. There are **no Flyway migrations** in this service yet.
-
-> **Planned (not provisioned):** `governance.yaml` *declares* a dedicated PostgreSQL schema `anacredit_schema`, `dataClassification: restricted`, `retentionPolicy: 10 years`. This is the target for v2 persistence (a JPA/Panache adapter behind the existing `CreditExposureRepository` port) and is documented here as the intended end-state, **not** as a live schema. Until then, the in-memory store is **non-durable**: it is lost on pod restart and must be re-fed.
+anacredit-service is **Postgres-backed** (ADR-0037 v2). Exposures live in the `credit_exposures`
+table (database `openbank_anacredit`, governance schema label `anacredit_schema`), one row per
+instrument keyed by `instrumentId`, behind a reactive-Panache `PostgresCreditExposureRepository`
+implementing the `CreditExposureRepository` port — the same adapter-swap pattern used by
+`openbank-product-catalog`. `governance.yaml` declares `dataClassification: restricted`,
+`retentionPolicy: 10 years`. Exposures now **survive a pod restart**; v1's in-memory
+`ConcurrentHashMap` (`InMemoryCreditExposureRepository`) has been removed.
 
 ## Logical entities
 
-These are the in-memory domain objects (not DB tables in v1):
+`CreditExposure` is now a real table row (`CREDIT_EXPOSURE` below); `CreditRecord` and
+`ExclusionNote` remain computed-on-demand, never persisted:
 
 ```mermaid
 erDiagram
@@ -54,9 +59,7 @@ erDiagram
 
 | Script | Status |
 |---|---|
-| — | **None.** No `db/migration` directory exists in v1 (in-memory store). |
-
-When persistence lands, the first migration will create `anacredit_schema` and the `credit_exposure` table, with a rollback note per the repo's migration rule.
+| `V1__create_credit_exposures.sql` | Applied — creates `credit_exposures` + `idx_credit_exposures_debtor_id`. Rollback: `DROP TABLE credit_exposures;` |
 
 ## Eligibility rules (the derivation that produces the data)
 
@@ -71,10 +74,10 @@ The €25 000 threshold (`AnaCreditEligibilityPolicy.REPORTING_THRESHOLD_EUR`) i
 
 ## Retention
 
-| Data | v1 (in-memory) | Planned (PostgreSQL) |
-|---|---|---|
-| credit exposures | volatile — held only while the pod runs | 10 years (`governance.yaml: retentionPolicy`), AML / regulatory record |
-| rendered returns | not persisted (recomputed on each request) | not persisted (derived) |
+| Data | Storage |
+|---|---|
+| credit exposures | durable — `credit_exposures` table, 10 years (`governance.yaml: retentionPolicy`), AML / regulatory record |
+| rendered returns | not persisted (recomputed on each request, derived) |
 
 ## PII / data classification
 
@@ -91,4 +94,4 @@ Because the reportable AnaCredit dataset covers **legal entities only**, the ren
 
 ## Lineage
 
-`governance.yaml: dataLineageRole: both` — anacredit-service is both a **consumer** of credit-exposure data (fed in via REST in v1; intended to consume `balance.overdraft.*` events later) and a **producer** of the AnaCredit return (a derived regulatory dataset). `evidenceExported: false` — it does not currently export evidence to a downstream evidence store.
+`governance.yaml: dataLineageRole: both` — anacredit-service is both a **consumer** of credit-exposure data (fed in via REST; a `balance.overdraft.*` event consumer remains a separate, not-yet-built follow-up) and a **producer** of the AnaCredit return (a derived regulatory dataset). `evidenceExported: false` — it does not currently export evidence to a downstream evidence store.

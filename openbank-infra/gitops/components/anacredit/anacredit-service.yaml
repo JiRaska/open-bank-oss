@@ -2,10 +2,11 @@
 # anacredit-service: AnaCredit regulatory reporting (ECB loan-level data, ADR-0037).
 # OIDC bearer auth via in-cluster Keycloak.
 #
-# Postgres-backed as of the loan.stage_changed event-ingestion follow-up (issue #638) — narrowly
-# scoped to the loan_stage_projection read-model; the CreditExposure feed itself is still in-memory.
-# anacredit-db (anacredit-db.yaml) must reconcile BEFORE this Deployment rolls the datasource-carrying
-# image, else Flyway-at-start fails on a missing DB (same pattern as product-catalog-db.yaml).
+# Postgres-backed: ADR-0037 v2 made the CreditExposure store durable, and the loan.stage_changed
+# event-ingestion follow-up (issue #638) added the separate loan_stage_projection read-model — same
+# anacredit-db CNPG cluster (anacredit-db.yaml), which must reconcile BEFORE this Deployment rolls
+# the datasource-carrying image, else Flyway-at-start fails on a missing DB (same pattern as
+# product-catalog-db.yaml).
 # Kafka mTLS identity/ACLs: kafka-anacredit-mtls.yaml (ADR-0137 pattern) — the KafkaUser/ExternalSecrets
 # there must also land first (lower sync-wave) so the keystore Secret exists when this pod starts.
 # Probes are httpGet on /q/health/ready (not a bare tcpSocket) so Flyway-at-start failures actually
@@ -58,16 +59,18 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
-            # Datasource (issue #638) — loan_stage_projection only.
+            # Datasource: single anacredit-db, backs both the CreditExposure store (ADR-0037 v2)
+            # and the loan_stage_projection read-model (issue #638). Reactive URL for the app
+            # (Panache); JDBC URL for Flyway. Bare `postgresql://` scheme (not `vertx-reactive:`),
+            # matching the already-working product-catalog pattern (product-catalog.yaml).
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: postgresql://anacredit-db-rw.anacredit.svc:5432/openbank_anacredit
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://anacredit-db-rw.anacredit.svc:5432/openbank_anacredit
-            - name: QUARKUS_DATASOURCE_REACTIVE_URL
-              value: vertx-reactive:postgresql://anacredit-db-rw.anacredit.svc:5432/openbank_anacredit
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: anacredit-db-app
-                  key: password
+            - name: QUARKUS_DATASOURCE_USERNAME
+              valueFrom: {secretKeyRef: {name: anacredit-db-app, key: username}}
+            - name: QUARKUS_DATASOURCE_PASSWORD
+              valueFrom: {secretKeyRef: {name: anacredit-db-app, key: password}}
             # Kafka mTLS (ADR-0137, kafka-anacredit-mtls.yaml) — consumes loan.stage_changed only.
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9093

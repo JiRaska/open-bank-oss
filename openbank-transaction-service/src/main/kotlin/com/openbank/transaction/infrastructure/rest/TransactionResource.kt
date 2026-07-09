@@ -168,7 +168,7 @@ class TransactionResource(
     @Path("/{transactionId}/reverse")
     @RolesAllowed(Roles.SERVICE, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "transaction.reverse", resource = "")
-    @Operation(summary = "Reverse a completed transaction — R-transaction return path (ADR-0109)")
+    @Operation(summary = "Reverse a completed transaction — R-transaction return path (ADR-0111)")
     suspend fun reverseTransaction(
         @PathParam("transactionId") transactionId: UUID,
         request: ReverseTransactionRequest,
