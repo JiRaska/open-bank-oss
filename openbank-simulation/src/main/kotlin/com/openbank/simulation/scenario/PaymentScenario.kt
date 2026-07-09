@@ -89,7 +89,17 @@ object PaymentScenario {
             val entry = buildTransfer(world, saga, target, money)
             world.ledger.post("saga-${saga.id}-ledger", entry)
             saga = saga.copy(journalId = entry.id)
-            publishBooked(world, entry)
+            // The hold is released only once its own booked delta actually lands (inside
+            // publishBooked, scoped to `source`) — NOT here, synchronously. World.bus defers
+            // the ledger->balance projection onto the scheduler (drained once per step, after
+            // every scenario in the step has run), so releasing the hold right after posting
+            // would restore `available` before the real debit is applied — a same-step window
+            // where this account's true available balance is overstated to any other scenario
+            // that reads it (e.g. FeeBillingScenario), exactly how seed 110 drove an account to
+            // -0.56 CZK: the hold was released here, the fee scenario then saw the (still
+            // pre-debit) available balance as room, and only once the scheduler drained did
+            // BOTH this payment's debit and the fee's debit land, together breaching the floor.
+            publishBooked(world, entry, holdToRelease = source to amount)
         } catch (e: SimulatedWriteFailure) {
             compensate(world, ::advance, saga, e.message)
             return
@@ -102,8 +112,8 @@ object PaymentScenario {
             return
         }
 
-        // 4. Happy path: release the hold and complete.
-        releaseHold(world, source, amount)
+        // 4. Happy path: the hold's release is already scheduled (step 2, above) to fire when
+        //    the debit lands — nothing left to release synchronously here.
         advance(SagaState.COMPLETED)
     }
 
@@ -174,12 +184,26 @@ object PaymentScenario {
         advance(SagaState.COMPENSATED)
     }
 
-    /** Project the entry's real `bookedDeltas()` (credit-positive, deposit-control) onto the bus. */
-    private fun publishBooked(world: World, entry: JournalEntry) {
+    /**
+     * Project the entry's real `bookedDeltas()` (credit-positive, deposit-control) onto the bus.
+     * [holdToRelease], when given, releases that (account, amount) hold from INSIDE the same
+     * deferred delivery that applies its debit leg — not before — so `available` never reflects
+     * "hold released" ahead of "debit actually landed" within the step (see the `step()` comment
+     * at the call site). Safe under at-least-once delivery: [releaseHold] clamps to the currently
+     * reserved amount, so a duplicated delivery's extra release is a no-op.
+     */
+    private fun publishBooked(
+        world: World,
+        entry: JournalEntry,
+        holdToRelease: Pair<AccountCurrency, BigDecimal>? = null,
+    ) {
         entry.bookedDeltas().forEach { delta ->
-            world.bus.publish(
-                AccountBookedChanged(entry.id, AccountCurrency(delta.accountId, delta.currency), delta.delta),
-            )
+            val account = AccountCurrency(delta.accountId, delta.currency)
+            world.bus.publish(AccountBookedChanged(entry.id, account, delta.delta)) {
+                if (holdToRelease != null && holdToRelease.first == account) {
+                    releaseHold(world, holdToRelease.first, holdToRelease.second)
+                }
+            }
         }
     }
 

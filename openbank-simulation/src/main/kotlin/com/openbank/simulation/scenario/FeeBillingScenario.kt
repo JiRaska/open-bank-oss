@@ -96,8 +96,33 @@ object FeeBillingScenario {
         // meant to catch. Skipping (assessed but waived to 0, exactly like a real waived fee)
         // when there isn't room keeps this scenario's own choices from tripping an unrelated
         // invariant, while still exercising assess -> [waive] -> (maybe) post -> (maybe) reverse.
-        val floor = world.balances.get(accountCurrency).arrangedOverdraftLimit.negate()
-        val hasRoom = world.balances.get(accountCurrency).available() - amount >= floor
+        //
+        // The room check MUST be atomic against BalanceStore, not a read of a stale snapshot:
+        // World.bus defers the ledger->balance projection (AccountBookedChanged) onto the
+        // DeterministicScheduler, drained only once per step AFTER every scenario has run
+        // (SimulationRunner.runSeed). A plain `available() - amount >= floor` read races every
+        // other same-step scenario's own not-yet-applied debit against the same account: each
+        // one independently observes the SAME pre-drain balance, so two-plus charges that each
+        // individually fit under the floor can jointly blow through it once the drain finally
+        // applies all of them (this is exactly how seed 110 drove an account to -0.56 CZK).
+        // PaymentScenario avoids this by reserving funds SYNCHRONOUSLY (`withReservation`, which
+        // itself guards the floor) before ever posting; mirror that here: reserve-then-release
+        // makes the room check and the balance debit atomic and visible to every other scenario
+        // in the same step, instead of only becoming visible after the scheduler drains.
+        val hasRoom = try {
+            world.balances.put(world.balances.get(accountCurrency).withReservation(amount))
+            true
+        } catch (_: IllegalArgumentException) {
+            false
+        }
+        if (hasRoom) {
+            // Release immediately: the reservation's only job was to make the room check atomic.
+            // The actual debit is still the deferred, real ledger->balance projection below
+            // (bookedDeltas() -> bus -> scheduler), exactly as for every other charge in this
+            // harness — this just prevents OTHER same-step scenarios from also spending the
+            // room this charge is about to consume.
+            world.balances.put(world.balances.get(accountCurrency).releaseReservation(amount))
+        }
 
         val assessedFee = AssessedFee(
             cycleId = cycleId,

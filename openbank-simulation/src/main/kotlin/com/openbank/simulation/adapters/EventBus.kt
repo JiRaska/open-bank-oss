@@ -54,15 +54,33 @@ class SimEventBus(
     private val reorderDelay = Duration.ofMillis(REORDER_DELAY_MS)
     private val redeliveryDelay = Duration.ofMillis(REDELIVERY_DELAY_MS)
 
-    fun publish(event: AccountBookedChanged) {
+    /**
+     * [onApplied], when given, runs INSIDE the same deferred delivery task, right after the
+     * projection applies [event]'s delta — never before. A caller that holds a synchronous
+     * reservation on this account (e.g. [com.openbank.simulation.scenario.PaymentScenario]'s
+     * funds hold) passes its release here instead of releasing right after `publish()` returns:
+     * releasing eagerly would restore `available` before this delta actually lands (delivery is
+     * always deferred onto the scheduler, drained once per step after every scenario has run),
+     * a same-step window where another scenario reading `available()` sees room that is really
+     * already spoken for by this not-yet-applied debit (ADR-0100 seed 110 regression: exactly
+     * this race let a fee charge and an in-flight payment debit jointly breach the floor).
+     * Fires on every delivery (including a duplicate), so [onApplied] must itself be idempotent.
+     */
+    fun publish(event: AccountBookedChanged, onApplied: (() -> Unit)? = null) {
         val firstDelay = when {
             faults.shouldDropEvent() -> redeliveryDelay
             faults.shouldReorderEvent() -> reorderDelay
             else -> normalDelay
         }
-        scheduler.schedule(firstDelay) { projection.on(event) }
+        scheduler.schedule(firstDelay) {
+            projection.on(event)
+            onApplied?.invoke()
+        }
         if (faults.shouldDuplicateEvent()) {
-            scheduler.schedule(redeliveryDelay) { projection.on(event) }
+            scheduler.schedule(redeliveryDelay) {
+                projection.on(event)
+                onApplied?.invoke()
+            }
         }
     }
 
