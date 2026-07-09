@@ -1,0 +1,36 @@
+# Kafka `group.id` / `auto.offset.reset` override for audit-service's audit-events-in channel
+# (issue #686).
+#
+# Why this exists: Quarkus's YAML config source unconditionally quotes any leaf map key
+# containing a literal dot when registering it as a MicroProfile Config property, so
+# `group.id: audit-service` / `auto.offset.reset: earliest` written as plain YAML keys under
+# `mp.messaging.incoming.audit-events-in` in application.yaml silently register only as the
+# literal property name `"group.id"` (quotes included) — a name
+# KafkaConnectorIncomingConfiguration's getters never look up. group.id then silently falls back
+# to Quarkus's default (quarkus.application.name = openbank-audit-service), which the
+# audit-service KafkaUser ACL (kafka-audit-mtls.yaml) does NOT grant Read on (only the group
+# "audit-service" is granted) — every consumer poll gets a silent
+# org.apache.kafka.common.errors.GroupAuthorizationException.
+#
+# Why a properties FILE and not env vars: SmallRye discovers messaging channels by scanning
+# config property NAMES, and the env-var form (MP_MESSAGING_INCOMING_AUDIT_EVENTS_IN_*)
+# reverse-maps ambiguously for a hyphenated channel name like audit-events-in → a broken channel
+# → startup crash (this exact approach was tried for transaction-service's hyphenated
+# payment-scheme-accepted channel and reverted, #2649→#2659). A properties file carries the EXACT
+# hyphenated/dotted property name unambiguously, so discovery is unambiguous.
+#
+# config_ordinal=500 forces this source to outrank the baked application.yaml (~254). Loaded via
+# QUARKUS_CONFIG_LOCATIONS on the Deployment (audit-service.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: audit-service-msg-override
+  namespace: audit
+  labels:
+    app.kubernetes.io/name: audit-service
+    app.kubernetes.io/part-of: audit
+data:
+  override.properties: |
+    config_ordinal=500
+    mp.messaging.incoming.audit-events-in.group.id=audit-service
+    mp.messaging.incoming.audit-events-in.auto.offset.reset=earliest

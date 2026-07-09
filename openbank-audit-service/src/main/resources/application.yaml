@@ -85,13 +85,26 @@ mp:
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     incoming:
+      # group.id / auto.offset.reset are deliberately NOT set as YAML keys here — see
+      # openbank-infra/gitops/components/audit/audit-service-msg-override.yaml (a properties-file
+      # override loaded via QUARKUS_CONFIG_LOCATIONS) for where they're set instead. Summary:
+      # SmallRye Config's YAML source unconditionally quotes any leaf map key containing a literal
+      # dot (`group.id` registers as the literal property name `"group.id"`, quotes included,
+      # regardless of whether the YAML key itself is quoted), so
+      # KafkaConnectorIncomingConfiguration's plain lookup never finds it. group.id then silently
+      # fell back to Quarkus's default (quarkus.application.name = openbank-audit-service), which
+      # the audit-service KafkaUser ACL (kafka-audit-mtls.yaml) does NOT grant Read on (only
+      # "audit-service" is granted) — every consumer poll got a silent
+      # org.apache.kafka.common.errors.GroupAuthorizationException. A properties file (not an env
+      # var) is used because this channel name is hyphenated (audit-events-in): SmallRye's env-var
+      # reverse-mapping for hyphenated/dotted channel names is ambiguous and previously broke
+      # transaction-service's payment-scheme-accepted channel this way (reverted, #2649→#2659); a
+      # properties file carries the exact property name unambiguously. See issue #686.
       audit-events-in:
         connector: smallrye-kafka
         client.id: audit-service-${quarkus.uuid}
-        group.id: audit-service
         topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        auto.offset.reset: earliest
 "%dev":
   quarkus:
     log:
