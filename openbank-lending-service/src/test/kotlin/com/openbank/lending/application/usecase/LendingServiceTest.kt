@@ -18,6 +18,9 @@ import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
 import com.openbank.lending.domain.model.ApplicationStatus
 import com.openbank.lending.domain.model.Collateral
+import com.openbank.lending.domain.model.CollateralDecisionRequest
+import com.openbank.lending.domain.model.CollateralRequest
+import com.openbank.lending.domain.model.CollateralStatus
 import com.openbank.lending.domain.model.CollateralType
 import com.openbank.lending.domain.model.DecisionRequest
 import com.openbank.lending.domain.model.Loan
@@ -27,6 +30,7 @@ import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.LoanProvisioningRecord
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.WriteOffRequest
+import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.domain.money.Money
@@ -451,15 +455,26 @@ class LendingServiceTest {
 
     // --- Collateral-adjusted LGD (ADR-0028 D1, first increment) -----------------------------------
 
-    private fun collateralItem(loanId: LoanId, marketValue: Money, haircut: BigDecimal, type: CollateralType) =
-        Collateral(
-            loanId = loanId,
-            type = type,
-            marketValue = marketValue,
-            haircut = haircut,
-            valuedAt = fixedNow,
-            createdAt = fixedNow,
-        )
+    // APPROVED by default: these tests validate the LGD math, not the four-eyes gate (that is covered
+    // separately below, "Collateral four-eyes" — ADR-0028 follow-up, issue #621).
+    private fun collateralItem(
+        loanId: LoanId,
+        marketValue: Money,
+        haircut: BigDecimal,
+        type: CollateralType,
+        status: CollateralStatus = CollateralStatus.APPROVED,
+    ) = Collateral(
+        loanId = loanId,
+        type = type,
+        marketValue = marketValue,
+        haircut = haircut,
+        valuedAt = fixedNow,
+        status = status,
+        registeredBy = "officer-1",
+        decidedBy = if (status == CollateralStatus.PENDING) null else "risk-1",
+        decidedAt = if (status == CollateralStatus.PENDING) null else fixedNow,
+        createdAt = fixedNow,
+    )
 
     @Test
     fun `registered collateral reduces the ECL proportionally to its haircut-adjusted cover`() {
@@ -657,6 +672,294 @@ class LendingServiceTest {
 
         assertThat(snapshot.expectedCreditLoss.isZero()).isTrue()
         assertThat(snapshot.expectedCreditLoss.isNegative()).isFalse()
+    }
+
+    @Test
+    fun `PENDING collateral is not consulted by the ECL calc`() {
+        val loanId = LoanId.random()
+        val loan = Loan(
+            id = loanId,
+            applicationId = LoanApplicationId.random(),
+            partyId = partyId,
+            principal = eur("12000.00"),
+            nominalAnnualRate = BigDecimal("0.12"),
+            termPeriods = 12,
+            method = AmortizationMethod.ANNUITY,
+            firstDueDate = firstDue,
+            disbursedAt = fixedNow,
+            createdAt = fixedNow,
+        )
+        val schedule = listOf(
+            LoanInstallment(
+                loanId = loanId,
+                number = 1,
+                dueDate = firstDue,
+                openingBalance = eur("12000.00"),
+                principal = eur("946.19"),
+                interest = eur("120.00"),
+                payment = eur("1066.19"),
+                closingBalance = eur("11053.81"),
+            ),
+        )
+        every { loans.findById(loanId) } returns Uni.createFrom().item(loan)
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        every { riskParameters.parametersFor(loan, eur("12000.00")) } returns Uni.createFrom().item(
+            EclInputs(
+                pd12Month = BigDecimal("0.02"),
+                pdLifetime = BigDecimal("0.20"),
+                lgd = BigDecimal("0.45"),
+                exposureAtDefault = eur("12000.00"),
+            ),
+        )
+        // Fully-covering collateral, but still PENDING (maker registered it, no checker decided yet):
+        // must NOT reduce LGD -- same ECL as if no collateral were registered at all (108.00).
+        every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(
+            listOf(
+                collateralItem(
+                    loanId,
+                    eur("15000.00"),
+                    BigDecimal("0.20"),
+                    CollateralType.REAL_ESTATE,
+                    status = CollateralStatus.PENDING,
+                ),
+            ),
+        )
+
+        val snapshot = service.assess(loanId, LocalDate.parse("2026-06-01")).await().indefinitely()
+
+        assertThat(snapshot.expectedCreditLoss).isEqualTo(eur("108.00"))
+    }
+
+    @Test
+    fun `REJECTED collateral is not consulted by the ECL calc`() {
+        val loanId = LoanId.random()
+        val loan = Loan(
+            id = loanId,
+            applicationId = LoanApplicationId.random(),
+            partyId = partyId,
+            principal = eur("12000.00"),
+            nominalAnnualRate = BigDecimal("0.12"),
+            termPeriods = 12,
+            method = AmortizationMethod.ANNUITY,
+            firstDueDate = firstDue,
+            disbursedAt = fixedNow,
+            createdAt = fixedNow,
+        )
+        val schedule = listOf(
+            LoanInstallment(
+                loanId = loanId,
+                number = 1,
+                dueDate = firstDue,
+                openingBalance = eur("12000.00"),
+                principal = eur("946.19"),
+                interest = eur("120.00"),
+                payment = eur("1066.19"),
+                closingBalance = eur("11053.81"),
+            ),
+        )
+        every { loans.findById(loanId) } returns Uni.createFrom().item(loan)
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        every { riskParameters.parametersFor(loan, eur("12000.00")) } returns Uni.createFrom().item(
+            EclInputs(
+                pd12Month = BigDecimal("0.02"),
+                pdLifetime = BigDecimal("0.20"),
+                lgd = BigDecimal("0.45"),
+                exposureAtDefault = eur("12000.00"),
+            ),
+        )
+        every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(
+            listOf(
+                collateralItem(
+                    loanId,
+                    eur("15000.00"),
+                    BigDecimal("0.20"),
+                    CollateralType.REAL_ESTATE,
+                    status = CollateralStatus.REJECTED,
+                ),
+            ),
+        )
+
+        val snapshot = service.assess(loanId, LocalDate.parse("2026-06-01")).await().indefinitely()
+
+        assertThat(snapshot.expectedCreditLoss).isEqualTo(eur("108.00"))
+    }
+
+    @Test
+    fun `a mix of APPROVED and PENDING collateral only sums the APPROVED item`() {
+        val loanId = LoanId.random()
+        val loan = Loan(
+            id = loanId,
+            applicationId = LoanApplicationId.random(),
+            partyId = partyId,
+            principal = eur("12000.00"),
+            nominalAnnualRate = BigDecimal("0.12"),
+            termPeriods = 12,
+            method = AmortizationMethod.ANNUITY,
+            firstDueDate = firstDue,
+            disbursedAt = fixedNow,
+            createdAt = fixedNow,
+        )
+        val schedule = listOf(
+            LoanInstallment(
+                loanId = loanId,
+                number = 1,
+                dueDate = firstDue,
+                openingBalance = eur("12000.00"),
+                principal = eur("946.19"),
+                interest = eur("120.00"),
+                payment = eur("1066.19"),
+                closingBalance = eur("11053.81"),
+            ),
+        )
+        every { loans.findById(loanId) } returns Uni.createFrom().item(loan)
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        every { riskParameters.parametersFor(loan, eur("12000.00")) } returns Uni.createFrom().item(
+            EclInputs(
+                pd12Month = BigDecimal("0.02"),
+                pdLifetime = BigDecimal("0.20"),
+                lgd = BigDecimal("0.45"),
+                exposureAtDefault = eur("12000.00"),
+            ),
+        )
+        // APPROVED vehicle (3000.00 cover) + a PENDING real-estate item that would fully cover the
+        // exposure on its own -- only the approved 3000.00 must count.
+        every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(
+            listOf(
+                collateralItem(loanId, eur("5000.00"), BigDecimal("0.40"), CollateralType.VEHICLE),
+                collateralItem(
+                    loanId,
+                    eur("15000.00"),
+                    BigDecimal("0.20"),
+                    CollateralType.REAL_ESTATE,
+                    status = CollateralStatus.PENDING,
+                ),
+            ),
+        )
+
+        val snapshot = service.assess(loanId, LocalDate.parse("2026-06-01")).await().indefinitely()
+
+        // Coverage ratio = 3000/12000 = 0.25 -> effective LGD = 0.45 - 0.25 = 0.20.
+        // ECL = 0.02 * 0.20 * 12000 = 48.00.
+        assertThat(snapshot.expectedCreditLoss).isEqualTo(eur("48.00"))
+    }
+
+    // --- Collateral four-eyes (ADR-0028 follow-up, issue #621) --------------------------------------
+
+    @Test
+    fun `register captures the maker and defaults to PENDING`() {
+        val loanId = LoanId.random()
+        val request = CollateralRequest(
+            type = CollateralType.VEHICLE,
+            marketValue = eur("5000.00"),
+            haircut = BigDecimal("0.40"),
+        )
+        every { valuation.revalue("VEHICLE", eur("5000.00")) } returns Uni.createFrom().item(eur("5000.00"))
+        val saved = slot<Collateral>()
+        every { collateral.save(capture(saved)) } answers { Uni.createFrom().item(saved.captured) }
+
+        val result = service.register(loanId, request, "officer-1").await().indefinitely()
+
+        assertThat(result.status).isEqualTo(CollateralStatus.PENDING)
+        assertThat(result.registeredBy).isEqualTo("officer-1")
+        assertThat(result.decidedBy).isNull()
+        assertThat(saved.captured.status).isEqualTo(CollateralStatus.PENDING)
+        assertThat(saved.captured.registeredBy).isEqualTo("officer-1")
+    }
+
+    @Test
+    fun `register rejects a blank registrant identity`() {
+        val loanId = LoanId.random()
+        val request = CollateralRequest(type = CollateralType.VEHICLE, marketValue = eur("5000.00"))
+
+        assertThatThrownBy { service.register(loanId, request, "").await().indefinitely() }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `a checker distinct from the maker can approve a pending collateral registration`() {
+        val id = CollateralId.random()
+        val loanId = LoanId.random()
+        val pending = collateralItem(loanId, eur("5000.00"), BigDecimal("0.40"), CollateralType.VEHICLE)
+            .copy(id = id, status = CollateralStatus.PENDING, registeredBy = "officer-1", decidedBy = null)
+        every { collateral.findById(id) } returns Uni.createFrom().item(pending)
+        val updated = slot<Collateral>()
+        every { collateral.update(capture(updated)) } answers { Uni.createFrom().item(updated.captured) }
+
+        val result = service.decide(id, CollateralDecisionRequest(approve = true), "risk-1").await().indefinitely()
+
+        assertThat(result.status).isEqualTo(CollateralStatus.APPROVED)
+        assertThat(result.decidedBy).isEqualTo("risk-1")
+    }
+
+    @Test
+    fun `a checker can reject a pending collateral registration`() {
+        val id = CollateralId.random()
+        val loanId = LoanId.random()
+        val pending = collateralItem(loanId, eur("5000.00"), BigDecimal("0.40"), CollateralType.VEHICLE)
+            .copy(id = id, status = CollateralStatus.PENDING, registeredBy = "officer-1", decidedBy = null)
+        every { collateral.findById(id) } returns Uni.createFrom().item(pending)
+        val updated = slot<Collateral>()
+        every { collateral.update(capture(updated)) } answers { Uni.createFrom().item(updated.captured) }
+
+        val result = service.decide(id, CollateralDecisionRequest(approve = false), "risk-1").await().indefinitely()
+
+        assertThat(result.status).isEqualTo(CollateralStatus.REJECTED)
+    }
+
+    @Test
+    fun `a maker cannot approve their own collateral registration (four-eyes)`() {
+        val id = CollateralId.random()
+        val loanId = LoanId.random()
+        val pending = collateralItem(loanId, eur("5000.00"), BigDecimal("0.40"), CollateralType.VEHICLE)
+            .copy(id = id, status = CollateralStatus.PENDING, registeredBy = "officer-1", decidedBy = null)
+        every { collateral.findById(id) } returns Uni.createFrom().item(pending)
+
+        assertThatThrownBy {
+            service.decide(id, CollateralDecisionRequest(approve = true), "officer-1").await().indefinitely()
+        }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("Four-eyes violation")
+        verify(exactly = 0) { collateral.update(any()) }
+    }
+
+    @Test
+    fun `decide fails for an unknown collateral id`() {
+        val id = CollateralId.random()
+        every { collateral.findById(id) } returns Uni.createFrom().nullItem()
+
+        assertThatThrownBy {
+            service.decide(id, CollateralDecisionRequest(approve = true), "risk-1").await().indefinitely()
+        }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `decide fails for a collateral registration that already has a decision`() {
+        val id = CollateralId.random()
+        val loanId = LoanId.random()
+        val alreadyApproved = collateralItem(loanId, eur("5000.00"), BigDecimal("0.40"), CollateralType.VEHICLE)
+            .copy(id = id, status = CollateralStatus.APPROVED, registeredBy = "officer-1", decidedBy = "risk-1")
+        every { collateral.findById(id) } returns Uni.createFrom().item(alreadyApproved)
+
+        assertThatThrownBy {
+            service.decide(id, CollateralDecisionRequest(approve = true), "risk-2").await().indefinitely()
+        }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("not awaiting a decision")
+    }
+
+    @Test
+    fun `decide rejects a blank decider identity`() {
+        val id = CollateralId.random()
+        val loanId = LoanId.random()
+        val pending = collateralItem(loanId, eur("5000.00"), BigDecimal("0.40"), CollateralType.VEHICLE)
+            .copy(id = id, status = CollateralStatus.PENDING, registeredBy = "officer-1", decidedBy = null)
+        every { collateral.findById(id) } returns Uni.createFrom().item(pending)
+
+        assertThatThrownBy {
+            service.decide(id, CollateralDecisionRequest(approve = true), "").await().indefinitely()
+        }
+            .isInstanceOf(IllegalArgumentException::class.java)
     }
 
     // --- Provisioning cycle: scheduled delta-vs-prior-period posting ---------------------------------
