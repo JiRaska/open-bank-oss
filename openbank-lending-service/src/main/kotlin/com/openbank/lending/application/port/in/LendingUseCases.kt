@@ -15,6 +15,7 @@ import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.ProvisioningRunOutcome
 import com.openbank.lending.domain.model.ProvisioningSnapshot
+import com.openbank.lending.domain.model.RescheduleRequest
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
@@ -63,6 +64,16 @@ interface AccrueInterestUseCase {
 /** Collections terminal step: write off an uncollectible loan's remaining exposure (IFRS 9 Stage 3). */
 interface WriteOffLoanUseCase {
     fun writeOff(loanId: LoanId, request: WriteOffRequest): Uni<Loan>
+}
+
+/**
+ * Collections/servicing forbearance: replace a loan's remaining unpaid schedule with a new
+ * contractual repayment plan, optionally forgiving part of the outstanding principal
+ * (issue #667/#668). [rescheduledBy] is the trusted acting principal (JWT subject), passed in by
+ * the adapter — not read from the request body.
+ */
+interface RescheduleLoanUseCase {
+    fun reschedule(loanId: LoanId, request: RescheduleRequest, rescheduledBy: String): Uni<Loan>
 }
 
 /**

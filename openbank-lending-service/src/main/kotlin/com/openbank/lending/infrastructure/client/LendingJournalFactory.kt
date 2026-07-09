@@ -32,6 +32,7 @@ data class LendingGlAccounts(
  *   INTEREST_ACCRUAL     DEBIT  Interest Receivable  CREDIT Interest Income       (income earned at due date, no cash yet)
  *   INTEREST_SETTLEMENT  DEBIT  Funding Clearing     CREDIT Interest Receivable   (cash in, accrued receivable cleared)
  *   WRITE_OFF            DEBIT  Loan Loss Expense    CREDIT Loans Receivable      (loss booked, asset off)
+ *   RESCHEDULE_FORGIVENESS DEBIT Loan Loss Expense   CREDIT Loans Receivable      (partial forgiveness, restructuring)
  *   PROVISIONING (Δ≥0)   DEBIT  Loan Loss Expense    CREDIT Loan Loss Allowance   (impairment increases: more provision)
  *   PROVISIONING (Δ<0)   DEBIT  Loan Loss Allowance  CREDIT Loan Loss Expense    (impairment decreases: partial release)
  *
@@ -69,6 +70,7 @@ object LendingJournalFactory {
             PostingKind.INTEREST_ACCRUAL -> accounts.interestReceivable to accounts.interestIncome
             PostingKind.INTEREST_SETTLEMENT -> accounts.fundingClearing to accounts.interestReceivable
             PostingKind.WRITE_OFF -> accounts.loanLossExpense to accounts.loansReceivable
+            PostingKind.RESCHEDULE_FORGIVENESS -> accounts.loanLossExpense to accounts.loansReceivable
             PostingKind.PROVISIONING -> error("unreachable: handled above")
         }
         val ccy = posting.amount.currency.code

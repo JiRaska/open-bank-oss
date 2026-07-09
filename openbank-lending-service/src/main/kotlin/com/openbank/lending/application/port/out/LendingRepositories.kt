@@ -45,6 +45,12 @@ interface InstallmentRepository {
 
     /** Mark an installment's interest as recognized (accrual basis); idempotent guard for the pass. */
     fun markAccrued(installmentId: UUID, accruedAt: java.time.OffsetDateTime): Uni<Int>
+
+    /**
+     * Remove every unpaid installment of [loanId] — the tail a reschedule replaces (issue #667/#668).
+     * Already-paid rows are never touched: history is never rewritten. Returns the number deleted.
+     */
+    fun deleteUnpaid(loanId: LoanId): Uni<Int>
 }
 
 interface CollateralRepository {

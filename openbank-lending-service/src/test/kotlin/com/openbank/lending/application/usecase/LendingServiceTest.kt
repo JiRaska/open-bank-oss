@@ -29,6 +29,7 @@ import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.LoanProvisioningRecord
 import com.openbank.lending.domain.model.LoanStatus
+import com.openbank.lending.domain.model.RescheduleRequest
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
@@ -401,6 +402,172 @@ class LendingServiceTest {
 
         verify(exactly = 0) { ledger.post(any()) }
         verify(exactly = 0) { loans.update(any()) }
+    }
+
+    // --- Reschedule / restructuring (issue #667/#668) ------------------------------------------------
+
+    private fun twoInstallmentSchedule(loanId: LoanId) = listOf(
+        LoanInstallment(
+            loanId = loanId, number = 1, dueDate = firstDue,
+            openingBalance = eur("12000.00"), principal = eur("946.19"),
+            interest = eur("120.00"), payment = eur("1066.19"), closingBalance = eur("11053.81"),
+            paid = true, paidAt = fixedNow,
+        ),
+        LoanInstallment(
+            loanId = loanId,
+            number = 2,
+            dueDate = firstDue.plusMonths(1),
+            openingBalance = eur("11053.81"),
+            principal = eur("955.65"),
+            interest = eur("110.54"),
+            payment = eur("1066.19"),
+            closingBalance = eur("10098.16"),
+        ),
+    )
+
+    private fun rescheduleRequest(forgiveness: Money = eur("0.00")) = RescheduleRequest(
+        newNominalAnnualRate = BigDecimal("0.08"),
+        newTermPeriods = 24,
+        newFirstDueDate = firstDue.plusMonths(2),
+        principalForgiveness = forgiveness,
+        reason = "hardship forbearance",
+    )
+
+    private fun mockRescheduleHappyPath(loanId: LoanId, loan: Loan, schedule: List<LoanInstallment>) {
+        every { loans.findById(loanId) } returns Uni.createFrom().item(loan)
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        every { installments.deleteUnpaid(loanId) } returns Uni.createFrom().item(1)
+        every { installments.saveAll(any()) } answers {
+            @Suppress("UNCHECKED_CAST")
+            Uni.createFrom().item(firstArg<List<LoanInstallment>>())
+        }
+        every { loans.update(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+    }
+
+    @Test
+    fun `reschedule replaces the unpaid tail, numbering new rows after the last paid installment`() {
+        val loanId = LoanId.random()
+        val loan = activeLoan(loanId)
+        val schedule = twoInstallmentSchedule(loanId)
+        mockRescheduleHappyPath(loanId, loan, schedule)
+        val rowsSlot: CapturingSlot<List<LoanInstallment>> = slot()
+        every { installments.saveAll(capture(rowsSlot)) } answers { Uni.createFrom().item(rowsSlot.captured) }
+
+        val result = service.reschedule(loanId, rescheduleRequest(), "carol").await().indefinitely()
+
+        assertThat(result.status).isEqualTo(LoanStatus.ACTIVE)
+        verify(exactly = 1) { installments.deleteUnpaid(loanId) }
+        // One paid installment (#1) already exists; the new schedule's rows must continue from #2 —
+        // never restart at #1, or a future repayment's ledger reference would collide with the paid one.
+        assertThat(rowsSlot.captured.first().number).isEqualTo(2)
+        assertThat(rowsSlot.captured.map { it.number }).isSorted()
+        assertThat(rowsSlot.captured).hasSize(24)
+        verify(exactly = 0) { ledger.post(match { it.kind == PostingKind.RESCHEDULE_FORGIVENESS }) }
+        verify(exactly = 1) { events.emit(match<LendingOutboxMessage> { it.eventType == "loan.rescheduled" }) }
+    }
+
+    @Test
+    fun `reschedule with principal forgiveness books a RESCHEDULE_FORGIVENESS journal for exactly that amount`() {
+        val loanId = LoanId.random()
+        val loan = activeLoan(loanId)
+        val schedule = twoInstallmentSchedule(loanId)
+        mockRescheduleHappyPath(loanId, loan, schedule)
+        val postingSlot: CapturingSlot<LedgerPosting> = slot()
+        every { ledger.post(capture(postingSlot)) } returns Uni.createFrom().item(Unit)
+
+        service.reschedule(loanId, rescheduleRequest(forgiveness = eur("1000.00")), "carol").await().indefinitely()
+
+        assertThat(postingSlot.captured.kind).isEqualTo(PostingKind.RESCHEDULE_FORGIVENESS)
+        assertThat(postingSlot.captured.amount).isEqualTo(eur("1000.00"))
+        verify(exactly = 1) { ledger.post(any()) }
+    }
+
+    @Test
+    fun `reschedule persists a bumped loan version so a repeat reschedule never reuses the same idempotency key`() {
+        val loanId = LoanId.random()
+        val loan = activeLoan(loanId)
+        val schedule = twoInstallmentSchedule(loanId)
+        mockRescheduleHappyPath(loanId, loan, schedule)
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        val loanSlot: CapturingSlot<Loan> = slot()
+        every { loans.update(capture(loanSlot)) } answers { Uni.createFrom().item(loanSlot.captured) }
+
+        service.reschedule(loanId, rescheduleRequest(forgiveness = eur("1000.00")), "carol").await().indefinitely()
+
+        assertThat(loanSlot.captured.version).isEqualTo(loan.version + 1)
+    }
+
+    @Test
+    fun `reschedule refuses a loan that is not ACTIVE`() {
+        val loanId = LoanId.random()
+        every { loans.findById(loanId) } returns
+            Uni.createFrom().item(activeLoan(loanId).copy(status = LoanStatus.WRITTEN_OFF))
+
+        assertThatThrownBy {
+            service.reschedule(loanId, rescheduleRequest(), "carol").await().indefinitely()
+        }.isInstanceOf(IllegalStateException::class.java).hasMessageContaining("ACTIVE")
+
+        verify(exactly = 0) { installments.deleteUnpaid(any()) }
+    }
+
+    @Test
+    fun `reschedule refuses a fully-repaid loan with nothing outstanding`() {
+        val loanId = LoanId.random()
+        val loan = activeLoan(loanId)
+        val schedule = listOf(
+            LoanInstallment(
+                loanId = loanId, number = 1, dueDate = firstDue,
+                openingBalance = eur("12000.00"), principal = eur("12000.00"),
+                interest = eur("0.00"), payment = eur("12000.00"), closingBalance = eur("0.00"),
+                paid = true, paidAt = fixedNow,
+            ),
+        )
+        every { loans.findById(loanId) } returns Uni.createFrom().item(loan)
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+
+        assertThatThrownBy {
+            service.reschedule(loanId, rescheduleRequest(), "carol").await().indefinitely()
+        }.isInstanceOf(IllegalStateException::class.java).hasMessageContaining("Nothing to reschedule")
+
+        verify(exactly = 0) { installments.deleteUnpaid(any()) }
+    }
+
+    @Test
+    fun `reschedule refuses forgiveness that exceeds the outstanding balance`() {
+        val loanId = LoanId.random()
+        val loan = activeLoan(loanId)
+        val schedule = twoInstallmentSchedule(loanId)
+        every { loans.findById(loanId) } returns Uni.createFrom().item(loan)
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+
+        assertThatThrownBy {
+            service.reschedule(loanId, rescheduleRequest(forgiveness = eur("99999.00")), "carol")
+                .await().indefinitely()
+        }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("exceeds outstanding")
+
+        verify(exactly = 0) { ledger.post(any()) }
+        verify(exactly = 0) { installments.deleteUnpaid(any()) }
+    }
+
+    @Test
+    fun `reschedule refuses a blank rescheduler identity`() {
+        val loanId = LoanId.random()
+        every { loans.findById(loanId) } returns Uni.createFrom().item(activeLoan(loanId))
+
+        assertThatThrownBy {
+            service.reschedule(loanId, rescheduleRequest(), "").await().indefinitely()
+        }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("identity is required")
+    }
+
+    @Test
+    fun `reschedule refuses a non-positive new term`() {
+        val loanId = LoanId.random()
+        every { loans.findById(loanId) } returns Uni.createFrom().item(activeLoan(loanId))
+
+        assertThatThrownBy {
+            service.reschedule(loanId, rescheduleRequest().copy(newTermPeriods = 0), "carol").await().indefinitely()
+        }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("at least one period")
     }
 
     @Test

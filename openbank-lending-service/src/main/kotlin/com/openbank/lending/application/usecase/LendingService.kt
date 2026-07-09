@@ -9,6 +9,7 @@ import com.openbank.lending.application.port.`in`.ApplyForLoanUseCase
 import com.openbank.lending.application.port.`in`.CollateralUseCase
 import com.openbank.lending.application.port.`in`.DisburseLoanUseCase
 import com.openbank.lending.application.port.`in`.ProvisioningUseCase
+import com.openbank.lending.application.port.`in`.RescheduleLoanUseCase
 import com.openbank.lending.application.port.`in`.RunProvisioningCycleUseCase
 import com.openbank.lending.application.port.`in`.ServicingUseCase
 import com.openbank.lending.application.port.`in`.WriteOffLoanUseCase
@@ -39,6 +40,7 @@ import com.openbank.lending.domain.model.LoanProvisioningRecord
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.ProvisioningRunOutcome
 import com.openbank.lending.domain.model.ProvisioningSnapshot
+import com.openbank.lending.domain.model.RescheduleRequest
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
@@ -64,7 +66,10 @@ import java.util.UUID
  * lives here — it is all in libs.
  */
 @ApplicationScoped
-@Suppress("LongParameterList")
+// TooManyFunctions: this is the single application service for the whole bounded context
+// (ADR-0028), implementing eight cohesive inbound-port interfaces — splitting it would scatter
+// one aggregate's orchestration across files for no behavioral benefit.
+@Suppress("LongParameterList", "TooManyFunctions")
 class LendingService(
     private val applications: LoanApplicationRepository,
     private val loans: LoanRepository,
@@ -81,6 +86,7 @@ class LendingService(
     ServicingUseCase,
     AccrueInterestUseCase,
     WriteOffLoanUseCase,
+    RescheduleLoanUseCase,
     CollateralUseCase,
     ProvisioningUseCase,
     RunProvisioningCycleUseCase {
@@ -369,6 +375,120 @@ class LendingService(
                 }
             }
         }
+
+    // --- Reschedule / restructuring (forbearance, issue #667/#668) ----------------------------------
+
+    /**
+     * Replace an ACTIVE loan's remaining unpaid schedule with a new contractual repayment plan. The
+     * new schedule is generated from the outstanding balance (net of any [RescheduleRequest.principalForgiveness])
+     * at the new rate/term/first-due-date, via the same pure [Amortization.schedule] primitive
+     * [bookLoan] uses at origination. Already-paid installments are untouched; new rows continue the
+     * installment numbering after the last paid one, so a future repayment's ledger reference
+     * (`"loan:<id>:inst:<number>:..."`) can never collide with an already-posted one.
+     */
+    @Suppress("LongMethod") // reschedule mirrors bookLoan's shape: validation + schedule build + persist + post
+    override fun reschedule(loanId: LoanId, request: RescheduleRequest, rescheduledBy: String): Uni<Loan> =
+        loans.findById(loanId).flatMap { loan ->
+            when {
+                loan == null ->
+                    Uni.createFrom().failure(IllegalArgumentException("Loan not found: $loanId"))
+                loan.status != LoanStatus.ACTIVE ->
+                    Uni.createFrom().failure(
+                        IllegalStateException("Only an ACTIVE loan can be rescheduled: ${loan.status}"),
+                    )
+                rescheduledBy.isBlank() ->
+                    Uni.createFrom().failure(IllegalArgumentException("Rescheduler identity is required"))
+                request.newTermPeriods <= 0 ->
+                    Uni.createFrom().failure(IllegalArgumentException("New term must be at least one period"))
+                request.newNominalAnnualRate.signum() < 0 ->
+                    Uni.createFrom().failure(IllegalArgumentException("New nominal rate cannot be negative"))
+                request.principalForgiveness.amount.signum() < 0 ->
+                    Uni.createFrom().failure(IllegalArgumentException("Principal forgiveness cannot be negative"))
+                else -> installments.findByLoan(loanId).flatMap { schedule ->
+                    rescheduleAgainst(loan, schedule, request)
+                }
+            }
+        }
+
+    private fun rescheduleAgainst(loan: Loan, schedule: List<LoanInstallment>, request: RescheduleRequest): Uni<Loan> {
+        val outstanding = outstandingBalance(loan, schedule)
+        if (!outstanding.isPositive()) {
+            return Uni.createFrom().failure(IllegalStateException("Nothing to reschedule: outstanding balance is zero"))
+        }
+        if (request.principalForgiveness.amount > outstanding.amount) {
+            return Uni.createFrom().failure(
+                IllegalArgumentException(
+                    "Forgiveness ${request.principalForgiveness} exceeds outstanding balance $outstanding",
+                ),
+            )
+        }
+        val newPrincipal = outstanding.minus(request.principalForgiveness)
+        // A monotonically-increasing, DURABLY PERSISTED generation number, not just loan.version + 1
+        // computed-and-discarded — the idempotency key below must never repeat across two separate
+        // reschedules of the same loan, or the second one's forgiveness would replay the first one's
+        // journal instead of posting its own (the ledger dedupes on this exact string).
+        val generation = loan.version + 1
+        val forgive = if (request.principalForgiveness.isPositive()) {
+            ledger.post(
+                LedgerPosting(
+                    "loan:${loan.id.value}:reschedule:$generation:forgiveness",
+                    loan.partyId,
+                    request.principalForgiveness,
+                    PostingKind.RESCHEDULE_FORGIVENESS,
+                ),
+            )
+        } else {
+            Uni.createFrom().item(Unit)
+        }
+        return forgive.flatMap { buildAndPersistNewSchedule(loan, schedule, newPrincipal, generation, request) }
+    }
+
+    private fun buildAndPersistNewSchedule(
+        loan: Loan,
+        schedule: List<LoanInstallment>,
+        newPrincipal: Money,
+        generation: Long,
+        request: RescheduleRequest,
+    ): Uni<Loan> {
+        val paidCount = schedule.count { it.paid }
+        val newSchedule = Amortization.schedule(
+            principal = newPrincipal,
+            nominalAnnualRate = request.newNominalAnnualRate,
+            termPeriods = request.newTermPeriods,
+            firstDueDate = request.newFirstDueDate,
+            periodsPerYear = loan.periodsPerYear,
+            method = loan.method,
+        )
+        val rows = newSchedule.installments.map { i ->
+            LoanInstallment(
+                loanId = loan.id,
+                number = paidCount + i.number,
+                dueDate = i.dueDate,
+                openingBalance = i.openingBalance,
+                principal = i.principal,
+                interest = i.interest,
+                payment = i.payment,
+                closingBalance = i.closingBalance,
+            )
+        }
+        return installments.deleteUnpaid(loan.id)
+            .flatMap { installments.saveAll(rows) }
+            // Persist the bumped version — the durable half of the idempotency key computed above.
+            .flatMap { loans.update(loan.copy(version = generation)) }
+            .flatMap { updated ->
+                events.emit(
+                    LendingOutboxMessage(
+                        aggregateId = updated.id.value,
+                        eventType = "loan.rescheduled",
+                        payload = """{"loanId":"${updated.id.value}","partyId":"${updated.partyId}",""" +
+                            """"newPrincipal":"$newPrincipal",""" +
+                            """"newNominalAnnualRate":"${request.newNominalAnnualRate}",""" +
+                            """"newTermPeriods":${request.newTermPeriods},""" +
+                            """"principalForgiveness":"${request.principalForgiveness}"}""",
+                    ),
+                ).map { updated }
+            }
+    }
 
     // --- Collateral (four-eyes, ADR-0028 follow-up issue #621) --------------------------------------
 

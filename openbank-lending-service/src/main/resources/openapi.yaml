@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.1.0
+  version: 1.2.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -172,6 +172,31 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
+  /api/v1/lending/loans/{id}/reschedule:
+    post:
+      tags: [Lending]
+      operationId: rescheduleLoan
+      summary: Restructure a loan, replacing its remaining schedule and optionally forgiving principal
+      description: >-
+        Requires ROLE_CREDIT_RISK, ROLE_COMPLIANCE or ROLE_ADMIN. The acting principal is the JWT
+        subject. Already-paid installments are untouched; a new schedule replaces only the unpaid
+        tail, generated from the outstanding balance net of any principalForgiveness.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RescheduleRequest'
+      responses:
+        '200': { description: Loan rescheduled }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/v1/lending/loans/{id}/collateral:
     post:
       tags: [Lending]
@@ -324,4 +349,17 @@ components:
         The acting principal is the authenticated JWT subject (server-side), never a client-supplied
         field, so only the audit reason is carried in the body.
       properties:
+        reason: { type: string, nullable: true }
+    RescheduleRequest:
+      type: object
+      description: >-
+        The acting principal is the authenticated JWT subject (server-side), never a client-supplied
+        field. principalForgiveness defaults conceptually to zero (no debt relief) — pass a Money of
+        zero for a pure term/rate change with no forgiveness.
+      required: [newNominalAnnualRate, newTermPeriods, newFirstDueDate, principalForgiveness]
+      properties:
+        newNominalAnnualRate: { type: number }
+        newTermPeriods: { type: integer }
+        newFirstDueDate: { type: string, format: date }
+        principalForgiveness: { $ref: '#/components/schemas/Money' }
         reason: { type: string, nullable: true }

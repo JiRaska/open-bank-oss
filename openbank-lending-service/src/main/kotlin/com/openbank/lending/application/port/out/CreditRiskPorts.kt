@@ -36,6 +36,12 @@ data class LedgerPosting(val reference: String, val partyId: UUID, val amount: M
  * (more provision required) debits the loss-provision expense and credits the loan-loss allowance (a
  * contra-asset); a decrease (partial release) is the reverse. The loan principal GL is never touched by
  * a provisioning entry — provisioning is an impairment overlay, not a change to the recognized asset.
+ *
+ * [RESCHEDULE_FORGIVENESS] books a partial debt-relief amount granted as part of a loan restructuring
+ * (issue #667/#668) — the same economic event as [WRITE_OFF] (a realized credit loss, asset off the
+ * books), just partial rather than the full remaining exposure, kept as a distinct kind so an audit
+ * trail can tell a restructuring's forgiveness apart from a full write-off even though both hit the
+ * same GL accounts.
  */
 enum class PostingKind {
     DISBURSEMENT,
@@ -45,6 +51,7 @@ enum class PostingKind {
     INTEREST_SETTLEMENT,
     WRITE_OFF,
     PROVISIONING,
+    RESCHEDULE_FORGIVENESS,
 }
 
 /** Posts loan cash events to the ledger (via the outbox in the real adapter). */
