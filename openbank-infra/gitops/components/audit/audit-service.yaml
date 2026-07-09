@@ -81,6 +81,14 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # issue #686: load the audit-events-in group.id / auto.offset.reset override
+            # (audit-service-msg-override ConfigMap, mounted below) as an external Quarkus config
+            # source, since these keys can't be set via the dotted YAML key in application.yaml
+            # (SmallRye Config silently drops it) nor via env var (ambiguous reverse-mapping for
+            # this hyphenated channel name). Optional location: if the file is absent Quarkus
+            # warns and continues.
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: /mnt/msg-config/override.properties
           startupProbe:
             tcpSocket:
               port: management
@@ -113,6 +121,9 @@ spec:
             - name: kafka-truststore
               mountPath: /mnt/kafka-truststore
               readOnly: true
+            - name: msg-override
+              mountPath: /mnt/msg-config
+              readOnly: true
           resources:
             requests:
               cpu: 200m
@@ -129,6 +140,9 @@ spec:
         - name: kafka-truststore
           secret:
             secretName: kafka-cluster-ca-truststore
+        - name: msg-override
+          configMap:
+            name: audit-service-msg-override
 ---
 apiVersion: v1
 kind: Service
