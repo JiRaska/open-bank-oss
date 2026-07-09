@@ -73,6 +73,27 @@ spec:
             # Customer audit trail -> Strimzi bus (EdgeAuditPublisher, best-effort).
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+            # Set as env vars, not application.yaml keys: SmallRye Config's YAML source
+            # unconditionally quotes any leaf map key containing a literal dot, so
+            # `group.id`/`auto.offset.reset` written in
+            # openbank-customer-edge/src/main/resources/application.yaml silently never resolve
+            # (see the comment there). Refs #686.
+            #
+            # NOTE (found while wiring this): unlike the rest of the fleet, customer-edge has no
+            # KafkaUser ACL resource at all and is still on the anonymous plaintext :9092
+            # listener above (KAFKA_BOOTSTRAP_SERVERS), not the mTLS :9093 listener. The Kafka
+            # cluster config (openbank-infra/gitops/components/kafka/kafka.yaml) now sets
+            # `allow.everyone.if.no.acl.found: "false"` cluster-wide ("All 33 deployed Kafka
+            # clients migrated to mTLS:9093 ... User:ANONYMOUS ... is now denied on every topic").
+            # That means this group.id fix alone does NOT make party-events-in consumable in a
+            # real cluster — User:ANONYMOUS is denied before group.id is ever evaluated. Getting
+            # a working KafkaUser + mTLS keystore/truststore wired for customer-edge (same pattern
+            # as kafka-pid-mtls.yaml / kafka-anacredit-mtls.yaml) is a separate, larger change and
+            # out of scope for this config-wiring-only fix; flagging so it isn't mistaken for done.
+            - name: MP_MESSAGING_INCOMING_PARTY_EVENTS_IN_GROUP_ID
+              value: customer-edge-onboarding-resume
+            - name: MP_MESSAGING_INCOMING_PARTY_EVENTS_IN_AUTO_OFFSET_RESET
+              value: latest
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank-customers
             - name: OIDC_CLIENT_ID
