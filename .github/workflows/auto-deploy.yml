@@ -607,8 +607,13 @@ jobs:
               # in this environment", the counterpart service has simply not been deployed to
               # sandbox yet and therefore cannot break any contract expectation. Treat it the
               # same as a 404 pacticipant (not a Pacticipant → trivially deployable).
-              elif [ "$(echo "$cid_out" | grep -c "no verified pact\|Computer says no" || true)" -gt 0 ] && \
-                   [ "$(echo "$cid_out" | grep -c "no version is currently recorded" || true)" -ge "$(echo "$cid_out" | grep -c "no verified pact\|Computer says no" || true)" ]; then
+              # Count only the per-pair "There is no verified pact..." explanation lines, NOT
+              # the one-time "Computer says no" banner the CLI prints regardless of how many
+              # pairs failed — folding the banner into the count made a single real failure
+              # look like two, so the >= comparison below could never hold for exactly one
+              # failing pair (issue surfaced by fraud-service/transaction-service, 2026-07-09).
+              elif [ "$(echo "$cid_out" | grep -c "There is no verified pact" || true)" -gt 0 ] && \
+                   [ "$(echo "$cid_out" | grep -c "no version is currently recorded" || true)" -ge "$(echo "$cid_out" | grep -c "There is no verified pact" || true)" ]; then
                 echo "::warning::can-i-deploy: ${svc} has counterpart(s) not yet recorded in sandbox — treating as deployable (ADR-0092)"
               else
                 echo "::error::can-i-deploy: ${svc} NOT deployable — deployment blocked (ADR-0092)"
