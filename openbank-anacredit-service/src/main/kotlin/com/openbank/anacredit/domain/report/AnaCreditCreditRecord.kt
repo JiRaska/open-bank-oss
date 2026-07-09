@@ -29,11 +29,7 @@ data class AnaCreditCreditRecord(
 )
 
 /** Audit trail of an instrument that was *not* reported, with the eligibility reason code. */
-data class ExclusionNote(
-    val instrumentId: String,
-    val debtorId: String,
-    val reason: String,
-)
+data class ExclusionNote(val instrumentId: String, val debtorId: String, val reason: String)
 
 /**
  * The materialised AnaCredit credit-dataset return for one reference date: the reportable [records]

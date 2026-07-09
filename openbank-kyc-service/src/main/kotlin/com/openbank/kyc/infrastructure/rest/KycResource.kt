@@ -9,6 +9,7 @@ import com.openbank.kyc.application.InvalidStateTransitionException
 import com.openbank.kyc.application.KycCaseConflictException
 import com.openbank.kyc.application.KycCaseNotFoundException
 import com.openbank.kyc.application.KycService
+import com.openbank.kyc.application.PepScreeningService
 import com.openbank.kyc.domain.model.CheckStatus
 import com.openbank.kyc.domain.model.CheckType
 import com.openbank.kyc.domain.model.KycCaseStatus
@@ -45,6 +46,8 @@ import java.util.UUID
 class KycResource {
 
     @Inject lateinit var kycService: KycService
+
+    @Inject lateinit var pepScreeningService: PepScreeningService
 
     @GET
     @Path("/cases")
@@ -143,6 +146,28 @@ class KycResource {
     }
 
     /**
+     * Re-run the first-increment PEP screen (ADR-0116 delivery note) for an existing case.
+     *
+     * This is an **operator-triggered** re-screen, not the periodic re-KYC programme described in
+     * ADR-0116 §5 (cadence LOW=5y/MEDIUM=3y/HIGH+=1y) — that still requires the Temporal scheduled
+     * workflow flagged there as a separate follow-up. Useful when the PEP dataset has since been
+     * refreshed (openbank-sanctions-service re-imports `PEP_GLOBAL` from OpenSanctions on its own
+     * schedule) and an operator wants to confirm a case is still clear before approving it.
+     */
+    @POST
+    @Path("/cases/{caseId}/pep-rescreen")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC_OPENER, Roles.COMPLIANCE)
+    @Authorize(action = "kycCase.pepRescreen", resource = "#caseId")
+    @Operation(
+        summary = "Re-screen a KYC case's party name against the PEP_GLOBAL list (first increment, ADR-0116).",
+        description = "Screens openbank-sanctions-service's OpenSanctions-derived PEP_GLOBAL list only — " +
+            "not a paid commercial vendor feed, not identity-document verification, not continuous " +
+            "real-time monitoring. A match escalates riskLevel and routes PEP_SCREENING to MANUAL_REVIEW.",
+    )
+    suspend fun rescreenPep(@PathParam("caseId") caseId: UUID, req: PepRescreenRequest): Response =
+        Response.ok(pepScreeningService.screenCase(caseId, req.partyName)).build()
+
+    /**
      * Approve a KYC case that is in UNDER_REVIEW status.
      *
      * Four-eyes mandate (ADR-0068, ČNB AML/KYC): the approver identity is derived from the
@@ -200,6 +225,9 @@ class KycResource {
 
 data class OpenCaseRequest(val partyId: UUID)
 data class UpdateCheckRequest(val status: String, val result: String?)
+
+/** Party legal name to screen — kept out of [com.openbank.kyc.domain.model.KycCase] (ADR-0116). */
+data class PepRescreenRequest(val partyName: String)
 
 /**
  * Request body for approve/reject operations.

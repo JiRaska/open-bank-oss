@@ -20,7 +20,8 @@ class AnaCreditEligibilityPolicyTest {
     @Test
     fun `a natural-person debtor is out of scope`() {
         val e = AnaCreditEligibilityPolicy.assess(
-            Fixtures.exposure(debtorType = CounterpartyType.NATURAL_PERSON), BigDecimal("40000"),
+            Fixtures.exposure(debtorType = CounterpartyType.NATURAL_PERSON),
+            BigDecimal("40000"),
         )
         assertThat(e).isInstanceOf(Eligibility.Excluded::class.java)
         assertThat((e as Eligibility.Excluded).reason).isEqualTo("HOUSEHOLD_OUT_OF_SCOPE")
@@ -51,7 +52,8 @@ class AnaCreditEligibilityPolicyTest {
     fun `scope is checked before the threshold`() {
         // Natural person AND below threshold -> scope reason wins (it is evaluated first).
         val e = AnaCreditEligibilityPolicy.assess(
-            Fixtures.exposure(debtorType = CounterpartyType.NATURAL_PERSON), BigDecimal("100"),
+            Fixtures.exposure(debtorType = CounterpartyType.NATURAL_PERSON),
+            BigDecimal("100"),
         )
         assertThat((e as Eligibility.Excluded).reason).isEqualTo("HOUSEHOLD_OUT_OF_SCOPE")
     }
