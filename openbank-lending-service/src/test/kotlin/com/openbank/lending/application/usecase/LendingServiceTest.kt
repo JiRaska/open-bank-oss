@@ -833,6 +833,118 @@ class LendingServiceTest {
     }
 
     @Test
+    fun `provisioning cycle emits loan stage_changed only on a genuine stage transition`() {
+        val loanId = LoanId.random()
+        val loan = Loan(
+            id = loanId,
+            applicationId = LoanApplicationId.random(),
+            partyId = partyId,
+            principal = eur("12000.00"),
+            nominalAnnualRate = BigDecimal("0.12"),
+            termPeriods = 12,
+            method = AmortizationMethod.ANNUITY,
+            firstDueDate = firstDue,
+            disbursedAt = fixedNow,
+            createdAt = fixedNow,
+        )
+        // Unpaid installment due 2026-06-30; assessed 40 days later => DPD 40 > the 30-day SICR
+        // threshold => Stage 2, whereas the prior period's record was Stage 1.
+        val schedule = listOf(
+            LoanInstallment(
+                loanId = loanId,
+                number = 1,
+                dueDate = firstDue,
+                openingBalance = eur("12000.00"),
+                principal = eur("946.19"),
+                interest = eur("120.00"),
+                payment = eur("1066.19"),
+                closingBalance = eur("11053.81"),
+            ),
+        )
+        val asOf = firstDue.plusDays(40)
+        val prior = LoanProvisioningRecord(
+            loanId = loanId,
+            period = "2026-06",
+            asOf = firstDue,
+            outstandingBalance = eur("12000.00"),
+            daysPastDue = 0,
+            bucket = com.openbank.libs.lending.DelinquencyBucket.CURRENT,
+            stage = Ifrs9Stage.STAGE_1,
+            expectedCreditLoss = eur("108.00"),
+            createdAt = fixedNow,
+        )
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        mockRiskParameters(loan, "0.02")
+        every { provisioning.findByLoanAndPeriod(loanId, "2026-07") } returns Uni.createFrom().nullItem()
+        every { provisioning.findLatestBefore(loanId, "2026-07") } returns Uni.createFrom().item(prior)
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { provisioning.save(any()) } answers { Uni.createFrom().item(firstArg<LoanProvisioningRecord>()) }
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+
+        service.runProvisioningCycle("2026-07", asOf, 500).await().indefinitely()
+
+        val stageChangedEvents = emitted.filter { it.eventType == "loan.stage_changed" }
+        assertThat(stageChangedEvents).hasSize(1)
+        val payload = stageChangedEvents.single().payload
+        assertThat(payload).contains(""""loanId":"${loanId.value}"""")
+        assertThat(payload).contains(""""previousStage":"STAGE_1"""")
+        assertThat(payload).contains(""""newStage":"STAGE_2"""")
+        assertThat(payload).contains(""""daysPastDue":40""")
+    }
+
+    @Test
+    fun `provisioning cycle does not emit loan stage_changed when the stage is unchanged`() {
+        val loanId = LoanId.random()
+        val (loan, schedule) = currentLoanWithSchedule(loanId)
+        val prior = LoanProvisioningRecord(
+            loanId = loanId,
+            period = "2026-05",
+            asOf = LocalDate.parse("2026-05-01"),
+            outstandingBalance = eur("12000.00"),
+            daysPastDue = 0,
+            bucket = com.openbank.libs.lending.DelinquencyBucket.CURRENT,
+            stage = Ifrs9Stage.STAGE_1,
+            expectedCreditLoss = eur("108.00"),
+            createdAt = fixedNow,
+        )
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        // Same PD as the prior period's baseline: Stage 1 -> Stage 1, zero ECL delta.
+        mockRiskParameters(loan, "0.02")
+        every { provisioning.findByLoanAndPeriod(loanId, "2026-06") } returns Uni.createFrom().nullItem()
+        every { provisioning.findLatestBefore(loanId, "2026-06") } returns Uni.createFrom().item(prior)
+        every { provisioning.save(any()) } answers { Uni.createFrom().item(firstArg<LoanProvisioningRecord>()) }
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+
+        service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 500).await().indefinitely()
+
+        assertThat(emitted.filter { it.eventType == "loan.stage_changed" }).isEmpty()
+    }
+
+    @Test
+    fun `first provisioning cycle for a loan never emits loan stage_changed (no prior stage to compare)`() {
+        val loanId = LoanId.random()
+        val (loan, schedule) = currentLoanWithSchedule(loanId)
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        mockRiskParameters(loan, "0.02")
+        every { provisioning.findByLoanAndPeriod(loanId, "2026-06") } returns Uni.createFrom().nullItem()
+        every { provisioning.findLatestBefore(loanId, "2026-06") } returns Uni.createFrom().nullItem()
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { provisioning.save(any()) } answers { Uni.createFrom().item(firstArg<LoanProvisioningRecord>()) }
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+
+        service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 500).await().indefinitely()
+
+        assertThat(emitted.filter { it.eventType == "loan.stage_changed" }).isEmpty()
+        assertThat(emitted.filter { it.eventType == "loan.provisioned" }).hasSize(1)
+    }
+
+    @Test
     fun `provisioning cycle is idempotent - a loan already provisioned this period is skipped`() {
         val loanId = LoanId.random()
         val (loan, _) = currentLoanWithSchedule(loanId)
