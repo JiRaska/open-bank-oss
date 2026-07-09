@@ -89,9 +89,10 @@ mp:
         # DLQ: stale signals degrade counters gracefully; processing failures go to DLQ
         failure-strategy: dead-letter-queue
         # group.id / auto.offset.reset / dead-letter-queue.topic are deliberately NOT set as YAML
-        # keys here — see openbank-infra/gitops/components/fraud-service/fraud-service.yaml
-        # (MP_MESSAGING_INCOMING_TRANSACTION_SIGNAL_* env vars) for why and where they're set
-        # instead. Summary: SmallRye Config's YAML source unconditionally quotes any leaf map key
+        # keys here — see openbank-infra/gitops/components/fraud-service/fraud-service-msg-override.yaml
+        # (loaded via QUARKUS_CONFIG_LOCATIONS) for why and where they're set instead. NOT env vars:
+        # that was tried (#685) and is unsafe for a hyphenated channel name like this one — see
+        # ADR-0137's "known follow-up" section (#2649 -> #2659, reverted). Summary: SmallRye Config's YAML source unconditionally quotes any leaf map key
         # containing a literal dot (`group.id` becomes the registered property name `"group.id"`,
         # quotes included — true whether or not the YAML key itself is quoted), so
         # KafkaConnectorIncomingConfiguration's plain config.getOptionalValue("group.id", ...) never
