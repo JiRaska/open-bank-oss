@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.9.1...kyc-service-v0.10.0) (2026-07-09)
+
+
+### Features
+
+* **kyc:** add first-increment PEP screening via sanctions-service PEP_GLOBAL list ([#634](https://github.com/JiRaska/open-bank-oss/issues/634)) ([9a2a31b](https://github.com/JiRaska/open-bank-oss/commit/9a2a31bc8aef91209c184005018eb36bb241cac1)), closes [#626](https://github.com/JiRaska/open-bank-oss/issues/626)
+
 ## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.9.0...kyc-service-v0.9.1) (2026-07-07)
 
 
