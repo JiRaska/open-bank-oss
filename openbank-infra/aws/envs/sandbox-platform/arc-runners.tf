@@ -213,7 +213,12 @@ locals {
       cache_root="/mnt/k8s-disks/0/runner-tool-cache/Java_Temurin-Hotspot_jdk"
       preload_root="/opt/openbank-jdk-preload/Java_Temurin-Hotspot_jdk"
       mkdir -p "$cache_root"
+      if [ ! -d "$preload_root" ]; then
+        echo "jdk toolcache: preload_root $preload_root not present in this runner image (stale/rebuilt image?) - skipping preload, actions/setup-java will download on demand"
+        exit 0
+      fi
       for version_dir in "$preload_root"/*/; do
+        [ -d "$version_dir" ] || continue
         version="$(basename "$version_dir")"
         dst="$cache_root/$version/arm64"
         if [ -e "$dst.complete" ]; then
