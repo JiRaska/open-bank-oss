@@ -1,6 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # anacredit-service: AnaCredit regulatory reporting (ECB loan-level data, ADR-0037).
-# No DB (reads ledger/credit APIs). OIDC bearer auth via in-cluster Keycloak.
+# OIDC bearer auth via in-cluster Keycloak.
+#
+# Postgres-backed as of the loan.stage_changed event-ingestion follow-up (issue #638) — narrowly
+# scoped to the loan_stage_projection read-model; the CreditExposure feed itself is still in-memory.
+# anacredit-db (anacredit-db.yaml) must reconcile BEFORE this Deployment rolls the datasource-carrying
+# image, else Flyway-at-start fails on a missing DB (same pattern as product-catalog-db.yaml).
+# Kafka mTLS identity/ACLs: kafka-anacredit-mtls.yaml (ADR-0137 pattern) — the KafkaUser/ExternalSecrets
+# there must also land first (lower sync-wave) so the keystore Secret exists when this pod starts.
+# Probes are httpGet on /q/health/ready (not a bare tcpSocket) so Flyway-at-start failures actually
+# fail the probe instead of a false-green TCP-only check (ADR-0105 P1 lesson, product-catalog-db.yaml).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -49,15 +58,52 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # Datasource (issue #638) — loan_stage_projection only.
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://anacredit-db-rw.anacredit.svc:5432/openbank_anacredit
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://anacredit-db-rw.anacredit.svc:5432/openbank_anacredit
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: anacredit-db-app
+                  key: password
+            # Kafka mTLS (ADR-0137, kafka-anacredit-mtls.yaml) — consumes loan.stage_changed only.
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: QUARKUS_SMALLRYE_REACTIVE_MESSAGING_KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka-keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: anacredit-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka-truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
           startupProbe:
-            tcpSocket:
+            httpGet:
+              path: /q/health/ready
               port: management
             initialDelaySeconds: 10
             periodSeconds: 5
             failureThreshold: 30
           readinessProbe:
-            tcpSocket:
-              port: http
+            httpGet:
+              path: /q/health/ready
+              port: management
             periodSeconds: 10
             failureThreshold: 3
           livenessProbe:
@@ -75,6 +121,12 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka-keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka-truststore
+              readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -85,6 +137,12 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: kafka-keystore
+          secret:
+            secretName: anacredit-service-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
 ---
 apiVersion: v1
 kind: Service

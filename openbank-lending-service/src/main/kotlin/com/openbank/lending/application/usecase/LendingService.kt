@@ -547,32 +547,54 @@ class LendingService(
                 expectedCreditLoss = snapshot.expectedCreditLoss,
                 createdAt = OffsetDateTime.now(clock),
             )
-            if (delta.isZero()) {
-                // Stage/ECL unchanged since the last cycle: keep the audit-trail row, post nothing.
-                provisioning.save(record).map { false }
-            } else {
-                ledger.post(
-                    LedgerPosting(
-                        "loan:${loan.id.value}:provisioning:$period",
-                        loan.partyId,
-                        delta,
-                        PostingKind.PROVISIONING,
+            // A genuine IFRS 9 stage transition (Stage 1/2/3) is a distinct signal from an ECL delta: ECL
+            // can move within the same stage (PD/EAD drift), and — first cycle aside — a stage can change
+            // with a zero-delta ECL in edge cases. Downstream consumers (e.g. AnaCredit's overdue/stage
+            // projection, issue #638) care about the transition itself, not the ledger movement, so this
+            // emits independently of whether a provisioning journal posts below.
+            val stageChanged = prior != null && prior.stage != snapshot.stage
+            val stageEvent = if (stageChanged) {
+                events.emit(
+                    LendingOutboxMessage(
+                        aggregateId = loan.id.value,
+                        eventType = "loan.stage_changed",
+                        payload = """{"loanId":"${loan.id.value}","previousStage":"${prior!!.stage}",""" +
+                            """"newStage":"${snapshot.stage}","daysPastDue":${snapshot.daysPastDue},""" +
+                            """"period":"$period","asOf":"${snapshot.asOf}"}""",
                     ),
                 )
-                    .flatMap { provisioning.save(record) }
-                    .flatMap {
-                        events.emit(
-                            LendingOutboxMessage(
-                                aggregateId = loan.id.value,
-                                eventType = "loan.provisioned",
-                                payload = """{"loanId":"${loan.id.value}","period":"$period",""" +
-                                    """"stage":"${snapshot.stage}",""" +
-                                    """"expectedCreditLoss":"${snapshot.expectedCreditLoss}",""" +
-                                    """"delta":"$delta"}""",
-                            ),
-                        )
-                    }
-                    .map { true }
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+            stageEvent.flatMap {
+                if (delta.isZero()) {
+                    // ECL unchanged since the last cycle: keep the audit-trail row, post nothing to the
+                    // ledger. The stage-changed event (if any) has already been emitted above.
+                    provisioning.save(record).map { false }
+                } else {
+                    ledger.post(
+                        LedgerPosting(
+                            "loan:${loan.id.value}:provisioning:$period",
+                            loan.partyId,
+                            delta,
+                            PostingKind.PROVISIONING,
+                        ),
+                    )
+                        .flatMap { provisioning.save(record) }
+                        .flatMap {
+                            events.emit(
+                                LendingOutboxMessage(
+                                    aggregateId = loan.id.value,
+                                    eventType = "loan.provisioned",
+                                    payload = """{"loanId":"${loan.id.value}","period":"$period",""" +
+                                        """"stage":"${snapshot.stage}",""" +
+                                        """"expectedCreditLoss":"${snapshot.expectedCreditLoss}",""" +
+                                        """"delta":"$delta"}""",
+                                ),
+                            )
+                        }
+                        .map { true }
+                }
             }
         }
 
