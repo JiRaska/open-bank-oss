@@ -23,7 +23,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.util.UUID
@@ -132,20 +131,14 @@ class FeeReversalServiceIT {
             assertThat(fee.postingStatus).isEqualTo(PostingStatus.NOT_APPLICABLE)
 
             val backlogBefore = outboxRepository.countProcessable()
-            assertThatThrownBy { runBlockingReverse(fee.idempotencyKey, "oops") }
-                .isInstanceOf(FeeNotPostedException::class.java)
+            val thrown = runCatching { reversalService.reverse(fee.idempotencyKey, "oops") }.exceptionOrNull()
+            assertThat(thrown).isInstanceOf(FeeNotPostedException::class.java)
             assertThat(outboxRepository.countProcessable()).isEqualTo(backlogBefore)
         }
 
     @Test
     fun `reversing a fee that was never assessed fails cleanly with FeeNotFoundException`(): Unit = onVertxContext {
-        assertThatThrownBy { runBlockingReverse("fee-no-such-key-CZK", "oops") }
-            .isInstanceOf(FeeNotFoundException::class.java)
+        val thrown = runCatching { reversalService.reverse("fee-no-such-key-CZK", "oops") }.exceptionOrNull()
+        assertThat(thrown).isInstanceOf(FeeNotFoundException::class.java)
     }
-
-    // A suspend call inside assertThatThrownBy's non-suspend lambda needs its own bridge —
-    // onVertxContext's outer suspend body already runs on the Vert.x context, so nesting another
-    // runBlocking here (not another onVertxContext, which would open a SECOND context) is safe.
-    private fun runBlockingReverse(idempotencyKey: String, reason: String): AssessedFee =
-        kotlinx.coroutines.runBlocking { reversalService.reverse(idempotencyKey, reason) }
 }
