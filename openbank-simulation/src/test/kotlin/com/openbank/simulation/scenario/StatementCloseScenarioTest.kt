@@ -7,10 +7,13 @@ package com.openbank.simulation.scenario
 import com.openbank.simulation.engine.FaultProfile
 import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.invariants.MoneyPathInvariants
+import com.openbank.simulation.model.AccountCurrency
+import com.openbank.simulation.model.StatementCloseKey
 import com.openbank.simulation.runner.SimulationConfig
 import com.openbank.simulation.runner.World
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
 
 /**
  * Issue #667 (E2E money-path): exercises [StatementCloseScenario] directly against the REAL
@@ -34,20 +37,56 @@ class StatementCloseScenarioTest {
         assertThat(MoneyPathInvariants.statementCloseIntegrity.check(world)).isNull()
     }
 
+    /** The running-state fields [StatementCloseScenario] can move — snapshotted before each step. */
+    private data class RunningState(val opening: BigDecimal, val netAtLastClose: BigDecimal, val nextSequence: Long)
+
+    private fun snapshot(world: World, key: AccountCurrency): RunningState = RunningState(
+        opening = world.statementCloses.openingBalanceOf(key, world.openingBookedOf(key)),
+        netAtLastClose = world.statementCloses.netAtLastCloseOf(key),
+        nextSequence = world.statementCloses.nextSequenceOf(key),
+    )
+
     @Test
-    fun `a reconciled close advances the running state and a mismatch leaves it untouched`() {
+    fun `a reconciled close advances the running state and a mismatch leaves it byte-for-byte unchanged`() {
         var sawReconciled = false
         var sawMismatch = false
         (0L until 40L).forEach { seed ->
             val world = newWorld(seed)
-            repeat(10) { StatementCloseScenario.step(world) }
+            var seenAttempts = emptySet<StatementCloseKey>()
+
+            repeat(10) {
+                // Snapshot every customer account's running close state — cheap (4 accounts) —
+                // so whichever one this step's seeded pick touches, its BEFORE state is on hand.
+                val before = world.customerAccounts.associateWith { id ->
+                    snapshot(world, AccountCurrency(id, world.currency))
+                }
+
+                StatementCloseScenario.step(world)
+
+                val attempt = (world.statementCloses.attempts() - seenAttempts).single()
+                seenAttempts = world.statementCloses.attempts()
+                val key = AccountCurrency(attempt.accountId, attempt.currency)
+                val beforeState = before.getValue(attempt.accountId)
+                val afterState = snapshot(world, key)
+
+                if (world.statementCloses.wasReconciled(attempt)) {
+                    sawReconciled = true
+                    assertThat(afterState.nextSequence)
+                        .withFailMessage("a reconciled close must bump the sequence")
+                        .isEqualTo(beforeState.nextSequence + 1)
+                } else {
+                    sawMismatch = true
+                    // The claim under test: NOTHING moved when reconciliation refused the close.
+                    assertThat(afterState.opening).isEqualByComparingTo(beforeState.opening)
+                    assertThat(afterState.netAtLastClose).isEqualByComparingTo(beforeState.netAtLastClose)
+                    assertThat(afterState.nextSequence)
+                        .withFailMessage("a refused close must not bump the sequence")
+                        .isEqualTo(beforeState.nextSequence)
+                }
+            }
 
             assertThat(MoneyPathInvariants.statementCloseIntegrity.check(world)).isNull()
             assertThat(MoneyPathInvariants.conservationOfMoney.check(world)).isNull()
-
-            world.statementCloses.attempts().forEach { attempt ->
-                if (world.statementCloses.wasReconciled(attempt)) sawReconciled = true else sawMismatch = true
-            }
         }
         // The seeded phantom-haléř fault must fire on some attempts and not others across the
         // sweep, exercising both the Reconciled and Mismatch branches every run.
