@@ -58,6 +58,9 @@ dependencies {
     // unaffected; run them explicitly with `-PwithDocker` (see tasks.test below).
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
+    // Boot IT proving the Kafka consumer joins the intended group.id (issue #686) — see
+    // AnalyticsEventsConsumerGroupIdBootIT.kt.
+    testImplementation(libs.testcontainers.redpanda)
 }
 kotlin {
     jvmToolchain(25)
