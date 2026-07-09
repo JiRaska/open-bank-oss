@@ -221,6 +221,26 @@ object MoneyPathInvariants {
         }
     }
 
+    /**
+     * ADR-0035 §E / ADR-0078, issue #667: a statement period is persisted *if and only if* the
+     * real `ReconciliationPolicy` decided `Reconciled` for that close attempt — never on a
+     * `Mismatch` (no partial, self-inconsistent legal document is ever produced) and never skipped
+     * on a `Reconciled` decision (no silently-dropped good close either).
+     */
+    val statementCloseIntegrity = object : Invariant {
+        override val name = "statement-close-integrity"
+        override fun check(world: World): Violation? {
+            world.statementCloses.attempts().forEach { attempt ->
+                val reconciled = world.statementCloses.wasReconciled(attempt)
+                val persisted = world.statementCloses.wasPersisted(attempt)
+                if (reconciled != persisted) {
+                    return Violation(name, "close attempt $attempt: reconciled=$reconciled but persisted=$persisted")
+                }
+            }
+            return null
+        }
+    }
+
     /** All Layer-3 invariants, in check order. */
     val ALL: List<Invariant> = listOf(
         conservationOfMoney,
@@ -232,6 +252,7 @@ object MoneyPathInvariants {
         settlementCompleteness,
         billingFeeConservation,
         interestCapitalizationConservation,
+        statementCloseIntegrity,
     )
 
     /** A terminal-state guard used by the saga orchestrator. */

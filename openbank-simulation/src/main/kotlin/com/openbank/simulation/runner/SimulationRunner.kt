@@ -12,6 +12,7 @@ import com.openbank.simulation.scenario.FeeBillingScenario
 import com.openbank.simulation.scenario.InterestAccrualScenario
 import com.openbank.simulation.scenario.PaymentScenario
 import com.openbank.simulation.scenario.SepaSettlementScenario
+import com.openbank.simulation.scenario.StatementCloseScenario
 
 /**
  * The seed-driven exhaustion loop (ADR-0100 Layer 2 — runner). For each seed it builds a fresh
@@ -62,6 +63,12 @@ class SimulationRunner(
             // capitalization-posting path so it shares the fault profile and is checked by the
             // same invariant sweep every step.
             InterestAccrualScenario.step(world)
+            context.scheduler.drain()
+            // ADR-0035/0078 / issue #667: the statement period-close path, checked against the
+            // ledger's net movement since the account's last close — reads world.ledger/balances
+            // only, posts nothing, so this drain is a no-op today but kept for the same
+            // "settled before the invariant sweep" convention as every other scenario above.
+            StatementCloseScenario.step(world)
             context.scheduler.drain()
             invariants.forEach { invariant ->
                 val violation = invariant.check(world)

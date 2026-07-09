@@ -81,6 +81,13 @@ dependencies {
     // framework-free (ADR-0002), so only the domain POJOs land on the classpath.
     implementation(project(":openbank-interest-service"))
 
+    // Issue #667 (E2E money-path): the harness also drives the REAL statement-service domain —
+    // `StatementPeriod`/`PeriodCloseStatus` and the ADR-0035/0078 `ReconciliationPolicy`
+    // (fail-closed period-boundary reconciliation: a period is closed only when the computed
+    // closing balance matches balance-service's independently reported one). The domain package
+    // is framework-free (ADR-0002), so only the domain POJOs land on the classpath.
+    implementation(project(":openbank-statement-service"))
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
