@@ -79,12 +79,14 @@ spec:
               conditions:
                 - all:
                     # The attested predicate must actually be a CycloneDX BOM, not an empty
-                    # envelope: bomFormat is a required CycloneDX root field. cosign attest
-                    # --type cyclonedx wraps the SBOM predicate under `Data`, so the field is
-                    # {{ Data.bomFormat }} — a bare {{ bomFormat }} resolves to null and would
-                    # fail EVERY correctly-attested image (100% false Audit failures, and a
-                    # fleet-wide reject if later flipped to Enforce). Matches Kyverno's own
-                    # reference "Verify CycloneDX SBOM" policy.
-                    - key: "{{ Data.bomFormat }}"
+                    # envelope: bomFormat is a required CycloneDX root field. The predicate is
+                    # exposed to the JMESPath condition as the lowercase `data` variable — the
+                    # capitalized `{{ Data.bomFormat }}` this policy shipped with resolves to
+                    # "Unknown key \"Data\" in path" on kyverno 3.2.6 (a JMESPath query failure,
+                    # not a false/true condition result), which errors the whole verifyImages
+                    # check for every correctly-attested image. Confirmed live 2026-07-09 against
+                    # a cosign-verified admin-ui SBOM attestation. Currently Audit-only so this
+                    # was silent; would have 100%-failed the fleet if flipped to Enforce as-is.
+                    - key: "{{ data.bomFormat }}"
                       operator: Equals
                       value: "CycloneDX"
