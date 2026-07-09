@@ -370,7 +370,7 @@ if [ -n "${COSIGN_BIN:-}" ]; then
   # the push): trivy generates the image SBOM, cosign attest binds it with the same KMS key.
   if command -v trivy >/dev/null 2>&1; then
     AUI_SBOM="${TMPDIR:-/tmp}/openbank-admin-ui.cdx.json"
-    if trivy image --format cyclonedx --output "${AUI_SBOM}" "${IMAGE}" 2>/dev/null; then
+    if trivy image --platform "${PLATFORM}" --format cyclonedx --output "${AUI_SBOM}" "${IMAGE}" 2>/dev/null; then
       echo "==> cosign attest (cyclonedx) ${IMAGE}"
       COSIGN_YES=true "$COSIGN_BIN" attest --key "${COSIGN_KEY}" --type cyclonedx \
         --predicate "${AUI_SBOM}" "${IMAGE}" \
