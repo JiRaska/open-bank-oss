@@ -59,7 +59,7 @@ erDiagram
 
 | Skript | Stav |
 |---|---|
-| `V1__create_credit_exposures.sql` | Aplikováno — vytváří `credit_exposures` + `idx_credit_exposures_debtor_id`. Rollback: `DROP TABLE credit_exposures;` |
+| `V2__create_credit_exposures.sql` | Aplikováno — vytváří `credit_exposures` + `idx_credit_exposures_debtor_id`. Rollback: `DROP TABLE credit_exposures;` |
 
 ## Pravidla způsobilosti (odvození, které produkuje data)
 

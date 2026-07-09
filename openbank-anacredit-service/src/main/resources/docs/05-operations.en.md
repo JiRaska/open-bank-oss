@@ -77,7 +77,7 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 
 ### Return looks empty / under-reports after a deploy
 
-1. Exposures are now durable (ADR-0037 v2) — a pod restart alone should **not** lose them. If the return is empty, first confirm the Flyway migration actually applied: `SELECT * FROM flyway_schema_history;` should show `V1__create_credit_exposures` as `success`.
+1. Exposures are now durable (ADR-0037 v2) — a pod restart alone should **not** lose them. If the return is empty, first confirm the Flyway migration actually applied: `SELECT * FROM flyway_schema_history;` should show `V2__create_credit_exposures` as `success`.
 2. If the migration is missing or the table is genuinely empty, re-run the exposure feed (re-POST exposures) before rendering the return.
 3. Verify with `GET /api/v1/anacredit/exposures` that the expected instruments are present.
 

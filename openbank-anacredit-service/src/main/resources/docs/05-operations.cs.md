@@ -77,7 +77,7 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 
 ### Výkaz vypadá prázdný / podhodnocený po deployi
 
-1. Expozice jsou nyní trvanlivé (ADR-0037 v2) — samotný restart podu by je **neměl** ztratit. Pokud je výkaz prázdný, nejprve ověř, že se Flyway migrace skutečně aplikovala: `SELECT * FROM flyway_schema_history;` by měla ukázat `V1__create_credit_exposures` jako `success`.
+1. Expozice jsou nyní trvanlivé (ADR-0037 v2) — samotný restart podu by je **neměl** ztratit. Pokud je výkaz prázdný, nejprve ověř, že se Flyway migrace skutečně aplikovala: `SELECT * FROM flyway_schema_history;` by měla ukázat `V2__create_credit_exposures` jako `success`.
 2. Pokud migrace chybí nebo je tabulka skutečně prázdná, znovu spusť feed expozic (re-POST expozice) před vykreslením výkazu.
 3. Ověř přes `GET /api/v1/anacredit/exposures`, že očekávané nástroje jsou přítomné.
 

@@ -31,7 +31,7 @@ audit trail** explaining every dropped instrument.
 - `application/` — `AnaCreditService` + in/out ports (all `suspend` — see below).
 - `infrastructure/persistence/` — `CreditExposureEntity` (reactive Panache) +
   `PostgresCreditExposureRepository` (ADR-0037 v2, the `openbank-product-catalog` pattern):
-  Postgres-backed, durable across restarts. Schema: `db/migration/V1__create_credit_exposures.sql`.
+  Postgres-backed, durable across restarts. Schema: `db/migration/V2__create_credit_exposures.sql`.
 - `infrastructure/rest/AnaCreditResource.kt` — `POST /api/v1/anacredit/exposures` (upsert),
   `GET /api/v1/anacredit/exposures`, `GET /api/v1/anacredit/returns/{referenceDate}` (render).
 - `domain/model/LoanStageProjection.kt` + `application/port/out/LoanStageProjectionRepository.kt` +
