@@ -8,6 +8,7 @@ import com.openbank.simulation.engine.FaultProfile
 import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.invariants.Invariant
 import com.openbank.simulation.invariants.MoneyPathInvariants
+import com.openbank.simulation.scenario.InterestAccrualScenario
 import com.openbank.simulation.scenario.PaymentScenario
 import com.openbank.simulation.scenario.SepaSettlementScenario
 
@@ -32,6 +33,10 @@ class SimulationRunner(
             // domain-class binding into the same seeded run so it shares the fault profile and
             // is checked by the same invariant sweep every step.
             SepaSettlementScenario.step(world)
+            // Issue #667 (E2E money-path): interleave the interest accrual → withholding →
+            // capitalization-posting path so it shares the fault profile and is checked by the
+            // same invariant sweep every step.
+            InterestAccrualScenario.step(world)
             context.scheduler.drain()
             invariants.forEach { invariant ->
                 val violation = invariant.check(world)
