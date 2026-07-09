@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.12.6...transaction-service-v1.13.0) (2026-07-09)
+
+
+### Features
+
+* **fraud:** add new-payee + high-amount REVIEW rule (v4) ([#635](https://github.com/JiRaska/open-bank-oss/issues/635)) ([ebc5dc1](https://github.com/JiRaska/open-bank-oss/commit/ebc5dc12d255a1dc46231b8c2a704b0839c556f1))
+
 ## [1.12.6](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.12.5...transaction-service-v1.12.6) (2026-07-08)
 
 
