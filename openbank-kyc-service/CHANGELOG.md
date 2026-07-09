@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.0...kyc-service-v0.10.1) (2026-07-09)
+
+
+### Bug Fixes
+
+* **kyc-service:** fix silent Kafka group.id/auto.offset.reset config bug ([#694](https://github.com/JiRaska/open-bank-oss/issues/694)) ([7b9681f](https://github.com/JiRaska/open-bank-oss/commit/7b9681f5274d3dd0eca04db83b39e4cd198a8c4d)), closes [#686](https://github.com/JiRaska/open-bank-oss/issues/686)
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.9.1...kyc-service-v0.10.0) (2026-07-09)
 
 
