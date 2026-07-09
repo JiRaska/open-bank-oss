@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.9.0...domestic-payment-v0.10.0) (2026-07-09)
+
+
+### Features
+
+* **domestic-payment:** enforce fraud verdict on cleared payments (ADR-0084 §4.2) ([#675](https://github.com/JiRaska/open-bank-oss/issues/675)) ([9778a11](https://github.com/JiRaska/open-bank-oss/commit/9778a113e574a5808c80a1724580ab755bb5c434)), closes [#667](https://github.com/JiRaska/open-bank-oss/issues/667)
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.8.10...domestic-payment-v0.9.0) (2026-07-08)
 
 
