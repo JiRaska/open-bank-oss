@@ -20,6 +20,10 @@ output "config_recorder_name" {
   value = aws_config_configuration_recorder.audit.name
 }
 
+output "config_role_arn" {
+  value = aws_iam_role.config.arn
+}
+
 output "audit_kms_key_arn" {
   value = aws_kms_key.audit.arn
 }
