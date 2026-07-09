@@ -16,13 +16,17 @@ LENDING_REST_EXT=$(cat << 'REGO'
 # Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
 #
 # Actions gated (LendingResource):
-#   lending.create   — submit a loan application (maker) / register collateral (#id)
-#   lending.approve  — approve/reject an application (checker; four-eyes in the handler)
-#   lending.read     — get application/loan/schedule/collateral/IFRS-9 snapshot (#id)
-#   lending.list     — list a party's applications/loans
-#   lending.disburse — disburse an approved application (books the loan)
-#   lending.repay    — record a repayment against an installment (#id)
-#   lending.writeoff — write off an uncollectible loan (#id)
+#   lending.create              — submit a loan application (maker)
+#   lending.approve             — approve/reject an application (checker; four-eyes in the handler)
+#   lending.read                — get application/loan/schedule/collateral/IFRS-9 snapshot (#id)
+#   lending.list                — list a party's applications/loans
+#   lending.disburse            — disburse an approved application (books the loan)
+#   lending.repay                — record a repayment against an installment (#id)
+#   lending.writeoff             — write off an uncollectible loan (#id)
+#   lending.collateralRegister  — register collateral against a loan (maker; four-eyes in the
+#                                 handler + four_eyes.verbs, issue #621; PENDING until decided)
+#   lending.collateralDecide    — approve/reject a pending collateral registration (checker; must
+#                                 differ from the registrant)
 #
 # Base rest.rego already grants: operator-read-any (OPERATOR/ADMIN on *.read/*.list),
 # compliance-read-any (*.read), party-self-service (reads where the JWT sub equals the
@@ -33,8 +37,8 @@ LENDING_REST_EXT=$(cat << 'REGO'
 # (action-level union), so flipping AUTHZ_ENFORCE=true is behaviour-preserving for the
 # roles RBAC already admits — OPA never grants what @RolesAllowed rejects (RBAC stays
 # the outer gate) and never denies a desk flow RBAC intends. The four-eyes maker-checker
-# on lending.approve/disburse is enforced in the application service from the JWT
-# subject, not in rego (same stance as pid's identity.case.decide).
+# on lending.approve/disburse/collateralDecide is enforced in the application service
+# from the JWT subject, not in rego (same stance as pid's identity.case.decide).
 
 package openbank.rest
 
@@ -50,8 +54,9 @@ allowed_reasons contains "operator-lending-write" if {
 }
 
 # Lending officers originate and service loans: apply (maker), disburse, record
-# repayments, register collateral, read/list the book. NOT approve (the checker is
-# credit-risk/admin per @RolesAllowed) and NOT writeoff.
+# repayments, register collateral (maker), read/list the book. NOT approve or
+# collateralDecide (the checker for both is credit-risk/admin per @RolesAllowed) and
+# NOT writeoff.
 allowed_reasons contains "lending-officer-desk" if {
 	input.principal.type == "HUMAN"
 	"ROLE_LENDING_OFFICER" in input.principal.roles
@@ -61,12 +66,14 @@ allowed_reasons contains "lending-officer-desk" if {
 		"lending.list",
 		"lending.repay",
 		"lending.disburse",
+		"lending.collateralRegister",
 	}
 }
 
-# Credit-risk decides applications (checker leg of the four-eyes; maker != checker is
-# enforced in the handler) and writes off uncollectible exposure. The create/read/list/
-# repay grants mirror the class-level @RolesAllowed. NOT disburse (lending-officer/admin).
+# Credit-risk decides applications and collateral registrations (the checker leg of
+# each four-eyes control; maker != checker is enforced in the handler) and writes off
+# uncollectible exposure. The create/read/list/repay/collateralRegister grants mirror
+# the class-level @RolesAllowed. NOT disburse (lending-officer/admin).
 allowed_reasons contains "credit-risk-desk" if {
 	input.principal.type == "HUMAN"
 	"ROLE_CREDIT_RISK" in input.principal.roles
@@ -77,12 +84,14 @@ allowed_reasons contains "credit-risk-desk" if {
 		"lending.repay",
 		"lending.approve",
 		"lending.writeoff",
+		"lending.collateralRegister",
+		"lending.collateralDecide",
 	}
 }
 
 # Compliance may write off (regulatory workout) and, per the class-level @RolesAllowed,
 # reaches the same origination/servicing surface as the desk; reads also ride on the
-# base compliance-read-any. NOT approve, NOT disburse.
+# base compliance-read-any. NOT approve, NOT disburse, NOT collateralDecide.
 allowed_reasons contains "compliance-lending-desk" if {
 	input.principal.type == "HUMAN"
 	"ROLE_COMPLIANCE" in input.principal.roles
@@ -92,6 +101,7 @@ allowed_reasons contains "compliance-lending-desk" if {
 		"lending.list",
 		"lending.repay",
 		"lending.writeoff",
+		"lending.collateralRegister",
 	}
 }
 

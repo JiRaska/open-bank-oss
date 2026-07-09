@@ -109,6 +109,10 @@ class LendingMapper {
         it.currency = c.marketValue.currency.code
         it.haircut = c.haircut
         it.valuedAt = c.valuedAt
+        it.status = c.status
+        it.registeredBy = c.registeredBy
+        it.decidedBy = c.decidedBy
+        it.decidedAt = c.decidedAt
         it.createdAt = c.createdAt
     }
 
@@ -120,6 +124,10 @@ class LendingMapper {
         marketValue = Money.of(e.marketValue, e.currency),
         haircut = e.haircut,
         valuedAt = e.valuedAt,
+        status = e.status,
+        registeredBy = e.registeredBy,
+        decidedBy = e.decidedBy,
+        decidedAt = e.decidedAt,
         createdAt = e.createdAt,
     )
 

@@ -13,7 +13,7 @@
 | Loan book (application, loan, schedule, stage) | Customer financial data (GDPR); the source of AnaCredit / FINREP / IFRS 9 returns. |
 | Cash events posted to the ledger | Real money movement (disbursement, repayment split, write-off). Integrity here is the money-path invariant. |
 | Credit decisions (maker / checker) | Governed origination (EBA/GL/2020/06); a forged or single-actor approval is a control failure. |
-| Collateral register & valuations | Drives LGD / haircut and capital; tampering (or a fabricated declared value / haircut) understates risk and, since Phase 3 increment 2, is now **wired into** the ECL calc via `Ifrs9.collateralAdjustedLgd` — a bad registration directly and immediately reduces the reported ECL, not just an AnaCredit field. Registration is gated the same way every other lending write is: `@RolesAllowed` + `@Authorize`; **it is not yet under the four-eyes/maker-checker control that origination and disbursement have** (see §5). |
+| Collateral register & valuations | Drives LGD / haircut and capital; tampering (or a fabricated declared value / haircut) understates risk and, since Phase 3 increment 2, is **wired into** the ECL calc via `Ifrs9.collateralAdjustedLgd` — a bad registration would directly and immediately reduce the reported ECL. **Closed (issue #621):** registration is now four-eyes / maker-checker, same shape as origination — a registered item is `PENDING` and excluded from the LGD adjustment until a DIFFERENT principal approves it (see §7). |
 | Risk parameters (PD / LGD / bureau data) | Inputs to ECL; manipulation distorts impairment and capital. **Currently flat, conservative placeholder constants (`ConservativeRiskParameterSource`), not a calibrated risk model — see 06 — Compliance for the explicit non-production caveat.** The collateral-adjusted effective LGD (Phase 3 increment 2) is *derived* from these same constants plus the collateral register — a bad collateral entry does not invent a new attack surface on PD/LGD itself, but it does change what "distorts impairment" means: `haircutAdjustedCollateralValue` is now a second untrusted-input path into the LGD term, not just `lgd` itself. |
 | IFRS 9 provisioning history (`loan_provisioning`) | Per-loan-per-period stage/ECL record; the delta baseline for the next cycle's ledger posting and (per ADR-0028) a future AnaCredit/FINREP input. Corruption or a skipped row causes silent under/over-provisioning. |
 
@@ -39,7 +39,8 @@
   (apply, decide, disburse, write-off) is the authenticated JWT subject via `actor()` — **never** a
   client-supplied field. (Write-off was hardened to this in PR #158.)
 - **Four-eyes (maker-checker).** A credit decision must be made by a principal *different* from the
-  application maker; disbursement by a principal different from the approver. Enforced server-side in the
+  application maker; disbursement by a principal different from the approver; a registered collateral
+  item by a principal different from its registrant (issue #621, see §7). Enforced server-side in the
   application state machine, not a UI nicety.
 - **Money-path integrity.** Postings are double-entry via the pure, unit-tested `LendingJournalFactory`
   (balanced legs asserted per `PostingKind`); the loan book mutates no balances itself.
@@ -85,13 +86,12 @@
     mis-registered collateral item in a different currency is excluded from the cover calculation rather
     than throwing (the loan book is single-currency per ADR-0028 D3, so this is a defensive filter against
     a data-entry error, not an expected path) or, worse, silently mixing currency amounts in the sum.
-  - **Roadmap gap, not yet mitigated — collateral registration has no four-eyes control.** Unlike credit
-    decisioning (`lending.approve`) and disbursement (`lending.disburse`), `POST .../collateral` is a
-    single-actor write: any principal holding `lending.create` on the loan can register collateral whose
-    declared value/haircut now directly reduces the reported ECL. A single compromised or careless
-    officer account can therefore understate provisioning without a second reviewer. Tracked as a roadmap
-    item (see §5) — the same shared `ApprovalStore`/`AuthorizeInterceptor` mechanism used for disbursement
-    (§7) is the natural extension point.
+  - **Closed (issue #621) — collateral registration is now four-eyes-gated.** `POST .../collateral`
+    (`lending.collateralRegister`) creates a `Collateral` in `PENDING` status; `applyCollateral` only
+    sums `APPROVED` items into the LGD adjustment. A different principal must decide it via `POST
+    /api/v1/lending/collateral/{id}/decision` (`lending.collateralDecide`) before it can reduce a loan's
+    reported ECL — mirrors the `lending.approve`/`decide` origination control (§7 for the STRIDE
+    supplement; this is the domain-level gate, independent of `authz.four-eyes.enforce`).
   - **Roadmap gap, not yet mitigated — no staleness bound on collateral valuation.** `marketValue` is
     whatever was declared (or externally revalued, if `CollateralValuationPort`'s no-op default is ever
     replaced) at registration time; there is no re-validation, expiry, or staleness flag, so an LGD
@@ -107,7 +107,7 @@
 | **Repudiation** | Mitigated | Maker/checker identities and sensitive reads audit-logged; write-off attribution now server-derived. |
 | **Information disclosure** | Mitigated | Role-gated GDPR-class reads; analytics only via the outbox stream. |
 | **Denial of service** | Partially mitigated | `LedgerCallGuard` (`@Retry`/`@Timeout`/`@CircuitBreaker`) bounds ledger calls; per-tenant rate limiting is a gateway-layer roadmap item. |
-| **Elevation of privilege** | Mitigated | No `@PermitAll`; least-privilege roles per endpoint; four-eyes prevents single-actor origination. |
+| **Elevation of privilege** | Mitigated | No `@PermitAll`; least-privilege roles per endpoint; four-eyes prevents single-actor origination, disbursement, and (issue #621) collateral registration from reducing reported ECL. |
 
 ## 5. Maturity / roadmap (tracked, not yet built)
 
@@ -127,14 +127,15 @@
 - **Money-path mutation testing** — pitest on the journal/amortization domain math (rules.yaml
   `money_path_depth`, currently `planned`) — should extend to `LendingJournalFactory.buildProvisioningLines`
   and the delta calculation once adopted.
-- **Collateral registration has no four-eyes control (ADR-0028 Phase 3 increment 2, new this slice).**
-  `POST /api/v1/lending/loans/{id}/collateral` is gated by role (`@RolesAllowed`/`@Authorize`) like every
-  other lending write, but — unlike credit decisioning and disbursement — a single principal can both
-  register collateral and have it immediately reduce the reported ECL on the next provisioning pass. Now
-  that collateral is wired into LGD (rather than being inert AnaCredit metadata), this is a genuine
-  provisioning-integrity gap, not just a data-quality one: it should get the same maker-checker treatment
-  origination/disbursement have (§7's `ApprovalStore`/`AuthorizeInterceptor` mechanism is the natural
-  extension point) before this is relied on for anything beyond a first-pass estimate.
+- **Collateral registration four-eyes: closed at the domain level, REST-layer pause not yet enforced
+  (issue #621).** `LendingService.decide()`/`applyCollateral()` always require a distinct checker before
+  a `Collateral` counts toward LGD — this holds regardless of `authz.four-eyes.enforce`. What remains a
+  deliberate, tracked follow-up (same as `lending.disburse` today, §7): flipping
+  `authz.four-eyes.enforce=true` so the REST call itself pauses (HTTP 202 + `PendingApproval`) rather than
+  the maker having to separately call the decide endpoint out-of-band. Until that flip, the maker's `POST
+  .../collateral` call still returns 201 immediately (the resulting row is `PENDING` and inert for ECL
+  purposes) rather than 202-pausing — a process/runbook gap, not a control gap: the data cannot reduce
+  provisioning without a second approval either way.
 - **No collateral valuation staleness bound.** `marketValue`/`haircut` are read as-declared at
   registration time with no expiry, re-validation, or staleness flag on the LGD reduction — see §3 and
   the ADR-0028 delivery note.
@@ -149,46 +150,82 @@ platform substrate (ADR-0027) and the unified authz layer (ADR-0034), not duplic
 
 ## 7. Four-eyes approval (ADR-0155) — STRIDE supplement
 
-`POST /applications/{id}/disburse` (`lending.disburse`) is the money-path action being wired into
-the shared, opt-in four-eyes mechanism (rollout tracked in issue #413; sepa-payment's `PATCH
-/status` was the pilot). Disbursement books the loan and its schedule and is the point at which
-funds actually move (`LedgerCallGuard` → `ledger-service`), so it is framed here as an **outbound
-money-movement action**, same risk class as the SEPA pilot's status transition. New endpoint
-`PATCH /api/v1/lending/approvals/{id}` lets a DIFFERENT lending officer decide the resulting
-`PendingApproval`; the maker retries `POST /applications/{id}/disburse` with an `X-Approval-Id`
-header. **`authz.four-eyes.enforce` stays `false` in this PR** — the `ApprovalStore`/endpoint are
-wired, but blocking is a deliberate follow-up flip, not bundled here (see ADR-0155).
+`POST /applications/{id}/disburse` (`lending.disburse`) and, as of issue #621, `POST
+/loans/{id}/collateral` (`lending.collateralRegister`) are the money-path/provisioning-integrity
+actions wired into the shared, opt-in ADR-0155 four-eyes mechanism (rollout tracked in issue #413;
+sepa-payment's `PATCH /status` was the pilot). Disbursement books the loan and moves funds
+(`LedgerCallGuard` → `ledger-service`); collateral registration feeds the IFRS 9 LGD adjustment
+(§1, §3) — both are framed here as actions where a single actor's data can misstate the bank's
+financial position. New endpoint `PATCH /api/v1/lending/approvals/{id}` lets a DIFFERENT lending
+officer decide the resulting `PendingApproval` for disbursement; the maker retries with an
+`X-Approval-Id` header. **`authz.four-eyes.enforce` stays `false`** — the `ApprovalStore`/endpoint
+are wired, but blocking the REST call itself (pause-and-resume) is a deliberate follow-up flip, not
+bundled here (see ADR-0155).
+
+Collateral registration additionally has its **own, independent, always-on domain-level gate** that
+does not depend on `authz.four-eyes.enforce` at all: `LendingService.register()` always creates a
+`Collateral` in `PENDING` status, and `applyCollateral()` only ever sums `APPROVED` items. A
+distinct checker decides it via `POST /api/v1/lending/collateral/{id}/decision`
+(`lending.collateralDecide`), which enforces `decidedBy != registeredBy` the same way `decide()`
+enforces `decidedBy != proposedBy` for origination (§3). This is deliberately a second, belt-and-braces
+layer beneath the shared ADR-0155 REST-pause mechanism — even with `authz.four-eyes.enforce=false`
+fleet-wide (and even if the OPA sidecar / `ApprovalStore` were entirely unavailable), a single maker
+cannot make their own collateral registration count toward a loan's ECL.
 
 Note: lending already has an *application-level* maker-checker control on the origination
-decision (`lending.approve`, §3 above — decide must differ from the application's maker). The
-ADR-0155 mechanism here is a second, independent control specifically on **disbursement**: even
-after a valid checker approved origination, releasing the funds is itself now gate-able by a
-second approver via the shared `ApprovalStore`/`AuthorizeInterceptor` path (currently advisory,
-`enforce=false`).
+decision (`lending.approve`, §3 above — decide must differ from the application's maker), and now
+an equivalent one on collateral (`lending.collateralDecide` — decide must differ from the
+registrant). The ADR-0155 mechanism here is a further, independent control specifically on
+**disbursement** and (once flipped) the REST-pause UX for **collateral registration**: even after a
+valid checker decision, the shared `ApprovalStore`/`AuthorizeInterceptor` path can additionally gate
+the triggering REST call itself (currently advisory, `enforce=false`).
 
 | STRIDE | Threat | Mitigation |
 |---|---|---|
-| **S**poofing | A caller other than a lending officer decides an approval | `@RolesAllowed("ROLE_LENDING_OFFICER","ROLE_ADMIN")` + OPA `@Authorize(action="lending.approval.decide")` on the decide endpoint |
-| **E**oP | The maker approves their own disbursement request (self-approval defeats maker-checker) | `ApprovalStore.decide` throws `SelfApprovalNotAllowedException` (mapped to 403) when `decidedBy == makerId` — enforced in the domain port itself, not just the REST layer, and `makerId`/`decidedBy` both resolve via the same `.principal.name` extraction (interceptor vs. `SecurityIdentity`) so the comparison can't silently mismatch for the same real person |
-| **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different disbursement | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
-| **R**epudiation | No record of who approved a gated disbursement | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see Residual risks below: not yet a permanent audit trail) |
-| **I**nfo disclosure | Approval id enumeration reveals loan/action metadata to an unauthorized caller | `decide` requires the caller to already hold a valid, role-gated session; the id itself is a random UUID (`RedisApprovalStore`, not sequential) |
-| **D**oS | Flooding `POST /applications/{id}/disburse` to exhaust Redis with pending approvals | Bounded by the same rate-limit controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
+| **S**poofing | A caller other than an authorized role decides an approval/decision | `@RolesAllowed("ROLE_LENDING_OFFICER","ROLE_ADMIN")` on the ADR-0155 decide endpoint; `@RolesAllowed("ROLE_CREDIT_RISK","ROLE_ADMIN")` on `lending.collateralDecide` + OPA `@Authorize` on both |
+| **E**oP | The maker approves their own disbursement or collateral registration (self-approval defeats maker-checker) | `ApprovalStore.decide` throws `SelfApprovalNotAllowedException` (403) when `decidedBy == makerId` for the ADR-0155 path; `LendingService.decide()` for collateral throws `IllegalStateException` (409, "Four-eyes violation") when `decidedBy == registeredBy` — enforced in the domain layer itself, not just the REST layer, for both |
+| **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different disbursement | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding. Collateral's own decide endpoint has an analogous one-time-use guard: `LendingService.decide()` rejects a collateral not currently `PENDING` (409, "not awaiting a decision") |
+| **R**epudiation | No record of who approved a gated disbursement or collateral registration | `PendingApproval.decidedBy`/`decidedAt` (Redis, TTL-bounded — see Residual risks below); `Collateral.decidedBy`/`decidedAt` (Postgres, permanent — no staleness/TTL concern for this path) |
+| **I**nfo disclosure | Approval id enumeration reveals loan/action metadata to an unauthorized caller | `decide` requires the caller to already hold a valid, role-gated session; the ADR-0155 approval id is a random UUID (`RedisApprovalStore`, not sequential); the collateral id is the `CollateralId` already returned to the (authorized) registrant |
+| **D**oS | Flooding the gated endpoints to exhaust Redis with pending approvals, or the DB with PENDING collateral rows | Bounded by the same rate-limit controls as the gated endpoint itself; each ADR-0155 `PendingApproval` is TTL-bounded (86400s); a PENDING `Collateral` row has no TTL but is bounded by ordinary row-count/rate limits, same as any other write |
 
 **DFD update:** adds `Lending officer (checker) → PATCH /api/v1/lending/approvals/{id} → Redis
-(approval:*)` alongside the existing `POST /applications/{id}/disburse` edge; the maker's retry
-reuses the existing DFD edge.
-**Risk class:** integrity (segregation of duties, disbursement) + confidentiality (approval
-record scope).
-**Rollback:** `authz.four-eyes.enforce=false` (default) — the endpoint and store exist but do not
-change any existing request's outcome until explicitly flipped.
+(approval:*)` alongside the existing `POST /applications/{id}/disburse` edge (the maker's retry
+reuses the existing DFD edge); adds `Credit-risk officer (checker) → POST
+/api/v1/lending/collateral/{id}/decision → Postgres (collateral.status)` alongside the existing
+`POST /loans/{id}/collateral` edge.
+**Risk class:** integrity (segregation of duties: disbursement, collateral registration) +
+confidentiality (approval record scope).
+**Rollback:** `authz.four-eyes.enforce=false` (default) — the ADR-0155 endpoint/store exist but do
+not change any existing request's outcome until explicitly flipped. The collateral domain-level
+gate (`PENDING` until decided) is NOT behind this flag and has no rollback toggle short of
+reverting the commit — see the ADR-0028 delivery note and §8.
 
 **Residual risk:** four-eyes `PendingApproval` records are TTL-bounded (Redis), not a permanent
 audit trail (ADR-0155) — a durable-audit requirement for "who approved what, forever" would need
-an additional store; not implemented in this PR.
+an additional store; not implemented in this PR. (The collateral decision itself, unlike the
+ADR-0155 `PendingApproval` wrapper, IS durably recorded in Postgres via `Collateral.decidedBy`/
+`decidedAt` — this residual risk is scoped to the Redis-backed ADR-0155 layer only.)
 
 ## 8. Change log
 
+- **2026-07-09** — Collateral registration four-eyes (ADR-0028 follow-up, issue #621), closing the
+  gap PR #607's threat-model update flagged. `Collateral` gains `status`
+  (`PENDING`/`APPROVED`/`REJECTED`), `registeredBy`, `decidedBy`, `decidedAt` (Flyway `V5`, existing
+  rows backfilled to `APPROVED`). New endpoint `POST /api/v1/lending/collateral/{id}/decision`
+  (`lending.collateralDecide`, `ROLE_CREDIT_RISK`/`ROLE_ADMIN`) lets a DIFFERENT principal decide a
+  `PENDING` registration; `LendingService.decide()` enforces `decidedBy != registeredBy`
+  domain-side (409 on violation). `applyCollateral()` now filters to `APPROVED` only — a `PENDING`
+  or `REJECTED` item cannot reduce a loan's ECL. `lending.collateralRegister` (the registration
+  action's new `@Authorize` verb, replacing the previous `lending.create`) added to
+  `rules.yaml: four_eyes.verbs` so the shared ADR-0155 REST-pause mechanism recognizes it the same
+  way it already recognizes `lending.disburse` — `authz.four-eyes.enforce` stays `false` (unchanged
+  fleet convention), so this PR does not change whether the REST call itself pauses; the
+  domain-level PENDING-until-decided gate is independent of that flag and is always on. Updated §1
+  (Collateral register asset), §3 (control block closed), §4 (EoP row), §5 (roadmap item
+  downgraded from "no control" to "REST-pause enforcement flip still pending, domain gate closed"),
+  §7 (STRIDE supplement extended to cover collateral alongside disbursement). Rollback: revert the
+  commit (`V5`'s own rollback note drops the new columns/type; pre-migration behavior returns).
 - **2026-07-08** — ADR-0155 four-eyes enforcement rollout (issue #413), mirroring the
   sepa-payment pilot. New endpoint `PATCH /api/v1/lending/approvals/{id}` + `ApprovalConfig`
   (Redis-backed `ApprovalStore`) + `AuthorizeInterceptor` four-eyes gate on `lending.disburse`
