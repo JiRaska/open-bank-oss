@@ -13,6 +13,7 @@ import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.model.BalanceStore
 import com.openbank.simulation.model.BillingFeeLedger
+import com.openbank.simulation.model.InterestAccrualBook
 import com.openbank.simulation.model.LedgerState
 import com.openbank.simulation.model.SimPaymentSaga
 import java.math.BigDecimal
@@ -56,6 +57,11 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     // fee journals posted per cycle/account/fee/currency). Populated by FeeBillingScenario every
     // step (previously unpopulated by any scenario, which made the invariant hold vacuously).
     val billingFees = BillingFeeLedger()
+
+    // ADR-0033 / issue #667: the interest-conservation invariant's state — daily accruals, the
+    // gross/net/tax capitalization split (real WithholdingTaxPolicy) and the journal legs that
+    // actually landed. Populated by InterestAccrualScenario; empty (trivially satisfied) otherwise.
+    val interest = InterestAccrualBook()
 
     val customerAccounts: List<UUID>
     val currency: String = config.currency
