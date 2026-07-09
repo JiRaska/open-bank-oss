@@ -10,6 +10,7 @@ import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import io.quarkus.hibernate.reactive.panache.Panache
+import io.quarkus.hibernate.reactive.panache.common.WithTransaction
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -22,6 +23,7 @@ class LendingOutboxRepositoryImpl :
     LendingOutboxRepository,
     PanacheRepository<LendingOutboxEntity> {
 
+    @WithTransaction
     override fun persistInTransaction(message: LendingOutboxMessage): Uni<Void> =
         persist(message.toEntity()).replaceWithVoid()
 
