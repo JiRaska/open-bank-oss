@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.3](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.5.2...billing-service-v0.5.3) (2026-07-09)
+
+
+### Bug Fixes
+
+* **simulation:** re-validate balance across interleaved DST scenarios ([#672](https://github.com/JiRaska/open-bank-oss/issues/672)) ([1a868b1](https://github.com/JiRaska/open-bank-oss/commit/1a868b121473f3838fd294538267d26ff1a2ccac))
+
 ## [0.5.2](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.5.1...billing-service-v0.5.2) (2026-07-08)
 
 
