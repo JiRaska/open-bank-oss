@@ -1,0 +1,26 @@
+# TEMPORARY diagnostic workflow — see issue investigating the dead Claude
+# fallback in agent-review.yml. Isolated from agent-review.yml's own scope
+# gate (which would otherwise mark any .github/* change "sensitive" and skip
+# the very step being tested). Delete this file once the fallback is fixed.
+name: Debug Claude OAuth
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Claude OAuth probe
+        uses: anthropics/claude-code-action@f87768c6d25f92ae6efa7175e223ef77d4cbf97f # v1.0.166
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          show_full_output: true
+          prompt: "Reply with exactly the word: PONG. Do not use any tools."
