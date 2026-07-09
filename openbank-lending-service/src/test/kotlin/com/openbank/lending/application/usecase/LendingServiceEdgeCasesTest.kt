@@ -16,6 +16,7 @@ import com.openbank.lending.application.port.out.RiskParameterSource
 import com.openbank.lending.domain.model.ApplicationStatus
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.CollateralRequest
+import com.openbank.lending.domain.model.CollateralStatus
 import com.openbank.lending.domain.model.CollateralType
 import com.openbank.lending.domain.model.DecisionRequest
 import com.openbank.lending.domain.model.Loan
@@ -335,7 +336,7 @@ class LendingServiceEdgeCasesTest {
             haircut = BigDecimal("1.01"),
         )
 
-        assertThatThrownBy { service.register(loanId, request) }
+        assertThatThrownBy { service.register(loanId, request, "officer-1") }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("Haircut")
 
@@ -351,7 +352,7 @@ class LendingServiceEdgeCasesTest {
             haircut = BigDecimal("-0.10"),
         )
 
-        assertThatThrownBy { service.register(loanId, request) }
+        assertThatThrownBy { service.register(loanId, request, "officer-1") }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("Haircut")
 
@@ -373,6 +374,7 @@ class LendingServiceEdgeCasesTest {
                 marketValue = eur("250000.00"),
                 haircut = BigDecimal("0.20"),
             ),
+            "officer-1",
         ).await().indefinitely()
 
         // The valuer's opinion wins over the declared market value.
@@ -381,6 +383,9 @@ class LendingServiceEdgeCasesTest {
         assertThat(result.type).isEqualTo(CollateralType.REAL_ESTATE)
         assertThat(result.haircut).isEqualTo(BigDecimal("0.20"))
         assertThat(result.valuedAt).isEqualTo(fixedNow)
+        // Four-eyes (ADR-0028 follow-up, issue #621): registration is PENDING and attributed to the maker.
+        assertThat(result.status).isEqualTo(CollateralStatus.PENDING)
+        assertThat(result.registeredBy).isEqualTo("officer-1")
         verify(exactly = 1) { collateral.save(any()) }
     }
 
