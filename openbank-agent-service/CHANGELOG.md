@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.14.0...agent-service-v1.14.1) (2026-07-09)
+
+
+### Bug Fixes
+
+* **agent-service:** wire Kafka mTLS + fix oversight-events group.id YAML bug ([#696](https://github.com/JiRaska/open-bank-oss/issues/696)) ([4e3c0b3](https://github.com/JiRaska/open-bank-oss/commit/4e3c0b35be8ee482a86110f0186e044b2bbba085)), closes [#686](https://github.com/JiRaska/open-bank-oss/issues/686)
+
 ## [1.14.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.13.2...agent-service-v1.14.0) (2026-07-08)
 
 
