@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.10.0...lending-service-v0.10.1) (2026-07-09)
+
+
+### Bug Fixes
+
+* **lending:** wire real outbox-writing adapter for loan domain events ([#652](https://github.com/JiRaska/open-bank-oss/issues/652)) ([59a6a48](https://github.com/JiRaska/open-bank-oss/commit/59a6a48db77a1236803513c271390087109f8817)), closes [#651](https://github.com/JiRaska/open-bank-oss/issues/651)
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.9.0...lending-service-v0.10.0) (2026-07-09)
 
 
