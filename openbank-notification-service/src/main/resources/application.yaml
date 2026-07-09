@@ -96,17 +96,23 @@ mp:
       notification-events-in:
         connector: smallrye-kafka
         client.id: notification-service-${quarkus.uuid}
-        group.id: notification-service
+        # group.id / auto.offset.reset are set via the gitops ConfigMap
+        # (notification-service-msg-override, QUARKUS_CONFIG_LOCATIONS) instead of
+        # here: Quarkus's YAML config source unconditionally quotes any dotted leaf
+        # key (`group.id`, `auto.offset.reset`) when flattening YAML, so it silently
+        # registers as `mp.messaging.incoming.notification-events-in."group.id"` —
+        # a property KafkaConnectorIncomingConfiguration never reads — and falls
+        # back to quarkus.application.name, which the Strimzi ACL does not grant
+        # Read on (issue #686).
         topic: openbank.notification.requests
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        auto.offset.reset: earliest
       party-events-in:
         connector: smallrye-kafka
         client.id: notification-service-party-${quarkus.uuid}
-        group.id: notification-service-party
+        # group.id / auto.offset.reset: same dotted-key YAML bug as above — set via
+        # the gitops ConfigMap instead (issue #686).
         topic: openbank.party.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        auto.offset.reset: earliest
 "%dev":
   quarkus:
     log:
