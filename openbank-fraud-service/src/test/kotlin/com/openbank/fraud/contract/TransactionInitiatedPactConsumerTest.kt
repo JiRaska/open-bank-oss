@@ -23,9 +23,10 @@ import java.util.UUID
  * Consumer-driven MESSAGE contract for the `openbank.transactions.transaction.initiated`
  * event that fraud-service consumes from transaction-service (ADR-0084 §2).
  *
- * The consumer (fraud-service) reads {aggregateId, sourceAccountId, amount, currencyCode}
- * to build velocity counters and run fraud-risk scoring. transaction-service (the provider)
- * verifies this pact via TransactionPactProviderVerificationTest.
+ * The consumer (fraud-service) reads {aggregateId, sourceAccountId, targetAccountId, amount,
+ * currencyCode} to build velocity counters, payee history (ADR-0084 §3 v4) and run fraud-risk
+ * scoring. transaction-service (the provider) verifies this pact via
+ * TransactionPactProviderVerificationTest.
  *
  * The generated pact JSON is published to the Pact Broker (pact.open-bank.tech) during CI
  * (ADR-0092).
@@ -46,6 +47,11 @@ class TransactionInitiatedPactConsumerTest {
             newJsonBody { o ->
                 o.uuid("aggregateId")
                 o.uuid("sourceAccountId")
+                // ADR-0084 §3 v4: the payee-history signal key. Nullable on the provider's domain
+                // model (external-rail payments may have no internal target account), so this pact
+                // still only asserts presence/shape when populated — the consumer already tolerates
+                // absence (TransactionSignalConsumer skips payee-history recording, never fails).
+                o.uuid("targetAccountId")
                 o.decimalType("amount", 250.00)
                 o.stringMatcher("currencyCode", "[A-Z]{3}", "CZK")
             }.build(),
@@ -59,6 +65,7 @@ class TransactionInitiatedPactConsumerTest {
 
         assertThat(UUID.fromString(node.path("aggregateId").asText())).isNotNull()
         assertThat(UUID.fromString(node.path("sourceAccountId").asText())).isNotNull()
+        assertThat(UUID.fromString(node.path("targetAccountId").asText())).isNotNull()
         assertThat(node.path("amount").decimalValue()).isGreaterThan(BigDecimal.ZERO)
         assertThat(node.path("currencyCode").asText()).hasSize(3)
     }

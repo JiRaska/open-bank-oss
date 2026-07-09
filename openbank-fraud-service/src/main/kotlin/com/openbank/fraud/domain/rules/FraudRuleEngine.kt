@@ -26,8 +26,10 @@ data class RuleHit(val scoreDelta: Int, val verdict: FraudVerdict, val reason: S
  *
  * Phase 2 (ADR-0084 §3) adds velocity cap rules that read rolling window counters populated by the
  * async Kafka signal plane ([VelocityH1ReviewRule], [VelocityH24ReviewRule]); v3 adds amount-based
- * rules ([LargeSingleTransactionReviewRule], [VelocityH1HighValueReviewRule]). Each new rule is its
- * own [FraudRule] added to [FraudRuleEngine.RULES] and bumps [FraudRuleEngine.RULE_VERSION].
+ * rules ([LargeSingleTransactionReviewRule], [VelocityH1HighValueReviewRule]); v4 adds the
+ * new-payee combination rule ([NewPayeeHighAmountReviewRule]) originally deferred from the roadmap.
+ * Each new rule is its own [FraudRule] added to [FraudRuleEngine.RULES] and bumps
+ * [FraudRuleEngine.RULE_VERSION].
  */
 object BaselineAllowRule : FraudRule {
     override fun evaluate(request: ScoreRequest): RuleHit =
@@ -134,6 +136,51 @@ object VelocityH1HighValueReviewRule : FraudRule {
 }
 
 /**
+ * Phase 2 v4 — ADR-0084 §3 ("new-payee + high-amount combination" from the original roadmap,
+ * deferred at Phase-1 launch for lack of a payee-history signal). REVIEW when [ScoreRequest.isNewPayee]
+ * is true (accountId has never paid counterpartyId before, per the payee_history signal plane) AND
+ * the amount exceeds a threshold for its currency — deliberately **notably lower** than
+ * [LargeSingleTransactionReviewRule]'s: a first-ever payment to a never-seen payee is inherently
+ * higher-risk than the same amount going to an established payee, which is the entire point of this
+ * rule existing separately from the plain amount rule.
+ *
+ * **Per-currency, not a single global figure** — same cross-currency rationale and disclosure as
+ * [LargeSingleTransactionReviewRule]; see that rule's doc for the full history.
+ *
+ * Silent when `isNewPayee` is false (established payee) regardless of amount — that case is already
+ * covered by [LargeSingleTransactionReviewRule] at its own (higher) threshold. **Fails CLOSED for an
+ * unmapped currency** whenever `isNewPayee` is true, matching the fail-closed convention of the
+ * other amount-based rules: an unmapped currency means the rule cannot safely evaluate the amount,
+ * so a genuinely new payee is flagged for a human rather than silently waived through.
+ *
+ * [THRESHOLDS_BY_CURRENCY] are first-pass, non-calibrated placeholders — not risk-team-approved
+ * figures — set at roughly half of [LargeSingleTransactionReviewRule]'s thresholds as a starting
+ * point; expected to be tuned once shadow-mode metrics establish a false-positive baseline, same
+ * disclosure spirit as the other v3/v4 amount rules.
+ */
+object NewPayeeHighAmountReviewRule : FraudRule {
+    // First-pass calibration only — not risk-team-approved figures. Roughly half of
+    // LargeSingleTransactionReviewRule's CZK/EUR thresholds: a first payment to a never-seen payee
+    // is inherently higher-risk than the same amount to an established payee.
+    private val THRESHOLDS_BY_CURRENCY: Map<String, BigDecimal> = mapOf(
+        "CZK" to BigDecimal("250000"),
+        "EUR" to BigDecimal("10000"),
+    )
+
+    override fun evaluate(request: ScoreRequest): RuleHit? {
+        if (!request.isNewPayee) return null
+        val threshold = THRESHOLDS_BY_CURRENCY[request.currency]
+            ?: return RuleHit(
+                scoreDelta = 30,
+                verdict = FraudVerdict.REVIEW,
+                reason = "new-payee-high-amount-unmapped-currency",
+            )
+        if (request.amount < threshold) return null
+        return RuleHit(scoreDelta = 30, verdict = FraudVerdict.REVIEW, reason = "new-payee-high-amount")
+    }
+}
+
+/**
  * Deterministic, versioned rule engine. Evaluates every rule in [RULES] over the request, sums the
  * score, and takes the most severe verdict any rule returned. Pure — no framework imports, fully
  * unit-testable in isolation from transport/persistence (ADR-0002).
@@ -141,12 +188,13 @@ object VelocityH1HighValueReviewRule : FraudRule {
 object FraudRuleEngine {
 
     /** Pin the rule-set version into every [FraudScore] for the audit trail. Bump on any rule change. */
-    const val RULE_VERSION: String = "v3"
+    const val RULE_VERSION: String = "v4"
 
     /**
      * Ordered rule set. Phase 1 had the single [BaselineAllowRule] stub; Phase 2 added velocity cap
-     * rules reading rolling window counters from the async Kafka signal plane (ADR-0084 §2); v3 adds
-     * amount-based rules ([LargeSingleTransactionReviewRule], [VelocityH1HighValueReviewRule]).
+     * rules reading rolling window counters from the async Kafka signal plane (ADR-0084 §2); v3 added
+     * amount-based rules ([LargeSingleTransactionReviewRule], [VelocityH1HighValueReviewRule]); v4
+     * adds the new-payee combination rule ([NewPayeeHighAmountReviewRule]).
      */
     private val RULES: List<FraudRule> = listOf(
         BaselineAllowRule,
@@ -154,6 +202,7 @@ object FraudRuleEngine {
         VelocityH24ReviewRule,
         LargeSingleTransactionReviewRule,
         VelocityH1HighValueReviewRule,
+        NewPayeeHighAmountReviewRule,
     )
 
     /** Verdict severity ordering — the engine returns the most severe verdict any rule produced. */
