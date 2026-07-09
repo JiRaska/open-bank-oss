@@ -109,6 +109,12 @@ mp:
         topic: payment.scheme-accepted
         group.id: transaction-scheme-accepted-cg
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        # NOTE: this dotted key never actually resolves via YAML flattening (SmallRye
+        # quotes any leaf map key containing a literal dot, so this only registers as
+        # "auto.offset.reset" verbatim, not the plain property KafkaConnectorIncomingConfiguration
+        # reads) — same bug as group.id/dead-letter-queue.topic below. Kept here (rather than
+        # removed) so local dev/test still gets `earliest`; the deployed value actually comes
+        # from the transaction-service-msg-override ConfigMap in gitops (issue #686).
         auto.offset.reset: earliest
         # DLQ ensures processing failures on this money-path consumer are retried out-of-band
         # rather than silently dropped (ignore) or stalling the partition (fail).
