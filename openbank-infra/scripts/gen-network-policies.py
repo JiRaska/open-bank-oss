@@ -20,6 +20,9 @@ openbank-infra/gitops/components/, extracts those edges and emits one
     monitor is reachable by Prometheus the moment its monitor is declared,
   - admin-ui allowed on every service HTTP port (the BFF discovers services
     dynamically via the k8s API, ADR-0051/0056 — its edges are not in env),
+    EXCEPT ports named for a datastore wire protocol (INTERNAL_ONLY_PORT_NAMES,
+    e.g. "redis") — those are same-namespace-only, since admin-ui never speaks
+    the raw wire protocol directly,
   - ingress-nginx allowed where an Ingress backend declares it,
   - the keda namespace (KEDA HTTP add-on interceptor) allowed on the HTTP port
     of any workload fronted by an HTTPScaledObject (T1 scale-to-zero) — the
@@ -68,6 +71,19 @@ ADMIN_UI_NS = "admin-ui"
 INGRESS_NS = "ingress-nginx"
 MESSAGING_NS = "messaging"
 KEDA_NS = "keda"
+
+# Container ports that speak a datastore wire protocol, not HTTP — keyed by the
+# `ports[].name` every gitops manifest already uses by convention (e.g. the
+# fleet's `redis.yaml` Deployments all name their port "redis"). A port whose
+# name lands here is never bucketed into http_ports, so it does NOT get the
+# admin-ui BFF-discovery rule, an ingress-nginx rule, or a KEDA HTTP add-on
+# rule — those all assume "reachable HTTP API", which a Redis/Postgres wire
+# port is not. It still gets the same-namespace rule (unconditional), and
+# still gets the management/security-scanner rules if it separately exposes a
+# port literally named "management". This is the gap behind the fraud-service
+# online-feature-store Redis fix (PR #706): any non-"management" port was
+# unconditionally treated as an admin-ui-reachable HTTP port.
+INTERNAL_ONLY_PORT_NAMES = {"redis", "postgres", "postgresql"}
 
 HEADER = """\
 # SPDX-License-Identifier: Apache-2.0
@@ -268,8 +284,12 @@ def main():
         mgmt_port = wl["ports"].get("management")
         if mgmt_port is None and MGMT_PORT in wl["ports"].values():
             mgmt_port = MGMT_PORT
+        internal_only_ports = {
+            p for n, p in wl["ports"].items() if n in INTERNAL_ONLY_PORT_NAMES
+        }
         http_ports = sorted(
-            p for n, p in wl["ports"].items() if p != mgmt_port
+            p for n, p in wl["ports"].items()
+            if p != mgmt_port and p not in internal_only_ports
         )
         callers = sorted(edges.get((ns, wl_name), set()) - {ns})
         ing_ports = {

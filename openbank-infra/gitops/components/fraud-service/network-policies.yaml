@@ -76,10 +76,3 @@ spec:
   ingress:
     - from:
         - podSelector: {}
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: admin-ui
-      ports:
-        - protocol: TCP
-          port: 6379
