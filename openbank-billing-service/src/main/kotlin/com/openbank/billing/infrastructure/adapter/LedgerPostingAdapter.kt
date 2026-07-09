@@ -6,6 +6,7 @@ package com.openbank.billing.infrastructure.adapter
 
 import com.openbank.billing.application.port.out.LedgerPostingPort
 import com.openbank.billing.domain.FeeJournalCommand
+import com.openbank.billing.domain.FeeReversalCommand
 import com.openbank.billing.infrastructure.client.BillingJournalFactory
 import com.openbank.billing.infrastructure.client.BillingLedgerConfig
 import com.openbank.billing.infrastructure.client.LedgerJournalEntryResponse
@@ -63,10 +64,41 @@ class LedgerPostingAdapter(
         return response.id
     }
 
+    override suspend fun postReversal(command: FeeReversalCommand): UUID {
+        val request = BillingJournalFactory.buildReversalRequest(
+            command = command,
+            accounts = config.gl(),
+            systemActorId = config.systemActorId(),
+            date = LocalDate.now(clock),
+        )
+        val response = postReversalWithResilience(request = request).awaitSuspending()
+        log.debugf(
+            "ledger reversal journal %s posted (%s) for fee reversal idempotencyKey=%s (original=%s)",
+            response.id,
+            response.status,
+            command.idempotencyKey,
+            command.originalIdempotencyKey,
+        )
+        return response.id
+    }
+
     @Retry(maxRetries = MAX_RETRIES, delay = RETRY_DELAY_MS, jitter = RETRY_JITTER_MS)
     @Timeout(CALL_TIMEOUT_MS)
     @CircuitBreaker(requestVolumeThreshold = CB_VOLUME_THRESHOLD, failureRatio = CB_FAILURE_RATIO, delay = CB_DELAY_MS)
     fun postWithResilience(request: LedgerPostJournalRequest): Uni<LedgerJournalEntryResponse> =
+        ledgerClient.postJournal(request)
+
+    // Same balanced-journal POST endpoint as the charge leg (a reversal is just another journal
+    // with swapped sides, ADR-0143 phase 2e) — deliberately NOT ledger-service's own
+    // POST /{journalId}/reverse endpoint, which is itself four-eyes gated (`ledger.reverse`) at
+    // ledger's OWN principal; a service-to-service OIDC client-credentials caller has no human
+    // "checker" distinct from the "maker" service account, so that second gate could never be
+    // decided and would orphan a PENDING approval forever. Billing's own `billing.reverse`
+    // four-eyes gate (BillingResource) is the single point of human dual control for this flow.
+    @Retry(maxRetries = MAX_RETRIES, delay = RETRY_DELAY_MS, jitter = RETRY_JITTER_MS)
+    @Timeout(CALL_TIMEOUT_MS)
+    @CircuitBreaker(requestVolumeThreshold = CB_VOLUME_THRESHOLD, failureRatio = CB_FAILURE_RATIO, delay = CB_DELAY_MS)
+    fun postReversalWithResilience(request: LedgerPostJournalRequest): Uni<LedgerJournalEntryResponse> =
         ledgerClient.postJournal(request)
 
     private companion object {

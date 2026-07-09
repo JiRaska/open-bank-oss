@@ -4,16 +4,18 @@
 openapi: 3.1.0
 info:
   title: Billing Service API
-  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.1 -> 1.2): additive
-  # endpoints only (POST /fees/post, PATCH /fees/approvals/{id}) — phase 2c-ii, no breaking change.
-  version: 1.2.0
+  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.2 -> 1.3): additive
+  # endpoint only (POST /fees/reverse) — phase 2e, no breaking change.
+  version: 1.3.0
   description: >-
-    Runtime product fee assessment and posting (ADR-0143). POST /api/v1/fees/assess computes an
-    account's fee assessment from live account/balance/catalog reads and returns it (dry run — no
-    ledger posting). POST /api/v1/fees/post (phase 2c-ii) persists the assessment and commits the
-    atomic intent-to-post to the transactional outbox, which then posts a balanced journal to the
-    ledger; it carries the four-eyes `billing.post` action (maker != checker), decided via PATCH
-    /api/v1/fees/approvals/{id}.
+    Runtime product fee assessment, posting and reversal (ADR-0143). POST /api/v1/fees/assess
+    computes an account's fee assessment from live account/balance/catalog reads and returns it
+    (dry run — no ledger posting). POST /api/v1/fees/post (phase 2c-ii) persists the assessment
+    and commits the atomic intent-to-post to the transactional outbox, which then posts a balanced
+    journal to the ledger; it carries the four-eyes `billing.post` action (maker != checker),
+    decided via PATCH /api/v1/fees/approvals/{id}. POST /api/v1/fees/reverse (phase 2e) reverses a
+    wrongly-charged, already-POSTED fee via a compensating journal (exact reverse GL direction);
+    it carries the four-eyes `billing.reverse` action, decided the same way.
 servers:
   - url: http://localhost:8132
     description: Local development
@@ -67,6 +69,42 @@ paths:
           description: Unauthenticated.
         "403":
           description: Authenticated but denied by the OPA authorization policy (ADR-0034).
+  /api/v1/fees/reverse:
+    post:
+      summary: >-
+        Reverse an already-POSTED fee via a compensating ledger journal (ADR-0143 phase 2e).
+        Idempotent: reversing an already-REVERSAL_PENDING/REVERSED fee returns the existing fee
+        unchanged rather than posting a second compensating journal. Subject to the four-eyes
+        `reverse` verb — a maker's call may be paused (202, PendingApproval) pending a distinct
+        checker's decision via /fees/approvals/{id}, then retried with an X-Approval-Id header.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: idempotencyKey, in: query, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+              required: [reason]
+      responses:
+        "200":
+          description: The reversed fee (posting status REVERSAL_PENDING, awaiting outbox dispatch).
+        "202":
+          description: Four-eyes pending — a second, distinct principal must approve via /fees/approvals/{id}.
+        "400":
+          description: Missing idempotencyKey query parameter or reason body field.
+        "401":
+          description: Unauthenticated.
+        "403":
+          description: Authenticated but denied by the OPA authorization policy (ADR-0034).
+        "404":
+          description: No assessed fee with that idempotencyKey.
+        "409":
+          description: The fee exists but was never POSTED (waived, zero, still PENDING, or FAILED) — nothing to reverse.
   /api/v1/fees/approvals/{id}:
     patch:
       summary: Approve or reject a pending four-eyes approval for a fee posting (ADR-0155).

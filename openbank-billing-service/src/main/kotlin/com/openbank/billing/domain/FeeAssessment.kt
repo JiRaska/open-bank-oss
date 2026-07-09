@@ -38,8 +38,13 @@ data class AssessedFee(
     val reason: WaiveReason,
     val postingStatus: PostingStatus = PostingStatus.NOT_APPLICABLE,
     val journalId: java.util.UUID? = null,
+    val reversalJournalId: java.util.UUID? = null,
+    val reversalReason: String? = null,
 ) {
     val idempotencyKey: String get() = "fee-$cycleId-$accountId-$feeId-$currency"
+
+    /** Distinct from [idempotencyKey] so the ledger never collapses a reversal replay with the charge. */
+    val reversalIdempotencyKey: String get() = "fee-reversal-$cycleId-$accountId-$feeId-$currency"
 }
 
 /**
@@ -57,14 +62,35 @@ data class FeeJournalCommand(
 )
 
 /**
- * The lifecycle of one [AssessedFee]'s ledger posting (ADR-0143 phase 2c). A waived or
+ * A request to post the compensating (reversing) journal for an already-POSTED [AssessedFee]
+ * (ADR-0143 phase 2e). [idempotencyKey] is distinct from the original charge's
+ * [AssessedFee.idempotencyKey] (`"fee-reversal-{cycleId}-{accountId}-{feeId}-{currency}"`) so the
+ * ledger's own idempotency store never collapses a reversal into a replay of the original charge.
+ * [originalIdempotencyKey] threads back to the [AssessedFee] being reversed.
+ */
+data class FeeReversalCommand(
+    val idempotencyKey: String,
+    val originalIdempotencyKey: String,
+    val cycleId: String,
+    val accountId: String,
+    val feeId: String,
+    val amount: BigDecimal,
+    val currency: String,
+    val reason: String,
+)
+
+/**
+ * The lifecycle of one [AssessedFee]'s ledger posting (ADR-0143 phase 2c/2e). A waived or
  * zero-amount fee never posts a journal and stays [NOT_APPLICABLE]. A chargeable fee starts
  * [PENDING] the moment its outbox row commits atomically with the assessment (ADR-0143 step 2),
  * moves to [POSTED] once the outbox dispatcher's ledger call succeeds (journalId recorded), or
  * [FAILED] once the outbox row is exhausted (terminal DEAD, `OutboxFailurePolicy`) without ever
- * reaching the ledger — an operator-visible signal distinct from "still in flight".
+ * reaching the ledger — an operator-visible signal distinct from "still in flight". A POSTED fee
+ * that is later found to be wrongly charged moves to [REVERSAL_PENDING] the moment its
+ * compensating-journal outbox row commits (ADR-0143 phase 2e), then to [REVERSED] once that
+ * journal is confirmed posted — terminal, and itself never reversible again.
  */
-enum class PostingStatus { NOT_APPLICABLE, PENDING, POSTED, FAILED }
+enum class PostingStatus { NOT_APPLICABLE, PENDING, POSTED, FAILED, REVERSAL_PENDING, REVERSED }
 
 /**
  * The result of assessing all of an account's fees for a cycle. [skipped] is set (with

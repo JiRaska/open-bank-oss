@@ -92,4 +92,55 @@ class BillingResourceAuthzTest {
             ).extract().body().asString()
         assertThat(body).contains("\"skipped\":true")
     }
+
+    @Test
+    fun `unauthenticated request to reverse is rejected before authorization ever runs`() {
+        Given {
+            contentType("application/json")
+            body("""{"reason":"oops"}""")
+        } When {
+            post("/api/v1/fees/reverse?idempotencyKey=fee-2026-07-acc1-f1-CZK")
+        } Then {
+            statusCode(401)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
+    fun `an authenticated caller without ROLE_OPERATOR or ROLE_ADMIN is forbidden from reversing`() {
+        Given {
+            contentType("application/json")
+            body("""{"reason":"oops"}""")
+        } When {
+            post("/api/v1/fees/reverse?idempotencyKey=fee-2026-07-acc1-f1-CZK")
+        } Then {
+            statusCode(403)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `an operator reversing with a missing reason reaches validation, not blocked by authz`() {
+        Given {
+            contentType("application/json")
+            body("""{"reason":""}""")
+        } When {
+            post("/api/v1/fees/reverse?idempotencyKey=fee-2026-07-acc1-f1-CZK")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `an operator reversing a fee that was never assessed gets a clean 404, not a 500`() {
+        Given {
+            contentType("application/json")
+            body("""{"reason":"oops"}""")
+        } When {
+            post("/api/v1/fees/reverse?idempotencyKey=fee-no-such-key-CZK")
+        } Then {
+            statusCode(404)
+        }
+    }
 }
