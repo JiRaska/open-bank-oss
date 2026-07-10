@@ -72,6 +72,16 @@ spec:
                 secretKeyRef:
                   name: onboarding-db-app
                   key: password
+            # Flyway checksum mismatch on V1 (2026-07-10): the 2026-06-27 repo-wide MPL->Apache-2.0
+            # relicense (60e0263f, #2276) flipped the SPDX header on every migration file including
+            # this one, changing V1's checksum. onboarding-service hadn't been redeployed since, so
+            # the mismatch was latent until this Kafka group.id fix's rollout hit it. Repair-at-start
+            # re-baselines the recorded checksum to the current (relicensed) file — safe because the
+            # relicense was a comment-only change, no SQL executed differently. Remove this once the
+            # live schema_history row is repaired (one successful boot is enough; safe to leave
+            # briefly if unsure, repair is a no-op once checksums already match).
+            - name: QUARKUS_FLYWAY_REPAIR_AT_START
+              value: "true"
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
             - name: QUARKUS_SMALLRYE_REACTIVE_MESSAGING_KAFKA_BOOTSTRAP_SERVERS
