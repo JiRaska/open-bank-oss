@@ -90,6 +90,7 @@ charter_allowed if rest_action_allowed
 # are inert until then anyway.
 rest_domains := {
 	"query.ledger.readonly": {"ledger", "account", "transaction", "balance"},
+	"query.gl.readonly": {"ledger", "gl"},
 	"query.catalog.readonly": {"catalog"},
 	"query.compliance.readonly": {"aml", "amlCase", "sanctions"},
 	"query.payments.readonly": {"fx", "clearing", "clearingBatch", "sepa-instant", "sctInstPayment"},
