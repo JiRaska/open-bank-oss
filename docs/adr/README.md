@@ -126,7 +126,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0115](0115-deterministic-simulation-harness.md) | Deterministic simulation harness — seed-driven money-path invariant checker (ADR-0100 Layer 2/3) | Accepted | Shipped | — |
 | [0116](0116-kyc-engine-risk-checks-and-four-eyes-gate.md) | KYC engine — risk-based checks, ČNB four-eyes gate, sandbox straight-through mode | Accepted | Shipped | — |
 | [0117](0117-dispute-and-complaint-lifecycle.md) | Dispute and complaint handling — PSD2 statutory deadlines, evidence chain, breach detection | Accepted | Partial | — |
-| [0118](0118-gdpr-data-lifecycle-and-retention.md) | GDPR data lifecycle — PII classification, retention periods, erasure model | Accepted | Partial | — |
+| [0118](0118-gdpr-data-lifecycle-and-retention.md) | GDPR data lifecycle — PII classification, retention periods, erasure model | Accepted | Shipped | — |
 | [0119](0119-ai-devops-agent.md) | AI DevOps Agent: proactive SSDLC / DORA observability and durable-fix proposals | Accepted | Partial | — |
 | [0120](0120-migrate-transaction-payment-orchestration-to-temporal.md) | Migrate transaction-service payment orchestration to Temporal | Accepted | Shipped | — |
 | [0121](0121-service-self-reported-sbom-and-supply-chain-attestation.md) | Service self-reported SBOM and supply-chain attestation | Accepted | Partial | — |
