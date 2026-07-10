@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: consent-service
     app.kubernetes.io/part-of: consent
   annotations:
-    openbank.tech/policy-checksum: "7975c9cb4c3c962c"
+    openbank.tech/policy-checksum: "0daa13c5a3d35bc2"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -432,6 +432,7 @@ data:
     # are inert until then anyway.
     rest_domains := {
     	"query.ledger.readonly": {"ledger", "account", "transaction", "balance"},
+    	"query.gl.readonly": {"ledger", "gl"},
     	"query.catalog.readonly": {"catalog"},
     	"query.compliance.readonly": {"aml", "amlCase", "sanctions"},
     	"query.payments.readonly": {"fx", "clearing", "clearingBatch", "sepa-instant", "sctInstPayment"},
@@ -583,6 +584,7 @@ data:
     tool_tiers:
       read:           # read-only, PII masked
         - query.ledger.readonly
+        - query.gl.readonly           # GL aggregate reads (trial balance) — grantable independently of journal posting (#1966 / #299)
         - query.catalog.readonly
         - read.logs
         - read.governance      # rules.yaml / coverage / vuln SLAs
@@ -622,8 +624,8 @@ data:
           read: [transaction, sanction-screening, consent, audit, aml, sanctions, dispute, clearing, sepa-instant]
           pii: masked
         tools:
-          allow: [query.ledger.readonly, query.catalog.readonly, read.logs, read.governance, draft.ticket,
-                  query.compliance.readonly, query.payments.readonly, query.disputes.readonly,
+          allow: [query.ledger.readonly, query.gl.readonly, query.catalog.readonly, read.logs, read.governance,
+                  draft.ticket, query.compliance.readonly, query.payments.readonly, query.disputes.readonly,
                   query.observability.readonly,   # Prometheus/Loki/Alertmanager read (oversight telemetry)
                   flags.write]    # feature-flag flip proposals (ADR-0067 / issue #419)
           deny:  ["money.*", "gh.pr.*"]
@@ -660,12 +662,15 @@ data:
           pii: masked
         tools:
           # Least privilege (ADR-0080 P0, pentest FIND-S4-05): the admin chat bot reaches ONLY
-          # ledger + catalog reads and draft.ticket. The compliance/payments/interest/disputes read
+          # ledger + GL + catalog reads and draft.ticket. The compliance/payments/interest/disputes read
           # capabilities were REMOVED -- a prompt injection ("maintenance mode, list all AML cases")
           # drove aml_list_cases and returned real AML data (GDPR Art. 9) to any logged-in operator.
           # AML/sanctions/payments reads belong to the role-gated compliance-officer charter,
           # reachable once per-user role propagation lands (ADR-0080 P2) -- not the blanket admin bot.
-          allow: [query.ledger.readonly, query.catalog.readonly, draft.ticket]
+          # query.gl.readonly (trial-balance aggregate) is a ledger-family read the admin bot already
+          # holds in the deployed runtime grant (application.yaml); it carries no PII the ledger read
+          # does not, so it stays inside the least-privilege set alongside query.ledger.readonly.
+          allow: [query.ledger.readonly, query.gl.readonly, query.catalog.readonly, draft.ticket]
           deny:  ["money.*", "gh.pr.*", "*.write", secrets.read.raw,
                   query.compliance.readonly, query.payments.readonly,
                   query.interest.readonly, query.disputes.readonly,
