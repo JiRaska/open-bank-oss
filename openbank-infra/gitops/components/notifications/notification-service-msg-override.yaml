@@ -18,6 +18,12 @@
 # transaction-service's payment-scheme-accepted channel, #2649, and reverted). A
 # properties file carries the EXACT hyphenated/dotted keys, so discovery is unambiguous.
 #
+# client.id is included below too (cosmetic-only — broker-side log/JMX label, not
+# authorization) rather than left as a broken YAML key: SmallRye's expression-expansion
+# interceptor (which resolves ${quarkus.uuid}) runs after config sources merge, so it
+# applies identically regardless of which source supplied the raw string — a properties
+# file is no different from application.yaml here.
+#
 # config_ordinal=500 forces this source to outrank the baked application.yaml (~254).
 # Loaded via QUARKUS_CONFIG_LOCATIONS on the Deployment (notification-service.yaml).
 apiVersion: v1
@@ -31,7 +37,9 @@ metadata:
 data:
   override.properties: |
     config_ordinal=500
+    mp.messaging.incoming.notification-events-in.client.id=notification-service-${quarkus.uuid}
     mp.messaging.incoming.notification-events-in.group.id=notification-service
     mp.messaging.incoming.notification-events-in.auto.offset.reset=earliest
+    mp.messaging.incoming.party-events-in.client.id=notification-service-party-${quarkus.uuid}
     mp.messaging.incoming.party-events-in.group.id=notification-service-party
     mp.messaging.incoming.party-events-in.auto.offset.reset=earliest
