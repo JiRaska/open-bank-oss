@@ -336,6 +336,12 @@ jobs:
       - name: governance-script unit tests
         run: python3 -m unittest discover -s openbank-infra/scripts -p '*_test.py' -v
 
+      # issue #669 scope item 3 / rules.yaml: slo. Every money_path_services entry needs a
+      # matching availability + latency Pyrra ServiceLevelObjective whose target/window match
+      # the governed values in rules.yaml — pyyaml is already installed by the step above.
+      - name: SLO registry consistency (issue #669, rules.yaml: slo)
+        run: python3 .github/scripts/check-slo-registry.py
+
       # ADR-0030 D2: every money-path service must ship a structured STRIDE/DFD
       # threat model. stdlib-only gate, ratchets coverage (a new money-path
       # service or a deleted/stubbed model fails here). Part of the always-run,

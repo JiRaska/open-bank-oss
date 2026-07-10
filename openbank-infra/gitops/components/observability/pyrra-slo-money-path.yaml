@@ -1,0 +1,763 @@
+# Per-money-path-service SLOs (issue #669 scope item 3, rules.yaml: slo). One availability
+# + one latency ServiceLevelObjective per rules.yaml: money_path_services entry, generated
+# from the governed targets there (availability_target/window, latency_target_percent/
+# threshold/window) — check-slo-registry.sh (CI) fails if this file and rules.yaml drift, or
+# if a money-path service is missing either object. Pyrra (ADR-0088 D2) reconciles each into
+# multi-window burn-rate PrometheusRules; error budgets are visible in the pyrra-api UI.
+#
+# Availability uses the same traces_spanmetrics_calls_total{service=...} indicator as the
+# fleet dashboards (dashboard-openbank-ledger-integrity.yaml et al.) — Tempo span-metrics,
+# zero app instrumentation (ADR-0082). Latency uses the traces_spanmetrics_latency_bucket
+# histogram at the le="1" boundary explicitly configured in tempo.yaml's span_metrics
+# processor (Tempo's default buckets don't include a clean 1s boundary).
+#
+# Targets are REFERENCE defaults (rules.yaml: slo comment) — not calibrated against real
+# production traffic. Revisit once the load-benchmark / DR-drill scope of issue #669 lands.
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-ledger-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-ledger-service
+spec:
+  target: "99.9"
+  window: 30d
+  description: "openbank-ledger-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-ledger-service",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-ledger-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-ledger-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-ledger-service
+spec:
+  target: "99"
+  window: 30d
+  description: "openbank-ledger-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-ledger-service",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-ledger-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-transaction-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-transaction-service
+spec:
+  target: "99.9"
+  window: 30d
+  description: "openbank-transaction-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-transaction-service",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-transaction-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-transaction-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-transaction-service
+spec:
+  target: "99"
+  window: 30d
+  description: "openbank-transaction-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-transaction-service",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-transaction-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-account-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-account-service
+spec:
+  target: "99.9"
+  window: 30d
+  description: "openbank-account-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-account-service",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-account-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-account-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-account-service
+spec:
+  target: "99"
+  window: 30d
+  description: "openbank-account-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-account-service",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-account-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-balance-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-balance-service
+spec:
+  target: "99.9"
+  window: 30d
+  description: "openbank-balance-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-balance-service",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-balance-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-balance-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-balance-service
+spec:
+  target: "99"
+  window: 30d
+  description: "openbank-balance-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-balance-service",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-balance-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-sepa-payment-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-sepa-payment
+spec:
+  target: "99.9"
+  window: 30d
+  description: "openbank-sepa-payment availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-sepa-payment",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-sepa-payment"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-sepa-payment-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-sepa-payment
+spec:
+  target: "99"
+  window: 30d
+  description: "openbank-sepa-payment latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-sepa-payment",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-sepa-payment"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-sepa-instant-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-sepa-instant
+spec:
+  target: "99.9"
+  window: 30d
+  description: "openbank-sepa-instant availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-sepa-instant",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-sepa-instant"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-sepa-instant-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-sepa-instant
+spec:
+  target: "99"
+  window: 30d
+  description: "openbank-sepa-instant latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-sepa-instant",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-sepa-instant"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-domestic-payment-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-domestic-payment
+spec:
+  target: "99.9"
+  window: 30d
+  description: "openbank-domestic-payment availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-domestic-payment",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-domestic-payment"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-domestic-payment-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-domestic-payment
+spec:
+  target: "99"
+  window: 30d
+  description: "openbank-domestic-payment latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-domestic-payment",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-domestic-payment"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-clearing-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-clearing-service
+spec:
+  target: "99.9"
+  window: 30d
+  description: "openbank-clearing-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-clearing-service",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-clearing-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-clearing-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-clearing-service
+spec:
+  target: "99"
+  window: 30d
+  description: "openbank-clearing-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-clearing-service",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-clearing-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-swift-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-swift-service
+spec:
+  target: "99.9"
+  window: 30d
+  description: "openbank-swift-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-swift-service",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-swift-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-swift-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-swift-service
+spec:
+  target: "99"
+  window: 30d
+  description: "openbank-swift-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-swift-service",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-swift-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-fx-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-fx-service
+spec:
+  target: "99.9"
+  window: 30d
+  description: "openbank-fx-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-fx-service",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-fx-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-fx-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-fx-service
+spec:
+  target: "99"
+  window: 30d
+  description: "openbank-fx-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-fx-service",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-fx-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-lending-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-lending-service
+spec:
+  target: "99.9"
+  window: 30d
+  description: "openbank-lending-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-lending-service",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-lending-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-lending-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-lending-service
+spec:
+  target: "99"
+  window: 30d
+  description: "openbank-lending-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-lending-service",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-lending-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-sca-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-sca-service
+spec:
+  target: "99.9"
+  window: 30d
+  description: "openbank-sca-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-sca-service",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-sca-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-sca-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-sca-service
+spec:
+  target: "99"
+  window: 30d
+  description: "openbank-sca-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-sca-service",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-sca-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-consent-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-consent-service
+spec:
+  target: "99.9"
+  window: 30d
+  description: "openbank-consent-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-consent-service",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-consent-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-consent-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-consent-service
+spec:
+  target: "99"
+  window: 30d
+  description: "openbank-consent-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-consent-service",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-consent-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-fraud-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-fraud-service
+spec:
+  target: "99.9"
+  window: 30d
+  description: "openbank-fraud-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-fraud-service",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-fraud-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-fraud-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-fraud-service
+spec:
+  target: "99"
+  window: 30d
+  description: "openbank-fraud-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-fraud-service",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-fraud-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-billing-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-billing-service
+spec:
+  target: "99.9"
+  window: 30d
+  description: "openbank-billing-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-billing-service",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-billing-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-billing-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-billing-service
+spec:
+  target: "99"
+  window: 30d
+  description: "openbank-billing-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-billing-service",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-billing-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-settlement-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-settlement-service
+spec:
+  target: "99.9"
+  window: 30d
+  description: "openbank-settlement-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-settlement-service",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-settlement-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-settlement-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-settlement-service
+spec:
+  target: "99"
+  window: 30d
+  description: "openbank-settlement-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-settlement-service",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-settlement-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-sanctions-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-sanctions-service
+spec:
+  target: "99.9"
+  window: 30d
+  description: "openbank-sanctions-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-sanctions-service",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-sanctions-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-sanctions-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-sanctions-service
+spec:
+  target: "99"
+  window: 30d
+  description: "openbank-sanctions-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-sanctions-service",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-sanctions-service"}

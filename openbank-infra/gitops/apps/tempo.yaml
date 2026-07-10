@@ -72,6 +72,15 @@ spec:
               local_blocks:
                 flush_to_storage: true
                 filter_server_spans: false
+              # Explicit latency buckets (issue #669 SLO definitions): Tempo's default
+              # span-metrics buckets (2ms..4.1s exponential) do NOT include a clean 1s
+              # boundary, so a Pyrra `latency` indicator selecting `le="1"` would silently
+              # match zero series — the exact "wrong label, empty result" class of bug this
+              # repo has been burned by before (see podmonitor-openbank-services.yaml).
+              # These boundaries give every money-path SLO's 1s p99 threshold (rules.yaml:
+              # slo.latency_threshold_seconds) a real bucket to read.
+              span_metrics:
+                histogram_buckets: [0.1, 0.25, 0.5, 1, 2, 5]
           # Enable the processors for ALL tenants (span-metrics = RED,
           # service-graphs = dependency edges). The chart templates the main
           # config's `overrides:` block from `.Values.tempo.overrides`
