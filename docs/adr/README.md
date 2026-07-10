@@ -159,7 +159,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0153](0153-savings-goal-metadata.md) | Savings goal metadata on account-service | Accepted | Shipped | — |
 | [0154](0154-agent-pr-approval-policy.md) | Independent agent PR approval for non-sensitive changes | Accepted | Shipped | — |
 | [0155](0155-four-eyes-enforcement-for-money-path-actions.md) | Four-eyes enforcement for money-path actions | Proposed | Partial — pilot only (openbank-sepa-payment) | — |
-| [0156](0156-agent-charters-as-markdown-alongside-agents-yaml.md) | Agent charters as Markdown alongside agents.yaml | Accepted | Partial | — |
+| [0156](0156-agent-charters-as-markdown-alongside-agents-yaml.md) | Agent charters as Markdown alongside agents.yaml | Accepted | Shipped | — |
 
 ---
 

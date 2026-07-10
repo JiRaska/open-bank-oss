@@ -2,8 +2,16 @@
 
 Date: 2026-07-08
 Decision-Status: Accepted
-Delivery-Status: Partial
+Delivery-Status: Shipped
 Author(s): jiri.raska
+
+**Delivery note (2026-07-10):** all four decision points are merged and live —
+`docs/agents/<id>.md` charters + the id-parity CI gate (PR #598), the admin-ui
+bundling, BFF route and `/iaops/agents/<id>` drill-down page (PR #599, deployed via
+`admin-ui-deploy.yml` on 2026-07-09), and the `ProposalResource` `agentId` filter with
+the `openapi.yaml` documentation of `/api/v1/proposals*` (PR #600, released as
+agent-service 1.14.0). The finops cost bridge mentioned in
+`docs/agents/finops-agent.md` remains a separate, out-of-scope follow-up.
 
 ## Context
 
