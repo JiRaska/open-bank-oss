@@ -336,5 +336,6 @@ openbank-admin-ui/patch-*.js
 # artifact left in the repo root.
 sbom-downloads/
 reports/
+!perf/reports/
 *-sbom.cdx.json
 [0-9]* test-reports-*
