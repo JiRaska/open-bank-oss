@@ -4,6 +4,7 @@
 
 package com.openbank.billing.infrastructure.scheduler
 
+import com.openbank.billing.application.port.out.BillableAccountDiscoveryPort
 import com.openbank.billing.application.usecase.BillingCycleService
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
@@ -22,15 +23,19 @@ import java.util.Optional
  * directly (ADR-0100 DST rule, CI-enforced) — and delegates to [BillingCycleService.runCycle] for
  * every configured account.
  *
- * **Known limitation, honestly scoped**: there is no fleet-wide "list every billable account"
- * read port yet (account-service's `listAccounts` is scoped to a single `partyId`, and a
- * monthly-turnover-style aggregate read port does not exist either — ADR-0143's own "Negative"
- * consequences section flags this). Until that port lands, the account batch this scheduler
- * assesses is **operator-configured** (`openbank.billing.scheduler.account-ids`, a comma-separated
- * list) rather than autonomously discovered — the same honesty this codebase already applies to
- * `InterestService.accrueAll`/`capitalizeAll` (both are documented stubs pending "fetch all active
- * accounts"). An empty list is a safe no-op default so this scheduler cannot charge anyone by
- * accident before an operator wires real account discovery (a follow-up, tracked in the PR).
+ * **Batch source** (ADR-0143 / issue #548 follow-up): the fleet-wide "list every billable
+ * account" read port now exists — account-service's `GET /api/v1/accounts/active`, consumed via
+ * [BillableAccountDiscoveryPort]. Because a discovered sweep charges every ACTIVE account in the
+ * fleet, it is guarded by its own opt-in flag on top of `enabled`:
+ *
+ *  1. `openbank.billing.scheduler.account-ids` set → that operator-configured CSV is the batch
+ *     (deliberate manual override; discovery is NOT consulted).
+ *  2. CSV empty + `openbank.billing.scheduler.discovery-enabled=true` → the batch is discovered
+ *     by paging `activeAccounts` (page size `discovery-page-size`), one `runCycle` per page so a
+ *     large book never materializes in memory. A page-read failure aborts the sweep (logged
+ *     error); the monthly re-run is idempotent per (cycleId, accountId, currency).
+ *  3. Neither → safe no-op, same as before this port existed — the scheduler still cannot
+ *     charge anyone by accident on default config.
  */
 @ApplicationScoped
 class BillingCycleScheduler {
@@ -54,6 +59,16 @@ class BillingCycleScheduler {
     @ConfigProperty(name = "openbank.billing.scheduler.currency", defaultValue = "CZK")
     lateinit var currency: String
 
+    /** Opt-in for the fleet-wide discovered sweep (see class KDoc rule 2) — default OFF. */
+    @ConfigProperty(name = "openbank.billing.scheduler.discovery-enabled", defaultValue = "false")
+    var discoveryEnabled: Boolean = false
+
+    @ConfigProperty(name = "openbank.billing.scheduler.discovery-page-size", defaultValue = "100")
+    var discoveryPageSize: Int = DEFAULT_DISCOVERY_PAGE_SIZE
+
+    @Inject
+    lateinit var accountDiscovery: BillableAccountDiscoveryPort
+
     private val log = Logger.getLogger(BillingCycleScheduler::class.java)
 
     @Scheduled(
@@ -68,22 +83,68 @@ class BillingCycleScheduler {
             log.debug("[billing-cycle-scheduler] Disabled — skipping sweep")
             return
         }
+        val cycleId = cycleIdFor(LocalDate.now(clock))
         val accountIds = accountIdsCsv.orElse("").split(",").map { it.trim() }.filter { it.isNotEmpty() }
-        if (accountIds.isEmpty()) {
-            log.debug("[billing-cycle-scheduler] No accounts configured — skipping sweep")
+        when {
+            // Rule 1 (class KDoc): an operator-configured CSV is a deliberate manual override.
+            accountIds.isNotEmpty() -> {
+                log.infof(
+                    "[billing-cycle-scheduler] Starting billing cycle %s for %d configured account(s)",
+                    cycleId,
+                    accountIds.size,
+                )
+                val processed = billingCycleService.runCycle(cycleId, accountIds, currency)
+                log.infof(
+                    "[billing-cycle-scheduler] Billing cycle %s done: %d account(s) processed",
+                    cycleId,
+                    processed,
+                )
+            }
+            discoveryEnabled -> runDiscoveredSweep(cycleId)
+            else -> log.debug("[billing-cycle-scheduler] No accounts configured, discovery off — skipping sweep")
+        }
+    }
+
+    /** Rule 2 (class KDoc): page through account-service's ACTIVE-account sweep, one cycle per page. */
+    @Suppress("TooGenericExceptionCaught") // a failed sweep must abort with ONE clear log line, whatever threw
+    private suspend fun runDiscoveredSweep(cycleId: String) {
+        log.infof("[billing-cycle-scheduler] Starting billing cycle %s via account discovery", cycleId)
+        var cursor: String? = null
+        var pages = 0
+        var processed = 0
+        try {
+            do {
+                val page = accountDiscovery.activeAccounts(discoveryPageSize, cursor)
+                if (page.accountIds.isNotEmpty()) {
+                    processed += billingCycleService.runCycle(cycleId, page.accountIds, currency)
+                    pages++
+                }
+                cursor = page.nextCursor
+            } while (cursor != null)
+        } catch (e: Exception) {
+            // Abort, don't swallow-and-continue: the monthly re-run is idempotent per
+            // (cycleId, accountId, currency), so the safe move is to stop and retry whole.
+            log.errorf(
+                e,
+                "[billing-cycle-scheduler] Billing cycle %s aborted after %d page(s), %d account(s) processed",
+                cycleId,
+                pages,
+                processed,
+            )
             return
         }
-        val cycleId = cycleIdFor(LocalDate.now(clock))
         log.infof(
-            "[billing-cycle-scheduler] Starting billing cycle %s for %d configured account(s)",
+            "[billing-cycle-scheduler] Billing cycle %s done: %d account(s) processed across %d page(s)",
             cycleId,
-            accountIds.size,
+            processed,
+            pages,
         )
-        val processed = billingCycleService.runCycle(cycleId, accountIds, currency)
-        log.infof("[billing-cycle-scheduler] Billing cycle %s done: %d account(s) processed", cycleId, processed)
     }
 
     companion object {
+        /** Matches account-service's own default page size for the /accounts/active sweep. */
+        const val DEFAULT_DISCOVERY_PAGE_SIZE = 100
+
         private val CYCLE_ID_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM")
 
         /** The billing cycle id for a date: the calendar month, e.g. `2026-07`. */

@@ -5,8 +5,11 @@
 package com.openbank.billing
 
 import com.openbank.billing.infrastructure.adapter.RestAccountContextPort
+import com.openbank.billing.infrastructure.adapter.RestBillableAccountDiscoveryPort
 import com.openbank.billing.infrastructure.adapter.RestProductCatalogPort
 import com.openbank.billing.infrastructure.client.AccountDto
+import com.openbank.billing.infrastructure.client.AccountPageDto
+import com.openbank.billing.infrastructure.client.AccountPageInfoDto
 import com.openbank.billing.infrastructure.client.AccountRestClient
 import com.openbank.billing.infrastructure.client.BalanceDto
 import com.openbank.billing.infrastructure.client.BalanceRestClient
@@ -65,6 +68,44 @@ class RestBillingAdaptersTest {
 
         assertThat(r).isNotNull
         assertThat(r!!.context.balance).isNull()
+    }
+
+    @Test
+    fun `activeAccounts maps ids and forwards the cursor only while more pages exist`(): Unit = runBlocking {
+        val accounts = mockk<AccountRestClient>()
+        every { accounts.listActiveAccounts(100, null) } returns Uni.createFrom().item(
+            AccountPageDto(
+                data = listOf(AccountDto("acc-1", "prod-1", "CZK"), AccountDto("acc-2", "prod-1", "CZK")),
+                pagination = AccountPageInfoDto(hasNextPage = true, nextCursor = "c1"),
+            ),
+        )
+        every { accounts.listActiveAccounts(100, "c1") } returns Uni.createFrom().item(
+            AccountPageDto(
+                data = listOf(AccountDto("acc-3", "prod-2", "CZK")),
+                pagination = AccountPageInfoDto(hasNextPage = false, nextCursor = null),
+            ),
+        )
+        val port = RestBillableAccountDiscoveryPort(accounts)
+
+        val first = port.activeAccounts(100, null)
+        assertThat(first.accountIds).containsExactly("acc-1", "acc-2")
+        assertThat(first.nextCursor).isEqualTo("c1")
+
+        val last = port.activeAccounts(100, "c1")
+        assertThat(last.accountIds).containsExactly("acc-3")
+        assertThat(last.nextCursor).isNull()
+    }
+
+    @Test
+    fun `activeAccounts propagates a failed page read instead of failing open`(): Unit = runBlocking {
+        val accounts = mockk<AccountRestClient>()
+        every { accounts.listActiveAccounts(any(), any()) } returns
+            Uni.createFrom().failure(RuntimeException("account-service down"))
+        val port = RestBillableAccountDiscoveryPort(accounts)
+
+        val thrown = runCatching { port.activeAccounts(100, null) }.exceptionOrNull()
+
+        assertThat(thrown).isInstanceOf(RuntimeException::class.java)
     }
 
     @Test

@@ -6,6 +6,8 @@ package com.openbank.billing.infrastructure.adapter
 
 import com.openbank.billing.application.port.out.AccountBilling
 import com.openbank.billing.application.port.out.AccountContextPort
+import com.openbank.billing.application.port.out.BillableAccountDiscoveryPort
+import com.openbank.billing.application.port.out.BillableAccountsPage
 import com.openbank.billing.application.port.out.ProductCatalogPort
 import com.openbank.billing.domain.BillableFee
 import com.openbank.billing.infrastructure.client.AccountRestClient
@@ -43,6 +45,26 @@ class RestAccountContextPort(
             currency = currency,
         )
         return AccountBilling(productId = account.productId, context = context)
+    }
+}
+
+/**
+ * Discovers the billing sweep's account batch from account-service's fleet-wide
+ * `GET /api/v1/accounts/active` (ADR-0143 / issue #548 follow-up). Deliberately NOT
+ * fail-open: an error propagates so the scheduler aborts (and logs) the sweep instead of
+ * silently billing a partial batch — the monthly re-run is idempotent per
+ * (cycleId, accountId, currency), so an aborted sweep is safely retried.
+ */
+@ApplicationScoped
+class RestBillableAccountDiscoveryPort(@RestClient private val accounts: AccountRestClient) :
+    BillableAccountDiscoveryPort {
+
+    override suspend fun activeAccounts(limit: Int, afterCursor: String?): BillableAccountsPage {
+        val page = accounts.listActiveAccounts(limit, afterCursor).awaitSuspending()
+        return BillableAccountsPage(
+            accountIds = page.data.map { it.id },
+            nextCursor = if (page.pagination.hasNextPage) page.pagination.nextCursor else null,
+        )
     }
 }
 

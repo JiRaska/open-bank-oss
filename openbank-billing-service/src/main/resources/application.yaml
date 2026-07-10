@@ -129,13 +129,18 @@ openbank:
     initial-delay: 5s
   billing:
     scheduler:
-      # Disabled by default: the account batch is operator-configured (no fleet-wide account
-      # discovery port exists yet — see BillingCycleScheduler's KDoc). Flip on and set
-      # account-ids only after that follow-up lands or for a deliberately scoped manual run.
+      # Disabled by default — the scheduler cannot charge anyone on default config.
+      # Batch source (BillingCycleScheduler KDoc, ADR-0143 / issue #548): account-ids CSV set
+      # -> deliberate manual override; CSV empty + discovery-enabled=true -> the batch is
+      # discovered from account-service's fleet-wide GET /api/v1/accounts/active; neither -> no-op.
       enabled: "${BILLING_SCHEDULER_ENABLED:false}"
       cron: "${BILLING_SCHEDULER_CRON:0 0 3 1 * ?}"
       account-ids: "${BILLING_SCHEDULER_ACCOUNT_IDS:}"
       currency: "${BILLING_SCHEDULER_CURRENCY:CZK}"
+      # Fleet-wide discovered sweep charges EVERY active account — its own opt-in on top of
+      # `enabled`, so flipping the scheduler on for a scoped manual run can never fan out.
+      discovery-enabled: "${BILLING_SCHEDULER_DISCOVERY_ENABLED:false}"
+      discovery-page-size: "${BILLING_SCHEDULER_DISCOVERY_PAGE_SIZE:100}"
 
 "%dev":
   quarkus:
