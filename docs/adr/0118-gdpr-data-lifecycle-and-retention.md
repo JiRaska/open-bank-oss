@@ -3,14 +3,14 @@
 Date: 2026-06-25
 Author: Claude (paired with Jiří Raška)
 Status: Accepted
-Delivery-Status: Partial
+Delivery-Status: Shipped
 
-**Delivery note (updated 2026-07-01):**
+**Delivery note (updated 2026-07-10):**
 - **Art. 17 erasure cascade** — ✅ Shipped: `party-service` anonymises in-place + deletes binary documents; `kyc-service` deletes documents and anonymises check results (`PartyEventConsumer.handleErased`); `notification-service` deletes preferences and history (`PartyErasureConsumer`); `card-issuance-service` anonymises `cardholderName`, `embossedName`, `deliveryAddress` (`PartyEventConsumer`). `audit-service`, `ledger-service`, `transaction-service` correctly retain data (AML/accounting override, Art. 17(3)(b)).
-- **Art. 15 data export** — ✅ Partial: `GET /api/v1/parties/{id}/gdpr-export` in `party-service` covers direct PII. kyc-service (sensitive PII) and card-issuance-service (card PII) contributions are ⬜ pending.
-- **Automated retention enforcement** — ⬜ Pending: TTL-based cleanup for session logs (90 d), KYC documents (5 y), and card PII after card expiry is policy intent only — no scheduler or batch job exists yet.
+- **Art. 15 data export** — ✅ Shipped: `GET /api/v1/parties/{id}/gdpr-export` in `party-service` aggregates direct PII with the cross-service contributions — `GdprAggregationAdapter` calls kyc-service (`GET /api/v1/kyc/cases/party/{id}`, sensitive PII) and card-issuance-service (`GET /api/v1/cards/party/{id}`, card PII), best-effort so one downstream being down degrades the export rather than failing it. Endpoints wired via #2630; cross-service test coverage closed via #356.
+- **Automated retention enforcement** — ✅ Shipped: three schedulers now exist. `card-issuance-service` (`CardPiiRetentionScheduler`) and `kyc-service` (`KycRetentionScheduler`) are enabled and live (`RETENTION_*_ENABLED=true`, `dry-run=false`, 5-year retention per AML Act §16). `audit-service`'s `SessionLogRetentionScheduler` (session/access-log 90-day TTL) ships **disabled-by-default** (`openbank.retention.session-log.enabled=false`, `dry-run=true`, #356) — it is new PII-deletion code, so enabling it per environment is a deliberate operational decision, not a delivery gap.
 
-Both pending items (Art. 15 export gaps, automated retention enforcement) tracked in issue #268.
+Issue #268 (Art. 15 export gaps + retention enforcement) is **closed** (2026-07-06). Remaining is operational only: a deliberate per-environment decision to enable session-log retention.
 
 ## Context
 
@@ -18,12 +18,14 @@ GDPR Art. 17 (Right to Erasure) is partially implemented in `party-service`: `DE
 anonymises the party row in-place and deletes binary document files. `PARTY_ERASED` is published
 via `KafkaPartyEventPublisher`.
 
-This ADR establishes the data lifecycle policy and the implementation plan for the remaining gaps:
+This ADR establishes the data lifecycle policy and the implementation plan, all of which has since shipped:
 1. ✅ `PARTY_ERASED` consumers implemented in `kyc-service` (`PartyEventConsumer`) and
    `notification-service` (`PartyErasureConsumer`).
-2. ✅ GDPR Art. 15 (Right of Access / data export) implemented: `GET /api/v1/parties/{id}/gdpr-export`
-   in party-service (`PartyGdprExport`).
-3. Retention enforcement (automated cleanup) remains pending — policy intent only.
+2. ✅ GDPR Art. 15 (Right of Access / data export) implemented and aggregated cross-service:
+   `GET /api/v1/parties/{id}/gdpr-export` in party-service pulls kyc + card PII via
+   `GdprAggregationAdapter`.
+3. ✅ Retention enforcement (automated cleanup) implemented: `CardPiiRetentionScheduler` (live),
+   `KycRetentionScheduler` (live), `SessionLogRetentionScheduler` (shipped, disabled-by-default).
 4. The AML/accounting retention vs. GDPR erasure conflict is documented below.
 
 ## Decision
@@ -49,7 +51,10 @@ This ADR establishes the data lifecycle policy and the implementation plan for t
 | Session / access logs | **90 days** | Proportionality; no specific statutory requirement |
 | Card data (maskedPan, cardholder name) | Duration of card + 5 years | AML Act §16 |
 
-Retention periods are currently **policy intent only** — no automated cleanup is implemented.
+Retention enforcement is implemented by per-service schedulers: `CardPiiRetentionScheduler`
+(card-issuance-service) and `KycRetentionScheduler` (kyc-service) run live on the 5-year AML clock;
+`SessionLogRetentionScheduler` (audit-service, 90-day session/access logs) ships disabled-by-default
+and is enabled per environment by a deliberate operational decision (it is PII-deleting code).
 
 **3. Erasure model (GDPR Art. 17 vs. AML conflict).**
 
@@ -82,18 +87,23 @@ Services that retain data under AML/accounting obligations (`audit-service`, `le
 
 **5. Retention enforcement (NOT YET IMPLEMENTED).**
 
-A scheduled Temporal workflow will enforce retention periods:
-- Session/access logs older than 90 days → delete from audit-service (behavioural PII only).
-- KYC documents older than `relationshipEndDate + 5 years` → delete from kyc-service.
-- Card PII older than `cardExpiry + 5 years` → anonymise in card-issuance-service.
+Per-service `@Scheduled` retention jobs enforce these periods (implemented as service-local
+schedulers rather than one central Temporal workflow — each owner deletes its own PII, keeping the
+boundary clean):
+- Session/access logs older than 90 days → delete from audit-service (`SessionLogRetentionScheduler`,
+  behavioural PII only; ships disabled-by-default).
+- KYC documents older than `relationshipEndDate + 5 years` → delete from kyc-service
+  (`KycRetentionScheduler`, live).
+- Card PII older than `cardExpiry + 5 years` → anonymise in card-issuance-service
+  (`CardPiiRetentionScheduler`, live).
 
-Ledger and transaction records are never deleted by this workflow.
+Ledger and transaction records are never deleted by these jobs.
 
 **6. Right of Access — Art. 15.**
 
 ✅ `GET /api/v1/parties/{id}/gdpr-export` is implemented in party-service (`PartyGdprExport` aggregate,
-`PartyResource`). It aggregates PII from party-service directly. kyc-service and card-issuance-service
-export contributions remain pending.
+`PartyResource`). It aggregates party-service PII directly and pulls kyc-service and
+card-issuance-service contributions via `GdprAggregationAdapter` (best-effort cross-service fan-out).
 
 ## Alternatives considered
 
@@ -112,10 +122,13 @@ export contributions remain pending.
 - party-service erasure (anonymise + document delete) is already implemented.
 
 **Negative**
-- Retention enforcement is not automated — data is not deleted when its retention period expires
-  (session logs, KYC documents, card PII).
-- GDPR Art. 15 export covers party-service only; kyc-service and card-issuance-service contributions
-  are pending.
+- Session-log retention (audit-service) ships disabled-by-default, so behavioural-PII cleanup does
+  not run until an operator deliberately enables it per environment. KYC-document and card-PII
+  retention run live; ledger/transaction records are intentionally never deleted (AML/accounting
+  override).
+- The cross-service Art. 15 export is best-effort: if kyc-service or card-issuance-service is
+  unavailable, the export degrades (omits that section) rather than failing — an availability, not
+  a completeness, trade-off.
 
 **Neutral**
 - Tombstone email pattern is an established industry approach for GDPR erasure in systems with
@@ -123,9 +136,10 @@ export contributions remain pending.
 
 ## Compliance impact
 
-- GDPR Art. 5(1)(e): storage limitation — retention periods defined above.
+- GDPR Art. 5(1)(e): storage limitation — retention periods defined above and enforced by the
+  per-service retention schedulers (card/KYC live; session-log disabled-by-default).
 - GDPR Art. 17: right to erasure — party-service ✅, kyc-service ✅, notification-service ✅, card-issuance-service ✅.
-- GDPR Art. 15: right of access — party-service ✅ implemented; kyc + card data export pending.
+- GDPR Art. 15: right of access — party-service ✅ implemented; kyc + card export ✅ aggregated via `GdprAggregationAdapter`.
 - GDPR Art. 5(2): accountability — audit log retention (5 years) supports this.
 - AML Act No. 253/2008 §16: 5-year retention after relationship end — implemented by omission
   (audit/ledger/transaction records are not deleted).
