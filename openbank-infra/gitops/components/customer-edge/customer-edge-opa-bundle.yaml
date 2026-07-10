@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: customer-edge
     app.kubernetes.io/part-of: customer-edge
   annotations:
-    openbank.tech/policy-checksum: "19b8391829116927"
+    openbank.tech/policy-checksum: "deb6c71645a3f6d0"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -367,14 +367,14 @@ data:
     # MCP capability is meant to cover (e.g. query.ledger.readonly also backs the
     # account/transaction/balance read tools, not just ledger). Keep the two in sync: a new
     # query.<x>.readonly tool, or a domain added to an existing one, needs an entry here too, or
-    # the fleet regains this exact gap. Some domains (catalog, aml, clearing, sepa-instant,
-    # dispute, balance-via-query.balance.readonly) have no @Authorize-gated read endpoint yet --
-    # their entries are forward-looking and inert until that service adopts @Authorize on its
-    # reads (tracked in issue #401). Where a service's only real @Authorize action today is a
-    # WRITE (e.g. aml-service's amlCase.updateDecision, clearing-service's clearingBatch.settle,
-    # sepa-instant's sctInstPayment.recall), the verified write-action prefix is listed alongside
-    # the bare service name, since a future read endpoint may reuse either convention and both
-    # are inert until then anyway.
+    # the fleet regains this exact gap. dispute + complaint reads are now @Authorize-gated
+    # (dispute.read/.list, complaint.read/.list) so query.disputes.readonly is live; catalog and
+    # aml still have no @Authorize-gated read endpoint yet -- their entries are forward-looking and
+    # inert until that service adopts @Authorize on its reads (tracked in issue #401). Where a
+    # service's only real @Authorize action today is a WRITE (e.g. aml-service's
+    # amlCase.updateDecision), the verified write-action prefix is listed alongside the bare
+    # service name, since a future read endpoint may reuse either convention and both are inert
+    # until then anyway.
     rest_domains := {
     	"query.ledger.readonly": {"ledger", "account", "transaction", "balance"},
     	"query.gl.readonly": {"ledger", "gl"},
@@ -382,7 +382,7 @@ data:
     	"query.compliance.readonly": {"aml", "amlCase", "sanctions"},
     	"query.payments.readonly": {"fx", "clearing", "clearingBatch", "sepa-instant", "sctInstPayment"},
     	"query.interest.readonly": {"interest"},
-    	"query.disputes.readonly": {"dispute"},
+    	"query.disputes.readonly": {"dispute", "complaint"},
     	"query.balance.readonly": {"balance"},
     	"query.transaction.readonly": {"transaction"},
     }
