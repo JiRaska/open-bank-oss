@@ -47,12 +47,14 @@ class ComplaintResource(
             .onFailure().recoverWithItem { e -> Response.serverError().entity(mapOf("error" to e.message)).build() }
 
     @GET
+    @Authorize(action = "complaint.list")
     @Operation(summary = "List complaints, optionally filtered by status")
     fun list(@QueryParam("status") status: String?): Uni<List<Complaint>> =
         if (status != null) getUseCase.listByStatus(ComplaintStatus.valueOf(status)) else getUseCase.listAll()
 
     @GET
     @Path("/{id}")
+    @Authorize(action = "complaint.read", resource = "#id")
     @Operation(summary = "Get complaint by ID")
     fun get(@PathParam("id") id: UUID): Uni<Response> = getUseCase.getComplaint(id).map {
         it?.let { c -> Response.ok(c).build() }

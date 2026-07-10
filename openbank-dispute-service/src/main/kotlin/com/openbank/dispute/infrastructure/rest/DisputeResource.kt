@@ -34,6 +34,7 @@ class DisputeResource(
             .onFailure().recoverWithItem { e -> Response.serverError().entity(mapOf("error" to e.message)).build() }
 
     @GET
+    @Authorize(action = "dispute.list")
     @Operation(summary = "List disputes by status")
     fun list(@QueryParam("status") status: String?): Uni<List<Dispute>> = if (status != null) {
         getUseCase.listByStatus(DisputeStatus.valueOf(status))
@@ -43,18 +44,21 @@ class DisputeResource(
 
     @GET
     @Path("/{id}")
+    @Authorize(action = "dispute.read", resource = "#id")
     @Operation(summary = "Get dispute by ID")
     fun get(@PathParam("id") id: UUID): Uni<Response> =
         getUseCase.getDispute(id).map { it?.let { d -> Response.ok(d).build() } ?: Response.status(404).build() }
 
     @GET
     @Path("/reference/{ref}")
+    @Authorize(action = "dispute.read", resource = "#ref")
     @Operation(summary = "Get dispute by reference")
     fun getByRef(@PathParam("ref") ref: String): Uni<Response> =
         getUseCase.getByReference(ref).map { it?.let { d -> Response.ok(d).build() } ?: Response.status(404).build() }
 
     @GET
     @Path("/account/{accountId}")
+    @Authorize(action = "dispute.list", resource = "#accountId")
     @Operation(summary = "List disputes for an account")
     fun listByAccount(@PathParam("accountId") accountId: UUID): Uni<List<Dispute>> = getUseCase.listByAccount(accountId)
 
@@ -109,11 +113,13 @@ class DisputeResource(
 
     @GET
     @Path("/{id}/timeline")
+    @Authorize(action = "dispute.read", resource = "#id")
     @Operation(summary = "Get dispute timeline")
     fun getTimeline(@PathParam("id") id: UUID): Uni<List<DisputeTimelineEvent>> = getUseCase.getTimeline(id)
 
     @GET
     @Path("/{id}/evidence")
+    @Authorize(action = "dispute.read", resource = "#id")
     @Operation(summary = "Get dispute evidence")
     fun getEvidence(@PathParam("id") id: UUID): Uni<List<DisputeEvidence>> = getUseCase.getEvidence(id)
 

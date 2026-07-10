@@ -19,7 +19,7 @@ charters := {
 			"id": "compliance-officer",
 			"plane": "control",
 			"tools": {
-				"allow": ["query.ledger.readonly", "query.gl.readonly", "query.catalog.readonly", "read.logs", "read.governance", "draft.ticket"],
+				"allow": ["query.ledger.readonly", "query.gl.readonly", "query.catalog.readonly", "query.disputes.readonly", "read.logs", "read.governance", "draft.ticket"],
 				"deny": ["money.*", "gh.pr.*", "*.write"],
 			},
 		},
@@ -218,6 +218,29 @@ test_allow_rest_action_via_readonly_tool_ledger_list if {
 test_allow_rest_action_via_readonly_tool_ledger_read if {
 	agents.allow with data.agents as charters
 		with input as {"agent": "compliance-officer", "tool": "ledger.read", "resource": null}
+}
+
+# query.disputes.readonly now bridges to dispute AND complaint reads (issue #401 part 1):
+# dispute-service adopted @Authorize on both resources (dispute.read/.list, complaint.read/.list),
+# so the previously-inert bucket entry is live.
+test_allow_rest_action_via_disputes_readonly_dispute if {
+	agents.allow with data.agents as charters
+		with input as {"agent": "compliance-officer", "tool": "dispute.list", "resource": null}
+	agents.allow with data.agents as charters
+		with input as {"agent": "compliance-officer", "tool": "dispute.read", "resource": "d-1"}
+}
+
+test_allow_rest_action_via_disputes_readonly_complaint if {
+	agents.allow with data.agents as charters
+		with input as {"agent": "compliance-officer", "tool": "complaint.list", "resource": null}
+	agents.allow with data.agents as charters
+		with input as {"agent": "compliance-officer", "tool": "complaint.read", "resource": "c-1"}
+}
+
+# Still read-only: a complaint WRITE verb is not bridged by the readonly capability.
+test_deny_rest_action_complaint_write_not_bridged if {
+	not agents.allow with data.agents as charters
+		with input as {"agent": "compliance-officer", "tool": "complaint.update", "resource": "c-1"}
 }
 
 # The bridge is read-only: a write verb in the same domain is NOT granted by the readonly
