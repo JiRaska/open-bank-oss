@@ -17,9 +17,8 @@ import jakarta.ws.rs.ext.Provider
  */
 @Provider
 class MakerCheckerExceptionMapper : ExceptionMapper<MakerCheckerViolation> {
-    override fun toResponse(exception: MakerCheckerViolation): Response =
-        Response.status(Response.Status.CONFLICT)
-            .type(MediaType.APPLICATION_JSON)
-            .entity(mapOf("error" to "maker_checker_violation", "message" to (exception.message ?: "")))
-            .build()
+    override fun toResponse(exception: MakerCheckerViolation): Response = Response.status(Response.Status.CONFLICT)
+        .type(MediaType.APPLICATION_JSON)
+        .entity(mapOf("error" to "maker_checker_violation", "message" to (exception.message ?: "")))
+        .build()
 }

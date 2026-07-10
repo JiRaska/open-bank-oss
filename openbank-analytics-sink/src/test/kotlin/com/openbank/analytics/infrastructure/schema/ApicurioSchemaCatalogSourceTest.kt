@@ -19,10 +19,8 @@ class ApicurioSchemaCatalogSourceTest {
     private val mapperFixture = ObjectMapper()
 
     /** Replays scripted JSON bodies keyed by request path; records every path it was asked for. */
-    private class ScriptedApicurio(
-        mapper: ObjectMapper,
-        private val responses: Map<String, String>
-    ) : ApicurioSchemaCatalogSource() {
+    private class ScriptedApicurio(mapper: ObjectMapper, private val responses: Map<String, String>) :
+        ApicurioSchemaCatalogSource() {
         val calls = mutableListOf<String>()
 
         init {
@@ -63,8 +61,8 @@ class ApicurioSchemaCatalogSourceTest {
                 "/apis/registry/v2/groups/default/artifacts/AccountOpened/versions?limit=500"
                     to """{"versions":[{"version":"1"},{"version":"2"}]}""",
                 "/apis/registry/v2/groups/default/artifacts/PartyRegistered/versions?limit=500"
-                    to """{"versions":[{"version":"1"}]}"""
-            )
+                    to """{"versions":[{"version":"1"}]}""",
+            ),
         )
 
         val catalog = src.load()

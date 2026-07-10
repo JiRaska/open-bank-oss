@@ -15,12 +15,7 @@ import java.time.Instant
  * rows. Once the producer bug is fixed, an operator replays the quarantined payloads through the
  * normal mapping path; until then they are visible and counted, never silently lost.
  */
-data class DeadLetterRecord(
-    val contentHash: String,
-    val rawPayload: String,
-    val error: String,
-    val failedAt: Instant
-)
+data class DeadLetterRecord(val contentHash: String, val rawPayload: String, val error: String, val failedAt: Instant)
 
 /**
  * Outbound port for quarantining un-projectable messages (ADR-0022).

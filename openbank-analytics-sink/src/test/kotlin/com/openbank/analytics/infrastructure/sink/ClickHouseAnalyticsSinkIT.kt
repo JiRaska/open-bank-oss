@@ -20,6 +20,7 @@ import org.testcontainers.junit.jupiter.Testcontainers
 import org.testcontainers.utility.MountableFile
 import java.time.Duration
 import java.time.Instant
+import java.util.Optional
 import java.util.UUID
 
 /**
@@ -52,7 +53,7 @@ class ClickHouseAnalyticsSinkIT {
                 .withEnv("CLICKHOUSE_PASSWORD", PASSWORD)
                 .withCopyFileToContainer(
                     MountableFile.forClasspathResource("clickhouse/V1__analytics_bronze_silver.sql"),
-                    "/docker-entrypoint-initdb.d/01-analytics.sql"
+                    "/docker-entrypoint-initdb.d/01-analytics.sql",
                 )
                 .withExposedPorts(8123)
                 // The mounted DDL triggers ClickHouse's initdb flow (temp server → run SQL → shut down →
@@ -65,7 +66,12 @@ class ClickHouseAnalyticsSinkIT {
 
         /** Verification client (real HTTP reads), configured against the container. */
         private val reader: ClickHouseClient by lazy {
-            ClickHouseClient().apply { url = baseUrl(); database = DB; username = USER; password = PASSWORD }
+            ClickHouseClient().apply {
+                url = baseUrl()
+                database = DB
+                username = USER
+                password = Optional.of(PASSWORD)
+            }
         }
 
         @BeforeAll
@@ -87,7 +93,11 @@ class ClickHouseAnalyticsSinkIT {
     private val mapper = ObjectMapper()
 
     private fun sink() = ClickHouseAnalyticsSink().apply {
-        url = baseUrl(); database = DB; username = USER; password = PASSWORD; mapper = this@ClickHouseAnalyticsSinkIT.mapper
+        url = baseUrl()
+        database = DB
+        username = USER
+        password = Optional.of(PASSWORD)
+        mapper = this@ClickHouseAnalyticsSinkIT.mapper
     }
 
     @Test
@@ -104,14 +114,14 @@ class ClickHouseAnalyticsSinkIT {
             actorId = "operator-7",
             actorType = "ROLE_OPERATOR",
             traceId = "trace-abc",
-            payload = mapOf("currencyCode" to "CZK", "status" to "ACTIVE")
+            payload = mapOf("currencyCode" to "CZK", "status" to "ACTIVE"),
         )
 
         sink().writeBatch(listOf(env))
 
         val row = reader.query(
             "SELECT aggregate_type, aggregate_version, event_type, record_hash, payload " +
-                "FROM $DB.bronze_events WHERE event_id = '${env.eventId}' FORMAT TabSeparated"
+                "FROM $DB.bronze_events WHERE event_id = '${env.eventId}' FORMAT TabSeparated",
         ).trim()
 
         val cols = row.split("\t")
@@ -133,7 +143,7 @@ class ClickHouseAnalyticsSinkIT {
             eventType = "party.party.created",
             occurredAt = Instant.parse("2026-05-30T11:00:00.000Z"),
             sourceService = "openbank-party-service",
-            schemaVersion = 1
+            schemaVersion = 1,
         )
 
         // Same event delivered twice (Kafka at-least-once). ReplacingMergeTree keyed by
@@ -142,7 +152,7 @@ class ClickHouseAnalyticsSinkIT {
         sink().writeBatch(listOf(env))
 
         val count = reader.query(
-            "SELECT count() FROM $DB.bronze_events FINAL WHERE event_id = '${env.eventId}' FORMAT TabSeparated"
+            "SELECT count() FROM $DB.bronze_events FINAL WHERE event_id = '${env.eventId}' FORMAT TabSeparated",
         ).trim()
         assertThat(count).isEqualTo("1")
     }

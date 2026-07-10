@@ -26,7 +26,9 @@ class NoOpBackfillSource : BackfillSource {
     override suspend fun read(window: BackfillWindow, request: BackfillRequest): List<String> {
         log.warnf(
             "NoOpBackfillSource: no durable reader wired; window=%s..%s source=%s returns 0 events",
-            window.from, window.to, request.source
+            window.from,
+            window.to,
+            request.source,
         )
         return emptyList()
     }

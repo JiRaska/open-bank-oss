@@ -7,8 +7,8 @@ package com.openbank.analytics.application
 import com.openbank.analytics.application.port.out.SchemaCatalogSource
 import com.openbank.libs.analytics.SchemaCatalog
 import com.openbank.libs.analytics.SchemaKey
-import jakarta.enterprise.context.ApplicationScoped
 import jakarta.annotation.PostConstruct
+import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger

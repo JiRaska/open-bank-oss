@@ -49,8 +49,8 @@
     <ID>TooGenericExceptionCaught:ApicurioSchemaCatalogSource.kt$ApicurioSchemaCatalogSource$e: Exception</ID>
     <ID>TooManyFunctions:S3WormArchive.kt$S3WormArchive : WormArchive</ID>
     <ID>UnusedParameter:DataResidencyValidator.kt$DataResidencyValidator$@Observes event: StartupEvent</ID>
-    <ID>UseCheckOrError:ClickHouseAnalyticsSink.kt$ClickHouseAnalyticsSink$throw IllegalStateException( "ClickHouse insert failed: HTTP ${response.statusCode()} ${response.body().take(500)}" )</ID>
-    <ID>UseCheckOrError:ClickHouseClient.kt$ClickHouseClient$throw IllegalStateException( "ClickHouse query failed: HTTP ${response.statusCode()} ${response.body().take(500)}" )</ID>
+    <ID>UseCheckOrError:ClickHouseAnalyticsSink.kt$ClickHouseAnalyticsSink$throw IllegalStateException( "ClickHouse insert failed: HTTP ${response.statusCode()} ${response.body().take(500)}", )</ID>
+    <ID>UseCheckOrError:ClickHouseClient.kt$ClickHouseClient$throw IllegalStateException( "ClickHouse query failed: HTTP ${response.statusCode()} ${response.body().take(500)}", )</ID>
     <ID>UseCheckOrError:HttpReconciliationSource.kt$HttpReconciliationSource$throw IllegalStateException( "reconciliation-summary failed: HTTP ${response.statusCode()} ${response.body().take(500)}" )</ID>
     <ID>UseCheckOrError:HttpReconciliationSourceTest.kt$HttpReconciliationSourceTest.&lt;no name provided&gt;$throw IllegalStateException("connection refused")</ID>
   </CurrentIssues>

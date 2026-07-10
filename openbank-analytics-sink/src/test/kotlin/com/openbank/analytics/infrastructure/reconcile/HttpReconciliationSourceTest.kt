@@ -8,11 +8,12 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.openbank.libs.analytics.AggregateKey
-import java.net.URI
-import java.time.Clock
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.net.URI
+import java.time.Clock
+import java.util.Optional
 
 /**
  * Plain-JUnit tests for [HttpReconciliationSource] (ADR-0026). A subclass stubs the HTTP [fetch] seam
@@ -29,7 +30,7 @@ class HttpReconciliationSourceTest {
         var fetchCalls = 0
 
         init {
-            endpointsSpec = spec
+            endpointsSpec = Optional.of(spec)
             mapper = this@HttpReconciliationSourceTest.mapper
             clock = Clock.systemUTC()
         }
@@ -94,7 +95,7 @@ class HttpReconciliationSourceTest {
         """.trimIndent()
         val source = object : HttpReconciliationSource() {
             init {
-                endpointsSpec = "account=http://acct:8081,down=http://down:9999"
+                endpointsSpec = Optional.of("account=http://acct:8081,down=http://down:9999")
                 mapper = this@HttpReconciliationSourceTest.mapper
                 clock = Clock.systemUTC()
             }

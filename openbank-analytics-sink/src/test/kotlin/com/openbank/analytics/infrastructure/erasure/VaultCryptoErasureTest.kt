@@ -8,6 +8,7 @@ import com.openbank.libs.analytics.AggregateKey
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.util.Optional
 
 /**
  * Plain-JUnit tests for the Vault-Transit crypto-shred adapter. The HTTP seam is overridden to script
@@ -22,7 +23,7 @@ class VaultCryptoErasureTest {
 
         init {
             url = "http://vault:8200"
-            token = "test-token"
+            token = Optional.of("test-token")
             mount = "transit"
             keyPrefix = "analytics"
         }
@@ -48,8 +49,8 @@ class VaultCryptoErasureTest {
         val v = ScriptedVault(
             mapOf(
                 "POST transit/keys/analytics-account-acc-1/config" to (204 to ""),
-                "DELETE transit/keys/analytics-account-acc-1" to (204 to "")
-            )
+                "DELETE transit/keys/analytics-account-acc-1" to (204 to ""),
+            ),
         )
 
         val affected = v.erase(AggregateKey("ACCOUNT", "acc-1"))
@@ -57,14 +58,14 @@ class VaultCryptoErasureTest {
         assertThat(affected).isEqualTo(1)
         assertThat(v.calls).containsExactly(
             "POST transit/keys/analytics-account-acc-1/config",
-            "DELETE transit/keys/analytics-account-acc-1"
+            "DELETE transit/keys/analytics-account-acc-1",
         )
     }
 
     @Test
     fun `erase is an idempotent no-op when the key is already gone`() = runBlocking<Unit> {
         val v = ScriptedVault(
-            mapOf("POST transit/keys/analytics-account-acc-1/config" to (404 to "not found"))
+            mapOf("POST transit/keys/analytics-account-acc-1/config" to (404 to "not found")),
         )
 
         val affected = v.erase(AggregateKey("ACCOUNT", "acc-1"))
@@ -77,7 +78,7 @@ class VaultCryptoErasureTest {
     @Test
     fun `erase throws on an unexpected Vault error so the failure is visible`() {
         val v = ScriptedVault(
-            mapOf("POST transit/keys/analytics-account-acc-1/config" to (500 to "boom"))
+            mapOf("POST transit/keys/analytics-account-acc-1/config" to (500 to "boom")),
         )
 
         runCatching { runBlocking { v.erase(AggregateKey("ACCOUNT", "acc-1")) } }

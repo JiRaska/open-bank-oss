@@ -23,7 +23,7 @@ data class IntegrityAnchor(
     val previousAnchorHash: String?,
     val recordCount: Int,
     val source: String,
-    val sealedAt: Instant
+    val sealedAt: Instant,
 )
 
 /**

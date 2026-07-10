@@ -6,10 +6,10 @@ package com.openbank.analytics.infrastructure.worm
 
 import com.openbank.analytics.application.port.out.IntegrityAnchor
 import com.openbank.analytics.application.port.out.WormArchive
-import jakarta.enterprise.context.ApplicationScoped
 import jakarta.annotation.PostConstruct
-import java.util.concurrent.atomic.AtomicReference
+import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Default [WormArchive] binding: logs each sealed anchor as a structured line and keeps the last one
@@ -30,7 +30,7 @@ class LoggingWormArchive : WormArchive {
     fun warn() {
         log.warn(
             "Using LoggingWormArchive: integrity anchors are logged, NOT sealed to durable WORM storage. " +
-                "Bind the S3-Object-Lock adapter in production (ADR-0023 F1+F2)."
+                "Bind the S3-Object-Lock adapter in production (ADR-0023 F1+F2).",
         )
     }
 
@@ -38,8 +38,11 @@ class LoggingWormArchive : WormArchive {
         last.set(anchor)
         log.infof(
             "WORM anchor sealed (log-only) anchorId=%s merkleRoot=%s prev=%s records=%d source=%s",
-            anchor.anchorId, anchor.merkleRoot, anchor.previousAnchorHash ?: "GENESIS",
-            anchor.recordCount, anchor.source
+            anchor.anchorId,
+            anchor.merkleRoot,
+            anchor.previousAnchorHash ?: "GENESIS",
+            anchor.recordCount,
+            anchor.source,
         )
     }
 

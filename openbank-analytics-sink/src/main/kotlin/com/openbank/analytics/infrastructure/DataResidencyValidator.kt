@@ -5,8 +5,8 @@
 package com.openbank.analytics.infrastructure
 
 import io.quarkus.runtime.StartupEvent
-import jakarta.enterprise.event.Observes
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 

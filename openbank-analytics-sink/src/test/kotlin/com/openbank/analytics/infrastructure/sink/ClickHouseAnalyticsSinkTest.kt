@@ -8,11 +8,12 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.analytics.AnalyticsEnvelope
 import com.openbank.libs.analytics.AnalyticsIntegrity
 import com.openbank.libs.analytics.IngestSource
-import java.time.Instant
-import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Instant
+import java.util.Optional
+import java.util.UUID
 
 /**
  * Plain-JUnit tests for the ClickHouse bronze adapter's pure row-mapping and the dedupe/insert path.
@@ -33,7 +34,7 @@ class ClickHouseAnalyticsSinkTest {
             url = "http://clickhouse:8123"
             database = "openbank_analytics"
             username = "analytics"
-            password = "secret"
+            password = Optional.of("secret")
         }
 
         override suspend fun send(body: String) {
@@ -45,7 +46,7 @@ class ClickHouseAnalyticsSinkTest {
     private fun envelope(
         eventId: UUID = UUID.randomUUID(),
         version: Long = 1,
-        payload: Map<String, Any?> = emptyMap()
+        payload: Map<String, Any?> = emptyMap(),
     ) = AnalyticsEnvelope(
         eventId = eventId,
         aggregateType = "ACCOUNT",
@@ -60,7 +61,7 @@ class ClickHouseAnalyticsSinkTest {
         traceId = "trace-9",
         ingestSource = IngestSource.STREAM,
         ingestedAt = Instant.parse("2026-01-02T03:04:05.678Z"),
-        payload = payload
+        payload = payload,
     )
 
     @Test

@@ -15,13 +15,13 @@ import com.openbank.libs.analytics.AnalyticsEnvelope
 import com.openbank.libs.analytics.BackfillRequest
 import com.openbank.libs.analytics.BackfillWindow
 import com.openbank.libs.analytics.IngestSource
+import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
-import kotlinx.coroutines.runBlocking
-import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Test
 
 /**
  * Covers the recovery flows that the live stream alone cannot: poison-message quarantine (DLQ) and

@@ -59,7 +59,7 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     // Boot IT proving the Kafka consumer joins the intended group.id (issue #686) — see
-    // AnalyticsEventsConsumerGroupIdBootIT.kt.
+    // AnalyticsEventsConsumerGroupIdBootIT.kt. Also backs AnalyticsSinkBootSmokeIT (issue #709).
     testImplementation(libs.testcontainers.redpanda)
 }
 kotlin {

@@ -6,10 +6,10 @@ package com.openbank.analytics.application
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.security.PiiMask
-import java.time.Clock
-import java.util.UUID
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Clock
+import java.util.UUID
 
 /**
  * Plain-JUnit tests for the event → [com.openbank.libs.analytics.AnalyticsEnvelope] projection and

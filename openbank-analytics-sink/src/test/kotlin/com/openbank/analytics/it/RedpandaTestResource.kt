@@ -15,7 +15,8 @@ import org.testcontainers.utility.DockerImageName
  * `@Incoming("analytics-events-in")` consumer (issue #686). This service owns no OLTP database
  * (ADR-0022 — see `application.yaml`'s "NOTE: no datasource" comment) and the default
  * `LoggingAnalyticsSink` / `LoggingDeadLetterSink` bindings need no external system, so a broker is
- * the only piece of infra a real boot needs here.
+ * the only piece of infra a real boot needs here. Docker Hub image -> served by the in-cluster
+ * registry-mirror; Ryuk disabled fleet-wide -> stop() tears it down.
  */
 class RedpandaTestResource : QuarkusTestResourceLifecycleManager {
 
@@ -29,7 +30,11 @@ class RedpandaTestResource : QuarkusTestResourceLifecycleManager {
             DockerImageName.parse("redpandadata/redpanda:v24.1.2")
                 .asCompatibleSubstituteFor("docker.redpanda.com/redpandadata/redpanda"),
         )
-        rp.start()
+        try {
+            rp.start()
+        } catch (e: Exception) {
+            throw TestAbortedException("Redpanda failed to start — skipping IT: ${e.message}", e)
+        }
         redpanda = rp
         lastBootstrapServers = rp.bootstrapServers
 
@@ -46,17 +51,6 @@ class RedpandaTestResource : QuarkusTestResourceLifecycleManager {
             "mp.messaging.incoming.analytics-events-in.group.id" to "analytics-sink",
             "mp.messaging.incoming.analytics-events-in.auto.offset.reset" to "earliest",
             "quarkus.devservices.enabled" to "false",
-            // Unrelated pre-existing defect surfaced by this being the service's first-ever real
-            // @QuarkusTest boot (issue #686 is scoped to the Kafka group.id bug only, so this is
-            // worked around here rather than fixed): openbank.analytics.schema.known resolves via
-            // ${ANALYTICS_SCHEMA_KNOWN:} to a literal empty string when unset, and
-            // ConfigSchemaCatalogSource declares it as plain `String` (not `Optional<String>`).
-            // SmallRye's ConfigRecorder.validateConfigProperties treats an empty-string resolution
-            // as "no value" for the built-in String converter and throws SRCFG00040 eagerly at
-            // startup — the exact class of bug CLAUDE.md's "@ConfigProperty optional field must be
-            // Optional<String>" pitfall describes. Give it a non-empty value here so this IT can
-            // actually boot; see the flagged follow-up in the PR description.
-            "openbank.analytics.schema.known" to "unused.placeholder:1",
         )
     }
 

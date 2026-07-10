@@ -14,6 +14,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
+import java.util.Optional
 
 /**
  * Thin transport over the ClickHouse HTTP interface, shared by the ClickHouse-native adapters
@@ -41,8 +42,10 @@ open class ClickHouseClient {
     @ConfigProperty(name = "openbank.analytics.clickhouse.username", defaultValue = "analytics")
     lateinit var username: String
 
-    @ConfigProperty(name = "openbank.analytics.clickhouse.password", defaultValue = "")
-    lateinit var password: String
+    // Optional<String>, not a plain String (CLAUDE.md pitfall): SmallRye's built-in String converter
+    // treats an empty-string-resolved value as "no value" and throws SRCFG00040 at boot.
+    @ConfigProperty(name = "openbank.analytics.clickhouse.password")
+    lateinit var password: Optional<String>
 
     private val http: HttpClient by lazy { HttpClient.newHttpClient() }
 
@@ -61,14 +64,14 @@ open class ClickHouseClient {
         val uri = URI.create("${url.trimEnd('/')}/?query=${URLEncoder.encode(sql, StandardCharsets.UTF_8)}")
         val request = HttpRequest.newBuilder(uri)
             .header("X-ClickHouse-User", username)
-            .header("X-ClickHouse-Key", password)
+            .header("X-ClickHouse-Key", password.orElse(""))
             .header("Content-Type", "text/plain; charset=UTF-8")
             .POST(HttpRequest.BodyPublishers.ofString(body ?: "", StandardCharsets.UTF_8))
             .build()
         val response = http.send(request, HttpResponse.BodyHandlers.ofString())
         if (response.statusCode() !in 200..299) {
             throw IllegalStateException(
-                "ClickHouse query failed: HTTP ${response.statusCode()} ${response.body().take(500)}"
+                "ClickHouse query failed: HTTP ${response.statusCode()} ${response.body().take(500)}",
             )
         }
         response.body()

@@ -15,11 +15,11 @@ import com.openbank.libs.analytics.Reconciliation
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import kotlinx.coroutines.runBlocking
+import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
-import kotlinx.coroutines.runBlocking
-import org.jboss.logging.Logger
 
 /**
  * Periodic OLTP-vs-warehouse **drift check** (ADR-0022) and the regulatory tie-out hook.

@@ -61,11 +61,21 @@ open class ApicurioSchemaCatalogSource : SchemaCatalogSource {
         val artifactIds = parseArtifactIds(httpGet("/apis/registry/v2/groups/$group/artifacts?limit=500"))
         val keys = artifactIds.flatMap { id ->
             val versions = parseVersionNumbers(
-                httpGet("/apis/registry/v2/groups/$group/artifacts/${URLEncoder.encode(id, StandardCharsets.UTF_8)}/versions?limit=500")
+                httpGet(
+                    "/apis/registry/v2/groups/$group/artifacts/${URLEncoder.encode(
+                        id,
+                        StandardCharsets.UTF_8,
+                    )}/versions?limit=500",
+                ),
             )
             versions.map { SchemaKey(id, it) }
         }.toSet()
-        log.infof("loaded schema catalog from Apicurio group=%s artifacts=%d keys=%d", group, artifactIds.size, keys.size)
+        log.infof(
+            "loaded schema catalog from Apicurio group=%s artifacts=%d keys=%d",
+            group,
+            artifactIds.size,
+            keys.size,
+        )
         SchemaCatalog(keys)
     } catch (e: Exception) {
         log.errorf(e, "Apicurio schema registry unreachable at %s (group=%s) — gate OPEN until next boot", url, group)
@@ -73,8 +83,9 @@ open class ApicurioSchemaCatalogSource : SchemaCatalogSource {
     }
 
     /** `{ "artifacts": [ { "id": "..." }, ... ] }` → list of artifact ids. Pure / unit-testable. */
-    internal fun parseArtifactIds(json: String): List<String> =
-        mapper.readTree(json).path("artifacts").mapNotNull { it.path("id").asText(null)?.takeIf { id -> id.isNotEmpty() } }
+    internal fun parseArtifactIds(json: String): List<String> = mapper.readTree(json).path("artifacts").mapNotNull {
+        it.path("id").asText(null)?.takeIf { id -> id.isNotEmpty() }
+    }
 
     /** `{ "versions": [ { "version": "1" }, ... ] }` → numeric versions (non-numeric ignored). Pure. */
     internal fun parseVersionNumbers(json: String): List<Int> =
