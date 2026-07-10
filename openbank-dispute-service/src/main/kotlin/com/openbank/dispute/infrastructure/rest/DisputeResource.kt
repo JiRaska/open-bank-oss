@@ -126,6 +126,7 @@ class DisputeResource(
     @GET
     @Path("/{id}/evidence/verify")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @Authorize(action = "dispute.read", resource = "#id")
     @Operation(summary = "Walk and verify a dispute's evidence hash chain (ADR-0117/ADR-0133 pattern)")
     fun verifyEvidenceChain(@PathParam("id") id: UUID): Uni<EvidenceChainVerification> =
         getUseCase.verifyEvidenceChain(id)
