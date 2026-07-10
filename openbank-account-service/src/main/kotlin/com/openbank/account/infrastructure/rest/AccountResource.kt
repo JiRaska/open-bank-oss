@@ -14,6 +14,7 @@ import com.openbank.account.application.port.`in`.FreezeAccountCommand
 import com.openbank.account.application.port.`in`.GetAccountByIbanQuery
 import com.openbank.account.application.port.`in`.GetAccountQuery
 import com.openbank.account.application.port.`in`.ListAccountsQuery
+import com.openbank.account.application.port.`in`.ListActiveAccountsQuery
 import com.openbank.account.application.port.`in`.ListPocketsQuery
 import com.openbank.account.application.port.`in`.OpenAccountCommand
 import com.openbank.account.application.port.`in`.ResolvePocketQuery
@@ -208,6 +209,23 @@ class AccountResource(
             return Response.status(400).entity(mapOf("error" to "q is required")).build()
         }
         val page = accountUseCase.searchAccounts(SearchAccountsQuery(q, limit, cursor))
+        return Response.ok(page.toResponse()).build()
+    }
+
+    // ADR-0143: the fleet-wide "list every billable account" read billing-service's cycle
+    // scheduler discovers its batch from. Deliberately NOT customer-facing: no partyId scoping
+    // header, staff/service roles only, page size capped in the use-case. The literal /active
+    // segment wins over the /{accountId} template per JAX-RS matching, so no route ambiguity.
+    @GET
+    @Path("/active")
+    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "account.list")
+    @Operation(summary = "List all ACTIVE accounts fleet-wide, cursor-paginated (billing discovery)")
+    suspend fun listActiveAccounts(
+        @QueryParam("limit") @DefaultValue("100") limit: Int,
+        @QueryParam("cursor") cursor: String?,
+    ): Response {
+        val page = accountUseCase.listActiveAccounts(ListActiveAccountsQuery(limit, cursor))
         return Response.ok(page.toResponse()).build()
     }
 

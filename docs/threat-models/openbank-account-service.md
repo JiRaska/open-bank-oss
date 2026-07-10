@@ -204,3 +204,18 @@ not change any existing request's outcome until explicitly flipped.
   enforce` stays `false`** — no behavior change to any existing request; this PR only wires the
   mechanism. Rollback: revert the commit (no DB/schema change; `ApprovalStore` records live in
   Redis with a TTL).
+- **2026-07-10** — Added `GET /api/v1/accounts/active` (fleet-wide ACTIVE-account sweep,
+  cursor-paginated; ADR-0143: the "list every billable account" read billing-service's cycle
+  scheduler discovers its batch from, issue #548). Touches the **I — information disclosure**
+  row: like `/search`, this is an account-enumeration surface — and a deliberately *broader* one
+  (no fragment required). Bounded the same way: `@RolesAllowed(SERVICE, VIEWER, OPERATOR,
+  ADMIN)` — never `@PermitAll`, asserted end-to-end by `ActiveAccountsApiIT` (401/403/200);
+  page size capped at 200 (`MAX_ACTIVE_LIST_LIMIT`) so one request cannot dump the whole book;
+  keyset cursor (stable under concurrent open/close); returns only ACTIVE rows, so a billing
+  sweep can never pick up a CLOSED/FROZEN account. No query input beyond limit/cursor — no
+  injection surface (status is a server-side constant, cursor decodes to a UUID or 500s before
+  any query). **Risk class = confidentiality** (fleet-wide enumeration by an over-privileged or
+  compromised staff/service token). Residual: any caller with an allowed role sees the whole
+  active book — acceptable because the roles are staff/M2M only and the same information is
+  already reachable via repeated `/search` paging; gateway rate limits apply. No DB change, no
+  new index (status + PK keyset uses the existing primary key). Rollback: revert the commit.
