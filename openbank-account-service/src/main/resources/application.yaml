@@ -81,7 +81,12 @@ quarkus:
     transaction-service:
       url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
     "sanctions-service":
-      url: ${SANCTIONS_SERVICE_URL:http://openbank-sanctions-service:8110}
+      # Was :8110 — that's sca-service's port, not sanctions-service's (QUARKUS_HTTP_PORT
+      # 8123 in docker-compose.yml). Never caught because no local docker-compose run had
+      # ever exercised account-service + sanctions-service together (issue #669 load-benchmark
+      # setup() was the first) — sanctions screening fails closed, so every local account
+      # creation was silently blocked, not just slow.
+      url: ${SANCTIONS_SERVICE_URL:http://openbank-sanctions-service:8123}
       connect-timeout: 3000
       read-timeout: 5000
     # Issue #668: unauthenticated read of product-catalog reference data at account-open time.
