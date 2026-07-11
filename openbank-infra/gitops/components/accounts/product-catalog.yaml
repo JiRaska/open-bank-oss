@@ -77,6 +77,11 @@ spec:
               valueFrom: {secretKeyRef: {name: product-catalog-db-app, key: username}}
             - name: QUARKUS_DATASOURCE_PASSWORD
               valueFrom: {secretKeyRef: {name: product-catalog-db-app, key: password}}
+            # Resource-server auth (issue #401): validate caller bearer tokens against the realm's
+            # JWKS. Pure resource server — no client secret needed. Egress to keycloak (iam ns) is
+            # already permitted (accounts ns has no egress policy; account-service validates here too).
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
           startupProbe:
             httpGet:
               path: /q/health/ready

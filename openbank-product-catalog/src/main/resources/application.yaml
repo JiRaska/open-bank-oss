@@ -48,14 +48,12 @@ quarkus:
     path: /api/docs
   # Resource-server: product-catalog now authenticates its callers (issue #401). Reads require a
   # valid token (@Authenticated); writes require ROLE_OPERATOR/ROLE_ADMIN. Every in-cluster caller
-  # already presents (or now presents) an openbank-services / openbank-edge service token; the
-  # admin-ui relays the operator's token via its BFF. The client-id/secret are reused only to
-  # resolve the issuer — this service is a resource server, it does not mint tokens.
+  # presents (or now presents) an openbank-services / openbank-edge service token; the admin-ui
+  # relays the operator's token via its BFF. This is a PURE resource server (application-type
+  # `service`, the default): it validates bearer tokens against the realm's JWKS and does not mint
+  # tokens, so it needs NO client secret — only the issuer URL.
   oidc:
     auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
-    client-id: ${OIDC_CLIENT_ID:openbank-services}
-    credentials:
-      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     tls:
       verification: ${OIDC_TLS_VERIFICATION:none}
 
