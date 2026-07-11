@@ -32,6 +32,7 @@ data class PostJournalRequest(
     val entryDate: String,
     val valueDate: String,
     val description: String,
+    val createdBy: UUID,
     val lines: List<JournalLineRequest>,
 )
 

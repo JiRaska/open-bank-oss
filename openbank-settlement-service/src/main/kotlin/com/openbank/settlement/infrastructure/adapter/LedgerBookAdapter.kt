@@ -31,6 +31,14 @@ class LedgerBookAdapter(
 
     private val log = Logger.getLogger(LedgerBookAdapter::class.java)
 
+    companion object {
+        // Settlement booking is a system-initiated posting (Temporal workflow / legacy async
+        // path, ADR-0108), not a human/security-context action — mirrors ledger-service's own
+        // FxRevaluationService.SYSTEM_USER sentinel pattern, with a distinct UUID so audit trails
+        // can tell settlement-service's system postings apart from ledger's internal ones.
+        val SYSTEM_USER: UUID = UUID.fromString("00000000-0000-0000-0000-000000005e77")
+    }
+
     override suspend fun book(settlementId: UUID) {
         val settlement = requireNotNull(settlementRepository.findById(settlementId)) {
             "Settlement $settlementId not found"
@@ -44,6 +52,7 @@ class LedgerBookAdapter(
                 entryDate = today,
                 valueDate = today,
                 description = "Settlement booking $settlementId",
+                createdBy = SYSTEM_USER,
                 lines = listOf(
                     JournalLineRequest(
                         glAccountId = glDebitAccountId,
