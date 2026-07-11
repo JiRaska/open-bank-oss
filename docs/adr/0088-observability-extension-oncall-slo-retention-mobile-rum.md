@@ -14,6 +14,16 @@
 >   route points at GoAlert generic-API webhook; ntfy is the contact method for paging.
 > - **D2 — Pyrra** live: `gitops/components/observability/pyrra.yaml` + `pyrra-crd.yaml`. SLO
 >   operator reconciles `ServiceLevelObjective` CRs into multi-window burn-rate `PrometheusRules`.
+> - **D2 rollout (2026-07-10, issue #669 scope item 3)** — the sample fleet-wide SLO is now
+>   joined by a per-money-path-service pair (availability + latency) for all 17 services in
+>   `rules.yaml: money_path_services`: `gitops/components/observability/pyrra-slo-money-path.yaml`,
+>   targets governed by `rules.yaml: slo` (99.9% availability / 30d, 99% of requests <1s / 30d;
+>   REFERENCE defaults, not calibrated against real traffic — see the file header). CI
+>   (`check-slo-registry.py`) fails on drift between the two. `tempo.yaml`'s span-metrics
+>   processor gained an explicit `histogram_buckets` list so the latency indicator's `le="1"`
+>   selector reads a real bucket (Tempo's default buckets have no exact 1s boundary). This
+>   satisfies the go-live gate's "Pyrra SLOs declared ... 30-day error-budget baseline
+>   established" item below for the money-path fleet, not just the payment rails.
 > - **D3 — Loki + Tempo on S3**: both apps reference `ADR-0088 D3` in their gitops YAML; Loki
 >   `object_store: s3` and Tempo `backend: s3` are active in the sandbox (IRSA, `openbank-observability-s3`).
 > - **D4a — `opentelemetry-android`** skeleton merged (openbank-app #55); iOS no-op stub in place.
@@ -200,6 +210,10 @@ Three non-negotiables for a bank (these, not the SDK, are why this is an ADR):
 - [ ] On-call schedule + escalation policy defined; GoAlert Postgres backed up.
 - [ ] Loki/Tempo on S3 with retention policy ≥ audit window; restore from object store rehearsed.
 - [ ] Pyrra SLOs declared for each payment rail; 30-day error-budget baseline established.
+      **Declared** (2026-07-10): all 17 money-path services, availability + latency, governed
+      by `rules.yaml: slo` — see the D2 rollout note above. **Baseline still open**: the
+      sandbox has no real production traffic, so there is no 30-day burn-rate history to
+      report yet (issue #669's load-benchmark scope, deferred).
 - [ ] Mobile OTLP ingest gateway threat-modelled; PII redaction + auth + rate-limit verified; consent wired.
 
 ---

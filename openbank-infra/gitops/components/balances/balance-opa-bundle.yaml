@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: balance-service
     app.kubernetes.io/part-of: balances
   annotations:
-    openbank.tech/policy-checksum: "363ecd4754d6d9bc"
+    openbank.tech/policy-checksum: "001169d06e2744a0"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -916,7 +916,7 @@ data:
 
     schema_version: 1
     source_of_truth: true
-    related_adrs: [ADR-0005, ADR-0014, ADR-0020, ADR-0029, ADR-0030, ADR-0031, ADR-0040, ADR-0043, ADR-0052, ADR-0053, ADR-0054, ADR-0060, ADR-0082]
+    related_adrs: [ADR-0005, ADR-0014, ADR-0020, ADR-0029, ADR-0030, ADR-0031, ADR-0040, ADR-0043, ADR-0052, ADR-0053, ADR-0054, ADR-0060, ADR-0082, ADR-0088]
 
     # ---------------------------------------------------------------------------------------
     # Conventional Commits — the vocabulary (mirrors CONTRIBUTING.md, authoritative here).
@@ -1214,6 +1214,31 @@ data:
       - openbank-billing-service              # ADR-0143: fee assess/post/reverse shipped (phases 1a-2e); real-env e2e verification + four-eyes enforcement flip still gate production go-live
       - openbank-settlement-service           # issue #307: debit->credit->ledger-booking saga (ADR-0101)
       - openbank-sanctions-service             # ADR-0116: real feed screening; already required by four_eyes below (issue #554)
+
+    # ---------------------------------------------------------------------------------------
+    # SLOs (issue #669 — operational evidence, scope item 3). Governed data: a single
+    # availability + latency target applied uniformly across every money_path_services entry
+    # above (no separate service list here — money_path_services is the one list, to avoid the
+    # two-lists-drift class of bug rule #7 exists to prevent). Reconciled into Prometheus
+    # multi-window burn-rate rules by Pyrra (ADR-0088 D2), one ServiceLevelObjective pair
+    # (availability + latency) per service in
+    # openbank-infra/gitops/components/observability/pyrra-slo-money-path.yaml.
+    # check-slo-registry.sh (CI, required) fails if a money-path service is missing either SLO
+    # object, or if an existing object's target/window drifts from the values below — so
+    # dashboards/alerts derive from this governed data, never a hand-edited PrometheusRule.
+    #
+    # Targets are REFERENCE defaults, not calibrated against real production incident or
+    # traffic history — this is a reference implementation with no live customer traffic (same
+    # honesty disclosure as the openbank-lending-service PD/LGD placeholders). Revisit once the
+    # load-benchmark / DR-drill scope of issue #669 produces real numbers.
+    slo:
+      availability_target: "99.9"           # percent of non-error requests, uniform fleet-wide
+      availability_window: 30d
+      latency_target_percent: "99"          # percent of requests faster than latency_threshold_seconds
+      # tighter than the fleet HighLatencyP99 alert (2s, prometheus-rules-tier1.yaml) by design:
+      # the SLO burn-rate should page before the blunter absolute-latency alert does.
+      latency_threshold_seconds: 1
+      latency_window: 30d
     review:
       default_approvals: 1
       money_path_approvals: 2               # CONTRIBUTING.md + branch protection
