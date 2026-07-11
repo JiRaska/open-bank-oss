@@ -4,7 +4,9 @@
 
 package com.openbank.productcatalog.infrastructure.rest
 
+import com.openbank.libs.authz.Authorize
 import com.openbank.productcatalog.application.ProductCatalogService
+import io.quarkus.security.Authenticated
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
@@ -25,10 +27,12 @@ import jakarta.ws.rs.core.Response
 class FeesResource(private val service: ProductCatalogService) {
 
     @GET
+    @Authenticated
+    @Authorize(action = "catalog.list")
     suspend fun list(
         @QueryParam("type") type: String?,
         @QueryParam("currency") currency: String?,
-        @QueryParam("productCode") productCode: String?
+        @QueryParam("productCode") productCode: String?,
     ): Response {
         var items = service.listFeeSchedule()
         if (!type.isNullOrBlank()) items = items.filter { it.type == type }
