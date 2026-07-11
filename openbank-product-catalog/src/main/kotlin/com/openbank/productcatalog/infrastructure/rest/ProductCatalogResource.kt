@@ -6,8 +6,16 @@ package com.openbank.productcatalog.infrastructure.rest
 
 import com.openbank.productcatalog.application.ProductCatalogService
 import com.openbank.productcatalog.application.ProductRequest
+import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.ws.rs.*
+import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.GET
+import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
+import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
+import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 
@@ -16,6 +24,8 @@ import jakarta.ws.rs.core.Response
 @Produces(MediaType.APPLICATION_JSON)
 class ProductCatalogResource(private val service: ProductCatalogService) {
 
+    // Public reference data by design (no auth) — the admin UI and other services read the
+    // live catalog without credentials.
     @GET
     suspend fun list(
         @QueryParam("type") type: String?,
@@ -43,6 +53,7 @@ class ProductCatalogResource(private val service: ProductCatalogService) {
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     suspend fun create(req: ProductRequest): Response = try {
         val product = service.create(req)
         Response.status(201).entity(product).build()
@@ -53,6 +64,7 @@ class ProductCatalogResource(private val service: ProductCatalogService) {
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     suspend fun update(@PathParam("id") id: String, req: ProductRequest): Response = try {
         Response.ok(service.update(id, req)).build()
     } catch (e: NoSuchElementException) {
@@ -63,6 +75,7 @@ class ProductCatalogResource(private val service: ProductCatalogService) {
 
     @POST
     @Path("/{id}/activate")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     suspend fun activate(@PathParam("id") id: String): Response = try {
         Response.ok(service.activate(id)).build()
     } catch (e: NoSuchElementException) {
@@ -71,6 +84,7 @@ class ProductCatalogResource(private val service: ProductCatalogService) {
 
     @POST
     @Path("/{id}/deactivate")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     suspend fun deactivate(@PathParam("id") id: String): Response = try {
         Response.ok(service.deactivate(id)).build()
     } catch (e: NoSuchElementException) {

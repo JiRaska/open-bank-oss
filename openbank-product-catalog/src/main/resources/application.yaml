@@ -46,8 +46,20 @@ quarkus:
   swagger-ui:
     always-include: true
     path: /api/docs
+  # Guards create/update/activate/deactivate (mutating the live product/fee catalog). The
+  # read endpoints (list/getById/getByCode/getFees) stay open by design — public reference
+  # data the admin UI's pricing screens read without auth.
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
 
 "%test":
   quarkus:
     management:
+      enabled: false
+    oidc:
       enabled: false

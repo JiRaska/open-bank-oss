@@ -17,6 +17,9 @@ dependencies {
     implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
+    // OIDC for the mutating catalog endpoints (create/update/activate/deactivate) — this
+    // service had no security extension at all until this fix.
+    implementation(libs.quarkus.oidc)
 
     // Persistence: reactive Panache + Postgres + Flyway, the fleet standard (ADR-0009/0105 P1).
     // openbank-libs is built on reactive Panache, so a service that depends on it must use reactive
@@ -35,6 +38,7 @@ dependencies {
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.quarkus.junit5)
+    testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
