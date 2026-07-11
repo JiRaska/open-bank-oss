@@ -12,7 +12,7 @@ import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import org.apache.kafka.clients.admin.AdminClient
 import org.apache.kafka.clients.admin.AdminClientConfig
-import org.apache.kafka.clients.admin.ListConsumerGroupsOptions
+import org.apache.kafka.clients.admin.ListGroupsOptions
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.clients.producer.KafkaProducer
@@ -68,7 +68,7 @@ class TransactionSignalConsumerBootIT {
             val deadline = System.currentTimeMillis() + DEADLINE_MS
             var groupIds: Set<String> = emptySet()
             while (System.currentTimeMillis() < deadline) {
-                groupIds = admin.listConsumerGroups(ListConsumerGroupsOptions())
+                groupIds = admin.listGroups(ListGroupsOptions.forConsumerGroups())
                     .all().get().map { it.groupId() }.toSet()
                 if (groupIds.isNotEmpty()) break
                 Thread.sleep(POLL_INTERVAL_MS)
