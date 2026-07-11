@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.5.3...billing-service-v0.6.0) (2026-07-11)
+
+
+### Features
+
+* **billing:** discover the billing-cycle account batch from account-service (ADR-0143) ([#736](https://github.com/JiRaska/open-bank-oss/issues/736)) ([a7df550](https://github.com/JiRaska/open-bank-oss/commit/a7df55001281edeabb2a6754bb163c653439c61a)), closes [#548](https://github.com/JiRaska/open-bank-oss/issues/548)
+* **billing:** propagate a service token to product-catalog ([#401](https://github.com/JiRaska/open-bank-oss/issues/401) rollout) ([#744](https://github.com/JiRaska/open-bank-oss/issues/744)) ([20293ee](https://github.com/JiRaska/open-bank-oss/commit/20293ee05c8f3becc0bba8ad6b6ad4f31d47bfee))
+
 ## [0.5.3](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.5.2...billing-service-v0.5.3) (2026-07-09)
 
 
