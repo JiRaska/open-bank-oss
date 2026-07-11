@@ -62,6 +62,7 @@ jobs:
             :openbank-lending-service:test --tests "com.openbank.lending.contract.*PactConsumerTest" \
             :openbank-notification-service:test --tests "com.openbank.notification.contract.*PactConsumerTest" \
             :openbank-sepa-payment:test --tests "com.openbank.sepa.contract.*PactConsumerTest" \
+            :openbank-settlement-service:test --tests "com.openbank.settlement.contract.*PactConsumerTest" \
             :openbank-transaction-service:test --tests "com.openbank.transaction.contract.*PactConsumerTest"
 
       - name: Fail on drift between regenerated and committed pacts
