@@ -17,7 +17,6 @@ import com.openbank.libs.observability.DomainMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
 import java.math.BigDecimal
-import java.math.RoundingMode
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -65,15 +64,14 @@ class FxService(
             ?: error("No FX rate available for ${cmd.fromCurrency}/${cmd.toCurrency}")
         require(rate.isValid(Instant.now(clock))) { "FX rate expired for ${cmd.fromCurrency}/${cmd.toCurrency}" }
 
-        val fromAmount = BigDecimal(cmd.fromAmountMinorUnits)
-        val toAmount = fromAmount.multiply(rate.askRate).setScale(0, RoundingMode.HALF_UP)
-        val fee = fromAmount.multiply(BigDecimal("0.005")).setScale(0, RoundingMode.HALF_UP) // 0.5% fee
+        val toAmount = FxConversionMath.convertedAmountMinorUnits(cmd.fromAmountMinorUnits, rate.askRate)
+        val fee = FxConversionMath.feeMinorUnits(cmd.fromAmountMinorUnits)
 
         // ADR-0032: screen the converting party synchronously *before* the conversion is allowed to
         // settle. CLEAR settles, BLOCK fails with a CRITICAL AML case, REVIEW / screening-unavailable
         // hold the conversion in PENDING (fail-closed — never settled un-screened).
         metrics.paymentSubmitted("fx", "${cmd.fromCurrency}_${cmd.toCurrency}")
-        val result = applyScreening(cmd, rate, toAmount.toLong(), fee.toLong())
+        val result = applyScreening(cmd, rate, toAmount, fee)
         scoreFraudShadow(cmd)
         return result
     }
