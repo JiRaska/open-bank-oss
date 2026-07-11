@@ -4,6 +4,7 @@
 
 package com.openbank.libs.testing.outbox
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import com.openbank.libs.persistence.outbox.OutboxMessage
@@ -98,14 +99,14 @@ abstract class OutboxDispatchConformanceIT {
 
     @Test
     fun `dispatch publishes pending rows with a stable per-aggregate key plus CloudEvents headers, marks SENT`() {
-        val aggregateId = UUID.randomUUID()
+        val aggregateId = Ids.newId()
         val first = OutboxMessage(
             aggregateId = aggregateId,
             eventType = "test.event.posted",
             payload = """{"seq":1}""",
             createdAt = Instant.now(),
         )
-        val second = first.copy(eventId = UUID.randomUUID(), payload = """{"seq":2}""")
+        val second = first.copy(eventId = Ids.newId(), payload = """{"seq":2}""")
         onEventLoop { seed(first) }
         onEventLoop { seed(second) }
 
@@ -144,7 +145,7 @@ abstract class OutboxDispatchConformanceIT {
     @Test
     fun `replaying dispatch after a row is SENT does not re-publish it`() {
         val message = OutboxMessage(
-            aggregateId = UUID.randomUUID(),
+            aggregateId = Ids.newId(),
             eventType = "test.event.replay",
             payload = """{"once":true}""",
             createdAt = Instant.now(),
