@@ -31,6 +31,9 @@ import { useCheckLog, type CheckLogEntry } from '@/lib/services/useCheckLog'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 
 const POLL = 30_000
+// A healthy daily tie-out (23:30) is at most ~24h old; past 25h the day's close likely
+// didn't run. Mirrors the balance-service ReconciliationFreshnessWatchdog SLA.
+const EOD_STALE_HOURS = 25
 const RUNNING_POLL = 5_000
 const HISTORY_LIMIT = 20
 
@@ -213,6 +216,25 @@ function EodPanel() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
           {Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton" style={{ height: '96px' }} />)}
         </div>
+      ) : unavailable && unavailable.kind === 'no_data' ? (
+        // Zero reconciliation records is NOT "no data yet" for a daily control — it means the
+        // EoD tie-out has never run. Surface it as an alert an operator/auditor must act on,
+        // not the calm gray no-data panel.
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '16px 18px',
+          background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: 'var(--r-lg)' }}>
+          <div style={{ padding: '10px', borderRadius: 'var(--r-md)', background: 'var(--surface)', color: 'var(--danger)' }}>
+            <AlertTriangle size={20} />
+          </div>
+          <div>
+            <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--danger)' }}>
+              {t('Denní tie-out dosud neproběhl', 'The daily tie-out has never run')}
+            </div>
+            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+              {t('Kontrola hlavní kniha ⇄ sub-ledger (ADR-0039) nemá žádný záznam — plánovač buď neběžel, nebo každý běh selhal. Vyžaduje prošetření.',
+                 'The ledger ⇄ sub-ledger control (ADR-0039) has no record — the scheduler has not run, or every run failed. Needs investigation.')}
+            </div>
+          </div>
+        </div>
       ) : unavailable ? (
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)' }}>
           <DataUnavailable
@@ -225,6 +247,23 @@ function EodPanel() {
         </div>
       ) : report ? (
         <>
+          {/* Staleness warning — a report exists but the last tie-out is older than the daily SLA,
+              so today's close likely didn't run. The report below is then a stale prior day. */}
+          {(() => {
+            const ageHours = (Date.now() - new Date(report.generatedAt).getTime()) / 3_600_000
+            if (!(ageHours > EOD_STALE_HOURS)) return null
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', marginBottom: '16px',
+                background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', borderRadius: 'var(--r-lg)' }}>
+                <AlertTriangle size={16} style={{ color: 'var(--warning)', flexShrink: 0 }} />
+                <span style={{ fontSize: '13px', color: 'var(--warning)' }}>
+                  {t(`Poslední tie-out je ${Math.round(ageHours)} h starý (${fmtDateTime(report.generatedAt)}) — dnešní denní závěrka zřejmě neproběhla.`,
+                     `The last tie-out is ${Math.round(ageHours)}h old (${fmtDateTime(report.generatedAt)}) — today's daily close appears not to have run.`)}
+                </span>
+              </div>
+            )
+          })()}
+
           {/* Overall status banner */}
           <div style={{
             display: 'flex', alignItems: 'center', gap: '14px',
