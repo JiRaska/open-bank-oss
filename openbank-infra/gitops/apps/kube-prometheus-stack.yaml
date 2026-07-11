@@ -162,10 +162,12 @@ spec:
             resources:
               requests:
                 cpu: 200m
-                # 512Mi → 1Gi: steady-state head + WAL replay sits above 512Mi with the
-                # current fleet of ServiceMonitors/PodMonitors; reserve it so the pod lands
-                # on a node that can actually hold it.
-                memory: 1Gi
+                # 512Mi → 1Gi → 2560Mi (issue #809): measured steady-state is ~2.4Gi
+                # with the current scrape fleet, so a 1Gi request under-declared
+                # ~1.4Gi of real usage to the scheduler — the single biggest
+                # request-vs-RSS gap in the cluster and a direct contributor to
+                # node memory exhaustion. Reserve what it actually uses.
+                memory: 2560Mi
               limits:
                 cpu: "1"
                 # 1536Mi → 3Gi: the server was OOMKilled (exit 137) during startup TSDB
@@ -248,10 +250,12 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 128Mi
+              # 128Mi → 384Mi (issue #809): measured steady-state ~340Mi sat just
+              # under the old 384Mi limit while the request declared a third of it.
+              memory: 384Mi
             limits:
               cpu: 500m
-              memory: 384Mi
+              memory: 512Mi
           # We define Prometheus + Tempo ourselves (below) to wire the full
           # correlation web, so disable the chart's auto-provisioned default.
           sidecar:

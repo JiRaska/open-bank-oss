@@ -63,10 +63,15 @@ spec:
           # 256Mi OOMKilled (exit 137, crashloop) the DaemonSet pod on the CI
           # runner nodes — arc-runners with dind emit a huge log volume Alloy must
           # buffer. 512Mi holds those nodes; service nodes stay well under it.
+          # Request raised 128Mi → 320Mi (issue #809): measured steady-state is
+          # 256-310Mi on EVERY node, so the 128Mi request understated real per-node
+          # DaemonSet overhead by ~180Mi — a key ingredient of the 4Gi-node memory
+          # exhaustion / reclaim-livelock hangs. The request must reflect reality
+          # for Karpenter's bin-packing to be honest.
           resources:
             requests:
               cpu: 50m
-              memory: 128Mi
+              memory: 320Mi
             limits:
               cpu: 300m
               memory: 512Mi
