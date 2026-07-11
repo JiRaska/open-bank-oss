@@ -95,12 +95,6 @@ spec:
                     secretKeyRef:
                       name: openbao-db-admin-passwords
                       key: notifications
-                - name: VAULT_ADMIN_PASS_PUSH_NOTIFICATIONS
-                  valueFrom:
-                    secretKeyRef:
-                      name: openbao-db-admin-passwords
-                      key: push-notifications
-                      optional: true
                 - name: VAULT_ADMIN_PASS_AUDIT
                   valueFrom:
                     secretKeyRef:
@@ -116,7 +110,6 @@ spec:
                     secretKeyRef:
                       name: openbao-db-admin-passwords
                       key: fx
-                      optional: true
                 - name: VAULT_ADMIN_PASS_ACCOUNT
                   valueFrom:
                     secretKeyRef:
