@@ -286,6 +286,20 @@ class PartyApiIT {
         }
     }
 
+    @Test
+    @Order(16)
+    fun `GET gdpr-export with no identity at all returns 401`() {
+        // Previously this endpoint carried no @Authenticated/@RolesAllowed annotation and an
+        // anonymous caller reached the handler's own manual role check; now @Authenticated
+        // rejects it before that.
+        val id = createdPartyId ?: return
+        Given { this } When {
+            get("/api/v1/parties/$id/gdpr-export")
+        } Then {
+            statusCode(401)
+        }
+    }
+
     // ── ADR-0055 name search ──────────────────────────────────────────────
 
     @Test
