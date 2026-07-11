@@ -1,0 +1,22 @@
+-- Create the missing Hibernate id sequence for balance_reconciliation.
+--
+-- BalanceReconciliationEntity (ADR-0039 Phase A, added in V4) is a Panache entity that
+-- allocates ids from a sequence named "balance_reconciliation_seq" (allocationSize 50).
+-- V4 created the table with BIGSERIAL (so only "balance_reconciliation_id_seq" exists) and
+-- the schema is generation:none, so every INSERT runs `nextval('balance_reconciliation_seq')`
+-- and fails with: relation "balance_reconciliation_seq" does not exist (42P01).
+--
+-- V5__hibernate_sequences.sql backfilled balances_seq / balance_holds_seq / balance_outbox_seq
+-- but MISSED this one. The reconciliation line was later added to V5 in source — but V5 had
+-- already been applied to live databases, and Flyway never re-runs an applied migration, so
+-- the fix never reached them: the daily control-account tie-out (BalanceReconciliationScheduler,
+-- 23:30) has therefore persisted ZERO rows since day one — the reconcile use-case 500s on the
+-- missing sequence on every run and the scheduler swallows it. This is a forward migration
+-- (never edit an applied migration) that finally creates the sequence on existing databases.
+--
+-- IF NOT EXISTS makes it idempotent: a no-op on any database provisioned after the V5 edit
+-- (where V5 already created it). Matches the repo convention: unquoted, lowercase, INCREMENT BY 50.
+--
+-- Rollback: DROP SEQUENCE IF EXISTS balance_reconciliation_seq;
+
+CREATE SEQUENCE IF NOT EXISTS balance_reconciliation_seq INCREMENT BY 50;
