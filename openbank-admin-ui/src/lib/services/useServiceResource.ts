@@ -73,9 +73,11 @@ export function useServiceResource<T = unknown>(
   const [nonce, setNonce] = useState<number>(0)
 
   // Keep the latest options in a ref so an inline `select`/config object doesn't
-  // change effect identity every render (which would re-fetch on a loop).
+  // change effect identity every render (which would re-fetch on a loop). The ref
+  // is seeded with the first options via useRef(options) and refreshed in an
+  // effect — never mutated during render (React purity rule).
   const optsRef = useRef(options)
-  optsRef.current = options
+  useEffect(() => { optsRef.current = options })
 
   const reload = useCallback(() => setNonce(n => n + 1), [])
 
