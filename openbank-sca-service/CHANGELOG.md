@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.9](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.8.8...sca-service-v0.8.9) (2026-07-11)
+
+
+### Security
+
+* **consent,sca:** pair @Authorize with @RolesAllowed on every endpoint ([#780](https://github.com/JiRaska/open-bank-oss/issues/780)) ([dfb425c](https://github.com/JiRaska/open-bank-oss/commit/dfb425cbd06ed8a6f27879719a57cce726475b41)), closes [#467](https://github.com/JiRaska/open-bank-oss/issues/467)
+
 ## [0.8.8](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.8.7...sca-service-v0.8.8) (2026-07-07)
 
 
