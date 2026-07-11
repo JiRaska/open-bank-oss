@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.4](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.11.3...standing-order-service-v0.11.4) (2026-07-11)
+
+
+### Security
+
+* **standing-order,tpp-registry:** add missing RBAC to fully-open endpoints ([#758](https://github.com/JiRaska/open-bank-oss/issues/758)) ([5ed0f4c](https://github.com/JiRaska/open-bank-oss/commit/5ed0f4cba2d47e288a8000f48d122418e878318f))
+
 ## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.11.2...standing-order-service-v0.11.3) (2026-07-07)
 
 
