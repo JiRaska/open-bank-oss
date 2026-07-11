@@ -85,6 +85,12 @@ resource "helm_release" "karpenter" {
       name  = "settings.interruptionQueue"
       value = local.karpenter_queue_name
     },
+    # Auto-replace nodes stuck NotReady (guest-level hang passes EC2 status checks;
+    # EKS node auto repair covers only the bootstrap managed node group). Issue #809.
+    {
+      name  = "settings.featureGates.nodeRepair"
+      value = "true"
+    },
     # Controller must run on the bootstrap managed nodes, never on nodes it owns.
     {
       name  = "controller.resources.requests.cpu"
@@ -262,6 +268,28 @@ resource "helm_release" "argocd" {
     {
       name  = "controller.priorityClassName"
       value = "system-cluster-critical"
+    },
+    # The chart ships the controller with no resources at all (BestEffort). On the
+    # bin-packed 4Gi spot nodes the controller repeatedly exhausted node memory
+    # into a full guest hang: kubelet + SSM died while EC2 status checks stayed
+    # ok, stranding the singleton pod (issue #809, 2026-07-11 — several such
+    # nodes in one day, each dying minutes after this pod landed on it). Measured
+    # live: the startup reconciliation of this fleet's apps blows through 2.5Gi
+    # within a minute (an earlier 2560Mi limit OOM-killed it at 61s of age). The
+    # request keeps it off the 4Gi shapes entirely; the limit turns a runaway
+    # into a container OOM-kill (self-healing) instead of a node-killing kernel
+    # reclaim livelock.
+    {
+      name  = "controller.resources.requests.cpu"
+      value = "250m"
+    },
+    {
+      name  = "controller.resources.requests.memory"
+      value = "2560Mi"
+    },
+    {
+      name  = "controller.resources.limits.memory"
+      value = "3584Mi"
     },
   ]
 }
