@@ -18,7 +18,7 @@ type InfraProbe =
   | { kind: 'tcp'; host: string; port: number }
   | { kind: 'absent' } // not deployed in this topology → UNKNOWN, never a false DOWN
 
-interface InfraDef {
+export interface InfraDef {
   id: string
   probe: InfraProbe
 }
@@ -29,7 +29,7 @@ interface InfraDef {
 // component that genuinely isn't part of the sandbox topology yet (loki, kafka-ui)
 // is marked `absent` ⇒ UNKNOWN, not a misleading red. Ids are stable contract
 // keys consumed by /docs/bcp and /infrastructure.
-const CLUSTER_INFRA: InfraDef[] = [
+export const CLUSTER_INFRA: InfraDef[] = [
   { id: 'postgres',        probe: { kind: 'tcp',  host: 'accounts-db-rw.accounts.svc',                       port: 5432 } },
   { id: 'kafka',           probe: { kind: 'tcp',  host: 'openbank-cluster-kafka-bootstrap.messaging.svc',    port: 9092 } },
   { id: 'keycloak',        probe: { kind: 'http', url: 'http://keycloak.iam.svc:8080/realms/master', okCodes: [200] } },
@@ -69,7 +69,7 @@ function containerHost(name: string): string {
   return process.env.SERVICES_HOST === 'container' ? name : 'localhost'
 }
 
-const LOCAL_INFRA: InfraDef[] = [
+export const LOCAL_INFRA: InfraDef[] = [
   { id: 'postgres',        probe: { kind: 'tcp',  host: containerHost('openbank-postgres'),         port: 5432 } },
   { id: 'kafka',           probe: { kind: 'tcp',  host: containerHost('openbank-kafka'),             port: process.env.SERVICES_HOST === 'container' ? 9092 : 29092 } },
   { id: 'keycloak',        probe: { kind: 'http', url: `http://${containerHost('openbank-keycloak')}:8080/realms/master`, okCodes: [200] } },
@@ -109,7 +109,7 @@ function tcpProbe(host: string, port: number, timeoutMs = 3000): Promise<number 
   })
 }
 
-async function probeInfra(def: InfraDef): Promise<InfraStatusResult> {
+export async function probeInfra(def: InfraDef): Promise<InfraStatusResult> {
   const now = new Date().toISOString()
   try {
     if (def.probe.kind === 'absent') {
