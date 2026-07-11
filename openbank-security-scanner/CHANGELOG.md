@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.4](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.5.3...security-scanner-v0.5.4) (2026-07-11)
+
+
+### Security
+
+* **security-scanner:** add missing RBAC and OIDC config ([#777](https://github.com/JiRaska/open-bank-oss/issues/777)) ([7f168bf](https://github.com/JiRaska/open-bank-oss/commit/7f168bf1b7ea010bcfffa123fb4d44ada47da029))
+
 ## [0.5.3](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.5.2...security-scanner-v0.5.3) (2026-07-07)
 
 
