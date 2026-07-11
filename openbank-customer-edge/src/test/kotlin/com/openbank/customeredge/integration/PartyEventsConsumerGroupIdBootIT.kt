@@ -9,7 +9,7 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import org.apache.kafka.clients.admin.AdminClient
 import org.apache.kafka.clients.admin.AdminClientConfig
-import org.apache.kafka.clients.admin.ListConsumerGroupsOptions
+import org.apache.kafka.clients.admin.ListGroupsOptions
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.util.Properties
@@ -46,7 +46,7 @@ class PartyEventsConsumerGroupIdBootIT {
             val deadline = System.currentTimeMillis() + DEADLINE_MS
             var groupIds: Set<String> = emptySet()
             while (System.currentTimeMillis() < deadline) {
-                groupIds = admin.listConsumerGroups(ListConsumerGroupsOptions())
+                groupIds = admin.listGroups(ListGroupsOptions.forConsumerGroups())
                     .all().get().map { it.groupId() }.toSet()
                 if (groupIds.isNotEmpty()) break
                 Thread.sleep(POLL_INTERVAL_MS)
