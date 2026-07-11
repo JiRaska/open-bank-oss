@@ -53,6 +53,8 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // Consumer-driven contract for the ledger-service postJournal call (ADR-0063, issue #468).
+    testImplementation(libs.pact.consumer)
 }
 
 // Coverage floor (ADR-0020, ratchet-only — issue #321: billing was the only money-path
@@ -87,4 +89,22 @@ kover {
             }
         }
     }
+}
+
+// Pact: write the generated consumer contract to pacts/ and forward broker config, matching
+// transaction-service/lending-service/settlement-service's tasks.withType<Test> block
+// (ADR-0063 P1/P2).
+tasks.withType<Test> {
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
+    listOf(
+        "pactbroker.url",
+        "pactbroker.auth.username",
+        "pactbroker.auth.password",
+        "pactbroker.enablePending",
+        "pactbroker.providerBranch",
+        "pact.verifier.publishResults",
+        "pact.provider.version",
+        "pact.provider.branch",
+        "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
