@@ -1,0 +1,168 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.libs.testing.outbox
+
+import com.openbank.libs.persistence.outbox.OutboxEntry
+import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
+import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.persistence.outbox.OutboxStatus
+import io.quarkus.vertx.VertxContextSupport
+import io.smallrye.mutiny.coroutines.uni
+import io.smallrye.reactive.messaging.kafka.api.OutgoingKafkaRecordMetadata
+import io.smallrye.reactive.messaging.memory.InMemoryConnector
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.reactive.messaging.Message
+import org.junit.jupiter.api.Test
+import java.nio.charset.StandardCharsets
+import java.time.Instant
+import java.util.UUID
+
+/**
+ * End-to-end outbox dispatch conformance (ADR-0050 N1-N3, issue #467). Generalises
+ * `openbank-ledger-service`'s `LedgerOutboxDispatchIT` — the only service with this coverage
+ * before this kit, despite `AbstractOutboxDispatcher` (`openbank-libs-runtime`) already being the
+ * shared dispatch-loop implementation every outbox-bearing service extends. That base class's own
+ * `AbstractOutboxDispatcherTest` proves the *logic* (mark-sent-on-success, mark-failed-on-error)
+ * against fakes; this proves the *real* reactive-Panache + Kafka wiring a fake can't reach:
+ *
+ *  - N1: the whole coroutine dispatch chain runs on the Vert.x event loop (no HR000068).
+ *  - N2: the produced record's key is the aggregate id (per-aggregate ordering).
+ *  - N3: `ce-id` / `idempotency-key` / `ce-type` headers are present and correct.
+ *  - The row transitions PENDING → SENT (attemptCount incremented, sentAt set).
+ *  - Replaying dispatch after a row is SENT does not re-publish it (idempotent replay).
+ *
+ * A concrete subclass wires the five abstract members below and carries its own `@QuarkusTest` +
+ * `@QuarkusTestResource` annotations (this class itself is deliberately undecorated — CDI
+ * injection and Testcontainers only activate on the concrete class, same constraint as every
+ * other `*ConformanceTest` in this kit).
+ *
+ * ```
+ * @QuarkusTest
+ * @QuarkusTestResource(LedgerOutboxConformanceIT.InMemoryKafkaResource::class)
+ * @QuarkusTestResource(PostgresTestResource::class)
+ * class LedgerOutboxConformanceIT : OutboxDispatchConformanceIT() {
+ *     @Inject lateinit var dispatcher: LedgerOutboxDispatcher
+ *     @Inject lateinit var repository: LedgerOutboxRepositoryImpl
+ *     @Inject @Connector("smallrye-in-memory") override lateinit var connector: InMemoryConnector
+ *
+ *     override val channelName = "ledger-events-out"
+ *     override suspend fun seed(message: OutboxMessage) = repository.persistInTransaction(message)
+ *     override suspend fun triggerDispatch() { dispatcher.dispatch() }
+ *     override suspend fun findEntry(eventId: UUID) =
+ *         repository.find("eventId", eventId).firstResult()?.toEntry()
+ * }
+ * ```
+ */
+// detekt's FunctionNaming excludes **/test/** by default, but these @Test methods must live in
+// src/main so testImplementation(project(":openbank-libs-testing")) can pull and inherit them.
+@Suppress("FunctionNaming")
+abstract class OutboxDispatchConformanceIT {
+
+    /** The channel this service's dispatcher publishes to (e.g. `"ledger-events-out"`). */
+    protected abstract val channelName: String
+
+    /** The service's in-memory Kafka connector (switched via `InMemoryConnector.switchOutgoingChannelsToInMemory`). */
+    protected abstract val connector: InMemoryConnector
+
+    /** Persist a PENDING row using the concrete service's own repository/entity mapping. */
+    protected abstract suspend fun seed(message: OutboxMessage)
+
+    /** Drive one dispatch cycle via the concrete service's own dispatcher bean. */
+    protected abstract suspend fun triggerDispatch()
+
+    /** Look up the row's current state (status/sentAt/attemptCount) by event id. */
+    protected abstract suspend fun findEntry(eventId: UUID): OutboxEntry?
+
+    /**
+     * Reactive Panache needs a Vert.x duplicated context; the JUnit thread is not one. Every
+     * concrete [seed]/[findEntry] implementation should run its Panache call through this.
+     */
+    protected fun <T> onEventLoop(block: suspend () -> T): T =
+        VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
+
+    private fun headerValue(message: Message<String>, name: String): String {
+        val md = message.getMetadata(OutgoingKafkaRecordMetadata::class.java).orElseThrow()
+        return String((md.headers.lastHeader(name) ?: error("missing header $name")).value(), StandardCharsets.UTF_8)
+    }
+
+    private fun key(message: Message<String>): String =
+        message.getMetadata(OutgoingKafkaRecordMetadata::class.java).orElseThrow().key as String
+
+    @Suppress("UNCHECKED_CAST")
+    private fun received(): List<Message<String>> =
+        connector.sink<String>(channelName).received().map { it as Message<String> }
+
+    @Test
+    fun `dispatch publishes pending rows with a stable per-aggregate key plus CloudEvents headers, marks SENT`() {
+        val aggregateId = UUID.randomUUID()
+        val first = OutboxMessage(
+            aggregateId = aggregateId,
+            eventType = "test.event.posted",
+            payload = """{"seq":1}""",
+            createdAt = Instant.now(),
+        )
+        val second = first.copy(eventId = UUID.randomUUID(), payload = """{"seq":2}""")
+        onEventLoop { seed(first) }
+        onEventLoop { seed(second) }
+
+        onEventLoop { triggerDispatch() }
+
+        val mineIds = setOf(first.eventId.toString(), second.eventId.toString())
+        val mine = received().filter {
+            headerValue(it, OutboxKafkaHeaders.HEADER_EVENT_ID) in mineIds
+        }
+        assertThat(mine).hasSize(2)
+
+        // N2: every record for this aggregate is keyed by the aggregate id.
+        assertThat(mine.map { key(it) }).containsOnly(aggregateId.toString())
+
+        // N3: ce-id / idempotency-key carry the event id; ce-type carries the event type.
+        val byEventId = mine.associateBy { headerValue(it, OutboxKafkaHeaders.HEADER_EVENT_ID) }
+        listOf(first, second).forEach { msg ->
+            val produced = byEventId.getValue(msg.eventId.toString())
+            assertThat(headerValue(produced, OutboxKafkaHeaders.HEADER_IDEMPOTENCY_KEY))
+                .isEqualTo(msg.eventId.toString())
+            assertThat(headerValue(produced, OutboxKafkaHeaders.HEADER_EVENT_TYPE)).isEqualTo(msg.eventType)
+            assertThat(produced.payload).isEqualTo(msg.payload)
+        }
+
+        // Persistence side committed: both rows are now SENT with a stamped sentAt and one attempt.
+        listOf(first, second).forEach { msg ->
+            val row = onEventLoop { findEntry(msg.eventId) }
+            assertThat(row).describedAs("row for event ${msg.eventId}").isNotNull
+            assertThat(row!!.status).isEqualTo(OutboxStatus.SENT)
+            assertThat(row.sentAt).isNotNull
+            assertThat(row.attemptCount).isGreaterThanOrEqualTo(1)
+            assertThat(row.lastError).isNull()
+        }
+    }
+
+    @Test
+    fun `replaying dispatch after a row is SENT does not re-publish it`() {
+        val message = OutboxMessage(
+            aggregateId = UUID.randomUUID(),
+            eventType = "test.event.replay",
+            payload = """{"once":true}""",
+            createdAt = Instant.now(),
+        )
+        onEventLoop { seed(message) }
+        onEventLoop { triggerDispatch() }
+
+        val firstPassCount = received().count {
+            headerValue(it, OutboxKafkaHeaders.HEADER_EVENT_ID) == message.eventId.toString()
+        }
+        assertThat(firstPassCount).isEqualTo(1)
+
+        // A second dispatch tick must not pick this row up again — it's SENT, not PENDING/FAILED.
+        onEventLoop { triggerDispatch() }
+
+        val secondPassCount = received().count {
+            headerValue(it, OutboxKafkaHeaders.HEADER_EVENT_ID) == message.eventId.toString()
+        }
+        assertThat(secondPassCount).describedAs("SENT row must not be re-published on replay").isEqualTo(1)
+    }
+}
