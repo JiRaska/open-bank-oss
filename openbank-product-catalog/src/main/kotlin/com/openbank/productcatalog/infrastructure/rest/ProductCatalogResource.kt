@@ -4,10 +4,21 @@
 
 package com.openbank.productcatalog.infrastructure.rest
 
+import com.openbank.libs.authz.Authorize
+import com.openbank.libs.security.Roles
 import com.openbank.productcatalog.application.ProductCatalogService
 import com.openbank.productcatalog.application.ProductRequest
+import io.quarkus.security.Authenticated
+import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.ws.rs.*
+import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.GET
+import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
+import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
+import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 
@@ -17,6 +28,8 @@ import jakarta.ws.rs.core.Response
 class ProductCatalogResource(private val service: ProductCatalogService) {
 
     @GET
+    @Authenticated
+    @Authorize(action = "catalog.list")
     suspend fun list(
         @QueryParam("type") type: String?,
         @QueryParam("status") status: String?,
@@ -31,18 +44,24 @@ class ProductCatalogResource(private val service: ProductCatalogService) {
 
     @GET
     @Path("/{id}")
+    @Authenticated
+    @Authorize(action = "catalog.read", resource = "#id")
     suspend fun getById(@PathParam("id") id: String): Response = service.findById(id)?.let { Response.ok(it).build() }
         ?: Response.status(404).entity(mapOf("error" to "Product $id not found")).build()
 
     // ADR-0105: resolve a product by its semantic code (e.g. SAVINGS_STANDARD) or prod-NNN legacy alias.
     @GET
     @Path("/by-code/{code}")
+    @Authenticated
+    @Authorize(action = "catalog.read", resource = "#code")
     suspend fun getByCode(@PathParam("code") code: String): Response =
         service.findByCode(code)?.let { Response.ok(it).build() }
             ?: Response.status(404).entity(mapOf("error" to "Product with code '$code' not found")).build()
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "catalog.create")
     suspend fun create(req: ProductRequest): Response = try {
         val product = service.create(req)
         Response.status(201).entity(product).build()
@@ -53,6 +72,8 @@ class ProductCatalogResource(private val service: ProductCatalogService) {
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "catalog.update", resource = "#id")
     suspend fun update(@PathParam("id") id: String, req: ProductRequest): Response = try {
         Response.ok(service.update(id, req)).build()
     } catch (e: NoSuchElementException) {
@@ -63,6 +84,8 @@ class ProductCatalogResource(private val service: ProductCatalogService) {
 
     @POST
     @Path("/{id}/activate")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "catalog.update", resource = "#id")
     suspend fun activate(@PathParam("id") id: String): Response = try {
         Response.ok(service.activate(id)).build()
     } catch (e: NoSuchElementException) {
@@ -71,6 +94,8 @@ class ProductCatalogResource(private val service: ProductCatalogService) {
 
     @POST
     @Path("/{id}/deactivate")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "catalog.update", resource = "#id")
     suspend fun deactivate(@PathParam("id") id: String): Response = try {
         Response.ok(service.deactivate(id)).build()
     } catch (e: NoSuchElementException) {
@@ -79,6 +104,8 @@ class ProductCatalogResource(private val service: ProductCatalogService) {
 
     @GET
     @Path("/{id}/fees")
+    @Authenticated
+    @Authorize(action = "catalog.read", resource = "#id")
     suspend fun getFees(@PathParam("id") id: String): Response = service.findById(id)
         ?.let { Response.ok(it.fees).build() }
         ?: Response.status(404).entity(mapOf("error" to "Product $id not found")).build()
