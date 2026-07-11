@@ -3,10 +3,16 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect } from 'react'
-import { Globe, Send, Search, CheckCircle2, XCircle, Clock, RefreshCw, AlertTriangle } from 'lucide-react'
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { Globe, Send, Search, CheckCircle2, Clock, RefreshCw, AlertTriangle, ChevronRight } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { svcUrl } from '@/lib/services/bff'
+import { useServiceResource } from '@/lib/services/useServiceResource'
+import { stashRow } from '@/lib/services/rowHandoff'
+import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 
 interface SwiftMessage {
   id: string; messageType: string; senderBic: string; receiverBic: string
@@ -21,19 +27,14 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; border: string }
 }
 
 export default function SwiftPage() {
-  const { t } = useLanguage()
-  const [messages, setMessages] = useState<SwiftMessage[]>([])
-  const [loading, setLoading] = useState(true)
+  const { t, language } = useLanguage()
+  const router = useRouter()
   const [search, setSearch] = useState('')
-  const [serviceUp, setServiceUp] = useState<boolean | null>(null)
-
-  useEffect(() => {
-    fetch('/api/svc/swift-service/q/health/ready').then(r => setServiceUp(r.ok)).catch(() => setServiceUp(false))
-    fetch('/api/svc/swift-service/api/v1/swift/messages').then(r => r.json())
-      .then(d => setMessages(Array.isArray(d) ? d : d.messages ?? []))
-      .catch(() => setMessages([]))
-      .finally(() => setLoading(false))
-  }, [])
+  const { data, loading, unavailable, waking } = useServiceResource<SwiftMessage[]>(
+    svcUrl('swift-service', '/api/v1/swift/messages'),
+    { select: (raw) => (Array.isArray(raw) ? (raw as SwiftMessage[]) : ((raw as { messages?: SwiftMessage[] }).messages ?? [])) },
+  )
+  const messages = data ?? []
 
   const filtered = messages.filter(m =>
     m.senderBic?.toLowerCase().includes(search.toLowerCase()) ||
@@ -55,14 +56,18 @@ export default function SwiftPage() {
             </p>
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 600,
-              padding: '4px 10px', borderRadius: '20px',
-              background: serviceUp === true ? 'var(--success-bg)' : serviceUp === false ? 'var(--danger-bg)' : 'var(--surface-3)',
-              color: serviceUp === true ? 'var(--success-text)' : serviceUp === false ? 'var(--danger-text)' : 'var(--text-tertiary)',
-              border: `1px solid ${serviceUp === true ? 'var(--success-border)' : serviceUp === false ? 'var(--danger-border)' : 'var(--border)'}` }}>
-              {serviceUp === true ? <CheckCircle2 size={10} /> : serviceUp === false ? <XCircle size={10} /> : <Clock size={10} />}
-              swift-service :8122
-            </span>
+            <ServiceStatusBadge
+              label="swift-service :8122"
+              loading={loading}
+              waking={waking}
+              unavailable={unavailable}
+              copy={{
+                up: t('swift-service běží', 'swift-service is up'),
+                idle: t('swift-service spí (scale-to-zero), probouzí se…', 'swift-service idle (scaled to zero), waking…'),
+                down: t('swift-service neodpovídá', 'swift-service is not responding'),
+                checking: t('Zjišťuji stav služby…', 'Checking service…'),
+              }}
+            />
             <button className="btn btn-primary btn-sm"><Send size={13} /> {t('Nová zpráva', 'New Message')}</button>
           </div>
         </div>
@@ -96,25 +101,27 @@ export default function SwiftPage() {
             <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
               <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám…', 'Loading…')}</div>
             </div>
+          ) : unavailable ? (
+            <DataUnavailable kind={unavailable.kind} service={t('SWIFT-service', 'SWIFT-service')} feature={t('SWIFT zprávy', 'SWIFT messages')} lang={language} />
           ) : filtered.length === 0 ? (
-            <div style={{ padding: '48px', textAlign: 'center' }}>
-              <Globe size={32} style={{ color: 'var(--text-tertiary)', marginBottom: '12px' }} />
-              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>{t('Žádné SWIFT zprávy', 'No SWIFT messages')}</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t('Mikroservisa běží na portu 8122.', 'Microservice is running on port 8122.')}</div>
-              <a href="/api/svc/swift-service/api/docs" target="_blank" rel="noreferrer"
-                style={{ display: 'inline-block', marginTop: '12px', fontSize: '12px', color: 'var(--accent)', textDecoration: 'none' }}>→ Swagger UI</a>
-            </div>
+            <DataUnavailable kind="no_data" feature={t('SWIFT zprávy', 'SWIFT messages')} lang={language}
+              detail={messages.length === 0
+                ? t('Služba běží, zatím žádné SWIFT zprávy.', 'The service is running; no SWIFT messages yet.')
+                : t('Žádné výsledky pro zadaný filtr.', 'No results for the applied filter.')} />
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
                 {[t('Typ', 'Type'), t('Odesílatel BIC', 'Sender BIC'), t('Příjemce BIC', 'Recipient BIC'), t('Částka', 'Amount'), t('Reference', 'Reference'), t('Status', 'Status'), t('Datum', 'Date')].map(h => (
                   <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
                 ))}
+                <th aria-label={t('Detail', 'Detail')} style={{ width: '36px' }} />
               </tr></thead>
               <tbody>{filtered.map(m => {
                 const sc = STATUS_COLORS[m.status] ?? STATUS_COLORS.PENDING
                 return (
-                  <tr key={m.id} style={{ borderBottom: '1px solid var(--border)' }}
+                  <tr key={m.id} style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
+                    onClick={() => { stashRow('swift', m.id, m); router.push(`/swift/${m.id}`) }}
+                    title={t('Zobrazit detail zprávy', 'View message detail')}
                     onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
                     onMouseLeave={e => (e.currentTarget.style.background = '')}>
                     <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 700, color: 'var(--accent)' }}>{m.messageType}</td>
@@ -129,6 +136,7 @@ export default function SwiftPage() {
                         background: sc.bg, color: sc.text, border: `1px solid ${sc.border}` }}>{m.status}</span>
                     </td>
                     <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{m.createdAt ? new Date(m.createdAt).toLocaleDateString('cs-CZ') : '—'}</td>
+                    <td style={{ padding: '12px 8px', textAlign: 'right' }}><ChevronRight size={14} style={{ color: 'var(--text-tertiary)' }} /></td>
                   </tr>
                 )
               })}</tbody>

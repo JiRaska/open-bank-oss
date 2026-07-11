@@ -9,8 +9,9 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
   Banknote, Search, RefreshCw, Plus, Zap, Globe, CheckCircle2, XCircle,
-  Clock, AlertTriangle, Timer, ShieldCheck, AlertCircle
+  Clock, AlertTriangle, Timer, ShieldCheck, AlertCircle, ChevronRight
 } from 'lucide-react'
+import { stashRow } from '@/lib/services/rowHandoff'
 
 // ADR-0080 P1 (pentest FIND-S3-03/04): all backend access goes through same-origin BFF
 // routes — never NEXT_PUBLIC_ localhost URLs, which leaked the internal port map into the
@@ -853,19 +854,22 @@ function PaymentsContent() {
                   <th>{t('Příjemce', 'Creditor')}</th>
                   <th>{t('IBAN / Účet příjemce', 'Creditor IBAN / Account')}</th>
                   <th>{t('Vytvořeno', 'Created')}</th>
+                  <th aria-label={t('Detail', 'Detail')} style={{ width: '36px' }} />
                 </tr>
               </thead>
               <tbody>
                 {loading && Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i}>{Array.from({ length: 7 }).map((_, j) => <td key={j}><div className="skeleton" style={{ height: '14px', width: j === 0 ? '120px' : '80px' }} /></td>)}</tr>
+                  <tr key={i}>{Array.from({ length: 8 }).map((_, j) => <td key={j}><div className="skeleton" style={{ height: '14px', width: j === 0 ? '120px' : '80px' }} /></td>)}</tr>
                 ))}
                 {!loading && filtered.length === 0 && (
-                  <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                     {t('Nebyly nalezeny žádné platby', 'No payments found')}
                   </td></tr>
                 )}
                 {!loading && filtered.map(p => (
-                  <tr key={`${p.type}-${p.id}`}>
+                  <tr key={`${p.type}-${p.id}`} style={{ cursor: 'pointer' }}
+                    title={t('Zobrazit detail platby', 'View payment detail')}
+                    onClick={() => { stashRow('payments', p.id, p); router.push(`/payments/${p.id}?type=${p.type}`) }}>
                     <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}>{p.id.slice(0, 8)}…</td>
                     <td><span className="tag" style={{ color: p.type === 'SEPA' ? 'var(--accent)' : 'var(--green)' }}>{p.type}</span></td>
                     <td>
@@ -879,6 +883,7 @@ function PaymentsContent() {
                       {p.creditorIban ? p.creditorIban : (p.creditorAccountNumber && p.creditorBankCode ? `${p.creditorAccountNumber}/${p.creditorBankCode}` : '—')}
                     </td>
                     <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(p.createdAt).toLocaleDateString()}</td>
+                    <td style={{ textAlign: 'right', paddingRight: '8px' }}><ChevronRight size={14} style={{ color: 'var(--text-muted)' }} /></td>
                   </tr>
                 ))}
               </tbody>
