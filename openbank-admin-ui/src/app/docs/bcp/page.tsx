@@ -34,8 +34,9 @@ const TIERS: {
     regulatoryBasis: ['Prerekvizita všech ostatních tierů', 'Prerequisite for all other tiers'],
     icon: Database,
     services: [
-      { name: 'postgres',         label: 'PostgreSQL',       note: ['Primární datové úložiště', 'Primary data store'] },
+      { name: 'postgres',         label: 'PostgreSQL (CloudNativePG)', note: ['Primární datové úložiště (operátor CNPG)', 'Primary data store (CNPG operator)'] },
       { name: 'kafka',            label: 'Apache Kafka',     note: ['Event streaming, outbox pattern', 'Event streaming, outbox pattern'] },
+      { name: 'temporal',         label: 'Temporal',         note: ['Orchestrace platebních a závěrkových workflow (settlement, SEPA, EoM)', 'Payment & close workflow orchestration (settlement, SEPA, EoM)'] },
       { name: 'keycloak',         label: 'Keycloak (IAM)',   note: ['PSD2 Art. 97 — autentizace', 'PSD2 Art. 97 — authentication'] },
       { name: 'openbao',          label: 'OpenBao',          note: ['PCI DSS Req. 3.5 — správa klíčů', 'PCI DSS Req. 3.5 — key management'] },
       { name: 'valkey',           label: 'Valkey (Redis)',   note: ['Idempotency — prevence duplikátů', 'Idempotency — duplicate prevention'] },
@@ -133,6 +134,7 @@ const TIERS: {
       { name: 'dispute-service',  label: 'Dispute Service',  note: ['PCI DSS Req. 12 — chargebacks', 'PCI DSS Req. 12 — chargebacks'] },
       { name: 'interest-service', label: 'Interest Service', note: ['CNB — úrokové výpočty', 'CNB — interest calculations'] },
       { name: 'admin-ui',         label: 'Admin UI',         note: ['Operátorská konzole', 'Operator console'] },
+      { name: 'keda',             label: 'KEDA',             note: ['Scale-to-zero autoscaling — úspora nákladů (ADR-0057)', 'Scale-to-zero autoscaling — cost saving (ADR-0057)'] },
       { name: 'grafana',          label: 'Grafana',          note: ['DORA Art. 8 — monitoring', 'DORA Art. 8 — monitoring'] },
       { name: 'prometheus',       label: 'Prometheus',       note: ['Metriky', 'Metrics'] },
       { name: 'loki',             label: 'Loki',             note: ['DORA Art. 17 — log retention', 'DORA Art. 17 — log retention'] },

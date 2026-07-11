@@ -53,7 +53,7 @@ const SERVICES = [
   { id: 'statement',   name: 'Statement Service',    port: 8136, group: 'core',    x: 625, y: 220,  color: '#2563eb', desc: 'Account statement generation (EoM)' },
   { id: 'onboarding',  name: 'Onboarding Service',   port: 8130, group: 'identity', x: 750, y: 220,  color: '#059669', desc: 'Customer onboarding journey (ADR-0069)' },
   { id: 'anacredit',   name: 'AnaCredit Service',    port: 8137, group: 'compliance', x: 1080, y: 500, color: '#dc2626', desc: 'AnaCredit regulatory reporting (ECB)' },
-  { id: 'sdd',         name: 'SEPA Direct Debit',    port: 8132, group: 'payment', x: 375, y: 500,  color: '#7c3aed', desc: 'SEPA Direct Debit mandates and collections' },
+  { id: 'sdd',         name: 'SEPA Direct Debit',    port: 8129, group: 'payment', x: 375, y: 500,  color: '#7c3aed', desc: 'SEPA Direct Debit mandates and collections' },
 ]
 
 // Service dependencies (edges)
