@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.10.1...lending-service-v0.11.0) (2026-07-11)
+
+
+### Features
+
+* **lending:** loan rescheduling/restructuring with optional forgiveness (issue [#667](https://github.com/JiRaska/open-bank-oss/issues/667)/[#668](https://github.com/JiRaska/open-bank-oss/issues/668)) ([#711](https://github.com/JiRaska/open-bank-oss/issues/711)) ([202f5c4](https://github.com/JiRaska/open-bank-oss/commit/202f5c4c0cc348898a0d77d155293c9a6991a6cb))
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.10.0...lending-service-v0.10.1) (2026-07-09)
 
 
