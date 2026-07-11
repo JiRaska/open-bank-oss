@@ -18,8 +18,13 @@ import com.openbank.balance.domain.model.BalanceHold
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
+import io.vertx.core.Vertx
+import io.vertx.core.impl.ContextInternal
 import jakarta.inject.Inject
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.launch
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
@@ -28,6 +33,9 @@ import org.junit.jupiter.api.extension.ExtendWith
 import java.math.BigDecimal
 import java.time.OffsetDateTime
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
 
 /**
  * Provider-side verification for all balance-service consumer contracts (ADR-0063 P2).
@@ -73,10 +81,52 @@ class BalancePactProviderVerificationTest {
     @Inject
     lateinit var holdRepo: HoldRepository
 
+    @Inject
+    lateinit var vertx: Vertx
+
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
         context?.target = HttpTestTarget("localhost", testPort.toInt())
         context?.addStateChangeHandlers(this)
+    }
+
+    /**
+     * Bridges a reactive-Panache block into Pact-JVM's synchronous `@State` callback. Pact-JVM
+     * invokes `@State` methods directly via reflection on the JUnit test thread, which has no
+     * Vert.x context — `Panache.withTransaction`/`withSession` (used by [balanceRepo]/[holdRepo])
+     * require one, so a bare `runBlocking { balanceRepo.save(...) }` throws
+     * `IllegalStateException: No current Vertx context found`. Confirmed live: this broke every
+     * account-service<->balance-service pact verification since 2026-06-21 (verification result
+     * #389) without ever being noticed, because the failure only actually blocks a deploy once
+     * `can-i-deploy` is reached — `fx-service`'s own Pact provider test has the identical
+     * `runBlocking { reactiveRepo.save(...) }` pattern and is presumably equally broken.
+     *
+     * A plain `vertx.runOnContext { runBlocking { ... } }` is NOT sufficient: it throws a
+     * *different* `IllegalStateException` ("current context is not a duplicated context") because
+     * Quarkus's `VertxContextSafetyToggle` requires the reactive Panache call to run on a
+     * duplicated context (the kind Quarkus creates per-request), not a plain event-loop context.
+     * Nesting `runBlocking` inside that context is also independently wrong even once the
+     * duplicated+safe context is set up: it parks the very event-loop thread the reactive chain
+     * needs to resume on, deadlocking instead of throwing (verified empirically — it hung the
+     * test JVM for 15+ minutes). The fix duplicates the context, marks it safe via the same
+     * toggle Quarkus uses internally, and dispatches the coroutine onto it with a plain
+     * `CoroutineDispatcher` that posts via `runOnContext` — never blocking that thread — so
+     * suspension/resumption on the reactive chain completes normally.
+     */
+    private fun runOnVertxContext(block: suspend () -> Unit) {
+        val future = CompletableFuture<Unit>()
+        val duplicated = (vertx.orCreateContext as ContextInternal).duplicate()
+        VertxContextSafetyToggle.setContextSafe(duplicated, true)
+        val dispatcher = Executor { command -> duplicated.runOnContext { command.run() } }.asCoroutineDispatcher()
+        CoroutineScope(dispatcher).launch {
+            try {
+                block()
+                future.complete(Unit)
+            } catch (t: Throwable) {
+                future.completeExceptionally(t)
+            }
+        }
+        future.get(10, TimeUnit.SECONDS)
     }
 
     @TestTemplate
@@ -86,7 +136,7 @@ class BalancePactProviderVerificationTest {
     }
 
     @State("a CZK balance exists for the holds account with sufficient funds")
-    fun stateBalanceExists(): Unit = runBlocking {
+    fun stateBalanceExists() = runOnVertxContext {
         balanceRepo.save(
             Balance(
                 id = UUID.randomUUID(),
@@ -104,7 +154,7 @@ class BalancePactProviderVerificationTest {
     }
 
     @State("a CZK hold exists for the holds account")
-    fun stateHoldExists(): Unit = runBlocking {
+    fun stateHoldExists() = runOnVertxContext {
         // Balance must exist before releaseHold — it looks up (accountId, currency) to update.
         // Uses a distinct RELEASE_ACCOUNT_ID to avoid (accountId, currency) collision with the
         // stateBalanceExists handler when both run in the same Testcontainer DB.
@@ -140,7 +190,7 @@ class BalancePactProviderVerificationTest {
     // --- Batch A: account-service states ---
 
     @State("balances exist for the balance account")
-    fun stateBalancesExist(): Unit = runBlocking {
+    fun stateBalancesExist() = runOnVertxContext {
         balanceRepo.save(
             Balance(
                 id = UUID.randomUUID(),
@@ -158,7 +208,7 @@ class BalancePactProviderVerificationTest {
     }
 
     @State("a CZK balance exists for the balance account")
-    fun stateSingleCzkBalanceExists(): Unit = runBlocking {
+    fun stateSingleCzkBalanceExists() = runOnVertxContext {
         balanceRepo.save(
             Balance(
                 id = UUID.randomUUID(),
