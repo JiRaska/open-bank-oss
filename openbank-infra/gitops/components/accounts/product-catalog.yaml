@@ -19,6 +19,20 @@
 # (minReplicas: 0) stays; JVM cold-start is slower but the admin-ui auto-wakes it. The
 # native pilot work is preserved (Dockerfile.native); it is simply not deployed to the fleet.
 # Do NOT declare `openbank-product-catalog: T1` in `rules.yaml:finops_tiers.declared`.
+#
+# Verification of this rollback:
+#  - sandbox-a407c3ae is the STANDARD JVM fast-jar build (build-push-service.sh),
+#    the same pipeline the other ~40 fleet services run in production — not a
+#    bespoke image. It carries a valid SBOM attestation (.att/.sig in ECR), so
+#    Kyverno verify-openbank-image-sbom-attestation admits it (the exact policy
+#    that was blocking statement-service on an un-attested tag).
+#  - Probe budget: startupProbe 5s + 30×5s = 155s, well above a JVM boot + Flyway
+#    migration; identical to the pre-native manifest that ran green. Resources
+#    (256Mi req / 512Mi limit) are unchanged from that JVM baseline.
+#  - Runtime SLA is only observable post-deploy: after merge, watch the ArgoCD
+#    `accounts` app roll the new ReplicaSet, confirm the pod reaches Ready and
+#    GET /api/v1/fees serves, and roll back this tag on failure. KEDA keeps it at
+#    0 replicas until a request wakes it (the admin-ui auto-wake covers cold start).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
