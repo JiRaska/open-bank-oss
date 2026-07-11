@@ -10,6 +10,8 @@ import com.openbank.ledger.application.usecase.JournalNotFoundException
 import com.openbank.ledger.application.usecase.JournalReversalConflictException
 import com.openbank.ledger.application.usecase.YearCloseConflictException
 import com.openbank.ledger.application.usecase.YearCloseNotFoundException
+import com.openbank.ledger.domain.model.LedgerConflictException
+import com.openbank.ledger.domain.model.LedgerValidationException
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.Response.Status.CONFLICT
@@ -17,6 +19,9 @@ import jakarta.ws.rs.core.Response.Status.NOT_FOUND
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
 import org.jboss.logging.Logger
+
+// Not in jakarta.ws.rs.core.Response.Status (JAX-RS's base enum stops short of 422).
+private const val UNPROCESSABLE_ENTITY = 422
 
 @Provider
 class JournalNotFoundExceptionMapper : ExceptionMapper<JournalNotFoundException> {
@@ -28,26 +33,32 @@ class JournalNotFoundExceptionMapper : ExceptionMapper<JournalNotFoundException>
 
 @Provider
 class GlAccountValidationExceptionMapper : ExceptionMapper<GlAccountValidationException> {
-    override fun toResponse(exception: GlAccountValidationException): Response = Response.status(422)
+    override fun toResponse(exception: GlAccountValidationException): Response = Response.status(UNPROCESSABLE_ENTITY)
         .entity(mapOf("error" to (exception.message ?: "Invalid GL account")))
         .type(MediaType.APPLICATION_JSON)
         .build()
 }
 
+// LedgerValidationException/LedgerConflictException (domain layer) replace bare
+// IllegalArgumentException/IllegalStateException (issue #526): a service-local
+// ExceptionMapper for a JDK type openbank-libs-runtime already maps collides
+// non-deterministically (JAX-RS has no defined tie-breaker between two same-type
+// providers) — the 422/409 below were a per-request lottery against libs' 400/422, not
+// the "intentional override" this file previously claimed.
 @Provider
-class IllegalArgumentExceptionMapper : ExceptionMapper<IllegalArgumentException> {
-    override fun toResponse(exception: IllegalArgumentException): Response = Response.status(422)
+class LedgerValidationExceptionMapper : ExceptionMapper<LedgerValidationException> {
+    override fun toResponse(exception: LedgerValidationException): Response = Response.status(UNPROCESSABLE_ENTITY)
         .entity(mapOf("error" to (exception.message ?: "Unprocessable entity")))
         .type(MediaType.APPLICATION_JSON)
         .build()
 }
 
 @Provider
-class IllegalStateExceptionMapper : ExceptionMapper<IllegalStateException> {
-    private val log = Logger.getLogger(IllegalStateExceptionMapper::class.java)
+class LedgerConflictExceptionMapper : ExceptionMapper<LedgerConflictException> {
+    private val log = Logger.getLogger(LedgerConflictExceptionMapper::class.java)
 
-    override fun toResponse(exception: IllegalStateException): Response {
-        log.errorf(exception, "Illegal state: %s", exception.message)
+    override fun toResponse(exception: LedgerConflictException): Response {
+        log.errorf(exception, "Ledger conflict: %s", exception.message)
         return Response.status(Response.Status.CONFLICT)
             .entity(mapOf("error" to (exception.message ?: "Conflict")))
             .type(MediaType.APPLICATION_JSON)
@@ -97,9 +108,9 @@ class ClosedFiscalPeriodExceptionMapper : ExceptionMapper<ClosedFiscalPeriodExce
 // ExceptionMapper<Exception> (GlobalExceptionMapper) is intentionally NOT declared here.
 // openbank-libs auto-registers GenericExceptionMapper (Exception → 500, correlation-aware) and
 // WebApplicationExceptionMapper (WebApplicationException → pass-through) via Jandex. A second
-// @Provider for the same type would collide non-deterministically (ADR-0049 D4).
-//
-// Ledger-specific status codes:
-//   IllegalArgumentException → 422 (GL validation failure, not a generic 400)
-//   IllegalStateException    → 409 Conflict (double-entry invariant violation)
-// These override libs' defaults intentionally and are kept above.
+// @Provider for the same type would collide non-deterministically (ADR-0049 D4, issue #526) —
+// the same reason IllegalArgumentException/IllegalStateException are no longer mapped directly
+// here either (see LedgerValidationException/LedgerConflictException above): a service-local
+// mapper for a libs-owned JDK type is a per-request lottery, not a reliable override. Ledger's
+// 422/409 status codes are still ledger-specific — they're just reached through a dedicated
+// domain exception type now, which JAX-RS resolves unambiguously.

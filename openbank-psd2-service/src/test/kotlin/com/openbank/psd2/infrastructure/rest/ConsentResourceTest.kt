@@ -12,6 +12,7 @@ import com.openbank.psd2.application.port.`in`.ConsentManagementUseCase
 import com.openbank.psd2.application.port.`in`.CreateConsentCommand
 import com.openbank.psd2.application.port.`in`.DeleteConsentCommand
 import com.openbank.psd2.application.port.`in`.GetConsentQuery
+import com.openbank.psd2.application.usecase.Psd2RequestFormatException
 import com.openbank.psd2.domain.model.ConsentStatusOb
 import com.openbank.psd2.domain.model.ObAccess
 import com.openbank.psd2.domain.model.ObConsentRequest
@@ -75,7 +76,7 @@ class ConsentResourceTest {
     fun `createConsent requires a non-blank X-Request-ID`(): Unit = runBlocking {
         assertThatThrownBy {
             runBlocking { resource.createConsent(sampleRequest(), null, "", ctxWithTpp("tpp-1")) }
-        }.isInstanceOf(IllegalArgumentException::class.java)
+        }.isInstanceOf(Psd2RequestFormatException::class.java)
     }
 
     @Test

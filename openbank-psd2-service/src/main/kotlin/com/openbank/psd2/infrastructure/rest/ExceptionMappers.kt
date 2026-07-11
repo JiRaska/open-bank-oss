@@ -7,6 +7,7 @@ package com.openbank.psd2.infrastructure.rest
 import com.openbank.psd2.application.usecase.ConsentNotFoundException
 import com.openbank.psd2.application.usecase.ConsentUnauthorizedException
 import com.openbank.psd2.application.usecase.InvalidPaymentProductException
+import com.openbank.psd2.application.usecase.Psd2RequestFormatException
 import com.openbank.psd2.application.usecase.TppNotAuthorizedException
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
@@ -39,8 +40,13 @@ class InvalidPaymentProductMapper : ExceptionMapper<InvalidPaymentProductExcepti
         Response.status(400).entity(tppMsg("ERROR", "PRODUCT_INVALID", e.message ?: "Invalid payment product")).build()
 }
 
+// Replaces ExceptionMapper<IllegalArgumentException> (issue #526): a service-local mapper for a
+// JDK type openbank-libs-runtime already maps to a DIFFERENT response shape (its generic
+// ApiError, not this service's Berlin Group tppMessages envelope) collides non-deterministically
+// — both happen to answer 400, but which body shape a TPP client got was a per-request lottery.
 @Provider
-class Psd2IllegalArgMapper : ExceptionMapper<IllegalArgumentException> {
-    override fun toResponse(e: IllegalArgumentException): Response =
-        Response.status(400).entity(tppMsg("ERROR", "FORMAT_ERROR", e.message ?: "Bad request")).build()
+class Psd2RequestFormatMapper : ExceptionMapper<Psd2RequestFormatException> {
+    override fun toResponse(e: Psd2RequestFormatException): Response = Response.status(Response.Status.BAD_REQUEST)
+        .entity(tppMsg("ERROR", "FORMAT_ERROR", e.message ?: "Bad request"))
+        .build()
 }

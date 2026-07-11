@@ -7,6 +7,7 @@ package com.openbank.psd2.infrastructure.rest
 import com.openbank.psd2.application.usecase.ConsentNotFoundException
 import com.openbank.psd2.application.usecase.ConsentUnauthorizedException
 import com.openbank.psd2.application.usecase.InvalidPaymentProductException
+import com.openbank.psd2.application.usecase.Psd2RequestFormatException
 import com.openbank.psd2.application.usecase.TppNotAuthorizedException
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -68,14 +69,12 @@ class ExceptionMappersTest {
     }
 
     @Test
-    fun `Psd2IllegalArgMapper returns 400 with FORMAT_ERROR and defaults message when null`() {
-        val withMessage = Psd2IllegalArgMapper().toResponse(IllegalArgumentException("bad format"))
-        assertThat(withMessage.status).isEqualTo(400)
-        assertThat(tppCode(withMessage.entity)).isEqualTo("FORMAT_ERROR")
-        assertThat(tppText(withMessage.entity)).isEqualTo("bad format")
+    fun `Psd2RequestFormatMapper returns 400 with FORMAT_ERROR`() {
+        val response = Psd2RequestFormatMapper().toResponse(Psd2RequestFormatException("bad format"))
 
-        val withoutMessage = Psd2IllegalArgMapper().toResponse(IllegalArgumentException())
-        assertThat(tppText(withoutMessage.entity)).isEqualTo("Bad request")
+        assertThat(response.status).isEqualTo(400)
+        assertThat(tppCode(response.entity)).isEqualTo("FORMAT_ERROR")
+        assertThat(tppText(response.entity)).isEqualTo("bad format")
     }
 
     @Test

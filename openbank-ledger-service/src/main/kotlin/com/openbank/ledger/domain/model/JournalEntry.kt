@@ -25,7 +25,7 @@ data class JournalEntry(
     val reversalOf: UUID? = null,
 ) {
     init {
-        require(lines.size >= 2) { "Journal entry must have at least 2 lines" }
+        requireValid(lines.size >= 2) { "Journal entry must have at least 2 lines" }
         validateBalance()
     }
 
@@ -40,14 +40,14 @@ data class JournalEntry(
                 .sumOf { it.baseAmount.amount }
             val credits = lines.filter { it.side == JournalSide.CREDIT && it.baseAmount.currency == currency }
                 .sumOf { it.baseAmount.amount }
-            require(debits.compareTo(credits) == 0) {
+            requireValid(debits.compareTo(credits) == 0) {
                 "Journal entry is not balanced in ${currency.code}: debits=$debits credits=$credits"
             }
         }
     }
 
     fun post(): JournalEntry {
-        check(status == JournalStatus.PENDING) { "Can only post PENDING journal entries, current: $status" }
+        checkConflict(status == JournalStatus.PENDING) { "Can only post PENDING journal entries, current: $status" }
         return copy(status = JournalStatus.POSTED)
     }
 
@@ -73,7 +73,7 @@ data class JournalEntry(
         }
 
     fun reverse(reversalId: UUID, reversedBy: UUID, lineIdProvider: (UUID) -> UUID = { Ids.newId() }): JournalEntry {
-        check(status == JournalStatus.POSTED) { "Can only reverse POSTED journal entries" }
+        checkConflict(status == JournalStatus.POSTED) { "Can only reverse POSTED journal entries" }
         val reversalLines = lines.map { line ->
             line.copy(
                 id = lineIdProvider(line.id),

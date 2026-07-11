@@ -36,16 +36,16 @@ object FxConversionPosting {
         customerBuyAmount: Money,
         fxRate: BigDecimal,
     ): List<JournalLine> {
-        require(sellAmount.isPositive()) { "sellAmount must be positive" }
-        require(grossBuyAmount.isPositive()) { "grossBuyAmount must be positive" }
-        require(sellAmount.currency != grossBuyAmount.currency) {
+        requireValid(sellAmount.isPositive()) { "sellAmount must be positive" }
+        requireValid(grossBuyAmount.isPositive()) { "grossBuyAmount must be positive" }
+        requireValid(sellAmount.currency != grossBuyAmount.currency) {
             "FX conversion must cross currencies: both legs are ${sellAmount.currency.code}"
         }
-        require(customerBuyAmount.currency == grossBuyAmount.currency) {
+        requireValid(customerBuyAmount.currency == grossBuyAmount.currency) {
             "customerBuyAmount currency ${customerBuyAmount.currency.code} must match buy currency ${grossBuyAmount.currency.code}"
         }
         val margin = grossBuyAmount - customerBuyAmount
-        require(margin.isNonNegative()) {
+        requireValid(margin.isNonNegative()) {
             "Customer cannot receive more than the gross converted amount (negative margin: $margin)"
         }
 

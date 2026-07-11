@@ -11,6 +11,7 @@ import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.psd2.application.port.`in`.GetPaymentStatusQuery
 import com.openbank.psd2.application.port.`in`.InitiatePaymentCommand
 import com.openbank.psd2.application.port.`in`.PaymentInitiationUseCase
+import com.openbank.psd2.application.usecase.Psd2RequestFormatException
 import com.openbank.psd2.domain.model.ObAccountRef
 import com.openbank.psd2.domain.model.ObAmount
 import com.openbank.psd2.domain.model.ObLinks
@@ -76,7 +77,7 @@ class PisResourceTest {
     fun `initiateSepa requires a non-blank Idempotency-Key`(): Unit = runBlocking {
         assertThatThrownBy {
             runBlocking { resource.initiateSepa(samplePayment(), "consent-1", "", ctxWithTpp("tpp-1")) }
-        }.isInstanceOf(IllegalArgumentException::class.java)
+        }.isInstanceOf(Psd2RequestFormatException::class.java)
             .hasMessageContaining("Idempotency-Key")
     }
 
