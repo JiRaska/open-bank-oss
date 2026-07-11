@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.8.4...product-catalog-v0.9.0) (2026-07-11)
+
+
+### Features
+
+* **product-catalog:** authenticate the catalog — @Authenticated reads, role-gated writes ([#401](https://github.com/JiRaska/open-bank-oss/issues/401)) ([#743](https://github.com/JiRaska/open-bank-oss/issues/743)) ([7eb1367](https://github.com/JiRaska/open-bank-oss/commit/7eb136746ddf560548167743bd6b585079ac4be8))
+
 ## [0.8.4](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.8.3...product-catalog-v0.8.4) (2026-07-07)
 
 
