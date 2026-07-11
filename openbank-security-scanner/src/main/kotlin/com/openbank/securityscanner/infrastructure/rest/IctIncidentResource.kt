@@ -5,10 +5,20 @@
 package com.openbank.securityscanner.infrastructure.rest
 
 import com.openbank.securityscanner.application.IctIncidentService
-import com.openbank.securityscanner.application.IctIncidentNotFoundException
 import com.openbank.securityscanner.application.ReportIncidentCommand
-import com.openbank.securityscanner.domain.*
-import jakarta.ws.rs.*
+import com.openbank.securityscanner.domain.IncidentCategory
+import com.openbank.securityscanner.domain.IncidentSeverity
+import com.openbank.securityscanner.domain.IncidentStatus
+import jakarta.annotation.security.RolesAllowed
+import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.GET
+import jakarta.ws.rs.PATCH
+import jakarta.ws.rs.POST
+import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
+import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
@@ -20,6 +30,7 @@ import java.util.UUID
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "ICT Incidents")
+@RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
 class IctIncidentResource(private val service: IctIncidentService, private val clock: Clock) {
 
     @POST
