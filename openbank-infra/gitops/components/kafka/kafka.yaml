@@ -38,7 +38,9 @@ spec:
   resources:
     requests:
       cpu: 250m
-      memory: 768Mi
+      # 768Mi → 1152Mi (issue #809): measured steady-state ~1Gi — the request
+      # must cover it so Karpenter's bin-packing stays honest.
+      memory: 1152Mi
     limits:
       cpu: "1"
       memory: 1536Mi
@@ -121,9 +123,26 @@ spec:
   kafkaExporter:
     topicRegex: ".*"
     groupRegex: ".*"
+  # Strimzi ships the entity operator with NO resources (BestEffort) — the pod
+  # measures ~470Mi (topic ~210Mi + user ~260Mi) that the scheduler never saw,
+  # eroding node headroom on whatever node it lands on (issue #809).
   entityOperator:
-    topicOperator: {}
-    userOperator: {}
+    topicOperator:
+      resources:
+        requests:
+          cpu: 25m
+          memory: 256Mi
+        limits:
+          cpu: 250m
+          memory: 384Mi
+    userOperator:
+      resources:
+        requests:
+          cpu: 25m
+          memory: 288Mi
+        limits:
+          cpu: 250m
+          memory: 448Mi
 ---
 # Domain event topic for account-service. Declared explicitly (the broker does
 # not auto-create topics) so the topic operator manages it and the producer's

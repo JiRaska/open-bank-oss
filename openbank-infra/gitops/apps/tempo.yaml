@@ -96,7 +96,9 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 320Mi
+              # 320Mi → 640Mi (issue #809): measured steady-state ~615Mi — the
+              # request must cover it so bin-packing stays honest.
+              memory: 640Mi
             limits:
               cpu: 500m
               # bumped 640Mi → 1Gi → 2Gi: local-blocks in-memory span buffer kept
