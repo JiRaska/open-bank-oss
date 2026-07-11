@@ -69,6 +69,16 @@ spec:
                 secretKeyRef:
                   name: ledger-db-app
                   key: password
+            # Flyway checksum mismatch on V7/V9/V11 (2026-07-11 bootstrap redeploy, #880):
+            # ledger-service hadn't been redeployed since 2026-07-06, so a repo-wide
+            # migration-file touch-up landed while it sat un-deployed. Repair-at-start
+            # re-baselines the recorded checksums to the current files — safe, matching the
+            # onboarding-service precedent (#730): git history shows these migration files
+            # have had no real content edit since their original authoring commit. Remove
+            # once the live schema_history rows are confirmed repaired (one clean boot is
+            # enough; safe to leave briefly, repair is a no-op once checksums already match).
+            - name: QUARKUS_FLYWAY_REPAIR_AT_START
+              value: "true"
             # Kafka producer → Strimzi tls:9093 (mTLS, ADR-0137 #2665 Tier 1).
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
