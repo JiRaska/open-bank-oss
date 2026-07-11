@@ -3,6 +3,7 @@ package com.openbank.account.application.usecase
 
 import com.openbank.account.application.port.`in`.CloseAccountCommand
 import com.openbank.account.application.port.`in`.ListAccountsQuery
+import com.openbank.account.application.port.`in`.ListActiveAccountsQuery
 import com.openbank.account.application.port.`in`.OpenAccountCommand
 import com.openbank.account.application.port.`in`.SearchAccountsQuery
 import com.openbank.account.application.port.out.AccountEventPublisher
@@ -199,6 +200,34 @@ class AccountServiceTest {
         assertThat(page.data).containsExactly(accounts[0], accounts[1])
         assertThat(page.pagination.hasNextPage).isTrue()
         assertThat(CursorEncoder.decode(page.pagination.nextCursor!!)).isEqualTo(accounts[1].id.toString())
+    }
+
+    @Test
+    fun `list active accounts decodes incoming cursor and emits next cursor from last item`(): Unit = runBlocking {
+        val afterId = UUID.randomUUID()
+        val accounts = listOf(
+            account(id = UUID.randomUUID(), partyId = UUID.randomUUID()),
+            account(id = UUID.randomUUID(), partyId = UUID.randomUUID()),
+            account(id = UUID.randomUUID(), partyId = UUID.randomUUID()),
+        )
+        coEvery { accountRepository.findActive(3, afterId) } returns accounts
+
+        val page = service.listActiveAccounts(
+            ListActiveAccountsQuery(limit = 2, afterCursor = CursorEncoder.encode(afterId.toString())),
+        )
+
+        assertThat(page.data).containsExactly(accounts[0], accounts[1])
+        assertThat(page.pagination.hasNextPage).isTrue()
+        assertThat(CursorEncoder.decode(page.pagination.nextCursor!!)).isEqualTo(accounts[1].id.toString())
+    }
+
+    @Test
+    fun `list active accounts caps the page size at the sweep maximum`(): Unit = runBlocking {
+        coEvery { accountRepository.findActive(any(), null) } returns emptyList()
+
+        service.listActiveAccounts(ListActiveAccountsQuery(limit = 9999))
+
+        coVerify { accountRepository.findActive(AccountService.MAX_ACTIVE_LIST_LIMIT + 1, null) }
     }
 
     // ── Sanctions gate tests (ADR-0032 §C) ────────────────────────────────────

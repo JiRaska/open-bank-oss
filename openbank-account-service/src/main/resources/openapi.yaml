@@ -3,9 +3,9 @@
 openapi: 3.1.0
 info:
   title: Account Service API
-  # Kept in lockstep with version.txt / quarkus.application.version
-  # (ADR-0029 D2 single-source invariant).
-  version: 1.3.1
+  # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
+  # independently of the release version in version.txt.
+  version: 1.4.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -130,6 +130,36 @@ paths:
                 $ref: '#/components/schemas/AccountPage'
         '400':
           description: q query parameter is required
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/active:
+    get:
+      tags: [Accounts]
+      summary: List all ACTIVE accounts fleet-wide, cursor-paginated
+      description: >
+        Fleet-wide sweep over ACTIVE accounts (ADR-0143: the "list every billable account"
+        read billing-service's cycle scheduler discovers its batch from). Staff/service roles
+        only — not customer-facing. Page size is capped at 200.
+      operationId: listActiveAccounts
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            maximum: 200
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of ACTIVE accounts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountPage'
         '403':
           $ref: '#/components/responses/Forbidden'
 

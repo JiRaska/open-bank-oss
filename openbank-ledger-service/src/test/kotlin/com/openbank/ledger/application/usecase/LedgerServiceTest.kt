@@ -23,6 +23,7 @@ import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalLine
 import com.openbank.ledger.domain.model.JournalSide
 import com.openbank.ledger.domain.model.JournalStatus
+import com.openbank.ledger.domain.model.LedgerValidationException
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
@@ -242,7 +243,7 @@ class LedgerServiceTest {
             )
 
             assertThatThrownBy { runBlocking { service.postJournal(command) } }
-                .isInstanceOf(IllegalArgumentException::class.java)
+                .isInstanceOf(LedgerValidationException::class.java)
         }
 
         @Test

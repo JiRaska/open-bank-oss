@@ -39,8 +39,13 @@ data class AccountDto(val id: String, val productId: String, val currencyCode: S
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class BalanceDto(val accountId: String, val currency: String, val currentBalance: BigDecimal)
 
-/** Product-catalog fee definitions (public read; the catalog is the fee source-of-truth). */
+/**
+ * Product-catalog fee definitions (the catalog is the fee source-of-truth). product-catalog now
+ * authenticates its callers (issue #401), so propagate an openbank-services bearer like the other
+ * clients below — a fee assessment cannot silently fall back to "no fees" on a 401.
+ */
 @RegisterRestClient(configKey = "product-catalog")
+@RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)

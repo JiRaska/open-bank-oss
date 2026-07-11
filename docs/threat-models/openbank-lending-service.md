@@ -16,6 +16,7 @@
 | Collateral register & valuations | Drives LGD / haircut and capital; tampering (or a fabricated declared value / haircut) understates risk and, since Phase 3 increment 2, is **wired into** the ECL calc via `Ifrs9.collateralAdjustedLgd` — a bad registration would directly and immediately reduce the reported ECL. **Closed (issue #621):** registration is now four-eyes / maker-checker, same shape as origination — a registered item is `PENDING` and excluded from the LGD adjustment until a DIFFERENT principal approves it (see §7). |
 | Risk parameters (PD / LGD / bureau data) | Inputs to ECL; manipulation distorts impairment and capital. **Currently flat, conservative placeholder constants (`ConservativeRiskParameterSource`), not a calibrated risk model — see 06 — Compliance for the explicit non-production caveat.** The collateral-adjusted effective LGD (Phase 3 increment 2) is *derived* from these same constants plus the collateral register — a bad collateral entry does not invent a new attack surface on PD/LGD itself, but it does change what "distorts impairment" means: `haircutAdjustedCollateralValue` is now a second untrusted-input path into the LGD term, not just `lgd` itself. |
 | IFRS 9 provisioning history (`loan_provisioning`) | Per-loan-per-period stage/ECL record; the delta baseline for the next cycle's ledger posting and (per ADR-0028) a future AnaCredit/FINREP input. Corruption or a skipped row causes silent under/over-provisioning. |
+| Restructuring authority (reschedule/forgiveness, issue #667/#668) | `RescheduleLoanUseCase` can discard a loan's remaining unpaid schedule and grant partial debt forgiveness — a genuine credit-loss event. Single-actor (`ROLE_CREDIT_RISK`/`ROLE_COMPLIANCE`/`ROLE_ADMIN`, JWT-subject captured server-side), same authority shape as `WriteOffLoanUseCase`; a compromised or over-privileged credit-risk identity could forgive principal without a second approver. Bounded by role-gating and the existing money-path audit trail (`loan.rescheduled` outbox event); no domain-level four-eyes check today (see §5). |
 
 ## 2. Trust boundaries
 
@@ -142,6 +143,14 @@
 - **Haircut calibration is a placeholder, not a risk model.** Per-`CollateralType` haircuts are supplied
   by the caller at registration time (`CollateralRequest.haircut`) with no platform-enforced or
   actuarially-derived table — see the ADR-0028 delivery note's explicit non-calibration caveat.
+- **Reschedule/restructuring has no maker-checker control (issue #667/#668).** Unlike origination
+  (proposer≠decider) and collateral (registrant≠decider), `RescheduleLoanUseCase.reschedule` is a
+  single-actor action — the same shape as `WriteOffLoanUseCase.writeOff`, which has the same gap.
+  A `ROLE_CREDIT_RISK` identity can unilaterally forgive principal and rewrite a loan's remaining
+  schedule. Given `principalForgiveness` is a genuine, unbounded credit-loss event, adding a
+  four-eyes decision step (mirroring the collateral `register`/`decide` split) is a tracked
+  follow-up, not done in this increment — flagged honestly rather than silently accepted as
+  equivalent to write-off's existing (also unaddressed) gap.
 
 ## 6. Out of scope
 
@@ -209,6 +218,21 @@ ADR-0155 `PendingApproval` wrapper, IS durably recorded in Postgres via `Collate
 
 ## 8. Change log
 
+- **2026-07-09** — Reschedule/restructuring (ADR-0028 follow-up, issue #667/#668). New
+  `RescheduleLoanUseCase` + `POST /api/v1/lending/loans/{id}/reschedule`
+  (`lending.reschedule`, `ROLE_CREDIT_RISK`/`ROLE_COMPLIANCE`/`ROLE_ADMIN`). Deletes an ACTIVE
+  loan's remaining UNPAID installments and replaces them with a new schedule generated from the
+  outstanding balance (net of an optional `principalForgiveness`) via the same `Amortization`
+  primitive origination uses; already-paid rows are never touched, and new rows continue the
+  installment numbering after the last paid one so a future repayment's ledger reference can never
+  collide with an already-posted one. A positive `principalForgiveness` books a new
+  `RESCHEDULE_FORGIVENESS` `PostingKind` — same GL accounts as `WRITE_OFF`, kept distinct only for
+  audit-trail attribution. The loan's `version` is bumped and persisted on every reschedule as the
+  durable half of the forgiveness posting's idempotency key. **New asset row added to §1**
+  (Restructuring authority); **new roadmap gap added to §5** (no maker-checker control, same
+  unaddressed shape as `WriteOffLoanUseCase`) — flagged honestly, not closed by this change. No new
+  trust boundary (same ledger/outbox crossings as write-off); no DB schema change (reuses the
+  existing `installment` table). Rollback: revert the commit.
 - **2026-07-09** — Collateral registration four-eyes (ADR-0028 follow-up, issue #621), closing the
   gap PR #607's threat-model update flagged. `Collateral` gains `status`
   (`PENDING`/`APPROVED`/`REJECTED`), `registeredBy`, `decidedBy`, `decidedAt` (Flyway `V5`, existing

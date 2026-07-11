@@ -25,7 +25,7 @@ data class JournalEntry(
     val reversalOf: UUID? = null,
 ) {
     init {
-        require(lines.size >= 2) { "Journal entry must have at least 2 lines" }
+        requireValid(lines.size >= 2) { "Journal entry must have at least 2 lines" }
         validateBalance()
     }
 
@@ -40,14 +40,14 @@ data class JournalEntry(
                 .sumOf { it.baseAmount.amount }
             val credits = lines.filter { it.side == JournalSide.CREDIT && it.baseAmount.currency == currency }
                 .sumOf { it.baseAmount.amount }
-            require(debits.compareTo(credits) == 0) {
+            requireValid(debits.compareTo(credits) == 0) {
                 "Journal entry is not balanced in ${currency.code}: debits=$debits credits=$credits"
             }
         }
     }
 
     fun post(): JournalEntry {
-        check(status == JournalStatus.PENDING) { "Can only post PENDING journal entries, current: $status" }
+        checkConflict(status == JournalStatus.PENDING) { "Can only post PENDING journal entries, current: $status" }
         return copy(status = JournalStatus.POSTED)
     }
 
@@ -73,14 +73,16 @@ data class JournalEntry(
         }
 
     fun reverse(reversalId: UUID, reversedBy: UUID, lineIdProvider: (UUID) -> UUID = { Ids.newId() }): JournalEntry {
-        check(status == JournalStatus.POSTED) { "Can only reverse POSTED journal entries" }
+        checkConflict(status == JournalStatus.POSTED) { "Can only reverse POSTED journal entries" }
         val reversalLines = lines.map { line ->
             line.copy(
                 id = lineIdProvider(line.id),
                 // Re-parent onto the reversal entry: leaving the original's journalId here is the
                 // V10-era bug (persistLines attached the reversal's lines to the ORIGINAL, saving
                 // the reversal with zero lines — unreadable on hydration). The V10 migration
-                // repaired the data; the code fix it references was never committed (#465).
+                // (2026-07-02) was a one-time hardcoded-id repair for the data corrupted up to that
+                // point; the code fix landed later, with #528. Any reversal booked in between
+                // re-created the same corruption with new ids — see V13's generic repair (#527).
                 journalId = reversalId,
                 side = if (line.side == JournalSide.DEBIT) JournalSide.CREDIT else JournalSide.DEBIT,
             )

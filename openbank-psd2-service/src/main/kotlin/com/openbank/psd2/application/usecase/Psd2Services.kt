@@ -41,6 +41,14 @@ class PaymentNotFoundException(id: String) : RuntimeException("Payment not found
 class TppNotAuthorizedException(tppId: String) : RuntimeException("TPP not authorized: $tppId")
 class InvalidPaymentProductException(msg: String) : RuntimeException(msg)
 
+// Replaces bare IllegalArgumentException (issue #526): a service-local
+// ExceptionMapper<IllegalArgumentException> collided non-deterministically with
+// openbank-libs-runtime's own mapper for the identical JDK type — both happen to answer 400,
+// but the response BODY shapes differ (this service's Berlin Group NextGenPSD2 `tppMessages`
+// array vs libs' generic ApiError envelope), so a TPP client could non-deterministically get
+// either shape depending on which provider JAX-RS happened to pick.
+class Psd2RequestFormatException(msg: String) : RuntimeException(msg)
+
 @ApplicationScoped
 class AccountInformationService(
     private val accountClient: AccountServiceClient,

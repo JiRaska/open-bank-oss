@@ -8,12 +8,14 @@ import com.openbank.lending.application.port.`in`.ApplyForLoanUseCase
 import com.openbank.lending.application.port.`in`.CollateralUseCase
 import com.openbank.lending.application.port.`in`.DisburseLoanUseCase
 import com.openbank.lending.application.port.`in`.ProvisioningUseCase
+import com.openbank.lending.application.port.`in`.RescheduleLoanUseCase
 import com.openbank.lending.application.port.`in`.ServicingUseCase
 import com.openbank.lending.application.port.`in`.WriteOffLoanUseCase
 import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
 import com.openbank.lending.domain.model.DecisionRequest
 import com.openbank.lending.domain.model.LoanApplicationRequest
+import com.openbank.lending.domain.model.RescheduleRequest
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.identifiers.CollateralId
@@ -53,6 +55,7 @@ class LendingResource(
     private val disburse: DisburseLoanUseCase,
     private val servicing: ServicingUseCase,
     private val writeOff: WriteOffLoanUseCase,
+    private val reschedule: RescheduleLoanUseCase,
     private val collateral: CollateralUseCase,
     private val provisioning: ProvisioningUseCase,
     private val identity: SecurityIdentity,
@@ -143,6 +146,16 @@ class LendingResource(
     @Authorize(action = "lending.writeoff", resource = "#id")
     fun writeOffLoan(@PathParam("id") id: UUID, request: WriteOffRequest): Uni<Response> =
         writeOff.writeOff(LoanId(id), request)
+            .map { Response.ok(it).build() }
+            .onFailure().recoverWithItem { e -> Response.status(409).entity(mapOf("error" to e.message)).build() }
+
+    @POST
+    @Path("/loans/{id}/reschedule")
+    @Operation(summary = "Restructure a loan: replace its remaining schedule, optionally forgiving principal")
+    @RolesAllowed("ROLE_CREDIT_RISK", "ROLE_COMPLIANCE", "ROLE_ADMIN")
+    @Authorize(action = "lending.reschedule", resource = "#id")
+    fun rescheduleLoan(@PathParam("id") id: UUID, request: RescheduleRequest): Uni<Response> =
+        reschedule.reschedule(LoanId(id), request, actor())
             .map { Response.ok(it).build() }
             .onFailure().recoverWithItem { e -> Response.status(409).entity(mapOf("error" to e.message)).build() }
 

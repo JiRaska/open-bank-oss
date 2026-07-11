@@ -13,6 +13,9 @@ import java.time.Instant
 import java.util.UUID
 
 /** Outbound persistence port for the account aggregate (single IBAN, N currency pockets). */
+// TooManyFunctions: cohesive query/persist surface of ONE aggregate — splitting would
+// scatter it across artificial sub-ports (same rationale as KycRepositoryPort).
+@Suppress("TooManyFunctions")
 interface AccountRepository {
 
     suspend fun findById(id: UUID): Account?
@@ -28,6 +31,12 @@ interface AccountRepository {
      * cursor, identically to [findByPartyId].
      */
     suspend fun searchByIban(normalizedFragment: String, limit: Int, afterId: UUID?): List<Account>
+
+    /**
+     * Every ACTIVE account, fleet-wide, keyset-paginated by id for a stable cursor, identically
+     * to [findByPartyId] (ADR-0143: billing-service's cycle-sweep discovery read).
+     */
+    suspend fun findActive(limit: Int, afterId: UUID?): List<Account>
 
     suspend fun save(account: Account): Account
 

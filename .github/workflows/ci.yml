@@ -501,6 +501,22 @@ jobs:
       - name: "no dead-code SERVICE-principal rego rule (enforced)"
         run: bash .github/scripts/check-no-service-principal-type.sh .
 
+      # No service may register its own ExceptionMapper for a JDK type
+      # openbank-libs-runtime already maps (IllegalArgumentException,
+      # IllegalStateException, NoSuchElementException, Exception,
+      # WebApplicationException) — JAX-RS provider selection between two
+      # mappers for the identical type is not deterministically ordered, so a
+      # second local mapper does not "override" the libs one, it races it
+      # per-request. Found live in ledger-service (422/409 racing libs'
+      # 400/422) and psd2-service (a different response BODY SHAPE racing
+      # libs' generic envelope for the same 400 status), issue #526. 0
+      # violations on origin/main at introduction — this is a regression
+      # guard; see LedgerValidationException/LedgerConflictException and
+      # Psd2RequestFormatException for the dedicated-exception-type fix
+      # pattern. ENFORCED.
+      - name: "no service-local ExceptionMapper collision with libs-runtime (enforced)"
+        run: bash .github/scripts/check-exception-mapper-collision.sh .
+
       # openbank.outbox.dispatch-enabled guard (the CLAUDE.md "outbox footgun":
       # a service whose OutboxDispatcher actually gates on this flag silently
       # never dispatches if it's left at its false default — no error,

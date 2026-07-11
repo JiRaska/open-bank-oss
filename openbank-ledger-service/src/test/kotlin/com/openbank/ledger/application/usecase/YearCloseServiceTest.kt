@@ -15,6 +15,7 @@ import com.openbank.ledger.application.port.out.JournalRepository
 import com.openbank.ledger.application.port.out.YearCloseRepository
 import com.openbank.ledger.domain.model.FiscalYearTrialBalance
 import com.openbank.ledger.domain.model.GlAccountType
+import com.openbank.ledger.domain.model.LedgerValidationException
 import com.openbank.ledger.domain.model.TrialBalanceLine
 import com.openbank.ledger.domain.model.YearCloseRecord
 import com.openbank.ledger.domain.model.YearCloseStatus
@@ -116,7 +117,7 @@ class YearCloseServiceTest {
         @Test
         fun `rejects a fiscal year outside the supported range`(): Unit = runBlocking {
             assertThatThrownBy { runBlocking { service.getTrialBalance(GetFiscalYearTrialBalanceQuery(42)) } }
-                .isInstanceOf(IllegalArgumentException::class.java)
+                .isInstanceOf(LedgerValidationException::class.java)
             Unit
         }
     }

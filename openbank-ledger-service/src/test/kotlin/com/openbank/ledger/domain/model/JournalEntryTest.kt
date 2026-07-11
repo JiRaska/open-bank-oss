@@ -103,7 +103,7 @@ class JournalEntryTest {
                     createdBy = userId,
                     version = 0L,
                 )
-            }.isInstanceOf(IllegalArgumentException::class.java)
+            }.isInstanceOf(LedgerValidationException::class.java)
                 .hasMessageContaining("at least 2 lines")
         }
 
@@ -116,7 +116,7 @@ class JournalEntryTest {
                         line(accountLiability, JournalSide.CREDIT, "999.99", sequence = 2),
                     ),
                 )
-            }.isInstanceOf(IllegalArgumentException::class.java)
+            }.isInstanceOf(LedgerValidationException::class.java)
                 .hasMessageContaining("not balanced")
         }
 
@@ -129,7 +129,7 @@ class JournalEntryTest {
                         line(accountLiability, JournalSide.CREDIT, "600.00", sequence = 2),
                     ),
                 )
-            }.isInstanceOf(IllegalArgumentException::class.java)
+            }.isInstanceOf(LedgerValidationException::class.java)
                 .hasMessageContaining("not balanced")
         }
 
@@ -215,7 +215,7 @@ class JournalEntryTest {
                         line(accountLiability, JournalSide.CREDIT, "1000.00", currency = "CZK", sequence = 2),
                     ),
                 )
-            }.isInstanceOf(IllegalArgumentException::class.java)
+            }.isInstanceOf(LedgerValidationException::class.java)
                 .hasMessageContaining("not balanced in EUR")
         }
 
@@ -247,7 +247,7 @@ class JournalEntryTest {
                         line(accountLiability, JournalSide.CREDIT, "24900.00", currency = "CZK", sequence = 4),
                     ),
                 )
-            }.isInstanceOf(IllegalArgumentException::class.java)
+            }.isInstanceOf(LedgerValidationException::class.java)
                 .hasMessageContaining("not balanced in CZK")
         }
     }
@@ -270,7 +270,7 @@ class JournalEntryTest {
             val posted = balancedEntry(status = JournalStatus.POSTED)
 
             assertThatThrownBy { posted.post() }
-                .isInstanceOf(IllegalStateException::class.java)
+                .isInstanceOf(LedgerConflictException::class.java)
                 .hasMessageContaining("PENDING")
         }
 
@@ -279,7 +279,7 @@ class JournalEntryTest {
             val reversed = balancedEntry(status = JournalStatus.REVERSED)
 
             assertThatThrownBy { reversed.post() }
-                .isInstanceOf(IllegalStateException::class.java)
+                .isInstanceOf(LedgerConflictException::class.java)
                 .hasMessageContaining("PENDING")
         }
     }
@@ -433,7 +433,7 @@ class JournalEntryTest {
             val pending = balancedEntry(status = JournalStatus.PENDING)
 
             assertThatThrownBy { pending.reverse(UUID.randomUUID(), UUID.randomUUID()) }
-                .isInstanceOf(IllegalStateException::class.java)
+                .isInstanceOf(LedgerConflictException::class.java)
                 .hasMessageContaining("POSTED")
         }
 
@@ -442,7 +442,7 @@ class JournalEntryTest {
             val reversed = balancedEntry(status = JournalStatus.REVERSED)
 
             assertThatThrownBy { reversed.reverse(UUID.randomUUID(), UUID.randomUUID()) }
-                .isInstanceOf(IllegalStateException::class.java)
+                .isInstanceOf(LedgerConflictException::class.java)
                 .hasMessageContaining("POSTED")
         }
     }

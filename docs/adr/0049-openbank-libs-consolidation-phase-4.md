@@ -5,12 +5,37 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): jiri.raska
 
-**Delivery note (updated 2026-06-30):**
+**Delivery note (updated 2026-07-11):**
 - **D3 (outbox abstraction)** — ✅ Shipped: all 29 services migrated to `AbstractOutboxDispatcher`; 20 PRs merged.
-- **D4 (exception-mapper cleanup)** — ✅ Shipped: duplicate generic mappers removed; 2 intentional overrides documented.
+- **D4 (exception-mapper cleanup)** — ✅ Shipped, corrected 2026-07-11: the 2026-06-19 amendment's "2 intentional overrides" were not safe overrides — they were a non-deterministic JAX-RS provider collision (issue #526). Fixed with dedicated exception types; see the 2026-07-11 amendment below.
 - **D1 (convention plugin rollout)** — ✅ Shipped: all 37 modules with a `build.gradle.kts` apply `openbank.quarkus-service` or `openbank.static-analysis`; rollout complete.
 - **D2 (`version.txt` adoption)** — ✅ Shipped: all 43 releasable components enrolled in release-please with `version.txt` + manifest entry (see ADR-0029 D2); 4 modules excluded by design.
 - **D5 (observability/metrics in libs)** — ⬜ Not started.
+
+> **Amendment 2026-07-11 — D4 correction: the "intentional overrides" were a collision bug, not a safe pattern.**
+>
+> The 2026-06-19 amendment below documented ledger's `IllegalArgumentExceptionMapper`/
+> `IllegalStateExceptionMapper` and psd2's `Psd2IllegalArgMapper` as deliberate, safe overrides of
+> the libs `CommonExceptionMappers` defaults. This was wrong: JAX-RS provider selection between two
+> `ExceptionMapper<T>`s registered for the **identical** type `T` is not deterministically ordered —
+> a second local mapper does not "override" the libs one, it races it per-request (found live while
+> building issue #669's write benchmark; ledger's 422/409 status codes and psd2's Berlin-Group
+> `tppMessages` response *shape* were both a per-request lottery against libs' defaults, not a
+> reliable override).
+>
+> Fix (issue #526): each service's colliding mapper is replaced by a **dedicated exception type**
+> that libs cannot also claim — `LedgerValidationException`/`LedgerConflictException` (ledger,
+> replacing bare `IllegalArgumentException`/`IllegalStateException` at every `require()`/`check()`
+> call site) and `Psd2RequestFormatException` (psd2). The status codes and response shapes are
+> unchanged; only the exception *type* changed, so JAX-RS now resolves the mapper unambiguously.
+> `check-exception-mapper-collision.sh` (CI, enforced) guards against this defect class recurring —
+> extends the "no second `ExceptionMapper<Exception>`" rule below to every libs-owned type
+> (`IllegalArgumentException`, `IllegalStateException`, `NoSuchElementException`, `Exception`,
+> `WebApplicationException`), closing the gap the 2026-06-19 sweep left open.
+>
+> **D4 rule, corrected:** a service must never register `ExceptionMapper<T>` for a JDK type libs
+> already maps. A service needing a different status code or response shape introduces a dedicated
+> domain exception + mapper instead — never re-maps the JDK type directly, "intentionally" or not.
 
 > **Amendment 2026-06-19 — D3 outbox abstraction sweep complete; D4 exception-mapper sweep complete.**
 >

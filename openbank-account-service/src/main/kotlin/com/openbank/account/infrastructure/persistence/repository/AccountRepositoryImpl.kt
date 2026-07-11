@@ -38,6 +38,7 @@ class AccountIdempotencyRepository(private val clock: Clock) :
 }
 
 @ApplicationScoped
+@Suppress("TooManyFunctions") // 1:1 impl of AccountRepository — see the port's own suppression rationale
 class AccountRepositoryImpl(
     // internal, not private: the file-scope versionMatchedUpdate extension below (#465,
     // outside the class body) stamps updatedAt from this clock — Kotlin's `private` on a
@@ -88,6 +89,18 @@ class AccountRepositoryImpl(
             }
             query.page(0, limit).list()
         }.awaitSuspending().map { it.toDomain() }
+
+    override suspend fun findActive(limit: Int, afterId: UUID?): List<Account> = Panache.withSession {
+        // Keyset pagination on the primary key, same stability contract as findByPartyId /
+        // searchByIban — a sweep that pages while accounts open/close never skips or repeats
+        // a row it has already passed (ADR-0143 billing discovery).
+        val query = if (afterId != null) {
+            find("status = ?1 AND id > ?2 ORDER BY id", AccountStatus.ACTIVE.name, afterId)
+        } else {
+            find("status = ?1 ORDER BY id", AccountStatus.ACTIVE.name)
+        }
+        query.page(0, limit).list()
+    }.awaitSuspending().map { it.toDomain() }
 
     override suspend fun save(account: Account): Account {
         val entity = account.toEntity()

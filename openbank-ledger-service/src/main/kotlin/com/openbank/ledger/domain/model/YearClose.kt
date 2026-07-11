@@ -135,7 +135,7 @@ data class YearCloseRecord(
     val attestedAt: Instant? = null,
 ) {
     init {
-        require(fiscalYear in MIN_FISCAL_YEAR..MAX_FISCAL_YEAR) { "fiscalYear out of range: $fiscalYear" }
+        requireValid(fiscalYear in MIN_FISCAL_YEAR..MAX_FISCAL_YEAR) { "fiscalYear out of range: $fiscalYear" }
     }
 
     /**
@@ -147,9 +147,11 @@ data class YearCloseRecord(
      * line so a future caller cannot bypass the control by going straight at the aggregate.
      */
     fun attest(attestedBy: String, attestedAt: Instant): YearCloseRecord {
-        check(status == YearCloseStatus.DRAFT) { "Year close $fiscalYear is not DRAFT (status=$status)" }
-        check(draftedBy != null) { "Year close $fiscalYear draft has no recorded author — cannot attest (four-eyes)" }
-        check(draftedBy != attestedBy) {
+        checkConflict(status == YearCloseStatus.DRAFT) { "Year close $fiscalYear is not DRAFT (status=$status)" }
+        checkConflict(draftedBy != null) {
+            "Year close $fiscalYear draft has no recorded author — cannot attest (four-eyes)"
+        }
+        checkConflict(draftedBy != attestedBy) {
             "Four-eyes violation: attestor $attestedBy must differ from the draft author for year $fiscalYear"
         }
         return copy(status = YearCloseStatus.ATTESTED, attestedBy = attestedBy, attestedAt = attestedAt)

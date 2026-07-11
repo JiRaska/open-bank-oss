@@ -58,6 +58,9 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.testcontainers.redpanda)
+
+    // Shared authz conformance kit (issue #467) — LedgerAuthzConformanceTest pilot migration.
+    testImplementation(project(":openbank-libs-testing"))
 }
 
 kover {

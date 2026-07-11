@@ -92,7 +92,7 @@ class FxConversionPostingTest {
                 customerBuyAmount = money("1000.00", "EUR"),
                 fxRate = BigDecimal.ONE,
             )
-        }.isInstanceOf(IllegalArgumentException::class.java)
+        }.isInstanceOf(LedgerValidationException::class.java)
             .hasMessageContaining("must cross currencies")
     }
 
@@ -111,7 +111,7 @@ class FxConversionPostingTest {
                 customerBuyAmount = money("25100.00", "CZK"),
                 fxRate = BigDecimal("25.00"),
             )
-        }.isInstanceOf(IllegalArgumentException::class.java)
+        }.isInstanceOf(LedgerValidationException::class.java)
             .hasMessageContaining("negative margin")
     }
 
@@ -130,7 +130,7 @@ class FxConversionPostingTest {
                 customerBuyAmount = money("25000.00", "CZK"),
                 fxRate = BigDecimal("25.00"),
             )
-        }.isInstanceOf(IllegalArgumentException::class.java)
+        }.isInstanceOf(LedgerValidationException::class.java)
             .hasMessageContaining("sellAmount must be positive")
     }
 
@@ -149,7 +149,7 @@ class FxConversionPostingTest {
                 customerBuyAmount = money("0.00", "CZK"),
                 fxRate = BigDecimal("25.00"),
             )
-        }.isInstanceOf(IllegalArgumentException::class.java)
+        }.isInstanceOf(LedgerValidationException::class.java)
             .hasMessageContaining("grossBuyAmount must be positive")
     }
 
@@ -168,7 +168,7 @@ class FxConversionPostingTest {
                 customerBuyAmount = money("25000.00", "EUR"), // wrong currency
                 fxRate = BigDecimal("25.00"),
             )
-        }.isInstanceOf(IllegalArgumentException::class.java)
+        }.isInstanceOf(LedgerValidationException::class.java)
             .hasMessageContaining("must match buy currency")
     }
 

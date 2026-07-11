@@ -45,6 +45,12 @@ data class GetAccountByIbanQuery(val iban: String)
 data class ListAccountsQuery(val partyId: UUID, val limit: Int = 20, val afterCursor: String? = null)
 data class SearchAccountsQuery(val query: String, val limit: Int = 20, val afterCursor: String? = null)
 
+/**
+ * Fleet-wide sweep over ACTIVE accounts, cursor-paginated (ADR-0143: the "list every billable
+ * account" read port billing-service's cycle scheduler discovers its batch from).
+ */
+data class ListActiveAccountsQuery(val limit: Int = 100, val afterCursor: String? = null)
+
 data class AddPocketCommand(val accountId: UUID, val currency: CurrencyCode, val requestedBy: UUID)
 data class ClosePocketCommand(val accountId: UUID, val currency: CurrencyCode, val requestedBy: UUID)
 data class ListPocketsQuery(val accountId: UUID)
@@ -76,6 +82,9 @@ interface AccountUseCase {
     suspend fun getAccountByIban(query: GetAccountByIbanQuery): Account
     suspend fun listAccounts(query: ListAccountsQuery): CursorPage<Account>
     suspend fun searchAccounts(query: SearchAccountsQuery): CursorPage<Account>
+
+    /** All ACTIVE accounts, fleet-wide, keyset-paginated by id (ADR-0143 billing discovery). */
+    suspend fun listActiveAccounts(query: ListActiveAccountsQuery): CursorPage<Account>
     suspend fun getBalance(accountId: UUID): BalanceView
     suspend fun addPocket(command: AddPocketCommand): CurrencyPocket
     suspend fun closePocket(command: ClosePocketCommand): CurrencyPocket

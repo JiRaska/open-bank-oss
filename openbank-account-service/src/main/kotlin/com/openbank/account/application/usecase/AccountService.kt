@@ -4,7 +4,22 @@
 
 package com.openbank.account.application.usecase
 
-import com.openbank.account.application.port.`in`.*
+import com.openbank.account.application.port.`in`.AccountUseCase
+import com.openbank.account.application.port.`in`.AddPocketCommand
+import com.openbank.account.application.port.`in`.ClearSavingsGoalCommand
+import com.openbank.account.application.port.`in`.CloseAccountCommand
+import com.openbank.account.application.port.`in`.ClosePocketCommand
+import com.openbank.account.application.port.`in`.FreezeAccountCommand
+import com.openbank.account.application.port.`in`.GetAccountByIbanQuery
+import com.openbank.account.application.port.`in`.GetAccountQuery
+import com.openbank.account.application.port.`in`.ListAccountsQuery
+import com.openbank.account.application.port.`in`.ListActiveAccountsQuery
+import com.openbank.account.application.port.`in`.ListPocketsQuery
+import com.openbank.account.application.port.`in`.OpenAccountCommand
+import com.openbank.account.application.port.`in`.ResolvePocketQuery
+import com.openbank.account.application.port.`in`.SearchAccountsQuery
+import com.openbank.account.application.port.`in`.UnfreezeAccountCommand
+import com.openbank.account.application.port.`in`.UpdateSavingsGoalCommand
 import com.openbank.account.application.port.out.AccountEventPublisher
 import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.application.port.out.AccountSanctionsScreeningPort
@@ -259,6 +274,22 @@ class AccountService(
         )
     }
 
+    override suspend fun listActiveAccounts(query: ListActiveAccountsQuery): CursorPage<Account> {
+        // A fleet-wide sweep read (ADR-0143 billing discovery) — larger pages than the
+        // customer-facing list are practical here, but the size is still capped so a single
+        // request cannot dump the whole book.
+        val limit = query.limit.coerceIn(1, MAX_ACTIVE_LIST_LIMIT)
+        val afterId = query.afterCursor?.let { UUID.fromString(CursorEncoder.decode(it)) }
+        val accounts = accountRepository.findActive(limit + 1, afterId)
+        val hasNext = accounts.size > limit
+        val page = if (hasNext) accounts.dropLast(1) else accounts
+        val nextCursor = if (hasNext) CursorEncoder.encode(page.last().id.toString()) else null
+        return CursorPage(
+            data = page,
+            pagination = PageInfo(limit = limit, hasNextPage = hasNext, nextCursor = nextCursor),
+        )
+    }
+
     override suspend fun getBalance(accountId: UUID): BalanceView {
         val account = requireAccount(accountId)
         return balancePort.getByAccountAndCurrency(accountId, account.currency.code)
@@ -395,6 +426,13 @@ class AccountService(
 
         /** Upper bound on the search page size, to cap the account-enumeration surface. */
         const val MAX_SEARCH_LIMIT = 50
+
+        /**
+         * Upper bound on the active-account sweep page size (ADR-0143 billing discovery).
+         * Larger than [MAX_SEARCH_LIMIT] because the caller is a paging batch job, not an
+         * interactive search — but still bounded so one request cannot dump the whole book.
+         */
+        const val MAX_ACTIVE_LIST_LIMIT = 200
     }
 }
 
