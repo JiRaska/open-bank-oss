@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.4](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.7.3...aml-service-v0.7.4) (2026-07-11)
+
+
+### Security
+
+* **libs-testing,aml,ledger:** add shared authz conformance kit, fix live AML gap ([#467](https://github.com/JiRaska/open-bank-oss/issues/467)) ([#757](https://github.com/JiRaska/open-bank-oss/issues/757)) ([94e9c6d](https://github.com/JiRaska/open-bank-oss/commit/94e9c6d9a20cb2b1bf972bf60dfed1ff90e2443c))
+
 ## [0.7.3](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.7.2...aml-service-v0.7.3) (2026-07-07)
 
 
