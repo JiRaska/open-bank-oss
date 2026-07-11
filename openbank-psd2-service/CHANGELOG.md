@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.7](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.8.6...psd2-service-v0.8.7) (2026-07-11)
+
+
+### Bug Fixes
+
+* **ledger,psd2:** dedicated exception types, no more mapper collision ([#526](https://github.com/JiRaska/open-bank-oss/issues/526)) ([#752](https://github.com/JiRaska/open-bank-oss/issues/752)) ([e15464c](https://github.com/JiRaska/open-bank-oss/commit/e15464c58a43c514f3a33c67751c3a75de667e1a))
+
 ## [0.8.6](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.8.5...psd2-service-v0.8.6) (2026-07-07)
 
 
