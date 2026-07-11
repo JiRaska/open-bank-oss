@@ -149,6 +149,11 @@ class InstallmentRepositoryImpl @Inject constructor(
         )
             .setParameter("t", accruedAt).setParameter("id", installmentId).executeUpdate()
     }
+
+    @WithTransaction override fun deleteUnpaid(loanId: LoanId): Uni<Int> = sf.withTransaction { s, _ ->
+        s.createMutationQuery("DELETE FROM InstallmentEntity WHERE loanId = :l AND paid = false")
+            .setParameter("l", loanId.value).executeUpdate()
+    }
 }
 
 @ApplicationScoped

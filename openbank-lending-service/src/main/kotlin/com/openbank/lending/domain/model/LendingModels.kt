@@ -172,6 +172,27 @@ data class CollateralDecisionRequest(val approve: Boolean, val reason: String? =
  */
 data class WriteOffRequest(val writtenOffBy: String, val reason: String? = null)
 
+/**
+ * Loan restructuring/rescheduling (forbearance, ADR-0028 follow-up, issue #667/#668): the loan's
+ * remaining UNPAID schedule is discarded and replaced with a new contractual repayment plan
+ * generated from the outstanding balance at [newNominalAnnualRate] over [newTermPeriods], starting
+ * [newFirstDueDate]. Already-paid installments are untouched — history is never rewritten.
+ *
+ * [principalForgiveness] is an optional debt-relief amount (default zero) deducted from the
+ * outstanding balance before the new schedule is generated. When positive it is a genuine credit
+ * loss, booked the same way a write-off is, just partial rather than full.
+ *
+ * There is **no `rescheduledBy`**: the acting principal is taken from the authenticated JWT subject
+ * server-side, never trusted from the request body (same convention as [LoanApplicationRequest]).
+ */
+data class RescheduleRequest(
+    val newNominalAnnualRate: BigDecimal,
+    val newTermPeriods: Int,
+    val newFirstDueDate: LocalDate,
+    val principalForgiveness: Money,
+    val reason: String? = null,
+)
+
 // --- Provisioning read model (IFRS 9) ---------------------------------------------------------------
 
 /** A point-in-time IFRS 9 / arrears snapshot for one loan, computed from libs primitives. */
