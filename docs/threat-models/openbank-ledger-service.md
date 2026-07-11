@@ -149,6 +149,19 @@ isolation from transport/persistence.
   `UPDATE ... WHERE status = 'POSTED'` guard plus the V12 unique-index backstop — had only a
   concurrent-race regression test (`LedgerConcurrencyIT`), not a deterministic repeat-call one. All
   now covered: `JournalEntryTest`, `JournalEntryPropertyTest`, `LedgerServiceTest`, `LedgerApiIT`.
+- **Historical reversal-line corruption, generic repair (#527, 2026-07-11):** the V10-era bug
+  (`reverse()` left `journalId` pointing at the original entry, so reversal lines attached to the
+  wrong aggregate — the reversal persisted with zero lines, unreadable on hydration) had its code
+  fix land later than the V10 data patch (V10 was a one-time hardcoded-id repair; the code fix
+  landed with #528). Any reversal booked in that window re-created the same corruption with new,
+  unknown ids. V13 is a generic repair, safe-by-construction: it identifies the misattached lines
+  via their UUIDv7-embedded creation timestamp (ADR-0106) rather than value matching, and only acts
+  when the split is unambiguous (exactly one broken reversal per original, an even line count, the
+  candidate orphan half internally balanced) — anything else is left untouched with a NOTICE for
+  manual review rather than guessed at. Tested against synthetic corruption + clean/correctly-
+  reversed control entries in an isolated local Postgres before this PR (not run against any live
+  ledger DB directly — Flyway applies it automatically on ledger-service's next normal deploy, the
+  same mechanism V10/V11/V12 already used).
 - Phase C: emit `AccountBookedChangedEvent` from ledger as the projection trigger (ADR-0039).
 
 ## 6. Tie-out endpoint (`GET /api/v1/control-accounts/{id}/tie-out`)

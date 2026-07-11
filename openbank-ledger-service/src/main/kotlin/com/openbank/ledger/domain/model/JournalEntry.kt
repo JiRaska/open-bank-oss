@@ -80,7 +80,9 @@ data class JournalEntry(
                 // Re-parent onto the reversal entry: leaving the original's journalId here is the
                 // V10-era bug (persistLines attached the reversal's lines to the ORIGINAL, saving
                 // the reversal with zero lines — unreadable on hydration). The V10 migration
-                // repaired the data; the code fix it references was never committed (#465).
+                // (2026-07-02) was a one-time hardcoded-id repair for the data corrupted up to that
+                // point; the code fix landed later, with #528. Any reversal booked in between
+                // re-created the same corruption with new ids — see V13's generic repair (#527).
                 journalId = reversalId,
                 side = if (line.side == JournalSide.DEBIT) JournalSide.CREDIT else JournalSide.DEBIT,
             )
