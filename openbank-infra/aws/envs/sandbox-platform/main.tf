@@ -247,6 +247,22 @@ resource "helm_release" "argocd" {
       name  = "configs.params.controller\\.diff\\.server\\.side"
       value = "true"
     },
+    # Keep Karpenter from consolidating the node out from under the singleton
+    # application-controller. Root cause of a ~7h ArgoCD outage (2026-07-11): the
+    # controller's node was Evicted "Underutilized" by Karpenter, went NotReady,
+    # and the StatefulSet pod (ordinal 0, at-most-one) got stuck Terminating — so
+    # no app synced for hours (deploys silently stopped updating). `do-not-disrupt`
+    # tells Karpenter not to voluntarily drain a node running this pod; the
+    # priority class keeps it from being preempted. Same footgun class as the
+    # DaemonSet/critical-pod priority note in CLAUDE.md.
+    {
+      name  = "controller.podAnnotations.karpenter\\.sh/do-not-disrupt"
+      value = "true"
+    },
+    {
+      name  = "controller.priorityClassName"
+      value = "system-cluster-critical"
+    },
   ]
 }
 
@@ -384,7 +400,7 @@ resource "helm_release" "keda" {
 resource "helm_release" "keda_http_add_on" {
   name             = "keda-add-ons-http"
   namespace        = "keda"
-  create_namespace = false   # already created by helm_release.keda above
+  create_namespace = false # already created by helm_release.keda above
   repository       = "https://kedacore.github.io/charts"
   chart            = "keda-add-ons-http"
   version          = var.keda_http_add_on_version
