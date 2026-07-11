@@ -129,10 +129,12 @@ jobs:
         run: npm run test:e2e
         # ADR-0076 Phase 2: Playwright E2E for /services docs-coverage page.
         # Mocks all BFF endpoints via page.route() — no live services required.
-        # continue-on-error: true until every pool member has browser system deps.
-        # Layer 1 (Vitest) and Layer 3 (Kotlin) are the regression gate; E2E is
-        # an advisory signal until runner infrastructure is fully provisioned.
-        continue-on-error: true
+        # Enforced (issue #653): this job runs solely on hosted ubuntu-latest (a single,
+        # uniform pool member — no ARC/self-hosted split for Admin UI build), the deps
+        # step above installs cleanly every run, and #646 fixed the suite from silently
+        # testing /auth/login (every route redirected there, no Keycloak in CI) to
+        # actually exercising /services via a minted session cookie. Verified stable:
+        # 5/5 passing across 3 consecutive main-branch runs, locally with --repeat-each=3.
         env:
           CI: "true"
           NEXTAUTH_URL: "http://localhost:3001"
