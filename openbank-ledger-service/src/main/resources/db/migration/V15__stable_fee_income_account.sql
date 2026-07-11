@@ -10,3 +10,9 @@
 -- already reference the old random id. Same convention as V5 (last UUID segment = account code).
 INSERT INTO gl_accounts (id, code, name, type, currency_code, is_leaf, is_enabled) VALUES
     ('a0000000-0000-0000-0000-000000004003', '4003', 'Fee Income', 'INCOME', 'CZK', true, true);
+
+-- Rollback:
+--   DELETE FROM gl_accounts WHERE id = 'a0000000-0000-0000-0000-000000004003';
+-- Safe to roll back only before any journal_lines reference this account (FK would block the
+-- DELETE otherwise) — i.e. before openbank-billing-service's fee-income config is pointed at it
+-- in a live environment.
