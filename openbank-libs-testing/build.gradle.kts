@@ -35,12 +35,27 @@ dependencies {
     api("jakarta.ws.rs:jakarta.ws.rs-api:3.1.0")
     api("jakarta.annotation:jakarta.annotation-api:3.0.0")
 
-    // Money test-data builders (issue #467) — Money/CurrencyCode are genuinely shared domain
-    // types (openbank-libs-domain), unlike JournalEntry/JournalLine which live per-service.
+    // Money test-data builders + outbox dispatch conformance kit (issue #467) — Money/
+    // CurrencyCode/OutboxMessage/OutboxEntry/OutboxKafkaHeaders are all genuinely shared
+    // domain types (openbank-libs-domain), unlike JournalEntry/JournalLine which live
+    // per-service.
     api(project(":openbank-libs-domain"))
     // Same version pin as openbank-ledger-service/openbank-balance-service's own property
     // suites and openbank-libs-domain's MoneyPropertyTest — kept a direct GAV like theirs.
     api("io.kotest:kotest-property:5.9.1")
+    // quarkus-vertx: VertxContextSupport (reactive Panache needs a Vert.x duplicated context).
+    // quarkus-messaging-kafka: OutgoingKafkaRecordMetadata (kafka-api), for reading the produced
+    // record's key/headers back out of the in-memory connector's sink.
+    // No Quarkus BOM here (this module isn't a Quarkus service), so pinned directly, matching
+    // libs.versions.toml's quarkus = "3.33.2".
+    api("io.quarkus:quarkus-vertx:3.33.2")
+    api("io.quarkus:quarkus-messaging-kafka:3.33.2")
+    // Bridges a Kotlin suspend block into the Uni VertxContextSupport.subscribeAndAwait expects
+    // (io.smallrye.mutiny.coroutines.uni), matching LedgerOutboxDispatchIT's own pattern.
+    api("io.smallrye.reactive:mutiny-kotlin:3.1.1")
+    // Same version-pin situation as quarkus-vertx/quarkus-messaging-kafka above — this catalog
+    // alias also has no version.ref (every other consumer relies on the Quarkus BOM).
+    api("io.smallrye.reactive:smallrye-reactive-messaging-in-memory:4.33.0")
 
     // Testcontainers resource kit — QuarkusTestResourceLifecycleManager (from quarkus-junit5,
     // which transitively brings quarkus-test-common) + the container types the canonical
