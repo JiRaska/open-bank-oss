@@ -94,9 +94,11 @@ interface ConsentServiceClient {
     fun getConsent(@PathParam("id") id: String): JsonNode
 }
 
-// product-catalog reads are public (the admin-ui fee page already proxies them), so the
-// bearer is harmless but not required — these tools return real data without service auth.
+// product-catalog now authenticates its callers (issue #401, #743): its reads require a valid
+// token, so propagate the openbank-services bearer like every other client here. The MCP
+// list_products/get_product/get_product_fees tools would otherwise 401 once #743 deploys.
 @RegisterRestClient(configKey = "product-catalog")
+@RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
