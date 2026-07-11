@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: customer-edge
     app.kubernetes.io/part-of: customer-edge
   annotations:
-    openbank.tech/policy-checksum: "c6595ba0beffb780"
+    openbank.tech/policy-checksum: "8fa9a37a00d73fc6"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -193,6 +193,40 @@ data:
     	some family in {"notification.", "device."}
     	startswith(input.action, family)
     }
+
+    # Any M2M service-account caller (e.g. account-service) may trigger a sanctions screen
+    # (issue #746, found via issue #669's load benchmark). sanctions.create is called with
+    # resource = "" — a resourceless system action — so operator-on-own-tenant (which requires
+    # input.resource) can never fire for it, and no other rule covers a resourceless write.
+    # Confirmed live: a client_credentials token from openbank-services (ROLE_OPERATOR, the same
+    # identity account-service uses to call ledger/balance) got 403 policy-denied calling
+    # sanctions.create directly, once AUTHZ_ENFORCE=true.
+    #
+    # Deliberately action-scoped to sanctions.create ONLY, not a "sanctions." family prefix:
+    # sanctions.review (dismiss/confirm a hit) and the list-refresh actions are real operator
+    # judgment calls, not a service-to-service compliance check, and must stay behind a human
+    # session — widening this to the family would let any M2M caller self-clear a sanctions hit.
+    #
+    # Deliberately NOT scoped to one hardcoded client id (unlike edge-service-notification):
+    # sanctions.create is "run a compliance check" — not an account-takeover primitive like
+    # device.enroll — and more than one service legitimately screens entities (account-service
+    # today; kyc/onboarding/party are plausible future callers). Gating on the
+    # "service-account-*" preferred_username prefix (deterministic for any Keycloak
+    # client_credentials token, per the edge-service-notification note above — not forgeable by
+    # a human password-grant session, whose preferred_username is the human's own username)
+    # covers any M2M caller without a per-caller rule, while still excluding real operator/admin
+    # staff sessions from this specific carve-out.
+    allowed_reasons contains "m2m-sanctions-screening" if {
+    	input.principal.type == "HUMAN"
+    	startswith(input.principal.id, "service-account-")
+    	input.action == "sanctions.create"
+    }
+
+    # NOTE: sanctions.create is not the only resourceless M2M `*.create` action with this
+    # gap — ledger.create, fx.create, lending.create, settlement.create, and others share the
+    # same shape and have the same live "advisory: would DENY" masked-by-AUTHZ_ENFORCE=false
+    # exposure. Each needs its own case-by-case rule (some may not be safe for any M2M caller
+    # the way sanctions.create is) — tracked separately as issue #750, not folded in here.
 
     # ---------------------------------------------------------------------------------------
     # Money-path actions get the four-eyes gate from rules.yaml. This rule does NOT grant

@@ -652,3 +652,58 @@ test_allow_edge_identity_without_explicit_operator_role_check if {
 
 	decision.allow == true
 }
+
+# ---------------------------------------------------------------------------------------
+# m2m-sanctions-screening (issue #746, found via issue #669's load benchmark): a resourceless
+# M2M sanctions.create call has no other matching rule (operator-on-own-tenant requires
+# input.resource; sanctions.create has none). account-service's client_credentials token
+# (client "openbank-services") is the confirmed real-world caller.
+# ---------------------------------------------------------------------------------------
+test_allow_m2m_sanctions_create if {
+	decision := rest.allow with input as {
+		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "sanctions.create",
+		"resource": "",
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	decision.reason == "m2m-sanctions-screening"
+}
+
+# Any service-account caller works, not just openbank-services — the rule is deliberately
+# not pinned to one client id (see rest.rego comment): more than one service may screen
+# entities. This is the "different caller, same carve-out" counterpart to the identity-
+# pinned edge-service-notification rule above.
+test_allow_m2m_sanctions_create_from_a_different_service_account if {
+	decision := rest.allow with input as {
+		"principal": {"id": "service-account-openbank-kyc", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "sanctions.create",
+		"resource": "",
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+}
+
+# Deny-by-default still holds outside sanctions.create — an M2M caller does NOT gain the
+# whole "sanctions." family. sanctions.review lets an operator dismiss/confirm a hit; a
+# service self-clearing its own screening result would defeat the compliance control.
+test_deny_m2m_sanctions_review_not_covered if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "sanctions.review",
+		"resource": "",
+	}
+}
+
+# A real human operator session (not a service-account principal) does NOT gain this rule's
+# reach via ROLE_OPERATOR alone — it gates on the "service-account-" identity prefix, not
+# the role, mirroring the edge-service-notification invariant above.
+test_deny_human_operator_sanctions_create_via_m2m_rule if {
+	not rest.allow with input as {
+		"principal": {"id": "operator-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "sanctions.create",
+		"resource": "",
+	}
+}
