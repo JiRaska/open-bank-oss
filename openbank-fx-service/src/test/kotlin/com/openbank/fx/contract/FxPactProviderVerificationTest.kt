@@ -32,12 +32,21 @@ import java.util.UUID
 /**
  * Provider-side verification for the FX rate contract published by transaction-service
  * (ADR-0063 P2 Batch B). Seeds an EUR/CZK SPOT rate so that GET /api/v1/fx/rates/EUR/CZK
- * returns 200 with the expected shape. The `@TestSecurity` satisfies the OIDC check on the
- * rates endpoint (service role required per ADR-0018).
+ * returns 200 with the expected shape. `@TestSecurity` must grant a role the endpoint's
+ * `@RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")` actually
+ * accepts — `ROLE_SERVICE` is not in that list and, per the Keycloak realm config
+ * (`openbank-realm.json` / `realm-template.json`), isn't even a realm role any real client
+ * is ever granted. The real M2M caller (transaction-service, via the shared
+ * `openbank-services` client) authenticates as `service-account-openbank-services`, whose
+ * realmRoles is `["ROLE_OPERATOR"]` — that's the role this test must present too, or every
+ * verification 403s before reaching the resource method (confirmed live: verification result
+ * #2247, 2026-07-11, and broken since this test was added on 2026-07-02 without ever being
+ * noticed locally, since it's `@EnabledIfSystemProperty(pactbroker.url)`-skipped without a
+ * broker).
  */
 @QuarkusTest
 @QuarkusTestResource(com.openbank.fx.it.PostgresRedisTestResource::class)
-@TestSecurity(user = "pact-verifier", roles = ["ROLE_SERVICE"])
+@TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR"])
 @Provider("openbank-fx-service")
 @PactBroker
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
