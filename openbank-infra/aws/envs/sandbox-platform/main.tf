@@ -85,6 +85,12 @@ resource "helm_release" "karpenter" {
       name  = "settings.interruptionQueue"
       value = local.karpenter_queue_name
     },
+    # Auto-replace nodes stuck NotReady (guest-level hang passes EC2 status checks;
+    # EKS node auto repair covers only the bootstrap managed node group). Issue #809.
+    {
+      name  = "settings.featureGates.nodeRepair"
+      value = "true"
+    },
     # Controller must run on the bootstrap managed nodes, never on nodes it owns.
     {
       name  = "controller.resources.requests.cpu"
