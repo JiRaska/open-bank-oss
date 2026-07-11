@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.7](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.5.6...onboarding-service-v0.5.7) (2026-07-11)
+
+
+### Bug Fixes
+
+* **onboarding-service:** fix silent Kafka group.id/auto.offset.reset config bug ([#692](https://github.com/JiRaska/open-bank-oss/issues/692)) ([2a2ec51](https://github.com/JiRaska/open-bank-oss/commit/2a2ec512249af9d8a015b65b020a2a9e2356c4d2)), closes [#686](https://github.com/JiRaska/open-bank-oss/issues/686)
+
 ## [0.5.6](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.5.5...onboarding-service-v0.5.6) (2026-07-07)
 
 

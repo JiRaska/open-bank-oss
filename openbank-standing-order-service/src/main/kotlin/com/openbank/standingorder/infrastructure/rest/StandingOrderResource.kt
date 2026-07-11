@@ -30,6 +30,7 @@ import java.util.UUID
 class StandingOrderResource(private val useCase: StandingOrderUseCase) {
 
     @POST
+    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
     suspend fun create(req: CreateStandingOrderRequest): Response {
         val order = useCase.create(
             CreateStandingOrderCommand(
@@ -43,29 +44,35 @@ class StandingOrderResource(private val useCase: StandingOrderUseCase) {
     }
 
     @GET
+    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
     suspend fun listAll() = useCase.listAll().map { it.toResponse() }
 
     @GET
     @Path("/{id}")
+    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
     suspend fun get(@PathParam("id") id: UUID) = useCase.getById(id) ?: throw NotFoundException()
 
     @GET
     @Path("/party/{partyId}")
+    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
     suspend fun listByParty(@PathParam("partyId") partyId: UUID) = useCase.listByParty(partyId).map { it.toResponse() }
 
     @POST
     @Path("/{id}/pause")
+    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "standingOrder.pause", resource = "#id")
     suspend fun pause(@PathParam("id") id: UUID, @HeaderParam("X-Customer-Party-Id") actor: String?) =
         useCase.pause(id, actor(actor)).toResponse()
 
     @POST
     @Path("/{id}/resume")
+    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
     suspend fun resume(@PathParam("id") id: UUID, @HeaderParam("X-Customer-Party-Id") actor: String?) =
         useCase.resume(id, actor(actor)).toResponse()
 
     @DELETE
     @Path("/{id}")
+    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
     suspend fun cancel(@PathParam("id") id: UUID, @HeaderParam("X-Customer-Party-Id") actor: String?): Response {
         useCase.cancel(id, actor(actor))
         return Response.noContent().build()
