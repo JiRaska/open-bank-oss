@@ -32,9 +32,9 @@ class ReconciliationFreshnessWatchdog(
 ) {
     private val log = Logger.getLogger(ReconciliationFreshnessWatchdog::class.java)
 
-    // The daily run fires at 23:30, so a healthy tie-out is at most ~24h old; allow a 1h grace (25h)
+    // The daily run fires at 23:30, so a healthy tie-out is at most ~24h old; allow a 1h grace
     // for run duration or a delayed scheduler before we call it a missed control.
-    private val staleAfter = Duration.ofHours(25)
+    private val staleAfter = Duration.ofHours(DAILY_SLA_HOURS)
 
     @Scheduled(
         cron = "{openbank.reconciliation.freshness-cron:0 20 * * * ?}",
@@ -60,5 +60,10 @@ class ReconciliationFreshnessWatchdog(
         } else {
             log.debugf("Balance reconciliation freshness OK: last tie-out %dh ago (as-of %s).", ageHours, latest.asOf)
         }
+    }
+
+    private companion object {
+        // 24h daily cadence + 1h grace for run duration / a delayed scheduler.
+        const val DAILY_SLA_HOURS = 25L
     }
 }
