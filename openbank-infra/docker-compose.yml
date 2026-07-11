@@ -380,6 +380,33 @@ services:
       - openbank-net
 
   # ─────────────────────────────────────────────
+  # Temporal (payment orchestration, ADR-0120 Phase 5) — dev-mode single binary, in-memory,
+  # no separate Postgres/Cassandra. This is LOCAL DEV ONLY; the sandbox EKS cluster runs the
+  # real Temporal Helm release (openbank-infra/gitops/components/temporal/temporal-helmrelease.yaml)
+  # with CNPG-backed persistence. Was previously absent from docker-compose entirely — transaction-
+  # service's PaymentWorkerRegistrar would register a worker that never dispatched (issue #669
+  # load-benchmark: `POST /api/v1/transactions` blocks until its PaymentWorkflow completes, so
+  # without this every local write hangs).
+  # --namespace pre-registers `openbank-payments` in addition to the always-created `default`
+  # namespace, matching transaction-service's TemporalConfig default (TEMPORAL_NAMESPACE).
+  temporal:
+    image: temporalio/temporal:1.7.3
+    container_name: openbank-temporal
+    restart: unless-stopped
+    command: server start-dev --ip 0.0.0.0 --namespace openbank-payments
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "127.0.0.1:7233"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - openbank-net
+
+  # ─────────────────────────────────────────────
   # Application Services
   # ─────────────────────────────────────────────
   account-service:
@@ -412,15 +439,20 @@ services:
       QUARKUS_HTTP_PORT: "8100"
       QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
       QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
-      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
       QUARKUS_SHUTDOWN_TIMEOUT: 30S
       MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # sanctions-service listens on 8123 (its own QUARKUS_HTTP_PORT below), not the stale
+      # :8110 fallback in account-service's application.yaml default (fixed alongside this).
+      SANCTIONS_SERVICE_URL: http://sanctions-service:8123
     ports:
       - "8100:8100"
     depends_on:
       postgres:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      sanctions-service:
         condition: service_healthy
     networks:
       - openbank-net
@@ -445,7 +477,7 @@ services:
       MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_aml
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_aml
       QUARKUS_DATASOURCE_USERNAME: openbank
@@ -471,7 +503,7 @@ services:
       QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
       QUARKUS_OIDC_ENABLED: "false"
       QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
-      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
       QUARKUS_SHUTDOWN_TIMEOUT: 30S
     ports:
       - "8117:8117"
@@ -503,7 +535,7 @@ services:
       MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_audit
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_audit
       QUARKUS_DATASOURCE_USERNAME: openbank
@@ -628,7 +660,7 @@ services:
       MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_balances
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_balances
       QUARKUS_DATASOURCE_USERNAME: openbank
@@ -687,7 +719,7 @@ services:
       MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_cards
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_cards
       QUARKUS_DATASOURCE_USERNAME: openbank
@@ -712,7 +744,7 @@ services:
       QUARKUS_OIDC_CLIENT_ID: openbank-services
       QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
       QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
-      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
       QUARKUS_SHUTDOWN_TIMEOUT: 30S
     ports:
       - "8118:8118"
@@ -743,7 +775,7 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_clearing
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_clearing
       QUARKUS_DATASOURCE_USERNAME: openbank
       QUARKUS_DEV_UI_ENABLED: "false"
@@ -764,7 +796,7 @@ services:
       QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
       QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
       QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
-      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
     ports:
       - "8124:8124"
     depends_on:
@@ -795,7 +827,7 @@ services:
       MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_consents
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_consents
       QUARKUS_DATASOURCE_USERNAME: openbank
@@ -819,7 +851,7 @@ services:
       QUARKUS_OIDC_CLIENT_ID: openbank-services
       QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
       QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
-      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
       QUARKUS_SHUTDOWN_TIMEOUT: 30S
     ports:
       - "8106:8106"
@@ -848,7 +880,7 @@ services:
     restart: unless-stopped
     environment:
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_dispute
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_dispute
       QUARKUS_DATASOURCE_USERNAME: openbank
       QUARKUS_DEV_UI_ENABLED: "false"
@@ -869,7 +901,7 @@ services:
       QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
       QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
       QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
-      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
     ports:
       - "8135:8135"
     depends_on:
@@ -902,7 +934,7 @@ services:
 
       QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_domestic_payments
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_domestic_payments
       QUARKUS_DATASOURCE_USERNAME: openbank
@@ -927,7 +959,7 @@ services:
       QUARKUS_OIDC_CLIENT_ID: openbank-services
       QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
       QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
-      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
       QUARKUS_SHUTDOWN_TIMEOUT: 30S
     ports:
       - "8116:8116"
@@ -956,7 +988,7 @@ services:
     restart: unless-stopped
     environment:
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_interest
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_interest
       QUARKUS_DATASOURCE_USERNAME: openbank
       QUARKUS_DEV_UI_ENABLED: "false"
@@ -977,7 +1009,7 @@ services:
       QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
       QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
       QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
-      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     ports:
@@ -1010,7 +1042,7 @@ services:
       MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_kyc
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_kyc
       QUARKUS_DATASOURCE_USERNAME: openbank
@@ -1070,7 +1102,7 @@ services:
       MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_ledger
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_ledger
       QUARKUS_DATASOURCE_USERNAME: openbank
@@ -1129,7 +1161,7 @@ services:
       MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_notifications
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_notifications
       QUARKUS_DATASOURCE_USERNAME: openbank
@@ -1185,7 +1217,7 @@ services:
       MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_parties
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_parties
       QUARKUS_DATASOURCE_USERNAME: openbank
@@ -1240,7 +1272,7 @@ services:
       MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_pid
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_pid
       QUARKUS_DATASOURCE_USERNAME: openbank
@@ -1293,7 +1325,7 @@ services:
     environment:
       QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_sca
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_sca
       QUARKUS_DATASOURCE_USERNAME: openbank
@@ -1319,7 +1351,7 @@ services:
       QUARKUS_OIDC_CLIENT_ID: openbank-services
       QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
       QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
-      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
       QUARKUS_SHUTDOWN_TIMEOUT: 30S
     ports:
       - "8110:8110"
@@ -1351,7 +1383,7 @@ services:
       MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       OPENBANK_SCT_INST_EXECUTION_TIMEOUT_SECONDS: 10
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_sepa_instant
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_sepa_instant
       QUARKUS_DATASOURCE_USERNAME: openbank
       QUARKUS_DEV_UI_ENABLED: "false"
@@ -1372,7 +1404,7 @@ services:
       QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
       QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
       QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
-      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
     ports:
       - "8127:8127"
     depends_on:
@@ -1405,7 +1437,7 @@ services:
 
       QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_sepa_payments
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_sepa_payments
       QUARKUS_DATASOURCE_USERNAME: openbank
@@ -1430,7 +1462,7 @@ services:
       QUARKUS_OIDC_CLIENT_ID: openbank-services
       QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
       QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
-      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
       QUARKUS_SHUTDOWN_TIMEOUT: 30S
     ports:
       - "8115:8115"
@@ -1466,7 +1498,7 @@ services:
       MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_sanctions
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_sanctions
       QUARKUS_DATASOURCE_USERNAME: openbank
@@ -1487,11 +1519,20 @@ services:
       QUARKUS_LOG_CONSOLE_JSON: "false"
       QUARKUS_MANAGEMENT_ENABLED: "true"
       QUARKUS_MANAGEMENT_PORT: 8085
+      # Matches the real gitops deployment (sanctions-service.yaml AUTHZ_ENFORCE=false):
+      # OPA rest.rego has no allowed_reasons rule that authorizes a resourceless
+      # `sanctions.create` M2M call (issue #669 load-benchmark discovered this — an
+      # account-service->sanctions-service screening call is unconditionally OPA-denied
+      # once AUTHZ_ENFORCE=true; every allowed_reasons rule needs either input.resource
+      # or a specific caller identity this M2M client doesn't match). Local dev was never
+      # overriding this default (code default is `true`, diverging from prod's `false`)
+      # because nobody had run account-service + sanctions-service together locally before.
+      AUTHZ_ENFORCE: "false"
       QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
       QUARKUS_OIDC_CLIENT_ID: openbank-services
       QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
       QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
-      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
       QUARKUS_SHUTDOWN_TIMEOUT: 30S
     ports:
       - "8123:8123"
@@ -1521,7 +1562,7 @@ services:
     environment:
       QUARKUS_DATASOURCE_JDBC_MAX_SIZE: 5
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_tpp_registry
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_DATASOURCE_REACTIVE_MAX_SIZE: 5
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_tpp_registry
       QUARKUS_DATASOURCE_USERNAME: openbank
@@ -1551,7 +1592,7 @@ services:
       QUARKUS_OIDC_CLIENT_ID: openbank-services
       QUARKUS_OIDC_CREDENTIALS_SECRET: changeme_local_oidc_client_dev_only
       QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
-      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
       QUARKUS_SHUTDOWN_TIMEOUT: 30S
     ports:
       - "8108:8108"
@@ -1698,9 +1739,10 @@ services:
       QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_HTTP_PORT: "8102"
       LEDGER_SERVICE_URL: http://ledger-service:8101
+      TEMPORAL_SERVER_URL: temporal:7233
       QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
       QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
-      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
       QUARKUS_SHUTDOWN_TIMEOUT: 30S
       MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
@@ -1716,6 +1758,8 @@ services:
       postgres:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      temporal:
         condition: service_healthy
     networks:
       - openbank-net
@@ -1747,7 +1791,7 @@ services:
       QUARKUS_HTTP_PORT: "8119"
       QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
       QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
-      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
       QUARKUS_SHUTDOWN_TIMEOUT: 30S
       MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
@@ -1788,14 +1832,14 @@ services:
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_standing_orders
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_standing_orders
       QUARKUS_DATASOURCE_USERNAME: openbank
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_HTTP_PORT: 8121
       QUARKUS_MANAGEMENT_ENABLED: "true"
       QUARKUS_MANAGEMENT_PORT: 8085
       QUARKUS_DEV_UI_ENABLED: "false"
       QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
       QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
-      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
       QUARKUS_SHUTDOWN_TIMEOUT: 30S
       QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
       QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
@@ -1835,7 +1879,7 @@ services:
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_swift
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_swift
       QUARKUS_DATASOURCE_USERNAME: openbank
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
       QUARKUS_HTTP_PORT: 8122
       QUARKUS_MANAGEMENT_ENABLED: "true"
@@ -1843,7 +1887,7 @@ services:
       QUARKUS_DEV_UI_ENABLED: "false"
       QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
       QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
-      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
       QUARKUS_SHUTDOWN_TIMEOUT: 30S
       QUARKUS_HTTP_HEADER__X_CONTENT_TYPE_OPTIONS__VALUE: nosniff
       QUARKUS_HTTP_HEADER__X_FRAME_OPTIONS__VALUE: DENY
@@ -1883,14 +1927,14 @@ services:
       QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://postgres:5432/openbank_security
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/openbank_security
       QUARKUS_DATASOURCE_USERNAME: openbank
-      QUARKUS_DATASOURCE_PASSWORD: openbank_secret
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       QUARKUS_HTTP_PORT: 8120
       QUARKUS_MANAGEMENT_ENABLED: "true"
       QUARKUS_MANAGEMENT_PORT: 8085
       QUARKUS_DEV_UI_ENABLED: "false"
       QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
       QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
-      QUARKUS_REDIS_HOSTS: redis://:openbank_cache_secret@valkey:6379
+      QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
       QUARKUS_SHUTDOWN_TIMEOUT: 30S
       QUARKUS_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/openbank
       QUARKUS_OIDC_CLIENT_ID: openbank-services
