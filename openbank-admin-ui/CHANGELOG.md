@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.42.0...admin-ui-v0.43.0) (2026-07-11)
+
+
+### Features
+
+* **admin-ui:** calm scale-to-zero states + last-7-days spend view ([#812](https://github.com/JiRaska/open-bank-oss/issues/812)) ([18d7ff3](https://github.com/JiRaska/open-bank-oss/commit/18d7ff39a0bd4cd9ed9d44c2f431d447a0d2a478)), closes [#759](https://github.com/JiRaska/open-bank-oss/issues/759)
+
 ## [0.42.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.41.0...admin-ui-v0.42.0) (2026-07-11)
 
 
