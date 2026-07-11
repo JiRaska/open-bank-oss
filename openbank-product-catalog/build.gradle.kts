@@ -15,6 +15,10 @@ dependencies {
     implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
+    // Resource-server auth (issue #401): validate caller tokens for @Authenticated / @RolesAllowed.
+    // The @Authorize interceptor, Roles and the Authorize annotation already arrive transitively via
+    // :openbank-libs (which api-exports :openbank-libs-runtime + :openbank-libs-domain).
+    implementation(libs.quarkus.oidc)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
 
@@ -39,6 +43,7 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.quarkus.test.security)
 }
 
 // Coverage floor (ADR-0020, ratchet-only — sweep #466: this module previously had NO

@@ -46,8 +46,35 @@ quarkus:
   swagger-ui:
     always-include: true
     path: /api/docs
+  # Resource-server: product-catalog now authenticates its callers (issue #401). Reads require a
+  # valid token (@Authenticated); writes require ROLE_OPERATOR/ROLE_ADMIN. Every in-cluster caller
+  # presents (or now presents) an openbank-services / openbank-edge service token; the admin-ui
+  # relays the operator's token via its BFF. This is a PURE resource server (application-type
+  # `service`, the default): it validates bearer tokens against the realm's JWKS and does not mint
+  # tokens, so it needs NO client secret — only the issuer URL.
+  oidc:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    tls:
+      verification: ${OIDC_TLS_VERIFICATION:none}
+
+# OPA sidecar (ADR-0034) for the AI-agent read bridge (query.catalog.readonly). Advisory by
+# default — a denied/unreachable decision is logged at WARN and the request proceeds; product
+# catalog has no sidecar yet, so this stays advisory until one is deployed and AUTHZ_ENFORCE=true.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:false}"
 
 "%test":
   quarkus:
     management:
       enabled: false
+    # No Keycloak on the test stack — disable the resource server so @QuarkusTest boots, and let
+    # @TestSecurity mock the identity for the security-annotated endpoints (quarkus-test-security).
+    oidc:
+      enabled: false
+  # OPA sidecar is absent in CI — keep @Authorize advisory so the reads proceed under test.
+  authz:
+    enforce: "false"
