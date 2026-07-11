@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.2](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.13.1...transaction-service-v1.13.2) (2026-07-11)
+
+
+### Bug Fixes
+
+* **transaction,ledger:** per-currency cash-clearing GL accounts ([#747](https://github.com/JiRaska/open-bank-oss/issues/747)) ([#749](https://github.com/JiRaska/open-bank-oss/issues/749)) ([7e0f934](https://github.com/JiRaska/open-bank-oss/commit/7e0f9341b9d0f92f61665ff4cf981b9d181d73c6))
+
 ## [1.13.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.13.0...transaction-service-v1.13.1) (2026-07-09)
 
 
