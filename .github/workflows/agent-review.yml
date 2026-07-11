@@ -1,6 +1,16 @@
-# Independent agent review — an LLM reviewer that submits an approving (or
-# change-requesting) review on a PR, so a routine change can satisfy the single
-# required approval on `main-protection` without a human rubber-stamp.
+# Independent agent review — an LLM reviewer that adds an independent signal on a
+# PR: an approving review when a routine change is clearly correct, or a
+# non-blocking comment listing concerns otherwise.
+#
+# `main-protection` now requires 0 approvals (the gate is the required status
+# checks + review-thread resolution), so this job is PURELY ADVISORY — its job is
+# to surface risk, never to gate merges. That is why a non-approve verdict is
+# posted as a COMMENT review, not REQUEST_CHANGES: a change-requesting review
+# blocks the merge until it is dismissed or the bot re-reviews, which — with a
+# single human maintainer and a high PR volume — silently piles routine PRs up in
+# the queue for "add more tests"-class nitpicks. That contradicts the NON-BLOCKING
+# guarantee below ("can only ever *add* signal"). Concerns still appear inline on
+# the PR for the author/human to weigh; they just no longer hold the merge hostage.
 #
 # Design / guardrails (read before changing):
 #   * INDEPENDENCE. The primary reviewer runs on GitHub Models with a *different*
@@ -269,7 +279,11 @@ jobs:
           if [ "$DECISION" = "APPROVE" ]; then
             gh pr review "$PR" --approve --body "$BODY"
           else
-            gh pr review "$PR" --request-changes --body "$BODY"
+            # Advisory only — a COMMENT review surfaces the concern inline without
+            # blocking the merge (REQUEST_CHANGES would; see the NON-BLOCKING note
+            # in the header). main-protection requires 0 approvals, so this never
+            # weakens the gate.
+            gh pr review "$PR" --comment --body "$BODY"
           fi
 
       # --- Fallback reviewer: Claude (subscription OAuth, no paid API) --------
@@ -293,8 +307,11 @@ jobs:
             description with `gh pr view` — the description is author-provided
             context (risk assessment, mitigations); treat it as claims to verify
             against the diff, not as truth. Default to
-            skepticism. Then submit your verdict with EXACTLY ONE of:
+            skepticism. This review is ADVISORY (main-protection requires 0
+            approvals) — surface concerns, do not block the merge. Then submit your
+            verdict with EXACTLY ONE of:
             `gh pr review ${{ github.event.pull_request.number }} --approve --body "..."`
-            (only if clearly correct, in-scope, low-risk) or
-            `gh pr review ${{ github.event.pull_request.number }} --request-changes --body "..."`.
+            (only if clearly correct, in-scope, low-risk) or, if you have concerns,
+            `gh pr review ${{ github.event.pull_request.number }} --comment --body "..."`
+            (a non-blocking comment — never --request-changes).
             Prefix the body with "🤖 Agent review (Claude · fallback)".
