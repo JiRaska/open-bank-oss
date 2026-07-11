@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.43.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.43.0...admin-ui-v0.43.1) (2026-07-11)
+
+
+### Bug Fixes
+
+* **admin-ui:** re-authenticate on refresh failure instead of dead 401 panels ([#838](https://github.com/JiRaska/open-bank-oss/issues/838)) ([7b985e8](https://github.com/JiRaska/open-bank-oss/commit/7b985e8cd9bd1c11474d777e20337defdf2a1cef)), closes [#759](https://github.com/JiRaska/open-bank-oss/issues/759)
+* **admin-ui:** surface standing-orders scale-to-zero state gracefully ([#830](https://github.com/JiRaska/open-bank-oss/issues/830)) ([91a000e](https://github.com/JiRaska/open-bank-oss/commit/91a000e5fed6c16e4e87fc512f34b279c3a133bb)), closes [#759](https://github.com/JiRaska/open-bank-oss/issues/759)
+
 ## [0.43.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.42.0...admin-ui-v0.43.0) (2026-07-11)
 
 
