@@ -3,10 +3,14 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Repeat, Plus, Search, CheckCircle2, XCircle, Clock, RefreshCw, Calendar } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { svcUrl } from '@/lib/services/bff'
+import { useServiceResource } from '@/lib/services/useServiceResource'
+import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 
 interface StandingOrder {
   id: string; debtorAccountId: string; creditorAccountId: string; creditorName: string
@@ -19,19 +23,19 @@ const FREQ_LABELS: Record<string, string> = {
 }
 
 export default function StandingOrdersPage() {
-  const { t } = useLanguage()
-  const [orders, setOrders] = useState<StandingOrder[]>([])
-  const [loading, setLoading] = useState(true)
+  const { t, language } = useLanguage()
   const [search, setSearch] = useState('')
-  const [serviceUp, setServiceUp] = useState<boolean | null>(null)
-
-  useEffect(() => {
-    fetch('/api/svc/standing-order-service/q/health/ready').then(r => setServiceUp(r.ok)).catch(() => setServiceUp(false))
-    fetch('/api/svc/standing-order-service/api/v1/standing-orders').then(r => r.json())
-      .then(d => setOrders(Array.isArray(d) ? d : d.standingOrders ?? []))
-      .catch(() => setOrders([]))
-      .finally(() => setLoading(false))
-  }, [])
+  // standing-order-service is on the FinOps off-hours scaledown allowlist, so it
+  // legitimately sits at zero replicas overnight/weekends. Route through the BFF
+  // proxy + useServiceResource so a scaled-to-zero backend surfaces a calm
+  // "idle, waking…" state (KEDA/scaledown) instead of a misleading error — and
+  // auto-retries while the pod wakes. (Was a raw /q/health/ready probe that read
+  // a scaled-down service as "down" and always claimed "running on port 8121".)
+  const { data, loading, unavailable, waking } = useServiceResource<StandingOrder[]>(
+    svcUrl('standing-order-service', '/api/v1/standing-orders'),
+    { select: (raw) => (Array.isArray(raw) ? (raw as StandingOrder[]) : ((raw as { standingOrders?: StandingOrder[] }).standingOrders ?? [])) },
+  )
+  const orders = data ?? []
 
   const filtered = orders.filter(o =>
     o.creditorName?.toLowerCase().includes(search.toLowerCase()) ||
@@ -52,14 +56,18 @@ export default function StandingOrdersPage() {
             </p>
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 600,
-              padding: '4px 10px', borderRadius: '20px',
-              background: serviceUp === true ? 'var(--success-bg)' : serviceUp === false ? 'var(--danger-bg)' : 'var(--surface-3)',
-              color: serviceUp === true ? 'var(--success-text)' : serviceUp === false ? 'var(--danger-text)' : 'var(--text-tertiary)',
-              border: `1px solid ${serviceUp === true ? 'var(--success-border)' : serviceUp === false ? 'var(--danger-border)' : 'var(--border)'}` }}>
-              {serviceUp === true ? <CheckCircle2 size={10} /> : serviceUp === false ? <XCircle size={10} /> : <Clock size={10} />}
-              standing-order :8121
-            </span>
+            <ServiceStatusBadge
+              label="standing-order :8121"
+              loading={loading}
+              waking={waking}
+              unavailable={unavailable}
+              copy={{
+                up: t('standing-order-service běží', 'standing-order-service is up'),
+                idle: t('standing-order spí (scale-to-zero), probouzí se…', 'standing-order idle (scaled to zero), waking…'),
+                down: t('standing-order-service neodpovídá', 'standing-order-service is not responding'),
+                checking: t('Zjišťuji stav služby…', 'Checking service…'),
+              }}
+            />
             <button className="btn btn-primary btn-sm"><Plus size={13} /> {t('Nový příkaz', 'New Order')}</button>
           </div>
         </div>
@@ -74,7 +82,7 @@ export default function StandingOrdersPage() {
             <div key={k.label} className="stat-card">
               <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`,
                 display: 'flex', alignItems: 'center', justifyContent: 'center', color: k.color, marginBottom: '10px' }}>{k.icon}</div>
-              <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>{k.value}</div>
+              <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>{loading ? '—' : k.value}</div>
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{k.label}</div>
             </div>
           ))}
@@ -93,14 +101,13 @@ export default function StandingOrdersPage() {
             <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
               <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám…', 'Loading…')}</div>
             </div>
+          ) : unavailable ? (
+            <DataUnavailable kind={unavailable.kind} service={t('Standing-order-service', 'Standing-order-service')} feature={t('Trvalé příkazy', 'Standing orders')} lang={language} />
           ) : filtered.length === 0 ? (
-            <div style={{ padding: '48px', textAlign: 'center' }}>
-              <Repeat size={32} style={{ color: 'var(--text-tertiary)', marginBottom: '12px' }} />
-              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>{t('Žádné trvalé příkazy', 'No standing orders')}</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t('Mikroservisa běží na portu 8121.', 'Microservice is running on port 8121.')}</div>
-              <a href="/api/svc/standing-order-service/api/docs" target="_blank" rel="noreferrer"
-                style={{ display: 'inline-block', marginTop: '12px', fontSize: '12px', color: 'var(--accent)', textDecoration: 'none' }}>→ Swagger UI</a>
-            </div>
+            <DataUnavailable kind="no_data" feature={t('Trvalé příkazy', 'Standing orders')} lang={language}
+              detail={orders.length === 0
+                ? t('Služba běží, zatím žádné trvalé příkazy.', 'The service is running; no standing orders yet.')
+                : t('Žádné výsledky pro zadaný filtr.', 'No results for the applied filter.')} />
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
@@ -116,7 +123,7 @@ export default function StandingOrdersPage() {
                   <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-primary)' }}>
                     {o.amount?.toLocaleString('cs-CZ', { minimumFractionDigits: 2 })} {o.currency}
                   </td>
-                  <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{FREQ_LABELS[o.frequency] ?? o.frequency}</td>
+                  <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{t(FREQ_LABELS[o.frequency] ?? o.frequency, o.frequency)}</td>
                   <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '5px' }}>
                     <Calendar size={11} style={{ color: 'var(--text-tertiary)' }} />
                     {o.nextExecutionDate ? new Date(o.nextExecutionDate).toLocaleDateString('cs-CZ') : '—'}
