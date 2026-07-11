@@ -397,6 +397,17 @@ resource "kubectl_manifest" "ec2nodeclass_runners" {
         ManagedBy                = "karpenter"
         Role                     = "arc-runner"
       }
+      # Eviction headroom against the no-swap memory-reclaim livelock (issue
+      # #809) — two of the four hung nodes on 2026-07-11 were runner nodes
+      # under Gradle build memory pressure. Evicting the runner pod (the job
+      # retries) beats a dead node that strands work for hours. Same block as
+      # the default EC2NodeClass; a change here drift-rolls the runner nodes.
+      kubelet = {
+        evictionHard              = { "memory.available" = "400Mi" }
+        evictionSoft              = { "memory.available" = "600Mi" }
+        evictionSoftGracePeriod   = { "memory.available" = "60s" }
+        evictionMaxPodGracePeriod = 60
+      }
       # CI/CD SPEED: put kubelet/containerd ephemeral storage (dind image layers,
       # Gradle build dir, Testcontainers volumes) on the instance's local NVMe via
       # RAID0 instead of the gp3 root EBS. NVMe random-IO is ~an order of magnitude

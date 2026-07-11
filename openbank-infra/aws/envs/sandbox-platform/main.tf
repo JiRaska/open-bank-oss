@@ -128,6 +128,20 @@ resource "kubectl_manifest" "ec2nodeclass_default" {
       amiSelectorTerms = [
         { alias = "al2023@latest" }
       ]
+      # Eviction headroom against the no-swap memory-reclaim livelock (issue
+      # #809): with the AMI default (evictionHard memory.available<100Mi, 10s
+      # cadence) a memory spike outruns kubelet eviction and the kernel
+      # livelocks — kubelet + SSM starve while EC2 status checks stay ok, the
+      # node lingers NotReady, singleton pods strand. Evict pods well before
+      # that point instead; Karpenter also subtracts this from allocatable, so
+      # bin-packing gets honest. NOTE: any change here drifts every node of
+      # this class → Karpenter rolls them per the NodePool disruption budgets.
+      kubelet = {
+        evictionHard              = { "memory.available" = "300Mi" }
+        evictionSoft              = { "memory.available" = "500Mi" }
+        evictionSoftGracePeriod   = { "memory.available" = "60s" }
+        evictionMaxPodGracePeriod = 60
+      }
       role = local.karpenter_node_role_name
       subnetSelectorTerms = [
         { tags = { "karpenter.sh/discovery" = local.cluster_name } }
