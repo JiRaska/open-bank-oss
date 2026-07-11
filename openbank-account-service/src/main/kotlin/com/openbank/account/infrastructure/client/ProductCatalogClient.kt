@@ -5,17 +5,24 @@
 package com.openbank.account.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
+import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 
-// product-catalog's product-read endpoints are unauthenticated (public reference data), so no
-// OidcClientRequestReactiveFilter provider here, unlike SanctionsServiceClient.
+// product-catalog now authenticates its callers (issue #401, #743): reads require a valid
+// token (@Authenticated). This comment previously said "unauthenticated, public reference
+// data" — true when this file was written, stale since #743 merged 2026-07-11. Propagate an
+// openbank-services bearer like SanctionsServiceClient, or every account-open product lookup
+// gets a 401 -> ProductLookupResult.Unavailable -> validation silently skipped (fail-open by
+// design, so this was never a crash, just a silent bypass of ADR-0158's whole point).
 @RegisterRestClient(configKey = "product-catalog-api")
+@RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/products")
 @Produces(MediaType.APPLICATION_JSON)
 interface ProductCatalogClient {
