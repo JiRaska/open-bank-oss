@@ -190,6 +190,8 @@ tracked separately.
 
 ## References
 
+- Issue #850 — the actionable rollout sweep (per-cluster `instances: 2`, one
+  money-path PR at a time) tracking this decision.
 - Issue #809 — node-hang / drift-roll-stall incident that made the
   single-instance node-lifecycle cost concrete and recurring.
 - ADR-0030 — money-path rigor (2 approvals + threat model) that governs the
