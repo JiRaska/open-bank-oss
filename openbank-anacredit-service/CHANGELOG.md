@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/anacredit-service-v0.6.0...anacredit-service-v0.7.0) (2026-07-11)
+
+
+### Features
+
+* **anacredit:** add Dockerfile and register with auto-deploy fleet ([#724](https://github.com/JiRaska/open-bank-oss/issues/724)) ([7616836](https://github.com/JiRaska/open-bank-oss/commit/7616836954cc2f8e3c732312b3d399dadb2996fc)), closes [#601](https://github.com/JiRaska/open-bank-oss/issues/601)
+
+
+### Bug Fixes
+
+* **anacredit:** move group.id off dotted YAML keys onto env vars ([#701](https://github.com/JiRaska/open-bank-oss/issues/701)) ([0934f01](https://github.com/JiRaska/open-bank-oss/commit/0934f01137cc9a41e32194038827216a6c8ad3e7))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/anacredit-service-v0.5.0...anacredit-service-v0.6.0) (2026-07-09)
 
 
