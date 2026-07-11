@@ -1,0 +1,110 @@
+{
+  "consumer": {
+    "name": "openbank-transaction-service"
+  },
+  "interactions": [
+    {
+      "description": "POST placeHold to reserve funds for a payment",
+      "providerStates": [
+        {
+          "name": "a CZK balance exists for the holds account with sufficient funds"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 100.00,
+          "currency": "CZK",
+          "reason": "payment-cover",
+          "referenceId": "pact-tx-00000001",
+          "ttlSeconds": 3600
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/balances/a1a1a1a1-a1a1-a1a1-a1a1-a1a1a1a1a1a1/holds"
+      },
+      "response": {
+        "body": {
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    },
+    {
+      "description": "DELETE releaseHold to release the payment cover",
+      "providerStates": [
+        {
+          "name": "a CZK hold exists for the holds account"
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v1/balances/holds/b2b2b2b2-b2b2-b2b2-b2b2-b2b2b2b2b2b2"
+      },
+      "response": {
+        "body": {
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-balance-service"
+  }
+}

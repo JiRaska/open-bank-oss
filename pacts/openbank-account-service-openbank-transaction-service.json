@@ -1,0 +1,80 @@
+{
+  "consumer": {
+    "name": "openbank-account-service"
+  },
+  "interactions": [
+    {
+      "description": "POST initiate a CREDIT welcome bonus transaction",
+      "providerStates": [
+        {
+          "name": "the transaction service is available"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 50.00,
+          "currencyCode": "CZK",
+          "description": "V\u00EDtac\u00ED bonus za zalo\u017Een\u00ED \u00FA\u010Dtu",
+          "idempotencyKey": "welcome-bonus-f6f6f6f6-f6f6-f6f6-f6f6-f6f6f6f6f6f6",
+          "targetAccountId": "f6f6f6f6-f6f6-f6f6-f6f6-f6f6f6f6f6f6",
+          "type": "CREDIT",
+          "valueDate": "2026-01-15"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/transactions"
+      },
+      "response": {
+        "body": {
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "status": "PENDING"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-transaction-service"
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "consumer": {
+    "name": "openbank-fraud-service"
+  },
+  "messages": [
+    {
+      "contents": {
+        "aggregateId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "amount": 250.0,
+        "currencyCode": "CZK",
+        "sourceAccountId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "targetAccountId": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+      },
+      "description": "a transaction.initiated event for fraud screening",
+      "generators": {
+        "body": {
+          "$.aggregateId": {
+            "type": "Uuid"
+          },
+          "$.sourceAccountId": {
+            "type": "Uuid"
+          },
+          "$.targetAccountId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.aggregateId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.amount": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "decimal"
+              }
+            ]
+          },
+          "$.currencyCode": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[A-Z]{3}"
+              }
+            ]
+          },
+          "$.sourceAccountId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.targetAccountId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "transaction-service has initiated a payment transaction"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-transaction-service"
+  }
+}

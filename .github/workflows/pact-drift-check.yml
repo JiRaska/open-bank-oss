@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: Apache-2.0
+# Contract-drift gate (ADR-0063 Phase 2, issue #468). Committed pacts are derived data — regenerated
+# from the consumer tests, never hand-edited (same principle as the catalog/NetworkPolicy generators).
+# This re-runs every consumer pact test and fails if the regenerated JSON differs from what's
+# committed in pacts/, catching exactly the class of bug #370 found as a "bonus" (a stale committed
+# pact missing an interaction the consumer test had already moved past).
+#
+# Consumer pact tests are pure JVM (an embedded mock server, no Testcontainers/Quarkus boot), so
+# this is cheap enough to run on every PR that touches a contract test or the pacts/ dir itself.
+
+name: Pact drift check
+
+on:
+  pull_request:
+    paths:
+      - "pacts/**"
+      - "**/src/test/kotlin/**/contract/*PactConsumerTest.kt"
+      - ".github/workflows/pact-drift-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - "pacts/**"
+      - "**/src/test/kotlin/**/contract/*PactConsumerTest.kt"
+
+permissions:
+  contents: read
+
+jobs:
+  drift-check:
+    name: Regenerate consumer pacts and diff against committed
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-java@1bcf9fb12cf4aa7d266a90ae39939e61372fe520 # v5
+        with:
+          java-version: "25"
+          distribution: temurin
+          cache: gradle
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+
+      # One Gradle invocation, every consumer pact test module — each writes to the shared
+      # pacts/ dir (systemProperty("pact.rootDir", ...) in the consuming service's
+      # build.gradle.kts). --continue so one module's failure doesn't hide drift elsewhere.
+      #
+      # openbank-swift-service is deliberately excluded here: its own build.gradle.kts
+      # statically excludes SwiftEventPactConsumerTest whenever CI=true (PactConsumerTestExt
+      # auto-publishes to pactbroker.url in CI and hangs/401s — issue #2404), so it can never
+      # run in a CI job regardless of --tests filtering. openbank-transaction-service-
+      # openbank-swift-service.json is NOT covered by this drift gate until #2404 re-enables it.
+      - name: Regenerate every consumer pact
+        run: |
+          ./gradlew --continue \
+            :openbank-account-service:test --tests "com.openbank.account.contract.*PactConsumerTest" \
+            :openbank-balance-service:test --tests "com.openbank.balance.contract.*PactConsumerTest" \
+            :openbank-consent-service:test --tests "com.openbank.consent.contract.*PactConsumerTest" \
+            :openbank-domestic-payment:test --tests "com.openbank.domestic.contract.*PactConsumerTest" \
+            :openbank-fraud-service:test --tests "com.openbank.fraud.contract.*PactConsumerTest" \
+            :openbank-lending-service:test --tests "com.openbank.lending.contract.*PactConsumerTest" \
+            :openbank-notification-service:test --tests "com.openbank.notification.contract.*PactConsumerTest" \
+            :openbank-sepa-payment:test --tests "com.openbank.sepa.contract.*PactConsumerTest" \
+            :openbank-transaction-service:test --tests "com.openbank.transaction.contract.*PactConsumerTest"
+
+      - name: Fail on drift between regenerated and committed pacts
+        run: |
+          if ! git diff --exit-code -- pacts/; then
+            echo "::error::Committed pacts/*.json differ from what the consumer tests generate right now."
+            echo "::error::Regenerate and commit: run the *PactConsumerTest* class for the affected service and commit the updated pacts/<consumer>-<provider>.json in the same PR."
+            git status --porcelain -- pacts/
+            exit 1
+          fi
+          echo "No drift — every committed pact matches its consumer test."
+
+      - name: Upload regenerated pacts on drift (for local diffing)
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: regenerated-pacts
+          path: pacts/
+          retention-days: 7

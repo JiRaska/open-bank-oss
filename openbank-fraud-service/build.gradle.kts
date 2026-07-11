@@ -41,6 +41,10 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.testcontainers.redpanda)
     testImplementation(libs.pact.consumer)
+    // fraud-service is now also a pact PROVIDER (FraudPactProviderVerificationTest, #468) —
+    // sepa-payment's fraud-score contract needs a provider-side replay, same as every other
+    // service that carries both directions.
+    testImplementation(libs.pact.provider)
 }
 
 // Pact: write generated consumer contracts to pacts/ and forward broker config.
