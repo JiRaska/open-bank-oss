@@ -33,6 +33,9 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    // Provider-side verification of the pacs.008/pacs.002 contract rail services publish
+    // (ADR-0063, issue #468). Git-pact (@PactFolder), matching ledger-service — no broker needed.
+    testImplementation(libs.pact.provider)
 }
 
 kover {

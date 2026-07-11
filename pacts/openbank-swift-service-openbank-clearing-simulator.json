@@ -1,0 +1,63 @@
+{
+  "consumer": {
+    "name": "openbank-swift-service"
+  },
+  "interactions": [
+    {
+      "description": "POST a pacs.008 credit transfer converted from an MT103",
+      "providerStates": [
+        {
+          "name": "the clearing simulator is available"
+        }
+      ],
+      "request": {
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08\">\n    <FIToFICstmrCdtTrf>\n        <GrpHdr>\n            <MsgId>SWIFT-TRX-PACT-001</MsgId>\n            <CreDtTm>2026-01-20T10:15:30Z</CreDtTm>\n            <NbOfTxs>1</NbOfTxs>\n            <SttlmInf>\n                <SttlmMtd>COVE</SttlmMtd>\n            </SttlmInf>\n        </GrpHdr>\n        <CdtTrfTxInf>\n            <PmtId>\n                <EndToEndId>TRX-PACT-001</EndToEndId>\n            </PmtId>\n            <IntrBkSttlmAmt Ccy=\"EUR\">12.34</IntrBkSttlmAmt>\n            <IntrBkSttlmDt>2026-01-20</IntrBkSttlmDt>\n            <ChrgBr>SHAR</ChrgBr>\n            <Dbtr>\n                <Nm>Alice Debtor</Nm>\n            </Dbtr>\n            <DbtrAcct>\n                <Id>\n                    <IBAN>DE89370400440532013000</IBAN>\n                </Id>\n            </DbtrAcct>\n            <DbtrAgt>\n                <FinInstnId>\n                    <BICFI>GIBACZPX</BICFI>\n                </FinInstnId>\n            </DbtrAgt>\n            <CdtrAgt>\n                <FinInstnId>\n                    <BICFI>DEUTDEFF</BICFI>\n                </FinInstnId>\n            </CdtrAgt>\n            <Cdtr>\n                <Nm>Bob Creditor</Nm>\n            </Cdtr>\n            <CdtrAcct>\n                <Id>\n                    <IBAN>GB33BUKB20201555555555</IBAN>\n                </Id>\n            </CdtrAcct>\n            <RmtInf>\n                <Ustrd>Invoice 1</Ustrd>\n            </RmtInf>\n        </CdtTrfTxInf>\n    </FIToFICstmrCdtTrf>\n</Document>\n",
+        "headers": {
+          "Content-Type": "application/xml"
+        },
+        "method": "POST",
+        "path": "/api/v1/clearing/credit-transfers"
+      },
+      "response": {
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:pacs.002.001.10\">\n    <FIToFIPmtStsRpt>\n        <GrpHdr>\n            <MsgId>SIM-STS-TRX-PACT-001</MsgId>\n            <CreDtTm>2026-01-20T10:15:30.123456Z</CreDtTm>\n        </GrpHdr>\n        <TxInfAndSts>\n            <OrgnlEndToEndId>TRX-PACT-001</OrgnlEndToEndId>\n            <TxSts>ACSC</TxSts>\n        </TxInfAndSts>\n    </FIToFIPmtStsRpt>\n</Document>\n",
+        "headers": {
+          "Content-Type": "application/xml"
+        },
+        "matchingRules": {
+          "body": {
+            "$.Document.FIToFIPmtStsRpt.GrpHdr.CreDtTm.#text": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z"
+                }
+              ]
+            },
+            "$.Document.FIToFIPmtStsRpt.GrpHdr.MsgId.#text": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "SIM-STS-.+"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-clearing-simulator"
+  }
+}

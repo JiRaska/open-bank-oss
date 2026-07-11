@@ -95,6 +95,9 @@ tasks.withType<Test> {
         // stalling the JVM for 30+ min. Exclude in CI; pact publishing runs as a dedicated step.
         // Re-enable once the pact-publish CI step is wired per #2404.
         exclude("**/SwiftEventPactConsumerTest*")
+        // ClearingSimulatorPactConsumerTest (issue #468 edge 4): same PactConsumerTestExt
+        // auto-publish hang as SwiftEventPactConsumerTest above — it runs fine locally.
+        exclude("**/ClearingSimulatorPactConsumerTest*")
 
         // CI hang #4 (#2404) background: test JVM used to hang 43+ min AFTER all tests
         // completed, in TestWorker$3.run() → LauncherSession.close() → CustomLauncherInterceptor
