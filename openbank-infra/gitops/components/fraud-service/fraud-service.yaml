@@ -64,19 +64,22 @@ spec:
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
             # #685 originally set these as MP_MESSAGING_INCOMING_TRANSACTION_SIGNAL_* env vars.
-            # Reverted here (open-bank-oss#686 follow-up): ADR-0137's "known follow-up" section
-            # documents that this exact approach — an env var for a HYPHENATED mp.messaging
-            # channel name — was tried for `payment-scheme-accepted` and reverted (#2649→#2659):
-            # SmallRye's channel discovery reverse-maps the env var name to a property name
-            # ambiguously and the pod fails to start. `transaction-signal` is hyphenated too, and
-            # #685's own regression test (TransactionSignalConsumerBootIT) never actually exercised
-            # this env var — it injects the property directly via a
-            # QuarkusTestResourceLifecycleManager config map (a different, always-safe mechanism),
-            # so it could not have caught this. Loading a properties FILE via
-            # QUARKUS_CONFIG_LOCATIONS instead — see fraud-service-msg-override.yaml — carries the
-            # exact hyphenated/dotted property name unambiguously (no YAML flattening, no env-var
-            # reverse-mapping), matching the proven pattern already live for transaction-service
-            # (transaction-service-msg-override.yaml).
+            # Switched here to loading a properties FILE via QUARKUS_CONFIG_LOCATIONS instead —
+            # see fraud-service-msg-override.yaml — matching the pattern already established for
+            # transaction-service (transaction-service-msg-override.yaml).
+            #
+            # Correction (round 2): an earlier version of this comment first cited nonexistent
+            # issues #2649/#2659, then over-corrected to claim #685's original env-var fix was
+            # "independently verified to work" — that overstated it too. The genuine concern is
+            # real: quarkusio/quarkus#30106 and smallrye/smallrye-reactive-messaging#2028 document
+            # a live, unresolved upstream bug where an env-var override of a single leaf property
+            # on a HYPHENATED channel name crashes Quarkus at startup (`SRMSG00071`, "connector
+            # attribute must be set for channel <wrong split>") — regardless of whether the channel
+            # is already registered via YAML/annotations. #685's own regression test didn't catch
+            # this because it injects the override via a QuarkusTestResourceLifecycleManager config
+            # map, not a real OS env var, so it doesn't exercise this failure mode. This
+            # properties-file mechanism is the CORRECT choice for the hyphenated
+            # `transaction-signal` channel, not merely a stylistic alternative.
             - name: QUARKUS_CONFIG_LOCATIONS
               value: /mnt/msg-config/override.properties
             - name: KAFKA_SECURITY_PROTOCOL

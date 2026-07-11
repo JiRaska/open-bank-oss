@@ -96,10 +96,23 @@ mp:
       # the audit-service KafkaUser ACL (kafka-audit-mtls.yaml) does NOT grant Read on (only
       # "audit-service" is granted) — every consumer poll got a silent
       # org.apache.kafka.common.errors.GroupAuthorizationException. A properties file (not an env
-      # var) is used because this channel name is hyphenated (audit-events-in): SmallRye's env-var
-      # reverse-mapping for hyphenated/dotted channel names is ambiguous and previously broke
-      # transaction-service's payment-scheme-accepted channel this way (reverted, #2649→#2659); a
-      # properties file carries the exact property name unambiguously. See issue #686.
+      # var) is used here, matching the pattern already established for transaction-service's
+      # payment-scheme-accepted channel; it carries the exact hyphenated/dotted property name
+      # unambiguously, avoiding any reliance on MicroProfile Config's env-var-name reverse-mapping
+      # for channel discovery. See issue #686.
+      #
+      # Correction (round 2): an earlier version of this comment first cited nonexistent issues
+      # #2649/#2659, then over-corrected to claim env vars are "independently verified to work"
+      # here — that overstated it too. The genuine concern is real: quarkusio/quarkus#30106 and
+      # smallrye/smallrye-reactive-messaging#2028 document a live, unresolved upstream bug where
+      # an env-var override of a single leaf property (e.g. `retries`, here `group.id`/
+      # `auto.offset.reset`) on a HYPHENATED channel name crashes Quarkus at startup
+      # (`SRMSG00071`, "connector attribute must be set for channel <wrong split>") — regardless
+      # of whether the channel is already registered via YAML/annotations. Boot tests added
+      # during this sweep inject the override via a QuarkusTestResourceLifecycleManager config
+      # map, not a real OS env var, so they don't exercise this failure mode. This properties-file
+      # mechanism is the CORRECT choice for a hyphenated channel like `audit-events-in`, not
+      # merely a stylistic alternative.
       audit-events-in:
         connector: smallrye-kafka
         client.id: audit-service-${quarkus.uuid}

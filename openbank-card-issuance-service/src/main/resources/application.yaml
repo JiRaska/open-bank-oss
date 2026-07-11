@@ -104,11 +104,24 @@ mp:
         # GroupAuthorizationException. auto.offset.reset would likewise silently fall back to
         # Kafka's `latest` default instead of `earliest`. Set instead via the
         # card-issuance-service-msg-override ConfigMap (QUARKUS_CONFIG_LOCATIONS,
-        # config_ordinal=500) — a properties FILE, not env vars, because the hyphenated channel
-        # name `party-events-in` breaks SmallRye's channel discovery when config is supplied as
-        # MP_MESSAGING_INCOMING_PARTY_EVENTS_IN_* env vars (tried fleet-wide for
-        # transaction-service and reverted, #2649 -> #2659; see
-        # openbank-infra/gitops/components/payments/transaction-service-msg-override.yaml).
+        # config_ordinal=500) — a properties FILE, matching the pattern already established for
+        # transaction-service's payment-scheme-accepted channel (see
+        # openbank-infra/gitops/components/payments/transaction-service-msg-override.yaml); it
+        # carries the exact hyphenated property key unambiguously, avoiding any reliance on
+        # MicroProfile Config's env-var-name reverse-mapping for channel discovery.
+        #
+        # Correction (round 2): an earlier version of this comment first cited nonexistent issues
+        # #2649/#2659, then over-corrected to claim env vars are "independently verified to work"
+        # here — that overstated it too. The genuine concern is real: quarkusio/quarkus#30106 and
+        # smallrye/smallrye-reactive-messaging#2028 document a live, unresolved upstream bug where
+        # an env-var override of a single leaf property (e.g. `retries`, here `group.id`/
+        # `auto.offset.reset`) on a HYPHENATED channel name crashes Quarkus at startup
+        # (`SRMSG00071`, "connector attribute must be set for channel <wrong split>") — regardless
+        # of whether the channel is already registered via YAML/annotations. Boot tests added
+        # during this sweep inject the override via a QuarkusTestResourceLifecycleManager config
+        # map, not a real OS env var, so they don't exercise this failure mode. This properties-file
+        # mechanism is the CORRECT choice for a hyphenated channel like `party-events-in`, not
+        # merely a stylistic alternative.
     outgoing:
       # ADR-0050 transactional-outbox egress. The dispatcher sets the Kafka key (= aggregate id, N2)
       # and ce-id/idempotency-key/ce-type headers (N3) via OutgoingKafkaRecordMetadata, so both a key
