@@ -13,6 +13,7 @@ import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
@@ -38,6 +39,17 @@ data class AccountDto(val id: String, val productId: String, val currencyCode: S
 /** The subset of balance-service `GET /api/v1/balances/{accountId}/{currency}` we need. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class BalanceDto(val accountId: String, val currency: String, val currentBalance: BigDecimal)
+
+/** The subset of account-service's cursor-page envelope the discovery sweep needs. */
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AccountPageInfoDto(val hasNextPage: Boolean = false, val nextCursor: String? = null)
+
+/** One page of account-service `GET /api/v1/accounts/active` (ADR-0143 billing discovery). */
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AccountPageDto(
+    val data: List<AccountDto> = emptyList(),
+    val pagination: AccountPageInfoDto = AccountPageInfoDto(),
+)
 
 /**
  * Product-catalog fee definitions (the catalog is the fee source-of-truth). product-catalog now
@@ -65,6 +77,11 @@ interface AccountRestClient {
     @GET
     @Path("/accounts/{id}")
     fun getAccount(@PathParam("id") accountId: String): Uni<AccountDto>
+
+    /** Fleet-wide ACTIVE-account sweep, cursor-paginated (ADR-0143 billing discovery). */
+    @GET
+    @Path("/accounts/active")
+    fun listActiveAccounts(@QueryParam("limit") limit: Int, @QueryParam("cursor") cursor: String?): Uni<AccountPageDto>
 }
 
 /** Balance read — balance is PII, so the call propagates an OIDC service token. */
