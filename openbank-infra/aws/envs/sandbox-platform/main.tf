@@ -269,6 +269,26 @@ resource "helm_release" "argocd" {
       name  = "controller.priorityClassName"
       value = "system-cluster-critical"
     },
+    # The chart ships the controller with no resources at all (BestEffort). On the
+    # bin-packed 4Gi spot nodes the controller (~1-2Gi for this fleet's app count)
+    # repeatedly exhausted node memory into a full guest hang: kubelet + SSM died
+    # while EC2 status checks stayed ok, stranding the singleton pod (issue #809,
+    # 2026-07-11 — two such nodes within an hour, each dying minutes after this
+    # pod landed on it). The request steers scheduling onto a node with real
+    # headroom; the limit turns a runaway into a container OOM-kill (self-healing)
+    # instead of a node-killing kernel thrash.
+    {
+      name  = "controller.resources.requests.cpu"
+      value = "250m"
+    },
+    {
+      name  = "controller.resources.requests.memory"
+      value = "1536Mi"
+    },
+    {
+      name  = "controller.resources.limits.memory"
+      value = "2560Mi"
+    },
   ]
 }
 
