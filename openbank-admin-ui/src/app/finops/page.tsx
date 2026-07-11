@@ -7,8 +7,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   RefreshCw, ShieldCheck, AlertTriangle, Clock, DollarSign,
-  Cpu, Server, Database, Zap, Info, Calendar, PieChart, TrendingDown,
-  Bot,
+  Cpu, Server, Database, Zap, Info, Calendar, PieChart, TrendingDown, TrendingUp,
+  Activity, Bot,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -80,6 +80,7 @@ interface ResourceData {
 }
 
 interface ServiceCost { name: string; amount: number; domain: string }
+interface DailyCost { date: string; amount: number }
 interface ServiceEfficiency {
   namespace: string
   displayName: string
@@ -107,6 +108,7 @@ interface CostReport {
   periodEnd: string
   total: number
   services: ServiceCost[]
+  daily: DailyCost[]
   collectedAt: string | null
   source: string
 }
@@ -222,6 +224,89 @@ function HeapBar({ pct, efficiency }: { pct: number | null; efficiency: string }
         <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: '3px' }} />
       </div>
       <span style={{ fontSize: '11px', fontWeight: 700, color, minWidth: '34px', textAlign: 'right' }}>{pct}%</span>
+    </div>
+  )
+}
+
+// Per-day cloud spend trend — a hand-rolled inline SVG area chart (matches the
+// panel's other hand-rolled bars; no chart lib). This is the series the team
+// otherwise reads only in the AWS console. Higher spend is tinted as the
+// "concern" direction (red) per the FinOps framing.
+function DailySpendTrend({ daily, currency }: { daily: DailyCost[]; currency: string }) {
+  const { t, language } = useLanguage()
+  const locale = language === 'cs' ? 'cs-CZ' : 'en-US'
+  const fmt = (v: number) => v.toLocaleString(locale, { maximumFractionDigits: 0 })
+
+  if (!daily || daily.length < 2) {
+    return (
+      <div style={{ marginBottom: '20px', padding: '14px', borderRadius: '8px', background: 'var(--surface-2)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <Activity size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+        <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+          {t('Denní trend výdajů se objeví po příštím sběru nákladů (DAILY granularita).', 'The daily spend trend will appear after the next cost collection (DAILY granularity).')}
+        </span>
+      </div>
+    )
+  }
+
+  const W = 760, H = 150, padL = 6, padR = 6, padT = 14, padB = 22
+  const amounts = daily.map(d => d.amount)
+  const max = Math.max(...amounts)
+  const min = Math.min(...amounts, 0)
+  const n = daily.length
+  const span = max - min || 1
+  const xAt = (i: number) => padL + (i / (n - 1)) * (W - padL - padR)
+  const yAt = (v: number) => padT + (1 - (v - min) / span) * (H - padT - padB)
+  const pts = daily.map((d, i) => `${xAt(i).toFixed(1)},${yAt(d.amount).toFixed(1)}`)
+  const line = `M ${pts.join(' L ')}`
+  const area = `M ${xAt(0).toFixed(1)},${(H - padB).toFixed(1)} L ${pts.join(' L ')} L ${xAt(n - 1).toFixed(1)},${(H - padB).toFixed(1)} Z`
+  const avg = amounts.reduce((s, a) => s + a, 0) / n
+  const avgY = yAt(avg)
+  const last = daily[n - 1]
+  const prev = daily[n - 2]
+  const dod = prev.amount ? ((last.amount - prev.amount) / prev.amount) * 100 : 0
+  const up = last.amount >= prev.amount
+  const fmtDate = (s: string) => { try { return new Date(s).toLocaleDateString(locale, { day: 'numeric', month: 'numeric' }) } catch { return s } }
+
+  return (
+    <div style={{ marginBottom: '20px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Activity size={14} style={{ color: '#6366f1' }} />
+          <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)' }}>
+            {t('Denní trend výdajů', 'Daily spend trend')}
+          </span>
+          <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>({n} {t('dní', 'days')} · {currency})</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+            {t('poslední den', 'last day')}: <strong style={{ color: 'var(--text-primary)' }}>${fmt(last.amount)}</strong>
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '11px', fontWeight: 700,
+            color: up ? 'var(--danger-text)' : 'var(--success-text)' }}
+            title={t('Změna oproti předchozímu dni', 'Change vs. the previous day')}>
+            {up ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+            {up ? '+' : ''}{dod.toFixed(0)}%
+          </span>
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: '100%', height: '150px', display: 'block' }}
+        role="img" aria-label={t('Graf denních cloudových výdajů', 'Daily cloud spend chart')}>
+        <defs>
+          <linearGradient id="spendGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#6366f1" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="#6366f1" stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+        <line x1={padL} y1={avgY} x2={W - padR} y2={avgY} stroke="var(--text-tertiary)" strokeWidth="1" strokeDasharray="4 4" opacity="0.5" />
+        <path d={area} fill="url(#spendGrad)" />
+        <path d={line} fill="none" stroke="#6366f1" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={xAt(n - 1)} cy={yAt(last.amount)} r="3.5" fill="#6366f1" />
+      </svg>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
+        <span>{fmtDate(daily[0].date)}</span>
+        <span>{t(`prům. $${fmt(avg)}/den · max $${fmt(max)}`, `avg $${fmt(avg)}/day · max $${fmt(max)}`)}</span>
+        <span>{fmtDate(last.date)}</span>
+      </div>
     </div>
   )
 }
@@ -434,11 +519,28 @@ function FinOpsContent() {
                   {t('Celkové měsíční náklady — AWS Cost Explorer', 'Total Monthly Cloud Spend — AWS Cost Explorer')}
                 </span>
               </div>
-              {costs?.available && (
-                <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                  {costs.periodStart} → {costs.periodEnd} · {costs.collectedAt ? new Date(costs.collectedAt).toLocaleDateString(language === 'cs' ? 'cs-CZ' : 'en-GB') : '—'}
-                </span>
-              )}
+              {costs?.available && (() => {
+                // Honest snapshot age. The cost number is a point-in-time snapshot
+                // (baked at deploy, refreshed daily by the in-cluster CronJob), NOT a
+                // live figure — so surface how old it actually is. Use lastRefresh
+                // (a state Date) as "now" to keep render pure.
+                const collected = costs.collectedAt ? new Date(costs.collectedAt) : null
+                const ageDays = collected && lastRefresh
+                  ? Math.max(0, Math.floor((lastRefresh.getTime() - collected.getTime()) / 86_400_000))
+                  : null
+                const stale = ageDays != null && ageDays >= 2
+                return (
+                  <span title={t('Snapshot z AWS Cost Exploreru — obnovuje se při deployi a denním CronJobem.', 'AWS Cost Explorer snapshot — refreshed on deploy and by the daily CronJob.')}
+                    style={{ fontSize: '11px', fontWeight: stale ? 700 : 400,
+                      color: stale ? 'var(--warning-text)' : 'var(--text-tertiary)',
+                      background: stale ? 'var(--warning-bg)' : 'transparent',
+                      border: stale ? '1px solid var(--warning-border)' : 'none',
+                      borderRadius: '10px', padding: stale ? '2px 8px' : 0 }}>
+                    {t('Snapshot', 'Snapshot')}: {collected ? collected.toLocaleDateString(language === 'cs' ? 'cs-CZ' : 'en-GB') : '—'}
+                    {ageDays != null && ` · ${ageDays === 0 ? t('dnes', 'today') : t(`starý ${ageDays} d`, `${ageDays}d old`)}`}
+                  </span>
+                )
+              })()}
             </div>
             <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: '0 0 16px' }}>
               {t(
@@ -488,6 +590,9 @@ function FinOpsContent() {
                       </div>
                     </div>
                   </div>
+
+                  {/* DAILY SPEND TREND — the per-day series we otherwise only read in the console */}
+                  <DailySpendTrend daily={costs.daily} currency={costs.currency} />
 
                   {/* BY DOMAIN — process/business view */}
                   <div style={{ marginBottom: '20px' }}>
