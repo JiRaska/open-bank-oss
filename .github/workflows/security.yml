@@ -33,6 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       run_sbom: ${{ steps.f.outputs.run_sbom }}
+      run_codeql: ${{ steps.f.outputs.run_codeql }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -42,25 +43,46 @@ jobs:
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
           SHA: ${{ github.sha }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
+          # Code paths that warrant CodeQL semantic analysis. A gitops/docs/*.md-only PR
+          # (e.g. an auto-generated deploy image-bump) changes none of these, so the
+          # ~14 min java-kotlin autobuild is pure waste there. CodeQL is NOT a required
+          # check, so skipping it on such PRs is safe — the weekly + main-push full scan
+          # (and Trivy on every PR) still cover them.
+          CODE_RE='(\.(java|kt|kts)$|(^|/)(build|settings)\.gradle|gradle/|\.(js|jsx|ts|tsx|mjs|cjs)$|(^|/)package(-lock)?\.json$|(^|/)Dockerfile|\.github/workflows/)'
           # schedule / manual: always run the full audit.
           if [ "$EVENT" = "schedule" ] || [ "$EVENT" = "workflow_dispatch" ]; then
-            echo "run_sbom=true" >> "$GITHUB_OUTPUT"; exit 0
+            echo "run_sbom=true" >> "$GITHUB_OUTPUT"; echo "run_codeql=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          # PRs never run the SBOM jobs (too heavy for the PR gate).
+          # PRs never run the SBOM jobs (too heavy for the PR gate). CodeQL runs only
+          # when code actually changed — diff against the merge-base with the target
+          # branch (not the frozen base.sha, which drifts once a competing PR merges).
           if [ "$EVENT" = "pull_request" ]; then
+            git fetch --no-tags --depth=1 origin "$BASE_REF" >/dev/null 2>&1 || true
+            BASE="$(git merge-base "origin/$BASE_REF" HEAD 2>/dev/null || true)"
+            if [ -n "$BASE" ] && ! git diff --name-only "$BASE" HEAD | grep -qE "$CODE_RE"; then
+              echo "run_codeql=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "run_codeql=true" >> "$GITHUB_OUTPUT"   # default to running when unsure
+            fi
             echo "run_sbom=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
           # First push of a branch has an all-zero "before" → cannot diff, run to be safe.
           if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            echo "run_sbom=true" >> "$GITHUB_OUTPUT"; exit 0
+            echo "run_sbom=true" >> "$GITHUB_OUTPUT"; echo "run_codeql=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
+          CHANGED="$(git diff --name-only "$BEFORE" "$SHA")"
           # Dependency-affecting paths: Gradle build/version files, lockfiles, Dockerfiles.
-          if git diff --name-only "$BEFORE" "$SHA" \
-               | grep -qE '(\.gradle\.kts$|gradle/libs\.versions\.toml$|gradle\.lockfile$|gradle/wrapper/|Dockerfile|package-lock\.json$|pnpm-lock\.yaml$|yarn\.lock$)'; then
+          if echo "$CHANGED" | grep -qE '(\.gradle\.kts$|gradle/libs\.versions\.toml$|gradle\.lockfile$|gradle/wrapper/|Dockerfile|package-lock\.json$|pnpm-lock\.yaml$|yarn\.lock$)'; then
             echo "run_sbom=true" >> "$GITHUB_OUTPUT"
           else
             echo "run_sbom=false" >> "$GITHUB_OUTPUT"
+          fi
+          if echo "$CHANGED" | grep -qE "$CODE_RE"; then
+            echo "run_codeql=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_codeql=false" >> "$GITHUB_OUTPUT"
           fi
 
   # ---------------------------------------------------------------------------
@@ -68,6 +90,7 @@ jobs:
   # ---------------------------------------------------------------------------
   codeql:
     name: CodeQL
+    needs: detect-deps
     # CodeQL uploads results to GitHub code scanning, which on a PRIVATE repo is a
     # paid GHAS add-on (not bundled with Free/Pro) — the init step errors with
     # "Code scanning is not enabled for this repository". So this job auto-skips
@@ -75,7 +98,9 @@ jobs:
     # mirroring the dependency-review job in ci.yml. Until then Trivy fs + Dependabot
     # cover vulnerable-dependency detection. (Aside: the CodeQL CLI also does not
     # support linux/arm64, so it could not run on the arm64 sandbox runner anyway.)
-    if: github.event.repository.private == false
+    # Skip on gitops/docs-only PRs (run_codeql=false) — CodeQL isn't a required check
+    # there, and the java-kotlin autobuild is the ~14 min tax that strands deploy PRs.
+    if: github.event.repository.private == false && needs.detect-deps.outputs.run_codeql != 'false'
     # Standard github/codeql-action usage targets ubuntu-latest; no self-hosted-specific
     # dependency here (setup-java/setup-node are already used to work around the Hetzner
     # pool lacking those toolchains). Public repo = free GitHub-hosted minutes.
