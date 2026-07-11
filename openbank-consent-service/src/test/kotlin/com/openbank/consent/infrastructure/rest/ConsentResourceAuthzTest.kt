@@ -24,6 +24,10 @@ import java.util.UUID
  * is enforced (that is the shared `AuthorizeInterceptor`'s own suite in
  * openbank-libs-runtime, plus the decision assertions in
  * openbank-infra/gitops/components/consent/gen-consent-opa-bundle.sh).
+ *
+ * `ConsentResource` now carries a class-level `@RolesAllowed` (the coarse gate `@Authorize`
+ * was always meant to pair with, per libs-domain's own docs) — an anonymous request is
+ * rejected before it ever reaches the `@Authorize` interceptor.
  */
 @QuarkusTest
 @QuarkusTestResource(ConsentResourceAuthzTest.InMemoryKafkaResource::class)
@@ -38,14 +42,13 @@ class ConsentResourceAuthzTest {
     }
 
     @Test
-    fun `anonymous request still reaches the handler in advisory mode`() {
-        // The test profile runs without enforced OIDC, so the request carries no identity
-        // at all — the strictest input the interceptor can see. Advisory mode must not
-        // 403/500 it; the handler's own not-found path answers.
+    fun `anonymous request is rejected before it reaches the Authorize interceptor`() {
+        // Previously this reached the handler (404) — the class had @Authorize but no
+        // @RolesAllowed pairing, so JAX-RS never rejected an unauthenticated caller.
         Given { this } When {
             get("/api/v1/consents/${UUID.randomUUID()}")
         } Then {
-            statusCode(404)
+            statusCode(401)
         }
     }
 

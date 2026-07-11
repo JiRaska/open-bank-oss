@@ -160,6 +160,7 @@ class ScaResource(
 
     @POST
     @Path("/challenges")
+    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "scaChallenge.initiate")
     suspend fun initiate(
         request: InitiateScaRequest,
@@ -200,6 +201,7 @@ class ScaResource(
 
     @POST
     @Path("/challenges/{id}/verify")
+    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "scaChallenge.verify", resource = "#id")
     suspend fun verify(@PathParam("id") id: UUID, request: VerifyScaRequest): ScaChallengeResponse {
         val challenge = verifySca.verify(VerifyScaCommand(id, request.partyId, request.otp))
@@ -208,13 +210,19 @@ class ScaResource(
 
     @GET
     @Path("/challenges/{id}")
+    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "scaChallenge.read", resource = "#id")
     suspend fun get(@PathParam("id") id: UUID): ScaChallengeResponse =
         ScaChallengeResponse.from(getSca.getChallenge(id))
 
-    /** List device credentials enrolled to a party (ADR-0021, ADR-0068 onboarding cockpit). */
+    /**
+     * List device credentials enrolled to a party (ADR-0021, ADR-0068 onboarding cockpit).
+     * Includes ROLE_CUSTOMER (unlike the other endpoints here) because this one carries its
+     * own ownership check below — a customer-realm caller can only ever list their own devices.
+     */
     @GET
     @Path("/parties/{partyId}/devices")
+    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
     @Authorize(action = "device.list", resource = "#partyId")
     suspend fun listDevices(@PathParam("partyId") partyId: UUID): List<EnrolledDeviceResponse> {
         val principalName = identity.principal?.name
@@ -226,9 +234,14 @@ class ScaResource(
         return listDevices.listDevices(ListDevicesQuery(partyId)).map { EnrolledDeviceResponse.from(it) }
     }
 
-    /** Enrol a device credential to a party (ADR-0021). */
+    /**
+     * Enrol a device credential to a party (ADR-0021). Includes ROLE_CUSTOMER for the same
+     * reason as [listDevices] — the ownership check below is the real gate for a customer
+     * caller.
+     */
     @POST
     @Path("/parties/{partyId}/devices")
+    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
     @Authorize(action = "device.enroll", resource = "#partyId")
     suspend fun enroll(@PathParam("partyId") partyId: UUID, request: EnrollDeviceRequest): Response {
         // P1 ownership enforcement (defense-in-depth over OPA advisory mode, ADR-0021 security review):
@@ -256,11 +269,15 @@ class ScaResource(
 
     /**
      * Record an out-of-band approval/denial from the enrolled device. Authenticated as the
-     * device/party (a different principal from the verify caller). The signed assertion is
-     * verified against the challenge's dynamic-linking data before it is stored.
+     * device/party (a different principal from the verify caller). Includes ROLE_CUSTOMER: the
+     * real security boundary here is the signature check inside [recordDecision] (verified
+     * against the challenge's dynamic-linking data), not caller identity — an attacker can't
+     * forge a decision without the enrolled device's private key even with a valid ROLE_CUSTOMER
+     * token for a different party.
      */
     @POST
     @Path("/challenges/{id}/decision")
+    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
     @Authorize(action = "scaChallenge.decide", resource = "#id")
     suspend fun decide(@PathParam("id") id: UUID, request: RecordDecisionRequest): ScaChallengeResponse {
         val challenge = recordDecision.recordDecision(
