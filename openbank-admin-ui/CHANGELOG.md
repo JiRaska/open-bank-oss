@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.42.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.41.0...admin-ui-v0.42.0) (2026-07-11)
+
+
+### Features
+
+* **admin-ui:** daily spend trend + fix security-scanner false positives on unreachable services ([#763](https://github.com/JiRaska/open-bank-oss/issues/763)) ([8a78091](https://github.com/JiRaska/open-bank-oss/commit/8a78091c4511b12c9a0c2ba1a79104cc87720a29))
+* **admin-ui:** honest scale-to-zero states, clickable payment/SWIFT detail, Closings check log ([#760](https://github.com/JiRaska/open-bank-oss/issues/760)) ([34b0c6f](https://github.com/JiRaska/open-bank-oss/commit/34b0c6f6119ab404c32240eb81d0d744e1fbb8cb))
+
+
+### Bug Fixes
+
+* **admin-ui:** reflect Temporal + platform control plane in infra/BCP/architecture views ([#764](https://github.com/JiRaska/open-bank-oss/issues/764)) ([39b75ac](https://github.com/JiRaska/open-bank-oss/commit/39b75ac55464ee9d779a1f6822e832be8c09ea5d))
+
 ## [0.41.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.40.2...admin-ui-v0.41.0) (2026-07-09)
 
 
