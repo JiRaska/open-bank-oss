@@ -11,7 +11,10 @@ import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.application.port.out.AccountSanctionsScreeningPort
 import com.openbank.account.application.port.out.AccountScreeningUnavailableException
 import com.openbank.account.application.port.out.BalanceQueryPort
+import com.openbank.account.application.port.out.CatalogProduct
 import com.openbank.account.application.port.out.CurrencyPocketRepository
+import com.openbank.account.application.port.out.ProductCatalogPort
+import com.openbank.account.application.port.out.ProductLookupResult
 import com.openbank.account.application.port.out.SanctionsScreenResult
 import com.openbank.account.domain.event.AccountCreatedEvent
 import com.openbank.account.domain.model.Account
@@ -45,6 +48,7 @@ class AccountServiceTest {
     private lateinit var ibanGenerator: IbanGenerator
     private lateinit var pocketRepository: CurrencyPocketRepository
     private lateinit var sanctionsScreening: AccountSanctionsScreeningPort
+    private lateinit var productCatalog: ProductCatalogPort
     private lateinit var metrics: DomainMetrics
     private lateinit var service: AccountService
 
@@ -56,7 +60,11 @@ class AccountServiceTest {
         ibanGenerator = mockk()
         pocketRepository = mockk()
         sanctionsScreening = mockk()
+        productCatalog = mockk()
         metrics = mockk(relaxed = true)
+        // Default: product-catalog unreachable — the fail-open path, so every pre-existing test
+        // that doesn't care about product validation keeps passing unchanged.
+        coEvery { productCatalog.findById(any()) } returns ProductLookupResult.Unavailable
         service =
             AccountService(
                 accountRepository,
@@ -65,6 +73,7 @@ class AccountServiceTest {
                 ibanGenerator,
                 pocketRepository,
                 sanctionsScreening,
+                productCatalog,
                 metrics,
                 Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC),
             )
@@ -311,6 +320,72 @@ class AccountServiceTest {
 
         assertThat(savedSlot.captured.sanctionsStatus).isEqualTo("CLEAR")
         assertThat(savedSlot.captured.sanctionsScreenedAt).isNotNull()
+    }
+
+    // --- Product validation at account-open (issue #668) --------------------------------------
+
+    @Test
+    fun `openAccount refuses a product that product-catalog confirms does not exist`() {
+        val command = openAccountCommand()
+        coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
+        coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        coEvery { productCatalog.findById(command.productId) } returns ProductLookupResult.NotFound
+
+        assertThatThrownBy { runBlocking { service.openAccount(command) } }
+            .isInstanceOf(ProductNotEligibleException::class.java)
+            .hasMessageContaining("does not exist")
+
+        coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any()) }
+    }
+
+    @Test
+    fun `openAccount refuses a product that is not ACTIVE`() {
+        val command = openAccountCommand()
+        coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
+        coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        coEvery { productCatalog.findById(command.productId) } returns
+            ProductLookupResult.Found(CatalogProduct(command.productId, "SAVINGS_STANDARD", "DRAFT"))
+
+        assertThatThrownBy { runBlocking { service.openAccount(command) } }
+            .isInstanceOf(ProductNotEligibleException::class.java)
+            .hasMessageContaining("DRAFT")
+
+        coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any()) }
+    }
+
+    @Test
+    fun `openAccount proceeds when product-catalog confirms an ACTIVE product`(): Unit = runBlocking {
+        val iban = Iban.of("CZ6508000000192000145399")
+        val command = openAccountCommand()
+        coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
+        coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        coEvery { productCatalog.findById(command.productId) } returns
+            ProductLookupResult.Found(CatalogProduct(command.productId, "SAVINGS_STANDARD", "ACTIVE"))
+        every { ibanGenerator.generate(command.currency) } returns iban
+        coEvery { accountRepository.existsByIban(iban) } returns false
+        coEvery { accountRepository.saveNewAccount(any(), any(), any()) } answers { firstArg() }
+        coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
+
+        val result = service.openAccount(command)
+
+        assertThat(result.status).isEqualTo(AccountStatus.ACTIVE)
+    }
+
+    @Test
+    fun `openAccount proceeds without validation when product-catalog is unavailable`(): Unit = runBlocking {
+        val iban = Iban.of("CZ6508000000192000145399")
+        val command = openAccountCommand()
+        coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
+        coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        coEvery { productCatalog.findById(command.productId) } returns ProductLookupResult.Unavailable
+        every { ibanGenerator.generate(command.currency) } returns iban
+        coEvery { accountRepository.existsByIban(iban) } returns false
+        coEvery { accountRepository.saveNewAccount(any(), any(), any()) } answers { firstArg() }
+        coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
+
+        val result = service.openAccount(command)
+
+        assertThat(result.status).isEqualTo(AccountStatus.ACTIVE)
     }
 
     @Test

@@ -22,13 +22,15 @@ that is balance-service).
                                                                 +--> [(account_outbox)] --outbox--> [Kafka account events]
                                                                 |
                                                                 +--> [sanctions-service] (OIDC M2M, sync, ADR-0032)
+                                                                |
+                                                                +--> [product-catalog] (unauthenticated read, sync, fail-open, ADR-0158)
 [Kafka party events] --in--> [account-service PartyEventConsumer] --activate--> [account-service]
                                                                 |
                                                                 +--M2M client_credentials (ROLE_OPERATOR)--> [transaction-service POST /api/v1/transactions]   (welcome bonus, sandbox-only)
 ```
 
 - **External entities:** operators/admins (human, OIDC via Keycloak), downstream consumers of account events, party-service (event source).
-- **Trust boundaries:** UI↔service (mTLS + OIDC + OPA authz, ADR-0034); service↔Postgres; service↔Kafka (outbox + party-events-in); **service↔transaction-service (outbound M2M, new — welcome-bonus grant)**; **account-service↔sanctions-service** (new, OIDC M2M, ADR-0032 §C).
+- **Trust boundaries:** UI↔service (mTLS + OIDC + OPA authz, ADR-0034); service↔Postgres; service↔Kafka (outbox + party-events-in); **service↔transaction-service (outbound M2M, new — welcome-bonus grant)**; **account-service↔sanctions-service** (new, OIDC M2M, ADR-0032 §C); **account-service↔product-catalog** (new, unauthenticated read, ADR-0158 — fail-**open**, a deliberately different posture from the sanctions gate: an unreachable product catalogue is reference-data unavailability, not a compliance risk, and must never block account opening).
 - **Assets:** account identity, IBAN, freeze/closure state, ownership linkage, **the oidc-client M2M secret** (grants ROLE_OPERATOR on the money path).
 
 ## 3. Authn/Authz
@@ -84,6 +86,15 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-07-09** — Account opening validates against product-catalog (ADR-0158, issue #668).
+  New outbound trust boundary: `account-service → product-catalog` (`GET /api/v1/products/{id}`,
+  unauthenticated, sync). `openAccount` now rejects a `productId` product-catalog confirms does
+  not exist, or that exists but is not `ACTIVE`. **Deliberately fail-open** on product-catalog
+  unavailability (timeout/5xx) — a different posture from the adjacent sanctions gate, which
+  fails closed: product-catalog is reference data (`rules.yaml: money_path_services` does not
+  list it), not a regulatory control, so an outage there must never block account opening.
+  New `ProductNotEligibleException` maps to 422 via the existing libs-runtime
+  `IllegalStateExceptionMapper`. No DB schema change; rollback = revert the commit.
 - **2026-06-09** — Customer-mediated ownership guard on the read endpoints (`getAccount`,
   `getAccountByIban`, `getBalance`): when `X-Customer-Party-Id` is present the account must belong to
   that party (else 404). Defense-in-depth for the edge IDOR fix (security finding A1). No data-flow or
