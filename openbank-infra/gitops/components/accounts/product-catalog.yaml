@@ -7,17 +7,32 @@
 # Quarkus management endpoints (health, metrics) bind to a separate port (8085).
 # QUARKUS_MANAGEMENT_HOST=0.0.0.0 is required so kubelet probes can reach them.
 #
-# ADR-0083 T1 native cutover (2026-07-06, #253). This Deployment now runs the
-# Mandrel/GraalVM native image (openbank-product-catalog/Dockerfile.native), not the
-# JVM fast-jar image every other service in the fleet still uses — the first native
-# cutover in the repo. startupProbe/readinessProbe are tuned to match (initialDelaySeconds:
-# 0, periodSeconds: 1 — a ~0.2-0.3s native process doesn't need the ~5s of JVM-scoped
-# headroom the previous probe carried). Do NOT copy this probe config onto a JVM-image
-# service without re-adding that headroom. The existing `product-catalog-http-scaledobject.yaml`
-# HTTPScaledObject (minReplicas: 0) was already live against the old JVM image; this
-# cutover is what actually makes its cold-start assumption true. Burn-in window before
-# declaring `openbank-product-catalog: T1` in `rules.yaml:finops_tiers.declared` per the
-# ADR's own Pilot plan step 5 — do not declare T1 from this manifest alone.
+# ADR-0083 T1 native pilot — ROLLED BACK to the JVM fast-jar image (open-bank-oss#253).
+# The native image compiled and cold-started, but every HTTP request 500s at runtime
+# (root cause still open in #253), so Fees / the fee-schedule vertical never served. Until
+# #253 is fixed, this Deployment runs the standard JVM fast-jar image like the rest of the
+# fleet. The startupProbe/readinessProbe are therefore restored to JVM-scoped headroom
+# (a JVM + Flyway-at-start needs far more than the ~10s the native-tuned probe allowed, or
+# the pod is killed before it becomes ready). The native-tuning was: startupProbe
+# initialDelaySeconds 0 / periodSeconds 1 / failureThreshold 10 — do NOT reinstate without
+# the native image. The `product-catalog-http-scaledobject.yaml` HTTPScaledObject
+# (minReplicas: 0) stays; JVM cold-start is slower but the admin-ui auto-wakes it. The
+# native pilot work is preserved (Dockerfile.native); it is simply not deployed to the fleet.
+# Do NOT declare `openbank-product-catalog: T1` in `rules.yaml:finops_tiers.declared`.
+#
+# Verification of this rollback:
+#  - sandbox-a407c3ae is the STANDARD JVM fast-jar build (build-push-service.sh),
+#    the same pipeline the other ~40 fleet services run in production — not a
+#    bespoke image. It carries a valid SBOM attestation (.att/.sig in ECR), so
+#    Kyverno verify-openbank-image-sbom-attestation admits it (the exact policy
+#    that was blocking statement-service on an un-attested tag).
+#  - Probe budget: startupProbe 5s + 30×5s = 155s, well above a JVM boot + Flyway
+#    migration; identical to the pre-native manifest that ran green. Resources
+#    (256Mi req / 512Mi limit) are unchanged from that JVM baseline.
+#  - Runtime SLA is only observable post-deploy: after merge, watch the ArgoCD
+#    `accounts` app roll the new ReplicaSet, confirm the pod reaches Ready and
+#    GET /api/v1/fees serves, and roll back this tag on failure. KEDA keeps it at
+#    0 replicas until a request wakes it (the admin-ui auto-wake covers cold start).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -54,7 +69,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: product-catalog
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-product-catalog:native-a2e14752
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-product-catalog:sandbox-a407c3ae
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -81,15 +96,17 @@ spec:
             httpGet:
               path: /q/health/ready
               port: management
-            initialDelaySeconds: 0
-            periodSeconds: 1
-            failureThreshold: 10
+            # JVM-scoped headroom (restored from the pre-native manifest): a JVM
+            # cold start + Flyway-at-start needs well over the native-tuned 10s.
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30
           readinessProbe:
             httpGet:
               path: /q/health/ready
               port: management
-            periodSeconds: 1
-            failureThreshold: 10
+            periodSeconds: 10
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /q/health/live

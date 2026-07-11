@@ -309,8 +309,8 @@ money_path_services:
   - openbank-lending-service
   - openbank-sca-service
   - openbank-consent-service
-  - openbank-fraud-service                # ADR-0084: first executable landed (Phase 1 skeleton)
-  - openbank-billing-service              # ADR-0143: fee posting to the ledger (Phase 2b skeleton)
+  - openbank-fraud-service                # ADR-0084: v4 rule engine live; domestic-payment enforcement gate merged (issue #667, flag default-off pending risk-team threshold calibration)
+  - openbank-billing-service              # ADR-0143: fee assess/post/reverse shipped (phases 1a-2e); real-env e2e verification + four-eyes enforcement flip still gate production go-live
   - openbank-settlement-service           # issue #307: debit->credit->ledger-booking saga (ADR-0101)
   - openbank-sanctions-service             # ADR-0116: real feed screening; already required by four_eyes below (issue #554)
 review:

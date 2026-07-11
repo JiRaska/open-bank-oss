@@ -95,22 +95,21 @@ mp:
     incoming:
       notification-events-in:
         connector: smallrye-kafka
-        client.id: notification-service-${quarkus.uuid}
-        # group.id / auto.offset.reset are set via the gitops ConfigMap
+        # client.id / group.id / auto.offset.reset are set via the gitops ConfigMap
         # (notification-service-msg-override, QUARKUS_CONFIG_LOCATIONS) instead of
         # here: Quarkus's YAML config source unconditionally quotes any dotted leaf
-        # key (`group.id`, `auto.offset.reset`) when flattening YAML, so it silently
-        # registers as `mp.messaging.incoming.notification-events-in."group.id"` —
-        # a property KafkaConnectorIncomingConfiguration never reads — and falls
-        # back to quarkus.application.name, which the Strimzi ACL does not grant
-        # Read on (issue #686).
+        # key (`client.id`, `group.id`, `auto.offset.reset`) when flattening YAML, so
+        # it silently registers as `mp.messaging.incoming.notification-events-in."group.id"`
+        # etc. — properties KafkaConnectorIncomingConfiguration never reads. group.id
+        # falls back to quarkus.application.name, which the Strimzi ACL does not grant
+        # Read on (issue #686); client.id is cosmetic (broker-side log/JMX label only)
+        # but left broken the same way if not moved out too.
         topic: openbank.notification.requests
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
       party-events-in:
         connector: smallrye-kafka
-        client.id: notification-service-party-${quarkus.uuid}
-        # group.id / auto.offset.reset: same dotted-key YAML bug as above — set via
-        # the gitops ConfigMap instead (issue #686).
+        # client.id / group.id / auto.offset.reset: same dotted-key YAML bug as above —
+        # set via the gitops ConfigMap instead (issue #686).
         topic: openbank.party.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 "%dev":

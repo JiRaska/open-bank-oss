@@ -12,12 +12,23 @@
 # (kafka-onboarding-mtls.yaml) does NOT grant Read on for any of the three groups below —
 # so every consumer poll on all three channels gets a silent GroupAuthorizationException.
 #
-# Why a properties FILE and not env vars: SmallRye discovers messaging channels by scanning
-# config property NAMES, and the env-var form (MP_MESSAGING_INCOMING_PARTY_EVENTS_IN_GROUP_ID
-# etc.) reverse-maps ambiguously for hyphenated channel names -> a broken channel -> startup
-# crash (this was tried for transaction-service's payment-scheme-accepted channel, #2649,
-# and reverted in #2659; see ADR-0137). A properties file carries the EXACT dotted/hyphenated
-# property names unambiguously, so channel discovery is unambiguous.
+# Why a properties FILE and not env vars: this mirrors the pre-existing pattern already used for
+# transaction-service's payment-scheme-accepted channel
+# (openbank-infra/gitops/components/payments/transaction-service-msg-override.yaml). A properties
+# file carries the exact dotted/hyphenated property names unambiguously, avoiding any reliance on
+# MicroProfile Config's env-var-name reverse-mapping for channel discovery.
+#
+# Correction (round 2): an earlier version of this comment first cited nonexistent issues
+# #2649/#2659, then over-corrected to claim env vars are "independently verified to work" here —
+# that overstated it too. The genuine concern is real: quarkusio/quarkus#30106 and
+# smallrye/smallrye-reactive-messaging#2028 document a live, unresolved upstream bug where an
+# env-var override of a single leaf property (e.g. `retries`, here `group.id`/`auto.offset.reset`)
+# on a HYPHENATED channel name crashes Quarkus at startup (`SRMSG00071`, "connector attribute must
+# be set for channel <wrong split>") — regardless of whether the channel is already registered
+# via YAML/annotations. Boot tests added during this sweep inject the override via a
+# QuarkusTestResourceLifecycleManager config map, not a real OS env var, so they don't exercise
+# this failure mode. This properties-file mechanism is the CORRECT choice for the hyphenated
+# `party-events-in`/`kyc-events-in`/`sca-events-in` channels, not merely a stylistic alternative.
 #
 # config_ordinal=500 forces this source to outrank the baked application.yaml (~254).
 # Loaded via QUARKUS_CONFIG_LOCATIONS on the Rollout (onboarding-service.yaml). Same pattern

@@ -299,10 +299,21 @@ mp:
         # default (latest) instead of the intended latest-is-fine-here value, but the same bug
         # class applies regardless (issue #686).
         #
-        # A properties-file override (not MP_MESSAGING_INCOMING_*_GROUP_ID env vars) is used
-        # because `oversight-events` is a hyphenated channel name: SmallRye's channel discovery
-        # cannot reliably reverse-map hyphenated MP_MESSAGING_INCOMING_OVERSIGHT_EVENTS_* env
-        # names back to the channel, and can register a broken channel that fails startup
-        # (confirmed on transaction-service's payment-scheme-accepted channel, #2649 -> reverted
-        # in #2659). A properties file carries the exact hyphenated property key, so discovery
-        # is unambiguous.
+        # A properties-file override (not MP_MESSAGING_INCOMING_*_GROUP_ID env vars) is used,
+        # matching the pattern already established for transaction-service's
+        # payment-scheme-accepted channel. A properties file carries the exact hyphenated
+        # property key unambiguously, avoiding any reliance on MicroProfile Config's env-var-name
+        # reverse-mapping for channel discovery.
+        #
+        # Correction (round 2): an earlier version of this comment first cited nonexistent issues
+        # #2649/#2659, then over-corrected to claim env vars are "independently verified to work"
+        # here — that overstated it too. The genuine concern is real: quarkusio/quarkus#30106 and
+        # smallrye/smallrye-reactive-messaging#2028 document a live, unresolved upstream bug where
+        # an env-var override of a single leaf property (e.g. `retries`, here `group.id`/
+        # `auto.offset.reset`) on a HYPHENATED channel name crashes Quarkus at startup
+        # (`SRMSG00071`, "connector attribute must be set for channel <wrong split>") — regardless
+        # of whether the channel is already registered via YAML/annotations. Boot tests added
+        # during this sweep inject the override via a QuarkusTestResourceLifecycleManager config
+        # map, not a real OS env var, so they don't exercise this failure mode. This properties-file
+        # mechanism is the CORRECT choice for a hyphenated channel like `oversight-events`, not
+        # merely a stylistic alternative.

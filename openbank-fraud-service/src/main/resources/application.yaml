@@ -90,9 +90,23 @@ mp:
         failure-strategy: dead-letter-queue
         # group.id / auto.offset.reset / dead-letter-queue.topic are deliberately NOT set as YAML
         # keys here — see openbank-infra/gitops/components/fraud-service/fraud-service-msg-override.yaml
-        # (loaded via QUARKUS_CONFIG_LOCATIONS) for why and where they're set instead. NOT env vars:
-        # that was tried (#685) and is unsafe for a hyphenated channel name like this one — see
-        # ADR-0137's "known follow-up" section (#2649 -> #2659, reverted). Summary: SmallRye Config's YAML source unconditionally quotes any leaf map key
+        # (loaded via QUARKUS_CONFIG_LOCATIONS) for why and where they're set instead, matching the
+        # pattern already established for transaction-service's payment-scheme-accepted channel.
+        #
+        # Correction (round 2): an earlier version of this comment first cited nonexistent issues
+        # #2649/#2659, then over-corrected to claim PR #685's original env-var fix was
+        # "independently verified to work" — that overstated it too. The genuine concern is real:
+        # quarkusio/quarkus#30106 and smallrye/smallrye-reactive-messaging#2028 document a live,
+        # unresolved upstream bug where an env-var override of a single leaf property (e.g.
+        # `retries`, here `group.id`/`auto.offset.reset`/`dead-letter-queue.topic`) on a HYPHENATED
+        # channel name crashes Quarkus at startup (`SRMSG00071`, "connector attribute must be set
+        # for channel <wrong split>") — regardless of whether the channel is already registered
+        # via YAML/annotations. #685's own regression test didn't catch this because it injects
+        # the override via a QuarkusTestResourceLifecycleManager config map, not a real OS env var,
+        # so it doesn't exercise this failure mode. This properties-file mechanism is the CORRECT
+        # choice for the hyphenated `transaction-signal` channel, not merely a stylistic
+        # alternative or a required-but-optional correction.
+        # Summary: SmallRye Config's YAML source unconditionally quotes any leaf map key
         # containing a literal dot (`group.id` becomes the registered property name `"group.id"`,
         # quotes included — true whether or not the YAML key itself is quoted), so
         # KafkaConnectorIncomingConfiguration's plain config.getOptionalValue("group.id", ...) never

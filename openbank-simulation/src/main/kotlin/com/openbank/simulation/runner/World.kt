@@ -16,6 +16,7 @@ import com.openbank.simulation.model.BillingFeeLedger
 import com.openbank.simulation.model.InterestAccrualBook
 import com.openbank.simulation.model.LedgerState
 import com.openbank.simulation.model.SimPaymentSaga
+import com.openbank.simulation.model.StatementCloseBook
 import java.math.BigDecimal
 import java.util.UUID
 
@@ -62,6 +63,11 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     // gross/net/tax capitalization split (real WithholdingTaxPolicy) and the journal legs that
     // actually landed. Populated by InterestAccrualScenario; empty (trivially satisfied) otherwise.
     val interest = InterestAccrualBook()
+
+    // ADR-0035/0078 / issue #667: the statement-close integrity invariant's state — every close
+    // attempt's ReconciliationPolicy decision cross-checked against whether a period was actually
+    // persisted. Populated by StatementCloseScenario; empty (trivially satisfied) otherwise.
+    val statementCloses = StatementCloseBook()
 
     val customerAccounts: List<UUID>
     val currency: String = config.currency
