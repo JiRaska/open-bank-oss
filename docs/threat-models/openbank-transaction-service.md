@@ -96,6 +96,18 @@ reference/counterparty/amount/date). Holds customer financial movement data.
 
 ## 6. Change log
 
+- **2026-07-11** — #747: `PaymentJournalFactory`'s cash-clearing leg (the bank-side leg of a
+  one-sided inbound/outbound payment) was hardcoded to the CZK-only GL account regardless of the
+  transaction's actual currency, so ledger-service rejected any non-CZK one-sided payment (422,
+  currency mismatch) — confirmed live while building the issue #669 write benchmark. Added a
+  per-currency `CASH_CLEARING` map (EUR/USD/GBP, mirroring the existing `DEPOSIT_CONTROL`/
+  `FX_POSITION` pattern) and the corresponding `gl_accounts` seed
+  (`V14__cash_clearing_accounts_per_currency.sql`, ledger-service). Purely additive reference
+  data + a lookup-by-currency change; no new trust boundary, no change to the CZK path (same
+  account id as before). Risk class = **integrity** (correct GL routing, not money-direction —
+  the D-2 direction invariant from 2026-06-17 below is untouched). Mitigated by two new
+  `PaymentJournalFactoryTest` cases asserting the EUR cash-clearing leg resolves to the new
+  per-currency account, not the CZK one.
 - **2026-06-28** — ADR-0120 Phase 1: Temporal payment orchestration scaffolding (flag-gated, default
   OFF). Additive `PaymentWorkflow` + activities mirroring `PaymentSagaOrchestrator`; no cutover, no saga
   removal. Risk class = **integrity** (must preserve the §4 money-direction + D-2 invariant) + new

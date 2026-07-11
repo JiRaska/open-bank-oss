@@ -44,8 +44,17 @@ object PaymentJournalFactory {
     // Well-known leaf GL accounts seeded by the ledger service.
     // V3__ledger_governance.sql: 1100 Customer Cash Clearing (ASSET, CZK), 2100 Customer Deposit
     // Control (LIABILITY, CZK). V5__fx_position_accounts.sql: per-currency deposit control and
-    // FX position accounts. Stable UUIDs let the saga reference them deterministically.
-    private val CUSTOMER_CASH_CLEARING_CZK = UUID.fromString("a0000000-0000-0000-0000-000000000001")
+    // FX position accounts. V14__cash_clearing_accounts_per_currency.sql: per-currency cash
+    // clearing (issue #747 — the CZK-only account was previously used for every currency's
+    // cash-clearing leg, rejected by LedgerService's line/account currency-match check (422) for
+    // anything non-CZK — confirmed live, a EUR CREDIT transaction failed where CZK succeeded).
+    // Stable UUIDs let the saga reference them deterministically.
+    private val CASH_CLEARING: Map<String, UUID> = mapOf(
+        "CZK" to UUID.fromString("a0000000-0000-0000-0000-000000000001"),
+        "EUR" to UUID.fromString("a0000000-0000-0000-0000-000000001101"),
+        "USD" to UUID.fromString("a0000000-0000-0000-0000-000000001102"),
+        "GBP" to UUID.fromString("a0000000-0000-0000-0000-000000001103"),
+    )
 
     private val DEPOSIT_CONTROL: Map<String, UUID> = mapOf(
         "CZK" to UUID.fromString("a0000000-0000-0000-0000-000000000002"),
@@ -112,7 +121,7 @@ object PaymentJournalFactory {
         )
 
     private fun cashClearingLeg(transaction: Transaction, ccy: String, side: String) = JournalLineRequest(
-        glAccountId = CUSTOMER_CASH_CLEARING_CZK,
+        glAccountId = cashClearing(ccy),
         side = side,
         amount = transaction.amount.amount,
         currencyCode = ccy,
@@ -152,6 +161,9 @@ object PaymentJournalFactory {
             ),
         )
     }
+
+    private fun cashClearing(currency: String): UUID = CASH_CLEARING[currency]
+        ?: error("No cash-clearing GL account seeded for currency $currency")
 
     private fun depositControl(currency: String): UUID = DEPOSIT_CONTROL[currency]
         ?: error("No deposit-control GL account seeded for currency $currency")

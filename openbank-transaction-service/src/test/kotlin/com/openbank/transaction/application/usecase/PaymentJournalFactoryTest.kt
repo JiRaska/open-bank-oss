@@ -20,6 +20,7 @@ import java.util.UUID
 class PaymentJournalFactoryTest {
 
     private val cashClearingCzk = UUID.fromString("a0000000-0000-0000-0000-000000000001")
+    private val cashClearingEur = UUID.fromString("a0000000-0000-0000-0000-000000001101")
     private val depositControlCzk = UUID.fromString("a0000000-0000-0000-0000-000000000002")
     private val depositControlEur = UUID.fromString("a0000000-0000-0000-0000-000000002101")
     private val fxPositionCzk = UUID.fromString("a0000000-0000-0000-0000-000000001990")
@@ -116,6 +117,48 @@ class PaymentJournalFactoryTest {
 
         assertThatThrownBy { PaymentJournalFactory.buildLines(tx) }
             .isInstanceOf(IllegalStateException::class.java)
+    }
+
+    // --- Non-CZK same-currency cash-clearing leg (issue #747): the cash-clearing account used to
+    // be hardcoded to the CZK-only leaf regardless of the payment's currency, which LedgerService
+    // rejects (422, currency mismatch between the line and its GL account) for anything non-CZK. ---
+
+    @Test
+    fun `outbound payment in EUR credits EUR cash-clearing, not the CZK-only account`() {
+        val source = UUID.randomUUID()
+        val tx = transaction(
+            amount = Money.of("40.00", "EUR"),
+            baseAmount = Money.of("40.00", "EUR"),
+            sourceAccountId = source,
+            targetAccountId = null,
+        )
+
+        val lines = PaymentJournalFactory.buildLines(tx)
+
+        assertThat(lines).hasSize(2)
+        val cash = lines.single { it.side == "CREDIT" }
+        assertThat(cash.glAccountId).isEqualTo(cashClearingEur)
+        assertThat(cash.currencyCode).isEqualTo("EUR")
+        assertPerCurrencyBalanced(lines)
+    }
+
+    @Test
+    fun `incoming credit in EUR debits EUR cash-clearing, not the CZK-only account`() {
+        val target = UUID.randomUUID()
+        val tx = transaction(
+            amount = Money.of("40.00", "EUR"),
+            baseAmount = Money.of("40.00", "EUR"),
+            sourceAccountId = null,
+            targetAccountId = target,
+        )
+
+        val lines = PaymentJournalFactory.buildLines(tx)
+
+        assertThat(lines).hasSize(2)
+        val cash = lines.single { it.side == "DEBIT" }
+        assertThat(cash.glAccountId).isEqualTo(cashClearingEur)
+        assertThat(cash.currencyCode).isEqualTo("EUR")
+        assertPerCurrencyBalanced(lines)
     }
 
     // --- Cross-currency (ADR-0025): four-legged FX entry, unchanged by the direction fix. ---
