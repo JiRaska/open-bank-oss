@@ -6,15 +6,15 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
-  Package, Search, RefreshCw, AlertCircle, Edit, Play, Square, Plus, X,
+  Package, Search, RefreshCw, Edit, Play, Square, Plus, X,
   Eye, EyeOff, CreditCard, Globe, TrendingDown,
   Clock, FileText, Tag, Users, ExternalLink, History, CheckCircle2,
   Layers, Banknote, Shield,
 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-
-const PROXY = '/api/product-catalog'
+import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
+import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 
 const STATUS_COLOR: Record<string, { bg: string; text: string; border: string }> = {
   ACTIVE:     { bg: 'var(--success-bg)',  text: 'var(--success-text)',  border: 'var(--success-border)' },
@@ -63,13 +63,27 @@ interface Product {
   createdAt?: string; updatedAt?: string
 }
 
+// Go through the BFF proxy (not a dedicated /api/product-catalog route): the proxy
+// detects KEDA scale-to-zero (ADR-0057) → a calm "idle" state instead of an
+// uncaught 500, and relays the operator token (product-catalog is now auth-gated).
+class ApiError extends Error {
+  kind: BffFailure
+  constructor(kind: BffFailure, message: string) {
+    super(message)
+    this.kind = kind
+  }
+}
+
 async function apiFetch(path: string, opts?: RequestInit) {
-  const res = await fetch(`${PROXY}${path}`, { cache: 'no-store', signal: AbortSignal.timeout(8000), ...opts })
+  const res = await fetch(svcUrl('product-catalog', `/api/v1/products${path}`), {
+    cache: 'no-store', signal: AbortSignal.timeout(8000), ...opts,
+  })
   if (!res.ok) {
+    const kind = await classifyBffFailure(res.clone())
     const text = await res.text().catch(() => '')
     let msg: string
     try { const parsed = JSON.parse(text); msg = parsed?.message ?? parsed?.error ?? text } catch { msg = text || res.statusText }
-    throw new Error(`${res.status} ${msg}`)
+    throw new ApiError(kind, msg || res.statusText)
   }
   return res.json()
 }
@@ -416,12 +430,13 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
 }
 
 export default function ProductCatalogPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  // Typed unavailable reason → renders the calm <DataUnavailable> panel (idle /
+  // waking / unreachable) instead of a red "service is down" banner.
+  const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [healthStatus, setHealthStatus] = useState<boolean | null>(null)
 
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('ALL')
@@ -436,11 +451,10 @@ export default function ProductCatalogPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    setError(null)
+    setUnavailable(null)
     setActionError(null)
     try {
       const data = await apiFetch('')
-      setHealthStatus(true)
       let items: Product[] = Array.isArray(data) ? data : (data.items ?? data.content ?? data.products ?? [])
       items = items.sort((a, b) => {
         if (a.updatedAt && b.updatedAt) return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
@@ -451,9 +465,9 @@ export default function ProductCatalogPage() {
         const refreshed = items.find(p => p.id === selectedProduct.id)
         if (refreshed) setSelectedProduct(refreshed)
       }
-    } catch (e: any) {
-      setHealthStatus(false)
-      setError(e.message ?? 'Failed to load product catalog')
+    } catch (e) {
+      setProducts([])
+      setUnavailable({ kind: e instanceof ApiError ? e.kind : 'unreachable' })
     } finally {
       setLoading(false)
     }
@@ -549,10 +563,15 @@ export default function ProductCatalogPage() {
             </div>
           </div>
 
-          {healthStatus === false && (
-            <div className="card" style={{ padding: '12px 16px', color: 'var(--danger-text)', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)' }}>
-              <AlertCircle size={15} />
-              <span style={{ fontSize: '13px' }}>{t('Služba katalogu produktů je nedostupná.', 'Product Catalog Service is unreachable.')}</span>
+          {unavailable && (
+            <div className="card" style={{ padding: 0, marginBottom: '16px' }}>
+              <DataUnavailable
+                kind={unavailable.kind}
+                service={t('Katalog produktů', 'Product Catalog')}
+                feature={t('Produkty', 'Products')}
+                lang={language}
+                dense
+              />
             </div>
           )}
 
@@ -595,7 +614,6 @@ export default function ProductCatalogPage() {
             ))}
           </div>
 
-          {error && <div className="card" style={{ padding: '12px 16px', color: 'var(--danger-text)', marginBottom: '16px', fontSize: '13px' }}>{error}</div>}
 
           <div className="card" style={{ overflow: 'hidden' }}>
             <table className="data-table">

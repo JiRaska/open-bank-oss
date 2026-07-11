@@ -591,6 +591,41 @@ function FinOpsContent() {
                     </div>
                   </div>
 
+                  {/* LAST 7 DAYS — the window operators watch day-to-day, with a
+                      week-over-week delta. Higher spend is red (bad), lower green. */}
+                  {costs.daily.length >= 1 && (() => {
+                    const sum = (a: DailyCost[]) => a.reduce((s, d) => s + d.amount, 0)
+                    const last7 = costs.daily.slice(-7)
+                    const prev7 = costs.daily.slice(-14, -7)
+                    const l7 = sum(last7)
+                    const avg = last7.length ? l7 / last7.length : 0
+                    const delta = prev7.length > 0 && sum(prev7) > 0 ? ((l7 - sum(prev7)) / sum(prev7)) * 100 : null
+                    const up = (delta ?? 0) >= 0
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '18px', marginBottom: '18px',
+                        padding: '14px 18px', borderRadius: '10px', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                        <div>
+                          <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                            {t('Posledních 7 dní', 'Last 7 days')}
+                          </div>
+                          <div style={{ fontSize: '26px', fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.15 }}>
+                            ${l7.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                          {t('⌀ / den', 'avg / day')}: <strong>${avg.toFixed(2)}</strong>
+                        </div>
+                        {delta !== null && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', fontWeight: 700,
+                            color: up ? '#dc2626' : '#16a34a' }}>
+                            {up ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
+                            {up ? '+' : ''}{delta.toFixed(1)}% {t('vs. předchozích 7 dní', 'vs. prior 7 days')}
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })()}
+
                   {/* DAILY SPEND TREND — the per-day series we otherwise only read in the console */}
                   <DailySpendTrend daily={costs.daily} currency={costs.currency} />
 
