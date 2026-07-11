@@ -3,10 +3,14 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect } from 'react'
-import { TrendingUp, Search, CheckCircle2, XCircle, Clock, RefreshCw, Percent, Calendar } from 'lucide-react'
+import { useState } from 'react'
+import { TrendingUp, Search, CheckCircle2, RefreshCw, Percent, Calendar } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { svcUrl } from '@/lib/services/bff'
+import { useServiceResource } from '@/lib/services/useServiceResource'
+import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 
 interface AccrualRecord {
   id: string; accountId: string; accrualDate: string; accruedAmount: number
@@ -14,19 +18,13 @@ interface AccrualRecord {
 }
 
 export default function InterestPage() {
-  const { t } = useLanguage()
-  const [accruals, setAccruals] = useState<AccrualRecord[]>([])
-  const [loading, setLoading] = useState(true)
+  const { t, language } = useLanguage()
   const [search, setSearch] = useState('')
-  const [serviceUp, setServiceUp] = useState<boolean | null>(null)
-
-  useEffect(() => {
-    fetch('/api/svc/interest-service/q/health/ready').then(r => setServiceUp(r.ok)).catch(() => setServiceUp(false))
-    fetch('/api/svc/interest-service/api/v1/interest/accruals').then(r => r.json())
-      .then(d => setAccruals(Array.isArray(d) ? d : d.accruals ?? []))
-      .catch(() => setAccruals([]))
-      .finally(() => setLoading(false))
-  }, [])
+  const { data, loading, unavailable, waking } = useServiceResource<AccrualRecord[]>(
+    svcUrl('interest-service', '/api/v1/interest/accruals'),
+    { select: (raw) => (Array.isArray(raw) ? (raw as AccrualRecord[]) : ((raw as { accruals?: AccrualRecord[] }).accruals ?? [])) },
+  )
+  const accruals = data ?? []
 
   const filtered = accruals.filter(a =>
     a.accountId?.toLowerCase().includes(search.toLowerCase()) ||
@@ -50,14 +48,18 @@ export default function InterestPage() {
               {t('Akruální účetnictví — ACT/365 · ACT/360 · kapitalizace', 'Accrual accounting — ACT/365 · ACT/360 · capitalisation')}
             </p>
           </div>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 600,
-            padding: '4px 10px', borderRadius: '20px',
-            background: serviceUp === true ? 'var(--success-bg)' : serviceUp === false ? 'var(--danger-bg)' : 'var(--surface-3)',
-            color: serviceUp === true ? 'var(--success-text)' : serviceUp === false ? 'var(--danger-text)' : 'var(--text-tertiary)',
-            border: `1px solid ${serviceUp === true ? 'var(--success-border)' : serviceUp === false ? 'var(--danger-border)' : 'var(--border)'}` }}>
-            {serviceUp === true ? <CheckCircle2 size={10} /> : serviceUp === false ? <XCircle size={10} /> : <Clock size={10} />}
-            interest-service :8125
-          </span>
+          <ServiceStatusBadge
+            label="interest-service :8125"
+            loading={loading}
+            waking={waking}
+            unavailable={unavailable}
+            copy={{
+              up: t('interest-service běží', 'interest-service is up'),
+              idle: t('interest-service spí (scale-to-zero), probouzí se…', 'interest-service idle (scaled to zero), waking…'),
+              down: t('interest-service neodpovídá', 'interest-service is not responding'),
+              checking: t('Zjišťuji stav služby…', 'Checking service…'),
+            }}
+          />
         </div>
 
         <div className="grid-4" style={{ marginBottom: '24px' }}>
@@ -89,14 +91,13 @@ export default function InterestPage() {
             <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
               <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám…', 'Loading…')}</div>
             </div>
+          ) : unavailable ? (
+            <DataUnavailable kind={unavailable.kind} service={t('Interest-service', 'Interest-service')} feature={t('Úrokové záznamy', 'Interest records')} lang={language} />
           ) : filtered.length === 0 ? (
-            <div style={{ padding: '48px', textAlign: 'center' }}>
-              <TrendingUp size={32} style={{ color: 'var(--text-tertiary)', marginBottom: '12px' }} />
-              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>{t('Žádné úrokové záznamy', 'No interest records')}</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t('Mikroservisa běží na portu 8125.', 'Microservice is running on port 8125.')}</div>
-              <a href="/api/svc/interest-service/api/docs" target="_blank" rel="noreferrer"
-                style={{ display: 'inline-block', marginTop: '12px', fontSize: '12px', color: 'var(--accent)', textDecoration: 'none' }}>→ Swagger UI</a>
-            </div>
+            <DataUnavailable kind="no_data" feature={t('Úrokové záznamy', 'Interest records')} lang={language}
+              detail={accruals.length === 0
+                ? t('Služba běží, zatím žádné úrokové záznamy.', 'The service is running; no interest records yet.')
+                : t('Žádné výsledky pro zadaný filtr.', 'No results for the applied filter.')} />
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
