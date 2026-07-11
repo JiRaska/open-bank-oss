@@ -3,10 +3,14 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { CreditCard, Plus, Search, RefreshCw, CheckCircle2, XCircle, Clock } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { svcUrl } from '@/lib/services/bff'
+import { useServiceResource } from '@/lib/services/useServiceResource'
+import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 
 interface Card {
   id: string; partyId: string; accountId: string; maskedPan: string
@@ -21,18 +25,17 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; border: string }
 }
 
 export default function CardsPage() {
-  const [cards, setCards] = useState<Card[]>([])
-  const { t } = useLanguage()
-  const [loading, setLoading] = useState(true)
+  const { t, language } = useLanguage()
   const [search, setSearch] = useState('')
-  const [serviceUp, setServiceUp] = useState<boolean | null>(null)
 
-  useEffect(() => {
-    fetch('/api/svc/card-issuance-service/q/health/ready').then(r => setServiceUp(r.ok)).catch(() => setServiceUp(false))
-    fetch('/api/svc/card-issuance-service/api/v1/cards').then(r => r.json()).then(d => {
-      setCards(Array.isArray(d) ? d : d.cards ?? [])
-    }).catch(() => setCards([])).finally(() => setLoading(false))
-  }, [])
+  // Single graceful data path (admin-ui rule #1): the hook classifies a non-OK
+  // BFF response and auto-wakes a scaled-to-zero pod (KEDA, ADR-0057) instead of
+  // showing a cold 503 as "not responding".
+  const { data, loading, unavailable, waking } = useServiceResource<Card[]>(
+    svcUrl('card-issuance-service', '/api/v1/cards'),
+    { select: (raw) => (Array.isArray(raw) ? (raw as Card[]) : ((raw as { cards?: Card[] }).cards ?? [])) },
+  )
+  const cards = data ?? []
 
   const filtered = cards.filter(c =>
     c.maskedPan?.includes(search) || c.cardType?.toLowerCase().includes(search.toLowerCase()) ||
@@ -52,14 +55,18 @@ export default function CardsPage() {
             </p>
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 600,
-              padding: '4px 10px', borderRadius: '20px',
-              background: serviceUp === true ? 'var(--success-bg)' : serviceUp === false ? 'var(--danger-bg)' : 'var(--surface-3)',
-              color: serviceUp === true ? 'var(--success-text)' : serviceUp === false ? 'var(--danger-text)' : 'var(--text-tertiary)',
-              border: `1px solid ${serviceUp === true ? 'var(--success-border)' : serviceUp === false ? 'var(--danger-border)' : 'var(--border)'}` }}>
-              {serviceUp === true ? <CheckCircle2 size={10} /> : serviceUp === false ? <XCircle size={10} /> : <Clock size={10} />}
-              card-issuance :8118
-            </span>
+            <ServiceStatusBadge
+              label="card-issuance :8118"
+              loading={loading}
+              waking={waking}
+              unavailable={unavailable}
+              copy={{
+                up: t('card-issuance běží', 'card-issuance is up'),
+                idle: t('card-issuance spí (scale-to-zero), probouzí se…', 'card-issuance idle (scaled to zero), waking…'),
+                down: t('card-issuance neodpovídá', 'card-issuance is not responding'),
+                checking: t('Zjišťuji stav služby…', 'Checking service…'),
+              }}
+            />
             <button className="btn btn-primary btn-sm"><Plus size={13} /> {t('Vydat kartu', 'Issue Card')}</button>
           </div>
         </div>
@@ -98,18 +105,13 @@ export default function CardsPage() {
               <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} />
               <div>{t('Načítám karty…', 'Loading cards…')}</div>
             </div>
+          ) : unavailable ? (
+            <DataUnavailable kind={unavailable.kind} service={t('Card-issuance-service', 'Card-issuance-service')} feature={t('Karty', 'Cards')} lang={language} />
           ) : filtered.length === 0 ? (
-            <div style={{ padding: '48px', textAlign: 'center' }}>
-              <CreditCard size={32} style={{ color: 'var(--text-tertiary)', marginBottom: '12px' }} />
-              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>{t('Žádné karty', 'No cards')}</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                {cards.length === 0 ? t('Mikroservisa běží. Zatím nebyly vydány žádné karty.', 'Microservice is running. No cards have been issued yet.') : t('Žádné výsledky pro zadaný filtr.', 'No results for the applied filter.')}
-              </div>
-              <a href="/api/svc/card-issuance-service/api/docs" target="_blank" rel="noreferrer"
-                style={{ display: 'inline-block', marginTop: '12px', fontSize: '12px', color: 'var(--accent)', textDecoration: 'none' }}>
-                → Swagger UI (port 8118)
-              </a>
-            </div>
+            <DataUnavailable kind="no_data" feature={t('Karty', 'Cards')} lang={language}
+              detail={cards.length === 0
+                ? t('Služba běží, zatím nebyly vydány žádné karty.', 'The service is running; no cards have been issued yet.')
+                : t('Žádné výsledky pro zadaný filtr.', 'No results for the applied filter.')} />
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>

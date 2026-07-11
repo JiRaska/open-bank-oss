@@ -3,10 +3,14 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { MessageSquareWarning, Search, CheckCircle2, XCircle, Clock, RefreshCw, AlertTriangle, Timer } from 'lucide-react'
+import { MessageSquareWarning, Search, CheckCircle2, Clock, RefreshCw, AlertTriangle, Timer } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { svcUrl } from '@/lib/services/bff'
+import { useServiceResource } from '@/lib/services/useServiceResource'
+import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 
 interface Dispute {
   id: string; referenceNumber: string; disputeType: string; status: string
@@ -15,19 +19,13 @@ interface Dispute {
 }
 
 export default function DisputesPage() {
-  const [disputes, setDisputes] = useState<Dispute[]>([])
-  const { t } = useLanguage()
-  const [loading, setLoading] = useState(true)
+  const { t, language } = useLanguage()
   const [search, setSearch] = useState('')
-  const [serviceUp, setServiceUp] = useState<boolean | null>(null)
-
-  useEffect(() => {
-    fetch('/api/svc/dispute-service/q/health/ready').then(r => setServiceUp(r.ok)).catch(() => setServiceUp(false))
-    fetch('/api/svc/dispute-service/api/v1/disputes').then(r => r.json())
-      .then(d => setDisputes(Array.isArray(d) ? d : d.disputes ?? []))
-      .catch(() => setDisputes([]))
-      .finally(() => setLoading(false))
-  }, [])
+  const { data, loading, unavailable, waking } = useServiceResource<Dispute[]>(
+    svcUrl('dispute-service', '/api/v1/disputes'),
+    { select: (raw) => (Array.isArray(raw) ? (raw as Dispute[]) : ((raw as { disputes?: Dispute[] }).disputes ?? [])) },
+  )
+  const disputes = data ?? []
 
   const filtered = disputes.filter(d =>
     d.referenceNumber?.toLowerCase().includes(search.toLowerCase()) ||
@@ -67,10 +65,18 @@ export default function DisputesPage() {
               {t('Správa sporů — chargeback · SLA 45 dní · PSD2 čl. 73', 'Dispute management — chargeback · SLA 45 days · PSD2 Art. 73')}
             </p>
           </div>
-          <span className={serviceUp === true ? 'badge badge-success' : serviceUp === false ? 'badge badge-danger' : 'badge badge-neutral'} style={{ padding: '4px 10px', fontSize: '11px' }}>
-            {serviceUp === true ? <CheckCircle2 size={10} /> : serviceUp === false ? <XCircle size={10} /> : <Clock size={10} />}
-            dispute-service :8135
-          </span>
+          <ServiceStatusBadge
+            label="dispute-service :8135"
+            loading={loading}
+            waking={waking}
+            unavailable={unavailable}
+            copy={{
+              up: t('dispute-service běží', 'dispute-service is up'),
+              idle: t('dispute-service spí (scale-to-zero), probouzí se…', 'dispute-service idle (scaled to zero), waking…'),
+              down: t('dispute-service neodpovídá', 'dispute-service is not responding'),
+              checking: t('Zjišťuji stav služby…', 'Checking service…'),
+            }}
+          />
         </div>
 
         {slaBreached.length > 0 && (
@@ -111,14 +117,13 @@ export default function DisputesPage() {
             <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
               <RefreshCw size={20} className="animate-spin" style={{ marginBottom: '8px', margin: '0 auto', display: 'block' }} /><div>{t('Načítám…', 'Loading…')}</div>
             </div>
+          ) : unavailable ? (
+            <DataUnavailable kind={unavailable.kind} service={t('Dispute-service', 'Dispute-service')} feature={t('Spory', 'Disputes')} lang={language} />
           ) : filtered.length === 0 ? (
-            <div style={{ padding: '48px', textAlign: 'center' }}>
-              <MessageSquareWarning size={32} style={{ color: 'var(--text-tertiary)', marginBottom: '12px', margin: '0 auto', display: 'block' }} />
-              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>{t('Žádné spory', 'No disputes')}</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t('Mikroservisa běží na portu 8135.', 'Microservice is running on port 8135.')}</div>
-              <a href="/api/svc/dispute-service/api/docs" target="_blank" rel="noreferrer"
-                style={{ display: 'inline-block', marginTop: '12px', fontSize: '12px', color: 'var(--accent)', textDecoration: 'none' }}>→ Swagger UI</a>
-            </div>
+            <DataUnavailable kind="no_data" feature={t('Spory', 'Disputes')} lang={language}
+              detail={disputes.length === 0
+                ? t('Služba běží, zatím žádné spory.', 'The service is running; no disputes yet.')
+                : t('Žádné výsledky pro zadaný filtr.', 'No results for the applied filter.')} />
           ) : (
             <div style={{ overflowX: 'auto' }}>
               <table className="table">

@@ -23,10 +23,11 @@ import { useSession } from 'next-auth/react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
   RefreshCw, Clock, CheckCircle2, AlertTriangle, Scale, CalendarClock, Coins,
-  ArrowRightLeft, CalendarCheck2, Play, ChevronDown, ChevronRight, History,
+  ArrowRightLeft, CalendarCheck2, Play, ChevronDown, ChevronRight, History, FileClock,
 } from 'lucide-react'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { hasPermission } from '@/lib/auth/roles'
+import { useCheckLog, type CheckLogEntry } from '@/lib/services/useCheckLog'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 
 const POLL = 30_000
@@ -402,6 +403,10 @@ function EomPanel() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [failures, setFailures] = useState<Record<string, FailuresState>>({})
   const busyRef = useRef(false)
+  // Operator-local check trail — survives reloads and (crucially) statement-service
+  // outages, so a later operator/agent can see WHEN the close was checked and what
+  // state it was in, even when the live run history isn't answering.
+  const { entries: checkLog, record: recordCheck } = useCheckLog('closings-eom')
 
   const load = useCallback(async (spinner = false) => {
     if (busyRef.current) return
@@ -440,6 +445,20 @@ function EomPanel() {
     return () => clearInterval(id)
   }, [load, running])
 
+  // Record each distinct observed state (deduped by signature) so the check trail
+  // reflects genuine transitions, not every poll.
+  useEffect(() => {
+    if (loading) return
+    if (unavailable) { recordCheck('error', 'unavailable', `unavail:${unavailable.kind}`, { kind: unavailable.kind }); return }
+    if (empty || !latest) { recordCheck('warn', 'no_run', 'no_run'); return }
+    recordCheck(
+      latest.status === 'COMPLETED_WITH_FAILURES' ? 'warn' : 'ok',
+      'run',
+      `run:${latest.status}:${runs.length}:${latest.pocketsFailed}`,
+      { status: latest.status, runs: runs.length, failed: latest.pocketsFailed },
+    )
+  }, [loading, unavailable, empty, latest, runs.length, recordCheck])
+
   const trigger = useCallback(async () => {
     setTriggering(true); setNotice(null)
     try {
@@ -455,13 +474,14 @@ function EomPanel() {
       setRuns(prev => [accepted, ...prev.filter(r => r.id !== accepted.id)])
       setEmpty(false)
       setNotice({ ok: true, text: t('Catch-up uzávěrka přijata.', 'Catch-up close run accepted.') })
+      recordCheck('ok', 'trigger', `trigger:${accepted.id}`)
       void load()
     } catch {
       setNotice({ ok: false, text: t('Spuštění catch-up uzávěrky se nezdařilo.', 'Could not start the catch-up close run.') })
     } finally {
       setTriggering(false)
     }
-  }, [t, load])
+  }, [t, load, recordCheck])
 
   const toggleFailures = useCallback(async (run: CloseRun) => {
     const open = !expanded[run.id]
@@ -511,6 +531,29 @@ function EomPanel() {
     UPSTREAM: t('Výpadek závislé služby', 'Upstream dependency failed'),
     UNKNOWN: t('Neznámá chyba', 'Unknown error'),
   }[reason] ?? reason)
+
+  const logLabel = (e: CheckLogEntry): string => {
+    switch (e.code) {
+      case 'unavailable': {
+        const k = String(e.meta?.kind ?? '')
+        return t(`Uzávěrka nedostupná (${k})`, `Close unavailable (${k})`)
+      }
+      case 'no_run':
+        return t('Uzávěrka zatím neproběhla', 'No close run yet')
+      case 'run': {
+        const s = String(e.meta?.status ?? '')
+        const failed = Number(e.meta?.failed ?? 0)
+        return t(
+          `Poslední běh: ${s}${failed ? ` · ${failed} selhalo` : ''}`,
+          `Latest run: ${s}${failed ? ` · ${failed} failed` : ''}`,
+        )
+      }
+      case 'trigger':
+        return t('Ručně spuštěna catch-up uzávěrka', 'Catch-up close triggered manually')
+      default:
+        return e.code
+    }
+  }
 
   return (
     <div>
@@ -661,6 +704,39 @@ function EomPanel() {
           </div>
         </>
       )}
+
+      {/* Operator check log — a local breadcrumb trail of observed close states.
+          Always visible, so even when statement-service is down there's a record
+          that the close was checked, when, and what state it was in. */}
+      <div style={{ marginTop: '20px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-xs)' }}>
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <FileClock size={14} style={{ color: 'var(--text-tertiary)' }} />
+          <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
+            {t('Záznam kontrol', 'Check log')}
+          </span>
+          <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+            {t('lokální stopa pozorovaných stavů', 'local trail of observed states')}
+          </span>
+        </div>
+        {checkLog.length === 0 ? (
+          <div style={{ padding: '16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>
+            {t('Zatím žádné záznamy. Každá kontrola této obrazovky sem zapíše pozorovaný stav.', 'No entries yet. Each check of this screen records the observed state here.')}
+          </div>
+        ) : (
+          <ul style={{ listStyle: 'none', margin: 0, padding: '6px 0', maxHeight: '220px', overflowY: 'auto' }}>
+            {checkLog.slice(0, 15).map((e, i) => (
+              <li key={`${e.at}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 16px', fontSize: '12px' }}>
+                <span style={{ width: '7px', height: '7px', borderRadius: '50%', flexShrink: 0,
+                  background: e.kind === 'error' ? 'var(--danger)' : e.kind === 'warn' ? 'var(--warning)' : 'var(--success)' }} />
+                <span style={{ color: 'var(--text-tertiary)', fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'nowrap' }}>
+                  {new Date(e.at).toLocaleString(locale)}
+                </span>
+                <span style={{ color: 'var(--text-secondary)' }}>{logLabel(e)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   )
 }
