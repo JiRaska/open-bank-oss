@@ -201,11 +201,19 @@ export const options = {
   },
 };
 
+// CodeQL's js/insecure-randomness taint tracking merges this pool index with the
+// Idempotency-Key header built in the same postTransaction() call (same pattern as
+// uuidv4() above) — crypto.getRandomValues() over Math.random() closes that flow too,
+// not just satisfies the query literally.
+function randomPoolIndex(length) {
+  return crypto.getRandomValues(new Uint32Array(1))[0] % length;
+}
+
 function randomDistinctPair(pool) {
-  const a = pool[Math.floor(Math.random() * pool.length)];
-  let b = pool[Math.floor(Math.random() * pool.length)];
+  const a = pool[randomPoolIndex(pool.length)];
+  let b = pool[randomPoolIndex(pool.length)];
   while (b === a && pool.length > 1) {
-    b = pool[Math.floor(Math.random() * pool.length)];
+    b = pool[randomPoolIndex(pool.length)];
   }
   return [a, b];
 }
