@@ -3,10 +3,14 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect } from 'react'
-import { Layers, Search, CheckCircle2, XCircle, Clock, RefreshCw, ArrowRightLeft, Banknote } from 'lucide-react'
+import { useState } from 'react'
+import { Layers, Search, CheckCircle2, Clock, RefreshCw, Banknote } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { svcUrl } from '@/lib/services/bff'
+import { useServiceResource } from '@/lib/services/useServiceResource'
+import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 
 interface ClearingBatch {
   id: string; batchReference: string; paymentRail: string; status: string
@@ -14,19 +18,13 @@ interface ClearingBatch {
 }
 
 export default function ClearingPage() {
-  const { t } = useLanguage()
-  const [batches, setBatches] = useState<ClearingBatch[]>([])
-  const [loading, setLoading] = useState(true)
+  const { t, language } = useLanguage()
   const [search, setSearch] = useState('')
-  const [serviceUp, setServiceUp] = useState<boolean | null>(null)
-
-  useEffect(() => {
-    fetch('/api/svc/clearing-service/q/health/ready').then(r => setServiceUp(r.ok)).catch(() => setServiceUp(false))
-    fetch('/api/svc/clearing-service/api/v1/clearing/batches').then(r => r.json())
-      .then(d => setBatches(Array.isArray(d) ? d : d.batches ?? []))
-      .catch(() => setBatches([]))
-      .finally(() => setLoading(false))
-  }, [])
+  const { data, loading, unavailable, waking } = useServiceResource<ClearingBatch[]>(
+    svcUrl('clearing-service', '/api/v1/clearing/batches'),
+    { select: (raw) => (Array.isArray(raw) ? (raw as ClearingBatch[]) : ((raw as { batches?: ClearingBatch[] }).batches ?? [])) },
+  )
+  const batches = data ?? []
 
   const filtered = batches.filter(b =>
     b.batchReference?.toLowerCase().includes(search.toLowerCase()) ||
@@ -56,14 +54,18 @@ export default function ClearingPage() {
               {t('Mezibankovní zúčtování — SEPA · SWIFT · Domestic netting', 'Interbank clearing — SEPA · SWIFT · Domestic netting')}
             </p>
           </div>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 600,
-            padding: '4px 10px', borderRadius: '20px',
-            background: serviceUp === true ? 'var(--success-bg)' : serviceUp === false ? 'var(--danger-bg)' : 'var(--surface-3)',
-            color: serviceUp === true ? 'var(--success-text)' : serviceUp === false ? 'var(--danger-text)' : 'var(--text-tertiary)',
-            border: `1px solid ${serviceUp === true ? 'var(--success-border)' : serviceUp === false ? 'var(--danger-border)' : 'var(--border)'}` }}>
-            {serviceUp === true ? <CheckCircle2 size={10} /> : serviceUp === false ? <XCircle size={10} /> : <Clock size={10} />}
-            clearing-service :8124
-          </span>
+          <ServiceStatusBadge
+            label="clearing-service :8124"
+            loading={loading}
+            waking={waking}
+            unavailable={unavailable}
+            copy={{
+              up: t('clearing-service běží', 'clearing-service is up'),
+              idle: t('clearing-service spí (scale-to-zero), probouzí se…', 'clearing-service idle (scaled to zero), waking…'),
+              down: t('clearing-service neodpovídá', 'clearing-service is not responding'),
+              checking: t('Zjišťuji stav služby…', 'Checking service…'),
+            }}
+          />
         </div>
 
         <div className="grid-4" style={{ marginBottom: '24px' }}>
@@ -95,14 +97,13 @@ export default function ClearingPage() {
             <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
               <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám…', 'Loading…')}</div>
             </div>
+          ) : unavailable ? (
+            <DataUnavailable kind={unavailable.kind} service={t('Clearing-service', 'Clearing-service')} feature={t('Clearing dávky', 'Clearing batches')} lang={language} />
           ) : filtered.length === 0 ? (
-            <div style={{ padding: '48px', textAlign: 'center' }}>
-              <ArrowRightLeft size={32} style={{ color: 'var(--text-tertiary)', marginBottom: '12px' }} />
-              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>{t('Žádné clearing dávky', 'No clearing batches')}</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t('Mikroservisa běží na portu 8124.', 'Microservice is running on port 8124.')}</div>
-              <a href="/api/svc/clearing-service/api/docs" target="_blank" rel="noreferrer"
-                style={{ display: 'inline-block', marginTop: '12px', fontSize: '12px', color: 'var(--accent)', textDecoration: 'none' }}>→ Swagger UI</a>
-            </div>
+            <DataUnavailable kind="no_data" feature={t('Clearing dávky', 'Clearing batches')} lang={language}
+              detail={batches.length === 0
+                ? t('Služba běží, zatím žádné clearing dávky.', 'The service is running; no clearing batches yet.')
+                : t('Žádné výsledky pro zadaný filtr.', 'No results for the applied filter.')} />
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
