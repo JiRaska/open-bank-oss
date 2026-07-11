@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sepa-payment
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "eaf8783527fd6f5e"
+    openbank.tech/policy-checksum: "cc374fc12b7728c1"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -955,6 +955,31 @@ data:
         enforced: advisory
         target_enforce_date: "2026-10-01"   # ADR-0144
         blocked_on: "the version-bump half is effectively covered by release-please + check-app-version-override.sh; 'test added for new behavior' has no automated diff-aware detector (not yet written) — may get redefined to lean on the coverage ratchet gate instead of a literal test-added check"
+      release_scope_mismatch:
+        # The inverse failure mode of service_code_change above: release-please attributes a
+        # commit to a component by the FILES IT TOUCHES under that component's directory,
+        # regardless of the typed scope (RELEASE.md) — so a feat/fix/perf/security (or
+        # breaking-marked) commit that only touches <service>/src/test/**, a root file like
+        # <service>/openapi.yaml, or gitops/docs outside the service dir entirely still makes
+        # release-please propose a release, even though only <service>/src/main/** should
+        # (rule 2). Observed live: PR #547 (feat(finrep): register ArgoCD Application — touched
+        # only a src/test boot-smoke test + gitops/docs outside the package dir) -> PR #551
+        # (finrep-service 0.4.0 proposed for an unchanged artifact). Harmless SemVer inflation,
+        # not a broken invariant — but the same mechanism misfires for any test-only or
+        # openapi.yaml-only PR typed feat/fix, so it is worth catching at PR time rather than
+        # correcting release-please output by hand (which rule 3 forbids anyway).
+        detect: ["<service>/** changed", "PR title type in {feat,fix,perf,security} or a breaking marker/footer", "no changed file under <service>/src/main/** (or openbank-admin-ui/src/**)"]
+        require:
+          - "use a non-releasing type (test/docs/chore/refactor/build/ci) when the PR doesn't touch the release-worthy subtree"
+          - "or split the src/main change and the non-src/main change into separate commits/PRs when both a release and a non-releasing change are intended"
+        gate: release-scope-mismatch
+        enforced: advisory
+        target_enforce_date: "2026-10-01"   # ADR-0144, same timeline as service_code_change (same root-cause class)
+        # CI producer is LIVE (advisory): openbank-infra/scripts/check-release-scope-mismatch.py runs
+        # in the "Validate manifests" job on every PR, right after release-registration consistency.
+        # Classifies from the PR title (the default squash-commit subject). Findings are ::warning
+        # annotations. Flip to enforced = pass --enforce to the script in ci.yml (one-line change).
+        ci_producer: "openbank-infra/scripts/check-release-scope-mismatch.py"
       service_config_change:
         # SmallRye Config / SnakeYAML do NOT merge duplicate mapping keys — the LAST
         # occurrence wins and earlier ones are SILENTLY dropped to library defaults, so
@@ -1084,9 +1109,10 @@ data:
       - openbank-lending-service
       - openbank-sca-service
       - openbank-consent-service
-      - openbank-fraud-service                # ADR-0084: first executable landed (Phase 1 skeleton)
-      - openbank-billing-service              # ADR-0143: fee posting to the ledger (Phase 2b skeleton)
+      - openbank-fraud-service                # ADR-0084: v4 rule engine live; domestic-payment enforcement gate merged (issue #667, flag default-off pending risk-team threshold calibration)
+      - openbank-billing-service              # ADR-0143: fee assess/post/reverse shipped (phases 1a-2e); real-env e2e verification + four-eyes enforcement flip still gate production go-live
       - openbank-settlement-service           # issue #307: debit->credit->ledger-booking saga (ADR-0101)
+      - openbank-sanctions-service             # ADR-0116: real feed screening; already required by four_eyes below (issue #554)
     review:
       default_approvals: 1
       money_path_approvals: 2               # CONTRIBUTING.md + branch protection
@@ -1146,6 +1172,7 @@ data:
         - send                              # swift: send an outbound wire message (issue #395)
         - credit                            # balance: direct ledger-balance credit adjustment (issue #395)
         - debit                             # balance: direct ledger-balance debit adjustment (issue #395)
+        - collateralRegister                # lending: collateral registration/edit feeds IFRS 9 LGD (issue #621)
 
     # ---------------------------------------------------------------------------------------
     # Feature-flag flip governance (ADR-0067 follow-up, issue #419). The OPA PEP (rest.rego)
@@ -1183,14 +1210,17 @@ data:
         enforced: advisory                  # weekly advisory runs are live; blocking flip pending sustained >=70%
         target_enforce_date: "2026-09-30"   # ADR-0144
         ci_producer: .github/workflows/pitest.yml
-        # Fleet rollout re-verified complete per the ADR-0063 criterion (2026-07-07, issue #265 D3):
-        # 9/15 money-path services wired (pitest.yml weekly) — ledger, balance, account, transaction,
-        # fx + sepa-payment, sepa-instant, domestic-payment, fraud (SSDLC-audit rollout 2026-07-06).
-        # The remaining 6 (sca, consent, billing, clearing, swift, lending) stay excluded: each has
-        # only 1-2 domain files, and those files are plain data models (no branching money-movement
-        # logic), so mutation testing there is noise, not signal — re-confirmed by file count on
-        # 2026-07-07, unchanged since the 2026-07-06 rollout. Revisit if any of these services grows
-        # real decision logic in its domain layer.
+        # Fleet rollout re-verified complete per the ADR-0063 criterion (2026-07-11, issue #265 D3):
+        # 10/17 money-path services wired (pitest.yml weekly) — ledger, balance, account, transaction,
+        # fx + sepa-payment, sepa-instant, domestic-payment, fraud (SSDLC-audit rollout 2026-07-06) +
+        # sanctions (2026-07-11: 3 domain files — screening/matching decision logic — matches the
+        # "substantive domain math" criterion, not the thin-domain one; 67% local baseline).
+        # The remaining 7 (sca, consent, billing, clearing, swift, lending, settlement) stay excluded:
+        # each has only 1-2 domain files, and those files are plain data models (no branching
+        # money-movement logic), so mutation testing there is noise, not signal — re-confirmed by
+        # file count on 2026-07-11 (settlement and sanctions were both added to money_path_services
+        # after the 2026-07-07 note above; settlement re-confirmed thin, sanctions was the one that
+        # wasn't). Revisit if any of the remaining 7 grows real decision logic in its domain layer.
         # True baselines at rollout (after fixing the KILLED-quote parsing bug): account 49%,
         # transaction 46%, balance 55%, ledger 65%, fx 73%.
         blocked_on: "blocking flip requires each service to sustain >=70% mutation kill score on the weekly run; account/transaction/balance/ledger are below it today (see baselines above)"
