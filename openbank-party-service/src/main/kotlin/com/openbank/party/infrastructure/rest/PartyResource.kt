@@ -191,8 +191,14 @@ class PartyResource {
         return Response.noContent().build()
     }
 
+    // @Authenticated (not @RolesAllowed) because this endpoint accepts three different valid
+    // caller shapes — ROLE_ADMIN, ROLE_DPO, or the subject's own JWT — which the method body
+    // below already checks; @RolesAllowed alone can't express "self OR one of these roles".
+    // Previously carried no annotation at all — reachable with no identity whatsoever, unlike
+    // every other endpoint on this resource.
     @GET
     @Path("/{id}/gdpr-export")
+    @Authenticated
     @Operation(summary = "Export all PII held for a party — GDPR Art. 15 Right of Access (ADR-0118)")
     suspend fun exportPartyGdpr(@PathParam("id") id: UUID): Response {
         val isAdmin = securityIdentity.hasRole("ROLE_ADMIN")
