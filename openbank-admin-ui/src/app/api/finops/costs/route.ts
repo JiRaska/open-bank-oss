@@ -37,6 +37,7 @@ const AWS_DOMAIN: Record<string, string> = {
 function domainFor(name: string): string { return AWS_DOMAIN[name] ?? 'Platform' }
 
 export interface ServiceCost { name: string; amount: number; domain: string }
+export interface DailyCost { date: string; amount: number }
 
 interface CostReport {
   available: boolean
@@ -46,6 +47,8 @@ interface CostReport {
   periodEnd: string
   total: number
   services: ServiceCost[]
+  /** Per-day total spend over the window (spend trend). Empty on older snapshots. */
+  daily: DailyCost[]
   collectedAt: string | null
   source: string
 }
@@ -73,6 +76,7 @@ const UNAVAILABLE: CostReport = {
   periodEnd: '',
   total: 0,
   services: [],
+  daily: [],
   collectedAt: null,
   source: 'aws-cost-explorer',
 }
@@ -91,6 +95,13 @@ function normalize(parsed: unknown): CostReport | null {
     .filter(s => Number.isFinite(s.amount) && s.amount > 0)
     .sort((a, b) => b.amount - a.amount)
   const total = Math.round(services.reduce((sum, s) => sum + s.amount, 0) * 100) / 100
+  // Per-day trend — present on DAILY snapshots, absent on older ones (→ []).
+  const daily = Array.isArray(p.daily)
+    ? (p.daily as { date?: unknown; amount?: unknown }[])
+        .map(d => ({ date: String(d?.date ?? ''), amount: Math.round(Number(d?.amount) * 100) / 100 }))
+        .filter(d => d.date && Number.isFinite(d.amount))
+        .sort((a, b) => a.date.localeCompare(b.date))
+    : []
   return {
     available: services.length > 0 && p.available !== false,
     reason: typeof p.reason === 'string' ? p.reason : undefined,
@@ -99,6 +110,7 @@ function normalize(parsed: unknown): CostReport | null {
     periodEnd: typeof p.periodEnd === 'string' ? p.periodEnd : '',
     total,
     services,
+    daily,
     collectedAt: typeof p.collectedAt === 'string' ? p.collectedAt : null,
     source: typeof p.source === 'string' ? p.source : 'aws-cost-explorer',
   }

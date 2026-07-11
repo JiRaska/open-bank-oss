@@ -54,6 +54,7 @@ function emptyReport(reason) {
     periodEnd: end,
     total: 0,
     services: [],
+    daily: [],
     collectedAt: now.toISOString(),
     source: 'aws-cost-explorer',
   }
@@ -63,7 +64,10 @@ function runCe() {
   const argv = [
     'ce', 'get-cost-and-usage',
     '--time-period', `Start=${start},End=${end}`,
-    '--granularity', 'MONTHLY',
+    // DAILY (not MONTHLY) so we can emit a per-day spend trend in addition to the
+    // per-service totals — the trend the team otherwise reads only in the console.
+    // Cost Explorer supports DAILY grouped by SERVICE within this window.
+    '--granularity', 'DAILY',
     '--metrics', 'UnblendedCost',
     '--group-by', 'Type=DIMENSION,Key=SERVICE',
     '--region', REGION,
@@ -77,13 +81,20 @@ let report
 try {
   const raw = runCe()
   const json = JSON.parse(raw)
-  const acc = new Map()
+  const acc = new Map()      // service name → total over the window
+  const daily = []           // one entry per day: { date, amount } (all services summed)
   for (const r of json.ResultsByTime ?? []) {
+    const date = r.TimePeriod?.Start ?? null
+    let dayTotal = 0
     for (const g of r.Groups ?? []) {
       const name = g.Keys?.[0] ?? 'Unknown'
       const amount = parseFloat(g.Metrics?.UnblendedCost?.Amount ?? '0')
-      if (!isNaN(amount)) acc.set(name, (acc.get(name) ?? 0) + amount)
+      if (!isNaN(amount)) {
+        acc.set(name, (acc.get(name) ?? 0) + amount)
+        dayTotal += amount
+      }
     }
+    if (date) daily.push({ date, amount: Math.round(dayTotal * 100) / 100 })
   }
   const services = [...acc.entries()]
     .map(([name, amount]) => ({ name, amount: Math.round(amount * 100) / 100 }))
@@ -98,10 +109,11 @@ try {
     periodEnd: end,
     total,
     services,
+    daily,
     collectedAt: now.toISOString(),
     source: 'aws-cost-explorer',
   }
-  console.log(`[collect-aws-costs] ${services.length} services, $${total} over ${start}..${end} → ${OUT}`)
+  console.log(`[collect-aws-costs] ${services.length} services, ${daily.length} days, $${total} over ${start}..${end} → ${OUT}`)
 } catch (e) {
   const msg = (e?.stderr || e?.message || String(e)).toString().split('\n')[0]
   report = emptyReport(msg.slice(0, 200))
