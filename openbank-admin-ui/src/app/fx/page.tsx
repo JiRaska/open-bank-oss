@@ -9,7 +9,7 @@ import {
   Globe, TrendingUp, RefreshCw, CheckCircle2, XCircle, Clock,
   ArrowLeftRight, Save, History, Edit3, Banknote, Download,
   Calendar, Play, AlertCircle, Settings, Eye, EyeOff, Percent,
-  ChevronDown, ChevronUp, Lock, Unlock,
+  ChevronDown, ChevronUp, Lock, Unlock, Moon,
 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { CURRENCY_META } from '@/lib/currency-meta'
@@ -87,6 +87,25 @@ const INITIAL_SCHEDULES: ScheduleEntry[] = [
 const ECB_CURRENCIES = ['USD', 'GBP', 'JPY', 'CHF', 'PLN', 'HUF', 'RON', 'SEK', 'NOK', 'DKK', 'AUD', 'CAD', 'CNY']
 const DEFAULT_PUBLISHED = ['USD', 'EUR', 'GBP', 'CHF', 'JPY', 'PLN', 'HUF', 'SEK', 'NOK', 'DKK']
 
+// fx-service is on the FinOps scaledown allowlist, so "not reachable" usually means
+// "intentionally idle", not "broken". Map the /api/fx/rates status to a calm badge:
+// scale-to-zero is amber "asleep", never a red "down". null = still checking.
+type FxStatus = 'up' | 'scaled_to_zero' | 'down' | 'not_deployed'
+function fxBadge(status: FxStatus | null, t: (cs: string, en: string) => string) {
+  switch (status) {
+    case 'up':
+      return { icon: CheckCircle2, bg: 'var(--success-bg)', fg: 'var(--success-text)', border: 'var(--success-border)', label: t('fx-service :8119', 'fx-service :8119') }
+    case 'scaled_to_zero':
+      return { icon: Moon, bg: 'var(--warning-bg)', fg: 'var(--warning-text)', border: 'var(--warning-border)', label: t('fx-service spí (scale-to-zero)', 'fx-service idle (scaled to zero)') }
+    case 'down':
+      return { icon: XCircle, bg: 'var(--danger-bg)', fg: 'var(--danger-text)', border: 'var(--danger-border)', label: t('fx-service neodpovídá', 'fx-service is not responding') }
+    case 'not_deployed':
+      return { icon: XCircle, bg: 'var(--surface-3)', fg: 'var(--text-tertiary)', border: 'var(--border)', label: t('fx-service není nasazen', 'fx-service not deployed') }
+    default:
+      return { icon: Clock, bg: 'var(--surface-3)', fg: 'var(--text-tertiary)', border: 'var(--border)', label: t('fx-service — zjišťuji…', 'fx-service — checking…') }
+  }
+}
+
 function applyMargin(mid: number, pct: number, direction: 'buy' | 'sell'): number {
   return direction === 'buy' ? mid * (1 - pct / 100) : mid * (1 + pct / 100)
 }
@@ -128,7 +147,7 @@ export default function FxPage() {
   const [ecbSyncedAt, setEcbSyncedAt] = useState<string | null>(null)
   const [ecbError, setEcbError] = useState<string | null>(null)
 
-  const [serviceUp, setServiceUp] = useState<boolean | null>(null)
+  const [fxStatus, setFxStatus] = useState<FxStatus | null>(null)
   const [conversions, setConversions] = useState<FxConversion[]>([])
 
   const [margin, setMargin] = useState<MarginConfig>({ buyPct: 1.5, sellPct: 1.5 })
@@ -170,7 +189,7 @@ export default function FxPage() {
       setEcbSyncedAt(data.ecb?.syncedAt ?? null)
       setEcbError(data.ecb?.error ?? null)
 
-      setServiceUp(data.fxService?.up ?? false)
+      setFxStatus((data.fxService?.status as FxStatus | undefined) ?? (data.fxService?.up ? 'up' : 'down'))
       setConversions(data.fxService?.conversions ?? [])
 
       const nowStr = new Date().toISOString()
@@ -297,13 +316,17 @@ export default function FxPage() {
               <Download size={13} style={{ animation: refreshing === 'all' ? 'spin 1s linear infinite' : 'none' }} />
               {t('Stáhnout vše', 'Fetch All')}
             </button>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 600, padding: '4px 10px', borderRadius: '20px',
-              background: serviceUp === true ? 'var(--success-bg)' : serviceUp === false ? 'var(--danger-bg)' : 'var(--surface-3)',
-              color: serviceUp === true ? 'var(--success-text)' : serviceUp === false ? 'var(--danger-text)' : 'var(--text-tertiary)',
-              border: `1px solid ${serviceUp === true ? 'var(--success-border)' : serviceUp === false ? 'var(--danger-border)' : 'var(--border)'}` }}>
-              {serviceUp === true ? <CheckCircle2 size={10} /> : serviceUp === false ? <XCircle size={10} /> : <Clock size={10} />}
-              fx-service :8119
-            </span>
+            {(() => {
+              const b = fxBadge(fxStatus, t)
+              const Icon = b.icon
+              return (
+                <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 600, padding: '4px 10px', borderRadius: '20px',
+                  background: b.bg, color: b.fg, border: `1px solid ${b.border}` }}>
+                  <Icon size={10} />
+                  {b.label}
+                </span>
+              )
+            })()}
           </div>
         </div>
 
@@ -335,9 +358,11 @@ export default function FxPage() {
             {t('externí referenční kurzy (data-api.ecb.europa.eu)', 'external reference rates (data-api.ecb.europa.eu)')}
           </span>
           <span style={{ display: 'flex', alignItems: 'center', gap: '5px', color: 'var(--text-tertiary)' }}>
-            {serviceUp === true ? <CheckCircle2 size={11} style={{ color: 'var(--success-text)' }} /> : serviceUp === false ? <XCircle size={11} style={{ color: 'var(--danger-text)' }} /> : <Clock size={11} />}
+            {(() => { const b = fxBadge(fxStatus, t); const Icon = b.icon; return <Icon size={11} style={{ color: b.fg }} /> })()}
             <strong style={{ color: 'var(--text-secondary)' }}>fx-service</strong>
-            {t('interní FX engine + konverze (DB)', 'internal FX engine + conversions (DB)')}
+            {fxStatus === 'scaled_to_zero'
+              ? t('interní FX engine + konverze (DB) — spí (scale-to-zero)', 'internal FX engine + conversions (DB) — idle (scaled to zero)')
+              : t('interní FX engine + konverze (DB)', 'internal FX engine + conversions (DB)')}
           </span>
           <span style={{ marginLeft: 'auto', color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
             <AlertCircle size={11} style={{ verticalAlign: '-1px', marginRight: '4px' }} />
