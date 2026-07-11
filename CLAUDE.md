@@ -108,6 +108,21 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `.github/scripts/check-no-service-principal-type.sh` (`rules.yaml: authz_policy`).
 
 ### GitOps / Kubernetes
+- **A no-swap node under memory pressure can hang whole-guest instead of OOM-killing.** Kernel
+  reclaim livelocks; kubelet and the SSM agent starve together while EC2 status checks stay `ok`,
+  so the node lingers NotReady and singleton pods (e.g. the ArgoCD application-controller) strand
+  (issue #809). Diagnosis shortcut: CloudWatch `CPUUtilization` pinned at a constant high plateau
+  for hours = livelock — terminate the instance, don't debug the guest. The defenses are layered
+  and ALL needed: honest memory *requests* (Karpenter bin-packs by requests — an undeclared
+  ~200Mi-per-node DaemonSet is what actually kills 4Gi nodes), kubelet eviction headroom in the
+  EC2NodeClass (the AMI default `memory.available<100Mi` reacts too late), memory *limits* on
+  singletons (a container OOM-kill self-heals; a dead node doesn't), and Karpenter `NodeRepair`
+  as the backstop (EKS node auto repair covers only managed node groups, and consolidation cannot
+  touch a node holding a `do-not-disrupt` pod).
+- **Right-sizing requests can pin a NodePool at its `limits` cap.** The cap was calibrated to the
+  old, understated requests; after raising them Karpenter may refuse to provision
+  ("all available instance types exceed limits for nodepool"), leaving pods Pending and stalling
+  drift rolls. Whenever you raise requests or eviction headroom, re-check the pool's `limits`.
 - **`strategy.type: Recreate` + Server-Side Apply = HTTP 403.** Use `RollingUpdate` with
   `maxSurge: 0 / maxUnavailable: 1` for identical zero-concurrency behaviour.
 - **Use explicit registry prefixes for container images** (`docker.io/library/<image>` for official
