@@ -92,14 +92,16 @@ spec:
               conditions:
                 - all:
                     # The attested predicate must actually be a CycloneDX BOM, not an empty
-                    # envelope: bomFormat is a required CycloneDX root field. The predicate is
-                    # exposed to the JMESPath condition as the lowercase `data` variable — the
-                    # capitalized `{{ Data.bomFormat }}` this policy shipped with resolves to
-                    # "Unknown key \"Data\" in path" on kyverno 3.2.6 (a JMESPath query failure,
-                    # not a false/true condition result), which errors the whole verifyImages
-                    # check for every correctly-attested image. Confirmed live 2026-07-09 against
-                    # a cosign-verified admin-ui SBOM attestation. Currently Audit-only so this
-                    # was silent; would have 100%-failed the fleet if flipped to Enforce as-is.
-                    - key: "{{ data.bomFormat }}"
+                    # envelope: bomFormat is a required CycloneDX root field. Kyverno exposes the
+                    # attestation's PREDICATE directly as the JMESPath context, so the fields are
+                    # referenced bare — `{{ bomFormat }}`. Both wrapper forms this policy carried
+                    # before were wrong: `{{ Data.bomFormat }}` → "Unknown key \"Data\"" and its
+                    # follow-up `{{ data.bomFormat }}` → "Unknown key \"data\"" (a JMESPath query
+                    # failure, not a false/true result), which ERRORS the whole verifyImages check
+                    # for every correctly-attested image. Audit-only, so it was silent — but it
+                    # would have 100%-failed the fleet if flipped to Enforce. Verified live
+                    # 2026-07-11 against a cosign-verified admin-ui SBOM attestation: `{{ bomFormat }}`
+                    # resolves with zero JMESPath errors and the attestation passes.
+                    - key: "{{ bomFormat }}"
                       operator: Equals
                       value: "CycloneDX"
