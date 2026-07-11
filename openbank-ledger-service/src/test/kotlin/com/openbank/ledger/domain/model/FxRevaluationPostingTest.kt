@@ -101,6 +101,6 @@ class FxRevaluationPostingTest {
     fun `rejects a non-positive rate`() {
         assertThatThrownBy {
             FxRevaluationPosting.build(journalId, pnl, listOf(input("EUR", eurCv, "1000000", "0", "0.00")))
-        }.isInstanceOf(IllegalArgumentException::class.java)
+        }.isInstanceOf(LedgerValidationException::class.java)
     }
 }

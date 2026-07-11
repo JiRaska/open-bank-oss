@@ -28,6 +28,7 @@ import com.openbank.ledger.domain.model.JournalLine
 import com.openbank.ledger.domain.model.JournalStatus
 import com.openbank.ledger.domain.model.SubLedgerBalance
 import com.openbank.ledger.domain.model.TrialBalance
+import com.openbank.ledger.domain.model.checkConflict
 import com.openbank.libs.api.pagination.CursorEncoder
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.api.pagination.PageInfo
@@ -115,7 +116,7 @@ class LedgerService(
         ).post()
 
         // Cross-check that we actually validated every account that the entry references.
-        check(glAccounts.keys.containsAll(entry.lines.map { it.glAccountId }.toSet())) {
+        checkConflict(glAccounts.keys.containsAll(entry.lines.map { it.glAccountId }.toSet())) {
             "Unvalidated GL account referenced in journal entry"
         }
 

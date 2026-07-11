@@ -54,7 +54,7 @@ object FxRevaluationPosting {
         val lines = mutableListOf<JournalLine>()
         var seq = 0
         for (input in inputs) {
-            require(input.cnbRate.signum() > 0) {
+            requireValid(input.cnbRate.signum() > 0) {
                 "ČNB rate must be positive for ${input.currency}, was ${input.cnbRate}"
             }
             val delta = movement(input)

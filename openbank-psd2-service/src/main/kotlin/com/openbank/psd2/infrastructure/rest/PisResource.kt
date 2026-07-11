@@ -10,6 +10,7 @@ import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.psd2.application.port.`in`.GetPaymentStatusQuery
 import com.openbank.psd2.application.port.`in`.InitiatePaymentCommand
 import com.openbank.psd2.application.port.`in`.PaymentInitiationUseCase
+import com.openbank.psd2.application.usecase.Psd2RequestFormatException
 import com.openbank.psd2.domain.model.DomesticCzPayment
 import com.openbank.psd2.domain.model.PaymentInitiation
 import com.openbank.psd2.domain.model.PaymentProduct
@@ -97,7 +98,7 @@ class PisResource(
         ctx: ContainerRequestContext,
     ): Response {
         val tppId = ctx.getProperty("tppId") as? String ?: return tppMissing()
-        require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }
+        if (idempotencyKey.isBlank()) throw Psd2RequestFormatException("Idempotency-Key header is required")
 
         val cacheKey = paymentCreateKey(tppId, product, idempotencyKey)
         idempotencyStore.get(cacheKey)?.let { cached ->

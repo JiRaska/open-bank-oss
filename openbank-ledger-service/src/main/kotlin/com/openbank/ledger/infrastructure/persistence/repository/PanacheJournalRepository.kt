@@ -12,6 +12,7 @@ import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalLine
 import com.openbank.ledger.domain.model.JournalSide
 import com.openbank.ledger.domain.model.JournalStatus
+import com.openbank.ledger.domain.model.LedgerConflictException
 import com.openbank.ledger.domain.model.SubLedgerBalance
 import com.openbank.ledger.domain.model.TrialBalanceLine
 import com.openbank.ledger.infrastructure.persistence.entity.JournalEntryEntity
@@ -368,7 +369,7 @@ class PanacheJournalRepository(
 
     private fun Any?.toUuid(): UUID = when (this) {
         is UUID -> this
-        null -> throw IllegalStateException("null UUID in trial balance row")
+        null -> throw LedgerConflictException("null UUID in trial balance row")
         else -> UUID.fromString(this.toString())
     }
 

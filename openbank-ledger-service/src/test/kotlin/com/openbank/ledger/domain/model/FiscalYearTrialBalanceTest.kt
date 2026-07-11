@@ -216,14 +216,14 @@ class FiscalYearTrialBalanceTest {
         fun `attesting an already attested record fails`() {
             val attested = draft().attest("operator-sub", Instant.now())
             assertThatThrownBy { attested.attest("someone-else", Instant.now()) }
-                .isInstanceOf(IllegalStateException::class.java)
+                .isInstanceOf(LedgerConflictException::class.java)
                 .hasMessageContaining("not DRAFT")
         }
 
         @Test
         fun `four-eyes - the maker cannot self-attest (domain check)`() {
             assertThatThrownBy { draft().attest("maker-sub", Instant.now()) }
-                .isInstanceOf(IllegalStateException::class.java)
+                .isInstanceOf(LedgerConflictException::class.java)
                 .hasMessageContaining("Four-eyes")
         }
 
@@ -235,7 +235,7 @@ class FiscalYearTrialBalanceTest {
                 draftedBy = null,
             )
             assertThatThrownBy { nullMaker.attest("checker-sub", Instant.now()) }
-                .isInstanceOf(IllegalStateException::class.java)
+                .isInstanceOf(LedgerConflictException::class.java)
                 .hasMessageContaining("no recorded author")
         }
 
@@ -243,7 +243,7 @@ class FiscalYearTrialBalanceTest {
         fun `fiscal year outside the supported range is rejected`() {
             assertThatThrownBy {
                 YearCloseRecord.draftOf(FiscalYearTrialBalance(1999, emptyList()), Instant.now())
-            }.isInstanceOf(IllegalArgumentException::class.java)
+            }.isInstanceOf(LedgerValidationException::class.java)
         }
     }
 }

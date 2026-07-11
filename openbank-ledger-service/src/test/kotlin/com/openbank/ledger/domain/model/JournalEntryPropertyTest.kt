@@ -115,7 +115,7 @@ class JournalEntryPropertyTest {
 
             assertThatThrownBy {
                 balanced.copy(lines = brokenLines)
-            }.isInstanceOf(IllegalArgumentException::class.java)
+            }.isInstanceOf(LedgerValidationException::class.java)
                 .hasMessageContaining("not balanced")
         }
     }

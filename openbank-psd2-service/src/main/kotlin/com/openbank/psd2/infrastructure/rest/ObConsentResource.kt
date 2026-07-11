@@ -11,6 +11,7 @@ import com.openbank.psd2.application.port.`in`.ConsentManagementUseCase
 import com.openbank.psd2.application.port.`in`.CreateConsentCommand
 import com.openbank.psd2.application.port.`in`.DeleteConsentCommand
 import com.openbank.psd2.application.port.`in`.GetConsentQuery
+import com.openbank.psd2.application.usecase.Psd2RequestFormatException
 import com.openbank.psd2.domain.model.ObConsentRequest
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
@@ -45,7 +46,7 @@ class ConsentResource(
             ?: return tppMissing()
         val tppName = ctx.getHeaderString("TPP-Name") ?: tppId
 
-        require(!xRequestId.isNullOrBlank()) { "X-Request-ID header is required" }
+        if (xRequestId.isNullOrBlank()) throw Psd2RequestFormatException("X-Request-ID header is required")
 
         val idempotencyKey = consentCreateKey(tppId, xRequestId)
         idempotencyStore.get(idempotencyKey)?.let { cached ->

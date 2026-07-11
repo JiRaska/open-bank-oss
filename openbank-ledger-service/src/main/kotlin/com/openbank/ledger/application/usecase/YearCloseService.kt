@@ -18,6 +18,7 @@ import com.openbank.ledger.domain.model.FiscalYearTrialBalance
 import com.openbank.ledger.domain.model.YearCloseRecord
 import com.openbank.ledger.domain.model.YearCloseStatus
 import com.openbank.ledger.domain.model.YearCloseVerification
+import com.openbank.ledger.domain.model.requireValid
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -171,7 +172,7 @@ class YearCloseService(
     }
 
     private suspend fun computeTrialBalance(fiscalYear: Int): FiscalYearTrialBalance {
-        require(fiscalYear in YearCloseRecord.MIN_FISCAL_YEAR..YearCloseRecord.MAX_FISCAL_YEAR) {
+        requireValid(fiscalYear in YearCloseRecord.MIN_FISCAL_YEAR..YearCloseRecord.MAX_FISCAL_YEAR) {
             "fiscalYear out of range: $fiscalYear"
         }
         val year = Year.of(fiscalYear)
