@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.10.5](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.10.4...ledger-service-v1.10.5) (2026-07-11)
+
+
+### Bug Fixes
+
+* **ledger,psd2:** dedicated exception types, no more mapper collision ([#526](https://github.com/JiRaska/open-bank-oss/issues/526)) ([#752](https://github.com/JiRaska/open-bank-oss/issues/752)) ([e15464c](https://github.com/JiRaska/open-bank-oss/commit/e15464c58a43c514f3a33c67751c3a75de667e1a))
+* **ledger:** generic repair for reversal-line corruption since V10 ([#527](https://github.com/JiRaska/open-bank-oss/issues/527)) ([#748](https://github.com/JiRaska/open-bank-oss/issues/748)) ([ca10585](https://github.com/JiRaska/open-bank-oss/commit/ca1058515a3873b5e74e6f7d59398fc3470ed9c8))
+* **transaction,ledger:** per-currency cash-clearing GL accounts ([#747](https://github.com/JiRaska/open-bank-oss/issues/747)) ([#749](https://github.com/JiRaska/open-bank-oss/issues/749)) ([7e0f934](https://github.com/JiRaska/open-bank-oss/commit/7e0f9341b9d0f92f61665ff4cf981b9d181d73c6))
+
+
+### Security
+
+* **libs-testing,aml,ledger:** add shared authz conformance kit, fix live AML gap ([#467](https://github.com/JiRaska/open-bank-oss/issues/467)) ([#757](https://github.com/JiRaska/open-bank-oss/issues/757)) ([94e9c6d](https://github.com/JiRaska/open-bank-oss/commit/94e9c6d9a20cb2b1bf972bf60dfed1ff90e2443c))
+
 ## [1.10.4](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.10.3...ledger-service-v1.10.4) (2026-07-07)
 
 
