@@ -706,6 +706,10 @@ jobs:
           # the PR can never auto-merge. Falls back to GITHUB_TOKEN so the pipeline still opens
           # a (manually-mergeable) PR if the secret is not set.
           token: ${{ secrets.GITOPS_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          # Create the commit through the GitHub API so it is signed/verified — the main
+          # ruleset enforces required_signatures, and an unsigned bot commit blocks the
+          # deploy PR forever (services silently stop updating until a human re-signs it).
+          sign-commits: true
           branch: chore/gitops-auto-deploy-${{ github.sha }}
           delete-branch: true
           commit-message: "chore(gitops): auto-deploy sandbox-${{ github.sha && github.sha || '' }}"
