@@ -327,6 +327,13 @@ jobs:
             exit 1
           fi
 
+      # The governance gates in this job (threat-model coverage + diff, network-policy
+      # generation, authz-coverage) are stdlib Python with committed *_test.py suites that,
+      # until now, no workflow ran — a gate whose own logic is untested silently rots. Run
+      # them here so a regression in a gate's parser fails the PR that introduced it.
+      - name: governance-script unit tests
+        run: python3 -m unittest discover -s openbank-infra/scripts -p '*_test.py' -v
+
       # ADR-0030 D2: every money-path service must ship a structured STRIDE/DFD
       # threat model. stdlib-only gate, ratchets coverage (a new money-path
       # service or a deleted/stubbed model fails here). Part of the always-run,
