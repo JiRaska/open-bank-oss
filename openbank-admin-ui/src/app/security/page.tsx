@@ -8,6 +8,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { Shield, RefreshCw, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { summarizeReachable, serviceVerdict } from '@/lib/security/summary'
 
 // Envelope returned by /api/security (never 500s — see that route): either the
 // scanner answered with a report, or it's unavailable with a typed reason that
@@ -105,10 +106,13 @@ export default function SecurityPage() {
   useEffect(() => { load() }, [load])
 
   const results = report?.serviceResults ?? []
-  const criticalCount = report?.criticalFindings ?? 0
-  const highCount = report?.highFindings ?? 0
-  const avgScore = report?.platformScore ?? 0
-  const platformGrade = report?.platformGrade ?? 'N/A'
+  // Only services the scanner could actually reach have a meaningful verdict. An
+  // unreachable service has NO known findings — counting it as a vulnerability, or
+  // letting its upstream F-grade drag the platform score, is a false positive. So
+  // the headline counts/score are computed over reachable services only (pure,
+  // unit-tested in src/lib/security/summary.ts); the unreachable ones are surfaced
+  // separately as a coverage gap, not a failure.
+  const { unreachableCount, criticalCount, highCount, avgScore, platformGrade } = summarizeReachable(results)
 
   const filteredResults = results.filter(r => {
     if (filter === 'ALL') return true
@@ -190,6 +194,20 @@ export default function SecurityPage() {
             </div>
           ))}
         </div>
+
+        {unreachableCount > 0 && (
+          <div style={{ marginBottom: '20px', padding: '10px 16px', borderRadius: '8px',
+            background: 'var(--info-bg)', border: '1px solid var(--info-border)',
+            display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Shield size={15} style={{ color: 'var(--info-text)', flexShrink: 0 }} />
+            <span style={{ fontSize: '12px', color: 'var(--info-text)' }}>
+              {t(
+                `${unreachableCount} ${unreachableCount === 1 ? 'služba byla' : 'služeb bylo'} nedostupná při skenu (nejspíš scale-to-zero) — nebyla skenována. Chybějící sken není zranitelnost; skóre a počty výše vychází pouze z dosažitelných služeb.`,
+                `${unreachableCount} service${unreachableCount === 1 ? ' was' : 's were'} unreachable during the scan (likely scaled to zero) — not scanned. A missing scan is not a vulnerability; the score and counts above reflect only the reachable services.`,
+              )}
+            </span>
+          </div>
+        )}
 
         {report?.complianceStatus && (
           <div className="card" style={{ padding: '16px 20px', marginBottom: '20px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -299,24 +317,38 @@ export default function SecurityPage() {
                             {!r.reachable && <div style={{ fontSize: '10px', color: 'var(--danger-text)', fontWeight: 400 }}>{t('nedostupné', 'unreachable')}</div>}
                           </td>
                           <td style={{ padding: '12px 16px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <span style={{ fontSize: '14px', fontWeight: 800, color: GRADE_COLORS[r.grade] ?? 'var(--text-secondary)' }}>{r.grade}</span>
-                              <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>{r.score}</span>
-                            </div>
+                            {r.reachable ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ fontSize: '14px', fontWeight: 800, color: GRADE_COLORS[r.grade] ?? 'var(--text-secondary)' }}>{r.grade}</span>
+                                <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>{r.score}</span>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-tertiary)' }}>—</span>
+                            )}
                           </td>
                           <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                            {r.findings.length}
+                            {r.reachable ? r.findings.length : '—'}
                           </td>
                           <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>
                             {formatDate(r.scannedAt)}
                           </td>
                           <td style={{ padding: '12px 16px' }}>
-                            <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: 700,
-                              background: ['F', 'D', 'C'].includes(r.grade) ? 'var(--danger-bg)' : ['A+', 'A'].includes(r.grade) ? 'var(--success-bg)' : 'var(--warning-bg)',
-                              color: ['F', 'D', 'C'].includes(r.grade) ? 'var(--danger-text)' : ['A+', 'A'].includes(r.grade) ? 'var(--success-text)' : 'var(--warning-text)',
-                              border: `1px solid ${['F', 'D', 'C'].includes(r.grade) ? 'var(--danger-border)' : ['A+', 'A'].includes(r.grade) ? 'var(--success-border)' : 'var(--warning-border)'}` }}>
-                              {['F', 'D', 'C'].includes(r.grade) ? t('Selhání', 'Fail') : ['A+', 'A'].includes(r.grade) ? t('V pořádku', 'Pass') : t('Ke kontrole', 'Review')}
-                            </span>
+                            {(() => {
+                              // Verdict is centralized + unit-tested; unreachable → "Not scanned",
+                              // never a red "Fail" (that mis-mapping was the false positive).
+                              const style = {
+                                not_scanned: { bg: 'var(--info-bg)',    fg: 'var(--info-text)',    bd: 'var(--info-border)',    label: t('Nelze skenovat', 'Not scanned') },
+                                fail:        { bg: 'var(--danger-bg)',  fg: 'var(--danger-text)',  bd: 'var(--danger-border)',  label: t('Selhání', 'Fail') },
+                                pass:        { bg: 'var(--success-bg)', fg: 'var(--success-text)', bd: 'var(--success-border)', label: t('V pořádku', 'Pass') },
+                                review:      { bg: 'var(--warning-bg)', fg: 'var(--warning-text)', bd: 'var(--warning-border)', label: t('Ke kontrole', 'Review') },
+                              }[serviceVerdict(r)]
+                              return (
+                                <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: 700,
+                                  background: style.bg, color: style.fg, border: `1px solid ${style.bd}` }}>
+                                  {style.label}
+                                </span>
+                              )
+                            })()}
                           </td>
                         </tr>
                       )
@@ -334,12 +366,32 @@ export default function SecurityPage() {
                     <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>{selected.serviceUrl}</div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '20px', fontWeight: 900, color: GRADE_COLORS[selected.grade] ?? 'var(--text-secondary)' }}>{selected.grade}</span>
-                    <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{selected.score}/100</span>
+                    {selected.reachable ? (
+                      <>
+                        <span style={{ fontSize: '20px', fontWeight: 900, color: GRADE_COLORS[selected.grade] ?? 'var(--text-secondary)' }}>{selected.grade}</span>
+                        <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{selected.score}/100</span>
+                      </>
+                    ) : (
+                      <span style={{ padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 700,
+                        background: 'var(--info-bg)', color: 'var(--info-text)', border: '1px solid var(--info-border)' }}>
+                        {t('Nedostupné', 'Unreachable')}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div style={{ overflowY: 'auto', maxHeight: '540px' }}>
-                  {(selected.findings ?? []).length === 0 ? (
+                  {!selected.reachable ? (
+                    // Not reachable during the scan — no verdict either way. Do NOT
+                    // show the green "passed all checks" state (that would be a false
+                    // positive in the opposite direction).
+                    <div style={{ padding: '48px 32px', textAlign: 'center' }}>
+                      <Shield size={32} style={{ color: 'var(--info-text)', marginBottom: '12px', marginInline: 'auto' }} />
+                      <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>{t('Služba nebyla skenována', 'Service was not scanned')}</div>
+                      <div style={{ fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '360px', margin: '4px auto 0' }}>
+                        {t('Při skenu byla nedostupná (nejspíš scale-to-zero). Chybějící sken neznamená zranitelnost ani že služba prošla — jen že se nedala prověřit.', 'It was unreachable during the scan (likely scaled to zero). A missing scan means neither a vulnerability nor a pass — only that it could not be checked.')}
+                      </div>
+                    </div>
+                  ) : (selected.findings ?? []).length === 0 ? (
                     <div style={{ padding: '48px 32px', textAlign: 'center' }}>
                       <CheckCircle2 size={32} style={{ color: 'var(--success)', marginBottom: '12px', marginInline: 'auto' }} />
                       <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>{t('Žádné nálezy', 'No findings')}</div>
