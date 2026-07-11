@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.14.1...agent-service-v1.15.0) (2026-07-11)
+
+
+### Features
+
+* **agent:** propagate a service token to product-catalog reads ([#401](https://github.com/JiRaska/open-bank-oss/issues/401) rollout) ([#745](https://github.com/JiRaska/open-bank-oss/issues/745)) ([b933ba9](https://github.com/JiRaska/open-bank-oss/commit/b933ba99bc9af16e2dc95b506905c0973f707a57))
+
 ## [1.14.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.14.0...agent-service-v1.14.1) (2026-07-09)
 
 
