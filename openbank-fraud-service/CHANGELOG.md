@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.7.0...fraud-service-v0.7.1) (2026-07-11)
+
+
+### Bug Fixes
+
+* **fraud-service:** provision Redis for the online feature store ([#706](https://github.com/JiRaska/open-bank-oss/issues/706)) ([a407c3a](https://github.com/JiRaska/open-bank-oss/commit/a407c3ae46fa3662ca5dfc4dfb8aa8b965255143))
+* **fraud-service:** replace env-var Kafka overrides with a properties file (startup-crash risk) ([#698](https://github.com/JiRaska/open-bank-oss/issues/698)) ([771528c](https://github.com/JiRaska/open-bank-oss/commit/771528c5f36ab45ed9914afbd39df4092b082146))
+* **fraud:** set Kafka group.id via env var, not a dotted YAML key ([#685](https://github.com/JiRaska/open-bank-oss/issues/685)) ([16d2556](https://github.com/JiRaska/open-bank-oss/commit/16d2556934fe5238fd98ad33da8472e257a1f014))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.6.1...fraud-service-v0.7.0) (2026-07-09)
 
 
