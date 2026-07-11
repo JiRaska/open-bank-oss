@@ -4,10 +4,41 @@
 
 import { NextResponse } from 'next/server'
 import { CURRENCY_META } from '@/lib/currency-meta'
+import { inCluster, discoverServices, resolveInClusterBaseUrl } from '@/lib/discovery'
 
-const FX_SERVICE_URL = process.env.FX_SERVICE_URL ?? 'http://openbank-fx-service:8119'
+// Off-cluster (local dev / docker-compose) fallback only. In-cluster we resolve
+// fx-service through discovery, never this literal — the real Service is
+// `fx-service.fx.svc:8119`, not `openbank-fx-service`.
+const FX_SERVICE_URL = process.env.FX_SERVICE_URL ?? 'http://localhost:8119'
 
 export const dynamic = 'force-dynamic'
+
+// fx-service is on the FinOps off-hours scaledown allowlist (fx/rollout/fx-service),
+// so it legitimately sits at zero replicas overnight/weekends. Resolve its state via
+// discovery so the FX page can show a calm "idle (scale-to-zero)" badge instead of a
+// misleading red "down" — and so a genuinely-up service isn't mislabelled red just
+// because the old hardcoded `openbank-fx-service` host never resolved.
+type FxStatus = 'up' | 'scaled_to_zero' | 'down' | 'not_deployed'
+
+async function resolveFxService(): Promise<{ status: FxStatus; baseUrl: string | null }> {
+  if (!inCluster()) {
+    // Local dev: probe the direct URL; can't distinguish scale-to-zero here.
+    try {
+      const res = await fetch(`${FX_SERVICE_URL}/q/health/ready`, { signal: AbortSignal.timeout(3000) })
+      return { status: res.ok ? 'up' : 'down', baseUrl: FX_SERVICE_URL }
+    } catch {
+      return { status: 'down', baseUrl: FX_SERVICE_URL }
+    }
+  }
+  const discovered = await discoverServices()
+  const fx = discovered?.find((d) => d.name === 'fx-service')
+  if (!fx) return { status: 'not_deployed', baseUrl: null }
+  if (fx.scaledToZero) return { status: 'scaled_to_zero', baseUrl: null }
+  // readyReplicas IS the kubelet's /q/health/ready verdict re-published by the control
+  // plane, so we trust discovery's readiness rather than a second in-band health probe.
+  const baseUrl = await resolveInClusterBaseUrl('fx-service')
+  return { status: fx.ready ? 'up' : 'down', baseUrl }
+}
 
 async function fetchCnbRates() {
   const res = await fetch('https://api.cnb.cz/cnbapi/exrates/daily?lang=EN', {
@@ -60,18 +91,9 @@ async function fetchEcbRates() {
   return result
 }
 
-async function fetchFxServiceHealth(): Promise<boolean> {
+async function fetchFxServiceRates(baseUrl: string) {
   try {
-    const res = await fetch(`${FX_SERVICE_URL}/q/health/ready`, { signal: AbortSignal.timeout(3000) })
-    return res.ok
-  } catch {
-    return false
-  }
-}
-
-async function fetchFxServiceRates() {
-  try {
-    const res = await fetch(`${FX_SERVICE_URL}/api/v1/fx/rates`, { signal: AbortSignal.timeout(5000) })
+    const res = await fetch(`${baseUrl}/api/v1/fx/rates`, { signal: AbortSignal.timeout(5000) })
     if (!res.ok) return []
     const data = await res.json()
     return Array.isArray(data) ? data : (data?.rates ?? [])
@@ -80,9 +102,9 @@ async function fetchFxServiceRates() {
   }
 }
 
-async function fetchFxConversions() {
+async function fetchFxConversions(baseUrl: string) {
   try {
-    const res = await fetch(`${FX_SERVICE_URL}/api/v1/fx/conversions`, { signal: AbortSignal.timeout(5000) })
+    const res = await fetch(`${baseUrl}/api/v1/fx/conversions`, { signal: AbortSignal.timeout(5000) })
     if (!res.ok) return []
     const data = await res.json()
     return Array.isArray(data) ? data : (data?.conversions ?? [])
@@ -92,12 +114,15 @@ async function fetchFxConversions() {
 }
 
 export async function GET() {
-  const [cnbRates, ecbRates, serviceUp, fxRates, conversions] = await Promise.allSettled([
+  const fx = await resolveFxService()
+  // Only reach out to fx-service when it's actually serving; a scaled-to-zero or
+  // undeployed service has no reachable pod, so skip the fetch (and its timeout).
+  const canFetch = fx.status === 'up' && fx.baseUrl !== null
+  const [cnbRates, ecbRates, fxRates, conversions] = await Promise.allSettled([
     fetchCnbRates(),
     fetchEcbRates(),
-    fetchFxServiceHealth(),
-    fetchFxServiceRates(),
-    fetchFxConversions(),
+    canFetch ? fetchFxServiceRates(fx.baseUrl!) : Promise.resolve([]),
+    canFetch ? fetchFxConversions(fx.baseUrl!) : Promise.resolve([]),
   ])
 
   return NextResponse.json({
@@ -112,7 +137,9 @@ export async function GET() {
       error: ecbRates.status === 'rejected' ? String(ecbRates.reason) : null,
     },
     fxService: {
-      up: serviceUp.status === 'fulfilled' ? serviceUp.value : false,
+      status: fx.status,
+      // `up` kept for backward-compat with any older client; `status` is authoritative.
+      up: fx.status === 'up',
       rates: fxRates.status === 'fulfilled' ? fxRates.value : [],
       conversions: conversions.status === 'fulfilled' ? conversions.value : [],
     },
