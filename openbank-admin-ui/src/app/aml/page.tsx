@@ -3,10 +3,13 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect, useCallback } from 'react'
-import { ShieldAlert, Search, CheckCircle2, XCircle, Clock, RefreshCw, AlertTriangle, User, Play, AlertOctagon } from 'lucide-react'
+import { useState } from 'react'
+import { ShieldAlert, Search, Clock, RefreshCw, AlertTriangle, User, Play, AlertOctagon } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
+import { svcUrl } from '@/lib/services/bff'
+import { useServiceResource } from '@/lib/services/useServiceResource'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 interface AmlCase {
@@ -36,28 +39,22 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; border: string }
 
 export default function AmlPage() {
   const { t, language } = useLanguage()
-  const [cases, setCases] = useState<AmlCase[]>([])
-  const [loading, setLoading] = useState(true)
   const [scanning, setScanning] = useState(false)
   const [search, setSearch] = useState('')
-  const [serviceUp, setServiceUp] = useState<boolean | null>(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    fetch('/api/svc/aml-service/q/health/ready').then(r => setServiceUp(r.ok)).catch(() => setServiceUp(false))
-    fetch('/api/svc/aml-service/api/v1/aml/cases').then(r => r.json())
-      .then(d => setCases(Array.isArray(d) ? d : d.cases ?? []))
-      .catch(() => setCases([]))
-      .finally(() => setLoading(false))
-  }, [])
-
-  useEffect(() => { load() }, [load])
+  const { data, loading, unavailable, waking, reload } = useServiceResource<AmlCase[]>(
+    svcUrl('aml-service', '/api/v1/aml/cases'),
+    { select: (raw) => (Array.isArray(raw) ? (raw as AmlCase[]) : ((raw as { cases?: AmlCase[] }).cases ?? [])) },
+  )
+  const cases = data ?? []
+  // The service can still be scanned when it's merely idle (a POST wakes it);
+  // only a hard-down state blocks the button.
+  const serviceReachable = !unavailable || unavailable.kind === 'no_data' || unavailable.kind === 'scaled_to_zero'
 
   const triggerScan = async () => {
     setScanning(true)
     try {
-      await fetch('/api/svc/aml-service/api/v1/aml/scan', { method: 'POST' })
-      setTimeout(() => { load(); setScanning(false) }, 3000)
+      await fetch(svcUrl('aml-service', '/api/v1/aml/scan'), { method: 'POST' })
+      setTimeout(() => { reload(); setScanning(false) }, 3000)
     } catch { setScanning(false) }
   }
 
@@ -84,15 +81,19 @@ export default function AmlPage() {
             </p>
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 600,
-              padding: '4px 10px', borderRadius: '20px',
-              background: serviceUp === true ? 'var(--success-bg)' : serviceUp === false ? 'var(--danger-bg)' : 'var(--surface-3)',
-              color: serviceUp === true ? 'var(--success-text)' : serviceUp === false ? 'var(--danger-text)' : 'var(--text-tertiary)',
-              border: `1px solid ${serviceUp === true ? 'var(--success-border)' : serviceUp === false ? 'var(--danger-border)' : 'var(--border)'}` }}>
-              {serviceUp === true ? <CheckCircle2 size={10} /> : serviceUp === false ? <XCircle size={10} /> : <Clock size={10} />}
-              aml-service :8117
-            </span>
-            <button onClick={triggerScan} disabled={scanning || serviceUp === false} className="btn btn-primary btn-sm" style={{ background: 'var(--accent)', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: scanning || serviceUp === false ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px', opacity: scanning || serviceUp === false ? 0.6 : 1 }}>
+            <ServiceStatusBadge
+              label="aml-service :8117"
+              loading={loading}
+              waking={waking}
+              unavailable={unavailable}
+              copy={{
+                up: t('aml-service běží', 'aml-service is up'),
+                idle: t('aml-service spí (scale-to-zero), probouzí se…', 'aml-service idle (scaled to zero), waking…'),
+                down: t('aml-service neodpovídá', 'aml-service is not responding'),
+                checking: t('Zjišťuji stav služby…', 'Checking service…'),
+              }}
+            />
+            <button onClick={triggerScan} disabled={scanning || !serviceReachable} className="btn btn-primary btn-sm" style={{ background: 'var(--accent)', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: scanning || !serviceReachable ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px', opacity: scanning || !serviceReachable ? 0.6 : 1 }}>
               <Play size={13} style={{ animation: scanning ? 'pulse 1s infinite' : 'none' }} />
               {scanning ? t('Kontroluji…', 'Scanning…') : t('Spustit AML kontrolu', 'Run AML scan')}
             </button>
@@ -105,7 +106,15 @@ export default function AmlPage() {
             display: 'flex', alignItems: 'center', gap: '10px' }}>
             <AlertOctagon size={16} style={{ color: 'var(--danger)', flexShrink: 0 }} />
             <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--danger-text)' }}>
-              {escalated.length} AML případ{escalated.length > 1 && escalated.length < 5 ? 'y byly eskalovány' : escalated.length >= 5 ? 'ů bylo eskalováno' : ' byl eskalován'} na compliance officera
+              {escalated.length}{' '}
+              {t(
+                escalated.length > 1 && escalated.length < 5
+                  ? 'AML případy byly eskalovány na compliance officera'
+                  : escalated.length >= 5
+                    ? 'AML případů bylo eskalováno na compliance officera'
+                    : 'AML případ byl eskalován na compliance officera',
+                escalated.length === 1 ? 'AML case escalated to a compliance officer' : 'AML cases escalated to a compliance officer',
+              )}
             </span>
           </div>
         )}
@@ -139,12 +148,11 @@ export default function AmlPage() {
             <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
               <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám případy…', 'Loading cases…')}</div>
             </div>
-          ) : serviceUp === false ? (
-            // aml-service is not reachable through the BFF — almost always means
-            // it isn't deployed in this sandbox (most of the fleet isn't). Explain
-            // it calmly instead of the old "Mikroservisa běží na portu 8117" copy,
-            // which falsely claimed the service was up.
-            <DataUnavailable kind="not_deployed" service="AML-service" feature={t('AML monitoring', 'AML monitoring')} lang={language} />
+          ) : unavailable ? (
+            // aml-service didn't answer through the BFF. Classify honestly — idle
+            // (scale-to-zero, ADR-0057), not deployed, or a real outage — instead
+            // of the old copy that falsely claimed the service was up.
+            <DataUnavailable kind={unavailable.kind} service={t('AML-service', 'AML-service')} feature={t('AML monitoring', 'AML monitoring')} lang={language} />
           ) : filtered.length === 0 ? (
             <DataUnavailable
               kind="no_data"

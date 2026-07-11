@@ -5,11 +5,14 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import {
-  ShieldAlert, Search, CheckCircle2, XCircle, Clock, RefreshCw,
+  ShieldAlert, Search, CheckCircle2, Clock, RefreshCw,
   AlertTriangle, User, Play, List, ChevronDown, ChevronUp,
   ToggleLeft, ToggleRight, ExternalLink, Download, Loader2
 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { classifyBffFailure } from '@/lib/services/bff'
+import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 interface SanctionCheck {
@@ -155,13 +158,13 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
 }
 
 export default function SanctionsPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const [tab, setTab] = useState<'checks'|'search'|'lists'>('checks')
   const [checks, setChecks] = useState<SanctionCheck[]>([])
   const [lists, setLists] = useState<SanctionsList[]>([])
   const [loading, setLoading] = useState(true)
   const [listsLoading, setListsLoading] = useState(true)
-  const [serviceUp, setServiceUp] = useState<boolean | null>(null)
+  const [checksUnavail, setChecksUnavail] = useState<{ kind: UnavailableKind } | null>(null)
   const [search, setSearch] = useState('')
   const [refreshingAll, setRefreshingAll] = useState(false)
 
@@ -173,29 +176,27 @@ export default function SanctionsPage() {
   const [screenResult, setScreenResult] = useState<SanctionCheck | null>(null)
   const [screenError, setScreenError] = useState('')
   const [listsError, setListsError] = useState('')
-  const [checksError, setChecksError] = useState('')
   // Selected list types for manual screening — initialised to all enabled lists once loaded
   const [selectedListTypes, setSelectedListTypes] = useState<string[]>([])
   const [listScopeInitialised, setListScopeInitialised] = useState(false)
 
   const loadChecks = useCallback(async () => {
     setLoading(true)
-    setChecksError('')
     try {
       const res = await fetch('/api/sanctions/checks', { cache: 'no-store' })
-      setServiceUp(res.ok)
-      const data = await res.json().catch(() => ([]))
       if (!res.ok) {
-        const errorPayload = data as ApiError
+        // Classify honestly (idle / not deployed / unreachable) instead of leaking
+        // a raw "HTTP <status>" string — admin-ui graceful-state rule.
         setChecks([])
-        setChecksError(errorPayload.error ?? t(`Načtení kontrol selhalo (HTTP ${res.status})`, `Failed to load checks (HTTP ${res.status})`))
+        setChecksUnavail({ kind: await classifyBffFailure(res) })
         return
       }
+      const data = await res.json().catch(() => ([]))
       setChecks(Array.isArray(data) ? data : [])
-    } catch (error) {
-      setServiceUp(false)
+      setChecksUnavail(null)
+    } catch {
       setChecks([])
-      setChecksError(error instanceof Error ? error.message : t('Spojení se službou selhalo', 'Connection to the service failed'))
+      setChecksUnavail({ kind: 'unreachable' })
     }
     finally { setLoading(false) }
   }, [])
@@ -333,14 +334,17 @@ export default function SanctionsPage() {
               {t('OFAC SDN · EU Consolidated · UN · HM Treasury · PEP · ČNB', 'OFAC SDN · EU Consolidated · UN · HM Treasury · PEP · ČNB')}
             </p>
           </div>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 600,
-            padding: '4px 10px', borderRadius: '20px',
-            background: serviceUp === true ? 'var(--success-bg)' : serviceUp === false ? 'var(--danger-bg)' : 'var(--surface-3)',
-            color: serviceUp === true ? 'var(--success-text)' : serviceUp === false ? 'var(--danger-text)' : 'var(--text-tertiary)',
-            border: `1px solid ${serviceUp === true ? 'var(--success-border)' : serviceUp === false ? 'var(--danger-border)' : 'var(--border)'}` }}>
-            {serviceUp === true ? <CheckCircle2 size={10} /> : serviceUp === false ? <XCircle size={10} /> : <Clock size={10} />}
-            sanctions-service :8123
-          </span>
+          <ServiceStatusBadge
+            label="sanctions-service :8123"
+            loading={loading}
+            unavailable={checksUnavail}
+            copy={{
+              up: t('sanctions-service běží', 'sanctions-service is up'),
+              idle: t('sanctions-service spí (scale-to-zero), probouzí se…', 'sanctions-service idle (scaled to zero), waking…'),
+              down: t('sanctions-service neodpovídá', 'sanctions-service is not responding'),
+              checking: t('Zjišťuji stav služby…', 'Checking service…'),
+            }}
+          />
         </div>
 
         {hits.length > 0 && (
@@ -400,12 +404,11 @@ export default function SanctionsPage() {
                 <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
                   <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám…', 'Loading…')}</div>
                 </div>
+              ) : checksUnavail ? (
+                <DataUnavailable kind={checksUnavail.kind} service={t('Sanctions-service', 'Sanctions-service')} feature={t('Sankční kontroly', 'Sanctions checks')} lang={language} />
               ) : filtered.length === 0 ? (
-                <div style={{ padding: '48px', textAlign: 'center' }}>
-                  <ShieldAlert size={32} style={{ color: 'var(--text-tertiary)', marginBottom: '12px' }} />
-                  <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>{t('Žádné záznamy', 'No records')}</div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{checksError || t('Použijte záložku Manuální vyhledávání pro první kontrolu.', 'Use the Manual Search tab to run a first check.')}</div>
-                </div>
+                <DataUnavailable kind="no_data" feature={t('Sankční kontroly', 'Sanctions checks')} lang={language}
+                  detail={t('Použijte záložku Manuální vyhledávání pro první kontrolu.', 'Use the Manual Search tab to run a first check.')} />
               ) : (
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
