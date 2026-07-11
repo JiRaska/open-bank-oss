@@ -219,11 +219,19 @@ resource "kubectl_manifest" "nodepool_default" {
           { nodes = "50%" },
         ]
       }
-      # Hard cap: at 4xlarge max, 32 vCPU = 2× c7g.4xlarge which comfortably
-      # fits all ~28 services + DaemonSets. Without this Karpenter happily
+      # Hard cap against runaway provisioning: without it Karpenter once
       # provisioned 14× c6g.12xlarge (~$235/day) with no warning.
+      # 32 → 48 vCPU (issue #809): the 32 cap was calibrated to the fleet's
+      # OLD, understated memory requests. Right-sizing them (#819) plus the
+      # kubelet eviction headroom (#820, subtracted from allocatable) raised
+      # declared demand, and the pool pinned at exactly 32/32 CPU — Karpenter
+      # then could NOT provision a node for the (2560Mi-request) ArgoCD
+      # application-controller ("all available instance types exceed limits"),
+      # leaving the deploy backbone Pending and stalling the drift roll. 48
+      # gives the roll surge + honest requests room while still capping
+      # runaway cost.
       limits = {
-        cpu    = "32"
+        cpu    = "48"
         memory = "128Gi"
       }
     }
