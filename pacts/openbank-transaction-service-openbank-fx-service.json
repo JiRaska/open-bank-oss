@@ -1,0 +1,78 @@
+{
+  "consumer": {
+    "name": "openbank-transaction-service"
+  },
+  "interactions": [
+    {
+      "description": "GET EUR/CZK FX rate",
+      "providerStates": [
+        {
+          "name": "an EUR/CZK rate exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/fx/rates/EUR/CZK"
+      },
+      "response": {
+        "body": {
+          "askRate": 25.2,
+          "baseCurrency": "EUR",
+          "bidRate": 24.8,
+          "quoteCurrency": "CZK"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.askRate": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.baseCurrency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.bidRate": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.quoteCurrency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-fx-service"
+  }
+}

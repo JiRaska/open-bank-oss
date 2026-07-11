@@ -1,0 +1,118 @@
+{
+  "consumer": {
+    "name": "openbank-transaction-service"
+  },
+  "messages": [
+    {
+      "contents": {
+        "amount": 1000.0,
+        "currency": "EUR",
+        "messageType": "MT103",
+        "occurredAt": "2000-01-31T14:00:00Z",
+        "paymentSagaRef": "string",
+        "status": "SETTLED",
+        "swiftMessageId": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+      },
+      "description": "a swift.message.status-changed event with status SETTLED",
+      "generators": {
+        "body": {
+          "$.occurredAt": {
+            "format": "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "type": "DateTime"
+          },
+          "$.paymentSagaRef": {
+            "size": 20,
+            "type": "RandomString"
+          },
+          "$.swiftMessageId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.amount": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "decimal"
+              }
+            ]
+          },
+          "$.currency": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[A-Z]{3}"
+              }
+            ]
+          },
+          "$.messageType": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "MT103|MT202|MX_PACS_008"
+              }
+            ]
+          },
+          "$.occurredAt": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "format": "yyyy-MM-dd'T'HH:mm:ss'Z'",
+                "match": "timestamp"
+              }
+            ]
+          },
+          "$.paymentSagaRef": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.status": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "VALIDATED|SENT|SETTLED|REJECTED"
+              }
+            ]
+          },
+          "$.swiftMessageId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "swift-service has processed an MT103 and submitted to scheme gateway"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-swift-service"
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "consumer": {
+    "name": "openbank-sepa-payment"
+  },
+  "interactions": [
+    {
+      "description": "POST fraud score for SEPA payment",
+      "providerStates": [
+        {
+          "name": "the fraud scoring engine is available"
+        }
+      ],
+      "request": {
+        "body": {
+          "accountId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+          "amount": 250.00,
+          "counterpartyId": null,
+          "currency": "EUR",
+          "rail": "SEPA"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/fraud/score"
+      },
+      "response": {
+        "body": {
+          "score": 10,
+          "verdict": "ACCEPT"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.score": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.verdict": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-fraud-service"
+  }
+}

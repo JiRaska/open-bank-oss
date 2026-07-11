@@ -1,0 +1,103 @@
+{
+  "consumer": {
+    "name": "openbank-notification-service"
+  },
+  "messages": [
+    {
+      "contents": {
+        "channel": "PUSH",
+        "partyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "recipient": "string",
+        "template": "TRANSACTION_COMPLETED",
+        "variables": {
+          "amount": "50.00",
+          "currency": "CZK"
+        }
+      },
+      "description": "a TRANSACTION_COMPLETED notification request",
+      "generators": {
+        "body": {
+          "$.partyId": {
+            "type": "Uuid"
+          },
+          "$.recipient": {
+            "size": 20,
+            "type": "RandomString"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.channel": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.partyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.recipient": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.template": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.variables.amount": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.variables.currency": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "account-service has posted an incoming credit"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-account-service"
+  }
+}
