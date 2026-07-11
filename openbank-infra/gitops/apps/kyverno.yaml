@@ -32,6 +32,23 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+          container:
+            # The amazon-ecr-credential-helper (registryCredentialHelpers=…,amazon)
+            # caches its ECR auth token under $HOME/.ecr. HOME defaults to
+            # /home/nonroot, which is on the readOnlyRootFilesystem, so the write
+            # fails ("open /home/nonroot/.ecr/…: no such file or directory") and the
+            # helper re-authenticates (ECR GetAuthorizationToken) on EVERY image
+            # verification. Under load that intermittently times out, so cosign
+            # signature/attestation fetches fail and validly-signed images get
+            # rejected as "unverified" — which the image-verify cache then pins for
+            # its whole TTL, silently wedging all NEW-image deploys fleet-wide
+            # (admin-ui + agent-service seen; incident 2026-07-11). Point HOME at the
+            # already-writable sigstore emptyDir (TUF_ROOT=/.sigstore) so the token
+            # caches and ECR auth stays reliable. No new volume — the chart exposes
+            # no extra-volume hook for the admission controller, only extraEnvVars.
+            extraEnvVars:
+              - name: HOME
+                value: /.sigstore
         backgroundController:
           replicas: 1
           resources:
