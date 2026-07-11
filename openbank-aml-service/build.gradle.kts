@@ -43,6 +43,9 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+
+    // Shared authz conformance kit (issue #467) — AmlCaseSecurityTest pilot migration.
+    testImplementation(project(":openbank-libs-testing"))
 }
 
 kover {
