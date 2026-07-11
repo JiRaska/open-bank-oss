@@ -19,7 +19,7 @@ charters := {
 			"id": "compliance-officer",
 			"plane": "control",
 			"tools": {
-				"allow": ["query.ledger.readonly", "query.catalog.readonly", "read.logs", "read.governance", "draft.ticket"],
+				"allow": ["query.ledger.readonly", "query.gl.readonly", "query.catalog.readonly", "read.logs", "read.governance", "draft.ticket"],
 				"deny": ["money.*", "gh.pr.*", "*.write"],
 			},
 		},
@@ -59,6 +59,20 @@ charters := {
 test_allow_read_for_chartered_control_agent if {
 	agents.allow with data.agents as charters
 		with input as {"agent": "compliance-officer", "tool": "query.ledger.readonly", "resource": "acct-1"}
+}
+
+# query.gl.readonly (GL aggregate / trial-balance read, #1966 / issue #401) is a first-class
+# read capability once declared in a charter's allowlist — the MCP gate must let get_trial_balance
+# through for an agent that holds it, instead of the deny-by-default that made it unreachable.
+test_allow_gl_readonly_for_chartered_agent if {
+	agents.allow with data.agents as charters
+		with input as {"agent": "compliance-officer", "tool": "query.gl.readonly", "resource": "trial-balance"}
+}
+
+# An agent whose charter does NOT list query.gl.readonly is still denied it (deny-by-default holds).
+test_deny_gl_readonly_when_not_chartered if {
+	not agents.allow with data.agents as charters
+		with input as {"agent": "ledger-domain-engineer", "tool": "query.gl.readonly", "resource": "trial-balance"}
 }
 
 test_allow_decision_reason_and_passthrough if {
