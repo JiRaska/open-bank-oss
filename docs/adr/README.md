@@ -161,6 +161,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0155](0155-four-eyes-enforcement-for-money-path-actions.md) | Four-eyes enforcement for money-path actions | Proposed | Partial — pilot only (openbank-sepa-payment) | — |
 | [0156](0156-agent-charters-as-markdown-alongside-agents-yaml.md) | Agent charters as Markdown alongside agents.yaml | Accepted | Shipped | — |
 | [0158](0158-account-opening-validates-against-product-catalog.md) | Account opening validates against product-catalog | Accepted | Complete | — |
+| [0159](0159-cnpg-ha-money-path.md) | High-availability CNPG for money-path databases | Proposed | Planned | — |
 
 ---
 
