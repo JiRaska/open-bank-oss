@@ -4,7 +4,11 @@
 
 package com.openbank.aml.infrastructure.rest
 
+import com.openbank.libs.authz.Authorize
 import com.openbank.libs.testing.authz.RestAuthzConformanceTest
+import jakarta.ws.rs.GET
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
 
 /**
  * Regression guard (C7/ADR-0030): no AML endpoint must be opened without role-gating. Migrated
@@ -17,4 +21,19 @@ import com.openbank.libs.testing.authz.RestAuthzConformanceTest
  */
 class AmlCaseSecurityTest : RestAuthzConformanceTest() {
     override val resourceClasses = listOf(AmlCaseResource::class)
+
+    @Test
+    fun `AML reads carry an amlCase read-verb Authorize action for the AI-agent bridge`() {
+        val reads = AmlCaseResource::class.java.declaredMethods.filter { it.getAnnotation(GET::class.java) != null }
+        assertThat(reads).describedAs("expected @GET reads on AmlCaseResource").isNotEmpty
+        reads.forEach { m ->
+            val authorize = m.getAnnotation(Authorize::class.java)
+            assertThat(authorize)
+                .describedAs("%s (a read) must carry @Authorize (issue #401 bridge)", m.name)
+                .isNotNull
+            assertThat(authorize.action)
+                .describedAs("%s @Authorize action must be a read verb under amlCase", m.name)
+                .isIn("amlCase.read", "amlCase.list", "amlCase.search")
+        }
+    }
 }
