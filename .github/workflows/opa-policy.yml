@@ -6,36 +6,21 @@
 # are generated, never hand-edited. subPath mounts do not hot-reload, so a stale
 # pod-roll annotation means pods silently keep serving the old policy. A broken policy
 # or a stale artifact fails the gate before it can ship.
+#
+# Required-status-check shape (issue #799): the workflow itself is deliberately NOT
+# path-scoped at the `on:` level anymore — a required status check that never gets
+# reported (because the workflow didn't trigger) leaves the PR stuck on "Expected",
+# blocking merge for every PR that doesn't touch a policy path. Instead, the `changes`
+# job (always runs) computes path-relevance and the heavy `verify` job stays
+# job-level path-scoped via `if:`. The always-run `gate` job aggregates the result —
+# same pattern as `ui` in ci.yml and `all-green` in services-ci.yml — and is the one
+# context branch protection should require.
 name: OPA policy
 
 on:
   push:
     branches: [main]
-    paths:
-      - openbank-infra/opa/**
-      - openbank-libs/governance/agents.yaml
-      - openbank-libs/governance/rules.yaml
-      - openbank-libs/governance/policies/**
-      - openbank-infra/gitops/components/agent/gen-opa-bundle-configmap.sh
-      - openbank-infra/gitops/components/agent/agent-opa-bundle.yaml
-      - openbank-infra/gitops/components/pid/**
-      - openbank-infra/gitops/components/copilot/**
-      - openbank-infra/gitops/components/customer-edge/**
-      - openbank-infra/gitops/components/notifications/**
-      - .github/workflows/opa-policy.yml
   pull_request:
-    paths:
-      - openbank-infra/opa/**
-      - openbank-libs/governance/agents.yaml
-      - openbank-libs/governance/rules.yaml
-      - openbank-libs/governance/policies/**
-      - openbank-infra/gitops/components/agent/gen-opa-bundle-configmap.sh
-      - openbank-infra/gitops/components/agent/agent-opa-bundle.yaml
-      - openbank-infra/gitops/components/pid/**
-      - openbank-infra/gitops/components/copilot/**
-      - openbank-infra/gitops/components/customer-edge/**
-      - openbank-infra/gitops/components/notifications/**
-      - .github/workflows/opa-policy.yml
 
 permissions:
   contents: read
@@ -45,8 +30,64 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect policy changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.detect.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        run: |
+          set -euo pipefail
+          # Mirrors the `paths:` list the workflow used to be gated on at the trigger
+          # level (kept as one source of truth here, in the job that now owns it).
+          PATTERN='^openbank-infra/opa/'
+          PATTERN="${PATTERN}|^openbank-libs/governance/agents\.yaml$"
+          PATTERN="${PATTERN}|^openbank-libs/governance/rules\.yaml$"
+          PATTERN="${PATTERN}|^openbank-libs/governance/policies/"
+          PATTERN="${PATTERN}|^openbank-infra/gitops/components/agent/gen-opa-bundle-configmap\.sh$"
+          PATTERN="${PATTERN}|^openbank-infra/gitops/components/agent/agent-opa-bundle\.yaml$"
+          PATTERN="${PATTERN}|^openbank-infra/gitops/components/pid/"
+          PATTERN="${PATTERN}|^openbank-infra/gitops/components/copilot/"
+          PATTERN="${PATTERN}|^openbank-infra/gitops/components/customer-edge/"
+          PATTERN="${PATTERN}|^openbank-infra/gitops/components/notifications/"
+          PATTERN="${PATTERN}|^\.github/workflows/opa-policy\.yml$"
+
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "Event push -> always verify (post-merge; keeps the deployed-bundle check current)."
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            BASE="origin/${{ github.base_ref }}"
+            # Persistent self-hosted runners reuse the workdir, so the remote-tracking
+            # ref can be stale -- force it to the true tip, then diff from the
+            # merge-base rather than the PR's creation-time base.sha (which goes stale
+            # the moment a competing PR merges first -- see ci.yml's "resolve PR diff
+            # base" comment for the incident this same fix guards against there).
+            git fetch --no-tags --force origin \
+              "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" \
+              >/dev/null 2>&1 || true
+            MB=$(git merge-base "$BASE" HEAD 2>/dev/null || echo "$BASE")
+            FILES=$(git diff --name-only "$MB" HEAD)
+            echo "Changed files:"; echo "$FILES" | sed 's/^/  /'
+            # Here-string, not `echo "$FILES" | grep -q`: under `set -o pipefail` a
+            # short-circuiting `grep -q` SIGPIPEs the upstream `echo`, and the
+            # pipeline's exit code becomes racy (documented in services-ci.yml).
+            if grep -qE "$PATTERN" <<< "$FILES"; then
+              echo "relevant=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "relevant=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
   verify:
     name: build + verify bundle, check ConfigMap sync
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     # Installs OPA to $HOME/bin itself (no sudo needed) — no self-hosted-pool dependency.
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -106,3 +147,23 @@ jobs:
             exit 1
           fi
           echo "All service OPA bundles + pod-roll annotations are in sync with the policy source."
+
+  # Gate job — always runs, maps to the required check name (issue #799). Passes
+  # when verify succeeded OR was skipped (no policy-relevant changes in this PR);
+  # fails only when verify itself failed. Same pattern as `ui` (ci.yml) / `all-green`
+  # (services-ci.yml), so a PR that never touches OPA policy is never blocked on an
+  # "Expected" status that will never report.
+  gate:
+    name: OPA policy gate
+    needs: [changes, verify]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check verify result
+        run: |
+          result="${{ needs.verify.result }}"
+          if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+            echo "OPA policy verify failed (result: $result)." && exit 1
+          fi
+          echo "OPA policy gate: $result (skipped = no policy-relevant changes in this PR)."
