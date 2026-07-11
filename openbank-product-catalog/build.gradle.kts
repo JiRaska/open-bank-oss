@@ -44,6 +44,10 @@ dependencies {
     testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.quarkus.test.security)
+
+    // Shared Testcontainers resource kit (issue #467) — pilot migration off the local
+    // PostgresTestResource.kt copy.
+    testImplementation(project(":openbank-libs-testing"))
 }
 
 // Coverage floor (ADR-0020, ratchet-only — sweep #466: this module previously had NO
