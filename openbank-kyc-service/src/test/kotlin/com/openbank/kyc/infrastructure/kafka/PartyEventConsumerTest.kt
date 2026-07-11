@@ -137,6 +137,13 @@ class PartyEventConsumerTest {
     }
 
     @Test
+    fun `PARTY_ERASED without a valid partyId is acked without anonymising or throwing`(): Unit = runBlocking {
+        consumer.consume("""{"eventType":"PARTY_ERASED"}""") // no partyId
+
+        coVerify(exactly = 0) { kycCaseRepository.anonymizeByPartyId(any(), any()) }
+    }
+
+    @Test
     fun `a domain failure is swallowed so the consumer group is not wedged`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
         coEvery { kycService.openCaseForParty(partyId) } throws RuntimeException("db down")

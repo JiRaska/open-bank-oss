@@ -127,4 +127,22 @@ class PartyEventPactProviderVerificationTest {
         )
         return objectMapper.writeValueAsString(event)
     }
+
+    @State("a party has been erased")
+    fun partyHasBeenErased() {
+        // No setup: produced deterministically by the @PactVerifyProvider method below.
+    }
+
+    @PactVerifyProvider("a PARTY_ERASED event")
+    fun producePartyErasedEvent(): String {
+        // Mirrors KafkaPartyEventPublisher.publishPartyErased: the separate, narrower envelope
+        // (no partyType/status/kycStatus/legalName/email — those are gone by the time GDPR
+        // Art. 17 erasure runs).
+        val event = linkedMapOf(
+            "eventType" to "PARTY_ERASED",
+            "partyId" to UUID.randomUUID(),
+            "erasedAt" to Instant.now(),
+        )
+        return objectMapper.writeValueAsString(event)
+    }
 }
