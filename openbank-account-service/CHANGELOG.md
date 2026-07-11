@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.15.0...account-service-v0.15.1) (2026-07-11)
+
+
+### Bug Fixes
+
+* **account:** propagate a service token to product-catalog ([#401](https://github.com/JiRaska/open-bank-oss/issues/401) rollout) ([#835](https://github.com/JiRaska/open-bank-oss/issues/835)) ([1444456](https://github.com/JiRaska/open-bank-oss/commit/144445677944189139752e313db68f132ed10d8e))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.14.0...account-service-v0.15.0) (2026-07-11)
 
 
