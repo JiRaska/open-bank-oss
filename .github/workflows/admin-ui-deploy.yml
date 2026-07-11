@@ -407,6 +407,12 @@ jobs:
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           token: ${{ secrets.GITOPS_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          # Create the commit through the GitHub API so it is signed/verified. The
+          # main ruleset enforces required_signatures; a plain git commit here is
+          # unsigned → the deploy PR is blocked forever and the admin UI silently
+          # stops updating (had to be re-signed by hand every time). sign-commits
+          # makes the bot commit verified so auto-merge actually lands it.
+          sign-commits: true
           branch: chore/admin-ui-deploy-${{ github.sha }}
           delete-branch: true
           commit-message: "chore(admin-ui): deploy ${{ steps.build.outputs.tag }}"
