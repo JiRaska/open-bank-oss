@@ -3,8 +3,8 @@
 # following the same first-registration pattern as developer-portal's `sandbox-sec1` — it
 # does NOT point at a real pushed image yet. Run `build-push-service.sh finrep --bump` (or the
 # CI auto-deploy pipeline) to build+push the real `sandbox-<git-sha>` image and rewrite this
-# tag before relying on this Deployment actually coming up (ArgoCD will otherwise report
-# ImagePullBackOff — see PR #547 reviewer notes).
+# tag before relying on this Deployment actually coming up (Kyverno blocks even ArgoCD's dry-run
+# diff for a nonexistent tag, so the app sticks at sync status Unknown, not ImagePullBackOff — see PR #547 reviewer notes).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
