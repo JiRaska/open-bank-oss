@@ -56,6 +56,7 @@ class AccountSecurityContractTest {
             "getAccount",
             "getAccountByIban",
             "listAccounts",
+            "listActiveAccounts",
             "searchAccounts",
             "getBalance",
             "listPockets",
