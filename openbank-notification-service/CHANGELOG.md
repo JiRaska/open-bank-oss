@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.7](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.12.6...notification-service-v0.12.7) (2026-07-11)
+
+
+### Bug Fixes
+
+* **notification-service:** fix silent Kafka client.id dotted-key bug ([#731](https://github.com/JiRaska/open-bank-oss/issues/731)) ([5efec71](https://github.com/JiRaska/open-bank-oss/commit/5efec7181047b1e95ccbb57927c788050d35c716)), closes [#686](https://github.com/JiRaska/open-bank-oss/issues/686)
+
 ## [0.12.6](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.12.5...notification-service-v0.12.6) (2026-07-09)
 
 
