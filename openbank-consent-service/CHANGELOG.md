@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.7](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.10.6...consent-service-v0.10.7) (2026-07-11)
+
+
+### Security
+
+* **consent,sca:** pair @Authorize with @RolesAllowed on every endpoint ([#780](https://github.com/JiRaska/open-bank-oss/issues/780)) ([dfb425c](https://github.com/JiRaska/open-bank-oss/commit/dfb425cbd06ed8a6f27879719a57cce726475b41)), closes [#467](https://github.com/JiRaska/open-bank-oss/issues/467)
+
 ## [0.10.6](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.10.5...consent-service-v0.10.6) (2026-07-07)
 
 
