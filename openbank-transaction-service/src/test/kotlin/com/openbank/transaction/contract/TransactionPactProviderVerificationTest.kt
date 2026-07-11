@@ -90,6 +90,14 @@ class TransactionPactProviderVerificationTest {
         // registered to return COMPLETED — no per-interaction setup needed here.
     }
 
+    @State("a valid source account exists")
+    fun stateValidSourceAccountExists() {
+        // Shared by domestic-payment, sepa-payment, and sepa-instant's consumer pacts (issue
+        // #468) — previously unhandled (pact-jvm silently skips a missing state, so this was a
+        // live gap, not a failure). No setup needed: initiateTransaction doesn't require the
+        // account to pre-exist in this test's Postgres, only that sourceAccountId parses as a UUID.
+    }
+
     @State("transaction-service has initiated a payment transaction")
     fun stateTransactionInitiated() {
         // No setup needed: the message producer below returns a deterministic payload.
