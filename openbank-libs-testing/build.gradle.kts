@@ -35,6 +35,13 @@ dependencies {
     api("jakarta.ws.rs:jakarta.ws.rs-api:3.1.0")
     api("jakarta.annotation:jakarta.annotation-api:3.0.0")
 
+    // Money test-data builders (issue #467) — Money/CurrencyCode are genuinely shared domain
+    // types (openbank-libs-domain), unlike JournalEntry/JournalLine which live per-service.
+    api(project(":openbank-libs-domain"))
+    // Same version pin as openbank-ledger-service/openbank-balance-service's own property
+    // suites and openbank-libs-domain's MoneyPropertyTest — kept a direct GAV like theirs.
+    api("io.kotest:kotest-property:5.9.1")
+
     testImplementation(libs.mockk)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
