@@ -123,11 +123,17 @@ Trust boundaries: every inbound/outbound hop is service↔service over mTLS with
   lag is a correctness assumption to be reconciled.
 - Fee reversal/refund is **not** in the initial charge path (milestone 2e) and is required before
   any production go-live.
-- **No fleet-wide "list every billable account" read port exists yet.** `BillingCycleScheduler`'s
-  account batch is therefore operator-configured (`openbank.billing.scheduler.account-ids`), not
-  autonomously discovered — disabled by default (`openbank.billing.scheduler.enabled=false`) so it
-  cannot charge anyone by accident before that follow-up lands. Mirrors the same honestly-scoped
-  gap in `InterestService.accrueAll`/`capitalizeAll`.
+- **Account discovery (2026-07-10):** `BillingCycleScheduler`'s batch can now be autonomously
+  discovered from account-service's fleet-wide `GET /api/v1/accounts/active`
+  (`BillableAccountDiscoveryPort` → the existing billing→account-service trust boundary and OIDC
+  M2M client — no new boundary, a second read on an established one). Because a discovered sweep
+  charges EVERY active account, it is double-gated: `openbank.billing.scheduler.enabled` AND
+  `openbank.billing.scheduler.discovery-enabled` (both default `false`); a configured
+  `account-ids` CSV always wins as a deliberate manual override. A failed page read aborts the
+  sweep (fail-closed, logged) — never a silently partial batch; the monthly re-run is idempotent
+  per (cycleId, accountId, currency). Residual: a compromised account-service response could
+  inflate the batch — bounded by assessment idempotency and by every charge still resolving its
+  own account/product context fail-closed before any posting.
 - `authz.four-eyes.enforce=false` by default (see §3): until an operator flips it on for this
   service, `billing.post` is authorized (single principal) but not yet dual-controlled in
   practice — OPA computing `four_eyes_required` correctly is necessary but not sufficient without
@@ -158,3 +164,8 @@ Trust boundaries: every inbound/outbound hop is service↔service over mTLS with
   404/409 failure modes. Phase 2d's DST invariant wired to a new seeded `FeeBillingScenario`
   (previously vacuous — confirmed and fixed, see §5). Updated the residual-risks list; removed the
   now-resolved DST-scenario gap and the phase-2e-not-built gap.
+- 2026-07-10 — account discovery landed (issue #548 follow-up): the cycle sweep can page
+  account-service's fleet-wide `GET /api/v1/accounts/active` via `BillableAccountDiscoveryPort`.
+  No new trust boundary (same billing→account-service OIDC M2M client as the existing account
+  read). Double-gated opt-in (`discovery-enabled` on top of `enabled`, both default off); CSV
+  override wins; fail-closed page reads. Rewrote the §5 "no discovery port" residual accordingly.

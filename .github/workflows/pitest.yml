@@ -13,7 +13,7 @@ on:
       services:
         description: "Space-separated list of service modules to run pitest on (the matrix below is the source of truth)"
         required: false
-        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service openbank-sepa-payment openbank-sepa-instant openbank-domestic-payment openbank-fraud-service"
+        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service openbank-sepa-payment openbank-sepa-instant openbank-domestic-payment openbank-fraud-service openbank-sanctions-service"
 
 # Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
 # block); the pitest job below already declares contents: read too, belt-and-suspenders.
@@ -47,6 +47,12 @@ jobs:
           - openbank-sepa-instant
           - openbank-domestic-payment
           - openbank-fraud-service
+          # ADR-0030 issue #265 sweep (2026-07-11): sanctions-service has 3 domain files
+          # (SanctionsCheck/SanctionsList/SanctionsEntry — screening/matching decision logic),
+          # the same "substantive domain math" shape as the payment trio + fraud above, not
+          # the 1-2-file "thin domain" shape that excludes sca/consent/billing/clearing/swift/
+          # lending/settlement. Local baseline: 67% mutation kill rate.
+          - openbank-sanctions-service
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

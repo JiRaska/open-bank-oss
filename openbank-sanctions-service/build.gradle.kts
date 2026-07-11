@@ -4,6 +4,7 @@
 
 plugins {
     id("openbank.quarkus-service")
+    id("info.solidsoft.pitest") version "1.19.0"
 }
 
 dependencies {
@@ -49,4 +50,24 @@ kover {
             }
         }
     }
+}
+
+// Mutation testing (ADR-0030 D3, issue #265). 3 domain files (SanctionsCheck, SanctionsList,
+// SanctionsEntry — screening/matching decision logic) — same "substantive domain math"
+// criterion pitest.yml already uses to include sepa-payment/sepa-instant/domestic-payment/
+// fraud (3 domain files each), not the "thin domain, 1-2 files" criterion that excludes
+// clearing/swift/lending/sca/consent/billing/settlement. Weekly-scheduled + manual dispatch
+// via pitest.yml, advisory — never a per-PR gate. Per-service plugin pin on purpose (rules.yaml
+// money_path_depth): keeping it out of the shared version catalog avoids a fleet-wide rebuild.
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf("com.openbank.sanctions.domain.*")
+    targetTests = setOf("com.openbank.sanctions.domain.*", "com.openbank.sanctions.application.usecase.*")
+    // Advisory (ADR-0063): pitest.yml reports the score; the Gradle task itself must not
+    // fail the run, so the threshold is 0. The workflow owns the 70% check.
+    mutationThreshold = 0
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
+    excludedClasses = setOf("com.openbank.sanctions.domain.*Kt")
 }

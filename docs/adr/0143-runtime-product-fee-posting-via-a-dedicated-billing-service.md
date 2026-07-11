@@ -2,13 +2,13 @@
 
 Date: 2026-06-29
 Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only; phases 1a/1b/2a/2b/2c/2c-ii/2d/2e implemented pending money-path review (PR TBD); real-environment e2e verification + four-eyes enforcement flip still required before production -->
+Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only; phases 1a/1b/2a/2b/2c/2c-ii/2d merged via PR #549, 2e via PR #672 (superseding #637), gitops DB/Redis via #683/#684; real-environment e2e verification + four-eyes enforcement flip still required before production -->
 Author(s): Jiri Raska
 
-**Delivery note (updated 2026-07-07):**
+**Delivery note (updated 2026-07-10):**
 - **Service skeleton and logic** — ✅ Shipped: `openbank-billing-service` Dockerfile + GitOps added (PR #2813); phases 1a/1b/2a/2b/2c-i merged; four-eyes `post` verb, `@RestClient` ledger posting, idempotency, balance/account context reads designed.
-- **Phase 2c (persistence + outbox + ledger posting + scheduled trigger)** — ✅ Implemented, pending
-  the required 2-approval + threat-model money-path review (ADR-0030) before merge: Flyway
+- **Phase 2c (persistence + outbox + ledger posting + scheduled trigger)** — ✅ Merged (PR #549,
+  money-path review per ADR-0030): Flyway
   migrations (`billing_cycle_assessment`, `assessed_fee`, `billing_outbox`), a `@RestClient` ledger
   posting adapter (`LedgerPostingAdapter`/`BillingJournalFactory`, mirrors
   `openbank-settlement-service`/`openbank-lending-service`), the transactional outbox
@@ -48,9 +48,14 @@ Author(s): Jiri Raska
   `reversal_reason`, `reversed_at`) via `V4__add_fee_reversal.sql`. Idempotent (re-reversing an
   already-REVERSAL_PENDING/REVERSED fee is a no-op replay) and fails cleanly — 404 for a fee never
   assessed, 409 for a fee never POSTED (waived/zero/still PENDING/FAILED) — never a generic 500.
-- **Known gaps, honestly scoped (not blockers for this PR, but block production go-live):**
-  there is no fleet-wide "list every billable account" read port, so `BillingCycleScheduler`'s
-  account batch is operator-configured rather than autonomously discovered (disabled by default);
+- **Account discovery (issue #548 follow-up)** — ✅ Implemented: account-service exposes the
+  fleet-wide `GET /api/v1/accounts/active` read (cursor-paginated, ACTIVE rows only, page cap
+  200); `BillingCycleScheduler` consumes it via `BillableAccountDiscoveryPort` when the
+  operator CSV is empty **and** `openbank.billing.scheduler.discovery-enabled=true` (its own
+  opt-in on top of `enabled`, since a discovered sweep charges every active account in the
+  fleet). An operator-configured CSV still wins as a deliberate manual override; default
+  config remains a safe no-op.
+- **Known gaps, honestly scoped (block production go-live):**
   `authz.four-eyes.enforce` needs a deliberate flip once the maker/checker runbook is reviewed;
   none of this has been deployed to or verified in a real environment (sandbox) yet.
 - **Money-path go-live** — ⬜ Still deploy-gated pending: real-environment (sandbox) e2e

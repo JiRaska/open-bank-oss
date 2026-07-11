@@ -96,3 +96,18 @@ interface LedgerPostingPort {
      */
     suspend fun postReversal(command: FeeReversalCommand): UUID
 }
+
+/** One page of the fleet-wide ACTIVE-account sweep (ADR-0143 billing discovery, issue #548). */
+data class BillableAccountsPage(val accountIds: List<String>, val nextCursor: String?)
+
+/**
+ * Discovers the accounts a billing cycle sweeps — account-service's fleet-wide
+ * `GET /api/v1/accounts/active` read (ADR-0143 / issue #548 follow-up: replaces the
+ * operator-configured account CSV as the batch source). Cursor-paginated; a `null`
+ * [BillableAccountsPage.nextCursor] means the sweep is complete. Backed by a reactive
+ * REST client; errors propagate so a failed page read aborts (and logs) the sweep
+ * rather than silently billing a partial batch.
+ */
+interface BillableAccountDiscoveryPort {
+    suspend fun activeAccounts(limit: Int, afterCursor: String?): BillableAccountsPage
+}
