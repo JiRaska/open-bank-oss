@@ -43,6 +43,16 @@ quarkus:
     root-path: /q
   dev-ui:
     enabled: false
+  # quarkus-oidc was already a build dependency but never configured — every REST endpoint
+  # was reachable with no authentication at all (issue found alongside the AmlCaseResource /
+  # StandingOrderResource / TppRegistryResource unauthenticated-endpoint sweep).
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
 
 "%dev":
   quarkus:
@@ -50,6 +60,11 @@ quarkus:
       level: DEBUG
       console:
         json: false
+
+"%test":
+  quarkus:
+    oidc:
+      enabled: false
 
 mp:
   messaging:
