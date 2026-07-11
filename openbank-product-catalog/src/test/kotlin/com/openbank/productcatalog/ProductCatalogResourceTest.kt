@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0\n// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.\n// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.\n
 package com.openbank.productcatalog
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
@@ -14,7 +16,10 @@ import org.junit.jupiter.api.Test
 // ROLE_OPERATOR. OIDC is disabled under test (%test) and @TestSecurity mocks the operator identity
 // every real caller carries (openbank-services / openbank-edge service token, or the admin-ui operator).
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(
+    value = PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_products")],
+)
 @TestSecurity(user = "test-operator", roles = ["ROLE_OPERATOR"])
 class ProductCatalogResourceTest {
 

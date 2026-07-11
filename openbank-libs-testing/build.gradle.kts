@@ -42,6 +42,39 @@ dependencies {
     // suites and openbank-libs-domain's MoneyPropertyTest — kept a direct GAV like theirs.
     api("io.kotest:kotest-property:5.9.1")
 
+    // Testcontainers resource kit — QuarkusTestResourceLifecycleManager (from quarkus-junit5,
+    // which transitively brings quarkus-test-common) + the container types the canonical
+    // Postgres*TestResource classes provision. No Quarkus BOM here either; a consuming
+    // service's own enforcedPlatform(libs.quarkus.bom) aligns final resolved versions.
+    // Version pinned directly (no version.ref on this catalog alias — every other consumer
+    // relies on enforcedPlatform(libs.quarkus.bom), which this non-Quarkus module doesn't
+    // apply). Matches libs.versions.toml's quarkus = "3.33.2".
+    // quarkus-test-common (not the heavier quarkus-junit5) — just enough for
+    // QuarkusTestResourceLifecycleManager / ResourceArg, without quarkus-junit5's full
+    // RestAssured + JUnit5-extension transitive graph, which pulled in an older docker-java
+    // that shadowed this module's own constraint below.
+    api("io.quarkus:quarkus-test-common:3.33.2")
+    api(libs.testcontainers)
+    api(libs.testcontainers.postgresql)
+    api(libs.testcontainers.redpanda)
+
+    // testcontainers:1.20.4 transitively pulls docker-java-*:3.4.0, whose default API-version
+    // negotiation is rejected by newer Docker daemons requiring a minimum API >= 1.40
+    // ("client version 1.32 is too old") — the exact failure this constraint fixes, confirmed
+    // by diffing resolved versions against a real Quarkus service (BOM-aligned to 3.7.1, works
+    // fine) vs this module unconstrained (3.4.0, fails). Every BOM-aligned consumer never hits
+    // this because enforcedPlatform(libs.quarkus.bom) already pins 3.7.1; this module has no
+    // BOM, so pin explicitly instead.
+    constraints {
+        api("com.github.docker-java:docker-java-api:3.7.1")
+        api("com.github.docker-java:docker-java-transport:3.7.1")
+        api("com.github.docker-java:docker-java-transport-zerodep:3.7.1")
+    }
+
+    // Real JDBC round-trip in the kit's own self-test (PostgresTestResourcesTest) — not
+    // pulled transitively by testcontainers-postgresql, which only drives the container.
+    testImplementation("org.postgresql:postgresql:42.7.4")
+
     testImplementation(libs.mockk)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
