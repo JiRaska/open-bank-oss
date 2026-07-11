@@ -23,6 +23,7 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
+import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.GET
@@ -38,10 +39,14 @@ import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.UriInfo
 import java.util.UUID
 
+// @Authorize alone is the fine-grained per-resource check; it must be paired with the coarse
+// @RolesAllowed gate (libs-domain's own Authorize.kt docs) — every method here was previously
+// missing that pairing, so an anonymous caller reached the @Authorize interceptor at all.
 @Tag(name = "Consents", description = "PSD2 / GDPR consent lifecycle management (ADR-0126)")
 @Path("/api/v1/consents")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
+@RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
 class ConsentResource(
     private val createConsent: CreateConsentUseCase,
     private val revokeConsent: RevokeConsentUseCase,
