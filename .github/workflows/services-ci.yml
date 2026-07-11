@@ -31,8 +31,18 @@ permissions:
 concurrency:
   # Don't let the nightly run cancel an in-flight PR/main run (or vice-versa): give the
   # scheduled/manual fleet build its own concurrency lane.
-  group: services-ci-${{ github.ref }}-${{ github.event_name == 'schedule' && 'nightly' || 'ci' }}
-  cancel-in-progress: true
+  #
+  # For push-to-main, github.ref is always refs/heads/main regardless of commit — so
+  # without a per-SHA key, any push landing while a prior main push is still building
+  # (bot commits from release-please/auto-deploy land every few minutes) cancels that
+  # run outright. A cancelled run never reaches the Pact publish step, so the broker's
+  # "latest main tag" consumer pact freezes at the last commit that happened to finish
+  # uninterrupted, and can-i-deploy keeps citing that stale/failed verification forever
+  # (issue #846). Key push-to-main by SHA so every commit gets its own lane and is never
+  # cancelled; PR pushes keep the superseding behavior (a new push to the same branch
+  # should cancel the old run).
+  group: services-ci-${{ github.ref }}-${{ github.event_name == 'schedule' && 'nightly' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || 'ci') }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
 jobs:
   changes:
