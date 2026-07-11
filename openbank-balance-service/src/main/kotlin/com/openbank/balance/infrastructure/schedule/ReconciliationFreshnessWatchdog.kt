@@ -55,7 +55,9 @@ class ReconciliationFreshnessWatchdog(
             log.errorf(
                 "Balance reconciliation freshness: STALE — last successful tie-out was %dh ago " +
                     "(as-of %s), past the %dh daily SLA; a scheduled run was likely missed.",
-                ageHours, latest.asOf, staleAfter.toHours(),
+                ageHours,
+                latest.asOf,
+                staleAfter.toHours(),
             )
         } else {
             log.debugf("Balance reconciliation freshness OK: last tie-out %dh ago (as-of %s).", ageHours, latest.asOf)
