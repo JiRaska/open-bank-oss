@@ -206,7 +206,15 @@ export const options = {
 // uuidv4() above) — crypto.getRandomValues() over Math.random() closes that flow too,
 // not just satisfies the query literally.
 function randomPoolIndex(length) {
-  return crypto.getRandomValues(new Uint32Array(1))[0] % length;
+  // Plain `% length` on a uint32 is biased toward low indices whenever length doesn't evenly
+  // divide 2^32 (CodeQL js/biased-cryptographic-random). Rejection sampling over the largest
+  // multiple of length below 2^32 keeps the distribution uniform.
+  const range = Math.floor(0x100000000 / length) * length;
+  let x;
+  do {
+    x = crypto.getRandomValues(new Uint32Array(1))[0];
+  } while (x >= range);
+  return x % length;
 }
 
 function randomDistinctPair(pool) {
