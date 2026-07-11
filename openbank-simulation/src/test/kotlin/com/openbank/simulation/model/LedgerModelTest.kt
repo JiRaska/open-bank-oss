@@ -9,6 +9,7 @@ import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalLine
 import com.openbank.ledger.domain.model.JournalSide
 import com.openbank.ledger.domain.model.JournalStatus
+import com.openbank.ledger.domain.model.LedgerValidationException
 import com.openbank.libs.domain.money.Money
 import com.openbank.simulation.adapters.AuditLog
 import org.assertj.core.api.Assertions.assertThat
@@ -98,7 +99,7 @@ class LedgerModelTest {
                 credit = "50.00",
                 status = JournalStatus.PENDING,
             )
-        }.isInstanceOf(IllegalArgumentException::class.java)
+        }.isInstanceOf(LedgerValidationException::class.java)
     }
 
     @Test
