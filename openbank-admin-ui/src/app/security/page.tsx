@@ -8,6 +8,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { Shield, RefreshCw, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { summarizeReachable, serviceVerdict } from '@/lib/security/summary'
 
 // Envelope returned by /api/security (never 500s — see that route): either the
 // scanner answered with a report, or it's unavailable with a typed reason that
@@ -50,17 +51,6 @@ const SEVERITY_COLORS: Record<string, { bg: string; text: string; border: string
 
 const GRADE_COLORS: Record<string, string> = {
   'A+': '#059669', A: '#10b981', B: '#3b82f6', C: '#f59e0b', D: '#ef4444', F: '#991b1b'
-}
-
-// Standard letter-grade bands, used to derive the platform grade from the score
-// recomputed over only the reachable services (see below).
-function gradeFromScore(score: number): string {
-  if (score >= 95) return 'A+'
-  if (score >= 90) return 'A'
-  if (score >= 80) return 'B'
-  if (score >= 70) return 'C'
-  if (score >= 60) return 'D'
-  return 'F'
 }
 
 const OWASP_LABELS: Record<string, [string, string]> = {
@@ -119,16 +109,10 @@ export default function SecurityPage() {
   // Only services the scanner could actually reach have a meaningful verdict. An
   // unreachable service has NO known findings — counting it as a vulnerability, or
   // letting its upstream F-grade drag the platform score, is a false positive. So
-  // the headline counts/score are computed over reachable services only; the
-  // unreachable ones are surfaced separately as a coverage gap, not a failure.
-  const reachableResults = results.filter(r => r.reachable)
-  const unreachableCount = results.length - reachableResults.length
-  const criticalCount = reachableResults.reduce((n, r) => n + r.findings.filter(f => f.severity === 'CRITICAL').length, 0)
-  const highCount = reachableResults.reduce((n, r) => n + r.findings.filter(f => f.severity === 'HIGH').length, 0)
-  const avgScore = reachableResults.length
-    ? Math.round(reachableResults.reduce((s, r) => s + r.score, 0) / reachableResults.length)
-    : 0
-  const platformGrade = reachableResults.length ? gradeFromScore(avgScore) : 'N/A'
+  // the headline counts/score are computed over reachable services only (pure,
+  // unit-tested in src/lib/security/summary.ts); the unreachable ones are surfaced
+  // separately as a coverage gap, not a failure.
+  const { unreachableCount, criticalCount, highCount, avgScore, platformGrade } = summarizeReachable(results)
 
   const filteredResults = results.filter(r => {
     if (filter === 'ALL') return true
@@ -349,21 +333,22 @@ export default function SecurityPage() {
                             {formatDate(r.scannedAt)}
                           </td>
                           <td style={{ padding: '12px 16px' }}>
-                            {!r.reachable ? (
-                              // Not reachable during the scan = no verdict, NOT a failure.
-                              // Rendering this as a red "Fail" was the false positive.
-                              <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: 700,
-                                background: 'var(--info-bg)', color: 'var(--info-text)', border: '1px solid var(--info-border)' }}>
-                                {t('Nelze skenovat', 'Not scanned')}
-                              </span>
-                            ) : (
-                              <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: 700,
-                                background: ['F', 'D', 'C'].includes(r.grade) ? 'var(--danger-bg)' : ['A+', 'A'].includes(r.grade) ? 'var(--success-bg)' : 'var(--warning-bg)',
-                                color: ['F', 'D', 'C'].includes(r.grade) ? 'var(--danger-text)' : ['A+', 'A'].includes(r.grade) ? 'var(--success-text)' : 'var(--warning-text)',
-                                border: `1px solid ${['F', 'D', 'C'].includes(r.grade) ? 'var(--danger-border)' : ['A+', 'A'].includes(r.grade) ? 'var(--success-border)' : 'var(--warning-border)'}` }}>
-                                {['F', 'D', 'C'].includes(r.grade) ? t('Selhání', 'Fail') : ['A+', 'A'].includes(r.grade) ? t('V pořádku', 'Pass') : t('Ke kontrole', 'Review')}
-                              </span>
-                            )}
+                            {(() => {
+                              // Verdict is centralized + unit-tested; unreachable → "Not scanned",
+                              // never a red "Fail" (that mis-mapping was the false positive).
+                              const style = {
+                                not_scanned: { bg: 'var(--info-bg)',    fg: 'var(--info-text)',    bd: 'var(--info-border)',    label: t('Nelze skenovat', 'Not scanned') },
+                                fail:        { bg: 'var(--danger-bg)',  fg: 'var(--danger-text)',  bd: 'var(--danger-border)',  label: t('Selhání', 'Fail') },
+                                pass:        { bg: 'var(--success-bg)', fg: 'var(--success-text)', bd: 'var(--success-border)', label: t('V pořádku', 'Pass') },
+                                review:      { bg: 'var(--warning-bg)', fg: 'var(--warning-text)', bd: 'var(--warning-border)', label: t('Ke kontrole', 'Review') },
+                              }[serviceVerdict(r)]
+                              return (
+                                <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: 700,
+                                  background: style.bg, color: style.fg, border: `1px solid ${style.bd}` }}>
+                                  {style.label}
+                                </span>
+                              )
+                            })()}
                           </td>
                         </tr>
                       )
