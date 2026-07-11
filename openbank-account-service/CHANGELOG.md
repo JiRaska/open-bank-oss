@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.14.0...account-service-v0.15.0) (2026-07-11)
+
+
+### Features
+
+* **perf:** money-path write benchmark + docker-compose local-dev fixes (issue [#669](https://github.com/JiRaska/open-bank-oss/issues/669)) ([#734](https://github.com/JiRaska/open-bank-oss/issues/734)) ([b0870e2](https://github.com/JiRaska/open-bank-oss/commit/b0870e27c5dfe789c47ff8e2843915de60c98d03))
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.13.0...account-service-v0.14.0) (2026-07-11)
 
 
