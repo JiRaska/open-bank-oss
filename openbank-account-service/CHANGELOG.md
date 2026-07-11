@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.13.0...account-service-v0.14.0) (2026-07-11)
+
+
+### Features
+
+* **account:** list ACTIVE accounts fleet-wide for billing discovery (ADR-0143) ([#735](https://github.com/JiRaska/open-bank-oss/issues/735)) ([ccff069](https://github.com/JiRaska/open-bank-oss/commit/ccff06984e3900b10f1fe08df90347426054ae2e))
+* **account:** validate account opening against product-catalog (ADR-0158, issue [#668](https://github.com/JiRaska/open-bank-oss/issues/668)) ([#727](https://github.com/JiRaska/open-bank-oss/issues/727)) ([2d56058](https://github.com/JiRaska/open-bank-oss/commit/2d56058a0d1ab2d8b6afcf79fbfee69bf792285c))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.12.3...account-service-v0.13.0) (2026-07-08)
 
 
