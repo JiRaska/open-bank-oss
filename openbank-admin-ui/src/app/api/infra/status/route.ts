@@ -52,6 +52,16 @@ const CLUSTER_INFRA: InfraDef[] = [
   { id: 'glitchtip',       probe: { kind: 'tcp',  host: 'glitchtip-web.observability.svc',                    port: 80 } },
   { id: 'goalert',         probe: { kind: 'tcp',  host: 'goalert.observability.svc',                          port: 8080 } },
   { id: 'ntfy',            probe: { kind: 'tcp',  host: 'ntfy.observability.svc',                             port: 8080 } },
+  // Platform control plane + orchestration. TCP probes (port open ⇒ up) against
+  // the real Service DNS, verified against the live cluster. Temporal underpins
+  // payment/settlement/statement workflow orchestration; KEDA drives the
+  // scale-to-zero the rest of the fleet relies on (ADR-0057).
+  { id: 'temporal',        probe: { kind: 'tcp',  host: 'temporal-frontend.temporal.svc',                    port: 7233 } },
+  { id: 'keda',            probe: { kind: 'tcp',  host: 'keda-operator.keda.svc',                             port: 9666 } },
+  { id: 'argocd',          probe: { kind: 'tcp',  host: 'argocd-server.argocd.svc',                           port: 80 } },
+  { id: 'kyverno',         probe: { kind: 'tcp',  host: 'kyverno-svc-metrics.kyverno.svc',                    port: 8000 } },
+  { id: 'cert-manager',    probe: { kind: 'tcp',  host: 'cert-manager.cert-manager.svc',                      port: 9402 } },
+  { id: 'karpenter',       probe: { kind: 'tcp',  host: 'karpenter.kube-system.svc',                          port: 8080 } },
 ]
 
 // Off-cluster (local dev / docker-compose): legacy localhost/container probes.
@@ -72,6 +82,14 @@ const LOCAL_INFRA: InfraDef[] = [
   { id: 'loki',            probe: { kind: 'http', url: `http://${containerHost('openbank-loki')}:3100/ready`, okCodes: [200] } },
   { id: 'tempo',           probe: { kind: 'http', url: `http://${containerHost('openbank-tempo')}:3200/ready`, okCodes: [200] } },
   { id: 'kafka-ui',        probe: { kind: 'http', url: `http://${containerHost('openbank-kafka-ui')}:8080/`, okCodes: [200, 302] } },
+  // Platform control plane is Kubernetes-only — not part of the docker-compose
+  // topology. Report UNKNOWN off-cluster rather than a misleading DOWN.
+  { id: 'temporal',        probe: { kind: 'absent' } },
+  { id: 'keda',            probe: { kind: 'absent' } },
+  { id: 'argocd',          probe: { kind: 'absent' } },
+  { id: 'kyverno',         probe: { kind: 'absent' } },
+  { id: 'cert-manager',    probe: { kind: 'absent' } },
+  { id: 'karpenter',       probe: { kind: 'absent' } },
 ]
 
 const INFRA: InfraDef[] = inCluster() ? CLUSTER_INFRA : LOCAL_INFRA

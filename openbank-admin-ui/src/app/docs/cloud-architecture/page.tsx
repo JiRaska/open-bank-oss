@@ -101,11 +101,12 @@ const NAMESPACES: NS[] = [
     ],
   },
   {
-    id: 'data', label: 'ns: cnpg-system / messaging / iam',
+    id: 'data', label: 'ns: cnpg-system / messaging / temporal / iam',
     note: ['OSS operátory pro data + identitu — in-cluster stavové jádro dle ADR-0027.', 'OSS data + identity operators — the in-cluster stateful core per ADR-0027.'],
     nodes: [
       node('cnpg', ['CloudNativePG (operátor)', 'CloudNativePG (operator)'], 'live', ['Postgres operátor Running v ns cnpg-system. Spravuje PG clustery podle domén (accounts-db, keycloak-db, apicurio-db).', 'Postgres operator Running in ns cnpg-system. Manages the per-domain PG clusters (accounts-db, keycloak-db, apicurio-db).']),
       node('kafka', ['Strimzi / Kafka', 'Strimzi / Kafka'], 'live', ['Strimzi operátor + Kafka broker (openbank-cluster) Running v ns messaging. ArgoCD app „kafka" je OutOfSync (config drift), byť Healthy.', 'Strimzi operator + Kafka broker (openbank-cluster) Running in ns messaging. ArgoCD app "kafka" is OutOfSync (config drift) though Healthy.']),
+      node('temporal', ['Temporal (workflow engine)', 'Temporal (workflow engine)'], 'live', ['Orchestrace platebních a závěrkových workflow (settlement, SEPA, statement EoM). Frontend :7233 v ns temporal + vlastní Postgres (CNPG); aplikační workery se připojují gRPC při startu (ADR-0057 app-plane).', 'Payment & close workflow orchestration (settlement, SEPA, statement EoM). Frontend :7233 in ns temporal + own Postgres (CNPG); app workers connect via gRPC at startup (ADR-0057 app-plane).']),
       node('apicurio', ['Apicurio (SQL storage)', 'Apicurio (SQL storage)'], 'live', ['Schema registry + vlastní Postgres (apicurio-db) Running v ns messaging — SQL storage, splňuje podmínku go-live ADR-0027 (ne in-memory).', 'Schema registry + its own Postgres (apicurio-db) Running in ns messaging — SQL storage, satisfying the ADR-0027 go-live condition (not in-memory).']),
       node('keycloak', ['Keycloak', 'Keycloak'], 'live', ['OIDC identity provider + keycloak-db Running v ns iam. ArgoCD app keycloak Synced + Healthy.', 'OIDC identity provider + keycloak-db Running in ns iam. ArgoCD app keycloak Synced + Healthy.']),
       node('valkey', ['Valkey / Redis', 'Valkey / Redis'], 'live', ['Cache/zámky (redis) Running v ns accounts vedle služby, která ji používá.', 'Cache/locks (redis) Running in ns accounts alongside the service that uses it.']),
