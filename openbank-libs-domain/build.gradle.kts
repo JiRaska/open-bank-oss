@@ -49,6 +49,11 @@ dependencies {
     // FlagdProviderTest and OpaSidecarPolicyDecisionPointTest drive real HttpClient calls over
     // a mock server; no framework needed — they are pure JVM.
     testImplementation("org.jboss.logging:jboss-logging:3.6.2.Final")
+    // Property-based tests on Money arithmetic invariants (ADR-0011 L1, issue #469). Same
+    // version pin as openbank-ledger-service/openbank-balance-service's JournalEntryPropertyTest/
+    // BalancePropertyTest — kept as a direct GAV like theirs rather than the shared catalog, since
+    // only the handful of services with money-invariant property suites need it.
+    testImplementation("io.kotest:kotest-property:5.9.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
