@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.6](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.6.5...tpp-registry-service-v0.6.6) (2026-07-11)
+
+
+### Security
+
+* **standing-order,tpp-registry:** add missing RBAC to fully-open endpoints ([#758](https://github.com/JiRaska/open-bank-oss/issues/758)) ([5ed0f4c](https://github.com/JiRaska/open-bank-oss/commit/5ed0f4cba2d47e288a8000f48d122418e878318f))
+
 ## [0.6.5](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.6.4...tpp-registry-service-v0.6.5) (2026-07-07)
 
 
