@@ -124,34 +124,40 @@ spec:
                   END=$(date -u +%Y-%m-%d)
                   START=$(date -u -d "@$(( $(date -u +%s) - 2592000 ))" +%Y-%m-%d)
                   NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-                  # FIX: aggregate ALL ResultsByTime periods. ResultsByTime[0]
-                  # only picks the first MONTHLY bucket; a window spanning two
-                  # months (e.g. May+June) would give just the few-day June total
-                  # ($0.17). Write the aggregator to a temp file so the Python code
-                  # stays outside the YAML block scalar (no indentation conflict).
+                  # A single DAILY, group-by-SERVICE query feeds BOTH aggregates:
+                  # summing a service's amount across every day gives services[]
+                  # (the domain breakdown), summing all services within a day gives
+                  # daily[] (the per-day spend trend the FinOps page charts). We
+                  # aggregate ALL ResultsByTime periods — never ResultsByTime[0]
+                  # alone, which would drop every day but the first. Write the
+                  # aggregator to a temp file so the Python stays outside the YAML
+                  # block scalar (no indentation conflict).
                   printf '%s\n' \
                     'import json,os' \
                     'd=json.load(open("/tmp/_ce_raw.json"))' \
                     'T={}' \
+                    'D={}' \
                     'for p in d.get("ResultsByTime",[]):' \
+                    '  day=p.get("TimePeriod",{}).get("Start","")' \
                     '  for g in p.get("Groups",[]):' \
                     '    n=g["Keys"][0];a=float(g["Metrics"]["UnblendedCost"]["Amount"])' \
                     '    T[n]=T.get(n,0.0)+a' \
+                    '    if day:D[day]=D.get(day,0.0)+a' \
                     'S=sorted([{"name":k,"amount":round(v,2)} for k,v in T.items() if v>0.001],key=lambda x:-x["amount"])' \
-                    'import sys' \
-                    'out={"available":bool(S),"currency":"USD","periodStart":os.environ["CE_START"],"periodEnd":os.environ["CE_END"],"services":S,"collectedAt":os.environ["CE_NOW"],"source":"aws-cost-explorer-cronjob"}' \
+                    'DA=[{"date":k,"amount":round(v,2)} for k,v in sorted(D.items())]' \
+                    'out={"available":bool(S),"currency":"USD","periodStart":os.environ["CE_START"],"periodEnd":os.environ["CE_END"],"total":round(sum(s["amount"] for s in S),2),"services":S,"daily":DA,"collectedAt":os.environ["CE_NOW"],"source":"aws-cost-explorer-cronjob"}' \
                     'json.dump(out,open("/tmp/cost-report.json","w"))' \
-                    'print("ok",len(S),round(sum(s["amount"] for s in S),2))' \
+                    'print("ok",len(S),"services",len(DA),"days",round(sum(s["amount"] for s in S),2))' \
                     > /tmp/agg.py
                   if aws ce get-cost-and-usage \
                        --time-period Start=$START,End=$END \
-                       --granularity MONTHLY --metrics UnblendedCost \
+                       --granularity DAILY --metrics UnblendedCost \
                        --group-by Type=DIMENSION,Key=SERVICE \
                        --region us-east-1 --output json > /tmp/_ce_raw.json 2>/dev/null; then
                     CE_START="$START" CE_END="$END" CE_NOW="$NOW" \
                     python3 /tmp/agg.py
                   else
-                    printf '{"available":false,"reason":"cost explorer query failed","currency":"USD","periodStart":"%s","periodEnd":"%s","total":0,"services":[],"collectedAt":"%s","source":"aws-cost-explorer-cronjob"}\n' \
+                    printf '{"available":false,"reason":"cost explorer query failed","currency":"USD","periodStart":"%s","periodEnd":"%s","total":0,"services":[],"daily":[],"collectedAt":"%s","source":"aws-cost-explorer-cronjob"}\n' \
                       "$START" "$END" "$NOW" > /tmp/cost-report.json
                   fi
                   echo "collected:"; cat /tmp/cost-report.json

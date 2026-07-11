@@ -8,7 +8,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react'
 import { Receipt, Search, RefreshCw } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { classifyBffFailure } from '@/lib/services/bff'
+import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 
 // Shape served by openbank-product-catalog GET /api/v1/fees — the bank-wide fee
@@ -54,7 +54,11 @@ export default function FeesPage() {
     setLoading(true)
     setUnavailable(null)
     try {
-      const res = await fetch('/api/product-catalog/fees', { cache: 'no-store' })
+      // Via the BFF proxy (not the dedicated /api/product-catalog route): the proxy
+      // detects KEDA scale-to-zero (ADR-0057) → a calm "idle" state instead of a
+      // scary "unreachable", and relays the operator token (product-catalog is now
+      // auth-gated). product-catalog is the KEDA-scaled fees system of record.
+      const res = await fetch(svcUrl('product-catalog', '/api/v1/fees'), { cache: 'no-store' })
       if (!res.ok) {
         setFees([])
         setUnavailable({ kind: await classifyBffFailure(res) })
