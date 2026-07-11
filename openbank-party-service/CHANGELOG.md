@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.8.1...party-service-v0.8.2) (2026-07-11)
+
+
+### Security
+
+* **party:** require authentication on the GDPR export endpoint ([#779](https://github.com/JiRaska/open-bank-oss/issues/779)) ([df93c24](https://github.com/JiRaska/open-bank-oss/commit/df93c249362559bc15a2b91560fe71b92d39db1a)), closes [#467](https://github.com/JiRaska/open-bank-oss/issues/467)
+
 ## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.8.0...party-service-v0.8.1) (2026-07-07)
 
 
