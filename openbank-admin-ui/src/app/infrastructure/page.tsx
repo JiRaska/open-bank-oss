@@ -8,7 +8,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
   Server, Database, Activity, RefreshCw, AlertTriangle,
-  Lock, Layers, HardDrive, CheckCircle2, XCircle, LayoutTemplate, Eye
+  Lock, Layers, HardDrive, CheckCircle2, XCircle, LayoutTemplate, Eye,
+  Workflow, Zap, GitBranch, ShieldCheck, Cpu
 } from 'lucide-react'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { LifecycleStrip, type CompLifecycle } from '@/components/infra/LifecycleStrip'
@@ -43,6 +44,13 @@ const INFRA_COMPONENTS: InfraComponent[] = [
   { id: 'glitchtip',       name: 'GlitchTip',          probeNote: 'TCP :80 · error tracking (Sentry API)', icon: <AlertTriangle size={20} /> },
   { id: 'goalert',         name: 'GoAlert',            probeNote: 'TCP :8080 · on-call escalation',       icon: <AlertTriangle size={20} /> },
   { id: 'ntfy',            name: 'ntfy',               probeNote: 'TCP :8080 · push notifications',       icon: <Activity size={20} /> },
+  // Platform control plane + orchestration (verified against the live cluster).
+  { id: 'temporal',        name: 'Temporal',           probeNote: 'TCP :7233 · workflow orchestration',   icon: <Workflow size={20} /> },
+  { id: 'keda',            name: 'KEDA',               probeNote: 'TCP :9666 · event-driven / scale-to-zero', icon: <Zap size={20} /> },
+  { id: 'argocd',          name: 'ArgoCD',             probeNote: 'TCP :80 · GitOps engine (app-of-apps)', icon: <GitBranch size={20} /> },
+  { id: 'kyverno',         name: 'Kyverno',            probeNote: 'TCP :8000 · admission policy',          icon: <ShieldCheck size={20} /> },
+  { id: 'cert-manager',    name: 'cert-manager',       probeNote: 'TCP :9402 · TLS certificate lifecycle', icon: <Lock size={20} /> },
+  { id: 'karpenter',       name: 'Karpenter',          probeNote: 'TCP :8080 · node autoscaler (Spot/arm64)', icon: <Cpu size={20} /> },
 ]
 
 interface StatusResult {
