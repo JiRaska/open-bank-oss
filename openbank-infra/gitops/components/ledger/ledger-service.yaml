@@ -4,9 +4,9 @@
 # bus when journal entries are posted. OIDC bearer-token validation points at
 # Keycloak over the in-cluster http leg (discovery returns the public issuer, so
 # browser-minted user tokens validate without touching the self-signed edge
-# cert). No Redis (no Idempotency-Key surface) and no Ingress — internal only.
-# Stays in CrashLoop until the DB and the realm client are reachable; ArgoCD
-# converges as each dependency comes up.
+# cert). Redis backs the ADR-0155 four-eyes ApprovalStore (no Idempotency-Key
+# surface). No Ingress — internal only. Stays in CrashLoop until the DB and the
+# realm client are reachable; ArgoCD converges as each dependency comes up.
 #
 # Progressive delivery: Deployment→Rollout (ADR-0098 Phase 2). Canary strategy
 # — 10% 5 min → 30% 5 min → 100%. ClusterAnalysisTemplate openbank-money-path-canary
@@ -69,6 +69,9 @@ spec:
                 secretKeyRef:
                   name: ledger-db-app
                   key: password
+            # Redis for the four-eyes ApprovalStore (ADR-0155).
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://redis.ledger.svc:6379
             # Flyway checksum mismatch on V7/V9/V11 (2026-07-11 bootstrap redeploy, #880):
             # ledger-service hadn't been redeployed since 2026-07-06, so a repo-wide
             # migration-file touch-up landed while it sat un-deployed. Repair-at-start

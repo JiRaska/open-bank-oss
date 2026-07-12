@@ -28,6 +28,9 @@ dependencies {
     implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
+    // Redis-backed ApprovalStore for the ADR-0155 four-eyes mechanism (ledger has no other
+    // Idempotency-Key/Redis surface today — this is the first Redis dependency in this service).
+    implementation(libs.quarkus.redis.client)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
 
