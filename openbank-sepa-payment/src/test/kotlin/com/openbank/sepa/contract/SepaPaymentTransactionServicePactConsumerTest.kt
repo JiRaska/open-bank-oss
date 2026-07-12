@@ -27,10 +27,16 @@ import org.junit.jupiter.api.extension.ExtendWith
 @PactTestFor(providerName = "openbank-transaction-service", pactVersion = PactSpecVersion.V3)
 class SepaPaymentTransactionServicePactConsumerTest {
 
+    // "type" must be a valid transaction-service TransactionType (DEBIT/CREDIT/TRANSFER/FEE/
+    // INTEREST/REVERSAL/ADJUSTMENT) — the payment scheme itself is carried separately in "rail".
+    // SettlementAdapter.kt sends type="TRANSFER" in production; this pact previously hardcoded
+    // the (invalid) rail-scheme name "SEPA_CREDIT_TRANSFER" here, which transaction-service
+    // rejects with 400 (No enum constant ...TransactionType.SEPA_CREDIT_TRANSFER) — confirmed
+    // live via Pact Broker verification result #2342.
     private val requestBody = """
         {
           "idempotencyKey": "pact-sepa-txn-001",
-          "type": "SEPA_CREDIT_TRANSFER",
+          "type": "TRANSFER",
           "sourceAccountId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
           "amount": 250.00,
           "currencyCode": "EUR",

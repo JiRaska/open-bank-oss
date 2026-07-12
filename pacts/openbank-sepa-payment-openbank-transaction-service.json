@@ -18,7 +18,7 @@
           "idempotencyKey": "pact-sepa-txn-001",
           "rail": "SEPA",
           "sourceAccountId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-          "type": "SEPA_CREDIT_TRANSFER",
+          "type": "TRANSFER",
           "valueDate": "2026-01-20"
         },
         "headers": {
