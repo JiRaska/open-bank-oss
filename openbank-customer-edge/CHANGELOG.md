@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.4](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.17.3...customer-edge-v0.17.4) (2026-07-12)
+
+
+### Bug Fixes
+
+* **customer-edge:** use Admin.listGroups instead of deprecated listConsumerGroups ([#868](https://github.com/JiRaska/open-bank-oss/issues/868)) ([d4fcfbe](https://github.com/JiRaska/open-bank-oss/commit/d4fcfbe25018bc9a3d51acb0dd88e83c7da5af7d)), closes [#865](https://github.com/JiRaska/open-bank-oss/issues/865)
+
 ## [0.17.3](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.17.2...customer-edge-v0.17.3) (2026-07-09)
 
 
