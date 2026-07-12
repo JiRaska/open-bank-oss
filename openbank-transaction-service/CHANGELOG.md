@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.3](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.13.2...transaction-service-v1.13.3) (2026-07-12)
+
+
+### Bug Fixes
+
+* **sepa-instant:** valueDate format bug + add transaction-service pact coverage ([#468](https://github.com/JiRaska/open-bank-oss/issues/468)) ([#840](https://github.com/JiRaska/open-bank-oss/issues/840)) ([96ab862](https://github.com/JiRaska/open-bank-oss/commit/96ab862846f734ce521c01d2b93ca8f6db0cbcf3))
+
 ## [1.13.2](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.13.1...transaction-service-v1.13.2) (2026-07-11)
 
 
