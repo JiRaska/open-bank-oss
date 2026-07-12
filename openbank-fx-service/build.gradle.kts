@@ -46,6 +46,8 @@ dependencies {
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
+    // Property-based testing of FX conversion margin invariants (ADR-0011, issue #469).
+    testImplementation("io.kotest:kotest-property:5.9.1")
     testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.testcontainers)
