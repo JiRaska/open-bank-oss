@@ -24,7 +24,7 @@ on:
     branches: [main]
     paths:
       - "**/build.gradle.kts"
-      - "gradle/libs.versions.toml"
+      - "openbank-libs/gradle/libs.versions.toml"
       - "settings.gradle.kts"
       - "gradle/wrapper/**"
   schedule:
