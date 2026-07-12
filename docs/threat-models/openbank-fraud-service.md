@@ -89,6 +89,8 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 | D1 | Scoring path | **DoS** — flood of `/score` calls, or a slow rule set, starves the payment hot path | Reactive non-blocking stack; per-service k8s limits; latency budget p99 ≤ 150 ms (ADR-0084); **fail-open** flag bounds caller blast radius if the scorer is slow/unavailable | Gateway rate-limiting — infra scope; load test before enforce phase |
 | E1 | Roles | **Elevation** — a read/operator role obtains a privileged action | Single endpoint, no privilege tiers within it yet; deny-by-default once OPA enforce is on (ADR-0034) | OPA still advisory — *open* |
 | S2 | OIDC client secret | **Spoofing (shared-credential blast radius)** — fraud reuses the shared `openbank-services` Keycloak confidential client / shared Vault key (like the rest of the fleet). Compromise of that one key mints tokens accepted across services. | Secret Vault-projected (never in git/state); confidential (not public) client; endpoint additionally requires a service/operator/admin role | **Shared-credential blast radius accepted for sandbox only.** Dedicated Vault path + per-service Keycloak client = hardening before prod. **Prod go-live requires the second money-path approver to sign off this residual** (ADR-0030). — *open* |
+| T4 | Bundled ONNX model | **Tampering** — a modified `baseline-fraud-v1.onnx` on the classpath changes shadow-score behaviour without a rule-set code review (T2's mitigation is code-as-config; a binary model artifact isn't source-reviewable the same way) | Model file is repo-committed (in `src/main/resources`, same PR review + signed-commit gate as code, ADR-0030); loaded from the service's own classpath only, never a runtime-fetched path; `OnnxFraudModel.loadSession` catches any parse/load failure and disables shadow scoring rather than propagating a bad model | No cryptographic signature/provenance on the model artifact itself yet — deferred to ADR-0141's model registry (model card + artifact signing reusing ADR-0121's chain), *tracked, not blocking since output stays shadow-only (never affects a verdict) until ADR-0139 phase 3* |
+| D2 | ONNX Runtime session | **DoS** — a malformed/oversized `.onnx` payload consumed pathologically by ONNX Runtime's native inference engine stalls or crashes the JVM | Model is a fixed, repo-bundled, size-known (269 B) artifact — never accepts an externally-supplied model at runtime; `scoreShadow` wraps inference in a try/catch and degrades to `null` (rules-only) rather than propagating | Native-library CVEs in `onnxruntime` itself — covered by the fleet's existing Trivy/SBOM scan (ADR-0121), not a fraud-service-specific gap |
 
 ## 4. Key invariants (must never regress)
 
@@ -199,3 +201,13 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
   Rollback: revert `FraudRuleEngine` to `v3` (`ScoreRequest.isNewPayee` defaults to `false` and is
   additive/backward-compatible, so no data cleanup is required); `payee_history` table can be
   dropped independently since nothing else reads it.
+
+- **2026-07-12** — ADR-0139 phase-1b: `OnnxFraudModel` replaces the throwaway
+  `BaselineFraudModel` behind `MlModelPort`. New asset: a repo-bundled ONNX model file and an
+  in-process ONNX Runtime native dependency (`com.microsoft.onnxruntime`). No new trust boundary,
+  no new endpoint, no new data source — the adapter is purely a serving-engine swap behind the
+  existing shadow-mode plane (`FraudScoringService.runShadow`, output logged, never honoured).
+  **New STRIDE additions**: T4 (unsigned model artifact — accepted risk until ADR-0141's registry
+  lands, since output stays shadow-only), D2 (native inference engine DoS — bounded by a
+  fixed/repo-bundled model and try/catch degrade-to-null). Rollback: revert this commit
+  (`BaselineFraudModel` restored verbatim); no data migration, no config change.
