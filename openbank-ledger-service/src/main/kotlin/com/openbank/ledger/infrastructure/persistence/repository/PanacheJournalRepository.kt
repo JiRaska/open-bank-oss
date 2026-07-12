@@ -389,6 +389,15 @@ class PanacheJournalRepository(
     }
 
     companion object {
+        // Balance queries include BOTH 'POSTED' and 'REVERSED' entries (only 'PENDING' is
+        // excluded). A reversal is stored as the original entry (status flipped to REVERSED) plus
+        // a compensating POSTED entry with mirrored sides — immutable history, the pair nets to
+        // zero. Filtering to POSTED alone drops the original's legs while keeping the reversal's,
+        // skewing every touched account by the original's net (issue #939: the deposit-control
+        // balance was off by the reversed originals' sum, and the global debit==credit tie-out
+        // can't catch it because the surviving reversal entry is internally balanced too).
+        private const val BOOKED_STATUSES = "('POSTED', 'REVERSED')"
+
         private val TRIAL_BALANCE_SQL = """
             select ga.id, ga.code, ga.name, ga.type, jl.base_currency,
                    coalesce(sum(case when jl.side = 'D' then jl.base_amount else 0 end), 0) as total_debit,
@@ -396,12 +405,12 @@ class PanacheJournalRepository(
             from journal_lines jl
             join journal_entries je on je.id = jl.journal_id
             join gl_accounts ga on ga.id = jl.gl_account_id
-            where je.status = 'POSTED' and je.entry_date <= :asOf
+            where je.status in $BOOKED_STATUSES and je.entry_date <= :asOf
             group by ga.id, ga.code, ga.name, ga.type, jl.base_currency
             order by ga.code
         """.trimIndent()
 
-        // Fiscal-period aggregation behind the entity-level year close (ADR-0078 D5): POSTED
+        // Fiscal-period aggregation behind the entity-level year close (ADR-0078 D5): booked
         // activity with entry_date INSIDE the period, per GL account. Same shape as
         // TRIAL_BALANCE_SQL, but range-bounded instead of cumulative-to-date.
         private val TRIAL_BALANCE_PERIOD_SQL = """
@@ -411,12 +420,12 @@ class PanacheJournalRepository(
             from journal_lines jl
             join journal_entries je on je.id = jl.journal_id
             join gl_accounts ga on ga.id = jl.gl_account_id
-            where je.status = 'POSTED' and je.entry_date >= :fromDate and je.entry_date <= :toDate
+            where je.status in $BOOKED_STATUSES and je.entry_date >= :fromDate and je.entry_date <= :toDate
             group by ga.id, ga.code, ga.name, ga.type, jl.base_currency
             order by ga.code
         """.trimIndent()
 
-        // Per-customer deposit-control sub-ledger (ADR-0039 Phase B). Only POSTED lines that carry
+        // Per-customer deposit-control sub-ledger (ADR-0039 Phase B). Only booked lines that carry
         // a sub_account_id contribute, grouped by (sub_account_id, base_currency).
         private val SUB_LEDGER_BALANCE_SQL = """
             select jl.sub_account_id, jl.base_currency,
@@ -424,7 +433,7 @@ class PanacheJournalRepository(
                    coalesce(sum(case when jl.side = 'C' then jl.base_amount else 0 end), 0) as total_credit
             from journal_lines jl
             join journal_entries je on je.id = jl.journal_id
-            where je.status = 'POSTED' and je.entry_date <= :asOf and jl.sub_account_id is not null
+            where je.status in $BOOKED_STATUSES and je.entry_date <= :asOf and jl.sub_account_id is not null
             group by jl.sub_account_id, jl.base_currency
             order by jl.sub_account_id, jl.base_currency
         """.trimIndent()
@@ -435,19 +444,19 @@ class PanacheJournalRepository(
                    coalesce(sum(case when jl.side = 'C' then jl.base_amount else 0 end), 0) as total_credit
             from journal_lines jl
             join journal_entries je on je.id = jl.journal_id
-            where je.status = 'POSTED' and je.entry_date <= :asOf and jl.sub_account_id = :subAccountId
+            where je.status in $BOOKED_STATUSES and je.entry_date <= :asOf and jl.sub_account_id = :subAccountId
             group by jl.sub_account_id, jl.base_currency
             order by jl.base_currency
         """.trimIndent()
 
-        // Tie-out: GL aggregate for a control account per currency (ALL posted lines).
+        // Tie-out: GL aggregate for a control account per currency (ALL booked lines).
         private val CONTROL_ACCOUNT_GL_BALANCE_SQL = """
             select jl.base_currency,
                    coalesce(sum(case when jl.side = 'D' then jl.base_amount else 0 end), 0) as total_debit,
                    coalesce(sum(case when jl.side = 'C' then jl.base_amount else 0 end), 0) as total_credit
             from journal_lines jl
             join journal_entries je on je.id = jl.journal_id
-            where je.status = 'POSTED'
+            where je.status in $BOOKED_STATUSES
               and je.entry_date <= :asOf
               and jl.gl_account_id = :controlAccountId
             group by jl.base_currency
@@ -462,7 +471,7 @@ class PanacheJournalRepository(
                    coalesce(sum(case when jl.side = 'C' then jl.base_amount else 0 end), 0) as total_credit
             from journal_lines jl
             join journal_entries je on je.id = jl.journal_id
-            where je.status = 'POSTED'
+            where je.status in $BOOKED_STATUSES
               and je.entry_date <= :asOf
               and jl.gl_account_id = :controlAccountId
               and jl.sub_account_id is not null
