@@ -6,6 +6,9 @@ package com.openbank.onboarding.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.onboarding.application.usecase.OnboardingProjectionService
+import com.openbank.onboarding.domain.model.KycStage
+import com.openbank.onboarding.domain.model.OnboardingEvent
+import com.openbank.onboarding.domain.model.PartyStage
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.just
@@ -15,6 +18,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Clock
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -80,4 +84,55 @@ class OnboardingEventConsumerTest {
 
         coVerify(exactly = 0) { projection.eraseParty(any()) }
     }
+
+    // ── KYC_STATUS_CHANGED (bug: KafkaPartyEventPublisher actually publishes this type, but the
+    // parser only matched "PARTY_STATUS_CHANGED" / "KYC_STATUS_UPDATED" — a type string never
+    // actually published, so every KYC/AML status transition was silently dropped) ─────────────
+
+    @Test
+    fun `consumePartyEvent projects PartyStatusChanged for KYC_STATUS_CHANGED events`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        val payload = """{"eventType":"KYC_STATUS_CHANGED","partyId":"$partyId",""" +
+            """"status":"ACTIVE","occurredAt":"2026-06-01T10:00:00Z"}"""
+        coEvery { projection.applyEvent(any()) } just runs
+
+        consumer.consumePartyEvent(payload)
+
+        coVerify(exactly = 1) {
+            projection.applyEvent(
+                OnboardingEvent.PartyStatusChanged(
+                    partyId,
+                    PartyStage.ACTIVE,
+                    Instant.parse("2026-06-01T10:00:00Z"),
+                ),
+            )
+        }
+    }
+
+    // ── KYC_CASE_STATUS_CHANGED (bug: KycEventPublisher.publish always serializes the field as
+    // "status", never "newStatus" — the parser had no fallback to "status", so every non-terminal
+    // case-status transition was silently dropped) ──────────────────────────────────────────────
+
+    @Test
+    fun `consumeKycEvent reads the 'status' field KycEventPublisher actually sends, not 'newStatus'`(): Unit =
+        runBlocking {
+            val partyId = UUID.randomUUID()
+            val caseId = UUID.randomUUID()
+            val payload = """{"eventType":"KYC_CASE_STATUS_CHANGED","partyId":"$partyId","kycCaseId":"$caseId",""" +
+                """"status":"UNDER_REVIEW","occurredAt":"2026-06-01T10:00:00Z"}"""
+            coEvery { projection.applyEvent(any()) } just runs
+
+            consumer.consumeKycEvent(payload)
+
+            coVerify(exactly = 1) {
+                projection.applyEvent(
+                    OnboardingEvent.KycStatusChanged(
+                        partyId,
+                        caseId,
+                        KycStage.UNDER_REVIEW,
+                        Instant.parse("2026-06-01T10:00:00Z"),
+                    ),
+                )
+            }
+        }
 }
