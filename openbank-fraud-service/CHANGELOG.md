@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.7.2...fraud-service-v0.8.0) (2026-07-12)
+
+
+### Features
+
+* **fraud:** add in-process ONNX Runtime adapter for shadow scoring (ADR-0139 phase-1b) ([#956](https://github.com/JiRaska/open-bank-oss/issues/956)) ([dae215b](https://github.com/JiRaska/open-bank-oss/commit/dae215b5bf996338411239a2bb807328ba165e06))
+
 ## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.7.1...fraud-service-v0.7.2) (2026-07-12)
 
 
