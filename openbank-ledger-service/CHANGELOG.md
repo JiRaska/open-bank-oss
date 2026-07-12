@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.11.1...ledger-service-v1.12.0) (2026-07-12)
+
+
+### Features
+
+* **ledger:** wire four-eyes enforcement mechanism (ADR-0155) ([#929](https://github.com/JiRaska/open-bank-oss/issues/929)) ([b92c042](https://github.com/JiRaska/open-bank-oss/commit/b92c042af5b25aba65c9d10eea37b2f414b7e540))
+
 ## [1.11.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.11.0...ledger-service-v1.11.1) (2026-07-12)
 
 
