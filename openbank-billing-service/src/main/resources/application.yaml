@@ -113,8 +113,14 @@ billing:
     # the real chart of accounts per environment.
     system-actor-id: ${BILLING_LEDGER_SYSTEM_ACTOR_ID:00000000-0000-0000-0000-0000000000bb}
     gl:
-      fee-receivable: ${BILLING_GL_FEE_RECEIVABLE_ACCOUNT_ID:a0000000-0000-0000-0000-000000001400}
-      fee-income: ${BILLING_GL_FEE_INCOME_ACCOUNT_ID:a0000000-0000-0000-0000-000000004001}
+      # Deposit-control (2100, same seeded account as settlement/transaction/interest use), not
+      # a separate fee-receivable asset account — subAccountId is only valid on deposit-control
+      # legs (ADR-0039 Phase B); "1400" was never a seeded GL account, so every real fee posting
+      # 422'd against ledger-service. Fixed alongside the pact coverage for this edge (issue #468).
+      fee-receivable: ${BILLING_GL_FEE_RECEIVABLE_ACCOUNT_ID:a0000000-0000-0000-0000-000000000002}
+      # 4003, not the older 4001 — V1__init_ledger.sql seeded 4001 with gen_random_uuid(), so no
+      # fixed UUID could ever reference it (issue #468). V15 adds a stable-UUID replacement.
+      fee-income: ${BILLING_GL_FEE_INCOME_ACCOUNT_ID:a0000000-0000-0000-0000-000000004003}
 
 openbank:
   outbox:

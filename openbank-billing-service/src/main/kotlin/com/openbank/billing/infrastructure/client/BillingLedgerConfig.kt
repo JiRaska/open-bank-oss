@@ -26,14 +26,23 @@ interface BillingLedgerConfig {
 
     interface Gl {
         /**
-         * DEBIT — the customer fee-receivable GL (an asset; `subAccountId = accountId` ties it
-         * to the sub-ledger, ADR-0039 Phase B).
+         * DEBIT — the customer's deposit-control GL (liability; `subAccountId = accountId` ties
+         * it to the sub-ledger, ADR-0039 Phase B — the ONLY GL account class that accepts
+         * `subAccountId`, matching `openbank-transaction-service`'s and `openbank-settlement-
+         * service`'s postings against the same account). Default is the seeded "2100 Customer
+         * Deposit Control" row (`V3__ledger_governance.sql`), not a separate fee-receivable asset
+         * account — an unseeded placeholder there previously made every real fee posting 422.
          */
-        @WithDefault("a0000000-0000-0000-0000-000000001400")
+        @WithDefault("a0000000-0000-0000-0000-000000000002")
         fun feeReceivable(): UUID
 
-        /** CREDIT — the bank's fee-income GL (matches the `4001 Fee Income` seed row, `V1__init_ledger.sql`). */
-        @WithDefault("a0000000-0000-0000-0000-000000004001")
+        /**
+         * CREDIT — the bank's fee-income GL. Default is the seeded "4003 Fee Income" row
+         * (`V15__stable_fee_income_account.sql`), not the OLDER `4001 Fee Income` row from
+         * `V1__init_ledger.sql` — V1 seeded it with `gen_random_uuid()`, so no fixed UUID could
+         * ever reference it; every real fee posting got a 422 "GL account not found".
+         */
+        @WithDefault("a0000000-0000-0000-0000-000000004003")
         fun feeIncome(): UUID
     }
 }

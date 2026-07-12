@@ -23,8 +23,8 @@ import java.util.UUID
 class BillingJournalFactoryTest {
 
     private val accounts = object : BillingLedgerConfig.Gl {
-        override fun feeReceivable(): UUID = UUID.fromString("a0000000-0000-0000-0000-000000001400")
-        override fun feeIncome(): UUID = UUID.fromString("a0000000-0000-0000-0000-000000004001")
+        override fun feeReceivable(): UUID = UUID.fromString("a0000000-0000-0000-0000-000000000002")
+        override fun feeIncome(): UUID = UUID.fromString("a0000000-0000-0000-0000-000000004003")
     }
     private val systemActorId = UUID.fromString("00000000-0000-0000-0000-0000000000bb")
     private val date = LocalDate.parse("2026-07-01")

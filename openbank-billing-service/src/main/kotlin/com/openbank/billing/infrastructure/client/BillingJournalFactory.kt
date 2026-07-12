@@ -14,9 +14,10 @@ import java.util.UUID
  * ledger-service (ADR-0143 step 2). Pure and side-effect-free so the accounting is fully
  * unit-tested without any HTTP — mirrors `openbank-lending-service`'s `LendingJournalFactory`.
  *
- * Fees are single-currency (no FX in phase 2, ADR-0143): DEBIT the customer fee-receivable GL
- * with `subAccountId = accountId` for the sub-ledger tie-out (ADR-0039 Phase B), CREDIT the bank
- * fee-income GL, both in the fee's own currency (`baseAmount == amount`).
+ * Fees are single-currency (no FX in phase 2, ADR-0143): DEBIT the customer's deposit-control GL
+ * with `subAccountId = accountId` for the sub-ledger tie-out (ADR-0039 Phase B — the only GL
+ * account class that accepts `subAccountId`), CREDIT the bank fee-income GL, both in the fee's
+ * own currency (`baseAmount == amount`).
  */
 object BillingJournalFactory {
 
@@ -74,8 +75,9 @@ object BillingJournalFactory {
 
     /**
      * The compensating journal for a wrongly-charged fee (ADR-0143 phase 2e): the EXACT reverse of
-     * [buildRequest]/[buildLines] — CREDIT the customer fee-receivable GL (`subAccountId = accountId`),
-     * DEBIT the bank fee-income GL — same amount/currency, own [FeeReversalCommand.idempotencyKey]
+     * [buildRequest]/[buildLines] — CREDIT the customer's deposit-control GL (`subAccountId =
+     * accountId`), DEBIT the bank fee-income GL — same amount/currency, own
+     * [FeeReversalCommand.idempotencyKey]
      * (distinct from the original charge's) so the ledger's idempotency store treats it as a new,
      * independent posting rather than a replay of the charge.
      */
