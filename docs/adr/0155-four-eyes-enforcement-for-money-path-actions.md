@@ -2,8 +2,21 @@
 
 Date: 2026-07-07
 Decision-Status: Proposed
-Delivery-Status: Partial — pilot only (openbank-sepa-payment)
+Delivery-Status: Partial — mechanism wired fleet-wide, enforcement off everywhere
 Author(s): jiri.raska
+
+> **Delivery update (2026-07-12).** All 11 money-path services with a
+> `four_eyes.verbs`-matching action now have the `ApprovalStore`/decide-endpoint
+> mechanism wired (issue #413): the original sepa-payment pilot plus batch 1
+> (account, billing, clearing, domestic-payment, lending, sepa-instant, swift —
+> PRs #556/#558–561/#563–564) plus batch 2 (ledger #929, balance #930,
+> transaction #931 — the three services that also needed a first-ever Redis
+> dependency added alongside the mechanism). `authz.four-eyes.enforce` stays
+> `false` on every service — flipping it to actually block requests pending a
+> second approval remains a deliberate, separate follow-up requiring the
+> maker/checker runbook review this ADR's own Decision section calls for, not
+> bundled into the wiring rollout. Decision-Status stays Proposed until that
+> runbook review happens and enforcement is actually turned on somewhere.
 
 ## Context
 
