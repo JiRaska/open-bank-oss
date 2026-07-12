@@ -5,6 +5,7 @@
 package com.openbank.party.contract
 
 import au.com.dius.pact.provider.PactVerifyProvider
+import au.com.dius.pact.provider.junit5.HttpTestTarget
 import au.com.dius.pact.provider.junit5.MessageTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
 import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
@@ -14,49 +15,106 @@ import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.party.application.port.out.PartyRepository
+import com.openbank.party.domain.model.AmlStatus
 import com.openbank.party.domain.model.KycStatus
+import com.openbank.party.domain.model.Party
 import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
+import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestSecurity
+import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
+import io.vertx.core.Vertx
+import io.vertx.core.impl.ContextInternal
+import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.launch
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
 
 /**
- * Provider-side verification for party-domain message contracts (ADR-0063 P1+P2 → ADR-0092).
- * Covers PARTY_CREATED (P1), PARTY_UPDATED and KYC_STATUS_CHANGED (P2 Batch C). Plain JUnit +
- * [MessageTestTarget] — no Quarkus boot. Each message mirrors the wire shape of
- * [com.openbank.party.infrastructure.kafka.KafkaPartyEventPublisher] and is serialized with the
- * same Jackson modules so the contract is verified against the real envelope.
+ * Provider-side verification for party-domain contracts (ADR-0063 P1+P2 → ADR-0092, extended by
+ * issue #468's onboarding->party/kyc/sca edge with the REST `PUT /{id}/kyc-status` interaction).
+ * Boots Quarkus (needed for the HTTP interaction; the message ones don't use it) and picks a
+ * per-interaction target the same way `TransactionPactProviderVerificationTest` does — a single
+ * `@Provider` class must verify every pact the broker/folder returns, so splitting HTTP and
+ * message into two classes collides (this repo's own "one @Provider test per provider" rule).
+ * `@TestSecurity` matches the kyc-status endpoint's `@RolesAllowed("ROLE_ADMIN", "ROLE_KYC")`.
  *
  * Reads the consumer pact from the git-pact folder (`@PactFolder`, resolved relative to this
  * module's working directory at `../pacts` = the monorepo-root `pacts/` dir) and replays each
  * interaction. This always runs — no broker, no gate, no CI secret required (ADR-0063 chose
- * git-pact over a Pact Broker for exactly this reason: zero new infra dependency), matching the
- * pattern already applied to `LedgerPactProviderVerificationTest` (openbank-ledger-service).
+ * git-pact over a Pact Broker for exactly this reason: zero new infra dependency).
  *
- * IMPORTANT: if `PartyCreatedMessagePactConsumerTest` (openbank-account-service) changes the
- * contract, regenerate the pact JSON (`./gradlew :openbank-account-service:test --tests
- * "*PartyCreatedMessagePactConsumerTest*"`) and commit the updated `pacts/openbank-account-
- * service-openbank-party-service.json` in the same PR, or this test will fail — or worse, pass
- * against a stale contract that no longer matches what the consumer actually expects.
+ * IMPORTANT: if a consumer's `@Pact` method changes (new interaction, different matcher, renamed
+ * field), regenerate that consumer's pact JSON and commit it in the same PR, or this test will
+ * fail — or worse, pass against a stale contract that no longer matches what the consumer
+ * actually expects.
  *
  * `@IgnoreNoPactsToVerify(ignoreIoErrors)` makes a missing/unreadable pact file a skip, not a
  * failure — relevant if the folder is ever emptied ahead of a broker migration.
  */
+@QuarkusTest
+@QuarkusTestResource(com.openbank.party.it.PostgresRedpandaTestResource::class)
+@TestSecurity(user = "pact-verifier", roles = ["ROLE_KYC"])
 @Provider("openbank-party-service")
 @PactFolder("../pacts")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class PartyEventPactProviderVerificationTest {
 
+    @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
+    lateinit var testPort: String
+
+    @Inject
+    lateinit var partyRepository: PartyRepository
+
+    @Inject
+    lateinit var vertx: Vertx
+
     private val objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
 
+    /**
+     * Bridges a reactive-Panache block into Pact-JVM's synchronous `@State` callback — same fix as
+     * `BalancePactProviderVerificationTest.runOnVertxContext`: pact-jvm invokes `@State` methods
+     * directly via reflection on the JUnit test thread, which has no Vert.x context, so a bare
+     * `runBlocking { partyRepository.save(...) }` throws `IllegalStateException: No current Vertx
+     * context found`.
+     */
+    private fun runOnVertxContext(block: suspend () -> Unit) {
+        val future = CompletableFuture<Unit>()
+        val duplicated = (vertx.orCreateContext as ContextInternal).duplicate()
+        VertxContextSafetyToggle.setContextSafe(duplicated, true)
+        val dispatcher = Executor { command -> duplicated.runOnContext { command.run() } }.asCoroutineDispatcher()
+        CoroutineScope(dispatcher).launch {
+            try {
+                block()
+                future.complete(Unit)
+            } catch (t: Throwable) {
+                future.completeExceptionally(t)
+            }
+        }
+        future.get(10, TimeUnit.SECONDS)
+    }
+
     @BeforeEach
-    fun setTarget(context: PactVerificationContext?) {
+    fun configureTarget(context: PactVerificationContext?) {
+        if (context == null) return
         // Package-scoped scan: the default classpath-wide ClassGraph scan throws on the JDK 25 toolchain.
-        // context is null when @IgnoreNoPactsToVerify fires a dummy invocation (no pacts in the broker).
-        context?.let { it.target = MessageTestTarget(listOf("com.openbank.party.contract")) }
+        context.target = if (context.interaction.isAsynchronousMessage()) {
+            MessageTestTarget(listOf("com.openbank.party.contract"))
+        } else {
+            HttpTestTarget("localhost", testPort.toInt())
+        }
+        context.addStateChangeHandlers(this)
     }
 
     @TestTemplate
@@ -144,5 +202,40 @@ class PartyEventPactProviderVerificationTest {
             "erasedAt" to Instant.now(),
         )
         return objectMapper.writeValueAsString(event)
+    }
+
+    @State("a party exists and can be suspended for KYC expiry")
+    fun partyExistsAndCanBeSuspended() = runOnVertxContext {
+        // pact-jvm 4.7.3 invokes each @State SETUP callback twice per interaction (visible for
+        // EVERY state in this class, not just this one — harmless for the no-op states above, but
+        // this one does a real insert with a fixed id, so the second call must be a no-op or it
+        // hits the parties_party_id_key unique constraint).
+        if (partyRepository.findById(FIXED_PARTY_ID) != null) return@runOnVertxContext
+        // Seeds the exact party id PartyServicePactConsumerTest's request path embeds
+        // (onboarding-service, issue #468) so PUT /{id}/kyc-status hits a real row.
+        partyRepository.save(
+            Party(
+                id = FIXED_PARTY_ID,
+                partyType = PartyType.INDIVIDUAL,
+                status = PartyStatus.PENDING_KYC,
+                legalName = "Pact Verify Party",
+                tradingName = null,
+                dateOfBirth = null,
+                nationality = null,
+                taxId = null,
+                registrationNumber = null,
+                email = "pact-verify-party@example.com",
+                phone = null,
+                address = null,
+                kycStatus = KycStatus.IN_PROGRESS,
+                createdAt = Instant.now(),
+                updatedAt = Instant.now(),
+                amlStatus = AmlStatus.NOT_SCREENED,
+            ),
+        )
+    }
+
+    companion object {
+        private val FIXED_PARTY_ID = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
     }
 }

@@ -63,6 +63,7 @@ jobs:
             :openbank-kyc-service:test --tests "com.openbank.kyc.contract.*PactConsumerTest" \
             :openbank-lending-service:test --tests "com.openbank.lending.contract.*PactConsumerTest" \
             :openbank-notification-service:test --tests "com.openbank.notification.contract.*PactConsumerTest" \
+            :openbank-onboarding-service:test --tests "com.openbank.onboarding.contract.*PactConsumerTest" \
             :openbank-sepa-instant:test --tests "com.openbank.sepainstant.contract.*PactConsumerTest" \
             :openbank-sepa-payment:test --tests "com.openbank.sepa.contract.*PactConsumerTest" \
             :openbank-transaction-service:test --tests "com.openbank.transaction.contract.*PactConsumerTest"

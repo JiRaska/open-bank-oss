@@ -1,0 +1,267 @@
+{
+  "consumer": {
+    "name": "openbank-onboarding-service"
+  },
+  "interactions": [
+    {
+      "comments": {
+        "testname": "com.openbank.onboarding.contract.PartyServicePactConsumerTest.the KYC_STATUS_CHANGED event carries the fields OnboardingEventConsumer needs(List)"
+      },
+      "contents": {
+        "content": {
+          "eventType": "KYC_STATUS_CHANGED",
+          "partyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "status": "ACTIVE"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "a KYC_STATUS_CHANGED event",
+      "generators": {
+        "body": {
+          "$.partyId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "key": "49f4f190",
+      "matchingRules": {
+        "body": {
+          "$.partyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.status": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a party KYC status has changed"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "comments": {
+        "testname": "com.openbank.onboarding.contract.PartyServicePactConsumerTest.suspendParty returns the party with status SUSPENDED(MockServer)"
+      },
+      "description": "PUT party kyc-status to EXPIRED (abandoned registration cleanup)",
+      "key": "148d374c",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a party exists and can be suspended for KYC expiry"
+        }
+      ],
+      "request": {
+        "body": {
+          "content": {
+            "kycStatus": "EXPIRED"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "method": "PUT",
+        "path": "/api/v1/parties/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/kyc-status"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+            "kycStatus": "EXPIRED",
+            "status": "SUSPENDED"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.kycStatus": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      },
+      "transport": "http",
+      "type": "Synchronous/HTTP"
+    },
+    {
+      "comments": {
+        "testname": "com.openbank.onboarding.contract.PartyServicePactConsumerTest.the PARTY_CREATED event carries the fields OnboardingEventConsumer needs(List)"
+      },
+      "contents": {
+        "content": {
+          "email": "jane.smith@example.com",
+          "eventType": "PARTY_CREATED",
+          "legalName": "Jane Smith",
+          "partyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "a PARTY_CREATED event",
+      "generators": {
+        "body": {
+          "$.partyId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "key": "46a7171f",
+      "matchingRules": {
+        "body": {
+          "$.email": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.legalName": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.partyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a party has been created"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "comments": {
+        "testname": "com.openbank.onboarding.contract.PartyServicePactConsumerTest.the PARTY_ERASED event carries the fields OnboardingEventConsumer needs(List)"
+      },
+      "contents": {
+        "content": {
+          "eventType": "PARTY_ERASED",
+          "partyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "a PARTY_ERASED event",
+      "generators": {
+        "body": {
+          "$.partyId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "key": "543be789",
+      "matchingRules": {
+        "body": {
+          "$.partyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "contentType": "application/json"
+      },
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "a party has been erased"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "4.0"
+    },
+    "plugins": [
+
+    ]
+  },
+  "provider": {
+    "name": "openbank-party-service"
+  }
+}

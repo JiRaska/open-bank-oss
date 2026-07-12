@@ -1,0 +1,219 @@
+{
+  "consumer": {
+    "name": "openbank-onboarding-service"
+  },
+  "messages": [
+    {
+      "contents": {
+        "eventType": "KYC_CASE_APPROVED",
+        "kycCaseId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "partyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+      },
+      "description": "a KYC_CASE_APPROVED event",
+      "generators": {
+        "body": {
+          "$.kycCaseId": {
+            "type": "Uuid"
+          },
+          "$.partyId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.kycCaseId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.partyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "a KYC case has been approved"
+        }
+      ]
+    },
+    {
+      "contents": {
+        "eventType": "KYC_CASE_OPENED",
+        "kycCaseId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "partyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+      },
+      "description": "a KYC_CASE_OPENED event",
+      "generators": {
+        "body": {
+          "$.kycCaseId": {
+            "type": "Uuid"
+          },
+          "$.partyId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.kycCaseId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.partyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "a KYC case has been opened"
+        }
+      ]
+    },
+    {
+      "contents": {
+        "eventType": "KYC_CASE_REJECTED",
+        "kycCaseId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "partyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+      },
+      "description": "a KYC_CASE_REJECTED event",
+      "generators": {
+        "body": {
+          "$.kycCaseId": {
+            "type": "Uuid"
+          },
+          "$.partyId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.kycCaseId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.partyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "a KYC case has been rejected"
+        }
+      ]
+    },
+    {
+      "contents": {
+        "eventType": "KYC_CASE_STATUS_CHANGED",
+        "kycCaseId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "partyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "status": "UNDER_REVIEW"
+      },
+      "description": "a KYC_CASE_STATUS_CHANGED event",
+      "generators": {
+        "body": {
+          "$.kycCaseId": {
+            "type": "Uuid"
+          },
+          "$.partyId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.kycCaseId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.partyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.status": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "a KYC case status has changed"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-kyc-service"
+  }
+}
