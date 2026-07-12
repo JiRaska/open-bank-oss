@@ -523,7 +523,14 @@ jobs:
   # has verified contracts before the gitops image-tag PR opens — the same
   # fail-closed shape as the Trivy image-scan gate, once flipped to enforce.
   #
-  # ENFORCE (ADR-0092): non-zero exit from can-i-deploy blocks the gitops-pr job.
+  # ENFORCE (ADR-0092): non-zero exit from can-i-deploy fails this job's own status (visible
+  # in the run), but gitops-pr no longer treats it as an all-or-nothing gate — see the
+  # `deployable` output below. A batch where 14/17 services fail must not silently prevent
+  # record-deployment from ever running for the 3 that passed (issue #846 postmortem,
+  # 2026-07-11): record-deployment was previously gated on this job's own success, so ONE
+  # blocked service in a fleet-wide batch permanently starved the broker's deployed-version
+  # matrix for every service in that batch, including the healthy ones — a circular deadlock
+  # no amount of retrying could resolve on its own.
   # Broker has been stable since ADR-0092; consumer pacts + provider verification
   # results land via _service-ci on the same main SHA (--retry-while-unknown covers
   # the race). Services with no contracts are trivially deployable (404 probe below).
@@ -540,6 +547,12 @@ jobs:
       pull-requests: write
       id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
     timeout-minutes: 10
+    outputs:
+      # JSON array of services that passed their own can-i-deploy check, set even when the
+      # step (and therefore this job) ultimately exits non-zero — step outputs written via
+      # $GITHUB_OUTPUT persist regardless of the step's own exit code. Empty/unset when the
+      # step didn't run at all (no PACT_BROKER_URL) — gitops-pr treats that as "no filter".
+      deployable: ${{ steps.check.outputs.deployable }}
     env:
       PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
       PACT_BROKER_USERNAME: ${{ vars.PACT_BROKER_USERNAME }}
@@ -550,6 +563,7 @@ jobs:
       # cluster DNS); the pact-cli docker image would run in dind and could not. The
       # standalone ships a linux arm64 build for the Graviton runner.
       - name: can-i-deploy (per changed service)
+        id: check
         if: ${{ vars.PACT_BROKER_URL != '' }}
         run: |
           set -uo pipefail
@@ -572,6 +586,7 @@ jobs:
             && echo "  ✓ sandbox environment ready" \
             || echo "::warning::could not ensure sandbox environment (may already exist — continuing)"
           rc=0
+          deployable_list=()
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
             # A service that has never published a contract is not a Pacticipant in the
             # broker; `can-i-deploy` then errors with "Pacticipant <svc> not found" (matrix
@@ -585,6 +600,7 @@ jobs:
               "${PACT_BROKER_URL}/pacticipants/${svc}" || echo 000)"
             if [ "$code" = "404" ]; then
               echo "  ✓ ${svc} has no contracts in the broker (not a Pacticipant) — deployable"
+              deployable_list+=("$svc")
               continue
             fi
             # --latest main: ask "can the latest version tagged 'main' go to sandbox?"
@@ -605,6 +621,7 @@ jobs:
             echo "$cid_out"
             if [ "$cid_rc" -eq 0 ]; then
               echo "  ✓ ${svc} deployable"
+              deployable_list+=("$svc")
             else
               # "No version with tag main exists": new service that has been registered as a
               # Pacticipant (via record-deployment) but has never published a pact or been
@@ -612,6 +629,7 @@ jobs:
               # break any consumer/provider expectation. Treat as deployable.
               if echo "$cid_out" | grep -q "No version with tag"; then
                 echo "::warning::can-i-deploy: ${svc} has no 'main'-tagged version yet (new service, no pacts) — treating as deployable (ADR-0092)"
+                deployable_list+=("$svc")
               # If every failure line is "no version is currently recorded as deployed/released
               # in this environment", the counterpart service has simply not been deployed to
               # sandbox yet and therefore cannot break any contract expectation. Treat it the
@@ -624,20 +642,40 @@ jobs:
               elif [ "$(echo "$cid_out" | grep -c "There is no verified pact" || true)" -gt 0 ] && \
                    [ "$(echo "$cid_out" | grep -c "no version is currently recorded" || true)" -ge "$(echo "$cid_out" | grep -c "There is no verified pact" || true)" ]; then
                 echo "::warning::can-i-deploy: ${svc} has counterpart(s) not yet recorded in sandbox — treating as deployable (ADR-0092)"
+                deployable_list+=("$svc")
               else
                 echo "::error::can-i-deploy: ${svc} NOT deployable — deployment blocked (ADR-0092)"
                 rc=1
               fi
             fi
           done
-          # Enforce: non-zero rc blocks the deploy (ADR-0092).
+          # Emit the per-service deployable set BEFORE the final exit — step outputs written
+          # via $GITHUB_OUTPUT persist even when the step subsequently exits non-zero, which is
+          # exactly what lets gitops-pr record-deployment proceed for the services that DID
+          # pass even when this job's own status is red because others didn't (issue #846).
+          deployable_json="$(printf '%s\n' "${deployable_list[@]:-}" | jq -R . | jq -sc 'map(select(length > 0))')"
+          echo "deployable=${deployable_json}" >> "$GITHUB_OUTPUT"
+          echo "Deployable this run: ${deployable_json}"
+          # Enforce: non-zero rc still fails this job's own status for visibility (ADR-0092) —
+          # it no longer blocks gitops-pr/record-deployment for the deployable subset above.
           exit $rc
 
   # ── 3. Update gitops manifests + open auto-merge PR ──────────────────────────
   gitops-pr:
     name: Gitops PR
     needs: [changes, build-push, can-i-deploy]
-    if: needs.changes.outputs.any == 'true'
+    # `always()` + explicit build-push check, NOT the default "can-i-deploy must succeed":
+    # can-i-deploy's own job status can be red while still emitting a `deployable` output for
+    # the services that individually passed (issue #846) — this job must still run to record
+    # THOSE, or a single blocked service in a fleet-wide batch permanently starves
+    # record-deployment for every other service in it, deadlocking the broker's view of
+    # reality against itself with no self-healing path. Never runs if build-push itself
+    # failed (nothing built to deploy) or was cancelled/skipped.
+    if: |
+      always() &&
+      needs.changes.outputs.any == 'true' &&
+      needs.build-push.result == 'success' &&
+      needs.can-i-deploy.result != 'cancelled'
     runs-on: ubuntu-latest  # manifest rewrite + PR only; hosted-first (public repo, free)
     permissions:
       contents: write
@@ -646,6 +684,10 @@ jobs:
     timeout-minutes: 10
     env:
       ECR_REGISTRY: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
+      # Services can-i-deploy confirmed deployable, as a JSON array. Empty/unset (can-i-deploy
+      # skipped entirely — no PACT_BROKER_URL) means "no filter, process everything", matching
+      # the pre-fix behavior for that case; an explicit `[]` means "checked, none passed".
+      DEPLOYABLE_SERVICES: ${{ needs.can-i-deploy.outputs.deployable || '' }}
     steps:
       # persist-credentials: false — otherwise actions/checkout leaves its own
       # Authorization extraheader in the git config AND peter-evans/create-pull-request
@@ -663,6 +705,15 @@ jobs:
           UPDATED=()
 
           for svc in $(echo "$IMAGE_TAGS" | jq -r 'keys[]'); do
+            # DEPLOYABLE_SERVICES empty/unset = can-i-deploy didn't run at all (no filter,
+            # process everything, matching pre-fix behavior). Otherwise it's an explicit JSON
+            # array (possibly []) — only services can-i-deploy actually confirmed get their
+            # manifest rewritten (issue #846: a batch-mate's failure must not block this one).
+            if [ -n "${DEPLOYABLE_SERVICES}" ] && \
+               ! echo "${DEPLOYABLE_SERVICES}" | jq -e --arg s "$svc" 'index($s) != null' >/dev/null; then
+              echo "  [${svc}] blocked by can-i-deploy this run — skipping manifest update"
+              continue
+            fi
             tag="$(echo "$IMAGE_TAGS" | jq -r --arg k "$svc" '.[$k]')"
             image="${ECR_REGISTRY}/${svc}"
 
@@ -776,11 +827,25 @@ jobs:
           PACT_STANDALONE_VERSION: "2.6.2"
         run: |
           set -uo pipefail
-          SERVICES='${{ needs.changes.outputs.services }}'
+          ALL_CHANGED='${{ needs.changes.outputs.services }}'
+          # Same filter as the "Rewrite image tags" step: only record-deploy services
+          # can-i-deploy actually confirmed this run (issue #846) — recording a service that
+          # was blocked (and therefore never got its manifest updated) would make the broker
+          # claim a version is deployed that isn't. Empty/unset DEPLOYABLE_SERVICES = can-i-
+          # deploy didn't run at all, no filter.
+          if [ -n "${DEPLOYABLE_SERVICES}" ]; then
+            SERVICES="$(echo "$ALL_CHANGED" | jq -c --argjson d "${DEPLOYABLE_SERVICES}" '[.[] | select(. as $s | $d | index($s) != null)]')"
+          else
+            SERVICES="$ALL_CHANGED"
+          fi
           arch="$(uname -m)"; case "$arch" in aarch64|arm64) a=arm64 ;; *) a=x86_64 ;; esac
           os="$(uname -s | tr '[:upper:]' '[:lower:]')"; case "$os" in darwin) o=osx ;; *) o=linux ;; esac
           tgz="pact-${PACT_STANDALONE_VERSION}-${o}-${a}.tar.gz"
           url="https://github.com/pact-foundation/pact-ruby-standalone/releases/download/v${PACT_STANDALONE_VERSION}/${tgz}"
+          if [ "$(echo "$SERVICES" | jq 'length')" -eq 0 ]; then
+            echo "No deployable services this run — nothing to record."
+            exit 0
+          fi
           # record-deployment MUST be reliable: a silent skip here lets the broker's
           # deployed-version matrix drift from reality, which then makes can-i-deploy
           # PHANTOM-BLOCK future deploys of healthy services ("no version recorded as
