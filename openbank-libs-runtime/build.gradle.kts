@@ -55,11 +55,6 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation("jakarta.ws.rs:jakarta.ws.rs-api:3.1.0")
-    // RedisFeatureStoreTest mocks these directly (no other libs-runtime class had a
-    // dedicated unit test needing Quarkus Redis types in the test source set before —
-    // the compileOnly above only covers main).
-    testImplementation("io.quarkus:quarkus-redis-client:3.33.2")
-    testImplementation("io.smallrye.reactive:mutiny-kotlin:3.1.1")
     testImplementation("jakarta.persistence:jakarta.persistence-api:3.2.0")
     testImplementation("io.quarkus:quarkus-security:3.33.2")
     testImplementation("org.jboss.resteasy:resteasy-core:6.2.12.Final")
