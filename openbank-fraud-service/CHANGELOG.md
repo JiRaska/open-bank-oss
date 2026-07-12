@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.7.1...fraud-service-v0.7.2) (2026-07-12)
+
+
+### Bug Fixes
+
+* **fraud:** use Admin.listGroups instead of deprecated listConsumerGroups ([#869](https://github.com/JiRaska/open-bank-oss/issues/869)) ([9d85115](https://github.com/JiRaska/open-bank-oss/commit/9d85115b71c20ae8a2decb64e9cec5e89ff79a07)), closes [#865](https://github.com/JiRaska/open-bank-oss/issues/865)
+
 ## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.7.0...fraud-service-v0.7.1) (2026-07-11)
 
 
