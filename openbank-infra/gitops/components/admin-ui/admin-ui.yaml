@@ -102,6 +102,11 @@ spec:
             # (before the first scan run — BFF degrades to "not yet scanned").
             - name: OPENBANK_INFRA_VULNS
               value: /config/infra-vulns/infra-vulns.json
+            # SBOM digest-identity drift (ADR-0030 D5 phase 1, issue #861): live
+            # ConfigMap written daily by the sbom-drift-scanner CronJob. Absent
+            # before the first scan run — BFF degrades to "not yet scanned".
+            - name: OPENBANK_SBOM_DRIFT
+              value: /config/sbom-drift/sbom-drift.json
             - name: SECURITY_SCANNER_URL
               value: http://security-scanner-service.security-scanner.svc:8120
             # Trace Explorer (/observability/traces): the BFF /api/tempo proxy
@@ -134,6 +139,9 @@ spec:
               readOnly: true
             - name: infra-vulns
               mountPath: /config/infra-vulns
+              readOnly: true
+            - name: sbom-drift
+              mountPath: /config/sbom-drift
               readOnly: true
           readinessProbe:
             tcpSocket:
@@ -169,6 +177,13 @@ spec:
         - name: infra-vulns
           configMap:
             name: infra-vulns
+            optional: true
+        # Daily gitops-sync drift check written by the sbom-drift-scanner CronJob
+        # (sbom-drift-scanner.yaml, ADR-0030 D5 phase 1). optional=true so the pod
+        # starts before the first scan; BFF degrades to "not yet scanned" gracefully.
+        - name: sbom-drift
+          configMap:
+            name: sbom-drift
             optional: true
 ---
 # Least-privilege identity for the BFF's Kubernetes discovery (ADR-0051).

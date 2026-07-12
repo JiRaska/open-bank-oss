@@ -5,7 +5,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { ChevronRight, ChevronDown, Download, Package, Scale, Layers, Loader2 } from 'lucide-react'
+import { ChevronRight, ChevronDown, Download, Package, Scale, Layers, Loader2, GitCompareArrows } from 'lucide-react'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 
 interface SbomSummary {
@@ -33,6 +33,16 @@ interface SbomSummary {
   }>
 }
 
+// ADR-0030 D5 phase 1 (issue #861): whether the running pod matches what
+// GitOps currently declares for this service. Undefined for any service not
+// covered by the scan (most services here aren't money-path) — no badge shown.
+interface DriftEntry {
+  status: 'checked' | 'no-pod-found'
+  runningImage?: string
+  declaredImage?: string
+  inSync?: boolean
+}
+
 interface Props {
   serviceName: string
 }
@@ -46,6 +56,18 @@ export function SbomViewer({ serviceName }: Props) {
   const [failure, setFailure] = useState<'not_generated' | 'error' | null>(null)
   const [loading, setLoading] = useState(false)
   const [filter, setFilter] = useState('')
+  const [drift, setDrift] = useState<DriftEntry | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/sbom/drift', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then((d: { services?: Record<string, DriftEntry> } | null) => {
+        if (!cancelled) setDrift(d?.services?.[serviceName] ?? null)
+      })
+      .catch(() => { if (!cancelled) setDrift(null) })
+    return () => { cancelled = true }
+  }, [serviceName])
 
   useEffect(() => {
     if (!open || data || failure) return
@@ -100,6 +122,18 @@ export function SbomViewer({ serviceName }: Props) {
               padding: '2px 6px', background: 'var(--surface-2)', borderRadius: '8px',
             }}>
               {data.totals.components} deps
+            </span>
+          )}
+          {drift?.status === 'checked' && !drift.inSync && (
+            <span
+              title={`Running image doesn't match GitOps: ${drift.runningImage ?? '?'} vs declared ${drift.declaredImage ?? '?'}`}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '3px',
+                fontSize: '10px', color: 'var(--warning, #d97706)',
+                padding: '2px 6px', background: 'var(--surface-2)', borderRadius: '8px',
+              }}
+            >
+              <GitCompareArrows size={10} /> drift
             </span>
           )}
         </button>

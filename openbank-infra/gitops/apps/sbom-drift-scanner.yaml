@@ -1,0 +1,25 @@
+# ADR-0030 D5 phase 1 (issue #861): digest-identity SBOM drift scanner.
+# See gitops/components/sbom-drift-scanner/ for design rationale.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: sbom-drift-scanner
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/sbom-drift-scanner
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: admin-ui
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
