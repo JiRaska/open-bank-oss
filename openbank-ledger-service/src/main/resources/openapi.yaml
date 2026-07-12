@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Ledger Service API
-  version: 1.7.0
+  version: 1.8.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -171,6 +171,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+
+  /api/v1/journals/replay-booked-changes:
+    post:
+      tags: [Ledger]
+      summary: Re-emit historical AccountBookedChanged events for a date window (ops recovery, #860)
+      description: >
+        Operations-recovery action. Reconstructs and re-enqueues the ledger's own already-posted
+        booked movements for a date window so a downstream projection that missed them (e.g.
+        balance-service's deposit-control sub-ledger, ADR-0039) can catch up idempotently — the
+        consumer dedups on `(journalEntryId, accountId, currency)`, so only genuinely-missing
+        deltas land. Posts NO journal and mutates NO ledger state. `dryRun` (default true) previews
+        the counts and net delta per currency without emitting anything.
+      operationId: replayBookedChanges
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplayBookedChangesRequest'
+      responses:
+        '200':
+          description: Replay summary — counts and net booked delta per currency for the window
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReplayBookedChangesResponse'
+        '400':
+          description: Invalid window (`from` after `to`) or unparseable date
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/journals/trial-balance:
     get:
@@ -624,6 +660,53 @@ components:
           type: string
           format: uuid
           description: Operator posting the reversal.
+
+    ReplayBookedChangesRequest:
+      type: object
+      required: [from, to]
+      properties:
+        from:
+          type: string
+          format: date
+          description: Inclusive start of the entry-date window to replay.
+        to:
+          type: string
+          format: date
+          description: Inclusive end of the entry-date window to replay.
+        dryRun:
+          type: boolean
+          default: true
+          description: >
+            When true (default) only previews the counts and net delta per currency without
+            emitting any event. Set false to actually re-enqueue the booked-change events.
+
+    ReplayBookedChangesResponse:
+      type: object
+      required: [dryRun, from, to, journalEntriesScanned, bookedChangeEvents, accountsTouched, netDeltaByCurrency]
+      properties:
+        dryRun:
+          type: boolean
+          description: Whether this run only previewed (true) or actually emitted (false) the events.
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        journalEntriesScanned:
+          type: integer
+          description: POSTED journal entries scanned in the window.
+        bookedChangeEvents:
+          type: integer
+          description: AccountBookedChanged events that were (or, in a dry run, would be) re-emitted.
+        accountsTouched:
+          type: integer
+          description: Distinct customer accounts touched by the replay.
+        netDeltaByCurrency:
+          type: object
+          additionalProperties:
+            type: number
+          description: Net booked delta per currency across the window — a sanity preview of what the replay carries.
 
     PostJournalLineRequest:
       type: object

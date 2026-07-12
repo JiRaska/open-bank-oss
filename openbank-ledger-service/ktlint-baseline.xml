@@ -23,6 +23,9 @@
         <error line="43" column="25" source="standard:trailing-comma-on-declaration-site" />
         <error line="52" column="36" source="standard:trailing-comma-on-declaration-site" />
     </file>
+    <file name="src/main/kotlin/com/openbank/ledger/application/port/in/ReplayBookedChangesPorts.kt">
+        <error line="5" column="9" source="standard:package-name" />
+    </file>
     <file name="src/main/kotlin/com/openbank/ledger/application/port/in/YearClosePorts.kt">
         <error line="5" column="9" source="standard:package-name" />
     </file>

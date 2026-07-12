@@ -49,6 +49,13 @@ interface JournalRepository {
      */
     suspend fun save(entry: JournalEntry, idempotencyKey: String?, outbox: List<OutboxMessage>): JournalEntry
 
+    /**
+     * Append standalone outbox messages (no journal entry) in one transaction — used by the
+     * booked-change replay (ops recovery, issue #860) to re-emit historical events for a downstream
+     * projection catch-up. Returns the number of messages enqueued.
+     */
+    suspend fun appendOutbox(messages: List<OutboxMessage>): Int
+
     /** Persist a reversal entry, flag the original as reversed, and enqueue its outbox messages, atomically. */
     suspend fun saveReversal(
         reversal: JournalEntry,
