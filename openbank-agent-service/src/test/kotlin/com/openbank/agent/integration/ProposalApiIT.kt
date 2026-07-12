@@ -25,7 +25,12 @@ import org.junit.jupiter.api.Test
  * locks the RBAC boundary on the maker-checker endpoint (ADR-0031).
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+// restrictToAnnotatedClass=true (explicit, not just relying on the framework default): without it,
+// PostgresTestResource's injected `agent.model.openai.api-key=test-not-used` placeholder can leak
+// into other @QuarkusTest classes sharing the same test JVM whose own @TestProfile expects an empty
+// key (e.g. OpenAiCompatibleModelProviderBootTest) — surfaced by the Quarkus 3.37.2 BOM bump, which
+// let this un-isolated resource's config win over a sibling class's TestProfile override.
+@QuarkusTestResource(PostgresTestResource::class, restrictToAnnotatedClass = true)
 class ProposalApiIT {
 
     @Inject
