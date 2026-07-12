@@ -248,4 +248,75 @@ class LedgerApiIT {
             body("status", equalTo("REVERSED"))
         }
     }
+
+    // Regression for #939: a posted-then-reversed pair must be balance-neutral on the trial
+    // balance. The original entry flips to REVERSED and the compensating entry posts with
+    // mirrored sides — immutable history, netting to zero. A status filter of POSTED alone
+    // drops the original's legs but keeps the reversal's, skewing every touched account by the
+    // original's net. The global debit==credit tie-out CANNOT catch that (the surviving
+    // reversal entry is internally balanced too), so this asserts the per-account NET.
+    @Test
+    @Order(11)
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `a reversed pair is balance-neutral on the trial balance per account`() {
+        val glAssetId = "a0000000-0000-0000-0000-000000000001"
+        val glLiabilityId = "a0000000-0000-0000-0000-000000000002"
+        val today = LocalDate.now().toString()
+
+        fun netByAccount(): Map<String, java.math.BigDecimal> {
+            val resp = Given { this } When { get("/api/v1/journals/trial-balance?asOf=$today") } Then {
+                statusCode(200)
+            }
+            val lines = resp.extract().jsonPath().getList<Map<String, Any>>("lines")
+            return lines.filter { it["currency"] == "CZK" }.associate {
+                val credit = java.math.BigDecimal(it["totalCredit"].toString())
+                val debit = java.math.BigDecimal(it["totalDebit"].toString())
+                // stripTrailingZeros: BigDecimal.equals is scale-sensitive (300.0 != 300.00) and
+                // the JSON scale grows with the decimals of the amounts posted so far.
+                it["code"] as String to (credit - debit).stripTrailingZeros()
+            }
+        }
+
+        val netBefore = netByAccount()
+
+        val payload = """
+            {
+              "idempotencyKey": "${UUID.randomUUID()}",
+              "transactionId": "${UUID.randomUUID()}",
+              "entryDate": "$today",
+              "valueDate": "$today",
+              "description": "Reversal-neutrality regression (#939)",
+              "createdBy": "$operatorId",
+              "lines": [
+                {"glAccountId": "$glAssetId", "side": "DEBIT", "amount": "123.45",
+                 "currencyCode": "CZK", "baseAmount": "123.45", "baseCurrencyCode": "CZK"},
+                {"glAccountId": "$glLiabilityId", "side": "CREDIT", "amount": "123.45",
+                 "currencyCode": "CZK", "baseAmount": "123.45", "baseCurrencyCode": "CZK"}
+              ]
+            }
+        """.trimIndent()
+        val journalId = (
+            Given {
+                contentType("application/json")
+                body(payload)
+            } When {
+                post("/api/v1/journals")
+            } Then {
+                statusCode(201)
+            }
+            ).extract().jsonPath().getString("id")
+
+        Given {
+            contentType("application/json")
+            body("""{"reason": "Reversal-neutrality regression", "reversedBy": "$operatorId"}""")
+        } When {
+            post("/api/v1/journals/$journalId/reverse")
+        } Then {
+            statusCode(200)
+            body("status", equalTo("REVERSED"))
+        }
+
+        // Post + reverse must leave every account's net position exactly where it started.
+        assertThat(netByAccount()).isEqualTo(netBefore)
+    }
 }
