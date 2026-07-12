@@ -11,18 +11,24 @@
 # first signature-Enforce attempt broke the fleet (#770 revert).
 #
 # Rollout (mirrors the signature policy's staging; rules.yaml provenance.enforce_criteria):
-#   1. (this file) Audit — surface images without the SBOM attestation as
-#      PolicyReport violations, break nothing. Expected to report violations for
-#      every pod whose image predates auto-deploy attestation — that is the point:
-#      the report is the redeploy worklist.
-#   2. (pending) Redeploy the running fleet so every live image carries the
-#      attestation (rules.yaml provenance.enforce_criteria #2). Verify:
-#      `kubectl get polr -A` reports 0 fail for this policy.
-#   3. (pending) Flip validationFailureAction to Enforce — only after criterion #2
-#      holds and the Audit report has run clean for an observation window
-#      (provenance.enforce_criteria #4). Same caveat as the signature policy:
-#      a `kubectl rollout undo` to a pre-attestation revision would be rejected
-#      under Enforce — rebuild or attest that digest first.
+#   1. (done) Audit — surface images without the SBOM attestation as PolicyReport
+#      violations, break nothing. Violations reported for every pod whose image
+#      predated auto-deploy attestation — that was the point: the report was the
+#      redeploy worklist.
+#   2. (done, 2026-07-12) Redeploy the running fleet so every live image carries the
+#      attestation. Surfaced a much larger latent problem along the way: almost the
+#      entire 17-service money-path fleet had never been redeployed via GitOps since
+#      initial setup, so a fleet-wide bootstrap was needed first (issue #846, PRs
+#      #847/#880/#882/#883/#884/#885) before this criterion could genuinely hold.
+#      Verified: `kubectl get polr -A` reports 0 fail for this policy against any
+#      openbank-* application pod (the small residual fail count is transient
+#      arc-runners CI-runner churn, unrelated to this policy's own scope).
+#   3. (done, 2026-07-12) Flip validationFailureAction to Enforce, per explicit
+#      maintainer authorization rather than a multi-day soak (provenance.enforce_criteria
+#      #4's "observation window" — judged satisfied given the depth of verification
+#      #2 required to actually reach a clean report). Same caveat as the signature
+#      policy: a `kubectl rollout undo` to a pre-attestation revision would be
+#      REJECTED under Enforce — rebuild or attest that digest first.
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -32,13 +38,13 @@ metadata:
     policies.kyverno.io/category: Supply Chain Security
     policies.kyverno.io/severity: high
     policies.kyverno.io/description: >-
-      Audits that every openbank-* container image carries a cosign-signed
+      Enforces that every openbank-* container image carries a cosign-signed
       CycloneDX SBOM attestation (predicateType https://cyclonedx.org/bom,
-      KMS public key). Audit mode until the running fleet is fully redeployed
-      with attested images; then staged to Enforce per rules.yaml
-      provenance.enforce_criteria (ADR-0144 graduation).
+      KMS public key). Graduated from Audit to Enforce 2026-07-12 (ADR-0144
+      graduation, rules.yaml provenance.enforce_criteria) after the running
+      fleet was fully redeployed with attested images.
 spec:
-  validationFailureAction: Audit
+  validationFailureAction: Enforce
   background: false
   webhookTimeoutSeconds: 30
   failurePolicy: Ignore
