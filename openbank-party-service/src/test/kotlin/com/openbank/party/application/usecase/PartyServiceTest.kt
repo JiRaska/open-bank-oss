@@ -364,6 +364,24 @@ class PartyServiceTest {
     }
 
     @Test
+    fun `updateKycStatus sets SUSPENDED when EXPIRED (AbandonedRegistrationCleaner's daily sweep)`(): Unit =
+        runBlocking {
+            // Was silently falling through to PENDING_KYC — the cleanup job's whole point (mark
+            // a stuck registration as blocked) didn't actually take effect, issue #468.
+            val service = newService()
+            val original = sampleParty(status = PartyStatus.PENDING_KYC, kycStatus = KycStatus.IN_PROGRESS)
+            val updatedSlot = slot<Party>()
+            coEvery { service.partyRepo.findById(original.id) } returns original
+            coEvery { service.partyRepo.update(capture(updatedSlot)) } answers { updatedSlot.captured }
+
+            val result = service.updateKycStatus(original.id, KycStatus.EXPIRED)
+
+            assertThat(updatedSlot.captured.kycStatus).isEqualTo(KycStatus.EXPIRED)
+            assertThat(updatedSlot.captured.status).isEqualTo(PartyStatus.SUSPENDED)
+            assertThat(result).isSameAs(updatedSlot.captured)
+        }
+
+    @Test
     fun `listParties with status filter dispatches to listByStatus and countByStatus`(): Unit = runBlocking {
         val service = newService()
         val parties = listOf(sampleParty(status = PartyStatus.PENDING_KYC))
