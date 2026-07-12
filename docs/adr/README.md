@@ -143,7 +143,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0137](0137-kafka-mtls-scheme-accepted-migration.md) | Kafka mTLS migration — topic-scoped enforcement of payment.scheme-accepted | Accepted | Shipped | — |
 | [0138](0138-configuration-driven-product-fee-rule-engine.md) | Configuration-driven product fee rule engine | Accepted | Partial | — |
 | [0139](0139-ml-decisioning-platform.md) | Real-time ML decisioning platform: feature store, model serving, champion/challenger governance | Accepted | Planned | — |
-| [0140](0140-feature-store-topology.md) | Feature store topology and point-in-time correctness | Accepted | Planned | — |
+| [0140](0140-feature-store-topology.md) | Feature store topology and point-in-time correctness | Accepted | Partial | — |
 | [0141](0141-model-registry-provenance.md) | Model registry and provenance for ML decisioning | Proposed | Planned | — |
 | [0142](0142-credit-decisioning-engine.md) | Credit decisioning engine on the ML decisioning platform | Proposed | Planned | — |
 | [0143](0143-runtime-product-fee-posting-via-a-dedicated-billing-service.md) | Runtime product fee posting via a dedicated billing service | Accepted | Partial | — |
@@ -158,10 +158,10 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0152](0152-single-tenancy-boundary-statement.md) | Single-tenancy boundary statement | Accepted | N/A — decision-only | — |
 | [0153](0153-savings-goal-metadata.md) | Savings goal metadata on account-service | Accepted | Shipped | — |
 | [0154](0154-agent-pr-approval-policy.md) | Independent agent PR approval for non-sensitive changes | Accepted | Shipped | — |
-| [0155](0155-four-eyes-enforcement-for-money-path-actions.md) | Four-eyes enforcement for money-path actions | Proposed | Partial — pilot only (openbank-sepa-payment) | — |
+| [0155](0155-four-eyes-enforcement-for-money-path-actions.md) | Four-eyes enforcement for money-path actions | Proposed | Partial — mechanism wired fleet-wide, enforcement off everywhere | — |
 | [0156](0156-agent-charters-as-markdown-alongside-agents-yaml.md) | Agent charters as Markdown alongside agents.yaml | Accepted | Shipped | — |
 | [0158](0158-account-opening-validates-against-product-catalog.md) | Account opening validates against product-catalog | Accepted | Complete | — |
-| [0159](0159-cnpg-ha-money-path.md) | High-availability CNPG for money-path databases | Proposed | Planned | — |
+| [0159](0159-cnpg-ha-money-path.md) | High-availability CNPG for money-path databases | Accepted | Shipped | — |
 
 ---
 
