@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/anacredit-service-v0.7.0...anacredit-service-v0.7.1) (2026-07-12)
+
+
+### Bug Fixes
+
+* **anacredit:** use Admin.listGroups instead of deprecated listConsumerGroups ([#866](https://github.com/JiRaska/open-bank-oss/issues/866)) ([c6a8c81](https://github.com/JiRaska/open-bank-oss/commit/c6a8c811d112e8f9c66f6a962d2bef520bed56df)), closes [#865](https://github.com/JiRaska/open-bank-oss/issues/865)
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/anacredit-service-v0.6.0...anacredit-service-v0.7.0) (2026-07-11)
 
 
