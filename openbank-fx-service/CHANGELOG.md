@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.7](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.7.6...fx-service-v0.7.7) (2026-07-12)
+
+
+### Bug Fixes
+
+* **fx:** grant the real M2M caller role in the Pact provider test, not a phantom one ([#862](https://github.com/JiRaska/open-bank-oss/issues/862)) ([e3a4c19](https://github.com/JiRaska/open-bank-oss/commit/e3a4c19dc13b4ffb34d75b55cc8124cb7e4b64be))
+
 ## [0.7.6](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.7.5...fx-service-v0.7.6) (2026-07-07)
 
 
