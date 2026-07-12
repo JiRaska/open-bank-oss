@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.7.0...swift-service-v0.7.1) (2026-07-12)
+
+
+### Bug Fixes
+
+* **swift:** fail-closed crash bug + add clearing-simulator pact coverage ([#468](https://github.com/JiRaska/open-bank-oss/issues/468)) ([#871](https://github.com/JiRaska/open-bank-oss/issues/871)) ([175c693](https://github.com/JiRaska/open-bank-oss/commit/175c69307a53da7eeac2639ee6ccff7fa5071a4e))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.6.9...swift-service-v0.7.0) (2026-07-08)
 
 
