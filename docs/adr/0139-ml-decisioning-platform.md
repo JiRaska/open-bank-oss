@@ -7,8 +7,8 @@ Author(s): Jiri Raska
 
 **Delivery note (updated 2026-07-12):**
 - **Foundation** — ✅ Ready: governance substrate (ADR-0031 extended by ADR-0141) in place; feature-store topology and model-serving architecture sketched.
-- **Phase 1 (substrate + shadow)** — 🟡 Partial: the feature-store side (velocity aggregates as declared features, ADR-0140) and the shadow-mode plane are shipped — `MlModelPort`, `FraudScoringService.runShadow` (computes and logs a score alongside the rule verdict, never affects it), and a zero-drift test. The in-process **ONNX Runtime adapter itself is not built yet** — `BaselineFraudModel` is an explicit throwaway placeholder behind `MlModelPort` ("phase-1b" per its own doc comment) so the shadow path could be proven end-to-end before the real model engine lands. This note previously read "not yet started", which was stale and led to a duplicate feature-store port being built from scratch (reverted, see ADR-0140's delivery note).
-- **Phase 2 (registry, drift, explainability)** — ⬜ Pending, blocked on this phase-1b ONNX adapter and ADR-0141.
+- **Phase 1 (substrate + shadow)** — ✅ Shipped: the feature-store side (velocity aggregates as declared features, ADR-0140), the shadow-mode plane (`MlModelPort`, `FraudScoringService.runShadow`, zero-drift test), and now the in-process ONNX Runtime adapter itself (`OnnxFraudModel`, phase-1b) — it loads a bundled ONNX model (`gen_onnx_baseline_model.py`) encoding the same deterministic logistic `BaselineFraudModel` used to compute directly, so behaviour is unchanged and only the execution engine is real. This note previously read "not yet started" (later "ONNX adapter itself not built yet"); both were stale for a while — the first led to a duplicate feature-store port being built from scratch (reverted, see ADR-0140's delivery note).
+- **Phase 2 (registry, drift, explainability)** — ⬜ Pending, blocked on ADR-0141 (no model registry/model-card/champion-challenger code exists anywhere in the repo — verified by grep, this one is not stale).
 - **Phase 3 (enforce in fraud)** / **Phase 4 (credit decisioning, ADR-0142)** — ⬜ Pending.
 
 ## Context
