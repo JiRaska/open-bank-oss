@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.12.0...ledger-service-v1.12.1) (2026-07-12)
+
+
+### Bug Fixes
+
+* **ledger:** include REVERSED entries in all balance-reading queries ([#945](https://github.com/JiRaska/open-bank-oss/issues/945)) ([83e070f](https://github.com/JiRaska/open-bank-oss/commit/83e070f62cc931da03ab4da5cf7a28940adf4d1f)), closes [#939](https://github.com/JiRaska/open-bank-oss/issues/939)
+
 ## [1.12.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.11.1...ledger-service-v1.12.0) (2026-07-12)
 
 
