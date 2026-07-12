@@ -34,28 +34,29 @@ class ApprovalResourceTest {
     }
 
     @Test
-    fun `decide resolves the checker id from the security identity and returns the mapped response`(): Unit = runBlocking {
-        val decidedAt = OffsetDateTime.parse("2026-07-12T00:00:00Z")
-        val approval = PendingApproval(
-            id = "appr-1",
-            action = "transaction.reverse",
-            resourceId = "txn-1",
-            makerId = "maker",
-            status = ApprovalStatus.APPROVED,
-            createdAt = decidedAt.minusHours(1),
-            decidedBy = "checker",
-            decidedAt = decidedAt,
-        )
-        val store = mockk<ApprovalStore>()
-        coEvery { store.decide("appr-1", "checker", true) } returns approval
+    fun `decide resolves the checker id from the security identity and returns the mapped response`(): Unit =
+        runBlocking {
+            val decidedAt = OffsetDateTime.parse("2026-07-12T00:00:00Z")
+            val approval = PendingApproval(
+                id = "appr-1",
+                action = "transaction.reverse",
+                resourceId = "txn-1",
+                makerId = "maker",
+                status = ApprovalStatus.APPROVED,
+                createdAt = decidedAt.minusHours(1),
+                decidedBy = "checker",
+                decidedAt = decidedAt,
+            )
+            val store = mockk<ApprovalStore>()
+            coEvery { store.decide("appr-1", "checker", true) } returns approval
 
-        val response = resourceWith(store, "checker").decide("appr-1", DecideApprovalRequest(approve = true))
+            val response = resourceWith(store, "checker").decide("appr-1", DecideApprovalRequest(approve = true))
 
-        assertThat(response.status).isEqualTo(200)
-        val body = response.entity as ApprovalResponse
-        assertThat(body.id).isEqualTo("appr-1")
-        assertThat(body.status).isEqualTo("APPROVED")
-    }
+            assertThat(response.status).isEqualTo(200)
+            val body = response.entity as ApprovalResponse
+            assertThat(body.id).isEqualTo("appr-1")
+            assertThat(body.status).isEqualTo("APPROVED")
+        }
 
     @Test
     fun `decide falls back to anonymous when the security identity has no principal`(): Unit = runBlocking {
