@@ -49,7 +49,7 @@ class SettlementAdapter(
     @Timeout(8_000)
     open suspend fun settleWithResilience(payment: SepaPayment): SettlementOutcome {
         val token = oidcClient.get().tokens.awaitSuspending().accessToken
-        val valueDate = LocalDate.now(clock).format(DateTimeFormatter.BASIC_ISO_DATE)
+        val valueDate = LocalDate.now(clock).format(DateTimeFormatter.ISO_LOCAL_DATE)
 
         val request = InitiateSettlementRequest(
             idempotencyKey = "sepa-settlement-${payment.id}",
