@@ -44,6 +44,9 @@ dependencies {
     testImplementation(libs.rest.assured.kotlin)
     // Consumer-driven contract for the party-events Kafka messages (ADR-0063, issue #468).
     testImplementation(libs.pact.consumer)
+    // Provider-side verification of kyc-case events onboarding-service consumes (ADR-0063,
+    // issue #468). Git-pact (@PactFolder) — no broker needed.
+    testImplementation(libs.pact.provider)
 }
 
 // Pact: write the generated consumer contract to pacts/ and forward broker config, matching

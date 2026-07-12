@@ -253,7 +253,10 @@ class PartyService : PartyUseCase {
      */
     private fun deriveStatus(kyc: KycStatus, aml: AmlStatus, current: PartyStatus): PartyStatus = when {
         current == PartyStatus.CLOSED -> PartyStatus.CLOSED
-        kyc == KycStatus.REJECTED || aml == AmlStatus.BLOCKED -> PartyStatus.SUSPENDED
+        // EXPIRED is set by AbandonedRegistrationCleaner's daily sweep, which explicitly expects
+        // this to suspend the party ("system expiry... party -> SUSPENDED") — without it here,
+        // an abandoned registration silently reverted to PENDING_KYC instead.
+        kyc == KycStatus.REJECTED || kyc == KycStatus.EXPIRED || aml == AmlStatus.BLOCKED -> PartyStatus.SUSPENDED
         kyc == KycStatus.APPROVED && aml == AmlStatus.CLEARED -> PartyStatus.ACTIVE
         else -> PartyStatus.PENDING_KYC
     }

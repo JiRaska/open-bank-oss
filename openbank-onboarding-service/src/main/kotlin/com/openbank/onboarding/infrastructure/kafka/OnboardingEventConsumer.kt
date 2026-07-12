@@ -105,7 +105,10 @@ class OnboardingEventConsumer(private val clock: Clock) {
                 email = node.path("email").asText(""),
                 occurredAt = occurredAt,
             )
-            "PARTY_STATUS_CHANGED", "KYC_STATUS_UPDATED" -> {
+            // KafkaPartyEventPublisher actually publishes "KYC_STATUS_CHANGED" (see
+            // publishKycStatusChanged) — "KYC_STATUS_UPDATED" was never a real event type, so
+            // every KYC/AML status transition from party-service was silently dropped here.
+            "PARTY_STATUS_CHANGED", "KYC_STATUS_UPDATED", "KYC_STATUS_CHANGED" -> {
                 val rawStatus = node.path("newStatus").asText().takeIf { it.isNotBlank() }
                     ?: node.path("status").asText()
                 val stage = runCatching { PartyStage.valueOf(rawStatus) }.getOrNull() ?: return null
@@ -128,7 +131,13 @@ class OnboardingEventConsumer(private val clock: Clock) {
             "KYC_CASE_STATUS_CHANGED", "KYC_CASE_APPROVED", "KYC_CASE_REJECTED" -> {
                 // kyc-service emits the case id as "kycCaseId"; accept "caseId" too for resilience.
                 val caseId = (node.path("kycCaseId").asUuid() ?: node.path("caseId").asUuid()) ?: return null
+                // KycEventPublisher.publish always serializes the field as "status", never
+                // "newStatus" — KYC_CASE_STATUS_CHANGED has no other fallback, so every
+                // non-terminal case-status transition (e.g. UNDER_REVIEW, PEP escalation) was
+                // silently dropped here (only the terminal APPROVED/REJECTED hardcoded defaults
+                // ever worked, and only by coincidence — they never actually read the payload).
                 val rawStatus = node.path("newStatus").asText().takeIf { it.isNotBlank() }
+                    ?: node.path("status").asText().takeIf { it.isNotBlank() }
                     ?: when (type) {
                         "KYC_CASE_APPROVED" -> "APPROVED"
                         "KYC_CASE_REJECTED" -> "REJECTED"
