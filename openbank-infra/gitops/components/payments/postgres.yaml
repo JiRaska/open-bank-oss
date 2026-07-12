@@ -194,7 +194,27 @@ spec:
   # deadlocks, xid age, WAL archiving) with zero app changes.
   monitoring:
     enablePodMonitor: true
-  instances: 1
+  # HA (ADR-0159): primary + hot standby with async streaming replication and
+  # CNPG-managed automated failover. `enablePodAntiAffinity` + required
+  # `kubernetes.io/hostname` keeps the two pods on DIFFERENT NODES — that is both
+  # the HA guarantee and the fix for the single-instance un-drainable-PDB node-roll
+  # block (issue #809): with a standby present the PDB permits one disruption, so
+  # Karpenter drains/rolls a DB-hosting node without the manual delete-primary dance.
+  # The topologySpreadConstraint softly spreads the pair across AZs when capacity
+  # allows. Async replication (no minSyncReplicas) keeps the write path independent
+  # of standby health; synchronous is deferred to a production decision (ADR-0159).
+  instances: 2
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          cnpg.io/cluster: sepa-instant-db
   imageName: ghcr.io/cloudnative-pg/postgresql:18.1
   storage:
     storageClass: gp3
