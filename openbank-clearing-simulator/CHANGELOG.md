@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.4](https://github.com/JiRaska/open-bank-oss/compare/clearing-simulator-v0.4.3...clearing-simulator-v0.4.4) (2026-07-12)
+
+
+### Bug Fixes
+
+* **swift:** fail-closed crash bug + add clearing-simulator pact coverage ([#468](https://github.com/JiRaska/open-bank-oss/issues/468)) ([#871](https://github.com/JiRaska/open-bank-oss/issues/871)) ([175c693](https://github.com/JiRaska/open-bank-oss/commit/175c69307a53da7eeac2639ee6ccff7fa5071a4e))
+
 ## [0.4.3](https://github.com/JiRaska/open-bank-oss/compare/clearing-simulator-v0.4.2...clearing-simulator-v0.4.3) (2026-07-07)
 
 

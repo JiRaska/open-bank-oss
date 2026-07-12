@@ -9,7 +9,7 @@
   "openbank-billing-service": "0.6.0",
   "openbank-card-issuance-service": "0.10.2",
   "openbank-clearing-service": "0.7.0",
-  "openbank-clearing-simulator": "0.4.3",
+  "openbank-clearing-simulator": "0.4.4",
   "openbank-consent-service": "0.10.7",
   "openbank-copilot-service": "0.5.2",
   "openbank-customer-edge": "0.17.4",
