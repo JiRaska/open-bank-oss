@@ -3,11 +3,12 @@ kotlin = "2.3.20"
 quarkus = "3.37.2"
 quarkus-plugin = "3.37.2"
 coroutines = "1.8.1"
-# 2.22.0 (Dependabot #57-#67 sweep): Quarkus 3.37.2's BOM resolves jackson-databind/
-# jackson-core to 2.22.0 for service modules (enforcedPlatform); this floors the modules
-# that declare Jackson directly (libs-domain) on the same version, closing
-# GHSA-hgj6-7826-r7m5 / GHSA-j3rv-43j4-c7qm / GHSA-rmj7-2vxq-3g9f / etc.
-jackson = "2.22.0"
+# 2.22.1 (Dependabot #75 follow-up): 2.22.0 itself carries a GHSA fixed in 2.22.1 — same
+# patch series Quarkus 3.37.2's BOM resolves jackson-databind/jackson-core to
+# (enforcedPlatform); this floors the modules that declare Jackson directly (libs-domain)
+# on the same version, closing GHSA-hgj6-7826-r7m5 / GHSA-j3rv-43j4-c7qm /
+# GHSA-rmj7-2vxq-3g9f / etc.
+jackson = "2.22.1"
 # JUG — UUIDv7 (RFC 9562) generation for time-ordered identifiers (ADR-0106). FasterXML,
 # Apache-2.0, same org as Jackson (already a core dep). Vetted generator instead of a
 # hand-rolled one: intra-millisecond monotonicity (RFC 9562 §6.2) is subtle to get right.

@@ -66,16 +66,31 @@ dependencies {
 // resolutionStrategy applies directly to it.
 //
 // jackson-databind/jackson-core: gradle/verification-metadata.xml still carries a real
-// (jar-backed, not pom-only stub) 2.21.2 resolution alongside the fleet-wide 2.21.5 floor
-// from openbank.dependency-vulnerability-pins — every service and openbank-simulation
-// already apply that plugin, so the lingering 2.21.2 is most likely the same class of gap
-// as plexus-utils above: the Quarkus Gradle plugin's own devtools/registry-client tooling
-// pulls Jackson for its own use, on a classpath a service's force() cannot reach. Floor it
-// here too on the off chance that's the source; harmless no-op otherwise.
+// (jar-backed, not pom-only stub) pre-patch resolution alongside the fleet-wide 2.22.1
+// floor from openbank.dependency-vulnerability-pins — every service and
+// openbank-simulation already apply that plugin, so the lingering old jar is most likely
+// the same class of gap as plexus-utils above: the Quarkus Gradle plugin's own
+// devtools/registry-client tooling pulls Jackson for its own use, on a classpath a
+// service's force() cannot reach. Floor it here too on the off chance that's the source;
+// harmless no-op otherwise. Netty is the same story — the plugin's own
+// quarkusBuild/quarkusDev augmentation classpath resolves its own Vert.x/Netty stack
+// independently of any service's resolutionStrategy (Dependabot #20-#56 sweep still
+// showed pre-4.1.135.Final jars in gradle/verification-metadata.xml after every service
+// was floored).
 configurations.all {
     resolutionStrategy {
         force("org.codehaus.plexus:plexus-utils:4.0.3")
-        force("com.fasterxml.jackson.core:jackson-databind:2.21.5")
-        force("com.fasterxml.jackson.core:jackson-core:2.21.5")
+        force("com.fasterxml.jackson.core:jackson-databind:2.22.1")
+        force("com.fasterxml.jackson.core:jackson-core:2.22.1")
+        force("io.netty:netty-codec:4.1.135.Final")
+        force("io.netty:netty-codec-http:4.1.135.Final")
+        force("io.netty:netty-codec-http2:4.1.135.Final")
+        force("io.netty:netty-codec-haproxy:4.1.135.Final")
+        force("io.netty:netty-common:4.1.135.Final")
+        force("io.netty:netty-handler:4.1.135.Final")
+        force("io.netty:netty-handler-proxy:4.1.135.Final")
+        force("io.netty:netty-resolver-dns:4.1.135.Final")
+        force("io.netty:netty-transport-native-epoll:4.1.135.Final")
+        force("io.netty:netty-transport-native-kqueue:4.1.135.Final")
     }
 }
