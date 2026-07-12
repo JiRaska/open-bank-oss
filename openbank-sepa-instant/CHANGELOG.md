@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.7.0...sepa-instant-v0.7.1) (2026-07-12)
+
+
+### Bug Fixes
+
+* **sepa-instant:** valueDate format bug + add transaction-service pact coverage ([#468](https://github.com/JiRaska/open-bank-oss/issues/468)) ([#840](https://github.com/JiRaska/open-bank-oss/issues/840)) ([96ab862](https://github.com/JiRaska/open-bank-oss/commit/96ab862846f734ce521c01d2b93ca8f6db0cbcf3))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.6.6...sepa-instant-v0.7.0) (2026-07-08)
 
 
