@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.1](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.10.0...balance-service-v1.10.1) (2026-07-12)
+
+
+### Bug Fixes
+
+* **balance:** V10 repair the booked-change replay double-count ([#939](https://github.com/JiRaska/open-bank-oss/issues/939)) ([#947](https://github.com/JiRaska/open-bank-oss/issues/947)) ([ef89022](https://github.com/JiRaska/open-bank-oss/commit/ef89022f2ebf75d08f46428a97b26045d6ecf986))
+
 ## [1.10.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.9.0...balance-service-v1.10.0) (2026-07-12)
 
 
