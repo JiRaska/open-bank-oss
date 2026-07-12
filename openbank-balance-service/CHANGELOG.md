@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.9.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.8.3...balance-service-v1.9.0) (2026-07-12)
+
+
+### Features
+
+* **balance:** watchdog alerts when the daily EoD tie-out goes stale/absent (step 2 of [#855](https://github.com/JiRaska/open-bank-oss/issues/855)) ([#863](https://github.com/JiRaska/open-bank-oss/issues/863)) ([84f54ec](https://github.com/JiRaska/open-bank-oss/commit/84f54ec1766e6c59acb5be13c56ea74ac36cd0a5))
+
+
+### Bug Fixes
+
+* **balance:** bridge Pact @State handlers onto a duplicated Vert.x context ([#858](https://github.com/JiRaska/open-bank-oss/issues/858)) ([79938a1](https://github.com/JiRaska/open-bank-oss/commit/79938a1302c5563aaaea8de537726ecc988b6fba))
+* **balance:** create missing balance_reconciliation_seq (daily tie-out never persisted) ([#856](https://github.com/JiRaska/open-bank-oss/issues/856)) ([9ef4905](https://github.com/JiRaska/open-bank-oss/commit/9ef4905fbc77f1bf6db823c4e2ea96aaa1421560))
+
 ## [1.8.3](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.8.2...balance-service-v1.8.3) (2026-07-07)
 
 
