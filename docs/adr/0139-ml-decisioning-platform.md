@@ -2,12 +2,14 @@
 
 Date: 2026-06-29
 Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only -->
+Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only -->
 Author(s): Jiri Raska
 
-**Delivery note (updated 2026-06-30):**
+**Delivery note (updated 2026-07-12):**
 - **Foundation** — ✅ Ready: governance substrate (ADR-0031 extended by ADR-0141) in place; feature-store topology and model-serving architecture sketched.
-- **Implementation** — ⬜ Pending: feature definition whitelisting, velocity aggregates (H1/H24/D7 windows), online/offline parity enforcement, model registry/cards, and fraud-service integration not yet started; Phase 1 phased pending ADR-0140/0141.
+- **Phase 1 (substrate + shadow)** — 🟡 Partial: the feature-store side (velocity aggregates as declared features, ADR-0140) and the shadow-mode plane are shipped — `MlModelPort`, `FraudScoringService.runShadow` (computes and logs a score alongside the rule verdict, never affects it), and a zero-drift test. The in-process **ONNX Runtime adapter itself is not built yet** — `BaselineFraudModel` is an explicit throwaway placeholder behind `MlModelPort` ("phase-1b" per its own doc comment) so the shadow path could be proven end-to-end before the real model engine lands. This note previously read "not yet started", which was stale and led to a duplicate feature-store port being built from scratch (reverted, see ADR-0140's delivery note).
+- **Phase 2 (registry, drift, explainability)** — ⬜ Pending, blocked on this phase-1b ONNX adapter and ADR-0141.
+- **Phase 3 (enforce in fraud)** / **Phase 4 (credit decisioning, ADR-0142)** — ⬜ Pending.
 
 ## Context
 
