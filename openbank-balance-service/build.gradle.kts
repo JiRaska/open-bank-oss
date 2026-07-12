@@ -32,6 +32,9 @@ dependencies {
     // DomainMetrics (incl. the outbox-backlog gauge) was a silent no-op. Adding this wires the
     // /q/metrics surface so the gauge actually emits (ADR-0077 / ADR-0079).
     implementation(libs.quarkus.micrometer.registry.prometheus)
+    // Redis-backed ApprovalStore for the four-eyes maker-checker mechanism (ADR-0155).
+    // First Redis usage in balance-service — see ApprovalConfig KDoc.
+    implementation(libs.quarkus.redis.client)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)

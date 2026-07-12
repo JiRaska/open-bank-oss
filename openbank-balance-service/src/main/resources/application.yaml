@@ -57,6 +57,9 @@ quarkus:
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
 
+  redis:
+    hosts: redis://localhost:6379
+
   rest-client:
     ledger-service:
       url: ${LEDGER_SERVICE_URL:http://localhost:8101}
@@ -205,3 +208,10 @@ opa:
 # logged at WARN, the request still proceeds. Flip to enforce is Phase 5.
 authz:
   enforce: "${AUTHZ_ENFORCE:false}"
+  # ADR-0155: four-eyes ENFORCEMENT (blocking a maker's request pending a second
+  # approver), independent of the base allow/deny enforce toggle above. Stays false
+  # here — this PR only wires the ApprovalStore/endpoint (mirrors the sepa-payment
+  # pilot); flipping this is a deliberate, separate follow-up once the maker/checker
+  # runbook is reviewed, not bundled with the wiring itself.
+  four-eyes:
+    enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"

@@ -70,6 +70,9 @@ spec:
                 secretKeyRef:
                   name: balances-db-app
                   key: password
+            # Redis for the four-eyes ApprovalStore (ADR-0155).
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://redis.balances.svc:6379
             # Kafka → Strimzi tls:9093 (mTLS, ADR-0137 #2665 Tier 1).
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9093

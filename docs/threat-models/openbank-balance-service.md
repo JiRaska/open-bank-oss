@@ -66,6 +66,8 @@ Domain layer has zero framework imports (ADR-0002); overdraft + reconciliation m
   verified callers collectively need (no blanket allow across every balance action), but not to the
   specific caller. Tightening this needs per-caller identity (mTLS SPIFFE, ADR-0017, or a dedicated
   OIDC client per caller) — tracked as a follow-up, not solved here.
+- Four-eyes approval-decide endpoint: same role set as the gated actions (`OPERATOR`/`ADMIN`),
+  plus a domain-level segregation-of-duties check (checker id != maker id) — see §4a.
 
 ## 4. STRIDE analysis
 
@@ -80,6 +82,42 @@ Domain layer has zero framework imports (ADR-0002); overdraft + reconciliation m
 | D1 | Reconciliation / writes | **DoS** — hold exhaustion / write storm / expensive tie-out scans | Rate limits; idempotency drops retries; per-currency aggregation; scheduled reconciliation cadence; reactive non-blocking stack | Gateway rate-limit — infra scope |
 | E1 | Roles | **Elevation** — read role triggers a debit / raises own overdraft | Deny-by-default; explicit role for money movement; cover check cannot mutate; OPA now enforced (a viewer/read-only reason never grants `balance.credit`/`balance.debit`) | Low |
 | T3 | Ledger client | **Tampering / spoofing of source** — projection trusts a forged ledger response | Authenticated ledger-service inside trust mesh; reconciliation compares against ledger as golden source, flags mismatch | mTLS/service-identity hardening — infra scope |
+
+## 4a. Four-eyes approval (ADR-0155) — STRIDE supplement
+
+Both `POST /{accountId}/credit` (`balance.credit`) and `POST /{accountId}/debit`
+(`balance.debit`) are money-path actions OPA (`rest.rego`) can flag `four_eyes_required`. New
+endpoint `PATCH /api/v1/balances/approvals/{id}` lets a DIFFERENT operator decide the resulting
+`PendingApproval`; the maker retries the original credit/debit call with an `X-Approval-Id`
+header. A single decide endpoint handles approvals for BOTH gated actions — `ApprovalStore.decide`
+resolves by approval id regardless of which action created the pending record. Note both actions
+also admit `ROLE_SERVICE` (M2M) callers, same as today — this mechanism does not change that;
+**`authz.four-eyes.enforce` stays `false` in this PR** — the `ApprovalStore`/endpoint are wired
+(mirroring the account-service rollout, issue #413), but blocking is a deliberate follow-up flip,
+not bundled here (see ADR-0155).
+
+This is also balance-service's **first** Redis dependency: a new namespace-local `redis`
+Deployment/Service (`openbank-infra/gitops/components/balances/redis.yaml`) backs the
+`RedisApprovalStore` producer — the service's existing money-movement idempotency (V8
+`balance_movement` dedup ledger) stays DB-based and is untouched by this change.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **S**poofing | A caller other than an operator decides an approval | `@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)` + OPA `@Authorize(action="balance.approval.decide")` on the decide endpoint |
+| **E**oP | The maker approves their own credit/debit request (self-approval defeats maker-checker) | `ApprovalStore.decide` throws `SelfApprovalNotAllowedException` (mapped to 403) when `decidedBy == makerId` — enforced in the domain port itself, not just the REST layer, and `makerId`/`decidedBy` both resolve via the same `.principal.name` extraction (interceptor vs. `SecurityIdentity`) so the comparison can't silently mismatch for the same real person |
+| **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different request | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
+| **R**epudiation | No record of who approved a gated credit/debit | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see ADR-0155 Negative consequences: not yet a permanent audit trail) |
+| **I**nfo disclosure | Approval id enumeration reveals account/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random id (`RedisApprovalStore`, not sequential) |
+| **D**oS | Flooding `POST /{accountId}/credit`\|`/debit` to exhaust Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoints themselves; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
+
+**DFD update:** adds `Operator (checker) → PATCH /api/v1/balances/approvals/{id} → Redis
+(approval:*)` alongside the existing `POST /{accountId}/credit`|`/debit` edges; the maker's retry
+reuses the existing DFD edges. New same-namespace-only trust boundary: `balance-service pod →
+redis.balances.svc:6379` (NetworkPolicy `redis-ingress-allow-list`, in-namespace callers only).
+**Risk class:** integrity (segregation of duties) + confidentiality (approval record scope).
+**Rollback:** `authz.four-eyes.enforce=false` (default) — the endpoint and store exist but do not
+change any existing request's outcome until explicitly flipped; the Redis deployment itself can
+also be deleted (nothing else in balance-service depends on it).
 
 ## 5. Key invariants (must never regress)
 
@@ -106,9 +144,25 @@ Domain layer has zero framework imports (ADR-0002); overdraft + reconciliation m
   retiring any independent balance write path.~~ **Done 2026-06-17** (Phase D-2): projection enabled
   as the sole booked-mover; the transaction saga's direct debit/credit is removed (see change log).
 - Mutation testing (pitest) on overdraft + reconciliation math (ADR-0030 D3).
+- Four-eyes now has the *mechanism* wired (§4a) but not enforced (`authz.four-eyes.enforce=false`)
+  on `balance.credit`/`balance.debit` — flipping it is a deliberate follow-up once the
+  maker/checker runbook is reviewed, tracked under issue #413.
 
 ## 7. Change log
 
+- **2026-07-12** — Wired the four-eyes (maker-checker) enforcement *mechanism* (ADR-0155) onto
+  `balance.credit`/`balance.debit`, mirroring the account-service rollout (issue #413). New
+  `ApprovalConfig` (`RedisApprovalStore` producer) and `PATCH /api/v1/balances/approvals/{id}`
+  checker-decide endpoint (`@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)`, `@Authorize(action =
+  "balance.approval.decide")`); two new exception mappers (`SelfApprovalNotAllowedMapper` → 403,
+  `InvalidApprovalStateMapper` → 409). Also adds balance-service's **first** Redis dependency (a
+  new namespace-local `redis` Deployment/Service under `openbank-infra/gitops/components/balances/`
+  plus a `redis-ingress-allow-list` NetworkPolicy, same-namespace-only) — the pre-existing DB-based
+  movement idempotency (V8 `balance_movement` ledger) is untouched. STRIDE supplement added in §4a
+  above. **`authz.four-eyes.enforce` stays `false`** — no behavior change to any existing request;
+  this PR only wires the mechanism. Rollback: revert the commit (no DB/schema change on the balance
+  schema; `ApprovalStore` records live in the new Redis with a TTL; the Redis deployment can also be
+  deleted, nothing else depends on it).
 - **2026-06-19** — A1 defense-in-depth (issue #628): added per-account ownership check on `getBalances` /
   `getBalance` via new `AccountServiceClient` (M2M REST call to account-service). When the caller
   supplies `X-Customer-Party-Id` the returned balance is scoped to the requesting party — mismatch
