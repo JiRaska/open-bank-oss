@@ -40,6 +40,15 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            # TEMPORARY: party-service hadn't been redeployed since 2026-06-20 — well before
+            # a repo-wide byte-level pass touched migration file contents without changing
+            # their logical SQL (same relicense-class mechanism as #730/#882). V4/V7 checksum
+            # mismatch confirmed via crash logs; both files show a single authoring commit,
+            # have had no real content edit since. Remove once the live schema_history rows
+            # are confirmed repaired (one clean boot is enough; safe to leave briefly, repair
+            # is a no-op once checksums already match).
+            - name: QUARKUS_FLYWAY_REPAIR_AT_START
+              value: "true"
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://party-db-rw.party.svc:5432/openbank_parties
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
