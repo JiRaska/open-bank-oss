@@ -174,3 +174,59 @@ Added in Phase B to make the scheduler's daily invariant queryable by auditors a
 | T6 | **Enumeration** — caller probes UUIDs for non-existent control accounts | Empty list returned for unknown `controlAccountId`; no 404 distinguishable from zero-activity account — timing-safe. |
 | T7 | **Denial of service via large `asOf` range** — `asOf` is a single date; the query is bounded to `entry_date <= :asOf` over a single control account | Query always scans a single account; index on `(account_id, entry_date)` (V7 migration) keeps cost proportional to account volume, not total ledger size. |
 | T8 | **TieOutScheduler silent failure** — exception in one currency skips remaining currencies | Per-currency `try/catch` logs `ERROR` and continues; `openbank.subledger.tieout.break` is a counter (non-zero = alert), not suppressed by exceptions. |
+
+## 7. Four-eyes approval (ADR-0155) — STRIDE supplement
+
+`POST /{journalId}/reverse` (`ledger.reverse`) is a money-path action OPA (`rest.rego`) can flag
+`four_eyes_required`. New endpoint `PATCH /api/v1/journals/approvals/{id}` lets a DIFFERENT
+operator decide the resulting `PendingApproval`; the maker retries `POST /{journalId}/reverse`
+with an `X-Approval-Id` header. **`authz.four-eyes.enforce` stays `false` in this PR** — the
+`ApprovalStore`/endpoint are wired (rollout tracked in issue #413, mirroring the sepa-payment
+pilot), but blocking is a deliberate follow-up flip, not bundled here (see ADR-0155).
+
+This is a NEW Redis dependency for ledger-service — previously ledger had no Redis surface at all
+(see §1/namespace note, now superseded). The `ApprovalStore` (`RedisApprovalStore`) is the only
+consumer; no Idempotency-Key dedup is added by this change.
+
+Note: ledger already has an independent, in-service four-eyes control on year-close attestation
+(`ledger.approve`, §4 Key invariants above — the attestor must differ from the draft author,
+enforced fail-closed in both the use case and the domain). The ADR-0155 mechanism here is a
+second, separate control specifically on **journal reversal** — a different action, gated through
+the shared `ApprovalStore`/`AuthorizeInterceptor` path (currently advisory, `enforce=false`).
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **S**poofing | A caller other than an operator decides an approval | `@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)` + OPA `@Authorize(action="ledger.approval.decide")` on the decide endpoint |
+| **E**oP | The maker approves their own reversal request (self-approval defeats maker-checker) | `ApprovalStore.decide` throws `SelfApprovalNotAllowedException` (mapped to 403) when `decidedBy == makerId` — enforced in the domain port itself, not just the REST layer, and `makerId`/`decidedBy` both resolve via the same `.principal.name` extraction (interceptor vs. `SecurityIdentity`) so the comparison can't silently mismatch for the same real person |
+| **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different reversal | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
+| **R**epudiation | No record of who approved a gated reversal | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see Residual risk below: not yet a permanent audit trail) |
+| **I**nfo disclosure | Approval id enumeration reveals journal/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random id (`RedisApprovalStore`, not sequential) |
+| **D**oS | Flooding `POST /{journalId}/reverse` to exhaust Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
+
+**DFD update:** adds `Operator (checker) → PATCH /api/v1/journals/approvals/{id} → Redis
+(approval:*)` alongside the existing `POST /{journalId}/reverse` edge; the maker's retry reuses
+the existing DFD edge.
+**Risk class:** integrity (segregation of duties, reversal) + confidentiality (approval record scope).
+**Rollback:** `authz.four-eyes.enforce=false` (default) — the endpoint and store exist but do not
+change any existing request's outcome until explicitly flipped.
+
+**Residual risk:** four-eyes `PendingApproval` records are TTL-bounded (Redis), not a permanent
+audit trail (ADR-0155) — a durable-audit requirement for "who approved what, forever" would need
+an additional store; not implemented in this PR. Also open (unchanged by this PR): S1 above (the
+`openbank-services` shared-credential blast radius) and E1 (RBAC + OPA both key off the same role
+set) apply equally to the new `ledger.approval.decide` action.
+
+## 8. Change log
+
+- **2026-07-12** — Wired the four-eyes (maker-checker) enforcement *mechanism* (ADR-0155) onto
+  `ledger.reverse`, mirroring the account/sepa-payment/lending rollouts (issue #413). This is
+  ledger-service's first-ever Redis dependency: new in-namespace `redis` Deployment/Service
+  (`openbank-infra/gitops/components/ledger/redis.yaml`) plus a `redis-ingress-allow-list`
+  NetworkPolicy, `QUARKUS_REDIS_HOSTS` wired on the Rollout, and `quarkus-redis-client` added to
+  the build. New `ApprovalConfig` (`RedisApprovalStore` producer) and `PATCH
+  /api/v1/journals/approvals/{id}` checker-decide endpoint (`@RolesAllowed(Roles.OPERATOR,
+  Roles.ADMIN)`, `@Authorize(action = "ledger.approval.decide")`); two new exception mappers
+  (`SelfApprovalNotAllowedMapper` → 403, `InvalidApprovalStateMapper` → 409) appended to the
+  existing `ExceptionMappers.kt`. STRIDE supplement added in §7 above. **`authz.four-eyes.enforce`
+  stays `false`** — no behavior change to any existing request; this PR only wires the mechanism.
+  Rollback: revert the commit (no DB/schema change; `ApprovalStore` records live in Redis with a TTL).

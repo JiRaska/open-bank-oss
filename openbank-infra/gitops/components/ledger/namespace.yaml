@@ -1,7 +1,8 @@
 # Ledger banking domain (ADR-0037: domain = namespace). App plane. Holds
-# ledger-service plus its single-owner CNPG Postgres, co-located (R4). Money-path
-# domain: the double-entry sub-ledger. No Redis (no Idempotency-Key surface) and
-# no public Ingress — ledger is an internal ClusterIP service driven by other
+# ledger-service plus its single-owner CNPG Postgres, co-located (R4), and an
+# in-namespace Redis backing the ADR-0155 four-eyes ApprovalStore (no
+# Idempotency-Key surface). Money-path domain: the double-entry sub-ledger. No
+# public Ingress — ledger is an internal ClusterIP service driven by other
 # domains over Kafka and in-cluster REST.
 apiVersion: v1
 kind: Namespace
