@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.6.0...billing-service-v0.6.1) (2026-07-12)
+
+
+### Bug Fixes
+
+* **billing,ledger:** unusable fee GL accounts + add ledger pact coverage ([#468](https://github.com/JiRaska/open-bank-oss/issues/468)) ([#859](https://github.com/JiRaska/open-bank-oss/issues/859)) ([3583372](https://github.com/JiRaska/open-bank-oss/commit/3583372f76f5093516289108aa5f248dd481d35e))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.5.3...billing-service-v0.6.0) (2026-07-11)
 
 
