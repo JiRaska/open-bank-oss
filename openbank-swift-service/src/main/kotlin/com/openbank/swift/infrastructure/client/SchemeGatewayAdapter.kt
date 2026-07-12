@@ -52,11 +52,15 @@ class SchemeGatewayAdapter(@RestClient private val client: ClearingSimulatorClie
     @Suppress("TooGenericExceptionCaught")
     override suspend fun submit(message: SwiftMessage): SchemeSubmissionOutcome {
         val pacs008 = builder.build(instruction(message))
-        check(validator.validate(pacs008) is Iso20022ValidationResult.Valid) {
-            "rail built a non-conforming pacs.008 for SWIFT message ${message.id}"
-        }
 
+        // The validity check must be inside this try/catch, not before it: a SwiftMessage with a
+        // legitimately-nullable debtor field (orderingCustomerAccount/Name — see instruction())
+        // builds a pacs.008 the XSD rejects (empty IBAN/name), and the class's own fail-closed
+        // contract promises that surfaces as SchemeGatewayUnavailableException, not a raw crash.
         val pacs002 = try {
+            check(validator.validate(pacs008) is Iso20022ValidationResult.Valid) {
+                "rail built a non-conforming pacs.008 for SWIFT message ${message.id}"
+            }
             self.submitWithResilience(pacs008)
         } catch (ex: Exception) {
             log.warnf(ex, "Scheme gateway unavailable for SWIFT message %s; holding", message.id)

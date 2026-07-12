@@ -58,6 +58,16 @@ class SchemeGatewayAdapterTest {
     }
 
     @Test
+    fun `a missing orderingCustomer account or name fails closed instead of crashing`() {
+        // Both are legitimately nullable on SwiftMessage (no validate() requirement), but an
+        // empty IBAN/name violates the pacs.008 XSD — must hold the message, not raise a raw
+        // IllegalStateException past the caller's fail-closed contract.
+        assertThatThrownBy {
+            runBlocking { adapter.submit(message(orderingCustomerAccount = null, orderingCustomerName = null)) }
+        }.isInstanceOf(SchemeGatewayUnavailableException::class.java)
+    }
+
+    @Test
     fun `OUR charge code maps to pacs008 with DEBT ChargeBearer`(): Unit = runBlocking {
         every { client.submitCreditTransfer(any()) } answers { call ->
             val xml = call.invocation.args[0] as String
@@ -79,14 +89,18 @@ class SchemeGatewayAdapterTest {
         adapter.submit(message(chargeCode = "SHA"))
     }
 
-    private fun message(chargeCode: String = "SHA") = SwiftMessage(
+    private fun message(
+        chargeCode: String = "SHA",
+        orderingCustomerAccount: String? = "DE89370400440532013000",
+        orderingCustomerName: String? = "Alice",
+    ) = SwiftMessage(
         id = UUID.fromString("55555555-5555-5555-5555-555555555555"),
         idempotencyKey = "test", messageType = SwiftMessageType.MT103,
         senderBic = "ABCDEFGH", receiverBic = "IJKLMNOP",
         transactionReference = "TRX-001", relatedReference = null,
         valueDate = "20260622", currency = "EUR", amountMinorUnits = 100_00L,
-        orderingCustomerAccount = "DE89370400440532013000", orderingCustomerAccountId = null,
-        orderingCustomerName = "Alice",
+        orderingCustomerAccount = orderingCustomerAccount, orderingCustomerAccountId = null,
+        orderingCustomerName = orderingCustomerName,
         beneficiaryAccount = "GB33BUKB20201555555555", beneficiaryName = "Bob",
         remittanceInfo = "Invoice 1", chargeCode = chargeCode,
         priority = SwiftPriority.NORMAL, status = SwiftStatus.VALIDATED,
