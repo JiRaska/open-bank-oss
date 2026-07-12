@@ -122,7 +122,7 @@ spec:
             - name: opa
               containerPort: 8181
           readinessProbe:
-            httpGet: {path: /health?bundles=true, port: 8181}
+            httpGet: {path: "/health?bundles=true", port: 8181}
             periodSeconds: 10
             failureThreshold: 3
           livenessProbe:
