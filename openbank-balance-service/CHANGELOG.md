@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.9.0...balance-service-v1.10.0) (2026-07-12)
+
+
+### Features
+
+* **balance:** wire four-eyes enforcement mechanism (ADR-0155) ([#930](https://github.com/JiRaska/open-bank-oss/issues/930)) ([7825026](https://github.com/JiRaska/open-bank-oss/commit/7825026b997e5239b750ec160b02fffaafbb2dc8))
+
 ## [1.9.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.8.3...balance-service-v1.9.0) (2026-07-12)
 
 
