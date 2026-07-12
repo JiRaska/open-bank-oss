@@ -7,22 +7,27 @@ package com.openbank.transaction.it
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.opentest4j.TestAbortedException
 import org.testcontainers.DockerClientFactory
+import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.redpanda.RedpandaContainer
 import org.testcontainers.utility.DockerImageName
 
 /**
- * CI infra sweep (issue #578). Isolated PostgreSQL + Redpanda (Kafka API) per test JVM
- * via Testcontainers, injected as highest-precedence config to override the shared-stack
- * localhost values. transaction-service has an outgoing Kafka channel
+ * CI infra sweep (issue #578). Isolated PostgreSQL + Redpanda (Kafka API) + Valkey (Redis)
+ * per test JVM via Testcontainers, injected as highest-precedence config to override the
+ * shared-stack localhost values. transaction-service has an outgoing Kafka channel
  * (@Channel("transaction-events-out") Emitter) that initialises at boot, so a real broker
- * is needed — Redpanda provides the Kafka API. Docker Hub images -> served by the
- * in-cluster registry-mirror; Ryuk disabled fleet-wide -> stop() tears them down.
+ * is needed — Redpanda provides the Kafka API. Redis was added for ADR-0155's four-eyes
+ * ApprovalStore (issue #413) — quarkus-redis-client registers a readiness health check, so
+ * ANY test booting the full app via this resource now needs a reachable Redis or
+ * `/q/health/ready` reports DOWN. Docker Hub images -> served by the in-cluster
+ * registry-mirror; Ryuk disabled fleet-wide -> stop() tears them down.
  */
 class PostgresRedpandaTestResource : QuarkusTestResourceLifecycleManager {
 
     private var postgres: PostgreSQLContainer<*>? = null
     private var redpanda: RedpandaContainer? = null
+    private var redis: GenericContainer<*>? = null
 
     override fun start(): Map<String, String> {
         if (!DockerClientFactory.instance().isDockerAvailable) {
@@ -46,6 +51,10 @@ class PostgresRedpandaTestResource : QuarkusTestResourceLifecycleManager {
         }
         redpanda = rp
 
+        val rd = GenericContainer(DockerImageName.parse("valkey/valkey:7.2-alpine")).withExposedPorts(6379)
+        rd.start()
+        redis = rd
+
         val host = pg.host
         val port = pg.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
         val bootstrap = rp.bootstrapServers
@@ -56,11 +65,13 @@ class PostgresRedpandaTestResource : QuarkusTestResourceLifecycleManager {
             "quarkus.datasource.password" to "openbank_secret",
             "kafka.bootstrap.servers" to bootstrap,
             "mp.messaging.connector.smallrye-kafka.bootstrap.servers" to bootstrap,
+            "quarkus.redis.hosts" to "redis://${rd.host}:${rd.getFirstMappedPort()}",
             "quarkus.devservices.enabled" to "false",
         )
     }
 
     override fun stop() {
+        redis?.stop()
         redpanda?.stop()
         postgres?.stop()
     }
