@@ -10,6 +10,16 @@
 #   * trivy                         — Trivy fs/config scan.
 #   * gitleaks                      — secret-scan.
 #   * yq (+ jq)                      — manifest / label workflows.
+#   * cosign                        — image signing/attestation (runner-image.yml's own
+#                                      supply-chain step, ADR-0030 D4 step 4). Previously
+#                                      downloaded at runtime with no retry logic — a
+#                                      transient GitHub-releases fetch failure silently
+#                                      dropped the runner image's own SBOM attestation
+#                                      (continue-on-error), which is what caused the
+#                                      Kyverno Enforce graduation deadlock (issue #310):
+#                                      no ARC runner using the unattested image could ever
+#                                      start, including the one needed to rebuild it. Baking
+#                                      it in removes the runtime network dependency entirely.
 #   * aws CLI v2                    — _service-ci.yml "Configure CodeArtifact
 #                                      Maven mirror" fetches the repo token via
 #                                      IRSA; without the CLI the step soft-skips
@@ -65,6 +75,8 @@ ARG TRIVY_VERSION=0.70.0
 ARG TRIVY_SHA256=2f6bb988b553a1bbac6bdd1ce890f5e412439564e17522b88a4541b4f364fc8d
 ARG GITLEAKS_VERSION=8.30.1
 ARG GITLEAKS_SHA256=e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080
+ARG COSIGN_VERSION=v2.4.3
+ARG COSIGN_SHA256=bd0f9763bca54de88699c3656ade2f39c9a1c7a2916ff35601caf23a79be0629
 ARG YQ_VERSION=v4.53.2
 ARG AWSCLI_VERSION=2.33.14
 ARG AWSCLI_SHA256=d4914cdbcfccfe151d1f4672bf7aeb81bd7cdfc5edc41425a9e54c900cddab24
@@ -110,6 +122,13 @@ RUN curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEA
  && tar -xz -C /usr/local/bin -f /tmp/gitleaks.tgz gitleaks \
  && rm /tmp/gitleaks.tgz \
  && gitleaks version
+
+# cosign — pinned release binary (not the mutable install script). Verified against
+# cosign's own published cosign_checksums.txt for this release before pinning here.
+RUN curl -fsSL "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-arm64" -o /usr/local/bin/cosign \
+ && echo "${COSIGN_SHA256}  /usr/local/bin/cosign" | sha256sum -c - \
+ && chmod +x /usr/local/bin/cosign \
+ && cosign version
 
 # aws CLI v2 — pinned installer zip (sha256 computed from the versioned, immutable
 # release URL; AWS publishes only PGP sigs, no checksum file). Used by the

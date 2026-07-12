@@ -74,35 +74,79 @@ jobs:
             echo "Pin this digest in \`local.runner_image\` (arc-runners.tf) and \`tofu apply\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # cosign is now baked into the image (Dockerfile) — see that file's own comment for
+      # why the previous runtime-download-with-no-retry was the actual root cause of this
+      # workflow's real-world silent attestation failures (issue #310). BUT: this exact
+      # workflow run executes on the runner image that existed BEFORE this fix rolls out
+      # (bootstrapping problem — the fixed image doesn't exist until this run produces it),
+      # so cosign is not guaranteed to be on PATH yet. Fall back to a retrying download only
+      # if it's genuinely missing; once the fixed image is live and pinned in arc-runners.tf,
+      # this whole step becomes a no-op every future run.
+      - name: Ensure cosign is available
+        run: |
+          set -uo pipefail
+          if command -v cosign >/dev/null 2>&1; then
+            echo "cosign already present (baked into the runner image): $(cosign version 2>/dev/null | head -1)"
+            exit 0
+          fi
+          echo "::warning::cosign not baked into this runner image yet (expected on the first run after this fix) — falling back to a retrying download."
+          COSIGN_VERSION="v2.4.3"
+          COSIGN_SHA256="bd0f9763bca54de88699c3656ade2f39c9a1c7a2916ff35601caf23a79be0629"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 \
+            -o /tmp/cosign-fallback "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-arm64"
+          echo "${COSIGN_SHA256}  /tmp/cosign-fallback" | sha256sum -c -
+          chmod +x /tmp/cosign-fallback
+          sudo mv /tmp/cosign-fallback /usr/local/bin/cosign
+          cosign version
+
       # Supply-chain provenance for the runner image itself (ADR-0030 D4 step 4, issue #310).
       # The kyverno attestation policy (verify-openbank-image-sbom-attestation, Audit) matches
       # openbank-* — the ci-runner image was the last fleet image with neither a signature nor
       # a CycloneDX SBOM attestation, so the Audit PolicyReport could never reach 0 fail and the
       # Enforce graduation stayed blocked. Same KMS key + trivy pattern as auto-deploy.yml.
-      # Non-fatal (continue-on-error): a cosign/trivy hiccup must never block a runner rebuild;
-      # the PolicyReport surfaces a missed attestation on the next audit pass anyway.
+      #
+      # continue-on-error stays: a cosign/trivy hiccup must still never block a runner
+      # rebuild. What changes is the silence — the verify step below makes a real failure
+      # loud (job summary + a dedicated, separately-watchable step) instead of a
+      # single easy-to-miss ::warning buried in this step's log.
       - name: Sign + attest runner image SBOM (cosign + KMS)
-        timeout-minutes: 15
+        id: attest
+        timeout-minutes: 10
         continue-on-error: true
         run: |
           set -uo pipefail
           COSIGN_KEY="awskms:///alias/openbank-cosign-signing"
-          COSIGN_VERSION="v2.4.3"
-          arch="$(uname -m)"; case "$arch" in aarch64) arch=arm64 ;; x86_64) arch=amd64 ;; esac
-          bin="$(command -v cosign || true)"
-          if ! { [ -n "$bin" ] && cosign version 2>/dev/null | grep -Eq 'GitVersion:[[:space:]]*v2\.'; }; then
-            bin="${RUNNER_TEMP}/cosign2"
-            curl -fsSL -o "$bin" "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-${arch}"
-            chmod +x "$bin"
-          fi
           echo "==> cosign sign ${IMAGE_DIGEST_REF}"
-          COSIGN_YES=true "$bin" sign --key "$COSIGN_KEY" "$IMAGE_DIGEST_REF" \
-            || echo "::warning::cosign sign failed"
+          COSIGN_YES=true cosign sign --key "$COSIGN_KEY" "$IMAGE_DIGEST_REF" \
+            || { echo "::warning::cosign sign failed"; exit 1; }
           sbom="${RUNNER_TEMP}/ci-runner.cdx.json"
-          if trivy image --format cyclonedx --output "$sbom" "$IMAGE_DIGEST_REF" 2>/dev/null; then
-            echo "==> cosign attest (cyclonedx) ${IMAGE_DIGEST_REF}"
-            COSIGN_YES=true "$bin" attest --key "$COSIGN_KEY" --type cyclonedx --predicate "$sbom" "$IMAGE_DIGEST_REF" \
-              || echo "::warning::cosign attest failed"
-          else
-            echo "::warning::trivy image SBOM generation failed — attestation skipped"
+          trivy image --format cyclonedx --output "$sbom" "$IMAGE_DIGEST_REF" \
+            || { echo "::warning::trivy SBOM generation failed"; exit 1; }
+          echo "==> cosign attest (cyclonedx) ${IMAGE_DIGEST_REF}"
+          COSIGN_YES=true cosign attest --key "$COSIGN_KEY" --type cyclonedx --predicate "$sbom" "$IMAGE_DIGEST_REF" \
+            || { echo "::warning::cosign attest failed"; exit 1; }
+
+      # Makes a Sign+attest failure IMPOSSIBLE to miss — the step above can fail silently
+      # from GitHub's UI perspective (continue-on-error), so this step independently
+      # verifies the signature/attestation actually landed and fails LOUDLY (this step has
+      # no continue-on-error) if either is missing, rather than relying on the next Kyverno
+      # Audit pass to eventually notice.
+      - name: Verify signature + attestation actually landed
+        if: always()
+        run: |
+          set -uo pipefail
+          COSIGN_KEY="awskms:///alias/openbank-cosign-signing"
+          FAIL=0
+          if ! cosign verify --key "$COSIGN_KEY" "$IMAGE_DIGEST_REF" >/dev/null 2>&1; then
+            echo "::error::openbank-ci-runner image signature verification FAILED — this image will be rejected by verify-openbank-image-signatures once any pod tries to use it."
+            FAIL=1
           fi
+          if ! cosign verify-attestation --key "$COSIGN_KEY" --type cyclonedx "$IMAGE_DIGEST_REF" >/dev/null 2>&1; then
+            echo "::error::openbank-ci-runner image SBOM attestation verification FAILED — this image will be rejected by verify-openbank-image-sbom-attestation once that policy is Enforce."
+            FAIL=1
+          fi
+          if [ "$FAIL" -eq 1 ]; then
+            echo "See the 'Sign + attest runner image SBOM' step's log above for the underlying error." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "✅ signature + SBOM attestation both verified present on ${IMAGE_DIGEST_REF}"
