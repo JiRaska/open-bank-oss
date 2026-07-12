@@ -60,6 +60,39 @@ reference/counterparty/amount/date). Holds customer financial movement data.
 | **D**oS | Search flooding (expensive multi-criteria query) | `limit` coerced to ≤200; `offset` ≥0; pagination |
 | **E**oP | Viewer initiates a transaction | Reads exclude write role; initiate = `OPERATOR` only, deny-by-default |
 
+## 4a. Four-eyes approval (ADR-0155) — STRIDE supplement
+
+`POST /{transactionId}/reverse` (`transaction.reverse`) is a money-path action OPA (`rest.rego`) can
+flag `four_eyes_required`. New endpoint `PATCH /api/v1/transactions/approvals/{id}` lets a DIFFERENT
+operator decide the resulting `PendingApproval`; the maker retries `POST /{transactionId}/reverse`
+with an `X-Approval-Id` header. Unlike `account.freeze` (human-only maker), `transaction.reverse`
+also permits `Roles.SERVICE` (M2M) makers — the checker role set below is unaffected by that, since
+**`authz.four-eyes.enforce` stays `false` in this PR** — the `ApprovalStore`/endpoint are wired
+(mirroring the account-service rollout, issue #413), but blocking is a deliberate follow-up flip,
+not bundled here (see ADR-0155).
+
+This service had **no Redis client wired before this change**. The `ApprovalStore` (Redis-backed)
+is wired onto the payments namespace's existing shared Redis instance (`redis.payments.svc:6379`,
+already used by sepa-payment/domestic-payment/sepa-instant for idempotency) rather than a new
+dedicated instance — no new trust boundary or NetworkPolicy edge is introduced; the existing
+`redis-ingress-allow-list` (same-namespace-only) already covers transaction-service as a caller.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **S**poofing | A caller other than an operator decides an approval | `@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)` + OPA `@Authorize(action="transaction.approval.decide")` on the decide endpoint |
+| **E**oP | The maker approves their own reversal request (self-approval defeats maker-checker) — including an M2M (`Roles.SERVICE`) maker, since `transaction.reverse` permits SERVICE callers | `ApprovalStore.decide` throws `SelfApprovalNotAllowedException` (mapped to 403) when `decidedBy == makerId` — enforced in the domain port itself, not just the REST layer; `makerId`/`decidedBy` both resolve via the same `.principal.name` extraction (interceptor vs. `SecurityIdentity`) so the comparison can't silently mismatch for the same real caller |
+| **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different request | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
+| **R**epudiation | No record of who approved a gated reversal | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see ADR-0155 Negative consequences: not yet a permanent audit trail) |
+| **I**nfo disclosure | Approval id enumeration reveals transaction/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random id (`RedisApprovalStore`, not sequential) |
+| **D**oS | Flooding `POST /{transactionId}/reverse` to exhaust the shared payments Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire; the Redis instance is already shared/sized for three other services' idempotency traffic |
+
+**DFD update:** adds `Operator (checker) → PATCH /api/v1/transactions/approvals/{id} → Redis
+(approval:*, redis.payments.svc)` alongside the existing `POST /{transactionId}/reverse` edge; the
+maker's retry reuses the existing DFD edge.
+**Risk class:** integrity (segregation of duties) + confidentiality (approval record scope).
+**Rollback:** `authz.four-eyes.enforce=false` (default) — the endpoint and store exist but do not
+change any existing request's outcome until explicitly flipped.
+
 ## 5. Residual risks / assumptions
 
 - **Booked balance is now a ledger projection (ADR-0039 Phase D-2).** The saga no longer debits/credits
@@ -79,6 +112,8 @@ reference/counterparty/amount/date). Holds customer financial movement data.
 - Search authorization is role-coarse — per-account/per-party scoping is OPA's job (ADR-0034 follow-up).
 - A null security principal on initiate falls back to a zero-UUID actor — acceptable only while OIDC
   is mandatory at the gateway; revisit if the gateway becomes optional.
+- Reversal now has the four-eyes *mechanism* wired (§4a) but not enforced
+  (`authz.four-eyes.enforce=false`) — a candidate for a follow-up rollout under issue #413.
 - **Temporal orchestration path (ADR-0120 Phase 1, flag-gated OFF).** When
   `openbank.transaction.orchestration.temporal.enabled=true`, `initiateTransaction` drives the payment
   through a durable `PaymentWorkflow` instead of `PaymentSagaOrchestrator`; activities wrap the **same**
@@ -96,6 +131,16 @@ reference/counterparty/amount/date). Holds customer financial movement data.
 
 ## 6. Change log
 
+- **2026-07-12** — Wired the four-eyes (maker-checker) enforcement *mechanism* (ADR-0155) onto
+  `transaction.reverse`, mirroring the account-service rollout (issue #413). New `ApprovalConfig`
+  (`RedisApprovalStore` producer, wired onto this service's first-ever Redis client — reuses the
+  payments namespace's existing shared Redis instance rather than a new dedicated one) and
+  `PATCH /api/v1/transactions/approvals/{id}` checker-decide endpoint (`@RolesAllowed(Roles.OPERATOR,
+  Roles.ADMIN)`, `@Authorize(action = "transaction.approval.decide")`); two new exception mappers
+  (`SelfApprovalNotAllowedMapper` → 403, `InvalidApprovalStateMapper` → 409). STRIDE supplement added
+  in §4a above. **`authz.four-eyes.enforce` stays `false`** — no behavior change to any existing
+  request; this PR only wires the mechanism. Rollback: revert the commit (no DB/schema change;
+  `ApprovalStore` records live in Redis with a TTL).
 - **2026-07-11** — #747: `PaymentJournalFactory`'s cash-clearing leg (the bank-side leg of a
   one-sided inbound/outbound payment) was hardcoded to the CZK-only GL account regardless of the
   transaction's actual currency, so ledger-service rejected any non-CZK one-sided payment (422,

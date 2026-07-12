@@ -27,6 +27,9 @@ dependencies {
     implementation(libs.quarkus.opentelemetry)
     implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.oidc.client.reactive.filter)
+    // Four-eyes ApprovalStore backing store (ADR-0155) — this service had no Redis client
+    // before; wired onto the existing shared payments-namespace Redis instance (gitops).
+    implementation(libs.quarkus.redis.client)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
 

@@ -104,6 +104,11 @@ spec:
                 secretKeyRef:
                   name: transaction-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # Redis for the four-eyes ApprovalStore (ADR-0155). Reuses the payments
+            # namespace's existing shared Redis instance (redis.yaml), already used by
+            # sepa-payment/domestic-payment/sepa-instant for idempotency.
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://redis.payments.svc:6379
             # ADR-0137 image-independent convergence: load the scheme-accepted
             # group.id / DLQ-topic override (transaction-service-msg-override
             # ConfigMap, mounted below) as an external Quarkus config source so
