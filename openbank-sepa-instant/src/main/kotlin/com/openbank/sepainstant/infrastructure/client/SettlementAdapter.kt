@@ -54,7 +54,7 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
             amount = payment.amount,
             currencyCode = payment.currency,
             description = "SCT Inst settlement ${payment.endToEndId}",
-            valueDate = LocalDate.now(clock).format(DateTimeFormatter.BASIC_ISO_DATE),
+            valueDate = LocalDate.now(clock).format(DateTimeFormatter.ISO_LOCAL_DATE),
             rail = "SEPA_INST",
             instructionType = "ONE_OFF",
         )

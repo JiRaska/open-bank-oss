@@ -49,6 +49,8 @@ dependencies {
     // In-memory reactive-messaging connector: SctInstBootSmokeIT swaps the Kafka outgoing
     // channel to InMemoryConnector so the boot smoke-test needs no broker (ADR-0104 D4 / #578).
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    // Consumer-driven contract for the transaction-service settlement call (ADR-0063, issue #468).
+    testImplementation(libs.pact.consumer)
 }
 
 kover {
@@ -91,4 +93,21 @@ pitest {
     timestampedReports = false
     threads = 4
     excludedClasses = setOf("com.openbank.sepainstant.domain.*Kt")
+}
+
+// Pact: write the generated consumer contract to pacts/ and forward broker config, matching
+// transaction-service/fx-service/domestic-payment's tasks.withType<Test> block (ADR-0063 P1/P2).
+tasks.withType<Test> {
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
+    listOf(
+        "pactbroker.url",
+        "pactbroker.auth.username",
+        "pactbroker.auth.password",
+        "pactbroker.enablePending",
+        "pactbroker.providerBranch",
+        "pact.verifier.publishResults",
+        "pact.provider.version",
+        "pact.provider.branch",
+        "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
