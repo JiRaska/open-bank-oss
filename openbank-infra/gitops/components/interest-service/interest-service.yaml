@@ -13,6 +13,10 @@ spec:
   template:
     metadata:
       labels: {app.kubernetes.io/name: interest-service, app.kubernetes.io/part-of: interest}
+      annotations:
+        # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-interest-opa-bundle.sh (do not hand-edit).
+        openbank.tech/policy-checksum: "2706acf959b61427"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -76,6 +80,12 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # OPA sidecar bootstrap (ADR-0034 Phase 5, issue #938). Advisory mode first
+            # (AUTHZ_ENFORCE=false, @Authorize logs "would DENY" without blocking) — matches
+            # every other service's rollout convention. Flip to true only after an observation
+            # window with a clean advisory report.
+            - name: AUTHZ_ENFORCE
+              value: "false"
           startupProbe: {tcpSocket: {port: management}, initialDelaySeconds: 10, periodSeconds: 5, failureThreshold: 30}
           readinessProbe: {tcpSocket: {port: http}, periodSeconds: 10, failureThreshold: 3}
           livenessProbe: {httpGet: {path: /q/health/live, port: management}, periodSeconds: 15, failureThreshold: 3}
@@ -95,9 +105,73 @@ spec:
           resources:
             requests: {cpu: 250m, memory: 360Mi}
             limits: {cpu: "1", memory: 1536Mi}
+        # OPA policy-decision sidecar (ADR-0034, issue #938 bootstrap). Serves
+        # data.openbank.rest.allow for all @Authorize-annotated endpoints in interest-service
+        # (interest.*). Bundle mounted from interest-opa-bundle ConfigMap (gen-interest-opa-bundle.sh).
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet: {path: /health?bundles=true, port: 8181}
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /health, port: 8181}
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/interest_rest_ext.rego
+              subPath: interest_rest_ext.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: interest-opa-bundle
         - name: kafka-keystore
           secret:
             secretName: interest-service-kafka-keystore
