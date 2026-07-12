@@ -1,0 +1,97 @@
+{
+  "consumer": {
+    "name": "openbank-kyc-service"
+  },
+  "messages": [
+    {
+      "contents": {
+        "eventType": "PARTY_CREATED",
+        "legalName": "Jane Smith",
+        "partyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+      },
+      "description": "a PARTY_CREATED event",
+      "generators": {
+        "body": {
+          "$.partyId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.legalName": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.partyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "a party has been created"
+        }
+      ]
+    },
+    {
+      "contents": {
+        "eventType": "PARTY_ERASED",
+        "partyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+      },
+      "description": "a PARTY_ERASED event",
+      "generators": {
+        "body": {
+          "$.partyId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.partyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "a party has been erased"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-party-service"
+  }
+}

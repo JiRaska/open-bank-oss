@@ -42,6 +42,25 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    // Consumer-driven contract for the party-events Kafka messages (ADR-0063, issue #468).
+    testImplementation(libs.pact.consumer)
+}
+
+// Pact: write the generated consumer contract to pacts/ and forward broker config, matching
+// account-service/ledger-service's tasks.withType<Test> block (ADR-0063 P1/P2).
+tasks.withType<Test> {
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
+    listOf(
+        "pactbroker.url",
+        "pactbroker.auth.username",
+        "pactbroker.auth.password",
+        "pactbroker.enablePending",
+        "pactbroker.providerBranch",
+        "pact.verifier.publishResults",
+        "pact.provider.version",
+        "pact.provider.branch",
+        "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
 
 kover {
