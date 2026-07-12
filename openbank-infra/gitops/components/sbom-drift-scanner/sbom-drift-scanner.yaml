@@ -1,0 +1,560 @@
+# ---------------------------------------------------------------------------
+# SBOM digest-identity drift scanner (ADR-0030 D5 phase 1, issue #861).
+#
+# D5's full scope is "does a running image's actual filesystem drift from its
+# attested release SBOM" — phase 1 targets a narrower question a fixed OCI
+# digest can actually answer cheaply: for each money-path service, is the pod
+# CURRENTLY RUNNING in sandbox the same image GitOps (origin/main) currently
+# declares? Phase 2 (re-match the attested SBOM against current CVEs) and
+# phase 3 (true in-container filesystem drift) are deliberately out of scope
+# here — see the ADR-0030 D5 design note.
+#
+# Design note — why this checks GitOps sync, not the cosign attestation
+# itself: the original design intended to re-verify each running pod's
+# CycloneDX attestation directly (cosign verify-attestation against ECR).
+# Live testing during implementation found that's both unreachable and
+# redundant:
+#   - Unreachable: cosign's registry client (and the AWS CLI's ECR auth
+#     token exchange) needs actual AWS credentials, not just "the node has
+#     ecr:* permissions" — this cluster's EKS nodes set the IMDS hop-limit to
+#     block non-host-network pods from reaching instance-profile credentials
+#     (a deliberate hardening), so a plain pod gets "Unable to locate
+#     credentials" / registry 401s with no IRSA. Standing up a new IAM role +
+#     OIDC trust policy for this is a real infra change, not a k8s-manifest
+#     one — out of scope for this pass; flagged as a possible follow-up if a
+#     genuine need for live attestation re-verification emerges.
+#   - Redundant: Kyverno's verify-openbank-image-sbom-attestation ClusterPolicy
+#     is Enforce (issue #310) — every pod that is currently RUNNING already
+#     passed cosign attestation verification at admission time, by definition.
+#     Re-checking it here would at best restate what admission already
+#     guaranteed, for the cost of the IAM work above.
+# What's left — "is the running pod what GitOps currently says should be
+# deployed" — is exactly the ArgoCD-sync-drift signal issue #846 this session
+# spent most of its time on (money-path services silently stuck on day-zero
+# images for over a week). It needs no cloud credentials at all: a shallow
+# clone of this PUBLIC repo (unauthenticated) to read the declared image tag,
+# diffed against the pod's actual running tag.
+#
+# Modeled on infra-vuln-scanner.yaml's RBAC/CronJob shape, with one difference
+# worth flagging: at the time this was written, infra-vuln-scanner had no
+# owning ArgoCD Application (orphaned manifest, never actually synced) — this
+# component gets its own Application (../../apps/sbom-drift-scanner.yaml)
+# specifically so that mistake isn't repeated.
+#
+# RBAC design:
+#   - sbom-drift-scanner-configmap Role (admin-ui ns): write the single
+#     sbom-drift ConfigMap.
+#   - sbom-drift-scanner-pod-reader ClusterRole + per-namespace RoleBindings:
+#     list/get pods in each money-path namespace to discover the live image
+#     tag. Never granted as a ClusterRoleBinding; confers no cross-namespace
+#     view beyond the 11 namespaces money-path services actually run in.
+#   - admin-ui SA gets a read-only Role/RoleBinding on the ConfigMap so the
+#     Next.js BFF can read the live result via the mounted volume.
+# ---------------------------------------------------------------------------
+
+# ─── ServiceAccount ─────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sbom-drift-scanner
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: sbom-drift-scanner
+    app.kubernetes.io/part-of: admin-ui
+
+---
+# ─── RBAC: write the single ConfigMap ───────────────────────────────────────
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sbom-drift-scanner-configmap
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: sbom-drift-scanner
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["sbom-drift"]
+    verbs: ["get", "patch", "update"]
+  # create: resourceNames cannot gate create — belt-and-braces for first-run
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sbom-drift-scanner-configmap
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: sbom-drift-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sbom-drift-scanner-configmap
+subjects:
+  - kind: ServiceAccount
+    name: sbom-drift-scanner
+    namespace: admin-ui
+
+---
+# ─── RBAC: read pods in money-path namespaces (never ClusterRoleBinding) ────
+# Defined as ClusterRole so it can be reused across per-namespace RoleBindings
+# without duplicating the rules. Each namespace binding is explicit below —
+# the 11 namespaces the 17 money-path services (rules.yaml money_path_services)
+# actually run in.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sbom-drift-scanner-pod-reader
+  labels:
+    app.kubernetes.io/name: sbom-drift-scanner
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+
+---
+# ledger-service
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sbom-drift-scanner-pod-reader
+  namespace: ledger
+  labels:
+    app.kubernetes.io/name: sbom-drift-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sbom-drift-scanner-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: sbom-drift-scanner
+    namespace: admin-ui
+
+---
+# transaction-service, sepa-payment, sepa-instant, domestic-payment,
+# clearing-service, swift-service, settlement-service
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sbom-drift-scanner-pod-reader
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: sbom-drift-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sbom-drift-scanner-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: sbom-drift-scanner
+    namespace: admin-ui
+
+---
+# account-service
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sbom-drift-scanner-pod-reader
+  namespace: accounts
+  labels:
+    app.kubernetes.io/name: sbom-drift-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sbom-drift-scanner-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: sbom-drift-scanner
+    namespace: admin-ui
+
+---
+# balance-service
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sbom-drift-scanner-pod-reader
+  namespace: balances
+  labels:
+    app.kubernetes.io/name: sbom-drift-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sbom-drift-scanner-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: sbom-drift-scanner
+    namespace: admin-ui
+
+---
+# fx-service
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sbom-drift-scanner-pod-reader
+  namespace: fx
+  labels:
+    app.kubernetes.io/name: sbom-drift-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sbom-drift-scanner-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: sbom-drift-scanner
+    namespace: admin-ui
+
+---
+# lending-service
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sbom-drift-scanner-pod-reader
+  namespace: lending
+  labels:
+    app.kubernetes.io/name: sbom-drift-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sbom-drift-scanner-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: sbom-drift-scanner
+    namespace: admin-ui
+
+---
+# sca-service
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sbom-drift-scanner-pod-reader
+  namespace: sca
+  labels:
+    app.kubernetes.io/name: sbom-drift-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sbom-drift-scanner-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: sbom-drift-scanner
+    namespace: admin-ui
+
+---
+# consent-service
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sbom-drift-scanner-pod-reader
+  namespace: consent
+  labels:
+    app.kubernetes.io/name: sbom-drift-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sbom-drift-scanner-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: sbom-drift-scanner
+    namespace: admin-ui
+
+---
+# fraud-service
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sbom-drift-scanner-pod-reader
+  namespace: fraud
+  labels:
+    app.kubernetes.io/name: sbom-drift-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sbom-drift-scanner-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: sbom-drift-scanner
+    namespace: admin-ui
+
+---
+# billing-service
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sbom-drift-scanner-pod-reader
+  namespace: billing
+  labels:
+    app.kubernetes.io/name: sbom-drift-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sbom-drift-scanner-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: sbom-drift-scanner
+    namespace: admin-ui
+
+---
+# sanctions-service
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sbom-drift-scanner-pod-reader
+  namespace: sanctions
+  labels:
+    app.kubernetes.io/name: sbom-drift-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sbom-drift-scanner-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: sbom-drift-scanner
+    namespace: admin-ui
+
+---
+# ─── RBAC: admin-ui SA reads the live ConfigMap (for the BFF route) ─────────
+# The admin-ui Deployment mounts the ConfigMap as a volume (optional:true), so
+# this binding is a belt-and-suspenders for any future direct-API read path —
+# mirrors admin-ui-infra-vulns-reader exactly.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sbom-drift-configmap-reader
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: sbom-drift-scanner
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["sbom-drift"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-sbom-drift-reader
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: sbom-drift-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sbom-drift-configmap-reader
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+
+---
+# ─── CronJob ────────────────────────────────────────────────────────────────
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sbom-drift-scanner
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: sbom-drift-scanner
+    app.kubernetes.io/part-of: admin-ui
+spec:
+  # 03:10 UTC daily — after infra-vuln-scanner's 02:15 slot, before peak traffic.
+  schedule: "10 3 * * *"
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 600
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: sbom-drift-scanner
+        spec:
+          serviceAccountName: sbom-drift-scanner
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          # Single-phase design (see the design note above for why this isn't
+          # multi-tool like infra-vuln-scanner): everything needed — kubectl
+          # for pod discovery, git for the unauthenticated public-repo clone —
+          # is already bundled in alpine/k8s, so one init container does the
+          # whole compare and the main container just publishes it.
+          initContainers:
+            - name: discover-and-compare
+              image: docker.io/alpine/k8s:1.34.1
+              command: ["/bin/sh", "-ec"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: false
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: HOME
+                  value: /tmp
+              args:
+                - |
+                  set -eu
+                  echo "Cloning openbank-oss (public repo, unauthenticated, depth=1)..."
+                  git clone --depth 1 --quiet \
+                    https://github.com/JiRaska/open-bank-oss.git /tmp/repo
+
+                  cat > /tmp/compare.py << 'PYEOF'
+                  import json, re, subprocess
+
+                  # (service id, namespace, gitops manifest path, container name in
+                  # the manifest — usually == service id, but the manifest's own
+                  # `- name:` key is the ground truth to grep against).
+                  COMPONENTS = [
+                      ("ledger-service", "ledger",
+                       "openbank-infra/gitops/components/ledger/ledger-service.yaml"),
+                      ("transaction-service", "payments",
+                       "openbank-infra/gitops/components/payments/payments-services.yaml"),
+                      ("account-service", "accounts",
+                       "openbank-infra/gitops/components/accounts/account-service.yaml"),
+                      ("balance-service", "balances",
+                       "openbank-infra/gitops/components/balances/balance-service.yaml"),
+                      ("sepa-payment", "payments",
+                       "openbank-infra/gitops/components/payments/payments-services.yaml"),
+                      ("sepa-instant", "payments",
+                       "openbank-infra/gitops/components/payments/payments-services.yaml"),
+                      ("domestic-payment", "payments",
+                       "openbank-infra/gitops/components/payments/payments-services.yaml"),
+                      ("clearing-service", "payments",
+                       "openbank-infra/gitops/components/payments/payments-services.yaml"),
+                      ("swift-service", "payments",
+                       "openbank-infra/gitops/components/payments/payments-services.yaml"),
+                      ("fx-service", "fx",
+                       "openbank-infra/gitops/components/fx-service/fx-service.yaml"),
+                      ("lending-service", "lending",
+                       "openbank-infra/gitops/components/lending/lending-service.yaml"),
+                      ("sca-service", "sca",
+                       "openbank-infra/gitops/components/sca/sca-service.yaml"),
+                      ("consent-service", "consent",
+                       "openbank-infra/gitops/components/consent/consent-service.yaml"),
+                      ("fraud-service", "fraud",
+                       "openbank-infra/gitops/components/fraud-service/fraud-service.yaml"),
+                      ("billing-service", "billing",
+                       "openbank-infra/gitops/components/billing/billing-service.yaml"),
+                      ("settlement-service", "payments",
+                       "openbank-infra/gitops/components/payments/payments-services.yaml"),
+                      ("sanctions-service", "sanctions",
+                       "openbank-infra/gitops/components/sanctions-service/sanctions-service.yaml"),
+                  ]
+
+                  def running_image(svc, ns):
+                      """The service's own container's running image (tag form), by
+                      container NAME — not index 0, several money-path pods run an OPA
+                      sidecar that isn't consistently container[0] (confirmed live)."""
+                      try:
+                          jsonpath = f'{{.items[0].status.containerStatuses[?(@.name=="{svc}")].image}}'
+                          out = subprocess.run(
+                              ["kubectl", "get", "pods", "-n", ns,
+                               "-l", f"app.kubernetes.io/name={svc}",
+                               "--field-selector=status.phase=Running",
+                               "-o", f"jsonpath={jsonpath}"],
+                              capture_output=True, text=True, timeout=15,
+                          )
+                          image = out.stdout.strip()
+                          return image or None
+                      except Exception as e:
+                          print(f"  WARN: pod lookup failed for {ns}/{svc}: {e}")
+                          return None
+
+                  def declared_image(svc, manifest_path):
+                      """The image this service's container currently declares in the
+                      gitops manifest on origin/main (the checked-out clone)."""
+                      try:
+                          with open(f"/tmp/repo/{manifest_path}") as f:
+                              text = f.read()
+                          # Find the `- name: <svc>` container block, then its own
+                          # `image:` line (not a sidecar's, further down/up in the file).
+                          block_re = re.compile(
+                              rf'-\s*name:\s*{re.escape(svc)}\b.*?image:\s*(\S+)',
+                              re.DOTALL,
+                          )
+                          m = block_re.search(text)
+                          return m.group(1) if m else None
+                      except Exception as e:
+                          print(f"  WARN: manifest read failed for {manifest_path}: {e}")
+                          return None
+
+                  results = {}
+                  for svc, ns, manifest_path in COMPONENTS:
+                      print(f"[{svc}] comparing running pod vs gitops...", flush=True)
+                      running = running_image(svc, ns)
+                      if not running:
+                          print(f"  SKIP {svc}: no running pod found", flush=True)
+                          results[svc] = {"status": "no-pod-found"}
+                          continue
+                      declared = declared_image(svc, manifest_path)
+                      in_sync = bool(declared) and running == declared
+                      print(f"  running={running} declared={declared} inSync={in_sync}", flush=True)
+                      results[svc] = {
+                          "status": "checked",
+                          "runningImage": running,
+                          "declaredImage": declared,
+                          "inSync": in_sync,
+                      }
+
+                  with open("/work/final.json", "w") as f:
+                      json.dump({"scannedAt": None, "services": results}, f)
+                  print(f"Written /work/final.json: {len(results)} services", flush=True)
+                  PYEOF
+
+                  python3 /tmp/compare.py
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: tmp
+                  mountPath: /tmp
+
+          containers:
+            - name: publish
+              image: docker.io/alpine/k8s:1.34.1
+              command: ["/bin/sh", "-ec"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: HOME
+                  value: /tmp
+              args:
+                - |
+                  NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                  sed "s/\"scannedAt\": null/\"scannedAt\": \"${NOW}\"/" /work/final.json > /tmp/final.json
+
+                  echo "Publishing sbom-drift ConfigMap..."
+                  cat /tmp/final.json
+                  kubectl create configmap sbom-drift \
+                    --namespace admin-ui \
+                    --from-file=sbom-drift.json=/tmp/final.json \
+                    --dry-run=client -o yaml | kubectl apply -f -
+                  echo "Done."
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+
+          volumes:
+            - name: work
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}
