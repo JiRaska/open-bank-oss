@@ -4,14 +4,23 @@
 
 package com.openbank.fraud.infrastructure.ml
 
+import ai.onnxruntime.OrtEnvironment
 import com.openbank.libs.domain.feature.VELOCITY_TXN_COUNT_H1
 import com.openbank.libs.domain.feature.VELOCITY_TXN_COUNT_H24
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 
-class BaselineFraudModelTest {
+/** Same behavioural contract as the superseded `BaselineFraudModelTest` — this adapter is required
+ *  to reproduce it byte-for-byte, just via a real ONNX Runtime session (ADR-0139 phase-1b). */
+class OnnxFraudModelTest {
 
-    private val model = BaselineFraudModel()
+    private val model = OnnxFraudModel()
+
+    @AfterEach
+    fun cleanup() {
+        model.close()
+    }
 
     @Test
     fun `score is bounded in 0_1 and deterministic`() {
@@ -33,5 +42,11 @@ class BaselineFraudModelTest {
     fun `missing features default to zero velocity (low baseline risk)`() {
         val score = model.scoreShadow(emptyMap())
         assertThat(score).isNotNull().isLessThan(0.05)
+    }
+
+    @Test
+    fun `load failure degrades to null scores instead of throwing`() {
+        val brokenSession = OnnxFraudModel.loadSession(OrtEnvironment.getEnvironment(), "ml/does-not-exist.onnx")
+        assertThat(brokenSession).isNull()
     }
 }

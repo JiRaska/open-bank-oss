@@ -32,6 +32,10 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    // In-process ONNX Runtime serving (ADR-0139 phase-1b, OnnxFraudModel). Fraud-service-only for
+    // now (single ML consumer) — kept out of the shared version catalog on purpose, same rationale
+    // as the pitest plugin pin above, to avoid a fleet-wide rebuild for a single-service dependency.
+    implementation("com.microsoft.onnxruntime:onnxruntime:1.22.0")
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
