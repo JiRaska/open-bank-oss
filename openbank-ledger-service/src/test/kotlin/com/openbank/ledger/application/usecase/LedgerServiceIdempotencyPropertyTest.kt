@@ -97,6 +97,8 @@ class LedgerServiceIdempotencyPropertyTest {
             outbox: List<OutboxMessage>,
         ): JournalEntry = error("not exercised by postJournal")
 
+        override suspend fun appendOutbox(messages: List<OutboxMessage>): Int = error("not exercised by postJournal")
+
         override suspend fun trialBalance(asOf: LocalDate): List<TrialBalanceLine> = error("not exercised")
 
         override suspend fun trialBalanceForPeriod(from: LocalDate, to: LocalDate): List<TrialBalanceLine> =
