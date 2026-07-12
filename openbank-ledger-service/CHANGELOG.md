@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.11.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.10.5...ledger-service-v1.11.0) (2026-07-12)
+
+
+### Features
+
+* **ledger:** add operator replay endpoint for historical booked-change events ([#888](https://github.com/JiRaska/open-bank-oss/issues/888)) ([946807f](https://github.com/JiRaska/open-bank-oss/commit/946807f77c2d7e524c14df311f9d93ce9ab92cfb))
+
+
+### Bug Fixes
+
+* **billing,ledger:** unusable fee GL accounts + add ledger pact coverage ([#468](https://github.com/JiRaska/open-bank-oss/issues/468)) ([#859](https://github.com/JiRaska/open-bank-oss/issues/859)) ([3583372](https://github.com/JiRaska/open-bank-oss/commit/3583372f76f5093516289108aa5f248dd481d35e))
+
 ## [1.10.5](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.10.4...ledger-service-v1.10.5) (2026-07-11)
 
 
