@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.11.0...ledger-service-v1.11.1) (2026-07-12)
+
+
+### Bug Fixes
+
+* **ledger:** unbreak main — InMemoryJournalRepository missing appendOutbox ([#902](https://github.com/JiRaska/open-bank-oss/issues/902)) ([7d5e7e1](https://github.com/JiRaska/open-bank-oss/commit/7d5e7e1ada0cccc5dd1f8b1070fa7ff7c50e1d10))
+
 ## [1.11.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.10.5...ledger-service-v1.11.0) (2026-07-12)
 
 
