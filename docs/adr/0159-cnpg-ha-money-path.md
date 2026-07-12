@@ -1,9 +1,17 @@
 # ADR-0159 — High-availability CNPG for money-path databases
 
 Date: 2026-07-11
-Decision-Status: Proposed   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only -->
+Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
+Delivery-Status: Shipped    <!-- Planned | Partial | Shipped | N/A — decision-only -->
 Author(s): jiri.raska
+
+> **Accepted (2026-07-12).** Shipped in full: all 17 money-path CNPG clusters (issue
+> #850) now run `instances: 2` with required hostname anti-affinity and a soft
+> cross-AZ topology spread. Every single cluster's failover was live-verified with a
+> real `kubectl cnpg promote` switchover (not just a readiness check) — primary role
+> confirmed to move, cluster returned to healthy 2/2, and the owning service's pods
+> showed zero restarts or errors throughout. PRs: #854 (ledger-db) and #910–#925
+> (the remaining 16).
 
 ## Context
 
