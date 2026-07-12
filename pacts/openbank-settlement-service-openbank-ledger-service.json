@@ -1,0 +1,114 @@
+{
+  "consumer": {
+    "name": "openbank-settlement-service"
+  },
+  "interactions": [
+    {
+      "description": "POST a balanced two-line CZK settlement journal",
+      "providerStates": [
+        {
+          "name": "the standard chart of accounts is seeded"
+        }
+      ],
+      "request": {
+        "body": {
+          "createdBy": "00000000-0000-0000-0000-000000005e77",
+          "description": "Settlement booking 55555555-5555-5555-5555-555555555555",
+          "entryDate": "2026-01-15",
+          "idempotencyKey": "settlement-book-55555555-5555-5555-5555-555555555555",
+          "lines": [
+            {
+              "amount": 750.00,
+              "baseAmount": 750.00,
+              "baseCurrencyCode": "CZK",
+              "currencyCode": "CZK",
+              "fxRate": null,
+              "glAccountId": "a0000000-0000-0000-0000-000000000002",
+              "side": "DEBIT",
+              "subAccountId": "66666666-6666-6666-6666-666666666666"
+            },
+            {
+              "amount": 750.00,
+              "baseAmount": 750.00,
+              "baseCurrencyCode": "CZK",
+              "currencyCode": "CZK",
+              "fxRate": null,
+              "glAccountId": "a0000000-0000-0000-0000-000000000002",
+              "side": "CREDIT",
+              "subAccountId": "77777777-7777-7777-7777-777777777777"
+            }
+          ],
+          "transactionId": "55555555-5555-5555-5555-555555555555",
+          "valueDate": "2026-01-15"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/journals"
+      },
+      "response": {
+        "body": {
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "status": "POSTED",
+          "transactionId": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            },
+            "$.transactionId": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.transactionId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-ledger-service"
+  }
+}

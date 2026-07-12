@@ -59,6 +59,7 @@ class LedgerBookAdapterTest {
         assertThat(request.captured.transactionId).isEqualTo(settlement.id)
         assertThat(request.captured.entryDate).isEqualTo("2026-07-06")
         assertThat(request.captured.valueDate).isEqualTo("2026-07-06")
+        assertThat(request.captured.createdBy).isEqualTo(LedgerBookAdapter.SYSTEM_USER)
         assertThat(request.captured.lines).hasSize(2)
 
         val debitLine = request.captured.lines.single { it.side == "DEBIT" }
