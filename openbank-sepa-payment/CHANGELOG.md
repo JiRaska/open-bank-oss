@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.8.1...sepa-payment-v0.8.2) (2026-07-12)
+
+
+### Bug Fixes
+
+* **sepa-payment:** send valueDate in the format transaction-service actually parses ([#844](https://github.com/JiRaska/open-bank-oss/issues/844)) ([c692624](https://github.com/JiRaska/open-bank-oss/commit/c692624f67b4b95f875ceb31e1376276faaf5eea))
+
 ## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.8.0...sepa-payment-v0.8.1) (2026-07-07)
 
 
