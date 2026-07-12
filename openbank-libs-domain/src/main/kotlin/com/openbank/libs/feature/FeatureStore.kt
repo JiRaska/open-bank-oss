@@ -15,11 +15,7 @@ import java.time.Instant
  * staleness detection and audit/reproducibility (it is what makes a training row
  * offset-pinned and replayable, ADR-0141).
  */
-data class FeatureValue(
-    val value: BigDecimal,
-    val asOf: Instant,
-    val sourceOffset: Long,
-)
+data class FeatureValue(val value: BigDecimal, val asOf: Instant, val sourceOffset: Long)
 
 /**
  * The outcome of reading a feature and classifying it against its declared TTL
