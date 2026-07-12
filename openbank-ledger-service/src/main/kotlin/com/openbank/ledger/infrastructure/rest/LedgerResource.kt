@@ -12,6 +12,9 @@ import com.openbank.ledger.application.port.`in`.JournalLineRequest
 import com.openbank.ledger.application.port.`in`.LedgerUseCase
 import com.openbank.ledger.application.port.`in`.ListJournalsQuery
 import com.openbank.ledger.application.port.`in`.PostJournalCommand
+import com.openbank.ledger.application.port.`in`.ReplayBookedChangesCommand
+import com.openbank.ledger.application.port.`in`.ReplayBookedChangesResult
+import com.openbank.ledger.application.port.`in`.ReplayBookedChangesUseCase
 import com.openbank.ledger.application.port.`in`.ReverseJournalCommand
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalLine
@@ -52,7 +55,11 @@ import java.util.UUID
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "Ledger", description = "General ledger journal entries")
-class LedgerResource(private val clock: Clock, private val ledgerUseCase: LedgerUseCase) {
+class LedgerResource(
+    private val clock: Clock,
+    private val ledgerUseCase: LedgerUseCase,
+    private val replayUseCase: ReplayBookedChangesUseCase,
+) {
 
     @GET
     @RolesAllowed(Roles.SERVICE, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
@@ -149,6 +156,27 @@ class LedgerResource(private val clock: Clock, private val ledgerUseCase: Ledger
         val cmd = ReverseJournalCommand(journalId = journalId, reason = request.reason, reversedBy = request.reversedBy)
         val entry = ledgerUseCase.reverseJournal(cmd)
         return Response.ok(entry.toResponse()).build()
+    }
+
+    @POST
+    @Path("/replay-booked-changes")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "ledger.replay", resource = "")
+    @Operation(
+        summary = "Re-emit historical AccountBookedChanged events for a date window (ops recovery, #860)",
+        description = "Reconstructs and re-enqueues the ledger's own already-posted booked movements so a " +
+            "downstream projection that missed them can catch up idempotently. Posts no journal and mutates " +
+            "no ledger state. dryRun (default true) previews the counts + net delta per currency without emitting.",
+    )
+    suspend fun replayBookedChanges(request: ReplayBookedChangesRequest): Response {
+        val result = replayUseCase.replay(
+            ReplayBookedChangesCommand(
+                from = LocalDate.parse(request.from),
+                to = LocalDate.parse(request.to),
+                dryRun = request.dryRun,
+            ),
+        )
+        return Response.ok(result.toResponse()).build()
     }
 }
 
@@ -291,4 +319,26 @@ private fun TrialBalance.toResponse() = TrialBalanceResponse(
             net = it.net,
         )
     },
+)
+
+data class ReplayBookedChangesRequest(val from: String, val to: String, val dryRun: Boolean = true)
+
+data class ReplayBookedChangesResponse(
+    val dryRun: Boolean,
+    val from: String,
+    val to: String,
+    val journalEntriesScanned: Int,
+    val bookedChangeEvents: Int,
+    val accountsTouched: Int,
+    val netDeltaByCurrency: Map<String, BigDecimal>,
+)
+
+private fun ReplayBookedChangesResult.toResponse() = ReplayBookedChangesResponse(
+    dryRun = dryRun,
+    from = from.toString(),
+    to = to.toString(),
+    journalEntriesScanned = journalEntriesScanned,
+    bookedChangeEvents = bookedChangeEvents,
+    accountsTouched = accountsTouched,
+    netDeltaByCurrency = netDeltaByCurrency,
 )

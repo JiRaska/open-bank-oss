@@ -44,4 +44,13 @@ class LedgerSecurityContractTest {
                 .containsExactlyInAnyOrder("ROLE_OPERATOR")
         }
     }
+
+    @Test
+    fun `booked-change replay is an ops recovery action restricted to operator and admin`() {
+        // #860: re-emits historical book-of-record events for a downstream projection catch-up.
+        // Ops-only (operator + admin, like other ops triggers) — never service/viewer/auditor.
+        assertThat(rolesOf("replayBookedChanges"))
+            .describedAs("replayBookedChanges roles (ops recovery — re-emits book-of-record events)")
+            .containsExactlyInAnyOrder("ROLE_OPERATOR", "ROLE_ADMIN")
+    }
 }

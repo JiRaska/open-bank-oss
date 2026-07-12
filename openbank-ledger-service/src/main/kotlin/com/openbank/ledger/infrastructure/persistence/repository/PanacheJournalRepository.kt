@@ -132,6 +132,14 @@ class PanacheJournalRepository(
                 .replaceWith(entry)
         }.awaitSuspending()
 
+    override suspend fun appendOutbox(messages: List<OutboxMessage>): Int = if (messages.isEmpty()) {
+        0
+    } else {
+        Panache.withTransaction {
+            persistOutbox(messages).replaceWith(messages.size)
+        }.awaitSuspending()
+    }
+
     override suspend fun saveReversal(
         reversal: JournalEntry,
         originalId: UUID,

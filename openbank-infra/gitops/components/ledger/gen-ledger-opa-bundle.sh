@@ -31,6 +31,8 @@ LEDGER_REST_EXT=$(cat << 'REGO'
 #   ledger.approve  — attest a DRAFT year-close (#fiscalYear) — a statutory close,
 #                      not a routine posting; kept operator-only, no M2M path.
 #   ledger.trigger  — run the daily FX revaluation (ops/backfill only)
+#   ledger.replay   — re-emit historical AccountBookedChanged for a window (ops recovery,
+#                      #860); posts no journal, re-drives the book of record's own events.
 #
 # Base rest.rego's operator-read-any / compliance-read-any only cover HUMAN
 # ROLE_OPERATOR/ROLE_ADMIN/ROLE_COMPLIANCE on *.read + *.list — but every ledger read
@@ -95,7 +97,7 @@ allowed_reasons contains "operator-ledger-write" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	input.action in {"ledger.create", "ledger.reverse", "ledger.trigger"}
+	input.action in {"ledger.create", "ledger.reverse", "ledger.trigger", "ledger.replay"}
 }
 
 # Year-close attestation (ledger.approve) is deliberately its OWN rule, not folded into
