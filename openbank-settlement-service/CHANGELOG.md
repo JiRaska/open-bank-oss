@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.6](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.4.5...settlement-service-v0.4.6) (2026-07-12)
+
+
+### Bug Fixes
+
+* **settlement:** missing createdBy bug + add ledger pact coverage ([#468](https://github.com/JiRaska/open-bank-oss/issues/468)) ([#848](https://github.com/JiRaska/open-bank-oss/issues/848)) ([eee4842](https://github.com/JiRaska/open-bank-oss/commit/eee48427bd69b55300109d6ed8c6812299d85afd))
+
 ## [0.4.5](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.4.4...settlement-service-v0.4.5) (2026-07-07)
 
 
