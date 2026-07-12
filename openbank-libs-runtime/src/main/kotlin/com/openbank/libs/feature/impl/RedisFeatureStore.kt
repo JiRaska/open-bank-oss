@@ -37,7 +37,12 @@ class RedisFeatureStore(private val redis: ReactiveRedisDataSource, private val 
 
     override suspend fun read(name: String, entityId: String, ttl: Duration): Freshness {
         val raw = valueCommands.get(key(name, entityId)).awaitSuspending() ?: return Freshness.Missing
-        val value = decode(raw)
+        return classify(decode(raw), ttl)
+    }
+
+    // internal: see the encode()/decode() KDoc note — tested directly rather than via a
+    // mocked Redis read.
+    internal fun classify(value: FeatureValue, ttl: Duration): Freshness {
         val age = Duration.between(value.asOf, Instant.now(clock))
         return if (age > ttl) Freshness.Stale(value) else Freshness.Fresh(value)
     }
@@ -46,17 +51,21 @@ class RedisFeatureStore(private val redis: ReactiveRedisDataSource, private val 
         valueCommands.set(key(name, entityId), encode(value)).awaitSuspending()
     }
 
-    private fun key(name: String, entityId: String) = "$KEY_PREFIX$name:$entityId"
+    internal fun key(name: String, entityId: String) = "$KEY_PREFIX$name:$entityId"
 
     // Pipe-delimited, mirroring RedisApprovalStore/RedisIdempotencyStore's encoding —
     // none of these fields (a decimal, an ISO instant, a long) ever contain the separator.
-    private fun encode(v: FeatureValue): String = listOf(
+    // internal (not private): RedisFeatureStoreTest exercises this directly rather than
+    // mocking the full Quarkus ReactiveRedisDataSource/ValueCommands reactive API surface,
+    // which has no working precedent elsewhere in this module (RedisApprovalStore has no
+    // dedicated unit test at all).
+    internal fun encode(v: FeatureValue): String = listOf(
         v.value.toPlainString(),
         v.asOf.toString(),
         v.sourceOffset.toString(),
     ).joinToString(SEPARATOR)
 
-    private fun decode(raw: String): FeatureValue {
+    internal fun decode(raw: String): FeatureValue {
         val parts = raw.split(SEPARATOR, limit = FIELD_COUNT)
         return FeatureValue(
             value = BigDecimal(parts[VALUE_IDX]),

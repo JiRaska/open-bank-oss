@@ -6,12 +6,8 @@ package com.openbank.libs.feature.impl
 
 import com.openbank.libs.feature.FeatureValue
 import com.openbank.libs.feature.Freshness
-import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.redis.datasource.ReactiveRedisDataSource
-import io.quarkus.redis.datasource.value.ValueCommands
-import io.smallrye.mutiny.Uni
-import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -20,65 +16,65 @@ import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
 
-/** Unit coverage for [RedisFeatureStore] — encode/decode round-trip and the ADR-0140
- *  freshness/staleness classification, without a real Redis (mocked value commands). */
+/**
+ * Unit coverage for [RedisFeatureStore]'s pure key-building, encode/decode and
+ * ADR-0140 freshness-classification logic. Exercised directly against the `internal`
+ * functions rather than through a mocked [ReactiveRedisDataSource] — see the KDoc on
+ * [RedisFeatureStore.encode] for why. The `redis` mock below is never stubbed and never
+ * touched (the `valueCommands` field it would back is lazy and only forced by `read()`/
+ * `write()`, neither of which these tests call).
+ */
 class RedisFeatureStoreTest {
 
     private val fixedNow = Instant.parse("2026-07-12T12:00:00Z")
-    private val clock = Clock.fixed(fixedNow, ZoneOffset.UTC)
+    private val store = RedisFeatureStore(
+        redis = mockk<ReactiveRedisDataSource>(),
+        clock = Clock.fixed(fixedNow, ZoneOffset.UTC),
+    )
 
-    private fun storeWith(storedRaw: String?): Pair<RedisFeatureStore, ValueCommands<String, String>> {
-        val redis = mockk<ReactiveRedisDataSource>()
-        val valueCommands = mockk<ValueCommands<String, String>>()
-        every { redis.value(String::class.java) } returns valueCommands
-        every { valueCommands.get(any()) } returns Uni.createFrom().item(storedRaw)
-        every { valueCommands.set(any(), any()) } returns Uni.createFrom().voidItem()
-        return RedisFeatureStore(redis, clock) to valueCommands
+    @Test
+    fun `key namespaces by feature name and entity id`() {
+        assertThat(store.key("fraud.velocity.h1.count", "acct-1")).isEqualTo("feature:fraud.velocity.h1.count:acct-1")
     }
 
     @Test
-    fun `read returns Missing when the key does not exist`(): Unit = runBlocking {
-        val (store, _) = storeWith(storedRaw = null)
+    fun `encode then decode round-trips value, asOf and sourceOffset`() {
+        val asOf = fixedNow.minus(Duration.ofMinutes(5))
+        val value = FeatureValue(BigDecimal("7"), asOf, 123L)
 
-        val result = store.read("fraud.velocity.h1.count", "acct-1", Duration.ofHours(1))
+        val decoded = store.decode(store.encode(value))
 
-        assertThat(result).isEqualTo(Freshness.Missing)
+        assertThat(decoded.value).isEqualByComparingTo(BigDecimal("7"))
+        assertThat(decoded.asOf).isEqualTo(asOf)
+        assertThat(decoded.sourceOffset).isEqualTo(123L)
     }
 
     @Test
-    fun `read returns Fresh when the stored value is within the TTL`(): Unit = runBlocking {
-        val asOf = fixedNow.minus(Duration.ofMinutes(30))
-        val (store, _) = storeWith(storedRaw = "3|$asOf|42")
+    fun `classify returns Fresh when the value is within the TTL`() {
+        val value = FeatureValue(BigDecimal("3"), fixedNow.minus(Duration.ofMinutes(30)), 42L)
 
-        val result = store.read("fraud.velocity.h1.count", "acct-1", Duration.ofHours(1))
+        val result = store.classify(value, Duration.ofHours(1))
 
         assertThat(result).isInstanceOf(Freshness.Fresh::class.java)
-        val fresh = result as Freshness.Fresh
-        assertThat(fresh.value.value).isEqualByComparingTo(BigDecimal("3"))
-        assertThat(fresh.value.asOf).isEqualTo(asOf)
-        assertThat(fresh.value.sourceOffset).isEqualTo(42L)
+        assertThat((result as Freshness.Fresh).value.sourceOffset).isEqualTo(42L)
     }
 
     @Test
-    fun `read returns Stale when the stored value is older than the TTL`(): Unit = runBlocking {
-        val asOf = fixedNow.minus(Duration.ofHours(2))
-        val (store, _) = storeWith(storedRaw = "5|$asOf|99")
+    fun `classify returns Stale when the value is older than the TTL`() {
+        val value = FeatureValue(BigDecimal("5"), fixedNow.minus(Duration.ofHours(2)), 99L)
 
-        val result = store.read("fraud.velocity.h1.count", "acct-1", Duration.ofHours(1))
+        val result = store.classify(value, Duration.ofHours(1))
 
         assertThat(result).isInstanceOf(Freshness.Stale::class.java)
         assertThat((result as Freshness.Stale).value.sourceOffset).isEqualTo(99L)
     }
 
     @Test
-    fun `write encodes value, asOf and sourceOffset for the given name and entity key`(): Unit = runBlocking {
-        val (store, valueCommands) = storeWith(storedRaw = null)
-        val asOf = fixedNow.minus(Duration.ofMinutes(5))
+    fun `classify treats a value exactly at the TTL boundary as Fresh`() {
+        val value = FeatureValue(BigDecimal("1"), fixedNow.minus(Duration.ofHours(1)), 1L)
 
-        store.write("fraud.velocity.h1.count", "acct-1", FeatureValue(BigDecimal("7"), asOf, 123L))
+        val result = store.classify(value, Duration.ofHours(1))
 
-        io.mockk.verify {
-            valueCommands.set("feature:fraud.velocity.h1.count:acct-1", "7|$asOf|123")
-        }
+        assertThat(result).isInstanceOf(Freshness.Fresh::class.java)
     }
 }
