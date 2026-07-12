@@ -34,7 +34,7 @@ class ApprovalResourceTest {
     }
 
     @Test
-    fun `decide resolves the checker id from the security identity and returns the mapped response`() = runBlocking {
+    fun `decide resolves the checker id from the security identity and returns the mapped response`(): Unit = runBlocking {
         val decidedAt = OffsetDateTime.parse("2026-07-12T00:00:00Z")
         val approval = PendingApproval(
             id = "appr-1",
@@ -58,7 +58,7 @@ class ApprovalResourceTest {
     }
 
     @Test
-    fun `decide falls back to anonymous when the security identity has no principal`() = runBlocking {
+    fun `decide falls back to anonymous when the security identity has no principal`(): Unit = runBlocking {
         val store = mockk<ApprovalStore>()
         coEvery { store.decide("appr-2", "anonymous", false) } returns null
 
@@ -68,7 +68,7 @@ class ApprovalResourceTest {
     }
 
     @Test
-    fun `decide throws NotFoundException when the store finds no matching pending approval`() = runBlocking {
+    fun `decide throws NotFoundException when the store finds no matching pending approval`(): Unit = runBlocking {
         val store = mockk<ApprovalStore>()
         coEvery { store.decide("missing", "checker", true) } returns null
 
