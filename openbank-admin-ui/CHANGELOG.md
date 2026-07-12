@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.44.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.43.1...admin-ui-v0.44.0) (2026-07-12)
+
+
+### Features
+
+* **gitops:** ADR-0030 D5 phase 1 — money-path GitOps-sync drift scanner ([#890](https://github.com/JiRaska/open-bank-oss/issues/890)) ([2e3aa4e](https://github.com/JiRaska/open-bank-oss/commit/2e3aa4e6a479cbc3e02d4b9f2a52cdc507272bc8)), closes [#265](https://github.com/JiRaska/open-bank-oss/issues/265)
+
+
+### Bug Fixes
+
+* **admin-ui:** day-end flags a never-run / stale EoD tie-out instead of "no data" ([#864](https://github.com/JiRaska/open-bank-oss/issues/864)) ([8f1a756](https://github.com/JiRaska/open-bank-oss/commit/8f1a7562adb0ae71c6e80275c7220eaf67211a69)), closes [#855](https://github.com/JiRaska/open-bank-oss/issues/855)
+* **admin-ui:** remove unused Link import in iaops page ([#870](https://github.com/JiRaska/open-bank-oss/issues/870)) ([2a44a96](https://github.com/JiRaska/open-bank-oss/commit/2a44a96ef7830c51854ef5550ced1448fac9eb48)), closes [#865](https://github.com/JiRaska/open-bank-oss/issues/865)
+* **admin-ui:** show fx-service scale-to-zero state on the FX page ([#851](https://github.com/JiRaska/open-bank-oss/issues/851)) ([d428007](https://github.com/JiRaska/open-bank-oss/commit/d428007896a88b6e0c9365da8caf5028748d51bc)), closes [#759](https://github.com/JiRaska/open-bank-oss/issues/759)
+
 ## [0.43.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.43.0...admin-ui-v0.43.1) (2026-07-11)
 
 
