@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pid-service
     app.kubernetes.io/part-of: pid
   annotations:
-    openbank.tech/policy-checksum: "0d367d361bce1ab8"
+    openbank.tech/policy-checksum: "3257446097563812"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1125,6 +1125,63 @@ data:
         compliance:
           eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
           dora: "Art. 9 ICT risk detection; Art. 5 ICT risk management framework — fleet-wide static verification that authorization-policy rules can actually fire as intended"
+
+      - id: flaky-test-hunter
+        plane: development
+        charter: "ADR-0168"
+        description: >
+          Static analyzer for fleet-wide silent-test-failure patterns in Kotlin test sources.
+          Generalizes the check-test-runblocking-unit.sh CI guard (expression-body test functions
+          using runBlocking/runTest/GlobalScope.launch/GlobalScope.async without an explicit ': Unit'
+          return type, which JUnit5 silently drops instead of running) beyond its one hardcoded
+          builder, flags Pact provider verification tests gated on pactbroker.url (always skipped by
+          a local './gradlew test' run) and any provider with two colliding @Provider test classes,
+          and cross-checks declared-vs-executed @Test counts per module. Proposes a tracking ticket
+          through the HITL queue for nearly every finding -- guessing wrong on a fix here (suspend fun
+          vs ': Unit', which @Provider class should own an interaction) risks silently masking a real
+          bug instead of fixing it. Never writes to a test file directly.
+        enabled: true
+        enforcement: block
+        schedule:
+          weekly: "08:00 UTC"
+          reactive: ci-test-suite-failure-webhook   # triggered when a CI test-suite run reports a failure
+        data_scope:
+          read:
+            - read.governance             # every module's src/test/kotlin tree, .github/scripts/*.sh CI
+                                           # guard scripts, and build/test-results/test/*.xml JUnit
+                                           # reports via a repo checkout
+          pii: none                       # test source text and JUnit report metadata only; no customer data
+        tools:
+          allow:
+            - tier: read
+              resources: [governance]
+            - tier: write_proposal
+              resources: [github-pr]      # opens draft.ticket by default; gh.pr.open stays wired but is
+                                           # rarely used (ADR-0168 Decision)
+          deny:
+            - tier: write
+              resources: ["*"]            # explicit: no direct write to any test file ever
+            - tier: execute
+              resources: ["*"]            # never invokes a build/test run itself
+        requires_human:
+          - any_flaky_test_finding        # HITL mandatory; a human reads the test's intent before a fix lands
+          - every: proposal                 # segregation of duties: agent proposes, human disposes
+        limits:
+          tokens_per_run: 50000
+          runs_per_day: 8                 # weekly sweep + occasional CI-test-suite-failure reactive runs
+          kill_switch: true
+        audit:
+          capture:
+            - model_id
+            - prompt_hash
+            - tool_calls
+            - policy_decision
+            - findings_detected
+            - flaky_test_check_type_impacted
+            - human_approved_by
+        compliance:
+          eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
+          dora: "Art. 9 ICT risk detection; Art. 5 ICT risk management framework — fleet-wide static verification that a test suite's reported green state reflects tests that actually ran"
   rules-data.yaml: |
     # SPDX-License-Identifier: Apache-2.0
     # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.

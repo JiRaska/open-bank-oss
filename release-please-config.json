@@ -129,6 +129,9 @@
     "openbank-finrep-service": {
       "component": "finrep-service"
     },
+    "openbank-flaky-test-hunter": {
+      "component": "flaky-test-hunter"
+    },
     "openbank-fraud-service": {
       "component": "fraud-service"
     },

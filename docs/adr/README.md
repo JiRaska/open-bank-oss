@@ -170,6 +170,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0165](0165-release-steward-ai-agent.md) | Release-steward AI agent | Accepted | Partial | — |
 | [0166](0166-docs-truth-agent-ai-agent.md) | docs-truth-agent AI agent | Accepted | Partial | — |
 | [0167](0167-authz-policy-auditor-ai-agent.md) | authz-policy-auditor AI agent | Accepted | Partial | — |
+| [0168](0168-flaky-test-hunter-ai-agent.md) | flaky-test-hunter AI agent | Accepted | Partial | — |
 
 ---
 

@@ -1,0 +1,79 @@
+quarkus:
+  application:
+    name: flaky-test-hunter
+  http:
+    port: 8148
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+      headers: Content-Type,Authorization
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+    oidc:
+      enabled: false
+
+"%test":
+  quarkus:
+    oidc:
+      enabled: false
+    management:
+      enabled: false
+
+openbank:
+  temporal:
+    enabled: ${TEMPORAL_ENABLED:false}
+    server-url: ${TEMPORAL_HOST:temporal-frontend.temporal:7233}
+    namespace: ${TEMPORAL_NAMESPACE:openbank}
+    task-queue: flaky-test-hunter
+  flaky-test-hunter:
+    github-api-url: ${GITHUB_API_URL:https://api.github.com}
+    github-repo: ${GITHUB_REPO:JiRaska/open-bank-oss}
+    llm-gateway-url: ${LLM_GATEWAY_URL:http://litellm.ai-platform:4000}
+    # Filesystem path to the monorepo checkout this agent reads */src/test/kotlin/**/*.kt,
+    # .github/scripts/*.sh CI guard scripts, and */build/test-results/test/*.xml JUnit reports
+    # from (TestScanPort).
+    repo-root: ${FLAKY_TEST_HUNTER_REPO_ROOT:.}

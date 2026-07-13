@@ -86,6 +86,9 @@ spec:
               kubernetes.io/metadata.name: finrep
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: flaky-test-hunter
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: fraud
         - namespaceSelector:
             matchLabels:
