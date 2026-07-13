@@ -20,7 +20,7 @@
 # Mandrel builder image: native-image is already on its PATH, so no nested
 # Docker-in-Docker is needed inside a `docker build`. Functionally equivalent output;
 # simpler to reason about inside a multi-stage build.
-FROM quay.io/quarkus/ubi9-quarkus-mandrel-builder-image:jdk-25@sha256:4dda6a3d677b57614849557d0d18aac7326c4f30175142b0f1bb91bdcfc5c29a AS build
+FROM quay.io/quarkus/ubi9-quarkus-mandrel-builder-image:jdk-25@sha256:e9a5ac0a5b23204e11f3817e4d6947555bf2696d1ea43c4cb7504f8b3aec8302 AS build
 WORKDIR /build
 
 # Same full-repo-root context rationale as the JVM Dockerfile: settings.gradle.kts
