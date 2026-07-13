@@ -76,7 +76,9 @@ class FlakyTestModelsTest {
             file = "openbank-standing-order-service/src/test/kotlin/.../ConsumerTest.kt",
             line = 88,
             builder = "runBlocking",
-            snippet = "fun `consumes due event`() = runBlocking {",
+            // Deliberately NOT a full function declaration here — that shape would itself trip
+            // check-test-runblocking-unit.sh's grep against this very file.
+            snippet = "= runBlocking { assertThat(consumed).isTrue() }",
         )
         assertThat(violation.builder).isEqualTo("runBlocking")
         assertThat(violation.line).isEqualTo(88)
