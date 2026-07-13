@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.3](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.9.2...audit-service-v0.9.3) (2026-07-13)
+
+
+### Bug Fixes
+
+* **audit:** consume clearing.batch.event + security.ict/scan.event ([#1007](https://github.com/JiRaska/open-bank-oss/issues/1007)) ([b2f307b](https://github.com/JiRaska/open-bank-oss/commit/b2f307b76f526fa84879ec249c749498b2d1a428))
+
 ## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.9.1...audit-service-v0.9.2) (2026-07-09)
 
 
