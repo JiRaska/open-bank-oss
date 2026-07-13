@@ -162,6 +162,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0156](0156-agent-charters-as-markdown-alongside-agents-yaml.md) | Agent charters as Markdown alongside agents.yaml | Accepted | Shipped | — |
 | [0158](0158-account-opening-validates-against-product-catalog.md) | Account opening validates against product-catalog | Accepted | Complete | — |
 | [0159](0159-cnpg-ha-money-path.md) | High-availability CNPG for money-path databases | Accepted | Shipped | — |
+| [0160](0160-end-to-end-integration-liveness-and-drift-detection-standard.md) | End-to-end integration liveness and drift-detection standard | Accepted | Partial | — |
 
 ---
 

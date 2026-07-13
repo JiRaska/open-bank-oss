@@ -146,6 +146,30 @@ change_requirements:
     # (removed/renamed props, type changes, non-nullable-no-default additions = replay break,
     # eventType renames) and *.avsc files (field default rules). Flip to enforced = --enforce.
     ci_producer: ".github/scripts/check-event-schema-compat.py"
+  event_consumer_liveness:
+    # ADR-0160 mechanism 1. standing-order-service published standing-order.due.v1 every day
+    # for weeks with zero consumers anywhere in the fleet — full CRUD, passing tests, docs, a
+    # scheduler doc-comment claiming a downstream consumed it — and nothing checked the claim
+    # against the actual fleet (issue #889). This is a fleet-wide scan, not diff-scoped: any
+    # Kafka topic published by ANY service's mp.messaging.outgoing (or dispatched via an
+    # outbox to a declared topic) must have at least one @Incoming consumer somewhere in the
+    # fleet (a matching topic:/topics: declaration), or be explicitly allowlisted below with a
+    # one-line reason (external sink, deliberately audit-only, or a tracked future-work gap).
+    detect: ["any <service>/src/main/resources/application.yaml mp.messaging.outgoing topic"]
+    require:
+      - "topic has >=1 real @Incoming consumer fleet-wide, or an allowlist entry with a reason"
+    gate: event-consumer-liveness
+    enforced: advisory
+    target_enforce_date: "2026-09-15"   # ADR-0144
+    # CI producer is LIVE (advisory): .github/scripts/check-event-consumer-liveness.py runs in
+    # the "Validate manifests" job on every PR — fleet-wide scan (not diff-scoped), findings are
+    # ::warning annotations. First scan (2026-07-13): 19 producer-only topics found, ALL still
+    # unallowlisted below (real triage tracked as a fleet-sweep issue, not resolved by fiat).
+    # Flip to enforced once triage brings unallowlisted violations to zero = pass --enforce to
+    # the script in ci.yml (one-line change), same as every other ADR-0144 gate here.
+    blocked_on: "19 pre-existing producer-only topics need individual triage (real gap vs. legitimate allowlist entry) before this can graduate to enforce — tracked as a fleet-sweep issue, not yet filed"
+    ci_producer: ".github/scripts/check-event-consumer-liveness.py"
+    allowlist: []
   service_code_change:
     detect: ["<service>/src/main/**"]
     require:
