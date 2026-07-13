@@ -11,6 +11,7 @@ import io.mockk.mockk
 import jakarta.enterprise.inject.Instance
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
 import java.time.Duration
 
 class DomainMetricsTest {
@@ -67,6 +68,48 @@ class DomainMetricsTest {
         dm.paymentSubmitted("sepa", "EUR")
         dm.outboxDead("ledger")
         dm.registerWorkflowLiveness("standing-order-execution", Duration.ofDays(1)).recordSuccess()
+        dm.recordReconciliationDrift("balance_deposit_control", "CZK", BigDecimal("200.00"))
+    }
+
+    @Test
+    fun `recordReconciliationDrift publishes a live gauge per control and currency`() {
+        val reg = SimpleMeterRegistry()
+        val dm = withRegistry(reg)
+
+        dm.recordReconciliationDrift("balance_deposit_control", "CZK", BigDecimal("-219633.00"))
+
+        val gauge = reg.find("openbank.balance.reconciliation.drift")
+            .tags("control", "balance_deposit_control", "currency", "CZK").gauge()
+        assertThat(gauge).isNotNull
+        assertThat(gauge!!.value()).isEqualTo(-219633.00)
+    }
+
+    @Test
+    fun `recordReconciliationDrift updates the same gauge in place on the next run, not a new one`() {
+        val reg = SimpleMeterRegistry()
+        val dm = withRegistry(reg)
+
+        dm.recordReconciliationDrift("balance_deposit_control", "CZK", BigDecimal("-219633.00"))
+        dm.recordReconciliationDrift("balance_deposit_control", "CZK", BigDecimal("200.00"))
+
+        val gauges = reg.find("openbank.balance.reconciliation.drift")
+            .tags("control", "balance_deposit_control", "currency", "CZK").gauges()
+        assertThat(gauges).hasSize(1)
+        assertThat(gauges.first().value()).isEqualTo(200.00)
+    }
+
+    @Test
+    fun `recordReconciliationDrift keeps separate gauges per currency`() {
+        val reg = SimpleMeterRegistry()
+        val dm = withRegistry(reg)
+
+        dm.recordReconciliationDrift("balance_deposit_control", "CZK", BigDecimal("200.00"))
+        dm.recordReconciliationDrift("balance_deposit_control", "EUR", BigDecimal.ZERO)
+
+        val czk = reg.find("openbank.balance.reconciliation.drift").tag("currency", "CZK").gauge()
+        val eur = reg.find("openbank.balance.reconciliation.drift").tag("currency", "EUR").gauge()
+        assertThat(czk!!.value()).isEqualTo(200.00)
+        assertThat(eur!!.value()).isEqualTo(0.0)
     }
 
     @Test

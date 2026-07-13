@@ -331,6 +331,52 @@ class DomainMetrics {
         return WorkflowLivenessRecorder(lastSuccessEpochMillis)
     }
 
+    // ── Reconciliation drift (ADR-0160 mechanism 4) ─────────────────────────────
+
+    // One AtomicReference per (control, currency) seen so far — populated lazily since the set of
+    // currencies isn't known at startup. ApplicationScoped singleton, so a mutable map field here
+    // has the same lifecycle/thread-safety shape as registerOutboxBacklog's captured closures.
+    private val driftHolders = java.util.concurrent.ConcurrentHashMap<
+        Pair<String, String>,
+        java.util.concurrent.atomic.AtomicReference<BigDecimal>,
+        >()
+
+    /**
+     * Record one currency's signed drift from a control-account ⇄ sub-ledger (or any two
+     * independent-writer) reconciliation run (ADR-0160 mechanism 4 — the revised design, see the
+     * ADR's 2026-07-13 amendment). Publishes `openbank.balance.reconciliation.drift{control,
+     * currency}` as a live gauge; a `PrometheusRule` with a `for:` clause (not this method — see
+     * the accompanying gitops manifest) turns "drift present in this one snapshot" into "drift has
+     * been sustained for N consecutive runs", which is what actually distinguishes a real defect
+     * from a transient artifact (a snapshot taken mid-backfill was misread as a ~220k CZK integrity
+     * crisis in issue #860 before this existed).
+     *
+     * Call on **every** reconciliation run, for every currency in the report — including a
+     * currency that came back within tolerance (drift = zero), so the gauge reflects the current
+     * state rather than freezing at the last non-zero value. Safe to call from the very first run:
+     * the gauge is registered lazily on first sight of a (control, currency) pair.
+     *
+     * @param control   stable low-cardinality name for the reconciliation control, e.g.
+     *                  `balance_deposit_control` — lets a future second independent-writer pair
+     *                  reuse this same primitive under its own control name.
+     * @param currency  ISO-4217 currency code
+     * @param drift     signed difference (sub-ledger − ledger-control, or whichever side this
+     *                  control defines as the delta); zero means the two writers agree
+     */
+    fun recordReconciliationDrift(control: String, currency: String, drift: BigDecimal) {
+        reg()?.let { r ->
+            driftHolders.computeIfAbsent(control to currency) {
+                val ref = java.util.concurrent.atomic.AtomicReference(BigDecimal.ZERO)
+                Gauge.builder("openbank.balance.reconciliation.drift") { ref.get().toDouble() }
+                    .tag("control", control)
+                    .tag("currency", currency)
+                    .strongReference(true)
+                    .register(r)
+                ref
+            }.set(drift)
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     // Get-or-create the named counter and record one occurrence. Every call site is a
