@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pid-service
     app.kubernetes.io/part-of: pid
   annotations:
-    openbank.tech/policy-checksum: "72b44a367d02f366"
+    openbank.tech/policy-checksum: "fe8ba5345031096d"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -997,7 +997,7 @@ data:
         # unallowlisted below (real triage tracked as a fleet-sweep issue, not resolved by fiat).
         # Flip to enforced once triage brings unallowlisted violations to zero = pass --enforce to
         # the script in ci.yml (one-line change), same as every other ADR-0144 gate here.
-        blocked_on: "9 unallowlisted REAL_GAP topics remain from the #996 triage (#1005 sca topic mismatch and #1007 audit-service fan-out landed, fixing 4; the 3 originally-UNCLEAR topics are now resolved — 2 more REAL_GAP: cards.events, fx.conversion.completed; 1 allowlisted below: pid.events) — tracked in issue #996, not resolved by fiat"
+        blocked_on: "11 unallowlisted REAL_GAP topics remain from the #996 triage: 13 original REAL_GAP - 4 fixed (#1005 sca topic mismatch, #1007 audit-service fan-out) + 2 more found once the 3 originally-UNCLEAR topics were resolved (cards.events, fx.conversion.completed are REAL_GAP; pid.events is allowlisted below) = 11 — tracked in issue #996, not resolved by fiat"
         ci_producer: ".github/scripts/check-event-consumer-liveness.py"
         # #996 triage findings, classified LEGITIMATE_NO_CONSUMER (not the #889 failure class):
         allowlist:
