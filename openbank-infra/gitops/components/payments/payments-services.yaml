@@ -1774,6 +1774,10 @@ spec:
       labels:
         app.kubernetes.io/name: card-issuance-service
         app.kubernetes.io/part-of: payments
+      annotations:
+        # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-card-issuance-opa-bundle.sh (do not hand-edit).
+        openbank.tech/policy-checksum: "2def8bbead9b9e1c"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1847,6 +1851,12 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # OPA sidecar bootstrap (ADR-0034 Phase 5, issue #938). Advisory mode first
+            # (AUTHZ_ENFORCE=false, @Authorize logs "would DENY" without blocking) — matches
+            # every other service's rollout convention. Flip to true only after an observation
+            # window with a clean advisory report.
+            - name: AUTHZ_ENFORCE
+              value: "false"
           startupProbe:
             tcpSocket:
               port: management
@@ -1889,9 +1899,84 @@ spec:
             limits:
               cpu: "1"
               memory: 768Mi
+        # OPA policy-decision sidecar (ADR-0034, issue #938 bootstrap). Serves
+        # data.openbank.rest.allow for all @Authorize-annotated endpoints in
+        # card-issuance-service (card.*). Bundle mounted from card-issuance-opa-bundle
+        # ConfigMap (gen-card-issuance-opa-bundle.sh).
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: card-issuance-opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: card-issuance-opa-bundle
+              mountPath: /bundle/card_issuance_rest_ext.rego
+              subPath: card_issuance_rest_ext.rego
+              readOnly: true
+            - name: card-issuance-opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: card-issuance-opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: card-issuance-opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: card-issuance-opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: card-issuance-opa-bundle
+          configMap:
+            name: card-issuance-opa-bundle
         - name: kafka-keystore
           secret:
             secretName: card-issuance-service-kafka-keystore

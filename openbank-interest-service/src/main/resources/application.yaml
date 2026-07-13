@@ -75,6 +75,14 @@ quarkus:
   dev-ui:
     enabled: false
 
+# OPA sidecar (ADR-0034 Phase 5, issue #938 bootstrap). Advisory mode by default.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:false}"
+
 "%dev":
   quarkus:
     log:
