@@ -17,6 +17,11 @@ dependencies {
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.smallrye.kafka)
+    // #889: initiate the real SEPA transfer for a due standing order via the sepa-payment REST API,
+    // with an openbank-services M2M token minted by the oidc-client filter.
+    implementation(libs.quarkus.rest.client.reactive)
+    implementation(libs.quarkus.rest.client.reactive.jackson)
+    implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.quarkus.smallrye.health)
     implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)

@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Standing Order Service API
-  version: 1.1.0
+  version: 1.2.0
   description: Recurring payment orders — create, pause, resume, cancel.
   license:
     name: Apache-2.0
@@ -142,6 +142,17 @@ components:
         debtorAccountId:
           type: string
           format: uuid
+        debtorIban:
+          description: >-
+            Debtor account IBAN, captured at creation and used to initiate the SEPA credit transfer
+            when the order is due (#889). Optional for backward compatibility; a SEPA_CREDIT order
+            without it cannot be executed.
+          type: string
+          nullable: true
+        debtorName:
+          description: Debtor display name for the SEPA credit transfer (#889). Optional; see debtorIban.
+          type: string
+          nullable: true
         creditorIban:
           type: string
         creditorName:

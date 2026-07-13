@@ -27,7 +27,8 @@ class StandingOrderBootSmokeIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("standing-order-events-out")
+            InMemoryConnector.switchOutgoingChannelsToInMemory("standing-order-events-out") +
+                InMemoryConnector.switchIncomingChannelsToInMemory("standing-order-due-in")
 
         override fun stop() = InMemoryConnector.clear()
     }

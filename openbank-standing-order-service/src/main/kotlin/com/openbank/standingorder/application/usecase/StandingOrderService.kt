@@ -32,6 +32,7 @@ class StandingOrderService(
         val order = StandingOrder(
             id = Ids.newId(), idempotencyKey = cmd.idempotencyKey,
             partyId = cmd.partyId, debitAccountId = cmd.debitAccountId,
+            debtorIban = cmd.debtorIban, debtorName = cmd.debtorName,
             creditorIban = cmd.creditorIban, creditorName = cmd.creditorName, creditorBic = cmd.creditorBic,
             amountMinorUnits = cmd.amountMinorUnits, currency = cmd.currency,
             frequency = cmd.frequency, paymentType = cmd.paymentType,
@@ -77,6 +78,8 @@ class StandingOrderService(
                             "orderId" to order.id,
                             "paymentType" to order.paymentType,
                             "debitAccountId" to order.debitAccountId,
+                            "debtorIban" to order.debtorIban,
+                            "debtorName" to order.debtorName,
                             "creditorIban" to order.creditorIban,
                             "creditorName" to order.creditorName,
                             "creditorBic" to order.creditorBic,
