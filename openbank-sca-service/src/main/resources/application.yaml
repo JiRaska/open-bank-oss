@@ -140,10 +140,18 @@ mp:
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     outgoing:
+      # Bug fix (ADR-0160 #996 triage): this channel only ever publishes DEVICE_ENROLLED — the
+      # long-lived SCA enrollment lifecycle event, per ADR-0068's design and the KafkaTopic
+      # already provisioned for exactly this purpose (openbank-infra/gitops/components/onboarding/
+      # kafka-topics.yaml: "onboarding is the only consumer of the SCA enrollment lifecycle
+      # topic"). It was wired to openbank.sca.challenge.event instead — the OTP CHALLENGE
+      # lifecycle topic (a distinct, not-yet-built feature; see kafka-sca-mtls.yaml) — so
+      # onboarding-service's already-correct sca-events-in listener (subscribed to
+      # openbank.sca.events since its own introduction) never received a single message.
       sca-events-out:
         connector: smallrye-kafka
         client.id: sca-service-${quarkus.uuid}
-        topic: openbank.sca.challenge.event
+        topic: openbank.sca.events
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
 

@@ -39,7 +39,11 @@ class SanctionsResource(private val useCase: SanctionsUseCase) {
     @POST
     @Path("/review")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
-    @Authorize(action = "sanctions.review", resource = "")
+    // Renamed from sanctions.review (issue #938 follow-up): "clear" is a distinctive four-eyes
+    // verb, kept apart from `release` (payment-hold release elsewhere in the fleet) for clean
+    // audit separation — a wrongly-cleared true positive here is a real sanctions violation.
+    // No ROLE_SERVICE on this endpoint, confirmed no M2M caller — safe to four-eyes gate.
+    @Authorize(action = "sanctions.clear", resource = "")
     suspend fun review(cmd: ReviewCommand) = useCase.review(cmd)
 
     @GET

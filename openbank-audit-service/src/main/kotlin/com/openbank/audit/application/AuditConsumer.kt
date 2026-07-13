@@ -35,11 +35,7 @@ class AuditConsumer {
                 id = UUID.randomUUID(),
                 eventType = node["eventType"]?.asText() ?: "UNKNOWN",
                 aggregateType = node["aggregateType"]?.asText() ?: inferAggregateType(node),
-                aggregateId = node["accountId"]?.asText()
-                    ?: node["partyId"]?.asText()
-                    ?: node["transactionId"]?.asText()
-                    ?: node["consentId"]?.asText()
-                    ?: "unknown",
+                aggregateId = inferAggregateId(node),
                 actorId = node["requestedBy"]?.asText()
                     ?: node["actorId"]?.asText()
                     // transaction.initiated events carry the customer identity here (ADR-0021).
@@ -57,12 +53,28 @@ class AuditConsumer {
         }
     }
 
+    private fun inferAggregateId(node: JsonNode): String = node["accountId"]?.asText()
+        ?: node["partyId"]?.asText()
+        ?: node["transactionId"]?.asText()
+        ?: node["consentId"]?.asText()
+        // clearing.batch.event: publishBatchSettled/publishItemCleared carry batchId/itemId, not a
+        // shared aggregate field name (PR #1007).
+        ?: node["batchId"]?.asText()
+        ?: node["itemId"]?.asText()
+        // security.ict.incident: IctIncidentService.publishEvent nests the incident under
+        // "incident" rather than a top-level id field (PR #1007).
+        ?: node["incident"]?.get("id")?.asText()
+        ?: "unknown"
+
     private fun inferAggregateType(node: JsonNode): String = when {
         node.has("accountId") -> "ACCOUNT"
         node.has("partyId") -> "PARTY"
         node.has("transactionId") -> "TRANSACTION"
         node.has("consentId") -> "CONSENT"
         node.has("kycCaseId") -> "KYC_CASE"
+        node.has("batchId") -> "CLEARING_BATCH"
+        node.has("itemId") -> "CLEARING_ITEM"
+        node.has("incident") -> "ICT_INCIDENT"
         else -> "UNKNOWN"
     }
 }

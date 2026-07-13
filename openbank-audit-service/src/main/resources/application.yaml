@@ -116,7 +116,14 @@ mp:
       audit-events-in:
         connector: smallrye-kafka
         client.id: audit-service-${quarkus.uuid}
-        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit
+        # clearing.batch.event / security.ict.incident / security.scan.event added (ADR-0160 #996
+        # triage): each publisher's own docs name audit-service as the SOLE intended consumer
+        # (clearing: "downstream audit consumers persist it for the statutory period"; scanner:
+        # "Consumed by audit-service for tamper-evident 10-year retention" per DORA Art. 17). All
+        # three were publish-with-zero-consumer since introduction. AuditConsumer.consume() is
+        # generic (stores payload verbatim, best-effort field extraction with "unknown" fallbacks)
+        # — no code change needed to accept a new topic's shape.
+        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.security.scan.event
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 "%dev":
   quarkus:

@@ -72,7 +72,7 @@ class FxResource(private val fxUseCase: FxUseCase, private val cnbIngestion: Cnb
     @POST
     @Path("/convert")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
-    @Authorize(action = "fx.create", resource = "")
+    @Authorize(action = "fx.convert", resource = "")
     @Operation(summary = "Execute FX conversion")
     suspend fun convert(req: ConvertRequest, @HeaderParam("Idempotency-Key") key: String): Response {
         require(key.isNotBlank()) { "Idempotency-Key required" }

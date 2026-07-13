@@ -32,6 +32,9 @@ class ClearingEventPublisherImpl @Inject constructor(
             eventType = BATCH_SETTLED_EVENT,
             payload = objectMapper.writeValueAsString(
                 mapOf(
+                    // eventType is also on OutboxMessage.eventType (-> Kafka header, ce-type), but
+                    // AuditConsumer (PR #1007) reads only the JSON body, so it is duplicated here.
+                    "eventType" to BATCH_SETTLED_EVENT,
                     "batchId" to batch.id,
                     "batchReference" to batch.batchReference,
                     "rail" to batch.rail.name,
@@ -53,6 +56,7 @@ class ClearingEventPublisherImpl @Inject constructor(
             eventType = ITEM_CLEARED_EVENT,
             payload = objectMapper.writeValueAsString(
                 mapOf(
+                    "eventType" to ITEM_CLEARED_EVENT,
                     "itemId" to item.id,
                     "batchId" to item.batchId,
                     "paymentId" to item.paymentId,

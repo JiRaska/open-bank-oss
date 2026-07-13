@@ -3,8 +3,13 @@
 openapi: 3.1.0
 info:
   title: Sanctions Screening Service API
-  version: 1.0.0
-  description: Real-time sanctions screening against EU, UN, OFAC, HM Treasury and CNB lists.
+  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.0 -> 1.1): additive
+  # endpoint only (PATCH /approvals/{id}, ADR-0155 four-eyes) — no breaking change.
+  version: 1.1.0
+  description: >-
+    Real-time sanctions screening against EU, UN, OFAC, HM Treasury and CNB lists. PATCH
+    /approvals/{id} decides a four-eyes approval paused by the platform's ADR-0155 maker-checker
+    gate on `sanctions.clear` (maker != checker).
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -53,7 +58,10 @@ paths:
   /api/v1/sanctions/review:
     post:
       tags: [Sanctions]
-      summary: Submit a manual review decision for a hit or potential hit
+      summary: >-
+        Submit a manual review decision for a hit or potential hit. Subject to the four-eyes
+        `clear` verb (ADR-0155) — a maker's call may be paused (202, PendingApproval) pending a
+        distinct checker's decision via /approvals/{id}, then retried with an X-Approval-Id header.
       operationId: reviewSanctionsHit
       requestBody:
         required: true
@@ -68,6 +76,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SanctionsCheck'
+        '202':
+          description: Four-eyes pending — a second, distinct principal must approve via /approvals/{id}.
 
   /api/v1/sanctions/hits:
     get:
@@ -217,6 +227,32 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/SanctionsList'
+
+  /api/v1/sanctions/approvals/{id}:
+    patch:
+      tags: [Sanctions]
+      summary: Approve or reject a pending four-eyes approval for a gated sanctions action (ADR-0155)
+      operationId: decideApproval
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                approve: { type: boolean }
+              required: [approve]
+      responses:
+        '200':
+          description: The decided approval
+        '404':
+          $ref: '#/components/responses/NotFound'
 
 components:
   responses:

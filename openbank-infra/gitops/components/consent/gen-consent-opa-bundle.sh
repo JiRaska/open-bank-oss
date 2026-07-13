@@ -16,13 +16,25 @@ CONSENT_REST_EXT=$(cat << 'REGO'
 # Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
 #
 # Actions gated (ConsentResource):
-#   consent.create    — create (PENDING_SCA); operator console / onboarding flows
+#   consent.grant     — create (PENDING_SCA); operator console / onboarding flows (renamed from
+#                       consent.create, issue #938 follow-up: "grant" is a distinctive four-eyes
+#                       verb, so it cannot silently gate every OTHER money-path service's
+#                       unrelated `.create` action fleet-wide); four-eyes gated, no M2M caller
 #   consent.read      — getById
 #   consent.list      — listByParty (#partyId), listByGrantee (#granteeId)
-#   consent.revoke    — revoke (DELETE)
-#   consent.activate  — activate after SCA challenge completes
+#   consent.revoke    — revoke (DELETE); four-eyes gated (operator-initiated denial of a
+#                       customer's active consent, rules.yaml four_eyes.verbs), no M2M caller
+#   consent.activate  — activate after SCA challenge completes. Deliberately NOT four-eyes
+#                       gated (issue #938 follow-up): the M2M grant below already reserves this
+#                       action for a possible SCA-completion-callback caller — four_eyes_required
+#                       has no awareness of caller identity, so gating it would risk pausing that
+#                       automated flow too, not just a risky operator-console path.
 #   consent.reject    — reject (customer cancelled SCA)
 #   consent.validate  — validate scope/account coverage (resource servers)
+#
+# Actions gated (ApprovalResource, ADR-0155):
+#   consent.approval.decide — a DIFFERENT operator decides a paused consent.grant /
+#                             consent.revoke request (#id)
 #
 # Base rest.rego already grants: operator-read-any / compliance-read-any for
 # consent.read + consent.list, and party-self-service for consent.list when the
@@ -44,11 +56,13 @@ allowed_reasons contains "operator-consent-write" if {
 # M2M resource servers acting in the consent ceremony: psd2-service validates a
 # consent before serving an AIS/PIS call (consent.read / consent.validate), and
 # the SCA completion callback activates or rejects a PENDING_SCA consent
-# (consent.activate / consent.reject). Deliberately narrow: consent.create and
+# (consent.activate / consent.reject). Deliberately narrow: consent.grant and
 # consent.revoke are NOT granted to M2M clients — those originate from a human
 # channel (customer or operator), mirroring edge-service-notification's stance
 # that a blanket SERVICE allow would open every @Authorize endpoint to any
-# M2M client.
+# M2M client. This is also why consent.activate stays OUT of four_eyes.verbs
+# (rules.yaml) despite being a risk-relevant action — see that file's guardrail
+# note (issue #938 follow-up).
 #
 # NOTE (found post-merge, issue tracked separately): AuthorizeInterceptor never
 # emits principal.type == "SERVICE" — M2M callers authenticate via Keycloak

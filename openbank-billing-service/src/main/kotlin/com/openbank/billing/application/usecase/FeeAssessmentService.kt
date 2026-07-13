@@ -40,8 +40,29 @@ class FeeAssessmentService(private val accounts: AccountContextPort, private val
                 skipReason = "ACCOUNT_CONTEXT_UNRESOLVED",
                 assessedFees = emptyList(),
             )
-        val assessed = catalog.billableFees(billing.productId, currency)
-            .map { fee -> assessOne(cycleId, accountId, currency, fee, billing.context) }
+
+        // Fail-closed, same as the account-context branch above: a product-catalog read failure
+        // (e.g. transiently unreachable) must be a visible, explicit skip — not a silent "zero
+        // fees" that looks identical to a product that genuinely has none. Confirmed live during
+        // real-environment verification (ADR-0143) that swallowing this exception at the port
+        // level made the two cases indistinguishable.
+        // TooGenericExceptionCaught/SwallowedException: deliberately catch ANY fault (network
+        // error, timeout, unexpected 5xx) — narrowing this would leave a class of catalog faults
+        // unhandled and silently billing on absent data, exactly what this branch exists to prevent.
+        @Suppress("TooGenericExceptionCaught", "SwallowedException")
+        val fees = try {
+            catalog.billableFees(billing.productId, currency)
+        } catch (e: Exception) {
+            return BillingAssessment(
+                cycleId = cycleId,
+                accountId = accountId,
+                currency = currency,
+                skipped = true,
+                skipReason = "PRODUCT_CATALOG_UNREACHABLE",
+                assessedFees = emptyList(),
+            )
+        }
+        val assessed = fees.map { fee -> assessOne(cycleId, accountId, currency, fee, billing.context) }
         return BillingAssessment(
             cycleId = cycleId,
             accountId = accountId,

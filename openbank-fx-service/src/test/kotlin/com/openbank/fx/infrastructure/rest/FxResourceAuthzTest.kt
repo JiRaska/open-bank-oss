@@ -69,7 +69,7 @@ class FxResourceAuthzTest {
         // No FX rate is seeded for this pair in the test DB, so the use case's own
         // "No FX rate available" failure answers (IllegalStateException -> 422 via the
         // shared exception mapper) - never a 401/403 from the interceptor itself, proving
-        // the fx.create @Authorize check did not interfere with the call. Content-Type is
+        // the fx.convert @Authorize check did not interfere with the call. Content-Type is
         // required — JAX-RS answers 415 without it.
         Given {
             contentType("application/json")
