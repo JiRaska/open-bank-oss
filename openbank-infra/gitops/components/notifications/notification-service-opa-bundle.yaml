@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: notification-service
     app.kubernetes.io/part-of: notifications
   annotations:
-    openbank.tech/policy-checksum: "502c99b30084ae66"
+    openbank.tech/policy-checksum: "72a59b6f5ad69a02"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2148,5 +2148,68 @@ data:
         compliance:
           eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
           dora: "Art. 9 ICT risk detection — fleet-wide re-verification that architectural decision records still match the code they describe"
+
+      - id: authz-policy-auditor
+        plane: control
+        charter: "ADR-0167"
+        description: >
+          Static analyzer for the fleet's OPA/Rego authorization policies (rest.rego, agents.rego,
+          copilot_tool.rego) and the agents.yaml charters that feed them. Cross-references every rule
+          condition against AuthorizeInterceptor's actual emitted principal-type/id vocabulary: a rule
+          gated on a classification value the interceptor never emits, an agent-id comparison missing
+          the trim_prefix normalization the REST bridge path needs, an agents.yaml charter's
+          tools.allow/deny drifting from the tool_tiers registry, and a REST rule bypassing
+          agents.allow by calling charter_allowed directly. Proposes a tracking ticket through the
+          HITL queue for every finding -- this agent never opens a fix PR, even for the fleet's usual
+          "one narrow mechanical case," because a wrong auto-fix on an authorization rule is a live
+          security exposure. Never writes to a .rego policy or agents.yaml directly.
+        enabled: true
+        enforcement: block
+        schedule:
+          weekly: "07:00 UTC"
+          reactive: policy-source-changed-webhook   # triggered when any .rego policy or agents.yaml changes
+        data_scope:
+          read:
+            - read.governance             # openbank-infra/opa/policies/*.rego, openbank-libs/governance/
+                                           # policies/*.rego, agents.yaml, and AuthorizeInterceptor.kt via
+                                           # a repo checkout
+          pii: none                       # policy source text and rule metadata only; no customer data
+        tools:
+          allow:
+            - tier: read
+              resources: [governance]
+            - tier: write_proposal
+              resources: [github-pr]      # opens draft.ticket ONLY -- never a fix PR (ADR-0167 Decision)
+          deny:
+            - tier: write
+              resources: ["*"]            # explicit: no direct write to any .rego policy or agents.yaml ever
+            - tier: execute
+              resources: ["*"]
+        requires_human:
+          - any_authz_policy_finding      # HITL mandatory; a human reads the rego/charter diff and the
+                                           # code path it gates before anything changes
+          - every: proposal                 # segregation of duties: agent proposes, human disposes
+          - two_person_review: authz_policy_findings   # stricter than every sibling agent's single-
+                                           # approval HITL gate (mirrors rules.yaml review.
+                                           # money_path_approvals: 2): a wrong disposition of an
+                                           # authz-policy finding is a live security exposure, not a
+                                           # documentation/cost/release nit, so this charter asks for a
+                                           # second reviewer before a finding is closed out
+        limits:
+          tokens_per_run: 50000
+          runs_per_day: 8                 # weekly sweep + occasional policy-source-changed reactive runs
+          kill_switch: true
+        audit:
+          capture:
+            - model_id
+            - prompt_hash
+            - tool_calls
+            - policy_decision
+            - findings_detected
+            - authz_check_type_impacted
+            - human_approved_by
+        compliance:
+          eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
+          dora: "Art. 9 ICT risk detection; Art. 5 ICT risk management framework — fleet-wide static verification that authorization-policy rules can actually fire as intended"
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}

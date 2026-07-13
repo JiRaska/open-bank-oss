@@ -78,6 +78,9 @@
     "openbank-audit-service": {
       "component": "audit-service"
     },
+    "openbank-authz-policy-auditor": {
+      "component": "authz-policy-auditor"
+    },
     "openbank-balance-service": {
       "component": "balance-service"
     },
