@@ -32,7 +32,7 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
-              containerPort: 8142
+              containerPort: 8144
             - name: management
               containerPort: 8085
           env:
@@ -83,7 +83,7 @@ spec:
     app.kubernetes.io/name: control-liveness-sentinel
   ports:
     - name: http
-      port: 8142
+      port: 8144
       targetPort: http
     - name: management
       port: 8085

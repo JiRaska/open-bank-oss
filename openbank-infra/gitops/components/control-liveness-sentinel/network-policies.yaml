@@ -34,7 +34,7 @@ spec:
               kubernetes.io/metadata.name: admin-ui
       ports:
         - protocol: TCP
-          port: 8142
+          port: 8144
     - from:
         - namespaceSelector:
             matchLabels:

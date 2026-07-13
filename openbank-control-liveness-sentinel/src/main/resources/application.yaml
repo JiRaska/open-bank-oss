@@ -2,7 +2,7 @@ quarkus:
   application:
     name: control-liveness-sentinel
   http:
-    port: 8142
+    port: 8144
     cors:
       ~: true
       origins: "http://localhost:3000"
