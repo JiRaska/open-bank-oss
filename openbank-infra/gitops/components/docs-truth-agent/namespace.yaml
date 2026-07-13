@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: docs-truth-agent
+  labels:
+    app.kubernetes.io/part-of: openbank
+    openbank.io/component: docs-truth-agent

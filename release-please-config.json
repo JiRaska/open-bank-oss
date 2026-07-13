@@ -111,6 +111,9 @@
     "openbank-dispute-service": {
       "component": "dispute-service"
     },
+    "openbank-docs-truth-agent": {
+      "component": "docs-truth-agent"
+    },
     "openbank-document-service": {
       "component": "document-service"
     },

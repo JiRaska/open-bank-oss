@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: agent-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "d9006a4d1117a34c"
+    openbank.tech/policy-checksum: "a098ca9d4f4d7f5d"
 data:
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -58,22 +58,6 @@ data:
 
     # Every tools.allow / tools.deny pattern across the agent's charter(s) -- factored out so
     # charter_allowed and rest_action_allowed don't each re-walk `some a in charter` themselves.
-    #
-    # SCHEMA NOTE: this only matches charters whose tools.allow/deny are a flat list of pattern
-    # STRINGS (compliance-officer, ledger-domain-engineer, ui-assistant, rca-investigator,
-    # customer-copilot). The standalone background/control-plane agents (finops-agent, devops-agent,
-    # control-liveness-sentinel, governance-auditor, release-steward, docs-truth-agent,
-    # authz-policy-auditor, flaky-test-hunter) instead declare tools.allow as a list of
-    # `{tier, resources}` objects -- `some pattern in a.tools.allow` binds `pattern` to the whole
-    # object for those charters, which glob_match can never match against a string tool name, so
-    # charter_allowed is always false for them here. This is intentionally NOT a security gap
-    # (default-deny fails closed, not open) -- it is simply inert: none of those services call the
-    # MCP /tools/call endpoint this package gates at all (confirmed: no reference to it in any of
-    # their source trees). Their real, live authorization is the standard `@RolesAllowed` REST
-    # security on each service's own endpoints. Their `agents.yaml` charter today documents intent
-    # for governance/audit purposes, not a runtime-enforced grant -- same as every charter's
-    # `requires_human` block, which no code path reads either. Wiring the tier+resources shape into
-    # a live decision here is future work if/when these services are ever fronted by the MCP gateway.
     allowed_or_denied_patterns := {
     	"allow": {pattern |
     		some a in charter
@@ -510,43 +494,47 @@ data:
           eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
           dora: "ICT change management (Art. 8–10); operational resilience via proactive pipeline monitoring"
 
-      - id: control-liveness-sentinel
+      - id: docs-truth-agent
         plane: control
-        charter: "ADR-0163"
+        charter: "ADR-0166"
         description: >
-          Fleet-wide correlator for the ADR-0160 liveness/drift-detection mechanisms — watches
-          WorkflowLivenessWatchdog heartbeat gauges, the event-consumer-liveness and lineage-vs-code
-          CI gate reports, and reconciliation drift-SLA windows. Surfaces a stale-or-silent control
-          as a finding before it pages, and proposes a durable fix (a code/IaC PR wiring an
-          unmonitored job into the watchdog, or a tracking ticket) through the HITL queue. Never
-          writes to a control directly.
+          Periodic ADR-status-vs-code drift detector. On a weekly sweep plus reactively when any
+          docs/adr/*.md file changes, greps every ADR's Delivery-Status: line against the code/
+          service/class/config key it names: a Shipped/Complete ADR whose named artifact doesn't
+          exist or isn't wired up, a Planned/Partial ADR whose fully-built implementation already
+          exists unmentioned (the ADR-0139/ADR-0140 feature-store incident), and a mismatch between
+          an ADR's or doc's "enforced" claim and rules.yaml's own gate-graduation enforced flag.
+          Findings are almost always a tracking ticket — correcting an ADR's substantive content is
+          a human judgment call — with a rare mechanical PR reserved for the one unambiguous case:
+          flipping just the Delivery-Status: line, nothing else in the file. Never edits ADR
+          decision content, merges a PR, or writes to rules.yaml.
         enabled: true
         enforcement: block
         schedule:
-          daily: "03:00 UTC"
-          reactive: goalert-webhook       # triggered when a WorkflowLivenessWatchdog gauge itself pages
+          weekly: "06:00 UTC"
+          reactive: adr-merge-webhook       # triggered by any merged change under docs/adr/*.md
         data_scope:
           read:
-            - prometheus-query-readonly   # openbank_workflow_liveness_last_success_age_seconds gauges
-            - read.governance             # rules.yaml advisory allowlists (mechanisms 1/2), ADR-0160
-          pii: none                       # control-heartbeat / CI-gate metadata only; no customer data
+            - read.governance             # docs/adr/*.md Delivery-Status lines, rules.yaml enforced flags,
+                                           # and a grep-based existence check of the artifacts they name
+          pii: none                       # ADR prose and repo file/grep metadata only; no customer data
         tools:
           allow:
             - tier: read
-              resources: [prometheus, governance]
+              resources: [governance]
             - tier: write_proposal
-              resources: [github-pr]      # opens code/IaC diff PRs or draft.ticket only; no write
+              resources: [github-pr]      # opens draft.ticket (primary) or, rarely, a Delivery-Status-only fix PR
           deny:
             - tier: write
-              resources: ["*"]            # explicit: no direct write to any control ever
+              resources: ["*"]            # explicit: no direct write to any ADR's decision content or rules.yaml ever
             - tier: execute
               resources: ["*"]
         requires_human:
-          - any_control_or_pipeline_change  # HITL mandatory; a human merges every proposal
-          - every: proposal                 # segregation of duties: agent proposes, human disposes
+          - any_adr_status_correction     # HITL mandatory; a human reads the ADR and the code to judge the correct status
+          - every: proposal               # segregation of duties: agent proposes, human disposes
         limits:
           tokens_per_run: 50000
-          runs_per_day: 6
+          runs_per_day: 4                 # weekly sweep + occasional ADR-merge reactive runs
           kill_switch: true
         audit:
           capture:
@@ -555,123 +543,10 @@ data:
             - tool_calls
             - policy_decision
             - findings_detected
-            - control_mechanism_impacted
+            - adr_status_drift_impacted
             - human_approved_by
         compliance:
           eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
-          dora: "Art. 9 ICT risk detection; Art. 24 testing of ICT systems — fleet-wide correlator for ADR-0160's detection controls"
-
-      - id: governance-auditor
-        plane: control
-        charter: "ADR-0164"
-        description: >
-          Post-hoc auditor of merged-PR governance compliance. For every PR merged to main, re-verifies
-          via the GitHub API that rules.yaml's own review rules were actually followed: approval count
-          vs. the money-path/default requirement, docs/threat-models/<service>.md presence for a
-          money-path change, merge-commit GPG verification, a linked issue in the PR body, and
-          (best-effort) an admin/override-flag bypass. Proposes a compliance-incident ticket through
-          the HITL queue for a human to triage — a violation on an already-merged PR is a human
-          decision, not a diff. Never merges, approves or re-runs anything.
-        enabled: true
-        enforcement: block
-        schedule:
-          daily: "04:30 UTC"
-          reactive: pr-merged-webhook     # triggered per PR merge to main — this agent's natural trigger,
-                                          # unlike the alert-driven goalert-webhook its siblings use
-        data_scope:
-          read:
-            - github-prs-readonly        # merged-PR metadata: reviews, merge-commit verification, body, labels
-            - read.governance            # rules.yaml review + money_path_services — the compliance bar itself
-          pii: none                       # PR/review metadata only; no customer data in scope
-        tools:
-          allow:
-            - tier: read
-              resources: [github, governance]
-            - tier: write_proposal
-              resources: [github-pr]      # opens draft.ticket (primary) or, rarely, a mechanical fix PR
-          deny:
-            - tier: write
-              resources: ["*"]            # explicit: no direct write to any PR/review/merge ever
-            - tier: execute
-              resources: ["*"]
-        requires_human:
-          - any_compliance_incident       # HITL mandatory; a human triages every finding
-          - every: proposal                 # segregation of duties: agent proposes, human disposes
-          - approver_must_differ_from: author     # segregation of duties
-          - record: reason                         # approve/reject reason -> audit
-        limits:
-          tokens_per_run: 50000
-          runs_per_day: 24                # one per merge is common; daily catch-up sweep is one more
-          kill_switch: true
-        audit:
-          capture:
-            - model_id
-            - prompt_hash
-            - tool_calls
-            - policy_decision
-            - findings_detected
-            - governance_check_type_impacted
-            - human_approved_by
-        compliance:
-          eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
-          dora: "Art. 9 ICT risk detection; Art. 5 governance and organisation — re-verifies the repo's own change-control governance was followed"
-
-      - id: release-steward
-        plane: control
-        charter: "ADR-0165"
-        description: >
-          Periodic guardian of the release-please / version-axis invariants. Checks
-          release-please-config.json vs .release-please-manifest.json lockstep, admin-ui
-          package.json vs version.txt sync, a fleet-wide scan for services that set
-          quarkus.application.version explicitly (proactively, ahead of the reactive
-          check-app-version-override.sh CI gate), and open-PR openapi.yaml:info.version
-          collision detection across every open PR touching a spec. Proposes a triage ticket
-          for judgment-call drift (manifest baseline, version-sync side, which racing PR
-          re-bumps) and, for the one mechanically fixable case (an explicit
-          quarkus.application.version key), a scaffold PR through the HITL queue. Never
-          edits version.txt, merges a release-please PR, or writes to openapi.yaml directly.
-        enabled: true
-        enforcement: block
-        schedule:
-          daily: "05:00 UTC"
-          reactive: release-please-merge-webhook   # triggered by every release-please PR merge —
-                                                    # this agent's natural trigger, the moment
-                                                    # incidents 1/2 have historically been introduced
-        data_scope:
-          read:
-            - read.governance             # release-please-config.json, .release-please-manifest.json,
-                                           # per-service application.yaml (repo-checkout reads)
-            - github-prs-readonly         # open PRs touching any openapi.yaml, for the collision check
-          pii: none                       # release/version metadata only; no customer data in scope
-        tools:
-          allow:
-            - tier: read
-              resources: [governance, github]
-            - tier: write_proposal
-              resources: [github-pr]      # opens draft.ticket (primary) or, rarely, a mechanical fix PR
-          deny:
-            - tier: write
-              resources: ["*"]            # explicit: no direct write to version.txt/openapi.yaml/manifest ever
-            - tier: execute
-              resources: ["*"]
-        requires_human:
-          - any_release_or_version_drift  # HITL mandatory; a human picks the correct baseline/side
-          - every: proposal                 # segregation of duties: agent proposes, human disposes
-        limits:
-          tokens_per_run: 50000
-          runs_per_day: 12                # daily sweep + one per release-please merge is common
-          kill_switch: true
-        audit:
-          capture:
-            - model_id
-            - prompt_hash
-            - tool_calls
-            - policy_decision
-            - findings_detected
-            - release_invariant_impacted
-            - human_approved_by
-        compliance:
-          eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
-          dora: "Art. 9 ICT risk detection; Art. 24 testing of ICT systems — fleet-wide re-verification for the repo's own release-engineering invariants"
+          dora: "Art. 9 ICT risk detection — fleet-wide re-verification that architectural decision records still match the code they describe"
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}

@@ -1,0 +1,29 @@
+# docs-truth-agent: periodic ADR-status-vs-code drift detector Temporal workflow service (ADR-0166). Namespace: docs-truth-agent.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: docs-truth-agent
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/docs-truth-agent
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: docs-truth-agent
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
