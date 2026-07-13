@@ -124,4 +124,15 @@ class RestBillingAdaptersTest {
         assertThat(fees.single().feeId).isEqualTo("f1")
         assertThat(fees.single().amount).isEqualByComparingTo("5")
     }
+
+    @Test
+    fun `billableFees propagates a failed catalog read instead of failing open`(): Unit = runBlocking {
+        val catalog = mockk<ProductCatalogRestClient>()
+        every { catalog.getProductFees(any()) } returns
+            Uni.createFrom().failure(RuntimeException("product-catalog down"))
+
+        val thrown = runCatching { RestProductCatalogPort(catalog).billableFees("prod-1", "CZK") }.exceptionOrNull()
+
+        assertThat(thrown).isInstanceOf(RuntimeException::class.java)
+    }
 }
