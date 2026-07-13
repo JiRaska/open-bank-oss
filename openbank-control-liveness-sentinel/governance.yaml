@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: platform
+primaryDatastore: "none (stateless)"
+schemaName: "n/a"
+dataLineageRole: internal
+dataClassification: internal
+retentionPolicy: "7 years"
+evidenceExported: false
+lineage:
+  upstream:
+    - serviceName: prometheus
+      relationType: api
+      description: reads WorkflowLivenessWatchdog heartbeat gauges (ADR-0160 mechanism 3)
+    - serviceName: alertmanager
+      relationType: api
+      description: receives control-liveness anomaly alerts
+  downstream:
+    - serviceName: admin-ui
+      relationType: api
+      description: exposes control-liveness findings and HITL approval queue
+schemaLineage:
+  ownedSchemas: []
+  dependentSchemas: []

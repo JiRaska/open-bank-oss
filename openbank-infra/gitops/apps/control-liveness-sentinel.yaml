@@ -1,0 +1,29 @@
+# control-liveness-sentinel: ADR-0160 mechanism correlator Temporal workflow service (ADR-0163). Namespace: control-liveness-sentinel.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: control-liveness-sentinel
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/control-liveness-sentinel
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: control-liveness-sentinel
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false

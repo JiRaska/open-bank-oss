@@ -96,6 +96,9 @@
     "openbank-consent-service": {
       "component": "consent-service"
     },
+    "openbank-control-liveness-sentinel": {
+      "component": "control-liveness-sentinel"
+    },
     "openbank-copilot-service": {
       "component": "copilot-service"
     },
