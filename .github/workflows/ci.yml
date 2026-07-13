@@ -342,6 +342,15 @@ jobs:
       - name: SLO registry consistency (issue #669, rules.yaml: slo)
         run: python3 .github/scripts/check-slo-registry.py
 
+      # ADR-0160 mechanism 1 / rules.yaml: change_requirements.event_consumer_liveness.
+      # Fleet-wide scan (not diff-scoped): every Kafka topic a service publishes must have a
+      # real @Incoming consumer somewhere in the fleet, or a one-line-reasoned allowlist entry.
+      # ADVISORY (ADR-0144) — findings are ::warning annotations; pyyaml is already installed by
+      # the step above. Flip to enforced once the 19-topic first-scan triage lands = add
+      # --enforce below.
+      - name: "event-consumer liveness (ADR-0160, advisory)"
+        run: python3 .github/scripts/check-event-consumer-liveness.py
+
       # ADR-0030 D2: every money-path service must ship a structured STRIDE/DFD
       # threat model. stdlib-only gate, ratchets coverage (a new money-path
       # service or a deleted/stubbed model fails here). Part of the always-run,
