@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.11.4...standing-order-service-v0.12.0) (2026-07-13)
+
+
+### Features
+
+* **standing-order:** execute due orders via the SEPA rail ([#889](https://github.com/JiRaska/open-bank-oss/issues/889)) ([#994](https://github.com/JiRaska/open-bank-oss/issues/994)) ([afc099d](https://github.com/JiRaska/open-bank-oss/commit/afc099d8d6d346bdb7bc172848dbbb0c2a05aacf))
+
 ## [0.11.4](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.11.3...standing-order-service-v0.11.4) (2026-07-11)
 
 
