@@ -11,6 +11,7 @@ import io.mockk.mockk
 import jakarta.enterprise.inject.Instance
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Duration
 
 class DomainMetricsTest {
 
@@ -65,5 +66,46 @@ class DomainMetricsTest {
         dm.registerOutboxBacklog("ledger") { 5 }
         dm.paymentSubmitted("sepa", "EUR")
         dm.outboxDead("ledger")
+        dm.registerWorkflowLiveness("standing-order-execution", Duration.ofDays(1)).recordSuccess()
+    }
+
+    @Test
+    fun `a never-succeeded workflow reads as maximally stale`() {
+        val reg = SimpleMeterRegistry()
+        val dm = withRegistry(reg)
+
+        dm.registerWorkflowLiveness("standing-order-execution", Duration.ofDays(1))
+
+        val age = reg.find("openbank.workflow.last_success.age_seconds")
+            .tag("workflow", "standing-order-execution").gauge()
+        // Age is computed from Instant.EPOCH (1970) — trivially past any real threshold, no
+        // special-casing needed for "this workflow has literally never run".
+        assertThat(age).isNotNull
+        assertThat(age!!.value()).isGreaterThan(Duration.ofDays(365 * 50).toSeconds().toDouble())
+    }
+
+    @Test
+    fun `recordSuccess resets the age gauge close to zero`() {
+        val reg = SimpleMeterRegistry()
+        val dm = withRegistry(reg)
+
+        val recorder = dm.registerWorkflowLiveness("standing-order-execution", Duration.ofDays(1))
+        recorder.recordSuccess()
+
+        val age = reg.find("openbank.workflow.last_success.age_seconds")
+            .tag("workflow", "standing-order-execution").gauge()
+        assertThat(age!!.value()).isLessThan(5.0)
+    }
+
+    @Test
+    fun `expected-interval gauge reports the registered cadence in seconds`() {
+        val reg = SimpleMeterRegistry()
+        val dm = withRegistry(reg)
+
+        dm.registerWorkflowLiveness("balance-reconciliation", Duration.ofHours(25))
+
+        val interval = reg.find("openbank.workflow.expected_interval_seconds")
+            .tag("workflow", "balance-reconciliation").gauge()
+        assertThat(interval!!.value()).isEqualTo(Duration.ofHours(25).toSeconds().toDouble())
     }
 }
