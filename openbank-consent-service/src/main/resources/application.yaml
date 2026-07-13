@@ -162,3 +162,10 @@ opa:
   timeout-ms: "${OPA_TIMEOUT_MS:500}"
 authz:
   enforce: "${AUTHZ_ENFORCE:false}"
+  # ADR-0155: four-eyes ENFORCEMENT (blocking a maker's request pending a second approver),
+  # independent of the base allow/deny enforce toggle above. Stays false by default — same
+  # deliberate, separate rollout decision every other money-path service in the fleet makes
+  # (billing-service's/sepa-payment's application.yaml have the identical comment); flipping
+  # this is a runbook-gated follow-up, not bundled with the ApprovalStore wiring itself.
+  four-eyes:
+    enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"

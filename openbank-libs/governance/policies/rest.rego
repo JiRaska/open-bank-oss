@@ -188,9 +188,10 @@ allowed_reasons contains "edge-service-notification" if {
 # sanctions.create directly, once AUTHZ_ENFORCE=true.
 #
 # Deliberately action-scoped to sanctions.create ONLY, not a "sanctions." family prefix:
-# sanctions.review (dismiss/confirm a hit) and the list-refresh actions are real operator
-# judgment calls, not a service-to-service compliance check, and must stay behind a human
-# session — widening this to the family would let any M2M caller self-clear a sanctions hit.
+# sanctions.clear (renamed from sanctions.review, issue #938 follow-up — dismiss/confirm a
+# hit) and the list-refresh actions are real operator judgment calls, not a service-to-service
+# compliance check, and must stay behind a human session — widening this to the family would
+# let any M2M caller self-clear a sanctions hit.
 #
 # Deliberately NOT scoped to one hardcoded client id (unlike edge-service-notification):
 # sanctions.create is "run a compliance check" — not an account-takeover primitive like
@@ -207,11 +208,12 @@ allowed_reasons contains "m2m-sanctions-screening" if {
 	input.action == "sanctions.create"
 }
 
-# NOTE: sanctions.create is not the only resourceless M2M `*.create` action with this
-# gap — ledger.create, fx.create, lending.create, settlement.create, and others share the
-# same shape and have the same live "advisory: would DENY" masked-by-AUTHZ_ENFORCE=false
-# exposure. Each needs its own case-by-case rule (some may not be safe for any M2M caller
-# the way sanctions.create is) — tracked separately as issue #750, not folded in here.
+# NOTE: sanctions.create is not the only resourceless M2M `*.create`-shaped action with
+# this gap — ledger.create, fx.convert (renamed from fx.create, issue #938 follow-up),
+# lending.create, settlement.create, and others share the same shape and have the same
+# live "advisory: would DENY" masked-by-AUTHZ_ENFORCE=false exposure. Each needs its own
+# case-by-case rule (some may not be safe for any M2M caller the way sanctions.create is)
+# — tracked separately as issue #750, not folded in here.
 
 # ---------------------------------------------------------------------------------------
 # Money-path actions get the four-eyes gate from rules.yaml. This rule does NOT grant

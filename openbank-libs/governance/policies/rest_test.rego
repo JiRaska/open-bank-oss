@@ -687,12 +687,13 @@ test_allow_m2m_sanctions_create_from_a_different_service_account if {
 }
 
 # Deny-by-default still holds outside sanctions.create — an M2M caller does NOT gain the
-# whole "sanctions." family. sanctions.review lets an operator dismiss/confirm a hit; a
-# service self-clearing its own screening result would defeat the compliance control.
-test_deny_m2m_sanctions_review_not_covered if {
+# whole "sanctions." family. sanctions.clear (renamed from sanctions.review, issue #938
+# follow-up) lets an operator dismiss/confirm a hit; a service self-clearing its own
+# screening result would defeat the compliance control.
+test_deny_m2m_sanctions_clear_not_covered if {
 	not rest.allow with input as {
 		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
-		"action": "sanctions.review",
+		"action": "sanctions.clear",
 		"resource": "",
 	}
 }

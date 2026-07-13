@@ -3,13 +3,16 @@
 openapi: 3.1.0
 info:
   title: FX Service API
-  version: 1.2.1
+  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.2 -> 1.3): additive
+  # endpoint only (PATCH /approvals/{id}, ADR-0155 four-eyes) — no breaking change.
+  version: 1.3.0
   description: >-
     Foreign exchange rates and currency conversion. On convert, the converting party's name is
     synchronously screened against the sanctions lists (ADR-0032): a clean party settles the
     conversion (SETTLED), a sanctions hit fails it (FAILED) with a CRITICAL AML case opened, and a
     sub-threshold potential hit or a screening-service outage holds the conversion in PENDING for
-    review (fail-closed — never settled un-screened).
+    review (fail-closed — never settled un-screened). PATCH /approvals/{id} decides a four-eyes
+    approval paused by the platform's ADR-0155 maker-checker gate on `fx.convert` (maker != checker).
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -161,6 +164,34 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConversionResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/fx/approvals/{id}:
+    patch:
+      tags: [FX]
+      summary: Approve or reject a pending four-eyes approval for an FX conversion (ADR-0155)
+      operationId: decideApproval
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                approve: { type: boolean }
+              required: [approve]
+      responses:
+        '200':
+          description: The decided approval
+        '404':
+          $ref: '#/components/responses/NotFound'
         '403':
           $ref: '#/components/responses/Forbidden'
 

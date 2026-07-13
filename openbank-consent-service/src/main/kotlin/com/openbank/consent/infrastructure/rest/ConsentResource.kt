@@ -59,7 +59,10 @@ class ConsentResource(
 
     @Operation(summary = "Create a new consent (PENDING_SCA); idempotent via tppTransactionId / X-Request-ID")
     @POST
-    @Authorize(action = "consent.create")
+    // Renamed from consent.create (issue #938 follow-up): "grant" is a distinctive verb so
+    // adding it to rules.yaml four_eyes.verbs cannot silently four-eyes-gate every OTHER
+    // money-path service's unrelated `.create` action fleet-wide.
+    @Authorize(action = "consent.grant")
     suspend fun create(
         request: CreateConsentRequest?,
         @HeaderParam("X-Request-ID") xRequestId: String?,

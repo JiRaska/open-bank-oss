@@ -19,8 +19,12 @@ FX_REST_EXT=$(cat << 'REGO'
 #   fx.list    — current FX rate sheet (GET /rates)
 #   fx.read    — a rate / rate history / conversion by id (GET, no resource on the rate
 #                endpoints; #id on GET /conversions/{id})
-#   fx.create  — execute an FX conversion (POST /convert)
+#   fx.convert — execute an FX conversion (POST /convert; renamed from fx.create and
+#                four-eyes gated, rules.yaml four_eyes.verbs, issue #938 follow-up)
 #   fx.trigger — ingest the CNB fixing for a day (POST /cnb/ingest)
+#
+# Actions gated (ApprovalResource, ADR-0155):
+#   fx.approval.decide — a DIFFERENT operator decides a paused fx.convert request (#id)
 #
 # Base rest.rego already grants: operator-read-any / compliance-read-any for
 # *.read + *.list (fx-service is in rules.yaml money_path_services, so operators,
@@ -51,7 +55,7 @@ allowed_reasons contains "operator-fx-write" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS"}
 	role in input.principal.roles
-	input.action == "fx.create"
+	input.action == "fx.convert"
 }
 
 allowed_reasons contains "operator-fx-trigger" if {
@@ -69,9 +73,10 @@ allowed_reasons contains "operator-fx-trigger" if {
 #     /fx/rates/{b}/{q}/history) — all `customer.fx.read` at the edge, `fx.list`/`fx.read`
 #     downstream.
 #   - agent-service (MCP read-only tools, ADR-0031 D5): fx_list_rates / fx_get_rate.
-# Deliberately narrow: fx.create (conversion) and fx.trigger (CNB ingest) have NO
-# in-repo M2M caller today and stay human-only. No blanket SERVICE allow on a
-# money-path service (rules.yaml money_path_services includes openbank-fx-service).
+# Deliberately narrow: fx.convert (the money-moving conversion, renamed from fx.create,
+# issue #938 follow-up — four-eyes gated per rules.yaml four_eyes.verbs) and fx.trigger
+# (CNB ingest) have NO in-repo M2M caller today and stay human-only. No blanket SERVICE
+# allow on a money-path service (rules.yaml money_path_services includes openbank-fx-service).
 #
 # NOTE (found post-merge, issue tracked separately): AuthorizeInterceptor never
 # emits principal.type == "SERVICE" — M2M callers authenticate via Keycloak
@@ -94,6 +99,15 @@ allowed_reasons contains "service-fx-shared-client-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
 	input.action in {"fx.read", "fx.list"}
+}
+
+# ADR-0155 checker gate: a DIFFERENT operator/admin decides a paused four-eyes approval on
+# fx.convert (issue #938 follow-up).
+allowed_reasons contains "operator-fx-approval-decide" if {
+	input.principal.type == "HUMAN"
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	input.action == "fx.approval.decide"
 }
 REGO
 )
