@@ -3,12 +3,17 @@
 # secret is projected into `sca` via ExternalSecret (kafka-messaging-certs
 # ClusterSecretStore). The cluster-CA truststore is shared and also projected.
 #
-# ACLs: sca-service only publishes SCA challenge events; it does not consume
-# scheme-accepted or any locked-down topic, so only Write+Describe on its own
-# outbound topic is needed. openbank.sca.challenge.event is not ACL-locked
-# (allow.everyone.if.no.acl.found=true covers it), but explicit Write+Describe
-# here ensures the mTLS principal is used and positions the service for a future
-# deny-by-default sweep.
+# ACLs: sca-service publishes the SCA enrollment lifecycle event (DEVICE_ENROLLED) to
+# openbank.sca.events — the topic onboarding-service's read-model projection (ADR-0068)
+# consumes. Bug fix (ADR-0160 #996 triage, 2026-07-13): this ACL previously granted Write
+# only on openbank.sca.challenge.event (the distinct, not-yet-built OTP challenge lifecycle
+# topic) — sca-service's application.yaml matched that same wrong topic name, so the
+# enrollment event was published somewhere nobody (including onboarding, correctly listening
+# on openbank.sca.events) ever consumed. Neither topic is ACL-locked
+# (allow.everyone.if.no.acl.found=true covers both), but explicit Write+Describe here ensures
+# the mTLS principal is used and positions the service for a future deny-by-default sweep. A
+# future OTP-challenge feature adds its own explicit Write grant on
+# openbank.sca.challenge.event when it is actually built — not speculatively kept here.
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser
@@ -28,7 +33,7 @@ spec:
     acls:
       - resource:
           type: topic
-          name: openbank.sca.challenge.event
+          name: openbank.sca.events
           patternType: literal
         operations: [Write, Describe]
         host: "*"
