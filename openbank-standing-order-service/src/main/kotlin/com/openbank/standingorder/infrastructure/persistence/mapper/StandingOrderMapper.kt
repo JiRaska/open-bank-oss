@@ -8,7 +8,8 @@ import com.openbank.standingorder.domain.model.StandingOrder
 import com.openbank.standingorder.infrastructure.persistence.entity.StandingOrderEntity
 
 fun StandingOrderEntity.toDomain() = StandingOrder(
-    id, idempotencyKey, partyId, debitAccountId, creditorIban, creditorName, creditorBic,
+    id, idempotencyKey, partyId, debitAccountId, debtorIban, debtorName,
+    creditorIban, creditorName, creditorBic,
     amountMinorUnits, currency, frequency, paymentType, remittanceInfo,
     startDate, endDate, nextExecutionDate, lastExecutionDate, executionCount, failureCount,
     status, createdAt, updatedAt,
@@ -19,6 +20,8 @@ fun StandingOrder.toEntity() = StandingOrderEntity().also {
     it.idempotencyKey = idempotencyKey
     it.partyId = partyId
     it.debitAccountId = debitAccountId
+    it.debtorIban = debtorIban
+    it.debtorName = debtorName
     it.creditorIban = creditorIban
     it.creditorName = creditorName
     it.creditorBic = creditorBic

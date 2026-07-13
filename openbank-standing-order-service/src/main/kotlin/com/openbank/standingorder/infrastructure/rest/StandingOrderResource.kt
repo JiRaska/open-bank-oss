@@ -35,6 +35,7 @@ class StandingOrderResource(private val useCase: StandingOrderUseCase) {
         val order = useCase.create(
             CreateStandingOrderCommand(
                 req.idempotencyKey, req.partyId, req.debitAccountId,
+                req.debtorIban, req.debtorName,
                 req.creditorIban, req.creditorName, req.creditorBic,
                 req.amountMinorUnits, req.currency, req.frequency, req.paymentType,
                 req.remittanceInfo, req.startDate, req.endDate,

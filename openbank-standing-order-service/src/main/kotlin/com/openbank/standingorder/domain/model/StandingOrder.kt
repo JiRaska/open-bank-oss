@@ -17,6 +17,12 @@ data class StandingOrder(
     val idempotencyKey: String,
     val partyId: UUID,
     val debitAccountId: UUID,
+    // Debtor IBAN + name captured at creation (#889): the SEPA rail's createPayment needs both,
+    // and account-service's by-id response exposes neither. Nullable for backward compatibility
+    // with orders created before this field existed — such orders can be created but not executed
+    // (the SEPA rail records a failure with a clear "missing debtor details" reason).
+    val debtorIban: String?,
+    val debtorName: String?,
     val creditorIban: String,
     val creditorName: String,
     val creditorBic: String?,

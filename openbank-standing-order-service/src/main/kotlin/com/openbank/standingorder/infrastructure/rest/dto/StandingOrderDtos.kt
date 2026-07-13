@@ -13,6 +13,8 @@ data class CreateStandingOrderRequest(
     val idempotencyKey: String,
     val partyId: UUID,
     val debitAccountId: UUID,
+    val debtorIban: String? = null,
+    val debtorName: String? = null,
     val creditorIban: String,
     val creditorName: String,
     val creditorBic: String?,

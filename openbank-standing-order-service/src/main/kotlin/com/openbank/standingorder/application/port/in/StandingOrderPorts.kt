@@ -12,6 +12,8 @@ data class CreateStandingOrderCommand(
     val idempotencyKey: String,
     val partyId: UUID,
     val debitAccountId: UUID,
+    val debtorIban: String?,
+    val debtorName: String?,
     val creditorIban: String,
     val creditorName: String,
     val creditorBic: String?,

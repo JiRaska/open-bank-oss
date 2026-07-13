@@ -48,6 +48,20 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     tls:
       verification: none
+  # Outbound service-to-service token (#889): the SEPA rest-client mints an openbank-services M2M
+  # token (ROLE_OPERATOR) via this oidc-client so sepa-payment's createPayment accepts the call.
+  # Disabled under %test (units call the consumer directly; the boot IT never dispatches a payment).
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+  rest-client:
+    sepa-payment-service:
+      url: ${SEPA_PAYMENT_SERVICE_URL:http://localhost:8115}
+      scope: jakarta.inject.Singleton
   redis:
     hosts: redis://localhost:6379
   smallrye-reactive-messaging:
@@ -89,6 +103,8 @@ quarkus:
   quarkus:
     oidc:
       enabled: false
+    oidc-client:
+      enabled: false
     management:
       enabled: false
 openbank:
@@ -125,6 +141,19 @@ mp:
         topic: openbank.standing-orders.order.event
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
+    incoming:
+      # #889: self-consume the due events the outbox dispatches, and initiate the real payment
+      # (StandingOrderDueConsumer). group.id / auto.offset.reset are deliberately NOT set as YAML
+      # keys here: SmallRye Config's YAML source quotes any leaf key containing a dot, so they would
+      # silently not resolve (the #686/#703 dotted-key footgun). The defaults are exactly what we
+      # want anyway — group.id falls back to quarkus.application.name (openbank-standing-order-service,
+      # a service-scoped consumer group), and auto.offset.reset stays `latest` so a fresh deploy does
+      # NOT replay historical due events and re-initiate old payments.
+      standing-order-due-in:
+        connector: smallrye-kafka
+        topic: openbank.standing-orders.order.event
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 # OPA sidecar (ADR-0034). Advisory mode by default.
 opa:
