@@ -167,9 +167,14 @@ change_requirements:
     # unallowlisted below (real triage tracked as a fleet-sweep issue, not resolved by fiat).
     # Flip to enforced once triage brings unallowlisted violations to zero = pass --enforce to
     # the script in ci.yml (one-line change), same as every other ADR-0144 gate here.
-    blocked_on: "19 pre-existing producer-only topics need individual triage (real gap vs. legitimate allowlist entry) before this can graduate to enforce — tracked as a fleet-sweep issue, not yet filed"
+    blocked_on: "16 unallowlisted producer-only topics remain as of this commit (13 REAL_GAP + 3 UNCLEAR from the #996 triage; 4 of the 13 REAL_GAP have open fixes pending review — #1005 sca topic mismatch, #1007 audit-service fan-out) — tracked in issue #996, not resolved by fiat"
     ci_producer: ".github/scripts/check-event-consumer-liveness.py"
-    allowlist: []
+    # #996 triage findings, classified LEGITIMATE_NO_CONSUMER (not the #889 failure class):
+    allowlist:
+      - topic: "openbank.psd2.events"
+        reason: "psd2-service docs consistently describe this as audit-trail + external TPP-webhook delivery, not an intra-fleet reaction — no OpenBank service is meant to consume it."
+      - topic: "openbank.tpp.registry.event"
+        reason: "tpp-registry-service's own docs say the publish side is dormant (\"no domain events are emitted yet\" — outbox transport exists but unused). Not the #889 pattern (a working publish going nowhere): nothing is actually published today. Re-triage once the publish side is wired."
   service_code_change:
     detect: ["<service>/src/main/**"]
     require:
