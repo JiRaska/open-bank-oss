@@ -5,6 +5,7 @@
 package com.openbank.document.infrastructure.render
 
 import com.openbank.document.application.port.out.PdfRenderPort
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,7 +18,6 @@ import java.net.http.HttpRequest.BodyPublishers
 import java.net.http.HttpResponse.BodyHandlers
 import java.nio.charset.StandardCharsets
 import java.time.Duration
-import java.util.UUID
 
 /**
  * [PdfRenderPort] HTTP adapter (ADR-0162 D3) over the JDK's own `java.net.http.HttpClient` — no
@@ -75,7 +75,7 @@ class HttpPdfRenderAdapter(
     }
 
     private fun renderViaGotenberg(html: String): ByteArray {
-        val boundary = "openbank-boundary-${UUID.randomUUID()}"
+        val boundary = "openbank-boundary-${Ids.randomId()}"
         val request = HttpRequest.newBuilder()
             .uri(URI.create("$gotenbergUrl/forms/chromium/convert/html"))
             .header("Content-Type", "multipart/form-data; boundary=$boundary")

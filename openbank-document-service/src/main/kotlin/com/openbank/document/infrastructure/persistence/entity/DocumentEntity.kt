@@ -5,6 +5,7 @@
 package com.openbank.document.infrastructure.persistence.entity
 
 import com.openbank.document.domain.model.DocumentStatus
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
@@ -19,7 +20,7 @@ import java.util.UUID
 @Table(name = "documents")
 class DocumentEntity {
     @Id
-    var id: UUID = UUID.randomUUID()
+    var id: UUID = Ids.newId()
 
     @field:Column(name = "template_code")
     var templateCode: String = ""

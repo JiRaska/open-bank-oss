@@ -6,6 +6,7 @@ package com.openbank.document.infrastructure.persistence.entity
 
 import com.openbank.document.domain.model.CeremonyStatus
 import com.openbank.document.domain.model.SignatureLevel
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
@@ -20,7 +21,7 @@ import java.util.UUID
 @Table(name = "signature_ceremonies")
 class SignatureCeremonyEntity {
     @Id
-    var id: UUID = UUID.randomUUID()
+    var id: UUID = Ids.newId()
 
     // Optimistic locking: recordDecision does a read-then-write across two separate
     // transactions (order-enforcement is checked in application memory in between), so without
@@ -29,7 +30,7 @@ class SignatureCeremonyEntity {
     var version: Int = 0
 
     @field:Column(name = "document_id")
-    var documentId: UUID = UUID.randomUUID()
+    var documentId: UUID = Ids.newId()
 
     @field:Column(name = "signers_json", columnDefinition = "TEXT")
     var signersJson: String = "[]"
