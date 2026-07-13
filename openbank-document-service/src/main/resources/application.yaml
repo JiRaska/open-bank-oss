@@ -1,0 +1,166 @@
+quarkus:
+  application:
+    name: openbank-document-service
+  http:
+    port: 8143
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+      headers: Content-Type,Authorization,Idempotency-Key
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: postgresql://localhost:5432/openbank_documents
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_documents
+  flyway:
+    migrate-at-start: true
+    validate-on-migrate: false
+    connect-retries: 10
+    connect-retries-interval: 2S
+  hibernate-orm:
+    database:
+      generation: none
+    physical-naming-strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  # Outbound service-to-service token (ADR-0162 D4): ScaVerificationAdapter's REST client mints an
+  # openbank-services M2M token via this oidc-client so sca-service's GET challenge endpoint accepts
+  # the call. Disabled under %test (unit tests mock SignerVerificationPort directly).
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+  rest-client:
+    sca-service:
+      url: ${SCA_SERVICE_URL:http://localhost:8121}
+      scope: jakarta.inject.Singleton
+  redis:
+    hosts: redis://localhost:6379
+  smallrye-reactive-messaging:
+    kafka:
+      bootstrap-servers: localhost:29092
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+    console:
+      json: true
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-document-service
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  management:
+    enabled: true
+    port: 8088
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+    oidc:
+      enabled: false
+"%test":
+  quarkus:
+    oidc:
+      enabled: false
+    oidc-client:
+      enabled: false
+    management:
+      enabled: false
+openbank:
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 200
+  outbox:
+    dispatch-enabled: true
+    poll-interval: 5s
+    initial-delay: 5s
+  # ADR-0161: shared ObjectStorePort backend selection. postgres is the default/dev/test adapter
+  # (BYTEA table, see V4__add_object_store_blobs.sql); s3 is the production adapter.
+  objectstore:
+    backend: ${OBJECTSTORE_BACKEND:postgres}
+    s3:
+      bucket: ${OBJECTSTORE_S3_BUCKET:openbank-documents-dev}
+      region: ${OBJECTSTORE_S3_REGION:eu-central-1}
+      # endpoint-override deliberately NOT declared here: it's an Optional<String> on the shared
+      # S3ObjectStore adapter, and a "${VAR:}" empty-string default would resolve to
+      # Optional.of("") (present-but-blank) instead of Optional.empty() — S3ObjectStore would then
+      # call URI.create("") and blow up. Only set OBJECTSTORE_S3_ENDPOINT_OVERRIDE (e.g. for
+      # localstack) when an override is actually wanted; leave the key wholly absent otherwise.
+  # ADR-0162 D3: PdfRenderPort HTTP adapter profile. weasyprint (default) = openbank-document-renderer
+  # sidecar; gotenberg = opt-in, per-template full-CSS/Office-fidelity fallback.
+  render:
+    profile: ${RENDER_PROFILE:weasyprint}
+    weasyprint-url: ${WEASYPRINT_URL:http://localhost:8200}
+    gotenberg-url: ${GOTENBERG_URL:http://localhost:3000}
+  # ADR-0162 D4: signature.keystore-path / keystore-password are intentionally NOT declared here
+  # (same Optional<String> reasoning as objectstore.s3.endpoint-override above) — leaving them
+  # wholly absent is what makes PdfBoxPadesSealAdapter fall back to its DEV-ONLY ephemeral
+  # certificate. Production sets both via real config/secrets, never a blank-string default.
+
+mp:
+  messaging:
+    connector:
+      smallrye-kafka:
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+        ssl.keystore.location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+        ssl.keystore.type: ${KAFKA_SSL_KEYSTORE_TYPE:PKCS12}
+        ssl.keystore.password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+        ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+        ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
+        ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    outgoing:
+      document-events-out:
+        connector: smallrye-kafka
+        client.id: document-service-${quarkus.uuid}
+        topic: openbank.documents.document.event
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+
+# OPA sidecar (ADR-0034). Advisory mode by default.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:true}"

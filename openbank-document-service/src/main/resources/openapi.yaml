@@ -1,0 +1,303 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+openapi: 3.1.0
+info:
+  title: Document Service API
+  version: 1.0.0
+  description: >-
+    Document Management — templates, rendering, storage with lifecycle/retention metadata,
+    and e-signature ceremonies. Not on the synchronous money path (emits events, never a
+    blocking fund-release gate).
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+  - url: http://localhost:8143
+    description: Local development
+tags:
+  - name: Templates
+  - name: Documents
+  - name: Signature Ceremonies
+
+paths:
+  /api/v1/documents/templates:
+    post:
+      tags: [Templates]
+      summary: Create a document template (DRAFT)
+      operationId: createTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTemplateRequest'
+      responses:
+        '201':
+          description: Template created
+    get:
+      tags: [Templates]
+      summary: List document templates (bounded, not cursor-paginated)
+      operationId: listTemplates
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+      responses:
+        '200':
+          description: Templates
+
+  /api/v1/documents/templates/{id}:
+    get:
+      tags: [Templates]
+      summary: Get a template by ID
+      operationId: getTemplate
+      parameters:
+        - $ref: '#/components/parameters/resourceId'
+      responses:
+        '200':
+          description: Template detail
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/documents/templates/{id}/publish:
+    post:
+      tags: [Templates]
+      summary: Publish a DRAFT template
+      operationId: publishTemplate
+      parameters:
+        - $ref: '#/components/parameters/resourceId'
+      responses:
+        '200':
+          description: Published
+
+  /api/v1/documents/templates/{id}/retire:
+    post:
+      tags: [Templates]
+      summary: Retire a PUBLISHED template
+      operationId: retireTemplate
+      parameters:
+        - $ref: '#/components/parameters/resourceId'
+      responses:
+        '200':
+          description: Retired
+
+  /api/v1/documents/render:
+    post:
+      tags: [Documents]
+      summary: Render a document from a published template + data map
+      operationId: renderDocument
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenderDocumentRequest'
+      responses:
+        '201':
+          description: Document generated
+
+  /api/v1/documents:
+    get:
+      tags: [Documents]
+      summary: List documents for a party/case (compliance/legal browse, not just lookup-by-id)
+      operationId: listDocumentsByParty
+      parameters:
+        - name: partyRef
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Documents for the given party
+        '400':
+          description: partyRef query parameter is required
+
+  /api/v1/documents/{id}:
+    get:
+      tags: [Documents]
+      summary: Get document metadata by ID
+      operationId: getDocument
+      parameters:
+        - $ref: '#/components/parameters/resourceId'
+      responses:
+        '200':
+          description: Document metadata
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/documents/{id}/content:
+    get:
+      tags: [Documents]
+      summary: Get document content bytes
+      operationId: getDocumentContent
+      parameters:
+        - $ref: '#/components/parameters/resourceId'
+      responses:
+        '200':
+          description: Document bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/signature-ceremonies:
+    post:
+      tags: [Signature Ceremonies]
+      summary: Open a signature ceremony over a document
+      operationId: openCeremony
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenCeremonyRequest'
+      responses:
+        '201':
+          description: Ceremony opened
+
+  /api/v1/signature-ceremonies/{id}:
+    get:
+      tags: [Signature Ceremonies]
+      summary: Get a ceremony by ID
+      operationId: getCeremony
+      parameters:
+        - $ref: '#/components/parameters/resourceId'
+      responses:
+        '200':
+          description: Ceremony detail
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/signature-ceremonies/{id}/decisions:
+    post:
+      tags: [Signature Ceremonies]
+      summary: Record a signer decision (SIGNED / DECLINED)
+      operationId: recordDecision
+      parameters:
+        - $ref: '#/components/parameters/resourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordDecisionRequest'
+      responses:
+        '200':
+          description: Decision recorded
+
+components:
+  parameters:
+    resourceId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    CreateTemplateRequest:
+      type: object
+      required: [code, version, name, bodyHtml]
+      properties:
+        code:
+          type: string
+          example: LOAN_AGREEMENT
+        version:
+          type: string
+          example: 1.0.0
+        name:
+          type: string
+        engine:
+          type: string
+          enum: [HANDLEBARS]
+        bodyHtml:
+          type: string
+        locale:
+          type: string
+        productRef:
+          type: string
+          nullable: true
+        classification:
+          type: string
+
+    RenderDocumentRequest:
+      type: object
+      required: [templateCode, templateVersion]
+      properties:
+        templateCode:
+          type: string
+        templateVersion:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+        contentType:
+          type: string
+        partyRef:
+          type: string
+          nullable: true
+        caseRef:
+          type: string
+          nullable: true
+        productRef:
+          type: string
+          nullable: true
+        retainUntil:
+          type: string
+          format: date
+          nullable: true
+
+    OpenCeremonyRequest:
+      type: object
+      required: [documentId, signerPartyRefs]
+      properties:
+        documentId:
+          type: string
+          format: uuid
+        signerPartyRefs:
+          type: array
+          items:
+            type: string
+        signatureLevel:
+          type: string
+          enum: [ADVANCED, QUALIFIED]
+
+    RecordDecisionRequest:
+      type: object
+      required: [partyRef, decision]
+      properties:
+        partyRef:
+          type: string
+        decision:
+          type: string
+          enum: [SIGNED, DECLINED]
+        evidenceRef:
+          type: string
+          nullable: true
+          description: >-
+            SCA challenge/approval reference (ADR-0021) proving partyRef's identity/consent.
+            Required and verified when decision is SIGNED; not required for DECLINED.
+
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string

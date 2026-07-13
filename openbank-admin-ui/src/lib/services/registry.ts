@@ -59,6 +59,7 @@ export const SERVICE_REGISTRY: ServiceEntry[] = [
   { id: 'customer-edge',     label: 'Customer Edge',    group: 'platform',     container: 'openbank-customer-edge',          port: 8128 },
   { id: 'statement',         label: 'Statements',       group: 'compliance',   container: 'openbank-statement-service',      port: 8136 },
   { id: 'onboarding',        label: 'Onboarding',       group: 'compliance',   container: 'openbank-onboarding-service',     port: 8130 },
+  { id: 'document',          label: 'Documents',        group: 'platform',     container: 'openbank-document-service',       port: 8143 },
 ]
 
 export function findService(id: string): ServiceEntry | undefined {

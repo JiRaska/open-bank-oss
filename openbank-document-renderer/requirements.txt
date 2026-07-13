@@ -1,0 +1,4 @@
+# weasyprint — BSD-3-Clause license (https://github.com/Kozea/WeasyPrint/blob/main/LICENSE)
+# HTML/CSS -> PDF renderer, no browser engine. Pinned to a specific recent
+# release per ADR-0162 D3 (default lightweight renderer for PdfRenderPort).
+weasyprint==65.1

@@ -35,6 +35,7 @@ const SERVICE_MAP: Record<string, { container: string; port: number }> = {
   'interest-service':       { container: 'openbank-interest-service',       port: 8125 },
   'dispute-service':        { container: 'openbank-dispute-service',        port: 8135 },
   'sepa-instant-service':   { container: 'openbank-sepa-instant-service',   port: 8127 },
+  'document-service':       { container: 'openbank-document-service',       port: 8143 },
 }
 
 // In-cluster, the upstream address must be the real Service DNS

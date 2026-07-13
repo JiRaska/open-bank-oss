@@ -1,0 +1,33 @@
+%% title: Document Render & Sign Flow
+sequenceDiagram
+    actor Caller as Operator / Service
+    participant DR as DocumentResource
+    participant RS as DocumentRenderService
+    participant TR as TemplateRenderPort
+    participant PDF as PdfRenderPort
+    participant OS as ObjectStorePort
+    participant DB as PostgreSQL (documents + outbox)
+    participant K as Kafka (documents.document.event)
+    participant SR as SignatureCeremonyResource
+    participant CS as SignatureCeremonyService
+    participant SEAL as SignatureSealPort
+
+    Caller->>DR: POST /api/v1/documents/render
+    DR->>RS: render(cmd)
+    RS->>DB: findPublished(code, version)
+    RS->>TR: renderHtml(template, data)
+    RS->>PDF: htmlToPdf(html)
+    RS->>OS: put(storageKey, pdf, contentType)
+    RS->>DB: saveWithOutbox(document, DocumentGenerated)
+    DB-->>K: (outbox dispatcher) document.generated.v1
+    DR-->>Caller: 201 DocumentResponse (sha256, storageKey)
+
+    Caller->>SR: POST /api/v1/signature-ceremonies
+    SR->>CS: openCeremony(documentId, signers)
+    CS->>DB: save(ceremony PENDING)
+    Caller->>SR: POST /{id}/decisions (SIGNED)
+    SR->>CS: recordDecision(id, party, SIGNED)
+    CS->>SEAL: sealPades(pdf, ceremony)  %% phase-1 no-op
+    CS->>OS: put(storageKey, sealedPdf)
+    CS->>DB: saveWithOutbox(ceremony COMPLETED, SignatureCeremonyCompleted)
+    DB-->>K: signature-ceremony.completed.v1

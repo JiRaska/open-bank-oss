@@ -108,6 +108,9 @@
     "openbank-dispute-service": {
       "component": "dispute-service"
     },
+    "openbank-document-service": {
+      "component": "document-service"
+    },
     "openbank-domestic-payment": {
       "component": "domestic-payment"
     },

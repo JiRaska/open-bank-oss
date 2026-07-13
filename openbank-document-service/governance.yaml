@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: platform
+primaryDatastore: PostgreSQL
+schemaName: documents_schema
+dataLineageRole: both
+dataClassification: restricted
+retentionPolicy: 10 years
+evidenceExported: true
+lineage:
+  downstream:
+    - serviceName: lending-service
+      relationType: api
+      description: consumes rendered loan agreements
+    - serviceName: account-service
+      relationType: api
+      description: consumes rendered account statements/agreements
+schemaLineage:
+  ownedSchemas:
+    - documents_schema
+  # No real dependent schema today: productRef/partyRef/caseRef on Document/DocumentTemplate are
+  # opaque free-text references, not a DB/schema-level coupling to product-catalog or any other
+  # service's schema.
+  dependentSchemas: []

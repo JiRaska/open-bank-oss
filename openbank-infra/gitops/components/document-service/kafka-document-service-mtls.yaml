@@ -1,0 +1,88 @@
+# Kafka mTLS identity + ACLs for document-service (ADR-0137 mTLS-only cluster
+# posture; kafka.yaml sets allow.everyone.if.no.acl.found: "false" fleet-wide, so
+# every deployed Kafka client needs an explicit KafkaUser + ACL before its first
+# deploy — same requirement notification-service/statement-service already meet).
+#
+# document-service is a pure PRODUCER: it publishes document lifecycle events to
+# openbank.documents.document.event via its outbox dispatcher (ADR-0161/ADR-0162).
+# It consumes nothing, so no consumer-group ACL is needed.
+#
+# Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal
+# for all of this service's Kafka traffic. These resources live in `messaging`
+# (where the Strimzi User Operator watches); the User Operator mints a per-user
+# Secret of the same name there (user.crt/key/p12 + user.password + ca.crt).
+# Those secrets are projected into the `documents` namespace by the External
+# Secrets below.
+---
+# ── KafkaUser: document-service ───────────────────────────────────────────────
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers→Strimzi secrets→ESO projection) must land
+    # before the document-service Deployment rolls pods onto mTLS; lower waves
+    # sync first and ArgoCD blocks on the ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: document-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.documents.document.event
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+---
+# ── ExternalSecret: document-service keystore ─────────────────────────────────
+# Projects the Strimzi-minted document-service Secret from `messaging` into
+# `documents`. dataFrom.extract copies every key verbatim (preserves binary
+# PKCS#12). deletionPolicy: Retain so a transient store/RBAC blip never deletes
+# a live cert.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: document-service-kafka-keystore
+  namespace: documents
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: document-service-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: document-service
+---
+# ── ExternalSecret: cluster CA truststore ─────────────────────────────────────
+# Shared cluster-CA truststore — same for every client; one projection per namespace.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: documents
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert

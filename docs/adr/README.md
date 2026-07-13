@@ -163,6 +163,8 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0158](0158-account-opening-validates-against-product-catalog.md) | Account opening validates against product-catalog | Accepted | Complete | — |
 | [0159](0159-cnpg-ha-money-path.md) | High-availability CNPG for money-path databases | Accepted | Shipped | — |
 | [0160](0160-end-to-end-integration-liveness-and-drift-detection-standard.md) | End-to-end integration liveness and drift-detection standard | Accepted | Partial | — |
+| [0161](0161-object-storage-standard-for-application-documents.md) | Object-storage standard for application binary artifacts | Proposed | Planned | — |
+| [0162](0162-document-management-templating-and-e-signature-architecture.md) | Document management, templating & e-signature architecture | Proposed | Planned | — |
 
 ---
 

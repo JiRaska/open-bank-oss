@@ -37,6 +37,30 @@ detekt = "1.23.8"
 ktlint-plugin = "13.1.0"
 # pitest-plugin = "1.15.0"       # deferred: crashes on Gradle 9.5 (ADR-0063 Phase 2)
 # pitest-junit5-plugin = "1.2.1" # deferred: see above
+# AWS SDK v2, Apache-2.0 (ADR-0161 D2): S3ObjectStore, the production ObjectStorePort
+# adapter. 2.29.52 is a recent stable 2.x pin at time of writing — verify/bump via
+# Dependabot rather than treating it as hand-curated forever. S3Presigner ships inside
+# this same `s3` artifact in SDK v2, so no separate presigner module is needed.
+aws-sdk = "2.29.52"
+# Handlebars.java, Apache-2.0 (ADR-0162 D2): the logic-less template engine behind
+# openbank-document-service's TemplateRenderPort. No custom helpers are ever registered
+# (see HandlebarsTemplateRenderer) — that is what keeps it free of arbitrary code
+# execution, not the library version. 4.4.0 is a recent stable pin — verify/bump via
+# Dependabot rather than treating it as hand-curated forever.
+handlebars = "4.4.0"
+# Apache PDFBox, Apache-2.0 (ADR-0162 D4 phase 1): PAdES-B PDF signing in
+# PdfBoxPadesSealAdapter. 3.0.3 is the current stable 3.x line — PDDocument loading moved
+# to org.apache.pdfbox.Loader in 3.x (the 2.x `PDDocument.load(...)` statics were removed).
+pdfbox = "3.0.3"
+# Bouncy Castle (bcprov/bcpkix jdk18on), Bouncy Castle License (MIT-style, permissive — NOT
+# GPL/AGPL, so it clears the dependency denylist) (ADR-0162 D4 phase 1): the CMS/PKCS7
+# detached-signature generator PdfBoxPadesSealAdapter uses to build the PAdES-B seal, and
+# the X.509 cert builder for the dev-only ephemeral certificate path. Distinct from EU DSS
+# (LGPL-2.1, phase 2 QES — legal sign-off required, ADR-0162 D4) — do not conflate the two.
+# 1.84 deliberately matches the version already resolved (and verified in
+# gradle/verification-metadata.xml) as a transitive dependency elsewhere in this build, rather
+# than introducing a second, differently-pinned BC version with its own fresh verification gap.
+bouncycastle = "1.84"
 
 [libraries]
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
@@ -107,6 +131,23 @@ testcontainers-redpanda = { module = "org.testcontainers:redpanda", version.ref 
 # Consumer-driven contract testing — Pact JVM (ADR-0063)
 pact-consumer = { module = "au.com.dius.pact.consumer:junit5", version.ref = "pact" }
 pact-provider = { module = "au.com.dius.pact.provider:junit5", version.ref = "pact" }
+
+# S3 client for the ObjectStorePort production adapter (ADR-0161 D2). Not added to any
+# service build.gradle.kts by this ADR — only openbank-libs-runtime compiles against it
+# (compileOnly, see its build.gradle.kts comment); a consuming service opts in itself.
+aws-sdk-s3 = { module = "software.amazon.awssdk:s3", version.ref = "aws-sdk" }
+
+# Logic-less HTML template engine (ADR-0162 D2) — openbank-document-service only.
+handlebars = { module = "com.github.jknack:handlebars", version.ref = "handlebars" }
+
+# PAdES-B PDF signing (ADR-0162 D4 phase 1) — openbank-document-service only.
+pdfbox = { module = "org.apache.pdfbox:pdfbox", version.ref = "pdfbox" }
+
+# CMS/PKCS7 signature generation + X.509 cert building for PAdES-B sealing (ADR-0162 D4
+# phase 1) — openbank-document-service only. bcpkix depends on bcprov; both declared
+# explicitly for clarity/reproducibility.
+bouncycastle-bcprov = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
+bouncycastle-bcpkix = { module = "org.bouncycastle:bcpkix-jdk18on", version.ref = "bouncycastle" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

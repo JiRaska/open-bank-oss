@@ -50,6 +50,15 @@ dependencies {
     compileOnly("io.quarkus:quarkus-security:3.33.2")
     compileOnly("io.quarkus:quarkus-arc:3.33.2")
 
+    // S3ObjectStore (ADR-0161 D2) compiles against the real AWS SDK v2 `s3` module
+    // (S3Presigner ships in the same artifact — no separate presigner dependency).
+    // compileOnly, matching the convention above: this is NOT part of the Quarkus
+    // platform BOM, so bundling it as implementation()/api() here would put the whole
+    // AWS SDK on every consuming service's runtime classpath whether or not that service
+    // ever selects the s3 backend. A service that sets openbank.objectstore.backend=s3
+    // must add libs.aws.sdk.s3 (or an equivalent) to its OWN build.gradle.kts.
+    compileOnly(libs.aws.sdk.s3)
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)

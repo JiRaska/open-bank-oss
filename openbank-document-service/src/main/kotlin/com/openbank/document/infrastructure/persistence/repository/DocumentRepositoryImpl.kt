@@ -1,0 +1,66 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.document.infrastructure.persistence.repository
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.document.application.port.out.DocumentRepositoryPort
+import com.openbank.document.domain.model.Document
+import com.openbank.document.infrastructure.persistence.entity.DocumentEntity
+import com.openbank.document.infrastructure.persistence.mapper.toDomain
+import com.openbank.document.infrastructure.persistence.mapper.toEntity
+import com.openbank.libs.persistence.outbox.OutboxMessage
+import io.quarkus.hibernate.reactive.panache.Panache
+import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.smallrye.mutiny.coroutines.awaitSuspending
+import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
+import java.util.UUID
+
+@ApplicationScoped
+class DocumentRepositoryImpl :
+    DocumentRepositoryPort,
+    PanacheRepository<DocumentEntity> {
+
+    @Inject
+    lateinit var objectMapper: ObjectMapper
+
+    @Inject
+    lateinit var outboxRepo: DocumentOutboxRepositoryImpl
+
+    override suspend fun save(document: Document): Document {
+        val e = document.toEntity(objectMapper)
+        Panache.withTransaction { persist(e) }.awaitSuspending()
+        return e.toDomain(objectMapper)
+    }
+
+    override suspend fun findById(id: UUID): Document? =
+        Panache.withSession { find("id", id).firstResult() }.awaitSuspending()?.toDomain(objectMapper)
+
+    override suspend fun findByParty(partyRef: String): List<Document> =
+        Panache.withSession { find("partyRef", partyRef).list() }
+            .awaitSuspending().map { it.toDomain(objectMapper) }
+
+    override suspend fun saveWithOutbox(document: Document, outboxMessage: OutboxMessage): Document =
+        Panache.withTransaction {
+            find("id", document.id).firstResult().flatMap { existing ->
+                if (existing != null) {
+                    existing.applyFrom(document)
+                    outboxRepo.persistInTransaction(outboxMessage).replaceWith(document)
+                } else {
+                    persist(document.toEntity(objectMapper))
+                        .chain { _ -> outboxRepo.persistInTransaction(outboxMessage) }
+                        .replaceWith(document)
+                }
+            }
+        }.awaitSuspending()
+
+    private fun DocumentEntity.applyFrom(document: Document) {
+        status = document.status
+        storageKey = document.storageKey
+        sha256 = document.sha256
+        sizeBytes = document.sizeBytes
+        contentType = document.contentType
+    }
+}

@@ -1,0 +1,75 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+plugins {
+    id("openbank.quarkus-service")
+}
+
+dependencies {
+    implementation(enforcedPlatform(libs.quarkus.bom))
+    implementation(libs.quarkus.kotlin)
+    implementation(libs.quarkus.resteasy.reactive)
+    implementation(libs.quarkus.resteasy.reactive.jackson)
+    implementation(libs.quarkus.hibernate.reactive.panache)
+    implementation(libs.quarkus.hibernate.reactive.panache.base)
+    implementation(libs.quarkus.reactive.pg.client)
+    implementation(libs.quarkus.flyway)
+    implementation(libs.quarkus.jdbc.postgresql)
+    implementation(libs.quarkus.smallrye.kafka)
+    implementation(libs.quarkus.smallrye.health)
+    implementation(libs.quarkus.micrometer.registry.prometheus)
+    implementation(libs.quarkus.opentelemetry)
+    implementation(libs.quarkus.oidc)
+    implementation(libs.quarkus.redis.client)
+    implementation(libs.quarkus.config.yaml)
+    implementation(libs.quarkus.smallrye.openapi)
+    implementation(libs.quarkus.smallrye.fault.tolerance)
+    implementation(libs.quarkus.cache)
+    implementation(libs.quarkus.scheduler)
+    // SignerVerificationPort's ScaVerificationAdapter calls sca-service (ADR-0162 D4), with an
+    // openbank-services M2M token minted by the oidc-client filter — same pattern as
+    // openbank-standing-order-service's SepaPaymentClient.
+    implementation(libs.quarkus.rest.client.reactive)
+    implementation(libs.quarkus.rest.client.reactive.jackson)
+    implementation(libs.quarkus.oidc.client.reactive.filter)
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.coroutines.reactive)
+    implementation(libs.jackson.module.kotlin)
+    implementation(libs.jackson.datatype.jsr310)
+    implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-runtime"))
+    // ADR-0161: openbank-libs-runtime only compiles S3ObjectStore against the AWS SDK as
+    // compileOnly — a consuming service opts in itself to get the real jar on its runtime
+    // classpath. This service supports openbank.objectstore.backend=s3.
+    implementation(libs.aws.sdk.s3)
+    // ADR-0162 D2: logic-less Handlebars templating behind TemplateRenderPort.
+    implementation(libs.handlebars)
+    // ADR-0162 D4 phase 1: PAdES-B sealing behind SignatureSealPort.
+    implementation(libs.pdfbox)
+    implementation(libs.bouncycastle.bcprov)
+    implementation(libs.bouncycastle.bcpkix)
+    testImplementation(libs.quarkus.junit5)
+    testImplementation(libs.assertj)
+    testImplementation(libs.mockk)
+    testImplementation(libs.rest.assured.kotlin)
+    testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    testImplementation(libs.testcontainers)
+    testImplementation(libs.testcontainers.junit)
+    testImplementation(libs.testcontainers.postgresql)
+}
+
+kover {
+    reports {
+        verify {
+            rule {
+                bound {
+                    // Introduction floor (ADR-0020): conservative scaffold baseline for a brand-new
+                    // service. Ratchet-only — raise as coverage grows, never lower.
+                    minValue = 30
+                    coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,49 @@
+# Redis for document-service. Ephemeral (sandbox). Wired because
+# openbank-document-service/src/main/resources/application.yaml actually configures
+# quarkus.redis.hosts (idempotency cache — the Idempotency-Key header is CORS-allowed
+# on this service's REST surface, backed by openbank-libs-runtime's
+# RedisIdempotencyStore). Mirrors billing/redis.yaml exactly.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: documents
+  labels: {app.kubernetes.io/name: redis, app.kubernetes.io/part-of: documents}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app.kubernetes.io/name: redis}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: redis}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: redis
+          image: docker.io/valkey/valkey:8-alpine
+          args: ["--save", "", "--appendonly", "no"]
+          ports: [{name: redis, containerPort: 6379}]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts: [{name: data, mountPath: /data}]
+          readinessProbe: {tcpSocket: {port: redis}, initialDelaySeconds: 5, periodSeconds: 10}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 192Mi}
+      volumes: [{name: data, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: documents
+  labels: {app.kubernetes.io/name: redis}
+spec:
+  selector: {app.kubernetes.io/name: redis}
+  ports: [{name: redis, port: 6379, targetPort: redis}]
