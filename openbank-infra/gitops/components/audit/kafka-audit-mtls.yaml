@@ -10,6 +10,15 @@
 # #996 triage): each was published with zero consumers since introduction — audit-service
 # is the sole intended consumer per the publishing services' own docs.
 #
+# dispute.events / statement.event / sanctions.screening.event added (#996 round 2) —
+# each publisher has its own mTLS KafkaUser with a Write ACL on its topic, which makes
+# that topic ACL-guarded (no longer covered by allow.everyone.if.no.acl.found=true), so
+# audit-service needs an explicit Read+Describe grant to actually consume it. Verified
+# each has a real producer (a genuine outbox-row write) before adding — cards.events /
+# domestic.payment.events / sepa.payment.events have no dedicated mTLS KafkaUser and stay
+# open under allow-everyone, same as clearing/security-scanner above; no ACL change needed
+# for those three.
+#
 # Strimzi User Operator mints a per-user Secret in `messaging` (user.crt/key/p12
 # + user.password + ca.crt). Those secrets are projected into the `audit` namespace
 # by External Secrets below.
@@ -86,6 +95,24 @@ spec:
       - resource:
           type: topic
           name: openbank.security.scan.event
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dispute.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.statement.event
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.sanctions.screening.event
           patternType: literal
         operations: [Read, Describe]
         host: "*"

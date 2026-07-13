@@ -64,6 +64,12 @@ class AuditConsumer {
         // security.ict.incident: IctIncidentService.publishEvent nests the incident under
         // "incident" rather than a top-level id field (PR #1007).
         ?: node["incident"]?.get("id")?.asText()
+        // cards.events (CardStatusChanged has no accountId/partyId), dispute.events,
+        // domestic.payment.events + sepa.payment.events, sanctions.screening.event (#996 round 2).
+        ?: node["cardId"]?.asText()
+        ?: node["disputeId"]?.asText()
+        ?: node["paymentId"]?.asText()
+        ?: node["id"]?.asText()
         ?: "unknown"
 
     private fun inferAggregateType(node: JsonNode): String = when {
@@ -75,6 +81,10 @@ class AuditConsumer {
         node.has("batchId") -> "CLEARING_BATCH"
         node.has("itemId") -> "CLEARING_ITEM"
         node.has("incident") -> "ICT_INCIDENT"
+        node.has("cardId") -> "CARD"
+        node.has("disputeId") -> "DISPUTE"
+        node.has("paymentId") -> "PAYMENT"
+        node.has("id") -> "SANCTIONS_CHECK"
         else -> "UNKNOWN"
     }
 }
