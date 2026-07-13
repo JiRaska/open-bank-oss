@@ -68,12 +68,26 @@ class RestBillableAccountDiscoveryPort(@RestClient private val accounts: Account
     }
 }
 
-/** Reads a product's billable fee definitions from the product catalogue (ADR-0143 phase 2c). */
+/**
+ * Reads a product's billable fee definitions from the product catalogue (ADR-0143 phase 2c).
+ *
+ * Deliberately does NOT swallow a catalog-read failure into an empty fee list: found live during
+ * real-environment verification (product-catalog scaled to zero) that the previous
+ * `runCatching { ... }.getOrDefault(emptyList())` here silently reported "this product has zero
+ * billable fees" whenever the catalog was merely unreachable — indistinguishable from a product
+ * that genuinely has no fees, and the OPPOSITE of every other read port in this file
+ * ([RestAccountContextPort], [RestBillableAccountDiscoveryPort]), which all fail closed (skip or
+ * abort) rather than silently substituting a confident-looking empty/zero result. A transient
+ * catalog blip during the monthly scheduled sweep would otherwise silently under-charge every
+ * account for that cycle with no operator-visible signal. Let the exception propagate — the
+ * caller ([com.openbank.billing.application.usecase.FeeAssessmentService]) converts it into an
+ * explicit `skipReason`, matching how an unresolvable account context is already handled.
+ */
 @ApplicationScoped
 class RestProductCatalogPort(@RestClient private val catalog: ProductCatalogRestClient) : ProductCatalogPort {
 
     override suspend fun billableFees(productId: String, currency: String): List<BillableFee> {
-        val fees = runCatching { catalog.getProductFees(productId).awaitSuspending() }.getOrDefault(emptyList())
+        val fees = catalog.getProductFees(productId).awaitSuspending()
         return fees
             .filter { it.currency == currency }
             .map { BillableFee(it.id, it.name, it.type, it.amount, it.currency, it.waivable, it.waiveCondition) }

@@ -32,6 +32,17 @@ class FeeAssessmentServiceTest {
         },
     )
 
+    private fun serviceWithUnreachableCatalog(billing: AccountBilling?) = FeeAssessmentService(
+        object : AccountContextPort {
+            override suspend fun resolve(accountId: String, currency: String): AccountBilling? = billing
+        },
+        object : ProductCatalogPort {
+            @Suppress("TooGenericExceptionThrown")
+            override suspend fun billableFees(productId: String, currency: String): List<BillableFee> =
+                throw RuntimeException("product-catalog unreachable")
+        },
+    )
+
     private fun fee(
         id: String,
         amount: String,
@@ -74,6 +85,16 @@ class FeeAssessmentServiceTest {
         val a = service(null, emptyList()).assess("c", "acc", "CZK")
         assertThat(a.skipped).isTrue()
         assertThat(a.skipReason).isEqualTo("ACCOUNT_CONTEXT_UNRESOLVED")
+        assertThat(a.assessedFees).isEmpty()
+        assertThat(a.journalCommands()).isEmpty()
+    }
+
+    @Test
+    fun `an unreachable product catalog skips the assessment and charges nothing`(): Unit = runBlocking {
+        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"))
+        val a = serviceWithUnreachableCatalog(billing).assess("c", "acc", "CZK")
+        assertThat(a.skipped).isTrue()
+        assertThat(a.skipReason).isEqualTo("PRODUCT_CATALOG_UNREACHABLE")
         assertThat(a.assessedFees).isEmpty()
         assertThat(a.journalCommands()).isEmpty()
     }
