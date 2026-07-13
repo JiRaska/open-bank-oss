@@ -38,8 +38,8 @@ to touch next. And two competing PRs both bumped the same `openapi.yaml:info.ver
 api-contract gate classifies against its own PR's merge base, structurally blind to a concurrent
 PR it never diffs against (PR #481 vs PR #524). This agent is the periodic, fleet-wide
 re-verification layer for exactly these four invariants — the same "a passing check is not proof
-the invariant holds repo-wide" premise ADR-0163/ADR-0164 apply to other axes, applied here to
-release engineering itself.
+the invariant holds repo-wide" premise its sibling control-liveness-sentinel and governance-auditor
+agents apply to other axes, applied here to release engineering itself.
 
 ## Human oversight
 
