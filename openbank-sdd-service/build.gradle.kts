@@ -25,6 +25,11 @@ dependencies {
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
+    // #1000: book the debtor-side debit for an authorised SDD collection via transaction-service,
+    // with an openbank-services M2M token minted by the oidc-client filter.
+    implementation(libs.quarkus.rest.client.reactive)
+    implementation(libs.quarkus.rest.client.reactive.jackson)
+    implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
     implementation(libs.jackson.module.kotlin)

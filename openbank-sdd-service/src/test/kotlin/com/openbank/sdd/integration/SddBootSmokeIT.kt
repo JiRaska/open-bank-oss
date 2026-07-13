@@ -32,6 +32,7 @@ class SddBootSmokeIT {
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> {
             val props = InMemoryConnector.switchOutgoingChannelsToInMemory("sdd-events-out").toMutableMap()
+            props.putAll(InMemoryConnector.switchIncomingChannelsToInMemory("sdd-collection-authorised-in"))
             props["quarkus.kafka.devservices.enabled"] = "false"
             return props
         }

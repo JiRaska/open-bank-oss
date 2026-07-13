@@ -47,6 +47,20 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     tls:
       verification: none
+  # Outbound service-to-service token (#1000): the transaction-service rest-client mints an
+  # openbank-services M2M token (ROLE_OPERATOR) via this oidc-client. Disabled under %test (units
+  # call the consumer directly; the boot IT never books a debit).
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+  rest-client:
+    transaction-service:
+      url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
+      scope: jakarta.inject.Singleton
   shutdown:
     timeout: 30S
   log:
@@ -99,6 +113,8 @@ quarkus:
       enabled: false
     oidc:
       enabled: false
+    oidc-client:
+      enabled: false
     # ADR-0050: disable the @Scheduled outbox tick under test so the integration test
     # drives dispatcher.dispatch() explicitly and never races the assertions.
     scheduler:
@@ -143,3 +159,14 @@ mp:
         topic: openbank.sdd.event
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
+    incoming:
+      # #1000: self-consume the collection-authorised events this service itself publishes, and
+      # book the debtor-side debit. group.id / auto.offset.reset deliberately NOT set as YAML keys
+      # (SmallRye's dotted-key footgun, #686/#703) — defaults are what we want: group.id falls back
+      # to quarkus.application.name (a service-scoped consumer group), auto.offset.reset stays
+      # `latest` so a fresh deploy does not replay historical authorisations and re-debit them.
+      sdd-collection-authorised-in:
+        connector: smallrye-kafka
+        topic: openbank.sdd.event
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer

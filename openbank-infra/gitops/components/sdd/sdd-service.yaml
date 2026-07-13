@@ -83,6 +83,9 @@ spec:
                   name: sdd-service-oidc
                   key: OIDC_CLIENT_SECRET
                   optional: true
+            # #1000: book the debtor-side debit for an authorised collection.
+            - name: TRANSACTION_SERVICE_URL
+              value: http://transaction-service.payments.svc:8102
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
