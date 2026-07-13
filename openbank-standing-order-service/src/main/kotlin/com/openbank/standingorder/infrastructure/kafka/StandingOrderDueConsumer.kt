@@ -11,6 +11,7 @@ import com.openbank.standingorder.infrastructure.client.CreateSepaPaymentRequest
 import com.openbank.standingorder.infrastructure.client.SepaPaymentClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
@@ -48,6 +49,9 @@ class StandingOrderDueConsumer(
     private val log = Logger.getLogger(StandingOrderDueConsumer::class.java)
 
     @Incoming("standing-order-due-in")
+    // Poison-pill safety: the consumer boundary must swallow ANY failure (parse, rail call, DB) and
+    // ack, so one bad event cannot wedge the consumer group — hence the deliberately broad catch.
+    @Suppress("TooGenericExceptionCaught")
     suspend fun consume(payload: String) {
         try {
             val node = objectMapper.readTree(payload)
@@ -101,8 +105,9 @@ class StandingOrderDueConsumer(
             endToEndId = node.path("idempotencyKey").asText(),
         )
         val idempotencyKey = node.path("idempotencyKey").asText()
-        val status = sepaClient.createPayment(idempotencyKey, request).awaitSuspending().status
-        if (status in 200..299) {
+        val response = sepaClient.createPayment(idempotencyKey, request).awaitSuspending()
+        val status = response.status
+        if (response.statusInfo.family == Response.Status.Family.SUCCESSFUL) {
             log.infof("[standing-order-exec] order %s SEPA transfer accepted (HTTP %d)", orderId, status)
             runCatching { useCase.confirmExecution(orderId) }
                 .onFailure { log.warnf(it, "[standing-order-exec] confirmExecution failed for order %s", orderId) }

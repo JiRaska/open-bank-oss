@@ -55,7 +55,7 @@ class StandingOrderDueConsumerTest {
     }
 
     @Test
-    fun `SEPA_CREDIT due event initiates a SEPA transfer and confirms execution on 2xx`() = runBlocking {
+    fun `SEPA_CREDIT due event initiates a SEPA transfer and confirms execution on 2xx`(): Unit = runBlocking {
         val req = slot<CreateSepaPaymentRequest>()
         val key = slot<String>()
         every { sepaClient.createPayment(capture(key), capture(req)) } returns
@@ -75,7 +75,7 @@ class StandingOrderDueConsumerTest {
     }
 
     @Test
-    fun `SEPA_CREDIT transfer rejection records a failure`() = runBlocking {
+    fun `SEPA_CREDIT transfer rejection records a failure`(): Unit = runBlocking {
         every { sepaClient.createPayment(any(), any()) } returns
             Uni.createFrom().item(Response.status(422).build())
         coEvery { useCase.recordFailure(orderId) } returns mockk(relaxed = true)
@@ -87,7 +87,7 @@ class StandingOrderDueConsumerTest {
     }
 
     @Test
-    fun `SEPA_CREDIT order missing debtor details records a failure without calling the rail`() = runBlocking {
+    fun `SEPA_CREDIT order missing debtor details records a failure without calling the rail`(): Unit = runBlocking {
         coEvery { useCase.recordFailure(orderId) } returns mockk(relaxed = true)
 
         consumer.consume(dueEvent(debtorIban = null))
@@ -97,7 +97,7 @@ class StandingOrderDueConsumerTest {
     }
 
     @Test
-    fun `DOMESTIC order is not yet wired to a rail and records a failure`() = runBlocking {
+    fun `DOMESTIC order is not yet wired to a rail and records a failure`(): Unit = runBlocking {
         coEvery { useCase.recordFailure(orderId) } returns mockk(relaxed = true)
 
         consumer.consume(dueEvent(paymentType = "DOMESTIC"))
@@ -107,7 +107,7 @@ class StandingOrderDueConsumerTest {
     }
 
     @Test
-    fun `a failed event (no paymentType) is ignored`() = runBlocking {
+    fun `a failed event (no paymentType) is ignored`(): Unit = runBlocking {
         val failedEvent = mapper.writeValueAsString(
             mapOf("orderId" to orderId, "partyId" to orderId, "failureCount" to 3, "status" to "FAILED"),
         )
