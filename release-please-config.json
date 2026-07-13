@@ -129,6 +129,9 @@
     "openbank-fx-service": {
       "component": "fx-service"
     },
+    "openbank-governance-auditor": {
+      "component": "governance-auditor"
+    },
     "openbank-interest-service": {
       "component": "interest-service"
     },

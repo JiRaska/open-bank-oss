@@ -1,0 +1,44 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) OpenBank contributors. Licensed under the GNU Affero General Public License v3.0 only.
+// A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
+// See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
+
+package com.openbank.govaudit.application.workflow
+
+import com.openbank.govaudit.infrastructure.temporal.TemporalConfig
+import io.quarkus.runtime.StartupEvent
+import io.temporal.client.WorkflowClient
+import io.temporal.worker.WorkerFactory
+import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
+import org.jboss.logging.Logger
+
+@ApplicationScoped
+class GovernanceAuditorWorkerRegistrar(
+    private val temporalConfig: TemporalConfig,
+    private val workflowClient: WorkflowClient,
+    private val collectMergedPrs: CollectMergedPrsActivityImpl,
+    private val detectViolations: DetectViolationsActivityImpl,
+    private val diagnoseAndPropose: DiagnoseAndProposeActivityImpl,
+) {
+
+    private val log = Logger.getLogger(GovernanceAuditorWorkerRegistrar::class.java)
+
+    @Suppress("UnusedParameter")
+    fun onStart(@Observes event: StartupEvent) {
+        if (!temporalConfig.enabled()) {
+            log.info("Temporal worker disabled (openbank.temporal.enabled=false); skipping registration")
+            return
+        }
+        log.infof(
+            "Registering Temporal governance-auditor worker on task queue '%s'",
+            temporalConfig.taskQueue(),
+        )
+        val factory = WorkerFactory.newInstance(workflowClient)
+        val worker = factory.newWorker(temporalConfig.taskQueue())
+        worker.registerWorkflowImplementationTypes(GovernanceAuditWorkflowImpl::class.java)
+        worker.registerActivitiesImplementations(collectMergedPrs, detectViolations, diagnoseAndPropose)
+        factory.start()
+        log.infof("Temporal governance-auditor worker started on task queue '%s'", temporalConfig.taskQueue())
+    }
+}
