@@ -86,6 +86,9 @@ spec:
               kubernetes.io/metadata.name: fx
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: governance-auditor
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: interest
         - namespaceSelector:
             matchLabels:
