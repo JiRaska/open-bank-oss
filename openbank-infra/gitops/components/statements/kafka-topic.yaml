@@ -1,0 +1,20 @@
+# Domain event topic produced by statement-service (ADR-0035). Declared explicitly (the
+# broker does not auto-create topics — kafka.yaml) so the Strimzi topic operator manages
+# it and the outbox producer channel `statement-events-out` has a destination. The
+# service's KafkaUser (kafka-statement-mtls.yaml) already grants Write/Describe on this
+# topic — this CR was the missing piece, so the outbox dispatcher was silently failing to
+# publish (attempt_count never advancing). Single partition + RF 1 for the single-broker
+# sandbox; prod should raise partitions for parallelism and RF to 3.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.statement.event
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
