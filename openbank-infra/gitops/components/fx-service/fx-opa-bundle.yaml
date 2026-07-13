@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fx-service
     app.kubernetes.io/part-of: fx
   annotations:
-    openbank.tech/policy-checksum: "30447d2d3c213fac"
+    openbank.tech/policy-checksum: "7586fafec5231bba"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -202,9 +202,10 @@ data:
     # sanctions.create directly, once AUTHZ_ENFORCE=true.
     #
     # Deliberately action-scoped to sanctions.create ONLY, not a "sanctions." family prefix:
-    # sanctions.review (dismiss/confirm a hit) and the list-refresh actions are real operator
-    # judgment calls, not a service-to-service compliance check, and must stay behind a human
-    # session — widening this to the family would let any M2M caller self-clear a sanctions hit.
+    # sanctions.clear (renamed from sanctions.review, issue #938 follow-up — dismiss/confirm a
+    # hit) and the list-refresh actions are real operator judgment calls, not a service-to-service
+    # compliance check, and must stay behind a human session — widening this to the family would
+    # let any M2M caller self-clear a sanctions hit.
     #
     # Deliberately NOT scoped to one hardcoded client id (unlike edge-service-notification):
     # sanctions.create is "run a compliance check" — not an account-takeover primitive like
@@ -221,11 +222,12 @@ data:
     	input.action == "sanctions.create"
     }
 
-    # NOTE: sanctions.create is not the only resourceless M2M `*.create` action with this
-    # gap — ledger.create, fx.create, lending.create, settlement.create, and others share the
-    # same shape and have the same live "advisory: would DENY" masked-by-AUTHZ_ENFORCE=false
-    # exposure. Each needs its own case-by-case rule (some may not be safe for any M2M caller
-    # the way sanctions.create is) — tracked separately as issue #750, not folded in here.
+    # NOTE: sanctions.create is not the only resourceless M2M `*.create`-shaped action with
+    # this gap — ledger.create, fx.convert (renamed from fx.create, issue #938 follow-up),
+    # lending.create, settlement.create, and others share the same shape and have the same
+    # live "advisory: would DENY" masked-by-AUTHZ_ENFORCE=false exposure. Each needs its own
+    # case-by-case rule (some may not be safe for any M2M caller the way sanctions.create is)
+    # — tracked separately as issue #750, not folded in here.
 
     # ---------------------------------------------------------------------------------------
     # Money-path actions get the four-eyes gate from rules.yaml. This rule does NOT grant
@@ -293,8 +295,12 @@ data:
     #   fx.list    — current FX rate sheet (GET /rates)
     #   fx.read    — a rate / rate history / conversion by id (GET, no resource on the rate
     #                endpoints; #id on GET /conversions/{id})
-    #   fx.create  — execute an FX conversion (POST /convert)
+    #   fx.convert — execute an FX conversion (POST /convert; renamed from fx.create and
+    #                four-eyes gated, rules.yaml four_eyes.verbs, issue #938 follow-up)
     #   fx.trigger — ingest the CNB fixing for a day (POST /cnb/ingest)
+    #
+    # Actions gated (ApprovalResource, ADR-0155):
+    #   fx.approval.decide — a DIFFERENT operator decides a paused fx.convert request (#id)
     #
     # Base rest.rego already grants: operator-read-any / compliance-read-any for
     # *.read + *.list (fx-service is in rules.yaml money_path_services, so operators,
@@ -325,7 +331,7 @@ data:
     	input.principal.type == "HUMAN"
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS"}
     	role in input.principal.roles
-    	input.action == "fx.create"
+    	input.action == "fx.convert"
     }
 
     allowed_reasons contains "operator-fx-trigger" if {
@@ -343,9 +349,10 @@ data:
     #     /fx/rates/{b}/{q}/history) — all `customer.fx.read` at the edge, `fx.list`/`fx.read`
     #     downstream.
     #   - agent-service (MCP read-only tools, ADR-0031 D5): fx_list_rates / fx_get_rate.
-    # Deliberately narrow: fx.create (conversion) and fx.trigger (CNB ingest) have NO
-    # in-repo M2M caller today and stay human-only. No blanket SERVICE allow on a
-    # money-path service (rules.yaml money_path_services includes openbank-fx-service).
+    # Deliberately narrow: fx.convert (the money-moving conversion, renamed from fx.create,
+    # issue #938 follow-up — four-eyes gated per rules.yaml four_eyes.verbs) and fx.trigger
+    # (CNB ingest) have NO in-repo M2M caller today and stay human-only. No blanket SERVICE
+    # allow on a money-path service (rules.yaml money_path_services includes openbank-fx-service).
     #
     # NOTE (found post-merge, issue tracked separately): AuthorizeInterceptor never
     # emits principal.type == "SERVICE" — M2M callers authenticate via Keycloak
@@ -368,6 +375,15 @@ data:
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-services"
     	input.action in {"fx.read", "fx.list"}
+    }
+
+    # ADR-0155 checker gate: a DIFFERENT operator/admin decides a paused four-eyes approval on
+    # fx.convert (issue #938 follow-up).
+    allowed_reasons contains "operator-fx-approval-decide" if {
+    	input.principal.type == "HUMAN"
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    	role in input.principal.roles
+    	input.action == "fx.approval.decide"
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1000,6 +1016,30 @@ data:
         # (removed/renamed props, type changes, non-nullable-no-default additions = replay break,
         # eventType renames) and *.avsc files (field default rules). Flip to enforced = --enforce.
         ci_producer: ".github/scripts/check-event-schema-compat.py"
+      event_consumer_liveness:
+        # ADR-0160 mechanism 1. standing-order-service published standing-order.due.v1 every day
+        # for weeks with zero consumers anywhere in the fleet — full CRUD, passing tests, docs, a
+        # scheduler doc-comment claiming a downstream consumed it — and nothing checked the claim
+        # against the actual fleet (issue #889). This is a fleet-wide scan, not diff-scoped: any
+        # Kafka topic published by ANY service's mp.messaging.outgoing (or dispatched via an
+        # outbox to a declared topic) must have at least one @Incoming consumer somewhere in the
+        # fleet (a matching topic:/topics: declaration), or be explicitly allowlisted below with a
+        # one-line reason (external sink, deliberately audit-only, or a tracked future-work gap).
+        detect: ["any <service>/src/main/resources/application.yaml mp.messaging.outgoing topic"]
+        require:
+          - "topic has >=1 real @Incoming consumer fleet-wide, or an allowlist entry with a reason"
+        gate: event-consumer-liveness
+        enforced: advisory
+        target_enforce_date: "2026-09-15"   # ADR-0144
+        # CI producer is LIVE (advisory): .github/scripts/check-event-consumer-liveness.py runs in
+        # the "Validate manifests" job on every PR — fleet-wide scan (not diff-scoped), findings are
+        # ::warning annotations. First scan (2026-07-13): 19 producer-only topics found, ALL still
+        # unallowlisted below (real triage tracked as a fleet-sweep issue, not resolved by fiat).
+        # Flip to enforced once triage brings unallowlisted violations to zero = pass --enforce to
+        # the script in ci.yml (one-line change), same as every other ADR-0144 gate here.
+        blocked_on: "19 pre-existing producer-only topics need individual triage (real gap vs. legitimate allowlist entry) before this can graduate to enforce — tracked as a fleet-sweep issue, not yet filed"
+        ci_producer: ".github/scripts/check-event-consumer-liveness.py"
+        allowlist: []
       service_code_change:
         detect: ["<service>/src/main/**"]
         require:
@@ -1161,12 +1201,31 @@ data:
       - openbank-swift-service
       - openbank-fx-service
       - openbank-lending-service
-      - openbank-sca-service
-      - openbank-consent-service
+      - openbank-sca-service                  # four-eyes assessed (issue #938 follow-up), NOT wired: device.enroll and
+                                               # scaChallenge.consume are both real-payment/self-service actions with a
+                                               # confirmed M2M automated caller (customer-edge) — gating either would brick
+                                               # production automation once enforcement is ever flipped on, not just close
+                                               # the risky operator-console gap. See the four_eyes.verbs guardrail note below.
+      - openbank-consent-service               # four-eyes wired (issue #938 follow-up) on consent.grant/consent.revoke —
+                                                # both confirmed human-operator-only (no M2M caller). consent.activate
+                                                # deliberately left ungated: its rego already reserves an M2M grant for a
+                                                # possible SCA-completion-callback caller.
       - openbank-fraud-service                # ADR-0084: v4 rule engine live; domestic-payment enforcement gate merged (issue #667, flag default-off pending risk-team threshold calibration)
+                                               # four-eyes assessed (issue #938 follow-up): the only REST surface today is a stateless
+                                               # POST /fraud/score (fraud.score) — no operator case-decision, rule-config, or manual
+                                               # override endpoint exists yet, so there is nothing real to maker-checker gate. Revisit
+                                               # once a fraud case-management endpoint ships (clearing a flag / disabling a rule /
+                                               # forcing a decision would need `clear`/`override`/`disable` verbs added here then).
       - openbank-billing-service              # ADR-0143: fee assess/post/reverse shipped (phases 1a-2e); real-env e2e verification + four-eyes enforcement flip still gate production go-live
-      - openbank-settlement-service           # issue #307: debit->credit->ledger-booking saga (ADR-0101)
-      - openbank-sanctions-service             # ADR-0116: real feed screening; already required by four_eyes below (issue #554)
+      - openbank-settlement-service           # issue #307: debit->credit->ledger-booking saga (ADR-0101), orchestrated by a real
+                                               # Temporal workflow (SettlementWorkflowImpl) — not a bespoke non-Temporal saga.
+                                               # four-eyes assessed (issue #938 follow-up): the only REST surface is
+                                               # POST /settlements (settlement.create), which starts the (self-healing, self-
+                                               # compensating) saga; there is no manual retry/force-complete/compensate endpoint to
+                                               # gate. Revisit if such an operator override endpoint is ever added.
+      - openbank-sanctions-service             # ADR-0116: real feed screening; four-eyes wired (issue #938 follow-up) on
+                                                # sanctions.clear (deciding a screening hit) — the highest-risk action in this
+                                                # service, since a wrongly-cleared true positive is a real sanctions violation.
 
     # ---------------------------------------------------------------------------------------
     # SLOs (issue #669 — operational evidence, scope item 3). Governed data: a single
@@ -1252,6 +1311,37 @@ data:
         - credit                            # balance: direct ledger-balance credit adjustment (issue #395)
         - debit                             # balance: direct ledger-balance debit adjustment (issue #395)
         - collateralRegister                # lending: collateral registration/edit feeds IFRS 9 LGD (issue #621)
+        - convert                           # fx: execute a currency conversion at the current spot rate (issue #938 follow-up).
+                                             # Confirmed no M2M caller (fx-service's own rego: "fx.convert... has NO in-repo M2M
+                                             # caller today and stays human-only") — see the guardrail note below before adding
+                                             # any further verb here.
+        - grant                             # consent: create a new TPP<->customer data-access consent (renamed from consent.create,
+                                             # issue #938 follow-up). Confirmed no M2M caller (consent-service's own rego: "consent.grant
+                                             # and consent.revoke are NOT granted to M2M clients").
+        - revoke                            # consent: operator-initiated revocation of a customer's active consent. Confirmed no M2M caller
+                                             # (same rego note as consent.grant above).
+        - clear                             # sanctions: decide a screening hit (CLEAR/HIT/POTENTIAL_HIT) — a wrongly-cleared true positive
+                                             # is a real sanctions violation; distinct from `release` (payment-hold release) for clean audit
+                                             # separation. Confirmed no M2M caller (@RolesAllowed on POST /sanctions/review admits only
+                                             # ROLE_OPERATOR/ROLE_ADMIN, no ROLE_SERVICE).
+        # GUARDRAIL (issue #938 follow-up — found while wiring sca-service): four_eyes_required is
+        # computed by ACTION NAME ALONE (rest.rego money_path_scopes + endswith verb match), with NO
+        # awareness of the caller's identity. A verb is only safe to add here if EVERY real-world
+        # caller of that action across the WHOLE fleet is a human operator/admin session — if even one
+        # legitimate M2M/automated caller exists, four-eyes enforcement (once ever flipped on for that
+        # service) pauses that automated flow too, indistinguishably from the risky human path it was
+        # meant to gate. sca-service's device.enroll and scaChallenge.consume were both assessed and
+        # REJECTED for this reason: both are granted to customer-edge's M2M identity in base rest.rego
+        # (edge-service-notification's device.* family, sca's own service-sca-edge-m2m rule) for
+        # ordinary customer self-service device enrollment and — critically — scaChallenge.consume is
+        # the payment settlement gate every real payment passes through. Gating either would silently
+        # brick production automation the moment enforcement is ever turned on, not just close the
+        # risky operator-console gap. Before adding a new verb: grep every service's own
+        # gen-<service>-opa-bundle.sh for an M2M/SERVICE-identity rule granting that action; if one
+        # exists (or plausibly could — consent.activate was ALSO excluded for this reason, no confirmed
+        # caller found but the rego already reserves the grant), the risky path needs its own distinct
+        # action (e.g. a dedicated operator-only "enrollOnBehalf" endpoint) before it can be four-eyes
+        # gated safely — do not reuse the shared customer/M2M-facing action.
 
     # ---------------------------------------------------------------------------------------
     # Feature-flag flip governance (ADR-0067 follow-up, issue #419). The OPA PEP (rest.rego)
