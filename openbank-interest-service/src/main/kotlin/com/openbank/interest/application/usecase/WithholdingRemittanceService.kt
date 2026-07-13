@@ -72,6 +72,8 @@ class WithholdingRemittanceService(
 
     override fun listRemittances(): Uni<List<WithholdingRemittance>> = remittanceRepo.findAll()
 
+    override fun settle(remittanceId: UUID): Uni<Unit> = remittanceRepo.markSettled(remittanceId).replaceWith(Unit)
+
     /** Builds the versioned `interest.withholding.remitted` outbox event (ADR-0038). */
     private fun remittedEvent(r: WithholdingRemittance): OutboxMessage {
         val payload = "{\"schemaVersion\":1," +

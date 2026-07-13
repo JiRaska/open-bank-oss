@@ -41,6 +41,13 @@ interface WithholdingRemittanceRepository {
     fun save(remittance: WithholdingRemittance): Uni<WithholdingRemittance>
     fun findByPeriod(year: Int, month: Int): Uni<WithholdingRemittance?>
     fun findAll(): Uni<List<WithholdingRemittance>>
+
+    /**
+     * Advance a batch `PENDING → SETTLED` once the cash leg to the finanční úřad has been booked
+     * (#999). Returns the number of rows updated (0 if already SETTLED — the caller treats that as
+     * an idempotent no-op, not an error).
+     */
+    fun markSettled(remittanceId: UUID): Uni<Int>
 }
 
 /**

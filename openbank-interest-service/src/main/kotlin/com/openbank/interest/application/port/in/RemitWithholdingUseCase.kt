@@ -6,6 +6,7 @@ package com.openbank.interest.application.port.`in`
 
 import com.openbank.interest.domain.tax.WithholdingRemittance
 import io.smallrye.mutiny.Uni
+import java.util.UUID
 
 /**
  * Inbound port for the withholding-tax remittance capability (ADR-0038): assemble the monthly
@@ -24,4 +25,11 @@ interface RemitWithholdingUseCase {
 
     /** List all assembled remittance batches (most recent first). */
     fun listRemittances(): Uni<List<WithholdingRemittance>>
+
+    /**
+     * Advance a batch `PENDING → SETTLED` once its cash leg to the finanční úřad has been booked
+     * (#999). Idempotent: settling an already-SETTLED batch is a no-op, not an error — a Kafka
+     * redelivery of the triggering event must not fail.
+     */
+    fun settle(remittanceId: UUID): Uni<Unit>
 }

@@ -27,6 +27,11 @@ dependencies {
     implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.cache)
+    // #999: book the withholding-tax cash leg to the finanční úřad via transaction-service, with an
+    // openbank-services M2M token minted by the oidc-client filter.
+    implementation(libs.quarkus.rest.client.reactive)
+    implementation(libs.quarkus.rest.client.reactive.jackson)
+    implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
     implementation(libs.jackson.module.kotlin)
