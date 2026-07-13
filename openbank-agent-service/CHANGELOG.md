@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.15.0...agent-service-v1.15.1) (2026-07-13)
+
+
+### Bug Fixes
+
+* **libs:** bump Quarkus BOM 3.33.2 -&gt; 3.37.2, refresh vulnerability pins ([#873](https://github.com/JiRaska/open-bank-oss/issues/873)) ([7de59e2](https://github.com/JiRaska/open-bank-oss/commit/7de59e27f618c5d923ba0cf519241ba675beb995))
+
 ## [1.15.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.14.1...agent-service-v1.15.0) (2026-07-11)
 
 
