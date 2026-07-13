@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.12.0...standing-order-service-v0.13.0) (2026-07-13)
+
+
+### Features
+
+* **libs-runtime:** WorkflowLivenessWatchdog primitive (ADR-0160 mechanism 3) ([#1001](https://github.com/JiRaska/open-bank-oss/issues/1001)) ([6c3d9f3](https://github.com/JiRaska/open-bank-oss/commit/6c3d9f36276c40466cadad78a2a01e5cec580219))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.11.4...standing-order-service-v0.12.0) (2026-07-13)
 
 
