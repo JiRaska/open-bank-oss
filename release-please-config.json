@@ -162,6 +162,9 @@
     "openbank-psd2-service": {
       "component": "psd2-service"
     },
+    "openbank-release-steward": {
+      "component": "release-steward"
+    },
     "openbank-sanctions-service": {
       "component": "sanctions-service"
     },

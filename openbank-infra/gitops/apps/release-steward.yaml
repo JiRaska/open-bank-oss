@@ -1,0 +1,29 @@
+# release-steward: periodic release-please / version-axis invariant guardian Temporal workflow service (ADR-0165). Namespace: release-steward.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: release-steward
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/release-steward
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: release-steward
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
