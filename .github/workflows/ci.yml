@@ -351,6 +351,14 @@ jobs:
       - name: "event-consumer liveness (ADR-0160, advisory)"
         run: python3 .github/scripts/check-event-consumer-liveness.py
 
+      # ADR-0160 mechanism 2 / rules.yaml: change_requirements.lineage_code_audit. Fleet-wide scan
+      # (not diff-scoped): every governance.yaml lineage.downstream edge must be backed by
+      # grep-verifiable code, or a one-line-reasoned allowlist entry. Reuses mechanism 1's topic
+      # map via importlib. ADVISORY (ADR-0144) — findings are ::warning annotations. Flip to
+      # enforced once the 34-edge first-scan triage lands = add --enforce below.
+      - name: "governance lineage-vs-code audit (ADR-0160, advisory)"
+        run: python3 .github/scripts/check-governance-lineage.py
+
       # ADR-0030 D2: every money-path service must ship a structured STRIDE/DFD
       # threat model. stdlib-only gate, ratchets coverage (a new money-path
       # service or a deleted/stubbed model fails here). Part of the always-run,
