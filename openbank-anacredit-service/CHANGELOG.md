@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/anacredit-service-v0.7.1...anacredit-service-v0.8.0) (2026-07-13)
+
+
+### Features
+
+* **governance:** bootstrap OPA enforcement for anacredit/card-issuance/interest ([#938](https://github.com/JiRaska/open-bank-oss/issues/938)) ([#962](https://github.com/JiRaska/open-bank-oss/issues/962)) ([8a35e3a](https://github.com/JiRaska/open-bank-oss/commit/8a35e3adfd4202339209aa67237082475dc7018d))
+
 ## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/anacredit-service-v0.7.0...anacredit-service-v0.7.1) (2026-07-12)
 
 
