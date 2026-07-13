@@ -293,6 +293,44 @@ class DomainMetrics {
         }
     }
 
+    // ── Workflow liveness (ADR-0160 mechanism 3) ────────────────────────────────
+
+    /**
+     * Register the liveness gauges for a scheduled workflow (ADR-0160): age-of-last-success and
+     * its expected interval, both in seconds. A single generic Prometheus rule —
+     * `openbank_workflow_last_success_age_seconds > 2 * on(workflow) openbank_workflow_expected_interval_seconds`
+     * — pages on ANY registered workflow that goes stale, with no per-service alert rule needed.
+     * This exists because a scheduled job can fail SILENTLY (an exception swallowed after logging,
+     * or simply stopping) and leave no record and no alarm — exactly how balance-service's daily
+     * reconciliation ran zero rows for 41 days unnoticed (issue #855) before it got its own
+     * bespoke, log-only watchdog. This is that watchdog, generalized to any `@Scheduled` job.
+     *
+     * Call **once at startup** (e.g. from the caller's constructor) with the workflow's own name
+     * and expected run interval; call [WorkflowLivenessRecorder.recordSuccess] at the end of the
+     * job's success path on every run. A workflow that has never succeeded reads as maximally
+     * stale (age computed from [java.time.Instant.EPOCH]) — no special-casing needed, it is
+     * trivially over any real threshold. Re-registration with the same `workflow` tag is a no-op
+     * gauge re-register (safe, matches [registerOutboxBacklog]); a no-op [WorkflowLivenessRecorder]
+     * is returned when no [MeterRegistry] is resolvable (same fallback as every method above).
+     *
+     * @param workflow          stable low-cardinality name, e.g. `standing-order-execution`
+     * @param expectedInterval  the job's normal run cadence (e.g. `Duration.ofDays(1)` for a daily
+     *                          sweep) — the alert fires at 2x this, so pick the SCHEDULE interval,
+     *                          not a tighter SLA; grace period is baked into the 2x multiplier.
+     */
+    fun registerWorkflowLiveness(workflow: String, expectedInterval: Duration): WorkflowLivenessRecorder {
+        val lastSuccessEpochMillis = java.util.concurrent.atomic.AtomicLong(java.time.Instant.EPOCH.toEpochMilli())
+        reg()?.let { r ->
+            Gauge.builder("openbank.workflow.last_success.age_seconds") {
+                Duration.between(java.time.Instant.ofEpochMilli(lastSuccessEpochMillis.get()), java.time.Instant.now())
+                    .toSeconds().toDouble()
+            }.tag("workflow", workflow).strongReference(true).register(r)
+            Gauge.builder("openbank.workflow.expected_interval_seconds") { expectedInterval.toSeconds().toDouble() }
+                .tag("workflow", workflow).strongReference(true).register(r)
+        }
+        return WorkflowLivenessRecorder(lastSuccessEpochMillis)
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     // Get-or-create the named counter and record one occurrence. Every call site is a
@@ -317,5 +355,18 @@ class DomainMetrics {
             .publishPercentiles(0.5, 0.95, 0.99)
             .publishPercentileHistogram()
             .register(it)
+    }
+}
+
+/**
+ * Handle returned by [DomainMetrics.registerWorkflowLiveness]; call [recordSuccess] at the end of
+ * the workflow's success path on every run. Not a CDI bean — a plain value object held by the
+ * scheduled job that registered it.
+ */
+class WorkflowLivenessRecorder internal constructor(
+    private val lastSuccessEpochMillis: java.util.concurrent.atomic.AtomicLong,
+) {
+    fun recordSuccess() {
+        lastSuccessEpochMillis.set(java.time.Instant.now().toEpochMilli())
     }
 }
