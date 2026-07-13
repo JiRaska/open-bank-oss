@@ -33,6 +33,13 @@ data class SignatureCeremony(
     val status: CeremonyStatus,
     val signatureLevel: SignatureLevel,
     val createdAt: Instant,
+    // JPA optimistic-lock counter, carried through from the persisted entity (0 for a
+    // not-yet-persisted ceremony). recordDecision reads a ceremony, mutates it in memory, then
+    // saves it in a separate transaction — this value is what lets the repository detect that
+    // another decision committed in between and reject the stale write, rather than silently
+    // overwriting it. A plain Int, not a framework type, so it does not violate the
+    // framework-free domain layer (ADR-0002).
+    val version: Int = 0,
 ) {
     fun open(): SignatureCeremony {
         require(status == CeremonyStatus.DRAFT) { "Only a DRAFT ceremony can be opened" }

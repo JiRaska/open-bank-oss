@@ -67,6 +67,7 @@ class DocumentResource(
     @POST
     @Path("/templates/{id}/retire")
     @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "documentTemplate.retire", resource = "#id")
     suspend fun retireTemplate(@PathParam("id") id: UUID) = templateUseCase.retireTemplate(id).toResponse()
 
     @GET
@@ -78,6 +79,7 @@ class DocumentResource(
     @GET
     @Path("/templates/{id}")
     @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "documentTemplate.read", resource = "#id")
     suspend fun getTemplate(@PathParam("id") id: UUID) =
         templateUseCase.getTemplate(id)?.toResponse() ?: throw NotFoundException()
 
@@ -110,6 +112,7 @@ class DocumentResource(
     @GET
     @Path("/{id}")
     @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "document.read", resource = "#id")
     suspend fun getDocument(@PathParam("id") id: UUID) =
         queryUseCase.getMetadata(id)?.toResponse() ?: throw NotFoundException()
 
@@ -117,6 +120,7 @@ class DocumentResource(
     @Path("/{id}/content")
     @Produces(MediaType.APPLICATION_OCTET_STREAM)
     @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "document.readContent", resource = "#id")
     suspend fun getContent(@PathParam("id") id: UUID): Response {
         val bytes = queryUseCase.getContent(id) ?: throw NotFoundException()
         return Response.ok(bytes).build()

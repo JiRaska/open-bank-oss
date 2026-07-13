@@ -43,6 +43,7 @@ class SignatureCeremonyResource(private val useCase: SignatureCeremonyUseCase) {
     @GET
     @Path("/{id}")
     @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "signatureCeremony.read", resource = "#id")
     suspend fun get(@PathParam("id") id: UUID) = useCase.getCeremony(id)?.toResponse() ?: throw NotFoundException()
 
     @POST

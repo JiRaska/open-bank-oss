@@ -13,7 +13,6 @@ import com.openbank.document.infrastructure.persistence.mapper.toEntity
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
-import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -31,37 +30,29 @@ class CeremonyRepositoryImpl :
     @Inject
     lateinit var outboxRepo: DocumentOutboxRepositoryImpl
 
-    override suspend fun save(ceremony: SignatureCeremony): SignatureCeremony {
-        Panache.withTransaction {
-            find("id", ceremony.id).firstResult().flatMap { existing ->
-                if (existing != null) {
-                    existing.applyFrom(ceremony)
-                    Uni.createFrom().item(existing)
-                } else {
-                    persist(ceremony.toEntity(objectMapper))
-                }
-            }
-        }.onFailure(OptimisticLockException::class.java).transform { conflictException(ceremony.id) }
-            .awaitSuspending()
-        return ceremony
-    }
+    // `merge()`, not find-then-mutate: recordDecision reads a ceremony, mutates it in memory, then
+    // saves it in a LATER, separate transaction — a find() done fresh inside THIS transaction would
+    // always see the current row and could never detect that the original read (back in the
+    // use-case) is now stale, defeating @Version entirely (a real bug, found in review before this
+    // shipped). merge() takes the entity carrying the version READ AT USE-CASE TIME and lets
+    // Hibernate compare it against the DB row's current version, throwing OptimisticLockException
+    // on a genuine conflict — for a NEW ceremony (version 0, no existing row) merge() inserts, same
+    // as persist() would have. Precedent: ScaChallengeRepositoryImpl.save().
+    override suspend fun save(ceremony: SignatureCeremony): SignatureCeremony = Panache.withTransaction {
+        getSession().flatMap { s -> s.merge(ceremony.toEntity(objectMapper)) }
+    }.onFailure(OptimisticLockException::class.java).transform { conflictException(ceremony.id) }
+        .map { it.toDomain(objectMapper) }
+        .awaitSuspending()
 
     override suspend fun findById(id: UUID): SignatureCeremony? =
         Panache.withSession { find("id", id).firstResult() }.awaitSuspending()?.toDomain(objectMapper)
 
     override suspend fun saveWithOutbox(ceremony: SignatureCeremony, outboxMessage: OutboxMessage): SignatureCeremony =
         Panache.withTransaction {
-            find("id", ceremony.id).firstResult().flatMap { existing ->
-                if (existing != null) {
-                    existing.applyFrom(ceremony)
-                    outboxRepo.persistInTransaction(outboxMessage).replaceWith(ceremony)
-                } else {
-                    persist(ceremony.toEntity(objectMapper))
-                        .chain { _ -> outboxRepo.persistInTransaction(outboxMessage) }
-                        .replaceWith(ceremony)
-                }
-            }
+            getSession().flatMap { s -> s.merge(ceremony.toEntity(objectMapper)) }
+                .call { _ -> outboxRepo.persistInTransaction(outboxMessage) }
         }.onFailure(OptimisticLockException::class.java).transform { conflictException(ceremony.id) }
+            .map { it.toDomain(objectMapper) }
             .awaitSuspending()
 
     // Surfaced as IllegalStateException so the shared libs-runtime IllegalStateExceptionMapper
@@ -69,9 +60,4 @@ class CeremonyRepositoryImpl :
     // client-actionable conflict (retry), not a server fault.
     private fun conflictException(ceremonyId: UUID) =
         IllegalStateException("Ceremony $ceremonyId was concurrently modified — retry the decision")
-
-    private fun SignatureCeremonyEntity.applyFrom(ceremony: SignatureCeremony) {
-        status = ceremony.status
-        signersJson = objectMapper.writeValueAsString(ceremony.signers)
-    }
 }
