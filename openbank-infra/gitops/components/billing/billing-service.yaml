@@ -64,6 +64,14 @@ spec:
               value: http://account-service.accounts.svc:8100
             - name: BALANCE_SERVICE_URL
               value: http://balance-service.balances.svc:8103
+            # ADR-0143 step 2: BillingOutboxDispatcher posts fee charges to ledger-service over
+            # HTTP (not Kafka — billing has no downstream event consumers for the charge itself).
+            # Missing here, LEDGER_SERVICE_URL falls back to application.yaml's dev default
+            # (http://localhost:8101) inside the pod, so every post-intent dead-letters after
+            # exhausting retries with "circuit breaker is open" — found live during ADR-0143
+            # real-environment e2e verification (issue #548 follow-up).
+            - name: LEDGER_SERVICE_URL
+              value: http://ledger-service.ledger.svc:8101
             # Datasource: single billing-db (billing-db.yaml). Reactive URL for the app
             # (Panache); JDBC URL for Flyway. Both username/password variants set, matching
             # the already-working fraud-service pattern (fraud-service.yaml).
