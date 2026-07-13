@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: copilot-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "613781dc80ca279e"
+    openbank.tech/policy-checksum: "04ab0ae0d544f6b8"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1056,7 +1056,7 @@ data:
         # unallowlisted below (real triage tracked as a fleet-sweep issue, not resolved by fiat).
         # Flip to enforced once triage brings unallowlisted violations to zero = pass --enforce to
         # the script in ci.yml (one-line change), same as every other ADR-0144 gate here.
-        blocked_on: "16 unallowlisted producer-only topics remain as of this commit (13 REAL_GAP + 3 UNCLEAR from the #996 triage; 4 of the 13 REAL_GAP have open fixes pending review — #1005 sca topic mismatch, #1007 audit-service fan-out) — tracked in issue #996, not resolved by fiat"
+        blocked_on: "9 unallowlisted REAL_GAP topics remain from the #996 triage (#1005 sca topic mismatch and #1007 audit-service fan-out landed, fixing 4; the 3 originally-UNCLEAR topics are now resolved — 2 more REAL_GAP: cards.events, fx.conversion.completed; 1 allowlisted below: pid.events) — tracked in issue #996, not resolved by fiat"
         ci_producer: ".github/scripts/check-event-consumer-liveness.py"
         # #996 triage findings, classified LEGITIMATE_NO_CONSUMER (not the #889 failure class):
         allowlist:
@@ -1064,6 +1064,8 @@ data:
             reason: "psd2-service docs consistently describe this as audit-trail + external TPP-webhook delivery, not an intra-fleet reaction — no OpenBank service is meant to consume it."
           - topic: "openbank.tpp.registry.event"
             reason: "tpp-registry-service's own docs say the publish side is dormant (\"no domain events are emitted yet\" — outbox transport exists but unused). Not the #889 pattern (a working publish going nowhere): nothing is actually published today. Re-triage once the publish side is wired."
+          - topic: "openbank.pid.events"
+            reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap."
       service_code_change:
         detect: ["<service>/src/main/**"]
         require:
