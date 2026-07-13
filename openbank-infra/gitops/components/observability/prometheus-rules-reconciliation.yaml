@@ -1,0 +1,45 @@
+# Reconciliation drift alert (ADR-0160 mechanism 4, amendment 2026-07-13). Picked up by the
+# Prometheus operator automatically (ruleSelectorNilUsesHelmValues=false), same as every other
+# PrometheusRule in this directory.
+#
+# WHY THIS EXISTS: BalanceReconciliationService (ADR-0039 Phase A) compares the ledger's
+# deposit-control balance against balance-service's booked sum, per currency, once daily
+# (23:30 Europe/Prague). A single snapshot taken mid-backfill was previously indistinguishable
+# from a real integrity defect — a ~220,000 CZK "drift" read as a money-path crisis (issue #860)
+# before investigation found the ledger was correct throughout and the number was a transient
+# artifact of a sub-ledger rewrite in progress.
+#
+# The FIX is `for: 30h` on this alert, not a bespoke DB counter: openbank_balance_reconciliation_
+# drift (published by DomainMetrics.recordReconciliationDrift, called on every reconcile() run for
+# every currency, including within-tolerance ones — a currency reads zero, not "absent", the
+# instant it clears) only crosses this alert's threshold once the SAME nonzero condition has held
+# continuously for over 30 hours — i.e. it survived being re-checked by at least one full
+# additional daily reconciliation cycle (the metric only changes once a day, at the scheduled run;
+# 30h > one 24h cycle + a grace margin, mirroring ReconciliationFreshnessWatchdog's own 25h SLA).
+# One bad snapshot mid-backfill clears at the next run and never crosses 30h continuous; genuine,
+# persistent drift does. The reconciliation record (unchanged) still keeps every snapshot for
+# audit — only the ALERTING threshold moved, not the underlying control.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-reconciliation-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.balance.reconciliation
+      rules:
+        - alert: BalanceReconciliationSustainedDrift
+          expr: abs(openbank_balance_reconciliation_drift) > 0
+          for: 30h
+          labels:
+            severity: critical
+          annotations:
+            summary: "Sustained ledger⇄sub-ledger drift on {{ $labels.currency }} ({{ $labels.control }})"
+            description: >-
+              openbank_balance_reconciliation_drift for {{ $labels.currency }} has been non-zero
+              for over 30h (survived at least one full daily reconciliation cycle without
+              clearing) — this is sustained drift, not a transient backfill-in-progress snapshot
+              (issue #860). Investigate the control-account ⇄ sub-ledger tie-out; do not dismiss
+              as a snapshot artifact.

@@ -10,6 +10,7 @@ import com.openbank.balance.application.port.out.LedgerControlBalancePort
 import com.openbank.balance.application.port.out.ReconciliationRecordRepository
 import com.openbank.balance.domain.reconciliation.ReconciliationPolicy
 import com.openbank.balance.domain.reconciliation.ReconciliationReport
+import com.openbank.libs.observability.DomainMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
 import java.time.Clock
@@ -23,6 +24,11 @@ import java.time.OffsetDateTime
  * [ReconciliationPolicy] tie-out, persists the run for audit, and logs drift at WARN (the alerting
  * hook). It changes no balance — this is the safety net that detects divergence between the two
  * independent writers until Phases B–D make balance a true ledger projection.
+ *
+ * Also publishes each currency's drift via [DomainMetrics.recordReconciliationDrift] (ADR-0160
+ * mechanism 4): a `PrometheusRule` with a `for:` clause pages only once drift has been sustained
+ * across consecutive runs, not on a single snapshot — a transient snapshot taken mid-backfill was
+ * previously misread as a ~220k CZK integrity crisis (issue #860) before this existed.
  */
 @ApplicationScoped
 class BalanceReconciliationService(
@@ -30,6 +36,7 @@ class BalanceReconciliationService(
     private val ledgerControl: LedgerControlBalancePort,
     private val recordRepo: ReconciliationRecordRepository,
     private val clock: Clock,
+    private val domainMetrics: DomainMetrics,
 ) : ReconcileBalancesUseCase {
 
     private val log = Logger.getLogger(BalanceReconciliationService::class.java)
@@ -46,6 +53,12 @@ class BalanceReconciliationService(
         )
 
         val persisted = recordRepo.save(report)
+
+        // Recorded for every currency, including within-tolerance ones (drift = 0) — the gauge
+        // must reflect the CURRENT state, not freeze at the last non-zero reading.
+        report.currencies.forEach {
+            domainMetrics.recordReconciliationDrift(CONTROL_NAME, it.currency, it.difference)
+        }
 
         if (report.hasDrift) {
             log.warnf(
@@ -65,4 +78,8 @@ class BalanceReconciliationService(
     }
 
     override suspend fun latest(): ReconciliationReport? = recordRepo.findLatest()
+
+    private companion object {
+        const val CONTROL_NAME = "balance_deposit_control"
+    }
 }

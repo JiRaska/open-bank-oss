@@ -7,6 +7,9 @@ package com.openbank.balance.application.usecase
 import com.openbank.balance.application.port.out.LedgerControlBalancePort
 import com.openbank.balance.application.port.out.ReconciliationRecordRepository
 import com.openbank.balance.domain.reconciliation.ReconciliationReport
+import com.openbank.libs.observability.DomainMetrics
+import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -27,7 +30,9 @@ class BalanceReconciliationServiceTest {
             val ledger = FakeLedgerControl(mapOf("CZK" to BigDecimal("1000.00"), "EUR" to BigDecimal("50.00")))
             val balanceRepo = FakeSumRepository(mapOf("CZK" to BigDecimal("1000.00"), "EUR" to BigDecimal("50.00")))
             val records = FakeRecordRepository()
-            val service = BalanceReconciliationService(balanceRepo, ledger, records, java.time.Clock.systemUTC())
+            val metrics = mockk<DomainMetrics>(relaxed = true)
+            val service =
+                BalanceReconciliationService(balanceRepo, ledger, records, java.time.Clock.systemUTC(), metrics)
 
             val report = service.reconcile(asOf)
 
@@ -42,7 +47,8 @@ class BalanceReconciliationServiceTest {
         val ledger = FakeLedgerControl(mapOf("CZK" to BigDecimal("1000.00")))
         val balanceRepo = FakeSumRepository(mapOf("CZK" to BigDecimal("990.00")))
         val records = FakeRecordRepository()
-        val service = BalanceReconciliationService(balanceRepo, ledger, records, java.time.Clock.systemUTC())
+        val metrics = mockk<DomainMetrics>(relaxed = true)
+        val service = BalanceReconciliationService(balanceRepo, ledger, records, java.time.Clock.systemUTC(), metrics)
 
         val report = service.reconcile(asOf)
 
@@ -53,6 +59,39 @@ class BalanceReconciliationServiceTest {
     }
 
     @Test
+    fun `reconcile publishes the drift gauge for every currency, including within-tolerance ones`(): Unit =
+        runBlocking {
+            val ledger = FakeLedgerControl(mapOf("CZK" to BigDecimal("1000.00"), "EUR" to BigDecimal("50.00")))
+            val balanceRepo = FakeSumRepository(mapOf("CZK" to BigDecimal("990.00"), "EUR" to BigDecimal("50.00")))
+            val records = FakeRecordRepository()
+            val metrics = mockk<DomainMetrics>(relaxed = true)
+            val service =
+                BalanceReconciliationService(balanceRepo, ledger, records, java.time.Clock.systemUTC(), metrics)
+
+            service.reconcile(asOf)
+
+            verify(exactly = 1) {
+                metrics.recordReconciliationDrift(
+                    "balance_deposit_control",
+                    "CZK",
+                    match { it.compareTo(BigDecimal("-10.00")) == 0 },
+                )
+            }
+            // EUR is within tolerance (difference = 0) but must still be recorded — a quiet currency
+            // must not read as "not yet reconciled" on the gauge.
+            verify(exactly = 1) {
+                metrics.recordReconciliationDrift(
+                    "balance_deposit_control",
+                    "EUR",
+                    match {
+                        it.compareTo(BigDecimal.ZERO) ==
+                            0
+                    },
+                )
+            }
+        }
+
+    @Test
     fun `latest delegates to the record repository`(): Unit = runBlocking {
         val records = FakeRecordRepository()
         val service =
@@ -61,6 +100,7 @@ class BalanceReconciliationServiceTest {
                 FakeLedgerControl(emptyMap()),
                 records,
                 java.time.Clock.systemUTC(),
+                mockk<DomainMetrics>(relaxed = true),
             )
         assertEquals(null, service.latest())
 
