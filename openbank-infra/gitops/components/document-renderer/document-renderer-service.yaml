@@ -43,13 +43,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: document-renderer
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-document-renderer:sandbox-pending-build
-          # NOTE: brand-new image, never pushed to ECR — sandbox-pending-build is a
-          # deliberately-fake placeholder tag (mirrors document-service's own
-          # first-gitops-PR placeholder). It HAS been built + run locally
-          # (docker build -t openbank-document-renderer:local ., per README.md) but
-          # not pushed anywhere — needs a real build+push to ECR before this
-          # Deployment can actually roll out.
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-document-renderer:sandbox-ed34a077
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

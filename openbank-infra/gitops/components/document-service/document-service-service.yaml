@@ -54,13 +54,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: document-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-document-service:sandbox-pending-build
-          # NOTE: this service has never been built/pushed to ECR (brand new,
-          # this PR is its first gitops registration) — sandbox-pending-build is a
-          # deliberately-fake placeholder tag, not a real image. Needs a real
-          # openbank-infra/scripts/build-push-service.sh document-service run
-          # (which also generates and COPYs the SBOM, per ADR-0121 Axis 1) before
-          # this Deployment can actually roll out.
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-document-service:sandbox-ed34a077
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
