@@ -144,6 +144,67 @@ multi-signer ceremonies.
 Phase 1 does not block on HSM procurement; phase 2 raises assurance when the hardware and
 legal review land. `SignatureLevel ∈ {ADVANCED, QUALIFIED}` records which was applied.
 
+### D4 (continued) — Two-tier signing: client one-time signature + bank seal, key custody in OpenBao
+
+Phase 1 originally applied a single cryptographic layer (the bank's own seal) and treated
+the *signer's* side purely as an audit-trail fact (the SCA-verified evidence). That
+conflated two eIDAS concepts that are legally and technically distinct:
+
+- **The signer's own electronic signature** (a natural person, eIDAS Art. 3(10)) —
+  `ClientSignatureIssuerPort`. Issues a **fresh, single-use certificate per signing act**
+  from a dedicated **OpenBao PKI secrets engine** (`pki-document-signing`, mirroring the
+  existing `pki-agent` pattern from ADR-0031 D3b — same OpenBao instance, same
+  Kubernetes-auth login-then-issue flow, a different dedicated mount/role), signs with it,
+  and lets the private key go out of scope immediately — never written to disk, a
+  keystore, or OpenBao itself (`no_store=true`). The signature's value doesn't rest on the
+  leaf certificate's own lifetime; it rests on the **issuing CA staying in OpenBao**,
+  where every issuance is itself an audited, short-TTL event. A signing environment
+  without a reachable OpenBao (local dev, tests, or a real OpenBao outage) falls back to a
+  local ephemeral self-signed identity — the same DEV-ONLY posture `PdfBoxPadesSealAdapter`
+  already had, worthless as evidence, loudly logged.
+- **The bank's institutional electronic seal** (a legal entity, eIDAS Art. 3(25)) —
+  `SignatureSealPort`, unchanged from the original phase-1 design: a **stable, long-lived**
+  organizational certificate, now sourced from an OpenBao **KV** secret (not the PKI
+  engine — the seal's identity is meant to persist across many documents, the opposite of
+  the client signature's one-time nature) projected via an ExternalSecrets Operator
+  `ExternalSecret` into a mounted PKCS12 keystore — the exact pattern document-service
+  already uses for its Kafka mTLS keystore.
+
+**Sequencing**: each signer's own signature is applied immediately when they SIGN (before
+their decision is even persisted — an unsigned document must never be recorded as decided),
+so a multi-signer ceremony layers one PDF signature per signer as they each decide, in
+order. The bank's seal is applied once, last, after the final signer completes — sealing
+the fully-signed document, not a partial one. PDF's native multi-signature support (each
+signature is an incremental update covering everything before it) is what makes this
+layering possible without any of the adapters needing to know about each other.
+
+**No visual signature appearance (yet).** Every signature/seal here is a pure
+cryptographic PAdES annotation — there is no rendered signature box, stamp, or image on
+the document page. Real electronic-signature products usually show one for the human
+reader's benefit; deliberately deferred (a TODO, not a decision) since it has no bearing
+on legal validity and would mean deciding on visual design + template placement, which
+D6's graphical editor doesn't support yet either.
+
+### D7 — Onboarding integration: the first real caller
+
+Templating, versioning, and e-signature existed end to end but had **no real caller** —
+reachable only via direct API calls or the admin-ui editor. Account opening
+(`openbank-account-service`) is the first business flow wired to it: `AccountCreatedConsumer`
+consumes the existing `account.created` event (the same topic `balance-service`'s
+`BalanceInitConsumer` already consumes for zero-balance initialization), looks up the
+opened account's product in `product-catalog`, and — if that product has a
+`documentTemplateRef`/`documentTemplateCode` bound (D1) — renders the onboarding contract
+and opens a single-signer ceremony for the account holder.
+
+This is deliberately **event-driven, not a synchronous call from account-service**: document
+rendering and e-signature orchestration stay entirely off the money-path account-opening
+gate (ADR-0086) — a slow or unreachable document-service can never delay or fail opening an
+account. It also exercises, for the first time, the version-resolution policy from D2
+(the render omits `templateVersion`, always resolving to whatever is currently `PUBLISHED`)
+and D1's `documentTemplateCode` reference together, end to end. `OnboardingDocumentService`
+is idempotent (a no-op if that account already has an issued document) so at-least-once
+Kafka delivery / event replay is safe.
+
 ### D5 — Storage & lifecycle via ADR-0161
 
 Documents are stored through the `ObjectStorePort` from **ADR-0161** (S3 + Object Lock

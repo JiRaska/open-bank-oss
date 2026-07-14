@@ -84,6 +84,65 @@ export default function DocumentManagementDocsPage() {
         </div>
       </Section>
 
+      {/* Two-tier signature model + onboarding */}
+      <Section
+        title={t('Dva podpisy, ne jeden: klientův podpis vs. bankovní pečeť', 'Two signatures, not one: the client signature vs. the bank seal')}
+        subtitle={t(
+          'eIDAS rozlišuje el. podpis fyzické osoby (Art. 3(10)) a el. pečeť právnické osoby (Art. 3(25)) — ADR-0162 D4 (pokračování) tohle nyní odráží kryptograficky, ne jen v auditním záznamu.',
+          'eIDAS distinguishes a natural person\'s electronic signature (Art. 3(10)) from a legal entity\'s electronic seal (Art. 3(25)) — ADR-0162 D4 (continued) now reflects that cryptographically, not just in the audit trail.',
+        )}
+      >
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <div className="card" style={{ flex: '1 1 320px', padding: 14, background: 'var(--surface-2)' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: INK, marginBottom: 6 }}>
+              {t('Klient — jednorázový certifikát', 'Client — one-time certificate')}
+            </div>
+            <p style={{ fontSize: 12.5, color: SUB, lineHeight: 1.6, margin: 0 }}>
+              {t(
+                'Při každém podpisu vydá OpenBao PKI engine (pki-document-signing, stejný vzor jako pki-agent z ADR-0031) čerstvý certifikát jen pro tento úkon. Soukromý klíč se nikam neukládá — použije se a zahodí. Důvěryhodnost stojí na vydávající CA bezpečně uložené v OpenBao, ne na životnosti jednoho certifikátu.',
+                'Every signing act gets a fresh certificate from OpenBao\'s PKI secrets engine (pki-document-signing, the same pattern as pki-agent from ADR-0031). The private key is never persisted anywhere — used once, then discarded. Trust rests on the issuing CA staying safely in OpenBao, not on any one leaf certificate\'s lifetime.',
+              )}
+            </p>
+          </div>
+          <div className="card" style={{ flex: '1 1 320px', padding: 14, background: 'var(--surface-2)' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: INK, marginBottom: 6 }}>
+              {t('Banka — stabilní organizační pečeť', 'The bank — stable organizational seal')}
+            </div>
+            <p style={{ fontSize: 12.5, color: SUB, lineHeight: 1.6, margin: 0 }}>
+              {t(
+                'Naproti tomu bankovní pečeť používá dlouhodobý certifikát uložený jako OpenBao KV secret, promítnutý přes ExternalSecrets Operator do PKCS12 keystore — stejný vzor, jaký document-service už používá pro Kafka mTLS. Aplikuje se jako poslední vrstva, až po podpisu všech signatářů.',
+                'The bank\'s seal, by contrast, uses a long-lived certificate stored as an OpenBao KV secret, projected via ExternalSecrets Operator into a PKCS12 keystore — the same pattern document-service already uses for its Kafka mTLS identity. It is applied as the last layer, only after every signer has decided.',
+              )}
+            </p>
+          </div>
+        </div>
+        <p style={{ fontSize: 12.5, color: SUB, lineHeight: 1.6, margin: '12px 0 0' }}>
+          {t(
+            'Vizuální podoba podpisu (razítko/obrázek na stránce) zatím není — obě vrstvy jsou čistě kryptografická PAdES anotace, bez dopadu na právní platnost. Vědomé TODO, ne opomenutí.',
+            'There is no visual signature appearance yet (a stamp/image on the page) — both layers are pure cryptographic PAdES annotations with no bearing on legal validity. A deliberate TODO, not an oversight.',
+          )}
+        </p>
+      </Section>
+
+      {/* Onboarding integration */}
+      <Section
+        title={t('Napojení na onboarding — první reálný volající', 'Onboarding integration — the first real caller')}
+        subtitle={t(
+          'Šablonování a e-podpis existovaly, ale nic je reálně nevolalo — jen přímé API/admin-ui. Založení účtu je první byznysový tok, který to využívá.',
+          'Templating and e-signature existed, but nothing real called them — only direct API/admin-ui. Account opening is the first business flow that actually uses it.',
+        )}
+      >
+        <div className="card" style={{ padding: 14, background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', display: 'flex', gap: 10 }}>
+          <Info size={16} style={{ color: ACCENT, flexShrink: 0, marginTop: 1 }} />
+          <div style={{ fontSize: 13, color: INK, lineHeight: 1.6 }}>
+            {t(
+              'document-service si sám odebírá existující událost account.created (stejné téma jako balance-service pro založení nulového zůstatku) — account-service se o dokumentech vůbec nemusí dozvědět. Po přijetí události se dotáže product-catalogu na TermsAndConditions.documentTemplateCode daného produktu a pokud existuje, vyrenderuje aktuální PUBLISHED verzi šablony (bez pevné verze — viz politika řešení verzí níže) a otevře podpisovou ceremonii pro majitele účtu. Idempotentní vůči opakovanému doručení Kafky.',
+              'document-service subscribes to the existing account.created event itself (the same topic balance-service already consumes for zero-balance initialization) — account-service never needs to know documents exist. On receiving the event it asks product-catalog for the product\'s TermsAndConditions.documentTemplateCode and, if bound, renders the current PUBLISHED template version (no pinned version — see the version-resolution policy below) and opens a signature ceremony for the account holder. Idempotent against Kafka\'s at-least-once redelivery.',
+            )}
+          </div>
+        </div>
+      </Section>
+
       {/* Phased rollout */}
       <Section
         title={t('Fázovaný rozjezd kryptografického zapečetění', 'Phased cryptographic sealing rollout')}
@@ -140,22 +199,26 @@ export default function DocumentManagementDocsPage() {
 // two-actor sequence.
 function ArchitectureFlowDiagram() {
   const { t } = useLanguage()
-  const W = 800, H = 856
+  const W = 800, H = 970
 
   type Node = { id: string; x: number; y: number; w: number; h: number; color: string; titleCs: string; titleEn: string; subCs: string; subEn: string }
   const nodes: Node[] = [
-    { id: 'data',     x: 20,  y: 198, w: 200, h: 64, color: '#94a3b8', titleCs: 'Business data', titleEn: 'Business data', subCs: 'produkt / party / úvěr', subEn: 'product / party / loan' },
-    { id: 'editor',   x: 250, y: 10,  w: 280, h: 64, color: ACCENT,    titleCs: 'Editor šablon v admin-ui', titleEn: 'Admin-ui template editor', subCs: 'ROLE_COMPLIANCE · textarea + náhled', subEn: 'ROLE_COMPLIANCE · textarea + preview' },
-    { id: 'registry', x: 250, y: 104, w: 280, h: 64, color: ACCENT,    titleCs: 'Registr šablon', titleEn: 'Template registry', subCs: 'DRAFT → PUBLISHED → RETIRED', subEn: 'DRAFT → PUBLISHED → RETIRED' },
-    { id: 'render',   x: 250, y: 198, w: 280, h: 64, color: '#0284c7', titleCs: 'Vykreslení', titleEn: 'Render', subCs: 'TemplateRenderPort + business data', subEn: 'TemplateRenderPort + business data' },
-    { id: 'pdf',      x: 250, y: 292, w: 280, h: 64, color: '#0284c7', titleCs: 'PDF', titleEn: 'PDF', subCs: 'WeasyPrint výchozí · Gotenberg volitelně', subEn: 'WeasyPrint default · Gotenberg opt-in' },
-    { id: 'store',    x: 560, y: 292, w: 200, h: 64, color: '#64748b', titleCs: 'Objektové úložiště', titleEn: 'Object store', subCs: 'S3 WORM / Postgres (ADR-0161)', subEn: 'S3 WORM / Postgres (ADR-0161)' },
-    { id: 'ceremony', x: 250, y: 386, w: 280, h: 64, color: '#7c3aed', titleCs: 'Podpisová ceremonie', titleEn: 'Signature ceremony', subCs: 'orchestrace Temporal, více podepisujících', subEn: 'Temporal-orchestrated, multi-signer' },
-    { id: 'signer',   x: 250, y: 480, w: 280, h: 64, color: '#7c3aed', titleCs: 'Vazba podepisujícího', titleEn: 'Signer binding', subCs: 'SCA (ADR-0021) + souhlas', subEn: 'SCA (ADR-0021) + consent' },
-    { id: 'seal',     x: 250, y: 574, w: 280, h: 74, color: '#059669', titleCs: 'SignatureSealPort', titleEn: 'SignatureSealPort', subCs: 'Fáze 1 PAdES-B → Fáze 2 QES/QSeal', subEn: 'Phase 1 PAdES-B → Phase 2 QES/QSeal' },
-    { id: 'audit',    x: 560, y: 574, w: 200, h: 64, color: '#64748b', titleCs: 'Audit hash-chain', titleEn: 'Audit hash-chain', subCs: 'ADR-0133 nepopiratelnost', subEn: 'ADR-0133 non-repudiation' },
-    { id: 'kafka',    x: 250, y: 678, w: 280, h: 64, color: '#f59e0b', titleCs: 'Kafka událost', titleEn: 'Kafka event', subCs: 'DOCUMENT_SIGNED · CEREMONY_COMPLETED', subEn: 'DOCUMENT_SIGNED · CEREMONY_COMPLETED' },
-    { id: 'lend',     x: 250, y: 772, w: 280, h: 64, color: '#16a34a', titleCs: 'Lending / založení účtu', titleEn: 'Lending / account-opening', subCs: 'reagují asynchronně, nikdy neblokují', subEn: 'react, non-blocking (never a money-path gate)' },
+    { id: 'onboarding',      x: 20,  y: 104, w: 200, h: 64, color: '#16a34a', titleCs: 'Událost account.created', titleEn: 'account.created event', subCs: 'account-service → onboarding (ADR-0086)', subEn: 'account-service → onboarding trigger (ADR-0086)' },
+    { id: 'data',            x: 20,  y: 198, w: 200, h: 64, color: '#94a3b8', titleCs: 'Business data', titleEn: 'Business data', subCs: 'produkt / party / úvěr', subEn: 'product / party / loan' },
+    { id: 'editor',          x: 250, y: 10,  w: 280, h: 64, color: ACCENT,    titleCs: 'Editor šablon v admin-ui', titleEn: 'Admin-ui template editor', subCs: 'ROLE_COMPLIANCE · textarea + náhled', subEn: 'ROLE_COMPLIANCE · textarea + preview' },
+    { id: 'registry',        x: 250, y: 104, w: 280, h: 64, color: ACCENT,    titleCs: 'Registr šablon', titleEn: 'Template registry', subCs: 'DRAFT → PUBLISHED → RETIRED, 1 aktuální/kód', subEn: 'DRAFT → PUBLISHED → RETIRED, 1 current/code' },
+    { id: 'render',          x: 250, y: 198, w: 280, h: 64, color: '#0284c7', titleCs: 'Vykreslení', titleEn: 'Render', subCs: 'TemplateRenderPort · bez pevné verze = aktuální', subEn: 'TemplateRenderPort · no pinned version = current' },
+    { id: 'pdf',             x: 250, y: 292, w: 280, h: 64, color: '#0284c7', titleCs: 'PDF', titleEn: 'PDF', subCs: 'WeasyPrint výchozí · Gotenberg volitelně', subEn: 'WeasyPrint default · Gotenberg opt-in' },
+    { id: 'store',           x: 560, y: 292, w: 200, h: 64, color: '#64748b', titleCs: 'Objektové úložiště', titleEn: 'Object store', subCs: 'S3 WORM / Postgres (ADR-0161)', subEn: 'S3 WORM / Postgres (ADR-0161)' },
+    { id: 'ceremony',        x: 250, y: 386, w: 280, h: 64, color: '#7c3aed', titleCs: 'Podpisová ceremonie', titleEn: 'Signature ceremony', subCs: 'orchestrace Temporal, více podepisujících', subEn: 'Temporal-orchestrated, multi-signer' },
+    { id: 'signer',          x: 250, y: 480, w: 280, h: 64, color: '#7c3aed', titleCs: 'Vazba podepisujícího', titleEn: 'Signer binding', subCs: 'SCA (ADR-0021) + souhlas', subEn: 'SCA (ADR-0021) + consent' },
+    { id: 'client_signature', x: 250, y: 574, w: 280, h: 74, color: '#059669', titleCs: 'ClientSignatureIssuerPort', titleEn: 'ClientSignatureIssuerPort', subCs: 'el. podpis klienta · jednorázový cert', subEn: 'client\'s e-signature · one-time cert' },
+    { id: 'openbao_pki',     x: 560, y: 574, w: 200, h: 64, color: '#64748b', titleCs: 'OpenBao PKI engine', titleEn: 'OpenBao PKI engine', subCs: 'pki-document-signing (vzor ADR-0031)', subEn: 'pki-document-signing (ADR-0031 pattern)' },
+    { id: 'bank_seal',       x: 250, y: 678, w: 280, h: 74, color: '#059669', titleCs: 'SignatureSealPort', titleEn: 'SignatureSealPort', subCs: 'el. pečeť banky · stabilní cert, aplikuje se poslední', subEn: 'the bank\'s e-seal · stable cert, applied last' },
+    { id: 'openbao_kv',      x: 560, y: 678, w: 200, h: 64, color: '#64748b', titleCs: 'OpenBao KV', titleEn: 'OpenBao KV', subCs: 'stabilní keystore banky (ESO)', subEn: 'stable bank keystore (ESO-projected)' },
+    { id: 'audit',           x: 560, y: 782, w: 200, h: 64, color: '#64748b', titleCs: 'Audit hash-chain', titleEn: 'Audit hash-chain', subCs: 'ADR-0133 nepopiratelnost', subEn: 'ADR-0133 non-repudiation' },
+    { id: 'kafka',           x: 250, y: 782, w: 280, h: 64, color: '#f59e0b', titleCs: 'Kafka událost', titleEn: 'Kafka event', subCs: 'DOCUMENT_SIGNED · CEREMONY_COMPLETED', subEn: 'DOCUMENT_SIGNED · CEREMONY_COMPLETED' },
+    { id: 'lend',            x: 250, y: 876, w: 280, h: 64, color: '#16a34a', titleCs: 'Lending / založení účtu', titleEn: 'Lending / account-opening', subCs: 'reagují asynchronně, nikdy neblokují', subEn: 'react, non-blocking (never a money-path gate)' },
   ]
   const byId = Object.fromEntries(nodes.map(n => [n.id, n]))
   const cx = (n: Node) => n.x + n.w / 2
@@ -178,12 +241,24 @@ function ArchitectureFlowDiagram() {
           <Arrow a={bottom(byId.editor)} b={top(byId.registry)} color={ACCENT} label={t('BFF · ADR-0056', 'BFF · ADR-0056')} />
           <Arrow a={bottom(byId.registry)} b={top(byId.render)} color={ACCENT} />
           <Arrow a={right(byId.data)} b={left(byId.render)} color="#94a3b8" label={t('sloučit pole', 'merge fields')} />
+          {/* Onboarding is the second (event-driven) trigger into render, alongside the
+              admin-ui/API-driven path above — an elbowed connector, ADR-0162 D7. */}
+          <path
+            d={`M ${bottom(byId.onboarding).x} ${bottom(byId.onboarding).y} L ${bottom(byId.onboarding).x} 230 L ${left(byId.render).x} 230`}
+            fill="none" stroke="#16a34a" strokeWidth={2} strokeDasharray="5 4" markerEnd="url(#dm-ah)"
+          />
+          <text x={bottom(byId.onboarding).x + 4} y={188} fontSize={11} fill="#16a34a">
+            {t('vyvolá render', 'triggers render')}
+          </text>
           <Arrow a={bottom(byId.render)} b={top(byId.pdf)} color="#0284c7" />
           <Arrow a={right(byId.pdf)} b={left(byId.store)} color="#64748b" label="ObjectStorePort" />
           <Arrow a={bottom(byId.pdf)} b={top(byId.ceremony)} color="#7c3aed" />
           <Arrow a={bottom(byId.ceremony)} b={top(byId.signer)} color="#7c3aed" label={t('vazba SCA', 'SCA bind')} />
-          <Arrow a={bottom(byId.signer)} b={top(byId.seal)} color="#059669" />
-          <Arrow a={right(byId.seal)} b={left(byId.audit)} color="#64748b" label={t('hash-chain', 'hash-chain')} />
+          <Arrow a={bottom(byId.signer)} b={top(byId.client_signature)} color="#059669" label={t('SIGNED → ihned', 'SIGNED → immediately')} />
+          <Arrow a={left(byId.openbao_pki)} b={right(byId.client_signature)} color="#64748b" label={t('vydá cert', 'issues cert')} />
+          <Arrow a={bottom(byId.client_signature)} b={top(byId.bank_seal)} color="#059669" label={t('poslední signatář → pečeť', 'last signer → seal')} />
+          <Arrow a={left(byId.openbao_kv)} b={right(byId.bank_seal)} color="#64748b" label={t('keystore', 'keystore')} />
+          <Arrow a={right(byId.bank_seal)} b={left(byId.audit)} color="#64748b" label={t('hash-chain', 'hash-chain')} />
           {/* Kafka event fires off the ceremony itself once complete, not off the
               seal detail — an elbowed connector on the left routes around
               signer/seal to stay faithful to the ADR-0162 mermaid edge

@@ -16,3 +16,5 @@ resources:
   - secret-rotator-cronjob.yaml
   # ADR-0031 D3b: short-TTL agent-identity PKI issuer (inert until PR5b grants a consumer)
   - openbao-agent-identity.yaml
+  # ADR-0162 D4 (continued): short-TTL document-signing PKI issuer for one-time client signatures
+  - openbao-document-signing-pki.yaml
