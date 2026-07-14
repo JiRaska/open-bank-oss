@@ -27,6 +27,7 @@ import { looksLikeUuid } from '@/lib/validation/iban'
 // graceful-state rule. See product-catalog/page.tsx's own comment on this.
 const SERVICE = 'document-service'
 const TEMPLATES_PATH = '/api/v1/documents/templates'
+const PREVIEW_PATH = `${TEMPLATES_PATH}/preview`
 const DOCUMENTS_PATH = '/api/v1/documents'
 
 const PAGE_SIZE = 25
@@ -104,16 +105,37 @@ const MERGE_FIELDS = [
   'signature.block',
 ]
 
-function buildPreviewHtml(bodyHtml: string): string {
+function wrapPreviewHtml(innerHtml: string): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+    body{font-family:system-ui,-apple-system,sans-serif;padding:20px;color:#0f172a;background:#fff;font-size:13px;line-height:1.6;margin:0}
+    img{max-width:100%}
+  </style></head><body>${innerHtml}</body></html>`
+}
+
+// Fallback-only preview: highlights {{token}} placeholders without merging any
+// real data. Used before the first successful dynamic-preview call and if a
+// POST to PREVIEW_PATH fails (see runPreview()) — never the primary path once
+// a merged preview has rendered at least once.
+function buildHighlightedPreviewHtml(bodyHtml: string): string {
   const highlighted = (bodyHtml || '').replace(
     /\{\{\s*([\w.]+)\s*\}\}/g,
     (_m, token) => `<mark style="background:#fde68a;color:#78350f;padding:0 3px;border-radius:2px;font-family:monospace;font-size:0.9em;">{{${token}}}</mark>`,
   )
-  return `<!doctype html><html><head><meta charset="utf-8"><style>
-    body{font-family:system-ui,-apple-system,sans-serif;padding:20px;color:#0f172a;background:#fff;font-size:13px;line-height:1.6;margin:0}
-    img{max-width:100%}
-  </style></head><body>${highlighted}</body></html>`
+  return wrapPreviewHtml(highlighted)
 }
+
+// Default sample data for the dynamic live preview, matching MERGE_FIELDS'
+// token shape. Pure UX convenience so a new template shows a real merged
+// preview immediately — the author can freely edit it in the "Sample data
+// (JSON)" panel; it is never persisted with the template.
+const DEFAULT_SAMPLE_DATA = {
+  party: { name: 'Jana Nováková', address: 'Václavské náměstí 1, 110 00 Praha 1', email: 'jana.novakova@example.com' },
+  product: { name: 'Standard Savings Account', code: 'SAVINGS_STANDARD' },
+  account: { iban: 'CZ6508000000192000145399' },
+  document: { date: '2026-07-14', caseRef: 'CASE-2026-000123' },
+  signature: { block: 'Podepsáno elektronicky / Signed electronically' },
+}
+const DEFAULT_SAMPLE_DATA_TEXT = JSON.stringify(DEFAULT_SAMPLE_DATA, null, 2)
 
 function StatusBadge({ status }: { status?: string }) {
   const c = STATUS_COLOR[status ?? ''] ?? STATUS_COLOR.DRAFT
@@ -147,7 +169,16 @@ export default function DocumentTemplatesPage() {
   const [formData, setFormData] = useState<Partial<DocumentTemplate>>({})
   const [saving, setSaving] = useState(false)
   const [previewHtml, setPreviewHtml] = useState('')
+  const [sampleDataText, setSampleDataText] = useState(DEFAULT_SAMPLE_DATA_TEXT)
+  const [sampleDataInvalid, setSampleDataInvalid] = useState(false)
+  const [previewNote, setPreviewNote] = useState<string | null>(null)
   const bodyRef = useRef<HTMLTextAreaElement>(null)
+  // Request-generation counter (not just an AbortController) so a stale
+  // response — even one that resolves before its abort takes effect — can
+  // never clobber a newer keystroke's result.
+  const previewRequestIdRef = useRef(0)
+  const previewAbortRef = useRef<AbortController | null>(null)
+  const lastMergedPreviewRef = useRef<string | null>(null)
 
   // Inline two-step confirm for publish/retire — never a raw `window.confirm`
   // or `alert`; the only lightweight confirm precedent found elsewhere in
@@ -180,11 +211,63 @@ export default function DocumentTemplatesPage() {
 
   useEffect(() => { load() }, [load])
 
-  // Debounced live preview re-render on every keystroke.
+  // Real dynamic preview: on a 250ms debounce after either the body or the
+  // sample-data JSON changes, merge the sample data into the template body
+  // through the SAME Handlebars engine the actual render pipeline uses
+  // (document-service's POST /templates/preview) — not a token highlighter.
+  // The old regex highlighter (buildHighlightedPreviewHtml) is now only a
+  // fallback: before the first successful call, while the sample JSON is
+  // unparseable, or if the request fails.
+  async function runPreview() {
+    let parsedData: Record<string, unknown>
+    try {
+      parsedData = JSON.parse(sampleDataText || '{}')
+    } catch {
+      // Don't call the backend with unparseable JSON — flag it inline and
+      // keep showing whatever preview is already on screen.
+      setSampleDataInvalid(true)
+      return
+    }
+    setSampleDataInvalid(false)
+
+    // Cancel any in-flight call before starting a new one, and bump the
+    // generation counter so even a response that lands after this point is
+    // recognized as stale and ignored.
+    previewAbortRef.current?.abort()
+    const controller = new AbortController()
+    previewAbortRef.current = controller
+    const requestId = ++previewRequestIdRef.current
+    const timeoutId = setTimeout(() => controller.abort(), 8000)
+
+    try {
+      const data = await apiFetch(PREVIEW_PATH, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bodyHtml: formData.bodyHtml ?? '', data: parsedData }),
+        signal: controller.signal,
+      }) as { renderedHtml?: string } | null
+      clearTimeout(timeoutId)
+      if (requestId !== previewRequestIdRef.current) return // superseded by a newer keystroke
+      const wrapped = wrapPreviewHtml(data?.renderedHtml ?? '')
+      lastMergedPreviewRef.current = wrapped
+      setPreviewHtml(wrapped)
+      setPreviewNote(null)
+    } catch {
+      clearTimeout(timeoutId)
+      if (requestId !== previewRequestIdRef.current) return // superseded, not a real failure
+      setPreviewNote(t(
+        'Náhled se sloučenými daty se teď nepodařilo obnovit — zobrazují se zvýrazněné zástupné symboly.',
+        'Could not refresh the merged preview right now — showing highlighted placeholders instead.',
+      ))
+      setPreviewHtml(lastMergedPreviewRef.current ?? buildHighlightedPreviewHtml(formData.bodyHtml ?? ''))
+    }
+  }
+
   useEffect(() => {
-    const id = setTimeout(() => setPreviewHtml(buildPreviewHtml(formData.bodyHtml ?? '')), 250)
+    const id = setTimeout(() => { void runPreview() }, 250)
     return () => clearTimeout(id)
-  }, [formData.bodyHtml])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runPreview closes over formData.bodyHtml/sampleDataText, both already deps below
+  }, [formData.bodyHtml, sampleDataText])
 
   const filtered = useMemo(() => templates.filter(tpl => {
     if (statusFilter !== 'ALL' && (tpl.status ?? 'DRAFT') !== statusFilter) return false
@@ -197,10 +280,24 @@ export default function DocumentTemplatesPage() {
 
   const visible = filtered.slice(0, visibleCount)
 
+  // Reset the preview state for a fresh modal session — otherwise a stale
+  // note/merged-preview from the previously edited template would flash
+  // before the debounced effect catches up.
+  const resetPreviewState = () => {
+    setSampleDataText(DEFAULT_SAMPLE_DATA_TEXT)
+    setSampleDataInvalid(false)
+    setPreviewNote(null)
+    setPreviewHtml('')
+    lastMergedPreviewRef.current = null
+    previewAbortRef.current?.abort()
+    previewRequestIdRef.current++
+  }
+
   const openCreateModal = () => {
     setEditingTemplate(null)
     setFormData({ code: '', version: '1.0.0', name: '', engine: 'HANDLEBARS', bodyHtml: '', locale: language === 'cs' ? 'cs' : 'en', classification: 'internal' })
     setActionError(null)
+    resetPreviewState()
     setModalOpen(true)
   }
 
@@ -208,6 +305,7 @@ export default function DocumentTemplatesPage() {
     setEditingTemplate(tpl)
     setFormData({ ...tpl })
     setActionError(null)
+    resetPreviewState()
     setModalOpen(true)
   }
 
@@ -485,6 +583,31 @@ export default function DocumentTemplatesPage() {
                       </button>
                     ))}
                   </div>
+
+                  <div style={{ marginBottom: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
+                        {t('Ukázková data pro náhled (JSON)', 'Sample data for preview (JSON)')}
+                      </label>
+                      {sampleDataInvalid && (
+                        <span style={{ fontSize: '10.5px', color: 'var(--warning-text)' }}>
+                          {t('Neplatný JSON — zobrazuje se poslední platný náhled', 'Invalid JSON — showing the last valid preview')}
+                        </span>
+                      )}
+                    </div>
+                    <textarea
+                      value={sampleDataText}
+                      onChange={e => setSampleDataText(e.target.value)}
+                      spellCheck={false}
+                      aria-label={t('Ukázková data pro náhled', 'Sample data for preview')}
+                      style={{
+                        width: '100%', height: '90px', resize: 'vertical', fontFamily: 'var(--font-mono)', fontSize: '11px',
+                        padding: '8px 10px', borderRadius: '8px', background: 'var(--surface-2)', color: 'var(--text-primary)',
+                        border: `1px solid ${sampleDataInvalid ? 'var(--warning-border)' : 'var(--border)'}`,
+                      }}
+                    />
+                  </div>
+
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', height: '320px' }}>
                     <textarea
                       ref={bodyRef}
@@ -496,23 +619,30 @@ export default function DocumentTemplatesPage() {
                     />
                     <iframe
                       title={t('Náhled šablony', 'Template preview')}
-                      // Sandboxed WITHOUT allow-scripts: template HTML is
-                      // untrusted/attacker-influenceable content (legal/compliance
-                      // authors free-form HTML) and this is an admin console, not
-                      // a public site — the preview must never execute script.
+                      // Sandboxed WITHOUT allow-scripts: the merged HTML still
+                      // embeds attacker-influenceable content (the *data* merged
+                      // in — e.g. a party name — can originate from any caller in
+                      // production) and this is an admin console, not a public
+                      // site — the preview must never execute script.
                       sandbox="allow-same-origin"
                       srcDoc={previewHtml}
                       style={{ width: '100%', height: '100%', border: '1px solid var(--border)', borderRadius: '8px', background: '#fff' }}
                     />
                   </div>
+                  {previewNote && (
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start', marginTop: '8px', fontSize: '11px', color: 'var(--warning-text)' }}>
+                      <Info size={12} style={{ flexShrink: 0, marginTop: '1px' }} />
+                      {previewNote}
+                    </div>
+                  )}
                   <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start', marginTop: '8px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
                     <Info size={12} style={{ flexShrink: 0, marginTop: '1px' }} />
                     {/* Honest scope note (ADR-0162 D6): a drag-and-drop visual
                         builder (GrapesJS/TipTap) is a follow-up enhancement, not
                         delivered in this pass — no new npm dependency was added. */}
                     {t(
-                      'Toto je textový editor s živým náhledem, ne vizuální drag-and-drop builder. Grafický editor (GrapesJS/TipTap) je plánované rozšíření (ADR-0162 D6), zatím nedodáno.',
-                      'This is a text editor with a live preview, not a drag-and-drop visual builder. A graphical editor (GrapesJS/TipTap) is a planned follow-up (ADR-0162 D6), not delivered in this pass.',
+                      'Toto je textový editor s živým náhledem se sloučenými ukázkovými daty, ne vizuální drag-and-drop builder. Grafický editor (GrapesJS/TipTap) je plánované rozšíření (ADR-0162 D6), zatím nedodáno.',
+                      'This is a text editor with a live preview merging real sample data, not a drag-and-drop visual builder. A graphical editor (GrapesJS/TipTap) is a planned follow-up (ADR-0162 D6), not delivered in this pass.',
                     )}
                   </div>
                 </div>

@@ -51,6 +51,14 @@ interface DocumentTemplateUseCase {
 
     /** [limit] is capped server-side (see [com.openbank.document.application.usecase.DocumentTemplateService]) — always bounded, never a full table scan. */
     suspend fun listTemplates(limit: Int): List<DocumentTemplate>
+
+    /**
+     * Merges [sampleData] into [bodyHtml] and returns the resulting HTML — the "dynamic preview"
+     * capability: an author sees the *actual* Handlebars-merged output while editing an unsaved
+     * DRAFT, not just the raw markup. Pure, no persistence, no PDF rendering (that stays behind
+     * [DocumentRenderUseCase] for a real, stored [Document]). Not suspend: it does no I/O.
+     */
+    fun previewRender(bodyHtml: String, sampleData: Map<String, Any?>): String
 }
 
 /** Renders a document from a published template + a data map, storing it and emitting an event. */

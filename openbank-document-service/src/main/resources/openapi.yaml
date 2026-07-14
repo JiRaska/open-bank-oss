@@ -49,6 +49,27 @@ paths:
         '200':
           description: Templates
 
+  /api/v1/documents/templates/preview:
+    post:
+      tags: [Templates]
+      summary: Merge sample data into an unsaved template body — dynamic preview, no persistence
+      operationId: previewTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreviewTemplateRequest'
+      responses:
+        '200':
+          description: Rendered preview HTML
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreviewTemplateResponse'
+        '400':
+          description: bodyHtml exceeds the preview size limit
+
   /api/v1/documents/templates/{id}:
     get:
       tags: [Templates]
@@ -234,6 +255,23 @@ components:
           type: string
           nullable: true
         classification:
+          type: string
+
+    PreviewTemplateRequest:
+      type: object
+      required: [bodyHtml]
+      properties:
+        bodyHtml:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+
+    PreviewTemplateResponse:
+      type: object
+      required: [renderedHtml]
+      properties:
+        renderedHtml:
           type: string
 
     RenderDocumentRequest:

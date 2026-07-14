@@ -6,8 +6,10 @@ package com.openbank.document.application.usecase
 
 import com.openbank.document.application.port.`in`.CreateTemplateCommand
 import com.openbank.document.application.port.`in`.DocumentTemplateUseCase
+import com.openbank.document.application.port.out.TemplateRenderPort
 import com.openbank.document.application.port.out.TemplateRepositoryPort
 import com.openbank.document.domain.model.DocumentTemplate
+import com.openbank.document.domain.model.TemplateEngine
 import com.openbank.document.domain.model.TemplateStatus
 import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
@@ -16,8 +18,11 @@ import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
-class DocumentTemplateService(private val repo: TemplateRepositoryPort, private val clock: Clock) :
-    DocumentTemplateUseCase {
+class DocumentTemplateService(
+    private val repo: TemplateRepositoryPort,
+    private val renderPort: TemplateRenderPort,
+    private val clock: Clock,
+) : DocumentTemplateUseCase {
 
     override suspend fun createTemplate(cmd: CreateTemplateCommand): DocumentTemplate {
         val template = DocumentTemplate(
@@ -50,7 +55,30 @@ class DocumentTemplateService(private val repo: TemplateRepositoryPort, private 
     override suspend fun listTemplates(limit: Int): List<DocumentTemplate> =
         repo.findAllTemplates(limit.coerceIn(1, MAX_LIMIT))
 
+    override fun previewRender(bodyHtml: String, sampleData: Map<String, Any?>): String {
+        // TemplateRenderPort.renderHtml takes a full DocumentTemplate, but a preview has no
+        // persisted identity yet — this ephemeral instance exists only to carry [bodyHtml] through
+        // the same real adapter (HandlebarsTemplateRenderer) the actual render path uses, so the
+        // preview is never a fake/parallel implementation of the merge logic.
+        val ephemeral = DocumentTemplate(
+            id = PREVIEW_ID,
+            code = "PREVIEW",
+            version = "0.0.0",
+            name = "preview",
+            engine = TemplateEngine.HANDLEBARS,
+            bodyHtml = bodyHtml,
+            locale = "en",
+            status = TemplateStatus.DRAFT,
+            productRef = null,
+            classification = "internal",
+            createdAt = Instant.now(clock),
+            createdBy = "preview",
+        )
+        return renderPort.renderHtml(ephemeral, sampleData)
+    }
+
     private companion object {
         const val MAX_LIMIT = 200
+        val PREVIEW_ID: UUID = UUID(0L, 0L)
     }
 }

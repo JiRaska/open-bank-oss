@@ -11,6 +11,8 @@ import com.openbank.document.application.port.`in`.DocumentTemplateUseCase
 import com.openbank.document.application.port.`in`.RenderDocumentCommand
 import com.openbank.document.infrastructure.rest.dto.CreateTemplateRequest
 import com.openbank.document.infrastructure.rest.dto.DocumentResponse
+import com.openbank.document.infrastructure.rest.dto.PreviewTemplateRequest
+import com.openbank.document.infrastructure.rest.dto.PreviewTemplateResponse
 import com.openbank.document.infrastructure.rest.dto.RenderDocumentRequest
 import com.openbank.document.infrastructure.rest.dto.toResponse
 import com.openbank.libs.authz.Authorize
@@ -56,6 +58,16 @@ class DocumentResource(
             ),
         )
         return Response.status(Response.Status.CREATED).entity(template.toResponse()).build()
+    }
+
+    @POST
+    @Path("/templates/preview")
+    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    fun previewTemplate(req: PreviewTemplateRequest): PreviewTemplateResponse {
+        if (req.bodyHtml.length > MAX_PREVIEW_BODY_LENGTH) {
+            throw BadRequestException("bodyHtml exceeds the $MAX_PREVIEW_BODY_LENGTH character preview limit")
+        }
+        return PreviewTemplateResponse(templateUseCase.previewRender(req.bodyHtml, req.data))
     }
 
     @POST
@@ -124,5 +136,9 @@ class DocumentResource(
     suspend fun getContent(@PathParam("id") id: UUID): Response {
         val bytes = queryUseCase.getContent(id) ?: throw NotFoundException()
         return Response.ok(bytes).build()
+    }
+
+    private companion object {
+        const val MAX_PREVIEW_BODY_LENGTH = 200_000
     }
 }
