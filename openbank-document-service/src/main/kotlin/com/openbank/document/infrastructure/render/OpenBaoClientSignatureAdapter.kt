@@ -91,7 +91,11 @@ class OpenBaoClientSignatureAdapter(
             val token = login(Files.readString(Path.of(saTokenPath)).trim())
             issueFromOpenBao(token, partyRef)
         } catch (e: Exception) {
-            logDevFallback(partyRef, e.message ?: e.javaClass.simpleName)
+            // Deliberately log only the exception TYPE, never e.message: a Vault/OpenBao HTTP
+            // client exception's message can embed response-body fragments, which must never
+            // reach a log line (CodeQL java/log-injection -- "insertion of sensitive information
+            // into log files"). The class name is enough to diagnose which failure mode fired.
+            logDevFallback(partyRef, e.javaClass.simpleName)
             PadesSigning.generateEphemeralIdentity(partyRef, EPHEMERAL_VALIDITY_DAYS)
         }
     }
