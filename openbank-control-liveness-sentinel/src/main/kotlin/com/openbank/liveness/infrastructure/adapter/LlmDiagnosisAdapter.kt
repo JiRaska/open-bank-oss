@@ -43,10 +43,15 @@ class LlmDiagnosisAdapter(private val config: LivenessSentinelConfig) : LlmDiagn
     private val log = Logger.getLogger(LlmDiagnosisAdapter::class.java)
 
     // OPTIONAL (not @ConfigProperty-injected): an un-seeded key must not fail config load at boot.
-    // Mirrors DevOpsConfig / OpenAiCompatibleModelProvider exactly (issue #1084 precedent).
+    // Deliberately OUTSIDE the openbank.liveness-sentinel prefix LivenessSentinelConfig's strict
+    // @ConfigMapping owns — a key nested under that prefix with no matching interface property
+    // fails boot with SRCFG00050 ("does not map to any root"), which crash-looped this pod on
+    // first real deploy. "liveness.model.api-key" resolves via SmallRye's env-var relaxed matching
+    // straight from LIVENESS_MODEL_API_KEY, no application.yaml entry needed — mirrors
+    // DevOpsConfig / OpenAiCompatibleModelProvider's short, unmapped lookup key exactly.
     private val apiKey: String
         get() = ConfigProvider.getConfig()
-            .getOptionalValue("openbank.liveness-sentinel.model.api-key", String::class.java).orElse("")
+            .getOptionalValue("liveness.model.api-key", String::class.java).orElse("")
 
     private val http: HttpClient by lazy {
         HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_S)).build()
@@ -56,7 +61,7 @@ class LlmDiagnosisAdapter(private val config: LivenessSentinelConfig) : LlmDiagn
     override suspend fun diagnose(finding: LivenessFinding, contextMetrics: Map<String, Double>): String {
         if (apiKey.isBlank()) {
             log.warn(
-                "openbank.liveness-sentinel.model.api-key not seeded — returning placeholder diagnosis (degraded)",
+                "liveness.model.api-key not seeded — returning placeholder diagnosis (degraded)",
             )
             return "Automated diagnosis unavailable (model API key not seeded). Finding: ${finding.title}. " +
                 "Affected control: ${finding.affectedControl}."
