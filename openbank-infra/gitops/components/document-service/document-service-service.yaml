@@ -45,6 +45,9 @@ spec:
         # Kept in sync by gen-document-service-opa-bundle.sh (do not hand-edit).
         openbank.tech/policy-checksum: "9ce5bdce9bbab509"
     spec:
+      # ADR-0162 D4 (continued): a dedicated SA (not `default`) is what OpenBao's Kubernetes-auth
+      # role `document-service-signing` is bound to — least-privilege, one identity per consumer.
+      serviceAccountName: document-service
       securityContext:
         runAsNonRoot: true
         runAsUser: 100
@@ -82,6 +85,24 @@ spec:
             # consent-service's SCA_SERVICE_URL.
             - name: SCA_SERVICE_URL
               value: http://sca-service.sca.svc:8110
+            # product-catalog REST client base URL (application.yaml:
+            # quarkus.rest-client.product-catalog-api.url) — ADR-0162 D7: AccountCreatedConsumer's
+            # ProductCatalogAdapter looks up documentTemplateCode for the account's product on
+            # every account.created event. Same in-cluster address billing-service already uses.
+            - name: PRODUCT_CATALOG_SERVICE_URL
+              value: http://product-catalog.accounts.svc:8104
+            # ADR-0162 D4 (continued): the bank's stable institutional PAdES-sealing identity,
+            # projected from OpenBao KV via es-document-service-signing-keystore.yaml. Absent =
+            # PdfBoxPadesSealAdapter falls back to a DEV-ONLY ephemeral cert (loud warning, never
+            # silent) -- see that adapter's own doc comment. Do not set a blank-string default.
+            - name: OPENBANK_SIGNATURE_KEYSTORE_PATH
+              value: /mnt/signing-keystore/keystore.p12
+            - name: OPENBANK_SIGNATURE_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: document-service-signing-keystore
+                  key: keystore.password
+                  optional: true
             # Datasource: single document-service-db (document-service-db.yaml).
             # Reactive URL for the app (Panache); JDBC URL for Flyway. Both
             # username/password variants set, matching the billing-service pattern.
@@ -189,6 +210,9 @@ spec:
             - name: kafka-truststore
               mountPath: /mnt/kafka-truststore
               readOnly: true
+            - name: signing-keystore
+              mountPath: /mnt/signing-keystore
+              readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -287,6 +311,25 @@ spec:
             items:
               - key: ca.p12
                 path: ca.p12
+        # optional: true — a not-yet-populated OpenBao KV secret must never block this volume
+        # from mounting (an empty dir instead), since PdfBoxPadesSealAdapter's own fallback
+        # already treats a missing keystore FILE the same as a missing config the same as a
+        # missing volume: all three degrade to the ephemeral dev identity, never a crash.
+        - name: signing-keystore
+          secret:
+            secretName: document-service-signing-keystore
+            optional: true
+            items:
+              - key: keystore.p12
+                path: keystore.p12
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: document-service
+  namespace: documents
+  labels:
+    app.kubernetes.io/name: document-service
 ---
 apiVersion: v1
 kind: Service

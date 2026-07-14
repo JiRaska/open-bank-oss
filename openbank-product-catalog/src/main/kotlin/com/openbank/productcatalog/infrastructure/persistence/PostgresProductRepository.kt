@@ -21,19 +21,16 @@ import java.util.UUID
  * column via Jackson; identity/filter attributes are mirrored into scalar columns for querying.
  */
 @ApplicationScoped
-class PostgresProductRepository(
-    private val sf: Mutiny.SessionFactory,
-    private val mapper: ObjectMapper,
-) : ProductRepository {
+class PostgresProductRepository(private val sf: Mutiny.SessionFactory, private val mapper: ObjectMapper) :
+    ProductRepository {
 
     override suspend fun findAll(): List<Product> = sf.withSession { s ->
         s.createQuery("FROM ProductEntity ORDER BY code", ProductEntity::class.java).resultList
     }.map { rows -> rows.map { it.toDomain() } }.awaitSuspending()
 
-    override suspend fun findById(id: UUID): Product? =
-        sf.withSession { s -> s.find(ProductEntity::class.java, id) }
-            .map { it?.toDomain() }
-            .awaitSuspending()
+    override suspend fun findById(id: UUID): Product? = sf.withSession { s -> s.find(ProductEntity::class.java, id) }
+        .map { it?.toDomain() }
+        .awaitSuspending()
 
     override suspend fun findByCode(code: String): Product? = sf.withSession { s ->
         s.createQuery(
@@ -58,15 +55,15 @@ class PostgresProductRepository(
         }
     }.awaitSuspending()
 
-    override suspend fun count(): Long =
-        sf.withSession { s -> s.createQuery("SELECT COUNT(p) FROM ProductEntity p", Long::class.javaObjectType).singleResult }
-            .awaitSuspending()
+    override suspend fun count(): Long = sf.withSession { s ->
+        s.createQuery("SELECT COUNT(p) FROM ProductEntity p", Long::class.javaObjectType).singleResult
+    }
+        .awaitSuspending()
 
-    private fun newEntity(p: Product, legacyCode: String?): ProductEntity =
-        ProductEntity().apply {
-            legacyCode?.let { this.legacyCode = it }
-            applyFrom(p)
-        }
+    private fun newEntity(p: Product, legacyCode: String?): ProductEntity = ProductEntity().apply {
+        legacyCode?.let { this.legacyCode = it }
+        applyFrom(p)
+    }
 
     private fun ProductEntity.applyFrom(p: Product) {
         id = UUID.fromString(p.id)

@@ -1,0 +1,168 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.document.application.usecase
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import com.openbank.document.application.port.out.CeremonyRepositoryPort
+import com.openbank.document.application.port.out.ClientSignatureIssuerPort
+import com.openbank.document.application.port.out.DocumentRepositoryPort
+import com.openbank.document.application.port.out.SignatureSealPort
+import com.openbank.document.application.port.out.SignerVerificationPort
+import com.openbank.document.domain.model.CeremonyStatus
+import com.openbank.document.domain.model.Document
+import com.openbank.document.domain.model.DocumentStatus
+import com.openbank.document.domain.model.SignatureCeremony
+import com.openbank.document.domain.model.SignatureLevel
+import com.openbank.document.domain.model.Signer
+import com.openbank.document.domain.model.SignerStatus
+import com.openbank.libs.storage.ObjectStorePort
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.coVerifyOrder
+import io.mockk.mockk
+import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.Test
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
+import java.util.UUID
+
+/**
+ * ADR-0162 D4 continued: a SIGNED decision applies the signer's own one-time signature
+ * ([ClientSignatureIssuerPort]) BEFORE persisting the decision; the bank's seal
+ * ([SignatureSealPort]) applies only once, LAST, after every signer reaches a terminal decision.
+ */
+class SignatureCeremonyServiceTest {
+
+    private val ceremonyRepo: CeremonyRepositoryPort = mockk()
+    private val documentRepo: DocumentRepositoryPort = mockk()
+    private val objectStore: ObjectStorePort = mockk()
+    private val sealPort: SignatureSealPort = mockk()
+    private val clientSignaturePort: ClientSignatureIssuerPort = mockk()
+    private val signerVerificationPort: SignerVerificationPort = mockk()
+    private val service = SignatureCeremonyService(
+        ceremonyRepo = ceremonyRepo,
+        documentRepo = documentRepo,
+        objectStore = objectStore,
+        sealPort = sealPort,
+        clientSignaturePort = clientSignaturePort,
+        signerVerificationPort = signerVerificationPort,
+        clock = Clock.fixed(FIXED_NOW, ZoneOffset.UTC),
+        objectMapper = ObjectMapper().registerModule(JavaTimeModule()),
+    )
+
+    @Test
+    fun `a single-signer ceremony applies the client signature then the bank seal`(): Unit = runBlocking {
+        val ceremony = ceremony(listOf(signer("party-1")))
+        val document = document()
+        val pdf = "pdf-bytes".toByteArray()
+        val clientSigned = "client-signed".toByteArray()
+        val sealed = "sealed".toByteArray()
+        coEvery { ceremonyRepo.findById(ceremony.id) } returns ceremony
+        coEvery { documentRepo.findById(ceremony.documentId) } returns document
+        coEvery { signerVerificationPort.verify("party-1", "evidence-1") } returns true
+        // First get() (inside signAsClient) sees the original bytes; the second (inside
+        // sealDocument) sees what signAsClient just put -- simulating the object store's own
+        // read-your-writes behavior across the two sequential steps.
+        coEvery { objectStore.get(document.storageKey) } returns pdf andThen clientSigned
+        coEvery { clientSignaturePort.signAsClient(pdf, "party-1") } returns clientSigned
+        coEvery { objectStore.put(document.storageKey, clientSigned, document.contentType) } returns Unit
+        coEvery { sealPort.sealPades(clientSigned, any()) } returns sealed
+        coEvery { objectStore.put(document.storageKey, sealed, document.contentType) } returns Unit
+        coEvery { ceremonyRepo.saveWithOutbox(any(), any()) } answers { firstArg() }
+
+        val result = service.recordDecision(ceremony.id, "party-1", SignerStatus.SIGNED, "evidence-1")
+
+        assertThat(result.status).isEqualTo(CeremonyStatus.COMPLETED)
+        coVerifyOrder {
+            clientSignaturePort.signAsClient(pdf, "party-1")
+            sealPort.sealPades(clientSigned, any())
+        }
+    }
+
+    @Test
+    fun `a two-signer ceremony signs each signer without sealing until the last one`(): Unit = runBlocking {
+        val ceremony = ceremony(listOf(signer("party-1", order = 1), signer("party-2", order = 2)))
+        val document = document()
+        val pdf = "pdf-bytes".toByteArray()
+        coEvery { ceremonyRepo.findById(ceremony.id) } returns ceremony
+        coEvery { documentRepo.findById(ceremony.documentId) } returns document
+        coEvery { signerVerificationPort.verify("party-1", "evidence-1") } returns true
+        coEvery { objectStore.get(document.storageKey) } returns pdf
+        coEvery { clientSignaturePort.signAsClient(any(), "party-1") } returns pdf
+        coEvery { objectStore.put(any(), any(), any()) } returns Unit
+        coEvery { ceremonyRepo.save(any()) } answers { firstArg() }
+
+        val result = service.recordDecision(ceremony.id, "party-1", SignerStatus.SIGNED, "evidence-1")
+
+        assertThat(result.status).isEqualTo(CeremonyStatus.PARTIALLY_SIGNED)
+        coVerify(exactly = 1) { clientSignaturePort.signAsClient(any(), "party-1") }
+        coVerify(exactly = 0) { sealPort.sealPades(any(), any()) }
+        coVerify(exactly = 0) { ceremonyRepo.saveWithOutbox(any(), any()) }
+    }
+
+    @Test
+    fun `a DECLINED decision applies neither the client signature nor the seal`(): Unit = runBlocking {
+        val ceremony = ceremony(listOf(signer("party-1")))
+        coEvery { ceremonyRepo.findById(ceremony.id) } returns ceremony
+        coEvery { ceremonyRepo.save(any()) } answers { firstArg() }
+
+        val result = service.recordDecision(ceremony.id, "party-1", SignerStatus.DECLINED, null)
+
+        assertThat(result.status).isEqualTo(CeremonyStatus.DECLINED)
+        coVerify(exactly = 0) { clientSignaturePort.signAsClient(any(), any()) }
+        coVerify(exactly = 0) { sealPort.sealPades(any(), any()) }
+    }
+
+    @Test
+    fun `a failed SCA verification never applies the client signature`(): Unit = runBlocking {
+        val ceremony = ceremony(listOf(signer("party-1")))
+        coEvery { ceremonyRepo.findById(ceremony.id) } returns ceremony
+        coEvery { signerVerificationPort.verify("party-1", "bad-evidence") } returns false
+
+        assertThatThrownBy {
+            runBlocking { service.recordDecision(ceremony.id, "party-1", SignerStatus.SIGNED, "bad-evidence") }
+        }
+            .isInstanceOf(IllegalStateException::class.java)
+
+        coVerify(exactly = 0) { clientSignaturePort.signAsClient(any(), any()) }
+    }
+
+    private fun signer(partyRef: String, order: Int = 1) =
+        Signer(partyRef = partyRef, order = order, status = SignerStatus.PENDING, signedAt = null)
+
+    private fun ceremony(signers: List<Signer>) = SignatureCeremony(
+        id = UUID.randomUUID(),
+        documentId = UUID.randomUUID(),
+        signers = signers,
+        status = CeremonyStatus.PENDING,
+        signatureLevel = SignatureLevel.ADVANCED,
+        createdAt = FIXED_NOW,
+    )
+
+    private fun document() = Document(
+        id = UUID.randomUUID(),
+        templateCode = "VOP_CS",
+        templateVersion = "1.1.0",
+        sha256 = "abc",
+        storageKey = "documents/1",
+        contentType = "application/pdf",
+        sizeBytes = 10,
+        status = DocumentStatus.PENDING_SIGNATURE,
+        metadata = emptyMap(),
+        partyRef = "party-1",
+        caseRef = null,
+        productRef = null,
+        retainUntil = null,
+        createdAt = FIXED_NOW,
+    )
+
+    private companion object {
+        val FIXED_NOW: Instant = Instant.parse("2026-01-15T10:15:30Z")
+    }
+}

@@ -104,3 +104,30 @@ interface SignatureSealPort {
 interface SignerVerificationPort {
     suspend fun verify(partyRef: String, evidenceRef: String): Boolean
 }
+
+/**
+ * Applies [partyRef]'s own **electronic signature** (eIDAS terms: a natural person's signature,
+ * distinct from [SignatureSealPort]'s institutional **electronic seal**) to [pdf] — a fresh,
+ * single-use certificate is issued for this one signing act and the private key is never
+ * persisted beyond it (ADR-0162 D4 continued). Unlike the seal's stable organizational identity,
+ * the *value* being protected here is that this specific act was authorized by a certificate
+ * freshly minted for it — the chain of trust (who issued it, when, to whom) is what stays
+ * auditable, rooted in the issuing CA (production: OpenBao's PKI secrets engine), not the leaf
+ * certificate's own lifetime.
+ */
+interface ClientSignatureIssuerPort {
+    suspend fun signAsClient(pdf: ByteArray, partyRef: String): ByteArray
+}
+
+/**
+ * Read-only lookup into `openbank-product-catalog`, scoped to exactly what the onboarding flow
+ * needs: which document template (if any) is bound to a product, via `TermsAndConditions.documentTemplateCode`
+ * (a `code`, never a pinned version — ADR-0162 D1/version-resolution policy). Fails open: an
+ * unreachable/unknown product-catalog resolves to `null`, same fail-open stance
+ * `account-service`'s own `ProductCatalogPort` takes for the same reference-data dependency —
+ * a missing onboarding-document binding must never block account opening (that already happened,
+ * upstream, by the time this is consulted).
+ */
+interface ProductCatalogPort {
+    suspend fun findDocumentTemplateCode(productId: UUID): String?
+}

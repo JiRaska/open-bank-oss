@@ -18,7 +18,6 @@ object ProductIds {
         "prod-010" to "00000000-0000-0000-0000-0000000000c3",
     )
 
-    fun canonicalId(legacyId: String): UUID =
-        sentinels[legacyId]?.let(UUID::fromString)
-            ?: UUID.nameUUIDFromBytes("openbank-product:$legacyId".toByteArray())
+    fun canonicalId(legacyId: String): UUID = sentinels[legacyId]?.let(UUID::fromString)
+        ?: UUID.nameUUIDFromBytes("openbank-product:$legacyId".toByteArray())
 }

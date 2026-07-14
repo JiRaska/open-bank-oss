@@ -1,0 +1,190 @@
+# ADR-0162 D4 (continued) — OpenBao PKI engine for one-time client signing certs (issuer half)
+#
+# Stands up a DEDICATED, isolated PKI engine (`pki-document-signing`) in the existing OpenBao
+# instance — mirrors `openbao-agent-identity.yaml`'s ADR-0031 D3b `pki-agent` pattern exactly
+# (same OpenBao, same Kubernetes-auth issuer/consumer shape), just a different mount/role for a
+# different purpose: a fresh, single-use certificate per e-signature ceremony signing act,
+# identifying the SIGNER (CN = partyRef), not an AI agent charter. The private key is never
+# persisted (`no_store=true`) — used once by `OpenBaoClientSignatureAdapter` to produce a PAdES
+# signature, then discarded. Trust rests on the issuing CA staying in OpenBao, not on any one
+# leaf certificate's lifetime.
+#
+# Deliberately NOT the same engine as pki-agent: agent-identity's `allowed_domains` allow-list
+# (a small, fixed set of agent charter names) is the wrong shape for a customer partyRef, which
+# varies per signer and isn't known in advance — this role uses `allow_any_name=true` instead.
+#
+# Deployed via the openbao-config ArgoCD Application (apps/openbao-config.yaml); requires the
+# openbao Helm release synced first so the `vault` namespace exists. See runbook
+# docs/runbooks/0008-openbao-document-signing-pki.md for the out-of-band admin-role bootstrap
+# (mirrors runbook 0007's agent-identity-admin bootstrap) and the bank-seal KV secret setup.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openbao-document-signing-config
+  namespace: vault
+  labels:
+    app.kubernetes.io/part-of: openbao
+    openbank.io/plane: platform
+    openbank.io/adr: "0162"
+data:
+  configure.sh: |
+    #!/bin/sh
+    set -eu
+
+    # -------------------------------------------------------------------------
+    # OpenBao document-signing PKI — idempotent setup (ADR-0162 D4 continued)
+    # -------------------------------------------------------------------------
+    BAO_ADDR="${BAO_ADDR:-http://openbao.vault.svc:8200}"
+    export BAO_ADDR
+
+    # Authenticate via the Kubernetes auth method (role document-signing-admin, bootstrapped
+    # out-of-band by runbook 0008 — mirrors agent-identity-admin, runbook 0007).
+    if [ -z "${BAO_TOKEN:-}" ]; then
+      SA_TOKEN="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+      BAO_TOKEN="$(bao write -field=token auth/kubernetes/login \
+        role=document-signing-admin \
+        jwt="${SA_TOKEN}")"
+      export BAO_TOKEN
+    fi
+
+    PKI_PATH="pki-document-signing"
+
+    # Enable a DEDICATED PKI engine for client signing certs (idempotent; isolated from
+    # pki-agent so a compromise of one issuing role cannot touch the other's policy surface).
+    bao secrets enable -path="${PKI_PATH}" pki 2>/dev/null || true
+    bao secrets tune -max-lease-ttl=87600h "${PKI_PATH}" >/dev/null
+
+    # Generate the internal root CA ONCE. Re-running root/generate mints a NEW CA and would
+    # invalidate the trust chain of every previously-signed document — guard on the existing CA.
+    if ! bao read "${PKI_PATH}/cert/ca" >/dev/null 2>&1; then
+      echo "[openbao-document-signing] generating document-signing root CA ..."
+      bao write -field=certificate "${PKI_PATH}/root/generate/internal" \
+        common_name="OpenBank Document Signing CA" \
+        issuer_name="document-signing-root" \
+        key_type="rsa" \
+        key_bits=2048 \
+        ttl=87600h >/dev/null
+    else
+      echo "[openbao-document-signing] document-signing root CA already present — keeping it."
+    fi
+
+    # Per-signing-act issuing role. CN = the signer's partyRef (allow_any_name=true — unlike
+    # pki-agent's fixed charter allow-list, a customer partyRef isn't knowable in advance).
+    # RSA to match the PAdES/CMS signing algorithm (SHA256withRSA) PadesSigning already uses.
+    # key_usage carries digital-signature + non-repudiation intent, not TLS auth (no
+    # server/client_flag). Short max TTL bounds a compromised issuance to minutes; no_store
+    # keeps ephemeral certs out of OpenBao storage entirely.
+    bao write "${PKI_PATH}/roles/client-signing" \
+      allow_any_name=true \
+      enforce_hostnames=false \
+      allow_ip_sans=false \
+      server_flag=false \
+      client_flag=false \
+      key_usage="DigitalSignature,ContentCommitment" \
+      key_type="rsa" \
+      key_bits=2048 \
+      ttl="300s" \
+      max_ttl="300s" \
+      no_store=true
+
+    # Narrow consumer policy: issue from client-signing + read the CA chain (a verifier can
+    # publish/trust it). Cannot read other secrets or tune the engine.
+    bao policy write document-signing-issue - <<EOF
+    path "${PKI_PATH}/issue/client-signing" {
+      capabilities = ["create", "update"]
+    }
+    path "${PKI_PATH}/cert/ca" {
+      capabilities = ["read"]
+    }
+    EOF
+
+    # Bind the CONSUMER — document-service's own ServiceAccount (documents namespace) — to the
+    # issue policy via Kubernetes auth (zero standing token, same pattern as admin-ui-mcp).
+    bao write "auth/kubernetes/role/document-service-signing" \
+      bound_service_account_names="${SIGNING_CONSUMER_SA:-document-service}" \
+      bound_service_account_namespaces="${SIGNING_CONSUMER_NS:-documents}" \
+      token_policies=document-signing-issue \
+      ttl=10m
+
+    echo "[openbao-document-signing] document-signing PKI + document-service consumer role configured."
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-document-signing-admin
+  namespace: vault
+  labels:
+    app.kubernetes.io/part-of: openbao
+    openbank.io/plane: platform
+    openbank.io/adr: "0162"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: openbao-document-signing-sync
+  namespace: vault
+  labels:
+    app.kubernetes.io/part-of: openbao
+    openbank.io/plane: platform
+    openbank.io/adr: "0162"
+  annotations:
+    openbank.tech/description: "ADR-0162 D4 continued: re-asserts the OpenBao document-signing PKI config weekly"
+    openbank.tech/runbook: "docs/runbooks/0008-openbao-document-signing-pki.md"
+spec:
+  # Sunday 02:30 UTC — staggered after db-rotation (02:00) and agent-identity (02:15) syncs.
+  schedule: "30 2 * * 0"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: openbao
+            openbank.io/plane: platform
+        spec:
+          serviceAccountName: openbao-document-signing-admin
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: configure
+              # Pin the same image tag as the openbao server (apps/openbao.yaml → openbao 2.5.4).
+              # Update together when the server image is bumped.
+              image: quay.io/openbao/openbao:2.5.4
+              command: ["/bin/sh", "/config/configure.sh"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                capabilities:
+                  drop:
+                    - ALL
+              env:
+                - name: BAO_ADDR
+                  value: "http://openbao.vault.svc:8200"
+                # BAO_TOKEN intentionally unset; configure.sh logs in via the Kubernetes auth
+                # method using the pod's projected SA token (zero standing token, ADR-0034).
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+              volumeMounts:
+                - name: config
+                  mountPath: /config
+                  readOnly: true
+          volumes:
+            - name: config
+              configMap:
+                name: openbao-document-signing-config
+                defaultMode: 0555

@@ -25,10 +25,7 @@ import org.jboss.logging.Logger
  * reactive Panache synchronously at startup), so it completes before the service serves traffic.
  */
 @ApplicationScoped
-class ProductCatalogSeeder(
-    private val sf: Mutiny.SessionFactory,
-    private val mapper: ObjectMapper,
-) {
+class ProductCatalogSeeder(private val sf: Mutiny.SessionFactory, private val mapper: ObjectMapper) {
     private val log = Logger.getLogger(ProductCatalogSeeder::class.java)
 
     // The broad catch is deliberate: subscribeAndAwait wraps the reactive failure in an opaque
@@ -54,34 +51,33 @@ class ProductCatalogSeeder(
         if (inserted > 0) log.info("Seeded $inserted canonical products (ADR-0105 P1).")
     }
 
-    private fun seed(): Int =
-        VertxContextSupport.subscribeAndAwait {
-            sf.withTransaction { s ->
-                s.createQuery("SELECT COUNT(p) FROM ProductEntity p", Long::class.javaObjectType)
-                    .singleResult
-                    .flatMap { count ->
-                        if (count > 0L) {
-                            Uni.createFrom().item(0)
-                        } else {
-                            val entities = ProductSeed.products.map { p ->
-                                val canonical = ProductIds.canonicalId(p.id)
-                                ProductEntity().apply {
-                                    id = canonical
-                                    code = p.code
-                                    legacyCode = p.id
-                                    type = p.type
-                                    status = p.status.name
-                                    currency = p.currency
-                                    doc = mapper.writeValueAsString(p.copy(id = canonical.toString()))
-                                }
+    private fun seed(): Int = VertxContextSupport.subscribeAndAwait {
+        sf.withTransaction { s ->
+            s.createQuery("SELECT COUNT(p) FROM ProductEntity p", Long::class.javaObjectType)
+                .singleResult
+                .flatMap { count ->
+                    if (count > 0L) {
+                        Uni.createFrom().item(0)
+                    } else {
+                        val entities = ProductSeed.products.map { p ->
+                            val canonical = ProductIds.canonicalId(p.id)
+                            ProductEntity().apply {
+                                id = canonical
+                                code = p.code
+                                legacyCode = p.id
+                                type = p.type
+                                status = p.status.name
+                                currency = p.currency
+                                doc = mapper.writeValueAsString(p.copy(id = canonical.toString()))
                             }
-                            entities.fold(Uni.createFrom().voidItem() as Uni<Void>) { acc, e ->
-                                acc.flatMap { s.persist(e) }
-                            }.replaceWith(entities.size)
                         }
+                        entities.fold(Uni.createFrom().voidItem() as Uni<Void>) { acc, e ->
+                            acc.flatMap { s.persist(e) }
+                        }.replaceWith(entities.size)
                     }
-            }
+                }
         }
+    }
 
     /** True if [e] (or any cause) is a Postgres unique-violation (SQLState 23505) — a lost seed race. */
     private fun isUniqueViolation(e: Throwable): Boolean {
