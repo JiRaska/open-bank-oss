@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.9.0...product-catalog-v0.10.0) (2026-07-14)
+
+
+### Features
+
+* **document-service:** enforce one PUBLISHED version per template code ([#1093](https://github.com/JiRaska/open-bank-oss/issues/1093)) ([6b69a34](https://github.com/JiRaska/open-bank-oss/commit/6b69a34d5b803b474b3de15a3d96e96d7e63bcb2))
+* **document-service:** two-tier e-signature + onboarding wiring ([#1102](https://github.com/JiRaska/open-bank-oss/issues/1102)) ([bf4c757](https://github.com/JiRaska/open-bank-oss/commit/bf4c75761c6a5d0fc74f08e1c8e3aa0a0c494411))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.8.4...product-catalog-v0.9.0) (2026-07-11)
 
 
