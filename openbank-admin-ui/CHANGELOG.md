@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.46.1...admin-ui-v0.47.0) (2026-07-14)
+
+
+### Features
+
+* **document-service,admin-ui:** letterhead + editor UX (new-window preview, syntax highlighting) ([#1083](https://github.com/JiRaska/open-bank-oss/issues/1083)) ([2da7ba6](https://github.com/JiRaska/open-bank-oss/commit/2da7ba6e8adb1bed9cc88d7f2b9c24c49ac39d91))
+
 ## [0.46.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.46.0...admin-ui-v0.46.1) (2026-07-14)
 
 
