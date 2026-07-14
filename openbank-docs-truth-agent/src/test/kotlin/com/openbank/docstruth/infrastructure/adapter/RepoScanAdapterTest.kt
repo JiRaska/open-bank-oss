@@ -26,10 +26,11 @@ class RepoScanAdapterTest {
         return RepoScanAdapter(config)
     }
 
-    // NOTE: every test body below uses a block body (`{ runBlocking { ... } }`), never
-    // `fun f() = runBlocking { ... }`. The expression-body form infers the function's return type
-    // from runBlocking's result (e.g. an AssertJ assert object), which is non-Unit — JUnit5 then
-    // silently skips the "test method must not return a value" method instead of running it.
+    // NOTE: every test body below uses a block body (`{ runBlocking { ... } }`), never the
+    // expression-body form (`= runBlocking { ... }` right after the parameter list). That form
+    // infers the function's return type from runBlocking's result (e.g. an AssertJ assert
+    // object), which is non-Unit — JUnit5 then silently skips the "test method must not return a
+    // value" method instead of running it.
 
     @Test
     fun `scanAdrRecords returns an empty list when docs adr does not exist`() {

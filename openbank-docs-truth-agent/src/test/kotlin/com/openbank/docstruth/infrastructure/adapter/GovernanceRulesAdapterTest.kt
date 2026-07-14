@@ -32,10 +32,11 @@ class GovernanceRulesAdapterTest {
         return GovernanceRulesAdapter(config)
     }
 
-    // NOTE: every test body below uses a block body (`{ runBlocking { ... } }`), never
-    // `fun f() = runBlocking { ... }` — the expression-body form infers the function's return type
-    // from runBlocking's result (an AssertJ assert object here), which is non-Unit, so JUnit5
-    // silently skips the test instead of running it (see CLAUDE.md's documented pitfall).
+    // NOTE: every test body below uses a block body (`{ runBlocking { ... } }`), never the
+    // expression-body form (`= runBlocking { ... }` right after the parameter list) — that form
+    // infers the function's return type from runBlocking's result (an AssertJ assert object
+    // here), which is non-Unit, so JUnit5 silently skips the test instead of running it (see
+    // CLAUDE.md's documented pitfall).
 
     @Test
     fun `returns empty map when rules yaml does not exist`() {
