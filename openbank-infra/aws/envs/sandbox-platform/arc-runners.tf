@@ -71,7 +71,28 @@ locals {
   # yq) — the set the retired EC2 AMI baked in. Pinned by digest (immutable +
   # reproducible): bump this when runner-image.yml rebuilds the image. The
   # digest below = the runner-image/Dockerfile in this commit.
-  runner_image   = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.name}.amazonaws.com/openbank-ci-runner@sha256:ce7b1171b6cd4c95552cc1201013664ed2ab51a35d142e996dd118a4152a482f"
+  #
+  # 2026-07-14: bumped from the 2026-06-16 digest (ce7b1171...), which predates
+  # the JDK-preload feature (PR #287, commit 4701ca7d) entirely and left
+  # /opt/openbank-jdk-preload/Java_Temurin-Hotspot_jdk/ present-but-empty on
+  # that image. openbank-build hit this same class of failure on 2026-07-09
+  # (PR #680, live kubectl-patched + this file's `[ ! -d "$preload_root" ]` /
+  # `[ -d "$version_dir" ] || continue` guards added) — but that fix was never
+  # `tofu apply`'d to the live cluster, so openbank-deploy (this file, unpatched)
+  # sat on the same stale digest with the OLD unguarded script and hit
+  # `Init:Error` for 24h+ the first time a job landed there (unglobbed `*/` ->
+  # literal `cp` target, ENOENT).
+  #
+  # First bumped to 78949d45... (the 2026-07-06 build), which unblocked the
+  # pool, but that image predates the cosign-attestation fix (PR #963,
+  # 2026-07-13) and so does NOT carry a valid CycloneDX SBOM attestation — it
+  # would still trip verify-openbank-image-sbom-attestation once the
+  # arc-runner-image-exception PolicyException (PR #908) is removed. Re-bumped
+  # same day to sha256:45c0408d8992a900d7a539463b9210686d988513b39b06beaa35643b4a03e972,
+  # the FIRST runner-image.yml run to complete after PR #963 — its "Verify
+  # signature + attestation actually landed" step (no continue-on-error)
+  # passed for this exact digest, confirmed live before this bump.
+  runner_image   = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.name}.amazonaws.com/openbank-ci-runner@sha256:45c0408d8992a900d7a539463b9210686d988513b39b06beaa35643b4a03e972"
   runner_command = ["/home/runner/run.sh"]
 
   # -------------------------------------------------------------------------
