@@ -19,8 +19,13 @@ import com.openbank.sca.domain.model.ScaStatus
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
+import io.vertx.core.Vertx
+import io.vertx.core.impl.ContextInternal
 import jakarta.inject.Inject
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.launch
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
@@ -28,6 +33,9 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
 import java.time.OffsetDateTime
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
 
 /**
  * Provider-side verification for the SCA challenge GET contract published by consent-service
@@ -56,10 +64,40 @@ class ScaPactProviderVerificationTest {
     @Inject
     lateinit var challengeRepo: ScaChallengeRepository
 
+    @Inject
+    lateinit var vertx: Vertx
+
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
         context?.target = HttpTestTarget("localhost", testPort.toInt())
         context?.addStateChangeHandlers(this)
+    }
+
+    /**
+     * Bridges a reactive-Panache block into Pact-JVM's synchronous `@State` callback. Pact-JVM
+     * invokes `@State` methods directly via reflection on the JUnit test thread, which has no
+     * Vert.x context — `Panache.withTransaction`/`withSession` (used by [challengeRepo]) requires
+     * one, so a bare `runBlocking { challengeRepo.save(...) }` throws `IllegalStateException: No
+     * current Vertx context found`. Confirmed live: this silently broke every
+     * consent-service<->sca-service pact verification (result 2026-07-14T11:28:06Z) without ever
+     * being noticed, because the failure only actually blocks a deploy once `can-i-deploy` is
+     * reached. Same fix as balance-service's `BalancePactProviderVerificationTest` (which
+     * documents why a plain `vertx.runOnContext { runBlocking { ... } }` is NOT sufficient).
+     */
+    private fun runOnVertxContext(block: suspend () -> Unit) {
+        val future = CompletableFuture<Unit>()
+        val duplicated = (vertx.orCreateContext as ContextInternal).duplicate()
+        VertxContextSafetyToggle.setContextSafe(duplicated, true)
+        val dispatcher = Executor { command -> duplicated.runOnContext { command.run() } }.asCoroutineDispatcher()
+        CoroutineScope(dispatcher).launch {
+            try {
+                block()
+                future.complete(Unit)
+            } catch (t: Throwable) {
+                future.completeExceptionally(t)
+            }
+        }
+        future.get(10, TimeUnit.SECONDS)
     }
 
     @TestTemplate
@@ -69,7 +107,7 @@ class ScaPactProviderVerificationTest {
     }
 
     @State("a PENDING SCA challenge exists")
-    fun statePendingChallengeExists(): Unit = runBlocking {
+    fun statePendingChallengeExists() = runOnVertxContext {
         challengeRepo.save(
             ScaChallenge(
                 id = CHALLENGE_ID,
