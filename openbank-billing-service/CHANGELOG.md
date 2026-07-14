@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.6.1...billing-service-v0.6.2) (2026-07-14)
+
+
+### Bug Fixes
+
+* **billing:** fail closed when product-catalog read fails during fee assessment ([#1002](https://github.com/JiRaska/open-bank-oss/issues/1002)) ([1b85f39](https://github.com/JiRaska/open-bank-oss/commit/1b85f39d20458f210e720f00f5cf9ff3c79581f4))
+
 ## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.6.0...billing-service-v0.6.1) (2026-07-12)
 
 
