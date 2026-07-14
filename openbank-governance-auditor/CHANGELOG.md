@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/JiRaska/open-bank-oss/compare/governance-auditor-v0.2.0...governance-auditor-v0.2.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* **infra:** add the 6 new control/governance agents to auto-deploy fleet ([#1091](https://github.com/JiRaska/open-bank-oss/issues/1091)) ([ca311e0](https://github.com/JiRaska/open-bank-oss/commit/ca311e04e013862f91249b92709de61a0a09ae7c))
+
 ## [0.2.0](https://github.com/JiRaska/open-bank-oss/compare/governance-auditor-v0.1.0...governance-auditor-v0.2.0) (2026-07-14)
 
 
