@@ -41,9 +41,18 @@ reconciliation did for 41 days (issue #855).
 - Detection is only as good as ADR-0160 mechanism 3's adoption rate: a `@Scheduled` job that has
   not yet been wired into `WorkflowLivenessWatchdog` emits no gauge, so this agent cannot see it
   going silent — the exact #855 failure mode, until that job's own adoption PR lands.
-- The LLM diagnosis and durable-fix-diff generation are stubs pending the shared LiteLLM gateway
-  wiring (same bootstrap state finops-agent/devops-agent shipped with); a finding today produces a
-  tracking ticket rather than a ready-to-review code diff.
+- LLM diagnosis is real (the same DeepInfra OpenAI-compatible backend devops-agent/copilot already
+  run against, not the "litellm.ai-platform" gateway earlier drafts of this doc named — that
+  gateway is not deployed anywhere in this repo's gitops). Durable-fix-diff generation deliberately
+  stays unimplemented: a finding always produces a real GitHub tracking ticket (or, for the rare
+  mechanical case, a proposal PR) rather than a ready-to-review code diff — ADR-0163's own design
+  already treats the ticket as the expected fallback.
+- The model API key and GitHub token are read via optional SmallRye config lookups
+  (`LIVENESS_MODEL_API_KEY`, `LIVENESS_GITHUB_TOKEN`, sourced from an ExternalSecret at
+  `openbank/control-liveness-sentinel` in Vault) — until that Vault path is seeded, the agent
+  degrades to a placeholder diagnosis and does not open a ticket/PR (logged, not crash-looping).
+  Seeding those two secret values is the one remaining manual step before this agent can produce a
+  real end-to-end proposal.
 - The Prometheus gauge names this agent queries
   (`openbank_workflow_liveness_last_success_age_seconds`,
   `openbank_event_consumer_liveness_producer_only`, `openbank_lineage_audit_unverified_edge`,

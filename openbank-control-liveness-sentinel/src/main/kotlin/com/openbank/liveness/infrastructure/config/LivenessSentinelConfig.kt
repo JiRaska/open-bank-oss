@@ -11,6 +11,7 @@ import jakarta.enterprise.context.ApplicationScoped
 
 @ConfigMapping(prefix = "openbank.liveness-sentinel")
 @ApplicationScoped
+@Suppress("TooManyFunctions") // flat config mapping: one accessor per tunable (model, GitHub, thresholds)
 interface LivenessSentinelConfig {
     @WithDefault("http://prometheus-operated.observability:9090")
     fun prometheusUrl(): String
@@ -18,8 +19,39 @@ interface LivenessSentinelConfig {
     @WithDefault("http://alertmanager-operated.observability:9093")
     fun alertmanagerUrl(): String
 
-    @WithDefault("http://litellm.ai-platform:4000")
-    fun llmGatewayUrl(): String
+    /**
+     * Base URL of the OpenAI-compatible model backend. Defaults to DeepInfra — the same provider
+     * devops-agent (ADR-0119) and the customer copilot (ADR-0089) already run against in production,
+     * NOT the "litellm.ai-platform" gateway every sibling agent's charter names: that in-cluster
+     * gateway is aspirational (ADR-0031 D6) and is not actually deployed anywhere in this repo's
+     * gitops (verified: no LiteLLM Deployment/Service manifest exists, only policy-comment mentions).
+     * The API key is read separately via an OPTIONAL lookup (openbank.liveness-sentinel.model.api-key)
+     * so an un-seeded key degrades the diagnosis call instead of CrashLooping the pod at boot
+     * (SmallRye SRCFG00040 on an empty String bind) — mirrors devops-agent's DevOpsConfig exactly.
+     */
+    @WithDefault("https://api.deepinfra.com/v1/openai")
+    fun modelEndpoint(): String
+
+    /** Upstream model name, sent verbatim — the same DeepSeek model devops-agent/copilot already run. */
+    @WithDefault("deepseek-ai/DeepSeek-V3.2")
+    fun modelId(): String
+
+    /**
+     * GitHub for opening tracking tickets / rare mechanical-fix PRs. The token is read separately via
+     * an OPTIONAL lookup (openbank.liveness-sentinel.github.token) so an un-seeded token degrades to
+     * "no ticket/PR opened" rather than CrashLooping — mirrors devops-agent's RemediationProposalAdapter.
+     */
+    @WithDefault("https://api.github.com")
+    fun githubApiUrl(): String
+
+    @WithDefault("JiRaska")
+    fun githubOwner(): String
+
+    @WithDefault("open-bank-oss")
+    fun githubRepo(): String
+
+    @WithDefault("docs/liveness-sentinel-proposals")
+    fun githubProposalDir(): String
 
     // Matches ADR-0160 mechanism 3's own Alertmanager paging threshold (2x expected interval) —
     // this agent's CRITICAL finding and the underlying page can never silently disagree.
