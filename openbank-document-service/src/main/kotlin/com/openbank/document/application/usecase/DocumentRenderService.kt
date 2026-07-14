@@ -38,8 +38,19 @@ class DocumentRenderService(
 ) : DocumentRenderUseCase {
 
     override suspend fun render(cmd: RenderDocumentCommand): Document {
-        val template = templateRepo.findPublished(cmd.templateCode, cmd.templateVersion)
-            ?: error("No published template for ${cmd.templateCode} v${cmd.templateVersion}")
+        // ADR-0162 version-resolution policy: an explicit templateVersion pins to that exact
+        // (immutable) version; omitting it resolves to whatever is currently PUBLISHED for
+        // templateCode. Either way, the resolved template.code/version is what gets snapshotted
+        // onto the resulting Document below, so a later re-publish can never retroactively change
+        // what this already-generated document is considered to have been rendered from.
+        val pinnedVersion = cmd.templateVersion
+        val template = if (pinnedVersion != null) {
+            templateRepo.findPublished(cmd.templateCode, pinnedVersion)
+                ?: error("No published template for ${cmd.templateCode} v$pinnedVersion")
+        } else {
+            templateRepo.findLatestPublished(cmd.templateCode)
+                ?: error("No published template for ${cmd.templateCode}")
+        }
 
         val html = templateRenderPort.renderHtml(template, cmd.data)
         val pdf = pdfRenderPort.htmlToPdf(html)

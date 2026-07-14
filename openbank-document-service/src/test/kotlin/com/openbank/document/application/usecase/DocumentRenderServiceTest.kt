@@ -78,9 +78,34 @@ class DocumentRenderServiceTest {
             .isInstanceOf(IllegalStateException::class.java)
     }
 
-    private fun command() = RenderDocumentCommand(
+    @Test
+    fun `render with no templateVersion resolves the current published version`(): Unit = runBlocking {
+        val pdf = "<html>rendered</html>".toByteArray()
+        coEvery { templateRepo.findLatestPublished("LOAN_AGREEMENT") } returns publishedTemplate()
+        coEvery { renderPort.renderHtml(any(), any()) } returns "<html>rendered</html>"
+        coEvery { pdfPort.htmlToPdf(any()) } returns pdf
+        coEvery { objectStore.put(any(), any(), any()) } returns Unit
+        val savedDoc = slot<Document>()
+        coEvery { documentRepo.saveWithOutbox(capture(savedDoc), any()) } answers { savedDoc.captured }
+
+        val result = service.render(command(templateVersion = null))
+
+        assertThat(result.templateVersion).isEqualTo("1.0.0")
+        coVerify(exactly = 1) { templateRepo.findLatestPublished("LOAN_AGREEMENT") }
+        coVerify(exactly = 0) { templateRepo.findPublished(any(), any()) }
+    }
+
+    @Test
+    fun `render with no templateVersion fails when nothing is currently published`(): Unit = runBlocking {
+        coEvery { templateRepo.findLatestPublished(any()) } returns null
+
+        assertThatThrownBy { runBlocking { service.render(command(templateVersion = null)) } }
+            .isInstanceOf(IllegalStateException::class.java)
+    }
+
+    private fun command(templateVersion: String? = "1.0.0") = RenderDocumentCommand(
         templateCode = "LOAN_AGREEMENT",
-        templateVersion = "1.0.0",
+        templateVersion = templateVersion,
         data = mapOf("name" to "Alice"),
         contentType = "application/pdf",
         partyRef = "party-1",

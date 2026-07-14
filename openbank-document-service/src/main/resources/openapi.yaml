@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Document Service API
-  version: 1.0.0
+  version: 1.1.0
   description: >-
     Document Management — templates, rendering, storage with lifecycle/retention metadata,
     and e-signature ceremonies. Not on the synchronous money path (emits events, never a
@@ -276,12 +276,16 @@ components:
 
     RenderDocumentRequest:
       type: object
-      required: [templateCode, templateVersion]
+      required: [templateCode]
       properties:
         templateCode:
           type: string
         templateVersion:
           type: string
+          nullable: true
+          description: >-
+            Exact version to render. Omit to render the current PUBLISHED version of
+            templateCode (a template code has at most one PUBLISHED version at a time).
         data:
           type: object
           additionalProperties: true

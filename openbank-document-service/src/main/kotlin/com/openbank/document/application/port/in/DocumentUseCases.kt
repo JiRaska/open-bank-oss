@@ -27,7 +27,12 @@ data class CreateTemplateCommand(
 
 data class RenderDocumentCommand(
     val templateCode: String,
-    val templateVersion: String,
+    // Null resolves to the current PUBLISHED version for [templateCode] (ADR-0162
+    // version-resolution policy) -- the caller pins an exact version only when it deliberately
+    // needs one that isn't current (e.g. re-rendering against a historical version for a support
+    // case). The [com.openbank.document.domain.model.Document] this produces always snapshots the
+    // exact version it actually resolved to, so the render itself is never ambiguous after the fact.
+    val templateVersion: String?,
     val data: Map<String, Any?>,
     val contentType: String,
     val partyRef: String?,
