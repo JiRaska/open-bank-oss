@@ -47,6 +47,20 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     tls:
       verification: none
+  # Outbound service-to-service token (#999): the transaction-service rest-client mints an
+  # openbank-services M2M token via this oidc-client. Disabled under %test (units call the
+  # consumer directly; the boot IT never books a remittance payment).
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+  rest-client:
+    transaction-service:
+      url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
+      scope: jakarta.inject.Singleton
   redis:
     hosts: redis://localhost:6379
   shutdown:
@@ -109,6 +123,8 @@ authz:
       enabled: false
     oidc:
       enabled: false
+    oidc-client:
+      enabled: false
     # ADR-0050: disable the @Scheduled outbox tick under test so the integration test drives
     # dispatchScheduledBatch() explicitly and never races the assertions.
     scheduler:
@@ -118,6 +134,15 @@ openbank:
     accrual-cron: "0 0 1 * * ?"
     capitalization-cron: "0 0 2 1 * ?"
     day-count-convention: ACT_365
+    withholding:
+      # #999: the bank's own operating/settlement account debited for the §38d odvod to the
+      # finanční úřad — this is the bank's OWN money (already withheld from customers' credited
+      # interest at capitalization time, ADR-0033), not a customer account. MUST be set to a real
+      # account UUID before this runs against anything but a sandbox; the placeholder below is
+      # deliberately an all-zero UUID (matches the CHANGE_ME_LOCAL_DEV_ONLY convention used for
+      # secrets elsewhere in this repo) so an unconfigured deployment fails loudly at the
+      # transaction-service call, not silently.
+      remittance-source-account-id: "${INTEREST_WITHHOLDING_SOURCE_ACCOUNT_ID:00000000-0000-0000-0000-000000000000}"
   rate-limit:
     enabled: true
     max-concurrent-requests: 200
@@ -144,3 +169,15 @@ mp:
         topic: openbank.interest.accrual.event
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
+    incoming:
+      # #999: self-consume the withholding-remittance events this service itself publishes (the
+      # topic also carries other interest event types; the consumer filters by eventType), and book
+      # the cash leg to the finanční úřad. group.id / auto.offset.reset deliberately NOT set as YAML
+      # keys (SmallRye's dotted-key footgun, #686/#703) — defaults are what we want: group.id falls
+      # back to quarkus.application.name, auto.offset.reset stays `latest` so a fresh deploy does
+      # not replay historical remittances and re-pay them.
+      interest-withholding-remitted-in:
+        connector: smallrye-kafka
+        topic: openbank.interest.accrual.event
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer

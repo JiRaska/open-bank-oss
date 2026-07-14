@@ -8,6 +8,7 @@ import com.openbank.interest.application.port.out.InterestEventOutbox
 import com.openbank.interest.application.port.out.WithholdingRemittanceRepository
 import com.openbank.interest.application.port.out.WithholdingTaxRepository
 import com.openbank.interest.domain.tax.WithholdingRemittance
+import com.openbank.interest.domain.tax.WithholdingRemittanceStatus
 import com.openbank.interest.domain.tax.WithholdingTax
 import com.openbank.interest.domain.tax.WithholdingTaxStatus
 import com.openbank.interest.infrastructure.persistence.entity.InterestOutboxEntity
@@ -28,7 +29,8 @@ import java.util.UUID
 
 @ApplicationScoped
 class WithholdingTaxRepositoryImpl @Inject constructor(
-    private val sf: Mutiny.SessionFactory, private val mapper: InterestMapper
+    private val sf: Mutiny.SessionFactory,
+    private val mapper: InterestMapper,
 ) : WithholdingTaxRepository {
 
     @WithTransaction override fun save(withholding: WithholdingTax): Uni<WithholdingTax> {
@@ -36,27 +38,26 @@ class WithholdingTaxRepositoryImpl @Inject constructor(
         return sf.withTransaction { s -> s.persist(e).map { mapper.toDomain(e) } }
     }
 
-    @WithSession override fun findByAccountId(accountId: UUID): Uni<List<WithholdingTax>> =
-        sf.withSession { s ->
-            s.createQuery(
-                "FROM WithholdingTaxEntity WHERE accountId = :a ORDER BY createdAt DESC",
-                WithholdingTaxEntity::class.java
-            ).setParameter("a", accountId).resultList
-        }.map { it.map(mapper::toDomain) }
+    @WithSession override fun findByAccountId(accountId: UUID): Uni<List<WithholdingTax>> = sf.withSession { s ->
+        s.createQuery(
+            "FROM WithholdingTaxEntity WHERE accountId = :a ORDER BY createdAt DESC",
+            WithholdingTaxEntity::class.java,
+        ).setParameter("a", accountId).resultList
+    }.map { it.map(mapper::toDomain) }
 
-    @WithSession override fun findByCapitalizationId(capitalizationId: UUID): Uni<WithholdingTax?> =
-        sf.withSession { s ->
-            s.createQuery(
-                "FROM WithholdingTaxEntity WHERE capitalizationId = :c",
-                WithholdingTaxEntity::class.java
-            ).setParameter("c", capitalizationId).setMaxResults(1).singleResultOrNull
-        }.map { it?.let(mapper::toDomain) }
+    @WithSession
+    override fun findByCapitalizationId(capitalizationId: UUID): Uni<WithholdingTax?> = sf.withSession { s ->
+        s.createQuery(
+            "FROM WithholdingTaxEntity WHERE capitalizationId = :c",
+            WithholdingTaxEntity::class.java,
+        ).setParameter("c", capitalizationId).setMaxResults(1).singleResultOrNull
+    }.map { it?.let(mapper::toDomain) }
 
     @WithSession override fun findRecordedForPeriod(from: LocalDate, to: LocalDate): Uni<List<WithholdingTax>> =
         sf.withSession { s ->
             s.createQuery(
                 "FROM WithholdingTaxEntity WHERE status = :st AND periodTo >= :from AND periodTo <= :to",
-                WithholdingTaxEntity::class.java
+                WithholdingTaxEntity::class.java,
             ).setParameter("st", WithholdingTaxStatus.RECORDED)
                 .setParameter("from", from).setParameter("to", to).resultList
         }.map { it.map(mapper::toDomain) }
@@ -65,7 +66,7 @@ class WithholdingTaxRepositoryImpl @Inject constructor(
         if (ids.isEmpty()) return Uni.createFrom().item(0)
         return sf.withTransaction { s ->
             s.createMutationQuery(
-                "UPDATE WithholdingTaxEntity SET status = :st, remittanceId = :r WHERE id IN :ids"
+                "UPDATE WithholdingTaxEntity SET status = :st, remittanceId = :r WHERE id IN :ids",
             ).setParameter("st", WithholdingTaxStatus.REMITTED)
                 .setParameter("r", remittanceId).setParameter("ids", ids).executeUpdate()
         }
@@ -74,7 +75,8 @@ class WithholdingTaxRepositoryImpl @Inject constructor(
 
 @ApplicationScoped
 class WithholdingRemittanceRepositoryImpl @Inject constructor(
-    private val sf: Mutiny.SessionFactory, private val mapper: InterestMapper
+    private val sf: Mutiny.SessionFactory,
+    private val mapper: InterestMapper,
 ) : WithholdingRemittanceRepository {
 
     @WithTransaction override fun save(remittance: WithholdingRemittance): Uni<WithholdingRemittance> {
@@ -82,21 +84,28 @@ class WithholdingRemittanceRepositoryImpl @Inject constructor(
         return sf.withTransaction { s -> s.persist(e).map { remittance } }
     }
 
-    @WithSession override fun findByPeriod(year: Int, month: Int): Uni<WithholdingRemittance?> =
-        sf.withSession { s ->
-            s.createQuery(
-                "FROM WithholdingRemittanceEntity WHERE periodYear = :y AND periodMonth = :m",
-                WithholdingRemittanceEntity::class.java
-            ).setParameter("y", year).setParameter("m", month).setMaxResults(1).singleResultOrNull
-        }.map { it?.let(mapper::toDomain) }
+    @WithSession override fun findByPeriod(year: Int, month: Int): Uni<WithholdingRemittance?> = sf.withSession { s ->
+        s.createQuery(
+            "FROM WithholdingRemittanceEntity WHERE periodYear = :y AND periodMonth = :m",
+            WithholdingRemittanceEntity::class.java,
+        ).setParameter("y", year).setParameter("m", month).setMaxResults(1).singleResultOrNull
+    }.map { it?.let(mapper::toDomain) }
 
-    @WithSession override fun findAll(): Uni<List<WithholdingRemittance>> =
-        sf.withSession { s ->
-            s.createQuery(
-                "FROM WithholdingRemittanceEntity ORDER BY periodYear DESC, periodMonth DESC, createdAt DESC",
-                WithholdingRemittanceEntity::class.java
-            ).resultList
-        }.map { it.map(mapper::toDomain) }
+    @WithSession override fun findAll(): Uni<List<WithholdingRemittance>> = sf.withSession { s ->
+        s.createQuery(
+            "FROM WithholdingRemittanceEntity ORDER BY periodYear DESC, periodMonth DESC, createdAt DESC",
+            WithholdingRemittanceEntity::class.java,
+        ).resultList
+    }.map { it.map(mapper::toDomain) }
+
+    @WithTransaction override fun markSettled(remittanceId: UUID): Uni<Int> = sf.withTransaction { s ->
+        s.createMutationQuery(
+            "UPDATE WithholdingRemittanceEntity SET status = :st WHERE id = :id AND status = :pending",
+        ).setParameter("st", WithholdingRemittanceStatus.SETTLED)
+            .setParameter("id", remittanceId)
+            .setParameter("pending", WithholdingRemittanceStatus.PENDING)
+            .executeUpdate()
+    }
 }
 
 @ApplicationScoped
