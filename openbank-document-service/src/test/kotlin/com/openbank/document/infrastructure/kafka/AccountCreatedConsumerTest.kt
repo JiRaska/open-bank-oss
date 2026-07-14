@@ -61,6 +61,21 @@ class AccountCreatedConsumerTest {
         coVerify(exactly = 0) { onboardingUseCase.issueOnboardingDocument(any()) }
     }
 
+    @Test
+    fun `swallows a downstream failure so one bad account never wedges the consumer`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+        val partyId = UUID.randomUUID()
+        val productId = UUID.randomUUID()
+        coEvery { onboardingUseCase.issueOnboardingDocument(any()) } throws
+            IllegalStateException("No published template for the product's documentTemplateCode")
+
+        // consume() must NOT propagate — a deterministic downstream failure for one account must not
+        // halt the stream (poison-pill safety). runBlocking would rethrow if consume() let it escape.
+        consumer.consume(accountCreatedPayload(accountId, partyId, productId))
+
+        coVerify(exactly = 1) { onboardingUseCase.issueOnboardingDocument(any()) }
+    }
+
     private fun accountCreatedPayload(accountId: UUID, partyId: UUID, productId: UUID) = """
         {"eventType":"AccountCreated","aggregateId":"$accountId","partyId":"$partyId","productId":"$productId","currency":"CZK"}
     """.trimIndent()
