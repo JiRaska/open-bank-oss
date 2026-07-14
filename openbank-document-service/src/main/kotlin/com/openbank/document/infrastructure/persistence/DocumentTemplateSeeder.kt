@@ -41,7 +41,9 @@ class DocumentTemplateSeeder(private val sf: Mutiny.SessionFactory) {
     // race on the (code, version) unique constraint (or the fixed seed `id` primary key) — that is
     // success, not failure. Rethrow anything that is NOT a lost seed race so a genuine DB fault
     // still fails the boot (a StartupEvent throwing crashloops the pod).
-    @Suppress("TooGenericExceptionCaught")
+    // UnusedParameter: `ev` is required by the CDI @Observes contract to declare the event type
+    // even though the body never reads it — same as ProductCatalogSeeder.onStart's identical shape.
+    @Suppress("TooGenericExceptionCaught", "UnusedParameter")
     fun onStart(@Observes ev: StartupEvent) {
         val inserted = try {
             seed()
@@ -53,26 +55,29 @@ class DocumentTemplateSeeder(private val sf: Mutiny.SessionFactory) {
                 throw e
             }
         }
-        if (inserted > 0) log.info("Seeded $inserted canonical document templates (VOP, framework & account agreements, cs/en).")
+        if (inserted >
+            0
+        ) {
+            log.info("Seeded $inserted canonical document templates (VOP, framework & account agreements, cs/en).")
+        }
     }
 
-    private fun seed(): Int =
-        VertxContextSupport.subscribeAndAwait {
-            sf.withTransaction { s ->
-                s.createQuery("SELECT COUNT(t) FROM DocumentTemplateEntity t", Long::class.javaObjectType)
-                    .singleResult
-                    .flatMap { count ->
-                        if (count > 0L) {
-                            Uni.createFrom().item(0)
-                        } else {
-                            val entities = DocumentTemplateSeed.templates.map { it.toEntity() }
-                            entities.fold(Uni.createFrom().voidItem() as Uni<Void>) { acc, e ->
-                                acc.flatMap { s.persist(e) }
-                            }.replaceWith(entities.size)
-                        }
+    private fun seed(): Int = VertxContextSupport.subscribeAndAwait {
+        sf.withTransaction { s ->
+            s.createQuery("SELECT COUNT(t) FROM DocumentTemplateEntity t", Long::class.javaObjectType)
+                .singleResult
+                .flatMap { count ->
+                    if (count > 0L) {
+                        Uni.createFrom().item(0)
+                    } else {
+                        val entities = DocumentTemplateSeed.templates.map { it.toEntity() }
+                        entities.fold(Uni.createFrom().voidItem() as Uni<Void>) { acc, e ->
+                            acc.flatMap { s.persist(e) }
+                        }.replaceWith(entities.size)
                     }
-            }
+                }
         }
+    }
 
     /** True if [e] (or any cause) is a Postgres unique-violation (SQLState 23505) — a lost seed race. */
     private fun isUniqueViolation(e: Throwable): Boolean {

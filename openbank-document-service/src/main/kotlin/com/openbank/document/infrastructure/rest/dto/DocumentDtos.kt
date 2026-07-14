@@ -25,14 +25,9 @@ data class CreateTemplateRequest(
     val createdBy: String = "system",
 )
 
-data class PreviewTemplateRequest(
-    val bodyHtml: String,
-    val data: Map<String, Any?> = emptyMap(),
-)
+data class PreviewTemplateRequest(val bodyHtml: String, val data: Map<String, Any?> = emptyMap())
 
-data class PreviewTemplateResponse(
-    val renderedHtml: String,
-)
+data class PreviewTemplateResponse(val renderedHtml: String)
 
 data class TemplateResponse(
     val id: UUID,

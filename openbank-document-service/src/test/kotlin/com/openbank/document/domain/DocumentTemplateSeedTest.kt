@@ -50,15 +50,14 @@ class DocumentTemplateSeedTest {
         }
 
     @TestFactory
-    fun `codes are unique and locale-suffixed consistently`() =
-        listOf(
-            "VOP" to listOf("VOP_CS", "VOP_EN"),
-            "RAMCOVA_SMLOUVA" to listOf("RAMCOVA_SMLOUVA_CS", "RAMCOVA_SMLOUVA_EN"),
-            "UCET_SMLOUVA" to listOf("UCET_SMLOUVA_CS", "UCET_SMLOUVA_EN"),
-        ).map { (family, expectedCodes) ->
-            DynamicTest.dynamicTest("$family has both a cs and an en variant") {
-                val codes = DocumentTemplateSeed.templates.map { it.code }
-                assertThat(codes).containsAll(expectedCodes)
-            }
+    fun `codes are unique and locale-suffixed consistently`() = listOf(
+        "VOP" to listOf("VOP_CS", "VOP_EN"),
+        "RAMCOVA_SMLOUVA" to listOf("RAMCOVA_SMLOUVA_CS", "RAMCOVA_SMLOUVA_EN"),
+        "UCET_SMLOUVA" to listOf("UCET_SMLOUVA_CS", "UCET_SMLOUVA_EN"),
+    ).map { (family, expectedCodes) ->
+        DynamicTest.dynamicTest("$family has both a cs and an en variant") {
+            val codes = DocumentTemplateSeed.templates.map { it.code }
+            assertThat(codes).containsAll(expectedCodes)
         }
+    }
 }
