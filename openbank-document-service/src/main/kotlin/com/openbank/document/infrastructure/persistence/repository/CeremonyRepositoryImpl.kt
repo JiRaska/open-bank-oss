@@ -6,7 +6,9 @@ package com.openbank.document.infrastructure.persistence.repository
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.document.application.port.out.CeremonyRepositoryPort
+import com.openbank.document.application.port.out.DuplicateCeremonyException
 import com.openbank.document.domain.model.SignatureCeremony
+import com.openbank.document.infrastructure.persistence.PostgresConflicts
 import com.openbank.document.infrastructure.persistence.entity.SignatureCeremonyEntity
 import com.openbank.document.infrastructure.persistence.mapper.toDomain
 import com.openbank.document.infrastructure.persistence.mapper.toEntity
@@ -41,11 +43,26 @@ class CeremonyRepositoryImpl :
     override suspend fun save(ceremony: SignatureCeremony): SignatureCeremony = Panache.withTransaction {
         getSession().flatMap { s -> s.merge(ceremony.toEntity(objectMapper)) }
     }.onFailure(OptimisticLockException::class.java).transform { conflictException(ceremony.id) }
+        .onFailure().transform { e ->
+            // A second non-terminal ceremony for the same document lost the insert race
+            // (uq_signature_ceremonies_active_document). Translate at the boundary so the
+            // application layer catches a typed DuplicateCeremonyException (ADR-0002); any other
+            // failure — including the optimistic-lock IllegalStateException above — passes through.
+            if (PostgresConflicts.isUniqueViolation(e)) {
+                DuplicateCeremonyException("A non-terminal ceremony already exists for document ${ceremony.documentId}")
+            } else {
+                e
+            }
+        }
         .map { it.toDomain(objectMapper) }
         .awaitSuspending()
 
     override suspend fun findById(id: UUID): SignatureCeremony? =
         Panache.withSession { find("id", id).firstResult() }.awaitSuspending()?.toDomain(objectMapper)
+
+    override suspend fun findByDocumentId(documentId: UUID): SignatureCeremony? =
+        Panache.withSession { find("documentId", documentId).firstResult() }
+            .awaitSuspending()?.toDomain(objectMapper)
 
     override suspend fun saveWithOutbox(ceremony: SignatureCeremony, outboxMessage: OutboxMessage): SignatureCeremony =
         Panache.withTransaction {

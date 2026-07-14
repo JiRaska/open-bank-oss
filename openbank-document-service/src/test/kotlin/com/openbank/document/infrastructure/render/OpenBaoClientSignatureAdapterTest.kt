@@ -52,6 +52,16 @@ class OpenBaoClientSignatureAdapterTest {
             .hasMessageContaining("require-trusted-issuer")
     }
 
+    @Test
+    fun `re-signing for the same party is idempotent — no second signature is layered`(): Unit = runBlocking {
+        val once = adapter().signAsClient(blankPdf(), "party-42")
+        val twice = adapter().signAsClient(once, "party-42")
+
+        val signatures = Loader.loadPDF(twice).use { it.signatureDictionaries }
+        assertThat(signatures).hasSize(1)
+        assertThat(signatures[0].name).isEqualTo("party-42")
+    }
+
     private fun blankPdf(): ByteArray {
         PDDocument().use { document ->
             document.addPage(PDPage())

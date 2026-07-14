@@ -110,6 +110,9 @@ class SignatureCeremonyService(
 
     override suspend fun getCeremony(id: UUID): SignatureCeremony? = ceremonyRepo.findById(id)
 
+    override suspend fun findByDocumentId(documentId: UUID): SignatureCeremony? =
+        ceremonyRepo.findByDocumentId(documentId)
+
     private suspend fun signAsClient(ceremony: SignatureCeremony, partyRef: String) {
         val document = documentRepo.findById(ceremony.documentId)
             ?: error("Cannot sign ceremony ${ceremony.id}: document ${ceremony.documentId} not found")

@@ -39,6 +39,9 @@ data class RenderDocumentCommand(
     val caseRef: String?,
     val productRef: String?,
     val retainUntil: LocalDate?,
+    // Onboarding sets this ("onboarding:<accountId>") to make issuance idempotent under at-least-once
+    // redelivery (ADR-0162 D7); ad-hoc REST renders leave it null. See [Document.idempotencyKey].
+    val idempotencyKey: String? = null,
 )
 
 data class OpenCeremonyCommand(
@@ -80,11 +83,17 @@ interface DocumentQueryUseCase {
 
     /** Documents for a party/case — lets the compliance/legal persona browse, not just look up by id. */
     suspend fun listByParty(partyRef: String): List<Document>
+
+    /** The document previously issued under [key] (e.g. onboarding idempotency key), or null. */
+    suspend fun findByIdempotencyKey(key: String): Document?
 }
 
 /** Opens signing ceremonies and records signer decisions. */
 interface SignatureCeremonyUseCase {
     suspend fun openCeremony(cmd: OpenCeremonyCommand): SignatureCeremony
+
+    /** The ceremony over [documentId] if one exists (resumable onboarding: open one only if absent). */
+    suspend fun findByDocumentId(documentId: UUID): SignatureCeremony?
 
     /**
      * [evidenceRef] is the SCA challenge/approval reference (ADR-0021) proving the signer's

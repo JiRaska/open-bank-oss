@@ -18,6 +18,22 @@ import java.util.UUID
  */
 class TemplatePublishConflictException(message: String) : RuntimeException(message)
 
+/**
+ * A document with the same idempotency key already exists — a concurrent onboarding delivery lost
+ * the insert race (Postgres unique-violation on `uq_documents_idempotency_key`, translated at the
+ * persistence boundary so the application layer never depends on a framework/SQL exception type,
+ * ADR-0002). Extends [IllegalStateException] so the shared runtime maps an *uncaught* one to 422;
+ * onboarding catches it and resolves to the winning document (idempotent).
+ */
+class DuplicateDocumentException(message: String) : IllegalStateException(message)
+
+/**
+ * A non-terminal ceremony already exists for the document — a concurrent open lost the race
+ * (unique-violation on `uq_signature_ceremonies_active_document`). Same boundary-translation and
+ * 422-mapping rationale as [DuplicateDocumentException].
+ */
+class DuplicateCeremonyException(message: String) : IllegalStateException(message)
+
 /** Persistence port for the [DocumentTemplate] aggregate. */
 interface TemplateRepositoryPort {
     suspend fun save(template: DocumentTemplate): DocumentTemplate
@@ -57,16 +73,32 @@ interface TemplateRepositoryPort {
 /** Persistence port for the [Document] aggregate, including transactional-outbox co-persistence. */
 interface DocumentRepositoryPort {
     suspend fun save(document: Document): Document
+
+    /**
+     * Persists [document] with its outbox event in one transaction. Throws [DuplicateDocumentException]
+     * if [Document.idempotencyKey] collides with an existing row (a lost onboarding-redelivery race).
+     */
     suspend fun saveWithOutbox(document: Document, outboxMessage: OutboxMessage): Document
     suspend fun findById(id: UUID): Document?
     suspend fun findByParty(partyRef: String): List<Document>
+
+    /** The document persisted under [idempotencyKey], or null — an O(1) index lookup, not a scan. */
+    suspend fun findByIdempotencyKey(idempotencyKey: String): Document?
 }
 
 /** Persistence port for the [SignatureCeremony] aggregate. */
 interface CeremonyRepositoryPort {
+    /**
+     * Inserts a new ceremony or updates an existing one (optimistic-locked). Throws
+     * [DuplicateCeremonyException] if a non-terminal ceremony already exists for the same document
+     * (a lost open race), and [IllegalStateException] on an optimistic-lock conflict.
+     */
     suspend fun save(ceremony: SignatureCeremony): SignatureCeremony
     suspend fun saveWithOutbox(ceremony: SignatureCeremony, outboxMessage: OutboxMessage): SignatureCeremony
     suspend fun findById(id: UUID): SignatureCeremony?
+
+    /** The (non-terminal-or-not) ceremony over [documentId], or null. */
+    suspend fun findByDocumentId(documentId: UUID): SignatureCeremony?
 }
 
 /**

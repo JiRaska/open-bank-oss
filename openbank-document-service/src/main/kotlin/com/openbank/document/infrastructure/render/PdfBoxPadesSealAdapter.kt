@@ -91,7 +91,13 @@ class PdfBoxPadesSealAdapter(
 
     override suspend fun sealPades(pdf: ByteArray, ceremony: SignatureCeremony): ByteArray =
         withContext(Dispatchers.IO) {
-            PadesSigning.applySignature(pdf, identity, ORGANIZATION_NAME, SEAL_REASON)
+            // Idempotent: don't re-apply the institutional seal if a retry re-enters after the seal
+            // was already written but the ceremony's completion failed to persist.
+            if (PadesSigning.hasSignatureNamed(pdf, ORGANIZATION_NAME)) {
+                pdf
+            } else {
+                PadesSigning.applySignature(pdf, identity, ORGANIZATION_NAME, SEAL_REASON)
+            }
         }
 
     private fun loadFromKeystore(path: String, password: String): SigningIdentity {
