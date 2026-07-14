@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.6.0...document-service-v0.7.0) (2026-07-14)
+
+
+### Features
+
+* **document-service:** fail-closed go-live gate for real signatures ([#1115](https://github.com/JiRaska/open-bank-oss/issues/1115)) ([b18d9fb](https://github.com/JiRaska/open-bank-oss/commit/b18d9fb6fbb7feabea364ee08f0f929b59fc14de))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.5.0...document-service-v0.6.0) (2026-07-14)
 
 
