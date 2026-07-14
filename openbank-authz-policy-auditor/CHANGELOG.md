@@ -1,1 +1,16 @@
 # Changelog
+
+## [0.2.0](https://github.com/JiRaska/open-bank-oss/compare/authz-policy-auditor-v0.1.0...authz-policy-auditor-v0.2.0) (2026-07-14)
+
+
+### Features
+
+* **authz-policy-auditor:** add ADR-0167 OPA/Rego static-policy auditor agent ([#1038](https://github.com/JiRaska/open-bank-oss/issues/1038)) ([0d752d6](https://github.com/JiRaska/open-bank-oss/commit/0d752d6db018bd0baf80e0e3f49d6f4e799c9373))
+
+
+### Bug Fixes
+
+* **account:** ktlintFormat AccountServiceLifecycleTest — Fleet lint red on main ([#480](https://github.com/JiRaska/open-bank-oss/issues/480)) ([37d303e](https://github.com/JiRaska/open-bank-oss/commit/37d303ef3e804f4cc30b79d8f0632ccfc2d942e7)), closes [#479](https://github.com/JiRaska/open-bank-oss/issues/479)
+* **infra:** add the 6 new control/governance agents to auto-deploy fleet ([#1091](https://github.com/JiRaska/open-bank-oss/issues/1091)) ([ca311e0](https://github.com/JiRaska/open-bank-oss/commit/ca311e04e013862f91249b92709de61a0a09ae7c))
+
+## Changelog
