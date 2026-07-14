@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.11.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.10.1...balance-service-v1.11.0) (2026-07-14)
+
+
+### Features
+
+* **balance,libs-runtime:** reconciliation drift-SLA via Prometheus (ADR-0160 m4) ([#1025](https://github.com/JiRaska/open-bank-oss/issues/1025)) ([b115581](https://github.com/JiRaska/open-bank-oss/commit/b1155819d4f9b31e100a8796ab55b3c3d5b1826e))
+* **balance:** watchdog alerts when the daily EoD tie-out goes stale/absent (step 2 of [#855](https://github.com/JiRaska/open-bank-oss/issues/855)) ([#863](https://github.com/JiRaska/open-bank-oss/issues/863)) ([84f54ec](https://github.com/JiRaska/open-bank-oss/commit/84f54ec1766e6c59acb5be13c56ea74ac36cd0a5))
+* **balance:** wire four-eyes enforcement mechanism (ADR-0155) ([#930](https://github.com/JiRaska/open-bank-oss/issues/930)) ([7825026](https://github.com/JiRaska/open-bank-oss/commit/7825026b997e5239b750ec160b02fffaafbb2dc8))
+
+
+### Bug Fixes
+
+* **balance:** bridge Pact @State handlers onto a duplicated Vert.x context ([#858](https://github.com/JiRaska/open-bank-oss/issues/858)) ([79938a1](https://github.com/JiRaska/open-bank-oss/commit/79938a1302c5563aaaea8de537726ecc988b6fba))
+* **balance:** create missing balance_reconciliation_seq (daily tie-out never persisted) ([#856](https://github.com/JiRaska/open-bank-oss/issues/856)) ([9ef4905](https://github.com/JiRaska/open-bank-oss/commit/9ef4905fbc77f1bf6db823c4e2ea96aaa1421560))
+* **balance:** V10 repair the booked-change replay double-count ([#939](https://github.com/JiRaska/open-bank-oss/issues/939)) ([#947](https://github.com/JiRaska/open-bank-oss/issues/947)) ([ef89022](https://github.com/JiRaska/open-bank-oss/commit/ef89022f2ebf75d08f46428a97b26045d6ecf986))
+
 ## [1.10.1](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.10.0...balance-service-v1.10.1) (2026-07-12)
 
 
