@@ -81,12 +81,18 @@ locals {
   # `tofu apply`'d to the live cluster, so openbank-deploy (this file, unpatched)
   # sat on the same stale digest with the OLD unguarded script and hit
   # `Init:Error` for 24h+ the first time a job landed there (unglobbed `*/` ->
-  # literal `cp` target, ENOENT). This digest (78949d45...) is the 2026-07-06
-  # `success` build made from the PR #287 commit itself — verified against ECR
-  # push history + the matching workflow run, not just "latest". Applying this
-  # also syncs the already-committed-but-never-applied guard script above onto
-  # openbank-deploy.
-  runner_image   = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.name}.amazonaws.com/openbank-ci-runner@sha256:78949d45c790f7196439cc517b00243d34ec229ee0e702d145ac44c4c3fd4b95"
+  # literal `cp` target, ENOENT).
+  #
+  # First bumped to 78949d45... (the 2026-07-06 build), which unblocked the
+  # pool, but that image predates the cosign-attestation fix (PR #963,
+  # 2026-07-13) and so does NOT carry a valid CycloneDX SBOM attestation — it
+  # would still trip verify-openbank-image-sbom-attestation once the
+  # arc-runner-image-exception PolicyException (PR #908) is removed. Re-bumped
+  # same day to sha256:45c0408d8992a900d7a539463b9210686d988513b39b06beaa35643b4a03e972,
+  # the FIRST runner-image.yml run to complete after PR #963 — its "Verify
+  # signature + attestation actually landed" step (no continue-on-error)
+  # passed for this exact digest, confirmed live before this bump.
+  runner_image   = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.name}.amazonaws.com/openbank-ci-runner@sha256:45c0408d8992a900d7a539463b9210686d988513b39b06beaa35643b4a03e972"
   runner_command = ["/home/runner/run.sh"]
 
   # -------------------------------------------------------------------------
