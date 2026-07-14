@@ -264,6 +264,7 @@ object ProductSeed {
                         effectiveFrom = LocalDate.of(2024, 11, 1),
                         language = "cs",
                         summary = "Osobní účet — obchodní podmínky v3.0",
+                        documentTemplateCode = "UCET_SMLOUVA_CS",
                     ),
                 ),
                 versionHistory = listOf(
@@ -1215,6 +1216,6 @@ object ProductSeed {
                     "0.5% FX margin, cross-pocket transfers",
                 createdAt = Instant.parse("2025-01-01T10:00:00Z"),
                 updatedAt = Instant.parse("2025-01-01T10:00:00Z"),
-            ),
+        ),
     )
 }
