@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.5.0...document-service-v0.6.0) (2026-07-14)
+
+
+### Features
+
+* **document-service:** two-tier e-signature + onboarding wiring ([#1102](https://github.com/JiRaska/open-bank-oss/issues/1102)) ([bf4c757](https://github.com/JiRaska/open-bank-oss/commit/bf4c75761c6a5d0fc74f08e1c8e3aa0a0c494411))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.4.0...document-service-v0.5.0) (2026-07-14)
 
 
