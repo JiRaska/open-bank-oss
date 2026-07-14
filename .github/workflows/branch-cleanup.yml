@@ -53,7 +53,7 @@ jobs:
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       (startsWith(github.event.pull_request.head.ref, 'chore/gitops-auto-deploy-') ||
-       startsWith(github.event.pull_request.head.ref, 'chore/admin-ui-deploy-'))
+      startsWith(github.event.pull_request.head.ref, 'chore/admin-ui-deploy-'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -100,8 +100,12 @@ jobs:
           set -euo pipefail
           git fetch --prune origin
 
-          # Open PR heads — never touch these
-          OPEN_HEADS=$(gh api \
+          # Open PR heads — never touch these. --paginate: without it only the first
+          # 100 open PRs are protected, and since deploy-snapshot branches no longer
+          # get an age grace, a fresh deploy PR beyond page 1 during a large fleet
+          # sweep (>100 open PRs) could otherwise be classified "no open PR" and have
+          # its head deleted, aborting an in-flight deploy.
+          OPEN_HEADS=$(gh api --paginate \
             "repos/$GITHUB_REPOSITORY/pulls?state=open&per_page=100" \
             --jq '.[].head.ref' | sort)
 
