@@ -28,7 +28,7 @@ class EnrollmentTicketServiceTest {
     fun `tampering with the partyId invalidates the MAC`() {
         val svc = service()
         val ticket = svc.issue("party-123")
-        val (partyIdB64, expiresAt, mac) = ticket.split(".")
+        val (_, expiresAt, mac) = ticket.split(".")
         val tamperedPartyId = java.util.Base64.getUrlEncoder().withoutPadding()
             .encodeToString("party-456".toByteArray())
         assertThat(svc.verify("$tamperedPartyId.$expiresAt.$mac")).isNull()

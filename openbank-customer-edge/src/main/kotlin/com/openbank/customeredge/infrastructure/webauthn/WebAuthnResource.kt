@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.webauthn4j.WebAuthnManager
 import com.webauthn4j.converter.AttestedCredentialDataConverter
 import com.webauthn4j.converter.util.ObjectConverter
+import com.webauthn4j.credential.CredentialRecordImpl
 import com.webauthn4j.data.AuthenticationParameters
 import com.webauthn4j.data.AuthenticationRequest
 import com.webauthn4j.data.RegistrationParameters
@@ -15,6 +16,7 @@ import com.webauthn4j.data.RegistrationRequest
 import com.webauthn4j.data.attestation.statement.NoneAttestationStatement
 import com.webauthn4j.data.client.Origin
 import com.webauthn4j.data.client.challenge.DefaultChallenge
+import com.webauthn4j.data.extension.authenticator.AuthenticationExtensionsAuthenticatorOutputs
 import com.webauthn4j.server.ServerProperty
 import com.webauthn4j.util.Base64UrlUtil
 import com.webauthn4j.verifier.exception.VerificationException
@@ -31,7 +33,6 @@ import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.security.SecureRandom
 import java.util.Base64
-import com.webauthn4j.authenticator.AuthenticatorImpl as WebAuthn4jAuthenticator
 
 /**
  * WebAuthn Relying Party (ADR-0066 F2, variant B1): the edge verifies passkey registration and
@@ -196,10 +197,21 @@ class WebAuthnResource(
         val attestedCredentialData = attestedCredentialDataConverter.convert(
             Base64.getDecoder().decode(stored.attestedCredentialDataB64),
         )
-        val authenticator = WebAuthn4jAuthenticator(
-            attestedCredentialData,
+        // CredentialRecord (not the deprecated Authenticator-based constructor/overload): the
+        // extra fields webauthn4j added alongside it (clientData, clientExtensions, transports,
+        // uvInitialized/backupEligible/backupState) are all nullable and unused here — this
+        // store only ever persisted the attested credential data + counter.
+        val credentialRecord = CredentialRecordImpl(
             NoneAttestationStatement(),
+            null, // uvInitialized
+            null, // backupEligible
+            null, // backupState
             stored.signCount,
+            attestedCredentialData,
+            AuthenticationExtensionsAuthenticatorOutputs(),
+            null, // clientData
+            null, // clientExtensions
+            null, // transports
         )
 
         // Result unused: [webAuthnManager] throws VerificationException on any failure — this
@@ -215,7 +227,8 @@ class WebAuthnResource(
                 ),
                 AuthenticationParameters(
                     ServerProperty(Origin.create(origin), rpId, DefaultChallenge(Base64UrlUtil.decode(challenge))),
-                    authenticator,
+                    credentialRecord,
+                    null, // allowCredentials — not enforced; the lookup above already pinned the exact credential
                     true, // userVerificationRequired — Face ID
                     true, // userPresenceRequired
                 ),
@@ -225,14 +238,14 @@ class WebAuthnResource(
             return unauthorized("Assertion verification failed")
         }
 
-        // Persist the authenticator's post-verify counter (webauthn4j clone-detection: a
-        // signature whose embedded counter does not exceed the stored one throws above, before
-        // reaching here — this line only ever advances it).
-        credentialStore.save(stored.copy(signCount = authenticator.counter))
+        // Persist the post-verify counter (webauthn4j clone-detection: a signature whose
+        // embedded counter does not exceed the stored one throws above, before reaching here —
+        // this line only ever advances it).
+        credentialStore.save(stored.copy(signCount = credentialRecord.counter))
         Log.debugf(
             "authComplete: verified assertion for credential=%s, newCounter=%d",
             credentialIdB64,
-            authenticator.counter,
+            credentialRecord.counter,
         )
 
         val (accessToken, refreshToken) = keycloakClient.impersonate(stored.keycloakUserId)
