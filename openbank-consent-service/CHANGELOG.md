@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.10.7...consent-service-v0.11.0) (2026-07-14)
+
+
+### Features
+
+* **governance:** four-eyes vocabulary for fx/consent/sanctions + sanctions OPA bootstrap ([#1006](https://github.com/JiRaska/open-bank-oss/issues/1006)) ([f5d589e](https://github.com/JiRaska/open-bank-oss/commit/f5d589e17d6bb8c1ed7abfa74f732d2b171fd3f9))
+
 ## [0.10.7](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.10.6...consent-service-v0.10.7) (2026-07-11)
 
 
