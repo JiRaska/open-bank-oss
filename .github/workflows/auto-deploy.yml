@@ -99,7 +99,15 @@ jobs:
           # (falls back to 8080 if absent). Added openbank-anacredit-service/Dockerfile
           # (EXPOSE 8137, matching the gitops manifest) alongside this entry so the port
           # extraction is correct, not just defaulted.
-          ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service'
+          # The 6 ADR-0163/ADR-0164-0168 control/governance agents (control-liveness-
+          # sentinel, governance-auditor, release-steward, docs-truth-agent,
+          # authz-policy-auditor, flaky-test-hunter) shipped with the exact same gap:
+          # merged, released, gitops manifest present — but never in ALL_SERVICES, so
+          # every one of their Deployments sat perpetually blocked at the placeholder
+          # `sandbox-pending` tag (Kyverno's SBOM-attestation/cosign-signature policies
+          # reject a tag that was never pushed) with zero auto-deploy coverage, and none
+          # had a per-service Dockerfile either. Added both here.
+          ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter'
 
           # Manual dispatch: rebuild the requested module(s), or the full deployable
           # fleet when no input is given. Only services that actually carry a gitops
