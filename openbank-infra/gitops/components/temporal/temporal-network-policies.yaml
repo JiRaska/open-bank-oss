@@ -70,6 +70,7 @@ spec:
                   - governance-auditor
                   - release-steward
                   - docs-truth-agent
+                  - authz-policy-auditor
       ports:
         - protocol: TCP
           port: 7233
