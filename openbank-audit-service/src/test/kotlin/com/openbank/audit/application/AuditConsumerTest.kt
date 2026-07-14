@@ -183,6 +183,29 @@ class AuditConsumerTest {
     }
 
     @Test
+    fun `consume falls back to the type field for eventType on a SEPA Instant event`(): Unit = runBlocking {
+        val paymentId = UUID.randomUUID()
+        // KafkaSctInstEventPublisher's wire shape: {"type": <event class name>, "paymentId",
+        // "occurredAt"} — no "eventType" key.
+        val payload =
+            """{"type":"SctInstPaymentSettled","paymentId":"$paymentId","occurredAt":"2026-07-14T00:00:00Z"}"""
+
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify {
+            repo.save(
+                match {
+                    it.eventType == "SctInstPaymentSettled" &&
+                        it.aggregateType == "PAYMENT" &&
+                        it.aggregateId == paymentId.toString()
+                },
+            )
+        }
+    }
+
+    @Test
     fun `consume extracts the bare id as aggregateId for a sanctions screening event`(): Unit = runBlocking {
         val checkId = UUID.randomUUID()
         val payload = """{"eventType":"sanctions.check.completed.v1","id":"$checkId","status":"CLEAR"}"""

@@ -127,13 +127,16 @@ mp:
         # cards.events / dispute.events / domestic.payment.events / sepa.payment.events /
         # statement.event / sanctions.screening.event added in the same #996 sweep, round 2 — each
         # verified to have a REAL producer (a genuine outbox-row write, not just a declared Kafka
-        # channel) before being added here. Two other #996 candidates in this same batch,
-        # fx.conversion.completed and sepa.instant.events, were found to have NO producer at all
-        # (the outbox message type exists but nothing in the use-case layer ever constructs one) —
-        # deliberately NOT added here; adding a consumer for an event that is never published would
-        # only silence the CI gate without fixing anything. Tracked as their own bugs, not a #996
-        # consumer-side gap (see issues opened in the same PR as this change).
-        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.security.scan.event,openbank.cards.events,openbank.dispute.events,openbank.domestic.payment.events,openbank.sepa.payment.events,openbank.statement.event,openbank.sanctions.screening.event
+        # channel) before being added here. openbank.fx.conversion.completed was found to have NO
+        # producer at all (KafkaFxEventPublisher.publish() was a no-op stub) — deliberately NOT
+        # added here until #1033 wires a real publisher; adding a consumer for an event that is
+        # never published would only silence the CI gate without fixing anything.
+        # openbank.sepa.instant.events, by contrast, DOES have a real, working producer
+        # (KafkaSctInstEventPublisher, called from SctInstPaymentService at every lifecycle
+        # transition) — an initial #996 triage pass mistook a separate, dead/unused outbox port
+        # (SctInstOutboxPort) for the only pipeline and wrongly concluded nothing was ever
+        # published; corrected here.
+        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.security.scan.event,openbank.cards.events,openbank.dispute.events,openbank.domestic.payment.events,openbank.sepa.payment.events,openbank.statement.event,openbank.sanctions.screening.event,openbank.sepa.instant.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 "%dev":
   quarkus:

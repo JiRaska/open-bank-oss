@@ -33,7 +33,9 @@ class AuditConsumer {
             val node: JsonNode = objectMapper.readTree(payload)
             val entry = AuditEntry(
                 id = UUID.randomUUID(),
-                eventType = node["eventType"]?.asText() ?: "UNKNOWN",
+                // sepa.instant.events (KafkaSctInstEventPublisher) names its discriminator "type",
+                // not "eventType" — the only #996-consumed producer that does so.
+                eventType = node["eventType"]?.asText() ?: node["type"]?.asText() ?: "UNKNOWN",
                 aggregateType = node["aggregateType"]?.asText() ?: inferAggregateType(node),
                 aggregateId = inferAggregateId(node),
                 actorId = node["requestedBy"]?.asText()
