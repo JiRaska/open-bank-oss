@@ -45,9 +45,13 @@ kover {
         verify {
             rule {
                 bound {
-                    // Ratchet floor (ADR-0020): initial coverage from the domain-model test only;
-                    // raise-only from here as adapters/activities gain tests.
-                    minValue = 5
+                    // Introduction floor (ADR-0020): measured ~58% LINE after adding real coverage
+                    // for AdrTextScanner, RepoScanAdapter, GovernanceRulesAdapter, and
+                    // DetectDriftActivityImpl (up from the domain-model-only 5% baseline) — set with
+                    // a small margin below that, ratchet-only from here. The largest untested
+                    // surfaces are the still-stubbed LlmDiagnosisAdapter/GitHubProposalAdapter and
+                    // the Temporal workflow/worker wiring itself.
+                    minValue = 55
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }

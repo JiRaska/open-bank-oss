@@ -8,14 +8,19 @@ package com.openbank.docstruth.application.workflow
 import com.openbank.docstruth.application.port.out.GovernanceRulesPort
 import com.openbank.docstruth.application.port.out.RepoScanPort
 import com.openbank.docstruth.domain.model.DocsTruthSnapshot
-import io.quarkus.vertx.VertxContextSupport
-import io.smallrye.mutiny.coroutines.asUni
 import jakarta.enterprise.context.ApplicationScoped
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
 import org.jboss.logging.Logger
 
+// Temporal activity methods are plain synchronous functions invoked on the Temporal SDK's own
+// activity worker thread pool (registered via WorkerFactory in DocsTruthWorkerRegistrar) — never
+// on a Vert.x event-loop thread. The finops-agent VertxContextSupport.subscribeAndAwait { ... }
+// pattern this was copied from exists to bridge a genuinely async Mutiny HTTP call back onto a
+// Vert.x duplicated context; there is no such context here to bridge onto, and
+// Dispatchers.Unconfined does not move the underlying blocking Files.list/Files.walk/readText
+// calls in RepoScanAdapter off-thread anyway, so the wrapping added indirection without moving
+// any work off the calling thread. A plain runBlocking on the activity thread is simpler and
+// exactly as correct.
 @ApplicationScoped
 open class CollectRepoScanActivityImpl(
     private val repoScan: RepoScanPort,
@@ -24,7 +29,7 @@ open class CollectRepoScanActivityImpl(
 
     private val log = Logger.getLogger(CollectRepoScanActivityImpl::class.java)
 
-    override fun collect(): DocsTruthSnapshot = runOnVertxContext {
+    override fun collect(): DocsTruthSnapshot = runBlocking {
         log.info("Scanning docs/adr/*.md Delivery-Status claims and cross-referencing rules.yaml")
         val adrRecords = repoScan.scanAdrRecords()
         val artifactNames = adrRecords.flatMap { adr -> adr.claimedArtifacts.map { it.name } }.toSet()
@@ -36,10 +41,5 @@ open class CollectRepoScanActivityImpl(
             artifactExistence = artifactExistence,
             gateEnforcementStatus = gateEnforcementStatus,
         )
-    }
-
-    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    protected open fun <T> runOnVertxContext(block: suspend () -> T): T = VertxContextSupport.subscribeAndAwait {
-        CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni()
     }
 }

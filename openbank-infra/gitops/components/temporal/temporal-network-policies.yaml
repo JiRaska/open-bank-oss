@@ -69,6 +69,7 @@ spec:
                   - control-liveness-sentinel
                   - governance-auditor
                   - release-steward
+                  - docs-truth-agent
       ports:
         - protocol: TCP
           port: 7233

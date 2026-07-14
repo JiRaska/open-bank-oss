@@ -99,8 +99,9 @@ class RepoScanAdapter(private val config: DocsTruthAgentConfig) : RepoScanPort {
 }
 
 /** File-tree filtering rules for [RepoScanAdapter.findArtifacts] — split out to keep that
- * adapter's own function count within the fleet's `TooManyFunctions` detekt threshold. */
-private object RepoFileFilter {
+ * adapter's own function count within the fleet's `TooManyFunctions` detekt threshold.
+ * Internal (not private) so unit tests can exercise the exclusion/searchability rules directly. */
+internal object RepoFileFilter {
     const val MAX_FILE_BYTES = 2_000_000L
 
     private val EXCLUDED_DIR_NAMES = setOf(
@@ -127,14 +128,36 @@ private object RepoFileFilter {
 /**
  * Standalone (non-CDI) ADR text parser — split out of [RepoScanAdapter] for the same
  * `TooManyFunctions` reason as `RepoFileFilter`. Extracts the `Delivery-Status:` line and every
- * backtick-quoted artifact/gate reference, tagged with its textual context.
+ * backtick-quoted artifact/gate reference, tagged with its textual context. Internal (not
+ * private) so unit tests can exercise the parsing/extraction heuristics directly.
  */
-private object AdrTextScanner {
+internal object AdrTextScanner {
     val ADR_FILENAME = Regex("""^(\d{4})-.*\.md$""")
 
     private val BACKTICK_TOKEN = Regex("`([^`\\s]{3,80})`")
     private val PASCAL_CLASS = Regex("^[A-Z][A-Za-z0-9]{2,60}$")
     private val PATH_OR_SCRIPT_SUFFIX = Regex(""".*\.(sh|py|kt|kts|ts|tsx|yaml|yml|json)$""")
+
+    // Backtick-quoted prose examples use these markers to signal "illustrative value, not a
+    // literal artifact": `<placeholder>` / `{templateVar}` / `*glob*` route segments, and a
+    // truncation ellipsis (either the Unicode "…" or literal "...") abbreviating a long id, e.g.
+    // ADR-0039's `a0000000-…-2101/2102/2103`. Without this guard, `looksLikeArtifact`'s bare
+    // `token.contains("/")` check flags that example as a claimed artifact requiring a repo-wide
+    // grep match — which it will never have, since it was never real code — producing a false
+    // CRITICAL "artifact missing" finding on a healthy, Shipped ADR the very first time this
+    // scanner runs against it.
+    private val ILLUSTRATIVE_MARKER = Regex("""[<>{}*…]|\.\.\.""")
+
+    // rules.yaml's own `gate:` values are plain lowercase, hyphen-separated identifiers
+    // ("api-contract", "db-migration", "duplicate-yaml-keys", "threat-model" — see grep across
+    // docs/adr/*.md for real examples). Such a token is neither PascalCase, nor path-shaped, nor
+    // script-suffixed, so `looksLikeArtifact` alone never accepted it — meaning `recordEnforcement`
+    // was gated behind a check that a plain gate-name token could never pass, so
+    // ENFORCEMENT_STATUS_MISMATCH (ADR-0166 check 3) could never actually fire for the common case
+    // of an ADR quoting a gate by its literal rules.yaml name. This is a distinct token shape from
+    // an artifact and needs its own recognizer.
+    private val GATE_NAME_SHAPE = Regex("^[a-z][a-z0-9]*(-[a-z0-9]+)+$")
+
     private val NOT_YET_PHRASES = listOf(
         "not yet implemented", "not yet built", "not implemented", "not built",
         "does not exist", "no implementation", "pending implementation",
@@ -176,9 +199,9 @@ private object AdrTextScanner {
             val lower = line.lowercase()
             for (m in BACKTICK_TOKEN.findAll(line)) {
                 val token = m.groupValues[1]
-                if (!looksLikeArtifact(token)) continue
-                recordArtifact(artifacts, token, lower)
-                recordEnforcement(enforcements, token, lower)
+                if (ILLUSTRATIVE_MARKER.containsMatchIn(token)) continue
+                if (looksLikeArtifact(token)) recordArtifact(artifacts, token, lower)
+                if (GATE_NAME_SHAPE.matches(token)) recordEnforcement(enforcements, token, lower)
             }
         }
         return artifacts to enforcements

@@ -57,6 +57,26 @@ closing a gap none of this repo's other control-plane agents cover.
   built"-style phrase proximity, "enforced"/"advisory" word proximity in `rules.yaml`) are
   best-effort text scans, not a real Markdown/YAML semantic parse — a future ADR-authoring
   convention change could reduce their match rate and would need a corresponding update here.
+- **False-positive risk: illustrative examples in backticks.** Artifact extraction treats any
+  backtick-quoted, identifier-shaped token as a claimed artifact requiring a repo-wide match. ADR
+  prose sometimes uses backticks for an illustrative example value rather than a real code
+  artifact — e.g. ADR-0039's `` `a0000000-…-2101/2102/2103` `` (a truncated example GL-account id
+  range, not a class/file/script). `AdrTextScanner` filters out tokens containing an obvious
+  illustrative marker (`<...>` / `{...}` / `*` wildcard segments / a `…` or `...` truncation
+  ellipsis), which covers the ADR-0039 shape and the common OpenAPI-route-template shape
+  (`` `/api/v{N}` ``, `` `/api/svc/<service>` ``), but this is still a heuristic — an illustrative
+  example that happens not to use any of those markers (a plausible-looking but fictional
+  file path or class name, for instance) can still misfire a false CRITICAL
+  `SHIPPED_ARTIFACT_MISSING` finding on an otherwise-healthy ADR.
+- **Wrong-gate-attribution risk in `GovernanceRulesAdapter`.** The `enforced:` lookup is anchored
+  on the literal `gate: <name>` YAML key (not a bare substring match anywhere in the file) and, if
+  `rules.yaml` legitimately reuses one gate name for two distinct rules (it does today, for
+  `version-bump` — `service_code_change` and `admin_ui_code_change`), reports a value only when
+  every matching definition agrees; a disagreement is logged and treated as "no finding" rather
+  than silently attributing one rule's status to the other. This closes the common
+  wrong-attribution case but is still a proximity-based text scan, not a structural YAML parse — a
+  `rules.yaml` restructuring that moves `enforced:` more than `SEARCH_WINDOW` (15) lines from its
+  `gate:` key would silently stop matching.
 - The `LlmDiagnosisPort` and `GitHubProposalPort` adapters are stubs pending the shared LiteLLM
   gateway and GitHub App installation-token wiring, the same bootstrap state finops-agent/devops-
   agent/control-liveness-sentinel/governance-auditor/release-steward shipped with. Until that
