@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.8.0...interest-service-v0.9.0) (2026-07-14)
+
+
+### Features
+
+* **interest:** book the withholding-tax remittance cash leg to the finanční úřad ([#999](https://github.com/JiRaska/open-bank-oss/issues/999)) ([#1039](https://github.com/JiRaska/open-bank-oss/issues/1039)) ([4417e2b](https://github.com/JiRaska/open-bank-oss/commit/4417e2bd636661eb40485eea0457fa7ead7afbc1))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.7.1...interest-service-v0.8.0) (2026-07-13)
 
 
