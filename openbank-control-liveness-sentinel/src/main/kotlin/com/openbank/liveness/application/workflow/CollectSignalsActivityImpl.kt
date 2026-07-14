@@ -20,10 +20,19 @@ open class CollectSignalsActivityImpl(private val prometheusQuery: PrometheusQue
     private val log = Logger.getLogger(CollectSignalsActivityImpl::class.java)
 
     // ADR-0160 mechanism 3: one WorkflowLivenessWatchdog gauge per opted-in @Scheduled job,
-    // labelled by job name. Reports age-of-last-success in seconds per job.
+    // labelled by job name, plus a companion gauge publishing that job's own declared expected
+    // interval (also labelled by job name). Joined here into a single "<job>|<intervalSeconds>"
+    // composite key -> ageSeconds map, so DetectFindingsActivityImpl never has to guess an
+    // interval or make a second Prometheus round-trip of its own. A job with an age gauge but no
+    // matching interval gauge is dropped rather than guessed at.
     override fun collectWatchdogHeartbeats(): Map<String, Double> = runOnVertxContext {
         log.debug("Collecting WorkflowLivenessWatchdog heartbeat gauges")
-        prometheusQuery.queryVector("openbank_workflow_liveness_last_success_age_seconds")
+        val ages = prometheusQuery.queryVector("openbank_workflow_liveness_last_success_age_seconds")
+        val intervals = prometheusQuery.queryVector("openbank_workflow_liveness_expected_interval_seconds")
+        ages.mapNotNull { (job, age) ->
+            val interval = intervals[job] ?: return@mapNotNull null
+            "$job|$interval" to age
+        }.toMap()
     }
 
     // ADR-0160 mechanism 1: check-event-consumer-liveness.sh publishes a gauge per producer-only

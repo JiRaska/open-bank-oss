@@ -74,6 +74,8 @@ openbank:
     alertmanager-url: ${ALERTMANAGER_URL:http://alertmanager-operated.observability:9093}
     llm-gateway-url: ${LLM_GATEWAY_URL:http://litellm.ai-platform:4000}
     # 2x expected interval == the same paging threshold ADR-0160 mechanism 3 defines, so this
-    # agent's WARNING/CRITICAL split can never silently disagree with the Alertmanager rule.
+    # agent's CRITICAL finding can never silently disagree with the Alertmanager rule.
     stale-heartbeat-multiplier: ${STALE_HEARTBEAT_MULTIPLIER:2.0}
+    # Fires WARNING earlier, before the control reaches the paging threshold above.
+    warn-heartbeat-multiplier: ${WARN_HEARTBEAT_MULTIPLIER:1.5}
     consecutive-drift-threshold: ${CONSECUTIVE_DRIFT_THRESHOLD:3}

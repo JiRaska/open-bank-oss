@@ -44,6 +44,22 @@ charter_denied if {
 
 # Every tools.allow / tools.deny pattern across the agent's charter(s) -- factored out so
 # charter_allowed and rest_action_allowed don't each re-walk `some a in charter` themselves.
+#
+# SCHEMA NOTE: this only matches charters whose tools.allow/deny are a flat list of pattern
+# STRINGS (compliance-officer, ledger-domain-engineer, ui-assistant, rca-investigator,
+# customer-copilot). The standalone background/control-plane agents (finops-agent, devops-agent,
+# control-liveness-sentinel, governance-auditor, release-steward, docs-truth-agent,
+# authz-policy-auditor, flaky-test-hunter) instead declare tools.allow as a list of
+# `{tier, resources}` objects -- `some pattern in a.tools.allow` binds `pattern` to the whole
+# object for those charters, which glob_match can never match against a string tool name, so
+# charter_allowed is always false for them here. This is intentionally NOT a security gap
+# (default-deny fails closed, not open) -- it is simply inert: none of those services call the
+# MCP /tools/call endpoint this package gates at all (confirmed: no reference to it in any of
+# their source trees). Their real, live authorization is the standard `@RolesAllowed` REST
+# security on each service's own endpoints. Their `agents.yaml` charter today documents intent
+# for governance/audit purposes, not a runtime-enforced grant -- same as every charter's
+# `requires_human` block, which no code path reads either. Wiring the tier+resources shape into
+# a live decision here is future work if/when these services are ever fronted by the MCP gateway.
 allowed_or_denied_patterns := {
 	"allow": {pattern |
 		some a in charter

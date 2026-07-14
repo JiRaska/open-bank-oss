@@ -66,6 +66,7 @@ spec:
                   - statements
                   - finops-agent
                   - devops-agent
+                  - control-liveness-sentinel
       ports:
         - protocol: TCP
           port: 7233

@@ -21,8 +21,15 @@ interface LivenessSentinelConfig {
     @WithDefault("http://litellm.ai-platform:4000")
     fun llmGatewayUrl(): String
 
+    // Matches ADR-0160 mechanism 3's own Alertmanager paging threshold (2x expected interval) —
+    // this agent's CRITICAL finding and the underlying page can never silently disagree.
     @WithDefault("2.0")
     fun staleHeartbeatMultiplier(): Double
+
+    // Fires a WARNING before the heartbeat reaches the paging threshold, so a control that is
+    // merely getting stale is visible before it becomes a page (ADR-0163's own worked example).
+    @WithDefault("1.5")
+    fun warnHeartbeatMultiplier(): Double
 
     @WithDefault("3")
     fun consecutiveDriftThreshold(): Int

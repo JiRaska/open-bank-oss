@@ -10,17 +10,16 @@ dataClassification: internal
 retentionPolicy: "7 years"
 evidenceExported: false
 lineage:
+  # Only edges backed by actual code (ADR-0160 mechanism 2's own "lineage-vs-code" standard,
+  # which this agent enforces on the rest of the fleet — so its own manifest holds to it too).
+  # The GoAlert reactive-trigger webhook and the admin-ui findings/HITL-queue integration are
+  # both still unbuilt (docs/agents/control-liveness-sentinel.md "Known gaps") and are
+  # deliberately NOT listed here until real code backs them.
   upstream:
     - serviceName: prometheus
       relationType: api
       description: reads WorkflowLivenessWatchdog heartbeat gauges (ADR-0160 mechanism 3)
-    - serviceName: alertmanager
-      relationType: api
-      description: receives control-liveness anomaly alerts
-  downstream:
-    - serviceName: admin-ui
-      relationType: api
-      description: exposes control-liveness findings and HITL approval queue
+  downstream: []
 schemaLineage:
   ownedSchemas: []
   dependentSchemas: []
