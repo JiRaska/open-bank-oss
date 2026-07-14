@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.4](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.9.3...audit-service-v0.9.4) (2026-07-14)
+
+
+### Bug Fixes
+
+* **audit:** consume sepa.instant.events, correcting issue [#1034](https://github.com/JiRaska/open-bank-oss/issues/1034)'s premise ([#1050](https://github.com/JiRaska/open-bank-oss/issues/1050)) ([53f0dae](https://github.com/JiRaska/open-bank-oss/commit/53f0dae5b6b2bbf8b95ba0ab36861a3d5229c162))
+
 ## [0.9.3](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.9.2...audit-service-v0.9.3) (2026-07-13)
 
 
