@@ -55,38 +55,44 @@ class AuditConsumer {
         }
     }
 
-    private fun inferAggregateId(node: JsonNode): String = node["accountId"]?.asText()
-        ?: node["partyId"]?.asText()
-        ?: node["transactionId"]?.asText()
-        ?: node["consentId"]?.asText()
-        // clearing.batch.event: publishBatchSettled/publishItemCleared carry batchId/itemId, not a
-        // shared aggregate field name (PR #1007).
-        ?: node["batchId"]?.asText()
-        ?: node["itemId"]?.asText()
-        // security.ict.incident: IctIncidentService.publishEvent nests the incident under
-        // "incident" rather than a top-level id field (PR #1007).
-        ?: node["incident"]?.get("id")?.asText()
-        // cards.events (CardStatusChanged has no accountId/partyId), dispute.events,
-        // domestic.payment.events + sepa.payment.events, sanctions.screening.event (#996 round 2).
-        ?: node["cardId"]?.asText()
-        ?: node["disputeId"]?.asText()
-        ?: node["paymentId"]?.asText()
-        ?: node["id"]?.asText()
-        ?: "unknown"
+    // Ordered (field name -> aggregate type) fallback chain, first match wins. One shared table
+    // backs both inferAggregateId/inferAggregateType instead of two parallel chains that drift —
+    // add a new topic's identifying field here rather than duplicating a branch in both functions
+    // (kept the two in sync by hand across #996 rounds 1-3 until this got too complex; also fixes
+    // a latent inconsistency where kycCaseId had a type but no matching id-extraction branch).
+    // "incident" (security.ict.incident) is the one exception: its id is nested, not a top-level
+    // field, so it is handled separately before this table.
+    private val aggregateFields = listOf(
+        "accountId" to "ACCOUNT",
+        "partyId" to "PARTY",
+        "transactionId" to "TRANSACTION",
+        "consentId" to "CONSENT",
+        "kycCaseId" to "KYC_CASE",
+        "batchId" to "CLEARING_BATCH",
+        "itemId" to "CLEARING_ITEM",
+        "cardId" to "CARD",
+        "disputeId" to "DISPUTE",
+        "paymentId" to "PAYMENT",
+        "documentId" to "DOCUMENT",
+        "ceremonyId" to "SIGNATURE_CEREMONY",
+        "conversionId" to "FX_CONVERSION",
+        "swiftMessageId" to "SWIFT_MESSAGE",
+        "id" to "SANCTIONS_CHECK",
+    )
 
-    private fun inferAggregateType(node: JsonNode): String = when {
-        node.has("accountId") -> "ACCOUNT"
-        node.has("partyId") -> "PARTY"
-        node.has("transactionId") -> "TRANSACTION"
-        node.has("consentId") -> "CONSENT"
-        node.has("kycCaseId") -> "KYC_CASE"
-        node.has("batchId") -> "CLEARING_BATCH"
-        node.has("itemId") -> "CLEARING_ITEM"
-        node.has("incident") -> "ICT_INCIDENT"
-        node.has("cardId") -> "CARD"
-        node.has("disputeId") -> "DISPUTE"
-        node.has("paymentId") -> "PAYMENT"
-        node.has("id") -> "SANCTIONS_CHECK"
-        else -> "UNKNOWN"
+    private fun inferAggregateId(node: JsonNode): String {
+        node["incident"]?.get("id")?.asText()?.let { return it }
+        for ((field, _) in aggregateFields) {
+            node[field]?.asText()?.let { return it }
+        }
+        return "unknown"
+    }
+
+    private fun inferAggregateType(node: JsonNode): String {
+        if (node.has("incident")) return "ICT_INCIDENT"
+        for ((field, type) in aggregateFields) {
+            if (node.has(field)) return type
+        }
+        return "UNKNOWN"
     }
 }
