@@ -18,9 +18,12 @@ shapes with no automated re-verification at all:
    literal shape `) = runBlocking {` without a nearby `: Unit`, and has genuinely fired pre-merge
    more than once (PR #931's `ApprovalResourceTest`, PR #994's standing-order consumer tests) — the
    guard works as designed. But it is a single hardcoded pattern: a helper function using a
-   different coroutine entry point with the identical non-Unit-inference shape (`runTest`,
-   `GlobalScope.launch`, `GlobalScope.async`) is invisible to it, and nothing periodically
-   re-confirms the guard itself has not regressed or been bypassed on an already-merged branch.
+   different coroutine entry point with the identical non-Unit-inference shape (`GlobalScope.launch`,
+   `GlobalScope.async`) is invisible to it, and nothing periodically re-confirms the guard itself has
+   not regressed or been bypassed on an already-merged branch. (`runTest` looks like a candidate for
+   the same generalization but is not: its lambda parameter type is fixed at `Unit` — JVM `actual
+   typealias TestResult = Unit` — unlike `runBlocking`'s generic `<T>`, so it can never hit this bug,
+   and is in fact this repo's own CLAUDE.md-recommended fix for it.)
 2. **Pact provider verification's local-green blind spot.** Provider tests are gated
    `@EnabledIfSystemProperty(named = "pactbroker.url", …)` — always skipped when a developer runs
    `./gradlew test` locally with no broker reachable; only CI, against a real broker, verifies them.
@@ -75,8 +78,10 @@ authz-policy-auditor:
   1. **`runBlocking`-without-`: Unit` (and near-miss builders).** Reuses
      `check-test-runblocking-unit.sh`'s exact regex shape for `runBlocking` — kept textually
      consistent with the guard by construction, not by parsing the shell script at runtime — and
-     generalizes it to `runTest`, `GlobalScope.launch`, and `GlobalScope.async`, every coroutine
-     entry point sharing the identical expression-body non-Unit-inference hazard.
+     generalizes it to `GlobalScope.launch` and `GlobalScope.async`, the coroutine entry points that
+     genuinely share the expression-body non-Unit-inference hazard. Deliberately excludes `runTest`:
+     its lambda type is fixed at `Unit` so it can never hit this bug, and it is this repo's own
+     documented fix for it — flagging it would mark the correct remediation as a violation.
   2. **Pact local-verification blind spot.** One finding per module summarizing how many
      `@EnabledIfSystemProperty(named = "pactbroker.url", …)`-gated classes it has — informational,
      not a defect: it exists so a developer reading this agent's report knows their own

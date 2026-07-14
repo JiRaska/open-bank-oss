@@ -11,8 +11,10 @@ adr: ADR-0168
 Static analyzer for fleet-wide silent-test-failure patterns in Kotlin test sources. On a weekly
 sweep plus reactively whenever a CI test-suite run reports a failure, this agent generalizes the
 `check-test-runblocking-unit.sh` CI guard (an expression-body test function using
-`runBlocking`/`runTest`/`GlobalScope.launch`/`GlobalScope.async` without an explicit `: Unit` return
-type, which JUnit5 silently drops instead of running) beyond its one hardcoded builder, flags Pact
+`runBlocking`/`GlobalScope.launch`/`GlobalScope.async` without an explicit `: Unit` return
+type, which JUnit5 silently drops instead of running) beyond its one hardcoded builder — deliberately
+excluding `runTest`, whose lambda type is fixed at `Unit` and can never hit this bug, and which this
+repo's own CLAUDE.md recommends as the fix — flags Pact
 provider verification tests gated on `pactbroker.url` (always skipped by a local `./gradlew test`
 run), flags any provider with two colliding `@Provider` test classes, and cross-checks
 declared-vs-executed `@Test` counts per module. Every finding becomes a tracking ticket through the

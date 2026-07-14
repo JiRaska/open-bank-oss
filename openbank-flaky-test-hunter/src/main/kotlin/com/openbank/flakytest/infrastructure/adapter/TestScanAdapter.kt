@@ -98,8 +98,17 @@ private object TestTextScanner {
     // then a `: Unit` exclusion) but generalized to the other coroutine builders sharing the exact
     // same "expression-body function whose last statement is non-Unit" JUnit5 silent-drop shape —
     // the "similar mistake with a different coroutine builder" the guard's one literal doesn't cover.
+    //
+    // Deliberately EXCLUDES `runTest`: kotlinx-coroutines-test's
+    // `runTest(testBody: suspend TestScope.() -> Unit): TestResult` has a JVM `actual typealias
+    // TestResult = Unit`, and its lambda parameter type is fixed at `Unit` (not generic like
+    // `runBlocking`'s `<T>`) — so `fun foo() = runTest { ... }` ALWAYS infers `Unit` regardless of
+    // the lambda body and is never subject to the silent-drop bug this whole check exists to catch.
+    // Worse, this repo's own CLAUDE.md explicitly recommends `suspend fun` + a coroutine test runner
+    // (i.e. `runTest`) as the FIX for the `runBlocking` footgun, so including it here would flag the
+    // officially-recommended remediation as a violation. Do not re-add it.
     private val EXPRESSION_BODY_COROUTINE =
-        Regex("""fun [A-Za-z`].*\) = (runBlocking|runTest|GlobalScope\.launch|GlobalScope\.async) ?\{""")
+        Regex("""fun [A-Za-z`].*\) = (runBlocking|GlobalScope\.launch|GlobalScope\.async) ?\{""")
     private const val UNIT_RETURN_MARKER = ": Unit"
 
     private const val PACT_GATED_MARKER = "pactbroker.url"

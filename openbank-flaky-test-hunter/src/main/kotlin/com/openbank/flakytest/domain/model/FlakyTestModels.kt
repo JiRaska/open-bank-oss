@@ -26,12 +26,16 @@ enum class FindingStatus { OPEN, DIAGNOSED, PROPOSED, APPROVED, REJECTED, RESOLV
 
 /** One expression-body function in test source matching the JUnit5 silent-drop shape: `fun f(...) =
  * <builder> { ... }` with no explicit `: Unit` return type. [builder] is the coroutine entry point
- * matched — `runBlocking` mirrors `check-test-runblocking-unit.sh`'s exact pattern; `runTest`,
- * `GlobalScope.launch` and `GlobalScope.async` are the "similar mistake with a different coroutine
- * builder" near-misses the CI guard's single literal pattern does not cover. Not restricted to
- * `@Test`-annotated functions — a private helper a test method calls indirectly matches the same
- * textual shape and is exactly as invisible to JUnit5 if the helper itself is what silently returns
- * a non-Unit value. */
+ * matched — `runBlocking` mirrors `check-test-runblocking-unit.sh`'s exact pattern; `GlobalScope.launch`
+ * and `GlobalScope.async` are the "similar mistake with a different coroutine builder" near-misses the
+ * CI guard's single literal pattern does not cover. Deliberately does NOT match `runTest`:
+ * kotlinx-coroutines-test's `runTest` has its lambda parameter type fixed at `Unit` (JVM `actual
+ * typealias TestResult = Unit`), unlike `runBlocking`'s generic `<T>`, so `fun f(...) = runTest { ... }`
+ * always infers `Unit` and can never hit this bug — and this repo's own CLAUDE.md recommends `runTest`
+ * as the fix for the `runBlocking` footgun, so flagging it would mark the correct remediation as a
+ * violation. Not restricted to `@Test`-annotated functions — a private helper a test method calls
+ * indirectly matches the same textual shape and is exactly as invisible to JUnit5 if the helper itself
+ * is what silently returns a non-Unit value. */
 data class RunBlockingViolation(val file: String, val line: Int, val builder: String, val snippet: String)
 
 /** One test class in [module] gated on `@EnabledIfSystemProperty(named = "pactbroker.url", ...)` —
