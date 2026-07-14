@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.10](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.8.9...sca-service-v0.8.10) (2026-07-14)
+
+
+### Bug Fixes
+
+* **pact:** bridge reactive-Panache @State handlers onto a Vert.x context ([#1097](https://github.com/JiRaska/open-bank-oss/issues/1097)) ([b9b496a](https://github.com/JiRaska/open-bank-oss/commit/b9b496a6cfdfb529fed96c6ef8f6944215c81c5c))
+* **sca:** publish DEVICE_ENROLLED to openbank.sca.events, not sca.challenge.event ([#1005](https://github.com/JiRaska/open-bank-oss/issues/1005)) ([41d83b4](https://github.com/JiRaska/open-bank-oss/commit/41d83b45745f6888046689f1ba02540d994a21ff)), closes [#996](https://github.com/JiRaska/open-bank-oss/issues/996)
+
 ## [0.8.9](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.8.8...sca-service-v0.8.9) (2026-07-11)
 
 
