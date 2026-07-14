@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.2.0...control-liveness-sentinel-v0.3.0) (2026-07-14)
+
+
+### Features
+
+* **control-liveness-sentinel:** wire real LLM diagnosis and GitHub proposal creation ([#1087](https://github.com/JiRaska/open-bank-oss/issues/1087)) ([59ecdfe](https://github.com/JiRaska/open-bank-oss/commit/59ecdfe02d905221e9f62d709949943589bb3f76))
+
+
+### Bug Fixes
+
+* **infra:** add the 6 new control/governance agents to auto-deploy fleet ([#1091](https://github.com/JiRaska/open-bank-oss/issues/1091)) ([ca311e0](https://github.com/JiRaska/open-bank-oss/commit/ca311e04e013862f91249b92709de61a0a09ae7c))
+
 ## [0.2.0](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.1.0...control-liveness-sentinel-v0.2.0) (2026-07-14)
 
 
