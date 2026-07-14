@@ -129,6 +129,101 @@ class AuditConsumerTest {
     }
 
     @Test
+    fun `consume extracts cardId as aggregateId for a card status-changed event`(): Unit = runBlocking {
+        val cardId = UUID.randomUUID()
+        val payload = """{"eventType":"CARD_STATUS_CHANGED","cardId":"$cardId","newStatus":"BLOCKED"}"""
+
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify {
+            repo.save(
+                match {
+                    it.aggregateType == "CARD" && it.aggregateId == cardId.toString()
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `consume extracts disputeId as aggregateId for a dispute-resolved event`(): Unit = runBlocking {
+        val disputeId = UUID.randomUUID()
+        val payload = """{"eventType":"dispute.resolved","disputeId":"$disputeId","outcome":"UPHELD"}"""
+
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify {
+            repo.save(
+                match {
+                    it.aggregateType == "DISPUTE" && it.aggregateId == disputeId.toString()
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `consume extracts paymentId as aggregateId for a payment status-changed event`(): Unit = runBlocking {
+        val paymentId = UUID.randomUUID()
+        val payload = """{"eventType":"PAYMENT_STATUS_CHANGED","paymentId":"$paymentId","status":"VALIDATED"}"""
+
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify {
+            repo.save(
+                match {
+                    it.aggregateType == "PAYMENT" && it.aggregateId == paymentId.toString()
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `consume falls back to the type field for eventType on a SEPA Instant event`(): Unit = runBlocking {
+        val paymentId = UUID.randomUUID()
+        // KafkaSctInstEventPublisher's wire shape: {"type": <event class name>, "paymentId",
+        // "occurredAt"} — no "eventType" key.
+        val payload =
+            """{"type":"SctInstPaymentSettled","paymentId":"$paymentId","occurredAt":"2026-07-14T00:00:00Z"}"""
+
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify {
+            repo.save(
+                match {
+                    it.eventType == "SctInstPaymentSettled" &&
+                        it.aggregateType == "PAYMENT" &&
+                        it.aggregateId == paymentId.toString()
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `consume extracts the bare id as aggregateId for a sanctions screening event`(): Unit = runBlocking {
+        val checkId = UUID.randomUUID()
+        val payload = """{"eventType":"sanctions.check.completed.v1","id":"$checkId","status":"CLEAR"}"""
+
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify {
+            repo.save(
+                match {
+                    it.aggregateType == "SANCTIONS_CHECK" && it.aggregateId == checkId.toString()
+                },
+            )
+        }
+    }
+
+    @Test
     fun `consume swallows malformed payloads without persisting`() {
         assertThatCode {
             runBlocking { consumer.consume("{bad-json") }
