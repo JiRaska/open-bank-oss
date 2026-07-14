@@ -3,9 +3,12 @@
 # every deployed Kafka client needs an explicit KafkaUser + ACL before its first
 # deploy — same requirement notification-service/statement-service already meet).
 #
-# document-service is a pure PRODUCER: it publishes document lifecycle events to
-# openbank.documents.document.event via its outbox dispatcher (ADR-0161/ADR-0162).
-# It consumes nothing, so no consumer-group ACL is needed.
+# document-service PRODUCES document lifecycle events to
+# openbank.documents.document.event via its outbox dispatcher (ADR-0161/ADR-0162),
+# and CONSUMES openbank.accounts.account.created (group openbank-document-service,
+# ADR-0162 D7) to issue onboarding documents off the account-opening path (ADR-0086).
+# It therefore needs a Read/Describe ACL on that topic plus a consumer-group ACL,
+# mirroring balance-service, which consumes the same topic.
 #
 # Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal
 # for all of this service's Kafka traffic. These resources live in `messaging`
@@ -38,6 +41,19 @@ spec:
           name: openbank.documents.document.event
           patternType: literal
         operations: [Write, Describe]
+        host: "*"
+      # ADR-0162 D7: consume account.created to issue onboarding documents.
+      - resource:
+          type: topic
+          name: openbank.accounts.account.created
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: openbank-document-service
+          patternType: literal
+        operations: [Read]
         host: "*"
 ---
 # ── ExternalSecret: document-service keystore ─────────────────────────────────
