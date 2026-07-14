@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.8.2...sepa-payment-v0.8.3) (2026-07-14)
+
+
+### Bug Fixes
+
+* **sepa-payment:** correct invalid TransactionType in the transaction-service pact ([#937](https://github.com/JiRaska/open-bank-oss/issues/937)) ([ecfb4b5](https://github.com/JiRaska/open-bank-oss/commit/ecfb4b5dc98b4500552374c1059e5e022d841ac6))
+
 ## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.8.1...sepa-payment-v0.8.2) (2026-07-12)
 
 
