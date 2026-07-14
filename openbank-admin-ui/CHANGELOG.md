@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.46.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.45.0...admin-ui-v0.46.0) (2026-07-14)
+
+
+### Features
+
+* **document-service:** seed VOP/framework/account templates (cs/en) + dynamic preview ([#1052](https://github.com/JiRaska/open-bank-oss/issues/1052)) ([0df4b9a](https://github.com/JiRaska/open-bank-oss/commit/0df4b9ab8142b2c59f10826099df56dc262ed142))
+
 ## [0.45.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.44.0...admin-ui-v0.45.0) (2026-07-14)
 
 
