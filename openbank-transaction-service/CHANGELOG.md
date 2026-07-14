@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.13.3...transaction-service-v1.14.0) (2026-07-14)
+
+
+### Features
+
+* **transaction:** wire four-eyes enforcement mechanism (ADR-0155) ([#931](https://github.com/JiRaska/open-bank-oss/issues/931)) ([7a8dd2e](https://github.com/JiRaska/open-bank-oss/commit/7a8dd2e8da2ddc64b558faa2e0474aa65a63033f))
+
 ## [1.13.3](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.13.2...transaction-service-v1.13.3) (2026-07-12)
 
 
