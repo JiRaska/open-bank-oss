@@ -31,74 +31,120 @@ object DocumentTemplateSeed {
     private const val SEEDED_BY = "system"
     private const val DEMO_CLASSIFICATION = "restricted"
 
+    // v1.1.0 (2026-07-14): added the OpenBank letterhead (inline-SVG logo). Published templates
+    // are immutable (DocumentTemplate.publish()/domain rule), so this is a NEW version — new fixed
+    // IDs, not an in-place edit of the v1.0.0 rows already seeded — coexisting with the original
+    // v1.0.0 seed (DocumentTemplateSeeder adds whichever (id) rows are missing, it does not
+    // truncate/replace, so both versions end up in the table; that is correct, not a bug — it is
+    // exactly what "published is immutable, a change ships as a new version" looks like in practice.
     val templates: List<DocumentTemplate> = listOf(
         template(
-            id = "1e575a01-0000-4000-9000-000000000001",
+            id = "1e575a01-0000-4000-9000-000000000011",
             code = "VOP_CS",
+            version = "1.1.0",
             name = "Všeobecné obchodní podmínky",
             locale = "cs",
             bodyHtml = VOP_CS_BODY,
         ),
         template(
-            id = "1e575a01-0000-4000-9000-000000000002",
+            id = "1e575a01-0000-4000-9000-000000000012",
             code = "VOP_EN",
+            version = "1.1.0",
             name = "General Terms and Conditions",
             locale = "en",
             bodyHtml = VOP_EN_BODY,
         ),
         template(
-            id = "1e575a01-0000-4000-9000-000000000003",
+            id = "1e575a01-0000-4000-9000-000000000013",
             code = "RAMCOVA_SMLOUVA_CS",
+            version = "1.1.0",
             name = "Rámcová smlouva o poskytování platebních služeb",
             locale = "cs",
             bodyHtml = FRAMEWORK_AGREEMENT_CS_BODY,
         ),
         template(
-            id = "1e575a01-0000-4000-9000-000000000004",
+            id = "1e575a01-0000-4000-9000-000000000014",
             code = "RAMCOVA_SMLOUVA_EN",
+            version = "1.1.0",
             name = "Framework Agreement for Payment Services",
             locale = "en",
             bodyHtml = FRAMEWORK_AGREEMENT_EN_BODY,
         ),
         template(
-            id = "1e575a01-0000-4000-9000-000000000005",
+            id = "1e575a01-0000-4000-9000-000000000015",
             code = "UCET_SMLOUVA_CS",
+            version = "1.1.0",
             name = "Smlouva o zřízení a vedení běžného účtu",
             locale = "cs",
             bodyHtml = ACCOUNT_AGREEMENT_CS_BODY,
         ),
         template(
-            id = "1e575a01-0000-4000-9000-000000000006",
+            id = "1e575a01-0000-4000-9000-000000000016",
             code = "UCET_SMLOUVA_EN",
+            version = "1.1.0",
             name = "Current Account Opening Agreement",
             locale = "en",
             bodyHtml = ACCOUNT_AGREEMENT_EN_BODY,
         ),
     )
 
-    private fun template(id: String, code: String, name: String, locale: String, bodyHtml: String) = DocumentTemplate(
-        id = UUID.fromString(id),
-        code = code,
-        version = "1.0.0",
-        name = name,
-        engine = TemplateEngine.HANDLEBARS,
-        bodyHtml = bodyHtml,
-        locale = locale,
-        // Seeded directly as PUBLISHED (like ProductSeed's ACTIVE products) — these are meant to be
-        // immediately renderable demo content, not drafts awaiting a human publish step.
-        status = TemplateStatus.PUBLISHED,
-        productRef = null,
-        classification = DEMO_CLASSIFICATION,
-        createdAt = SEEDED_AT,
-        createdBy = SEEDED_BY,
-    )
+    private fun template(id: String, code: String, version: String, name: String, locale: String, bodyHtml: String) =
+        DocumentTemplate(
+            id = UUID.fromString(id),
+            code = code,
+            version = version,
+            name = name,
+            engine = TemplateEngine.HANDLEBARS,
+            bodyHtml = bodyHtml,
+            locale = locale,
+            // Seeded directly as PUBLISHED (like ProductSeed's ACTIVE products) — these are meant to be
+            // immediately renderable demo content, not drafts awaiting a human publish step.
+            status = TemplateStatus.PUBLISHED,
+            productRef = null,
+            classification = DEMO_CLASSIFICATION,
+            createdAt = SEEDED_AT,
+            createdBy = SEEDED_BY,
+        )
 }
 
 // ---------------------------------------------------------------------------------------------
 // VOP — Všeobecné obchodní podmínky / General Terms and Conditions
 // ---------------------------------------------------------------------------------------------
 
-private const val VOP_CS_BODY = """
+// Letterhead — inline SVG, not an <img src="..."> reference: the real render pipeline's
+// PdfRenderPort (WeasyPrint/Gotenberg) never fetches external resources by design (SSRF
+// mitigation), and the admin-ui preview also sandboxes the iframe without network access —
+// inline SVG markup needs neither, so it renders identically in the editor preview, a
+// browser "open in new window" view, and the actual generated PDF. Two locale variants
+// (only the city name differs) so every document, not just the party-identification
+// clause, opens with a real letterhead rather than a bare heading.
+private const val LETTERHEAD_CS = """
+<div style="display:flex;align-items:center;gap:12px;padding-bottom:16px;margin-bottom:24px;border-bottom:2px solid #4f46e5;">
+<svg width="42" height="42" viewBox="0 0 42 42" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="OpenBank">
+<rect width="42" height="42" rx="10" fill="#4f46e5"/>
+<text x="21" y="28" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">OB</text>
+</svg>
+<div>
+<div style="font-size:19px;font-weight:700;color:#0f172a;letter-spacing:-0.01em;">OpenBank</div>
+<div style="font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;">a.s. &middot; Na Příkopě 1, 110&nbsp;00 Praha 1</div>
+</div>
+</div>
+"""
+
+private const val LETTERHEAD_EN = """
+<div style="display:flex;align-items:center;gap:12px;padding-bottom:16px;margin-bottom:24px;border-bottom:2px solid #4f46e5;">
+<svg width="42" height="42" viewBox="0 0 42 42" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="OpenBank">
+<rect width="42" height="42" rx="10" fill="#4f46e5"/>
+<text x="21" y="28" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">OB</text>
+</svg>
+<div>
+<div style="font-size:19px;font-weight:700;color:#0f172a;letter-spacing:-0.01em;">OpenBank</div>
+<div style="font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;">a.s. &middot; Na Příkopě 1, 110&nbsp;00 Prague 1</div>
+</div>
+</div>
+"""
+
+private const val VOP_CS_BODY = """$LETTERHEAD_CS
 <h1>Všeobecné obchodní podmínky</h1>
 <p style="color:#64748b;font-size:12px;">OpenBank a.s. &middot; účinné od {{document.date}}</p>
 
@@ -154,7 +200,7 @@ Klienta informuje způsobem sjednaným v příslušné smlouvě.</p>
 </p>
 """
 
-private const val VOP_EN_BODY = """
+private const val VOP_EN_BODY = """$LETTERHEAD_EN
 <h1>General Terms and Conditions</h1>
 <p style="color:#64748b;font-size:12px;">OpenBank a.s. &middot; effective from {{document.date}}</p>
 
@@ -215,7 +261,7 @@ and will notify the Customer in the manner agreed in the relevant agreement.</p>
 // Rámcová smlouva o poskytování platebních služeb / Framework Agreement for Payment Services
 // ---------------------------------------------------------------------------------------------
 
-private const val FRAMEWORK_AGREEMENT_CS_BODY = """
+private const val FRAMEWORK_AGREEMENT_CS_BODY = """$LETTERHEAD_CS
 <h1>Rámcová smlouva o poskytování platebních služeb</h1>
 
 <p><strong>OpenBank a.s.</strong>, se sídlem Na Příkopě 1, 110 00 Praha 1, IČO 000 00 001, zapsaná v
@@ -267,7 +313,7 @@ obchodní podmínky Banky.</p>
 <p>Klient: {{#if signature.block}}{{signature.block}}{{else}}_________________________ {{party.name}}{{/if}}</p>
 """
 
-private const val FRAMEWORK_AGREEMENT_EN_BODY = """
+private const val FRAMEWORK_AGREEMENT_EN_BODY = """$LETTERHEAD_EN
 <h1>Framework Agreement for Payment Services</h1>
 
 <p><strong>OpenBank a.s.</strong>, with its registered office at Na Příkopě 1, 110 00 Prague 1, Company
@@ -323,7 +369,7 @@ form an integral part of this Agreement.</p>
 // Smlouva o zřízení a vedení běžného účtu / Current Account Opening Agreement
 // ---------------------------------------------------------------------------------------------
 
-private const val ACCOUNT_AGREEMENT_CS_BODY = """
+private const val ACCOUNT_AGREEMENT_CS_BODY = """$LETTERHEAD_CS
 <h1>Smlouva o zřízení a vedení běžného účtu</h1>
 
 <p><strong>OpenBank a.s.</strong>, se sídlem Na Příkopě 1, 110 00 Praha 1, IČO 000 00 001
@@ -366,7 +412,7 @@ ve VOP.</p>
 <p>Klient: {{#if signature.block}}{{signature.block}}{{else}}_________________________ {{party.name}}{{/if}}</p>
 """
 
-private const val ACCOUNT_AGREEMENT_EN_BODY = """
+private const val ACCOUNT_AGREEMENT_EN_BODY = """$LETTERHEAD_EN
 <h1>Current Account Opening Agreement</h1>
 
 <p><strong>OpenBank a.s.</strong>, with its registered office at Na Příkopě 1, 110 00 Prague 1, Company

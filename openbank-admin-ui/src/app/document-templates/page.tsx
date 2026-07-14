@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSession } from 'next-auth/react'
 import {
   FileSignature, Plus, Search, RefreshCw, Edit, Eye, X, Send, Archive,
-  FileText, Hash, Tag, Download, FileCode2, Info,
+  FileText, Hash, Tag, Download, FileCode2, Info, ExternalLink,
 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -124,6 +124,55 @@ function buildHighlightedPreviewHtml(bodyHtml: string): string {
   return wrapPreviewHtml(highlighted)
 }
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+// Small hand-rolled syntax highlighter for the body editor — not a full HTML
+// parser, just enough to make tag names / attributes / {{merge tokens}}
+// visually distinct for a non-technical author. Every literal text fragment
+// goes through escapeHtml(); only the <span> wrappers this function adds are
+// real markup, so the result is safe to render via dangerouslySetInnerHTML
+// (this is purely a *read-only, aria-hidden* display layer behind the actual
+// textarea — see the overlay technique below).
+const TAG_OR_TOKEN = /(\{\{[^}]*\}\})|(<\/?)([a-zA-Z][a-zA-Z0-9-]*)((?:\s+[a-zA-Z_-][a-zA-Z0-9_-]*(?:=(?:"[^"]*"|'[^']*'))?)*)(\s*\/?>)/g
+const ATTR = /([a-zA-Z_-][a-zA-Z0-9_-]*)(=)("[^"]*"|'[^']*')?/g
+
+function highlightHtmlSource(source: string): string {
+  let out = ''
+  let lastIndex = 0
+  TAG_OR_TOKEN.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = TAG_OR_TOKEN.exec(source)) !== null) {
+    out += escapeHtml(source.slice(lastIndex, m.index))
+    if (m[1]) {
+      out += `<span style="color:var(--warning-text);font-weight:600;">${escapeHtml(m[1])}</span>`
+    } else {
+      const [, , open, name, attrsRaw, close] = m
+      out += escapeHtml(open ?? '')
+      out += `<span style="color:var(--accent);font-weight:600;">${escapeHtml(name ?? '')}</span>`
+      let attrOut = ''
+      let attrLast = 0
+      ATTR.lastIndex = 0
+      let am: RegExpExecArray | null
+      const attrs = attrsRaw ?? ''
+      while ((am = ATTR.exec(attrs)) !== null) {
+        attrOut += escapeHtml(attrs.slice(attrLast, am.index))
+        attrOut += `<span style="color:var(--text-secondary);">${escapeHtml(am[1])}</span>`
+        if (am[2]) attrOut += escapeHtml(am[2])
+        if (am[3]) attrOut += `<span style="color:var(--success-text);">${escapeHtml(am[3])}</span>`
+        attrLast = ATTR.lastIndex
+      }
+      attrOut += escapeHtml(attrs.slice(attrLast))
+      out += attrOut
+      out += escapeHtml(close ?? '')
+    }
+    lastIndex = TAG_OR_TOKEN.lastIndex
+  }
+  out += escapeHtml(source.slice(lastIndex))
+  return out
+}
+
 // Default sample data for the dynamic live preview, matching MERGE_FIELDS'
 // token shape. Pure UX convenience so a new template shows a real merged
 // preview immediately — the author can freely edit it in the "Sample data
@@ -173,6 +222,7 @@ export default function DocumentTemplatesPage() {
   const [sampleDataInvalid, setSampleDataInvalid] = useState(false)
   const [previewNote, setPreviewNote] = useState<string | null>(null)
   const bodyRef = useRef<HTMLTextAreaElement>(null)
+  const highlightRef = useRef<HTMLPreElement>(null)
   // Request-generation counter (not just an AbortController) so a stale
   // response — even one that resolves before its abort takes effect — can
   // never clobber a newer keystroke's result.
@@ -268,6 +318,16 @@ export default function DocumentTemplatesPage() {
     return () => clearTimeout(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runPreview closes over formData.bodyHtml/sampleDataText, both already deps below
   }, [formData.bodyHtml, sampleDataText])
+
+  // "Open in a new window" — a Blob URL so the merged preview opens as its own
+  // real document/tab (what a client would actually see), not squeezed into a
+  // small iframe. Revoked after a delay so the new tab has time to load it.
+  function openPreviewInNewWindow() {
+    if (!previewHtml) return
+    const blobUrl = URL.createObjectURL(new Blob([previewHtml], { type: 'text/html' }))
+    window.open(blobUrl, '_blank', 'noopener,noreferrer')
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 30_000)
+  }
 
   const filtered = useMemo(() => templates.filter(tpl => {
     if (statusFilter !== 'ALL' && (tpl.status ?? 'DRAFT') !== statusFilter) return false
@@ -608,15 +668,74 @@ export default function DocumentTemplatesPage() {
                     />
                   </div>
 
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>
+                      {t('Zdrojový kód', 'Source')}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>
+                        {t('Náhled', 'Preview')}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={openPreviewInNewWindow}
+                        disabled={!previewHtml}
+                        title={t('Otevřít náhled v novém okně (jak jej uvidí klient)', 'Open the preview in a new window (as the client would see it)')}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10.5px', fontWeight: 600,
+                          padding: '2px 7px', borderRadius: '10px', border: '1px solid var(--accent-border)',
+                          background: 'var(--accent-bg)', color: 'var(--accent)',
+                          cursor: previewHtml ? 'pointer' : 'default', opacity: previewHtml ? 1 : 0.5,
+                        }}
+                      >
+                        <ExternalLink size={10} /> {t('Nové okno', 'New window')}
+                      </button>
+                    </div>
+                  </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', height: '320px' }}>
-                    <textarea
-                      ref={bodyRef}
-                      required
-                      value={formData.bodyHtml ?? ''}
-                      onChange={e => setFormData(p => ({ ...p, bodyHtml: e.target.value }))}
-                      placeholder={t('<p>Vážený/á {{party.name}}, …</p>', '<p>Dear {{party.name}}, …</p>')}
-                      style={{ width: '100%', height: '100%', resize: 'none', fontFamily: 'var(--font-mono)', fontSize: '12px', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text-primary)' }}
-                    />
+                    {/* Syntax-highlight overlay: a read-only, aria-hidden <pre> renders the
+                        colored markup behind a textarea whose own text/background are
+                        transparent (only the caret and native text-selection show), so
+                        typing/scrolling/selecting all still work exactly like a plain
+                        textarea while the author sees tags/attributes/{{tokens}} colored. */}
+                    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                      <pre
+                        ref={highlightRef}
+                        aria-hidden="true"
+                        style={{
+                          position: 'absolute', inset: 0, margin: 0, overflow: 'auto', pointerEvents: 'none',
+                          fontFamily: 'var(--font-mono)', fontSize: '12px', lineHeight: 1.5, padding: '10px',
+                          borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface-2)',
+                          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                        }}
+                        dangerouslySetInnerHTML={{
+                          __html: formData.bodyHtml
+                            ? highlightHtmlSource(formData.bodyHtml)
+                            : `<span style="color:var(--text-tertiary);">${escapeHtml(t('<p>Vážený/á {{party.name}}, …</p>', '<p>Dear {{party.name}}, …</p>'))}</span>`,
+                        }}
+                      />
+                      <textarea
+                        ref={bodyRef}
+                        required
+                        value={formData.bodyHtml ?? ''}
+                        onChange={e => setFormData(p => ({ ...p, bodyHtml: e.target.value }))}
+                        onScroll={e => {
+                          if (highlightRef.current) {
+                            highlightRef.current.scrollTop = e.currentTarget.scrollTop
+                            highlightRef.current.scrollLeft = e.currentTarget.scrollLeft
+                          }
+                        }}
+                        spellCheck={false}
+                        aria-label={t('Tělo šablony (HTML)', 'Template body (HTML)')}
+                        style={{
+                          position: 'relative', width: '100%', height: '100%', resize: 'none', margin: 0,
+                          fontFamily: 'var(--font-mono)', fontSize: '12px', lineHeight: 1.5, padding: '10px',
+                          borderRadius: '8px', border: '1px solid var(--border)',
+                          background: 'transparent', color: 'transparent', caretColor: 'var(--text-primary)',
+                          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                        }}
+                      />
+                    </div>
                     <iframe
                       title={t('Náhled šablony', 'Template preview')}
                       // Sandboxed WITHOUT allow-scripts: the merged HTML still
