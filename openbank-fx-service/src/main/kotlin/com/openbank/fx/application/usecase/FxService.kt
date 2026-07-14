@@ -4,16 +4,34 @@
 
 package com.openbank.fx.application.usecase
 
-import com.openbank.fx.application.port.`in`.*
-import com.openbank.fx.application.port.out.*
-import com.openbank.fx.domain.model.*
-import com.openbank.fx.domain.event.*
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.fx.application.port.`in`.ConvertCommand
+import com.openbank.fx.application.port.`in`.FxUseCase
+import com.openbank.fx.application.port.`in`.GetRateHistoryQuery
+import com.openbank.fx.application.port.`in`.GetRateQuery
+import com.openbank.fx.application.port.out.AmlCasePort
+import com.openbank.fx.application.port.out.AmlCaseRiskLevel
+import com.openbank.fx.application.port.out.FraudScoreCommand
+import com.openbank.fx.application.port.out.FraudScoringPort
+import com.openbank.fx.application.port.out.FraudVerdict
+import com.openbank.fx.application.port.out.FxConversionRepository
+import com.openbank.fx.application.port.out.FxRateRepository
+import com.openbank.fx.application.port.out.OpenAmlCaseCommand
+import com.openbank.fx.application.port.out.SanctionsScreeningPort
+import com.openbank.fx.application.port.out.ScreeningUnavailableException
+import com.openbank.fx.domain.event.FxConversionExecuted
+import com.openbank.fx.domain.model.FxConversion
+import com.openbank.fx.domain.model.FxConversionMath
+import com.openbank.fx.domain.model.FxConversionStatus
+import com.openbank.fx.domain.model.FxRate
+import com.openbank.fx.domain.model.RateType
 import com.openbank.fx.domain.screening.ScreeningDecision
 import com.openbank.fx.domain.screening.ScreeningMatchStatus
 import com.openbank.fx.domain.screening.ScreeningPolicy
 import com.openbank.fx.domain.screening.ScreeningResult
 import com.openbank.fx.domain.screening.ScreeningRole
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
 import java.math.BigDecimal
@@ -27,7 +45,7 @@ import java.util.UUID
 class FxService(
     private val rateRepo: FxRateRepository,
     private val convRepo: FxConversionRepository,
-    private val publisher: FxEventPublisher,
+    private val objectMapper: ObjectMapper,
     private val screeningPort: SanctionsScreeningPort,
     private val amlCasePort: AmlCasePort,
     private val metrics: DomainMetrics,
@@ -41,6 +59,11 @@ class FxService(
         const val ALERT_SANCTIONS_HIT = "SANCTIONS_HIT"
         const val ALERT_AML_HOLD = "AML_HOLD"
         const val ALERT_SCREENING_UNAVAILABLE = "SCREENING_UNAVAILABLE"
+
+        // #1033: FX conversions never actually reached Kafka — KafkaFxEventPublisher.publish()
+        // was a no-op stub. settle() now writes to the same transactional outbox every other
+        // money-path service uses (FxOutboxRepository -> fx-events-out -> openbank.fx.conversion.completed).
+        const val EVENT_FX_CONVERSION_EXECUTED = "fx.conversion.executed.v1"
     }
 
     override suspend fun getRate(query: GetRateQuery) =
@@ -141,28 +164,32 @@ class FxService(
         conversionId: UUID,
     ): FxConversion {
         val now = Instant.now(clock)
-        val saved = convRepo.save(
-            conversion(
-                cmd,
-                rate,
-                toAmountMinorUnits,
-                feeMinorUnits,
-                conversionId,
-                FxConversionStatus.SETTLED,
-                now,
-                settledAt = now,
-            ),
+        val conv = conversion(
+            cmd,
+            rate,
+            toAmountMinorUnits,
+            feeMinorUnits,
+            conversionId,
+            FxConversionStatus.SETTLED,
+            now,
+            settledAt = now,
         )
-        publisher.publish(
-            FxConversionExecuted(
-                saved.id,
-                saved.partyId,
-                saved.fromCurrency,
-                saved.toCurrency,
-                saved.fromAmountMinorUnits,
-                saved.toAmountMinorUnits,
-                saved.appliedRate,
-                occurredAt = now,
+        val event = FxConversionExecuted(
+            conv.id,
+            conv.partyId,
+            conv.fromCurrency,
+            conv.toCurrency,
+            conv.fromAmountMinorUnits,
+            conv.toAmountMinorUnits,
+            conv.appliedRate,
+            occurredAt = now,
+        )
+        val saved = convRepo.saveWithOutbox(
+            conv,
+            OutboxMessage(
+                aggregateId = conv.id,
+                eventType = EVENT_FX_CONVERSION_EXECUTED,
+                payload = objectMapper.writeValueAsString(event),
             ),
         )
         metrics.paymentCompleted("fx", "${cmd.fromCurrency}_${cmd.toCurrency}", "completed")

@@ -4,11 +4,11 @@
 
 package com.openbank.fx.application.port.out
 
-import com.openbank.fx.domain.event.FxEvent
 import com.openbank.fx.domain.model.FxConversion
 import com.openbank.fx.domain.model.FxRate
 import com.openbank.fx.domain.model.RateSource
 import com.openbank.fx.domain.model.RateType
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import java.time.Instant
 import java.util.UUID
 
@@ -51,15 +51,12 @@ interface FxConversionRepository {
 
     suspend fun save(conv: FxConversion): FxConversion
 
+    /** Persists the conversion and a transactional-outbox row in the same DB transaction (#1033). */
+    suspend fun saveWithOutbox(conv: FxConversion, outboxMessage: OutboxMessage): FxConversion
+
     suspend fun findById(id: UUID): FxConversion?
 
     suspend fun findByIdempotencyKey(key: String): FxConversion?
 
     suspend fun findByPartyId(partyId: UUID): List<FxConversion>
-}
-
-/** Outbound port for publishing FX domain events to the broker. */
-interface FxEventPublisher {
-
-    suspend fun publish(event: FxEvent)
 }
