@@ -1,11 +1,26 @@
 name: Branch cleanup
 
-# Každé pondělí 4:00 UTC smaže větve, které nemají otevřený PR a jejichž poslední
-# commit je starší než 14 dní. Chrání: main, release-please-*, dependabot/*.
-# Auto-delete on merge (GitHub setting) pokrývá čerstvé mergnuté větve okamžitě;
-# tento workflow zachytí stragglery (ruční větve, failed auto-delete, worktree leftovers).
+# Two mechanisms keep the branch list from accumulating stale refs:
+#
+# 1. Event-driven (pull_request: closed) — deletes the head branch of a bot
+#    auto-deploy PR the instant it closes, MERGED OR NOT. GitHub's "Automatically
+#    delete head branches" setting and peter-evans `delete-branch: true` both fire
+#    only on MERGE; a superseded deploy PR is CLOSED-unmerged (a newer deploy won the
+#    race), so neither removes it and the per-SHA branch orphans forever. Left alone,
+#    a rolling backlog of chore/admin-ui-deploy-<sha> / chore/gitops-auto-deploy-<sha>
+#    branches builds up (they were 57 of a 76-branch manual sweep on 2026-07-14).
+#    This job closes the leak at the source — scoped to the disposable bot patterns
+#    only, same-repo only, never a human or fork branch.
+#
+# 2. Weekly cron backstop — sweeps anything the event missed (e.g. branches created
+#    while this workflow was disabled/failing). Bot deploy-snapshot branches are
+#    deleted as soon as they have no open PR; every other straggler keeps a 14-day
+#    grace so in-flight local work is never cut. Protects: main, release-please--*,
+#    dependabot/*, and any open-PR head.
 
 on:
+  pull_request:
+    types: [closed]
   schedule:
     - cron: '0 4 * * 1'
   workflow_dispatch:
@@ -16,12 +31,59 @@ on:
         default: 'false'
 
 # Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
-# block); the prune job below declares its own override for the write access it needs.
+# block); each job below declares its own override for the write access it needs.
 permissions:
   contents: read
 
+# A burst of deploy PRs closing together would otherwise race deletes against the same
+# ref namespace. Serialize per-branch (scheduled/dispatch runs fall back to a unique
+# run-id group so they never cancel each other or an in-flight delete).
+concurrency:
+  group: branch-cleanup-${{ github.event.pull_request.head.ref || github.run_id }}
+  cancel-in-progress: false
+
 jobs:
+  # ── 1. Event-driven: delete a bot deploy branch the moment its PR closes ──────
+  delete-closed-deploy-branch:
+    name: Delete closed deploy branch
+    # Only the disposable bot auto-deploy snapshot branches, and only from this repo
+    # (never a fork head). Merged OR closed-unmerged — both leave the per-SHA branch
+    # behind unless removed here (GitHub auto-delete only covers the merged case).
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (startsWith(github.event.pull_request.head.ref, 'chore/gitops-auto-deploy-') ||
+      startsWith(github.event.pull_request.head.ref, 'chore/admin-ui-deploy-'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    timeout-minutes: 5
+    steps:
+      - name: Delete head branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BR: ${{ github.event.pull_request.head.ref }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          echo "PR #${PR_NUMBER} closed (merged=${MERGED}); head branch = ${BR}"
+          # Idempotent: GitHub's auto-delete-on-merge may have removed it already
+          # (404/422). That is success, not failure — only a genuine error should fail.
+          if gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${BR}" \
+               >/dev/null 2>/tmp/gh-err; then
+            echo "Deleted ${BR}"
+          elif grep -qE 'HTTP 404|HTTP 422|Reference does not exist|Not Found' /tmp/gh-err; then
+            echo "Already gone (auto-delete beat us): ${BR}"
+          else
+            echo "::error::could not delete ${BR}"; cat /tmp/gh-err; exit 1
+          fi
+
+  # ── 2. Weekly backstop: sweep stragglers the event-driven job missed ─────────
   prune-stale-branches:
+    name: Prune stale branches
+    # Never on pull_request — the event-driven job above owns that path.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -38,8 +100,12 @@ jobs:
           set -euo pipefail
           git fetch --prune origin
 
-          # Open PR heads — never touch these
-          OPEN_HEADS=$(gh api \
+          # Open PR heads — never touch these. --paginate: without it only the first
+          # 100 open PRs are protected, and since deploy-snapshot branches no longer
+          # get an age grace, a fresh deploy PR beyond page 1 during a large fleet
+          # sweep (>100 open PRs) could otherwise be classified "no open PR" and have
+          # its head deleted, aborting an in-flight deploy.
+          OPEN_HEADS=$(gh api --paginate \
             "repos/$GITHUB_REPOSITORY/pulls?state=open&per_page=100" \
             --jq '.[].head.ref' | sort)
 
@@ -62,18 +128,28 @@ jobs:
               SKIPPED=$(( SKIPPED + 1 )); continue
             fi
 
-            # Age check: skip if last commit is recent
-            LAST=$(git log -1 --format="%ct" "origin/$branch" 2>/dev/null || echo 0)
-            if [[ "$LAST" -gt "$CUTOFF" ]]; then
-              echo "KEEP (recent):  $branch"
-              SKIPPED=$(( SKIPPED + 1 )); continue
+            # Bot deploy-snapshot branches are disposable the moment their PR is gone —
+            # the pull_request:closed job above normally deletes them first; this is the
+            # backstop for any created while it was disabled/failing. No age grace: they
+            # are per-SHA machine artifacts and never hold human work.
+            if [[ "$branch" == chore/gitops-auto-deploy-* || \
+                  "$branch" == chore/admin-ui-deploy-* ]]; then
+              REASON="deploy-snapshot, no open PR"
+            else
+              # Age check: skip if last commit is recent (protects in-flight local work)
+              LAST=$(git log -1 --format="%ct" "origin/$branch" 2>/dev/null || echo 0)
+              if [[ "$LAST" -gt "$CUTOFF" ]]; then
+                echo "KEEP (recent):  $branch"
+                SKIPPED=$(( SKIPPED + 1 )); continue
+              fi
+              AGE=$(( ($(date -u +%s) - LAST) / 86400 ))
+              REASON="${AGE}d old"
             fi
 
-            AGE=$(( ($(date -u +%s) - LAST) / 86400 ))
             if [[ "$DRY_RUN" == "true" ]]; then
-              echo "DRY-RUN delete: $branch  (${AGE}d old)"
+              echo "DRY-RUN delete: $branch  (${REASON})"
             else
-              echo "Deleting:       $branch  (${AGE}d old)"
+              echo "Deleting:       $branch  (${REASON})"
               git push origin ":refs/heads/$branch" || \
                 echo "  WARNING: push delete failed for $branch — skipping"
             fi
