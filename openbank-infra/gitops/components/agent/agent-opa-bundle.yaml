@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: agent-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "8315dff99932c3eb"
+    openbank.tech/policy-checksum: "519bfc094e0f7669"
 data:
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -494,47 +494,50 @@ data:
           eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
           dora: "ICT change management (Art. 8–10); operational resilience via proactive pipeline monitoring"
 
-      - id: governance-auditor
+      - id: release-steward
         plane: control
-        charter: "ADR-0164"
+        charter: "ADR-0165"
         description: >
-          Post-hoc auditor of merged-PR governance compliance. For every PR merged to main, re-verifies
-          via the GitHub API that rules.yaml's own review rules were actually followed: approval count
-          vs. the money-path/default requirement, docs/threat-models/<service>.md presence for a
-          money-path change, merge-commit GPG verification, a linked issue in the PR body, and
-          (best-effort) an admin/override-flag bypass. Proposes a compliance-incident ticket through
-          the HITL queue for a human to triage — a violation on an already-merged PR is a human
-          decision, not a diff. Never merges, approves or re-runs anything.
+          Periodic guardian of the release-please / version-axis invariants. Checks
+          release-please-config.json vs .release-please-manifest.json lockstep, admin-ui
+          package.json vs version.txt sync, a fleet-wide scan for services that set
+          quarkus.application.version explicitly (proactively, ahead of the reactive
+          check-app-version-override.sh CI gate), and open-PR openapi.yaml:info.version
+          collision detection across every open PR touching a spec. Proposes a triage ticket
+          for judgment-call drift (manifest baseline, version-sync side, which racing PR
+          re-bumps) and, for the one mechanically fixable case (an explicit
+          quarkus.application.version key), a scaffold PR through the HITL queue. Never
+          edits version.txt, merges a release-please PR, or writes to openapi.yaml directly.
         enabled: true
         enforcement: block
         schedule:
-          daily: "04:30 UTC"
-          reactive: pr-merged-webhook     # triggered per PR merge to main — this agent's natural trigger,
-                                          # unlike the alert-driven goalert-webhook its siblings use
+          daily: "05:00 UTC"
+          reactive: release-please-merge-webhook   # triggered by every release-please PR merge —
+                                                    # this agent's natural trigger, the moment
+                                                    # incidents 1/2 have historically been introduced
         data_scope:
           read:
-            - github-prs-readonly        # merged-PR metadata: reviews, merge-commit verification, body, labels
-            - read.governance            # rules.yaml review + money_path_services — the compliance bar itself
-          pii: none                       # PR/review metadata only; no customer data in scope
+            - read.governance             # release-please-config.json, .release-please-manifest.json,
+                                           # per-service application.yaml (repo-checkout reads)
+            - github-prs-readonly         # open PRs touching any openapi.yaml, for the collision check
+          pii: none                       # release/version metadata only; no customer data in scope
         tools:
           allow:
             - tier: read
-              resources: [github, governance]
+              resources: [governance, github]
             - tier: write_proposal
               resources: [github-pr]      # opens draft.ticket (primary) or, rarely, a mechanical fix PR
           deny:
             - tier: write
-              resources: ["*"]            # explicit: no direct write to any PR/review/merge ever
+              resources: ["*"]            # explicit: no direct write to version.txt/openapi.yaml/manifest ever
             - tier: execute
               resources: ["*"]
         requires_human:
-          - any_compliance_incident       # HITL mandatory; a human triages every finding
+          - any_release_or_version_drift  # HITL mandatory; a human picks the correct baseline/side
           - every: proposal                 # segregation of duties: agent proposes, human disposes
-          - approver_must_differ_from: author     # segregation of duties
-          - record: reason                         # approve/reject reason -> audit
         limits:
           tokens_per_run: 50000
-          runs_per_day: 24                # one per merge is common; daily catch-up sweep is one more
+          runs_per_day: 12                # daily sweep + one per release-please merge is common
           kill_switch: true
         audit:
           capture:
@@ -543,10 +546,10 @@ data:
             - tool_calls
             - policy_decision
             - findings_detected
-            - governance_check_type_impacted
+            - release_invariant_impacted
             - human_approved_by
         compliance:
           eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
-          dora: "Art. 9 ICT risk detection; Art. 5 governance and organisation — re-verifies the repo's own change-control governance was followed"
+          dora: "Art. 9 ICT risk detection; Art. 24 testing of ICT systems — fleet-wide re-verification for the repo's own release-engineering invariants"
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}
