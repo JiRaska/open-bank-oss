@@ -47,6 +47,15 @@ aws s3 sync "$SITE" "s3://$BUCKET" \
   --content-type "application/xml; charset=utf-8" \
   --cache-control "public, max-age=3600"
 
-# 5) Bust the edge cache.
+# 5) Apple App Site Association — Associated Domains for the iOS app (ADR-0066 F2 native
+#    passkeys, webcredentials → tech.openbank.app). MUST be served as application/json at the
+#    exact extensionless path with no redirect. Uploaded AFTER the .well-known/* text sync in
+#    step 3 (which would otherwise leave it text/plain) so this content-type is the one that wins.
+aws s3 cp "$SITE/.well-known/apple-app-site-association" \
+  "s3://$BUCKET/.well-known/apple-app-site-association" \
+  --content-type "application/json" \
+  --cache-control "public, max-age=3600"
+
+# 6) Bust the edge cache.
 aws cloudfront create-invalidation --distribution-id "$DIST" --paths "/*" >/dev/null
 echo "✓ deployed — https://open-bank.tech"
