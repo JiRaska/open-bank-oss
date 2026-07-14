@@ -116,7 +116,7 @@ jobs:
                    date -u -v-${STALE_DAYS}d +%s)  # GNU / BSD date
 
           while IFS= read -r branch; do
-            branch="${branch#origin/}"
+            branch="${branch#origin/}"   # 'origin/feat/x' -> 'feat/x' (input is whitespace-free)
 
             # Immutable whitelist
             [[ "$branch" == "main" ]]              && { SKIPPED=$(( SKIPPED + 1 )); continue; }
@@ -154,7 +154,15 @@ jobs:
                 echo "  WARNING: push delete failed for $branch — skipping"
             fi
             DELETED=$(( DELETED + 1 ))
-          done < <(git branch -r | grep "^  origin/" | grep -v "HEAD")
+          # --format='%(refname:short)' yields clean 'origin/<name>' with NO leading
+          # whitespace. The old `git branch -r | grep '^  origin/'` kept git's 2-space
+          # indent ('  origin/main'), which `${branch#origin/}` below could NOT strip
+          # (the string starts with spaces, not 'origin/'), so every whitelist / open-PR
+          # / age check silently missed and the real (non-dry-run) delete built a
+          # malformed refspec that always failed — the prune loop deleted nothing since
+          # it was added (why stale branches piled up; caught by a dry-run 2026-07-14).
+          # grep drops the 'origin'/'origin/HEAD' symref (its short form is bare 'origin').
+          done < <(git branch -r --format='%(refname:short)' | grep -vE '^origin(/HEAD)?$')
 
           echo ""
           echo "Summary: deleted=$DELETED  skipped=$SKIPPED  dry_run=$DRY_RUN"
