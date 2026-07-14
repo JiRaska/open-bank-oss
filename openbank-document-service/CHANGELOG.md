@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.4.0...document-service-v0.5.0) (2026-07-14)
+
+
+### Features
+
+* **document-service:** enforce one PUBLISHED version per template code ([#1093](https://github.com/JiRaska/open-bank-oss/issues/1093)) ([6b69a34](https://github.com/JiRaska/open-bank-oss/commit/6b69a34d5b803b474b3de15a3d96e96d7e63bcb2))
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.3.0...document-service-v0.4.0) (2026-07-14)
 
 
