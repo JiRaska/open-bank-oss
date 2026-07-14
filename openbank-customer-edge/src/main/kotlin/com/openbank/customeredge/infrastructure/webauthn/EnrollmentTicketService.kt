@@ -33,7 +33,7 @@ class EnrollmentTicketService {
     lateinit var secret: String
 
     fun issue(partyId: String): String {
-        val expiresAt = (System.currentTimeMillis() / 1000L) + TTL_SECONDS
+        val expiresAt = (System.currentTimeMillis() / MILLIS_PER_SECOND) + TTL_SECONDS
         val payload = "$partyId.$expiresAt"
         val mac = hmacHex(payload)
         val partyIdB64 = Base64.getUrlEncoder().withoutPadding().encodeToString(partyId.toByteArray(Charsets.UTF_8))
@@ -47,10 +47,10 @@ class EnrollmentTicketService {
             return null
         }
         val parts = ticket.split(".")
-        if (parts.size != 3) return null
+        if (parts.size != TICKET_PARTS_COUNT) return null
         val (partyIdB64, expiresAtRaw, mac) = parts
         val expiresAt = expiresAtRaw.toLongOrNull() ?: return null
-        if (System.currentTimeMillis() / 1000L >= expiresAt) return null
+        if (System.currentTimeMillis() / MILLIS_PER_SECOND >= expiresAt) return null
         val partyId = runCatching {
             String(Base64.getUrlDecoder().decode(partyIdB64), Charsets.UTF_8)
         }.getOrNull() ?: return null
@@ -74,6 +74,8 @@ class EnrollmentTicketService {
 
     companion object {
         private const val HMAC_ALGORITHM = "HmacSHA256"
+        private const val MILLIS_PER_SECOND = 1000L
+        private const val TICKET_PARTS_COUNT = 3
 
         // The device round-trip (register/begin -> Face ID -> register/complete) is seconds;
         // 10 minutes covers a slow network / app backgrounding mid-flow without leaving a

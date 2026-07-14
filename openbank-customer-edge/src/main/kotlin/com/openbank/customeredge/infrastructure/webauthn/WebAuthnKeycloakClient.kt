@@ -49,7 +49,7 @@ class WebAuthnKeycloakClient {
 
     private val http: HttpClient = HttpClient.newBuilder()
         .version(HttpClient.Version.HTTP_1_1)
-        .connectTimeout(Duration.ofSeconds(5))
+        .connectTimeout(Duration.ofSeconds(HTTP_TIMEOUT_SECONDS))
         .build()
 
     private val json = ObjectMapper()
@@ -60,9 +60,9 @@ class WebAuthnKeycloakClient {
 
     @Synchronized
     private fun serviceToken(): String {
-        val now = System.currentTimeMillis() / 1000L
+        val now = System.currentTimeMillis() / MILLIS_PER_SECOND
         val cached = cachedToken
-        if (cached != null && tokenExpiresAt - now > 60L) return cached
+        if (cached != null && tokenExpiresAt - now > TOKEN_REFRESH_SKEW_SECONDS) return cached
         val (token, expiresIn) = grant("grant_type=client_credentials&client_id=$clientId&client_secret=$clientSecret")
         cachedToken = token
         tokenExpiresAt = now + expiresIn
@@ -74,15 +74,15 @@ class WebAuthnKeycloakClient {
             HttpRequest.newBuilder()
                 .uri(URI.create("$adminUrl/realms/$realm/protocol/openid-connect/token"))
                 .header("Content-Type", "application/x-www-form-urlencoded")
-                .timeout(Duration.ofSeconds(5))
+                .timeout(Duration.ofSeconds(HTTP_TIMEOUT_SECONDS))
                 .POST(HttpRequest.BodyPublishers.ofString(formBody))
                 .build(),
             HttpResponse.BodyHandlers.ofString(),
         )
-        check(resp.statusCode() == 200) { "Keycloak token endpoint returned ${resp.statusCode()}: ${resp.body()}" }
+        check(resp.statusCode() == HTTP_OK) { "Keycloak token endpoint returned ${resp.statusCode()}: ${resp.body()}" }
         val tree = json.readTree(resp.body())
         val token = tree.get("access_token")?.asText() ?: error("token response missing access_token")
-        return token to (tree.get("expires_in")?.asLong() ?: 60L)
+        return token to (tree.get("expires_in")?.asLong() ?: DEFAULT_EXPIRES_IN_SECONDS)
     }
 
     /**
@@ -99,12 +99,12 @@ class WebAuthnKeycloakClient {
             HttpRequest.newBuilder()
                 .uri(URI.create("$adminUrl/admin/realms/$realm/users?email=$encodedEmail&exact=true"))
                 .header("Authorization", "Bearer $token")
-                .timeout(Duration.ofSeconds(5))
+                .timeout(Duration.ofSeconds(HTTP_TIMEOUT_SECONDS))
                 .GET()
                 .build(),
             HttpResponse.BodyHandlers.ofString(),
         )
-        check(searchResp.statusCode() == 200) { "Keycloak GET /users returned ${searchResp.statusCode()}" }
+        check(searchResp.statusCode() == HTTP_OK) { "Keycloak GET /users returned ${searchResp.statusCode()}" }
         val existing = json.readTree(searchResp.body()).firstOrNull()
         if (existing != null) return existing.get("id").asText()
 
@@ -125,12 +125,12 @@ class WebAuthnKeycloakClient {
                 .uri(URI.create("$adminUrl/admin/realms/$realm/users"))
                 .header("Authorization", "Bearer $token")
                 .header("Content-Type", "application/json")
-                .timeout(Duration.ofSeconds(5))
+                .timeout(Duration.ofSeconds(HTTP_TIMEOUT_SECONDS))
                 .POST(HttpRequest.BodyPublishers.ofString(createBody))
                 .build(),
             HttpResponse.BodyHandlers.ofString(),
         )
-        check(createResp.statusCode() == 201) {
+        check(createResp.statusCode() == HTTP_CREATED) {
             "Keycloak POST /users returned ${createResp.statusCode()}: ${createResp.body()}"
         }
         val location = createResp.headers().firstValue("Location").orElse(null)
@@ -154,12 +154,12 @@ class WebAuthnKeycloakClient {
             HttpRequest.newBuilder()
                 .uri(URI.create("$adminUrl/realms/$realm/protocol/openid-connect/token"))
                 .header("Content-Type", "application/x-www-form-urlencoded")
-                .timeout(Duration.ofSeconds(5))
+                .timeout(Duration.ofSeconds(HTTP_TIMEOUT_SECONDS))
                 .POST(HttpRequest.BodyPublishers.ofString(formBody))
                 .build(),
             HttpResponse.BodyHandlers.ofString(),
         )
-        check(resp.statusCode() == 200) {
+        check(resp.statusCode() == HTTP_OK) {
             "Keycloak token-exchange returned ${resp.statusCode()}: ${resp.body()}"
         }
         val tree = json.readTree(resp.body())
@@ -171,5 +171,17 @@ class WebAuthnKeycloakClient {
 
     companion object {
         private const val TOKEN_EXCHANGE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:token-exchange"
+        private const val HTTP_TIMEOUT_SECONDS = 5L
+        private const val HTTP_OK = 200
+        private const val HTTP_CREATED = 201
+        private const val MILLIS_PER_SECOND = 1000L
+
+        // Refresh the cached service token this many seconds before its nominal expiry so a
+        // concurrent caller never races a token that's about to be rejected.
+        private const val TOKEN_REFRESH_SKEW_SECONDS = 60L
+
+        // Keycloak's token response always includes expires_in in practice; this is only a
+        // conservative fallback if a future response ever omits it.
+        private const val DEFAULT_EXPIRES_IN_SECONDS = 60L
     }
 }
