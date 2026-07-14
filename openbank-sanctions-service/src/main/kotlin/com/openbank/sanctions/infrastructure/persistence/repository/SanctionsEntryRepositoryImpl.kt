@@ -8,6 +8,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.sanctions.application.port.out.SanctionsEntryRepository
 import com.openbank.sanctions.domain.model.*
+import io.quarkus.logging.Log
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.mutiny.pgclient.PgPool
 import io.vertx.mutiny.sqlclient.Tuple
@@ -129,16 +130,57 @@ class SanctionsEntryRepositoryImpl(private val pool: PgPool, private val clock: 
         return rows.iterator().next().getLong("cnt") ?: 0L
     }
 
+    /**
+     * Parses a stored enum/JSON column, falling back to [default] on a malformed value — but
+     * LOUDLY: a silent `runCatching{}.getOrDefault()` here previously made a corrupted DB value
+     * (e.g. a `list_type` string that no longer matches [SanctionsListType], or malformed
+     * `aliases_json`) indistinguishable from genuinely absent data, with zero operator-visible
+     * signal. [rowId] is logged so a bad row can actually be found and repaired.
+     */
+    internal fun <T> parseColumnOrWarn(
+        rowId: String,
+        column: String,
+        raw: String,
+        default: T,
+        parse: (String) -> T,
+    ): T = runCatching { parse(raw) }.getOrElse {
+        Log.warnf(
+            "sanctions_entries row %s has an unparseable '%s' column (%s: %s) — falling back to %s",
+            rowId,
+            column,
+            it.javaClass.simpleName,
+            it.message,
+            default,
+        )
+        default
+    }
+
     private fun rowToEntry(row: io.vertx.mutiny.sqlclient.Row): SanctionsEntry {
         val idStr = row.getString("id") ?: UUID.randomUUID().toString()
-        val listTypeStr = row.getString("list_type") ?: ""
-        val listType = runCatching { SanctionsListType.valueOf(listTypeStr) }.getOrDefault(SanctionsListType.OFAC_SDN)
-        val entityTypeStr = row.getString("entity_type") ?: "INDIVIDUAL"
-        val entityType = runCatching { EntityType.valueOf(entityTypeStr) }.getOrDefault(EntityType.INDIVIDUAL)
-
-        val aliasesJson = row.getString("aliases_json") ?: "[]"
-        val nationalitiesJson = row.getString("nationalities") ?: "[]"
-        val programsJson = row.getString("programs") ?: "[]"
+        val listType =
+            parseColumnOrWarn(idStr, "list_type", row.getString("list_type") ?: "", SanctionsListType.OFAC_SDN) {
+                SanctionsListType.valueOf(it)
+            }
+        val entityType =
+            parseColumnOrWarn(
+                idStr,
+                "entity_type",
+                row.getString("entity_type") ?: "INDIVIDUAL",
+                EntityType.INDIVIDUAL,
+            ) {
+                EntityType.valueOf(it)
+            }
+        val aliases =
+            parseColumnOrWarn(idStr, "aliases_json", row.getString("aliases_json") ?: "[]", emptyList<String>()) {
+                mapper.readValue<List<String>>(it)
+            }
+        val nationalities =
+            parseColumnOrWarn(idStr, "nationalities", row.getString("nationalities") ?: "[]", emptyList<String>()) {
+                mapper.readValue<List<String>>(it)
+            }
+        val programs = parseColumnOrWarn(idStr, "programs", row.getString("programs") ?: "[]", emptyList<String>()) {
+            mapper.readValue<List<String>>(it)
+        }
 
         val createdAt = row.getOffsetDateTime("created_at")?.toInstant() ?: Instant.now(clock)
         val updatedAt = row.getOffsetDateTime("updated_at")?.toInstant() ?: Instant.now(clock)
@@ -149,10 +191,10 @@ class SanctionsEntryRepositoryImpl(private val pool: PgPool, private val clock: 
             externalId = row.getString("external_id"),
             entityType = entityType,
             primaryName = row.getString("primary_name") ?: "",
-            aliases = runCatching { mapper.readValue<List<String>>(aliasesJson) }.getOrDefault(emptyList()),
+            aliases = aliases,
             dateOfBirth = row.getString("date_of_birth"),
-            nationalities = runCatching { mapper.readValue<List<String>>(nationalitiesJson) }.getOrDefault(emptyList()),
-            programs = runCatching { mapper.readValue<List<String>>(programsJson) }.getOrDefault(emptyList()),
+            nationalities = nationalities,
+            programs = programs,
             searchText = "", // not needed after fetch, only used on insert
             active = row.getBoolean("active") ?: true,
             createdAt = createdAt,
