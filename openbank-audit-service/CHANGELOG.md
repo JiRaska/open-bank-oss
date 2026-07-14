@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.5](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.9.4...audit-service-v0.9.5) (2026-07-14)
+
+
+### Bug Fixes
+
+* **audit,governance:** [#996](https://github.com/JiRaska/open-bank-oss/issues/996) round 3 + graduate event-consumer-liveness to enforced ([#1082](https://github.com/JiRaska/open-bank-oss/issues/1082)) ([f4bd8b8](https://github.com/JiRaska/open-bank-oss/commit/f4bd8b810a4e116d8315e8bd6c7ca699f253cc4f))
+
 ## [0.9.4](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.9.3...audit-service-v0.9.4) (2026-07-14)
 
 
