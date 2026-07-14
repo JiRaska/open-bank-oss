@@ -5,6 +5,7 @@
 package com.openbank.customeredge.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.customeredge.infrastructure.webauthn.EnrollmentTicketService
 import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.PermitAll
 import jakarta.annotation.security.RolesAllowed
@@ -42,7 +43,10 @@ import org.eclipse.microprofile.jwt.JsonWebToken
 @Path("/customer/v1/onboarding")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-class OnboardingResource(private val upstream: UpstreamClient) {
+class OnboardingResource(
+    private val upstream: UpstreamClient,
+    private val enrollmentTicketService: EnrollmentTicketService,
+) {
 
     companion object {
         private const val MAX_BODY_BYTES = 4_096
@@ -114,8 +118,14 @@ class OnboardingResource(private val upstream: UpstreamClient) {
                 .entity("""{"error":"party-service did not return an id"}""")
                 .type(MediaType.APPLICATION_JSON)
                 .build()
+        // ADR-0066 F2 (native passkey, variant B1): a short-lived HMAC ticket the app can present
+        // as a bearer credential to WebAuthnResource's register/begin+complete BEFORE any
+        // Keycloak session exists — see EnrollmentTicketService's KDoc for why it can't just be a
+        // Keycloak JWT. Harmless to always issue: it does nothing unless AppConfig.useNativePasskey
+        // on the app side actually consumes it.
+        val enrollmentTicket = enrollmentTicketService.issue(partyId)
         return Response.status(201)
-            .entity("""{"partyId":"$partyId","status":"PENDING_ACTIVATION"}""")
+            .entity("""{"partyId":"$partyId","status":"PENDING_ACTIVATION","enrollmentTicket":"$enrollmentTicket"}""")
             .type(MediaType.APPLICATION_JSON)
             .build()
     }

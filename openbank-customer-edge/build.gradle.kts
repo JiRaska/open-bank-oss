@@ -23,8 +23,12 @@ dependencies {
     implementation(libs.quarkus.smallrye.kafka)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
-    // Redis: pending-onboarding store for four-eyes auto-resume (ADR-0072), keyed by caseId.
+    // Redis: pending-onboarding store for four-eyes auto-resume (ADR-0072), keyed by caseId;
+    // also backs the WebAuthn RP challenge/credential store (ADR-0066 F2) on the same instance.
     implementation(libs.quarkus.redis.client)
+    // WebAuthn RP verification (ADR-0066 F2 native passkey) — registration/authentication
+    // ceremony crypto (attestation + assertion). Pinned old on purpose; see libs.versions.toml.
+    implementation(libs.webauthn4j.core)
 
     implementation(project(":openbank-libs"))
 

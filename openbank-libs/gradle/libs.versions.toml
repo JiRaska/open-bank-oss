@@ -9,6 +9,11 @@ coroutines = "1.8.1"
 # on the same version, closing GHSA-hgj6-7826-r7m5 / GHSA-j3rv-43j4-c7qm /
 # GHSA-rmj7-2vxq-3g9f / etc.
 jackson = "2.22.1"
+# WebAuthn RP verification (ADR-0066 F2, customer-edge native passkey). Pinned to 0.28.x —
+# 0.31.x switched ObjectConverter to the Jackson 3 "tools.jackson" fork, which conflicts
+# with Quarkus 3.37's Jackson 2.x (jackson-databind/jackson-core, pinned above); 0.28.5
+# is the newest release still on classic com.fasterxml.jackson.
+webauthn4j = "0.28.5.RELEASE"
 # JUG — UUIDv7 (RFC 9562) generation for time-ordered identifiers (ADR-0106). FasterXML,
 # Apache-2.0, same org as Jackson (already a core dep). Vetted generator instead of a
 # hand-rolled one: intra-millisecond monotonicity (RFC 9562 §6.2) is subtle to get right.
@@ -92,6 +97,7 @@ quarkus-opentelemetry = { module = "io.quarkus:quarkus-opentelemetry" }
 quarkus-oidc = { module = "io.quarkus:quarkus-oidc" }
 quarkus-oidc-client-reactive-filter = { module = "io.quarkus:quarkus-rest-client-oidc-filter" }
 quarkus-redis-client = { module = "io.quarkus:quarkus-redis-client" }
+webauthn4j-core = { module = "com.webauthn4j:webauthn4j-core", version.ref = "webauthn4j" }
 quarkus-grpc = { module = "io.quarkus:quarkus-grpc" }
 quarkus-config-yaml = { module = "io.quarkus:quarkus-config-yaml" }
 quarkus-smallrye-openapi = { module = "io.quarkus:quarkus-smallrye-openapi" }

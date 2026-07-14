@@ -7,6 +7,7 @@ package com.openbank.customeredge
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.customeredge.infrastructure.rest.OnboardingResource
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
+import com.openbank.customeredge.infrastructure.webauthn.EnrollmentTicketService
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -21,7 +22,12 @@ import org.junit.jupiter.api.Test
  */
 class OnboardingStartValidationTest {
 
-    private fun resource(upstream: UpstreamClient = mockk()): OnboardingResource = OnboardingResource(upstream).apply {
+    private fun resource(upstream: UpstreamClient = mockk()): OnboardingResource = OnboardingResource(
+        upstream,
+        mockk<EnrollmentTicketService>(relaxed = true).apply {
+            every { issue(any()) } returns "fake-enrollment-ticket"
+        },
+    ).apply {
         jsonMapper = ObjectMapper()
         partyServiceUrl = "http://party"
     }
