@@ -1,0 +1,29 @@
+# flaky-test-hunter: fleet-wide silent-test-failure static analyzer Temporal workflow service (ADR-0168). Namespace: flaky-test-hunter.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: flaky-test-hunter
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/flaky-test-hunter
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: flaky-test-hunter
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false

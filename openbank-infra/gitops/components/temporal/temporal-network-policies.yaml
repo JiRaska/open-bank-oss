@@ -71,6 +71,7 @@ spec:
                   - release-steward
                   - docs-truth-agent
                   - authz-policy-auditor
+                  - flaky-test-hunter
       ports:
         - protocol: TCP
           port: 7233
