@@ -1,20 +1,19 @@
-# TEMPORARY exception — remove once openbank-ci-runner carries a valid CycloneDX SBOM
-# attestation and `kubectl get polr -A` reports 0 fail for verify-openbank-image-sbom-attestation
-# against arc-runners pods.
+# Pre-existing exception, applied out-of-band on 2026-06-17 (reason predates this repo's
+# tracked history) — scoped to the signature-verification policy only. Not a temporary
+# incident exception; do not remove without confirming why it was originally needed.
 #
-# Incident (2026-07-12): verify-openbank-image-sbom-attestation graduated Audit -> Enforce
-# (PR #887) while openbank-ci-runner's own attestation step in runner-image.yml is
-# continue-on-error and had been silently failing. Once Enforce landed, every ARC runner pod
-# using that image (openbank-build AND openbank-deploy pools) was rejected at admission —
-# a hard deadlock, since the only workflow that can rebuild+attest a fixed runner image
-# (runner-image.yml) itself needs an ARC runner (ambient IRSA for the ECR/KMS push, see that
-# workflow's own comment) that is blocked by the same policy it would fix. No workflow
-# re-trigger can break this cycle from inside the cluster.
-#
-# This PolicyException mirrors the existing (previously gitops-untracked, applied out-of-band
-# on 2026-06-17) arc-runner-image-exception scope — same namespace, same object name, adding
-# only the SBOM-attestation rule the original exception predates. Scoped to Pod resources in
-# arc-runners only; does not touch any openbank-* application namespace or the signature policy.
+# The SBOM-attestation entry that used to also live here (added 2026-07-12 as a TEMPORARY
+# incident exception, see git history for this file) has been REMOVED 2026-07-14: it was
+# needed because verify-openbank-image-sbom-attestation graduated Audit -> Enforce (PR
+# #887) while openbank-ci-runner's own attestation step in runner-image.yml was
+# continue-on-error and had been silently failing — every ARC runner pod (openbank-build
+# AND openbank-deploy) was rejected at admission, a hard deadlock since the only workflow
+# that can rebuild+attest a fixed image needs a runner blocked by the same policy it would
+# fix. Root-cause fixed in PR #963 (cosign baked into the image, loud non-continue-on-error
+# verification) + PR #1051 (the pinned digest was ALSO stale, predating both the JDK-preload
+# fix and PR #963 — re-bumped to the first post-#963 build). Confirmed live before removal:
+# `cosign verify-attestation --key <the policy's public key> --type cyclonedx
+# <the new pinned digest>` succeeds against openbank-ci-runner's actual current image.
 apiVersion: kyverno.io/v2
 kind: PolicyException
 metadata:
@@ -33,7 +32,3 @@ spec:
       ruleNames:
         - verify-cosign-signature
         - autogen-verify-cosign-signature
-    - policyName: verify-openbank-image-sbom-attestation
-      ruleNames:
-        - verify-cyclonedx-sbom-attestation
-        - autogen-verify-cyclonedx-sbom-attestation
