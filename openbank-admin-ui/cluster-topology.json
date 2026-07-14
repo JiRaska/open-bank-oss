@@ -1,10 +1,10 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-07-14T08:18:45.068Z",
+  "generatedAt": "2026-07-14T08:39:40.542Z",
   "counts": {
-    "namespaces": 62,
-    "networkPolicies": 85,
+    "namespaces": 63,
+    "networkPolicies": 86,
     "externalSecrets": 117,
     "clusterPolicies": 4
   },
@@ -89,6 +89,12 @@
       "name": "audit",
       "group": "domain",
       "role": "Auditní záznamy",
+      "declared": true
+    },
+    {
+      "name": "authz-policy-auditor",
+      "group": "domain",
+      "role": "authz-policy-auditor",
       "declared": true
     },
     {
@@ -440,9 +446,9 @@
       "icon": "network",
       "status": "planned",
       "analogy": "Zamčené dveře mezi patry — bez propustky se mezi odděleními neprojde.",
-      "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 85 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
+      "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 86 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
       "controls": [
-        "NetworkPolicy (85 / 62)",
+        "NetworkPolicy (86 / 63)",
         "per-namespace deny-by-default (cíl)"
       ],
       "adr": [
@@ -600,13 +606,13 @@
     {
       "item": "Namespace segmentace",
       "plan": "Doménová izolace, 1 ns / doména",
-      "reality": "62 namespaců",
+      "reality": "63 namespaců",
       "status": "live"
     },
     {
       "item": "NetworkPolicy (east-west)",
       "plan": "deny-by-default v každém ns",
-      "reality": "85 / 62 ns má NetworkPolicy → většina provozu otevřená",
+      "reality": "86 / 63 ns má NetworkPolicy → většina provozu otevřená",
       "status": "planned"
     },
     {
