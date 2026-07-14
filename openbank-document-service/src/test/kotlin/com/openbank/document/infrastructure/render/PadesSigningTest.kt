@@ -56,6 +56,16 @@ class PadesSigningTest {
         }
     }
 
+    @Test
+    fun `hasSignatureNamed detects a present signature and ignores absent names and unsigned pdfs`() {
+        val pdf = blankPdf()
+        val signed = PadesSigning.applySignature(pdf, PadesSigning.generateEphemeralIdentity("party-1"), "party-1", "s")
+
+        assertThat(PadesSigning.hasSignatureNamed(signed, "party-1")).isTrue()
+        assertThat(PadesSigning.hasSignatureNamed(signed, "party-2")).isFalse()
+        assertThat(PadesSigning.hasSignatureNamed(pdf, "party-1")).isFalse()
+    }
+
     /** Verifies a detached CMS/PKCS7 signature against the certificate embedded in it. */
     @Suppress("UNCHECKED_CAST")
     private fun verifies(cmsBytes: ByteArray, signedContent: ByteArray): Boolean {

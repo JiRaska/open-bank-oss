@@ -6,7 +6,9 @@ package com.openbank.document.infrastructure.persistence.repository
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.document.application.port.out.DocumentRepositoryPort
+import com.openbank.document.application.port.out.DuplicateDocumentException
 import com.openbank.document.domain.model.Document
+import com.openbank.document.infrastructure.persistence.PostgresConflicts
 import com.openbank.document.infrastructure.persistence.entity.DocumentEntity
 import com.openbank.document.infrastructure.persistence.mapper.toDomain
 import com.openbank.document.infrastructure.persistence.mapper.toEntity
@@ -42,6 +44,10 @@ class DocumentRepositoryImpl :
         Panache.withSession { find("partyRef", partyRef).list() }
             .awaitSuspending().map { it.toDomain(objectMapper) }
 
+    override suspend fun findByIdempotencyKey(idempotencyKey: String): Document? =
+        Panache.withSession { find("idempotencyKey", idempotencyKey).firstResult() }
+            .awaitSuspending()?.toDomain(objectMapper)
+
     override suspend fun saveWithOutbox(document: Document, outboxMessage: OutboxMessage): Document =
         Panache.withTransaction {
             find("id", document.id).firstResult().flatMap { existing ->
@@ -53,6 +59,15 @@ class DocumentRepositoryImpl :
                         .chain { _ -> outboxRepo.persistInTransaction(outboxMessage) }
                         .replaceWith(document)
                 }
+            }
+        }.onFailure().transform { e ->
+            // Translate the idempotency-key unique-violation at the persistence boundary so the
+            // application layer catches a typed DuplicateDocumentException, never a raw SQL/Hibernate
+            // exception (ADR-0002). Any other failure passes through unchanged.
+            if (PostgresConflicts.isUniqueViolation(e)) {
+                DuplicateDocumentException("A document already exists for idempotency key ${document.idempotencyKey}")
+            } else {
+                e
             }
         }.awaitSuspending()
 

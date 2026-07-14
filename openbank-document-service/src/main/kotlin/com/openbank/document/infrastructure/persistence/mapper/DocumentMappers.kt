@@ -59,6 +59,7 @@ fun DocumentEntity.toDomain(mapper: ObjectMapper) = Document(
     productRef = productRef,
     retainUntil = retainUntil,
     createdAt = createdAt,
+    idempotencyKey = idempotencyKey,
 )
 
 fun Document.toEntity(mapper: ObjectMapper) = DocumentEntity().also {
@@ -74,6 +75,7 @@ fun Document.toEntity(mapper: ObjectMapper) = DocumentEntity().also {
     it.partyRef = partyRef
     it.caseRef = caseRef
     it.productRef = productRef
+    it.idempotencyKey = idempotencyKey
     it.retainUntil = retainUntil
     it.createdAt = createdAt
 }

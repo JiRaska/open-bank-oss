@@ -85,8 +85,14 @@ class OpenBaoClientSignatureAdapter(
         .build()
 
     override suspend fun signAsClient(pdf: ByteArray, partyRef: String): ByteArray = withContext(Dispatchers.IO) {
-        val identity = issueOneTimeIdentity(partyRef)
-        PadesSigning.applySignature(pdf, identity, partyRef, SIGNATURE_REASON)
+        // Idempotent: a retry after a persistence failure must not layer a second signature for a
+        // signer who has already signed this document.
+        if (PadesSigning.hasSignatureNamed(pdf, partyRef)) {
+            pdf
+        } else {
+            val identity = issueOneTimeIdentity(partyRef)
+            PadesSigning.applySignature(pdf, identity, partyRef, SIGNATURE_REASON)
+        }
     }
 
     @Suppress("TooGenericExceptionCaught")

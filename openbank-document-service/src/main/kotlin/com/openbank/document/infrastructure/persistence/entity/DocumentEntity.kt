@@ -54,6 +54,9 @@ class DocumentEntity {
     @field:Column(name = "product_ref")
     var productRef: String? = null
 
+    @field:Column(name = "idempotency_key")
+    var idempotencyKey: String? = null
+
     @field:Column(name = "retain_until")
     var retainUntil: LocalDate? = null
 

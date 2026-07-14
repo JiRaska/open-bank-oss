@@ -32,6 +32,10 @@ data class Document(
     val productRef: String?,
     val retainUntil: LocalDate?,
     val createdAt: Instant,
+    // Onboarding-specific idempotency key ("onboarding:<accountId>"), null for every other document
+    // type. Backed by a partial unique index (V6) so at-least-once event redelivery cannot render a
+    // second onboarding contract for the same account (ADR-0162 D7). Not part of the content address.
+    val idempotencyKey: String? = null,
 ) {
     fun markPendingSignature(): Document {
         require(status == DocumentStatus.GENERATED) { "Only GENERATED documents can enter signing" }
