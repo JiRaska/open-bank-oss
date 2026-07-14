@@ -84,7 +84,7 @@ class OpenBaoClientSignatureAdapter(
     @Suppress("TooGenericExceptionCaught")
     private fun issueOneTimeIdentity(partyRef: String): SigningIdentity {
         if (!Files.exists(Path.of(saTokenPath))) {
-            logDevFallback(partyRef, "no projected ServiceAccount token at $saTokenPath")
+            logDevFallback("no projected ServiceAccount token")
             return PadesSigning.generateEphemeralIdentity(partyRef, EPHEMERAL_VALIDITY_DAYS)
         }
         return try {
@@ -95,17 +95,21 @@ class OpenBaoClientSignatureAdapter(
             // client exception's message can embed response-body fragments, which must never
             // reach a log line (CodeQL java/log-injection -- "insertion of sensitive information
             // into log files"). The class name is enough to diagnose which failure mode fired.
-            logDevFallback(partyRef, e.javaClass.simpleName)
+            logDevFallback(e.javaClass.simpleName)
             PadesSigning.generateEphemeralIdentity(partyRef, EPHEMERAL_VALIDITY_DAYS)
         }
     }
 
-    private fun logDevFallback(partyRef: String, reason: String) {
+    // No partyRef (or any other per-signer identifier) in this log line, deliberately: CodeQL's
+    // sensitive-data-in-logs query flags a customer-identifying reference interpolated into a log
+    // message, and this warning's whole purpose (an operational dev-fallback signal) doesn't need
+    // per-signer granularity anyway -- the reason code alone is enough to diagnose it.
+    private fun logDevFallback(reason: String) {
         logger.warn(
-            "Could not issue a OpenBao-rooted one-time signing certificate for party $partyRef ($reason) — " +
-                "falling back to an EPHEMERAL, in-memory, non-CA-issued certificate. This is DEV-ONLY: the " +
-                "resulting signature is worthless as evidence (no auditable issuing CA). Production must run " +
-                "with a bound ServiceAccount + a reachable OpenBao pki-document-signing engine " +
+            "Could not issue a OpenBao-rooted one-time signing certificate ($reason) — falling back " +
+                "to an EPHEMERAL, in-memory, non-CA-issued certificate. This is DEV-ONLY: the resulting " +
+                "signature is worthless as evidence (no auditable issuing CA). Production must run with " +
+                "a bound ServiceAccount + a reachable OpenBao pki-document-signing engine " +
                 "(ADR-0162 D4 continued, runbook 0008).",
         )
     }
