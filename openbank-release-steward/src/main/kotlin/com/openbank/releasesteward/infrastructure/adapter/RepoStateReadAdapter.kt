@@ -162,6 +162,6 @@ private object AppVersionOverrideScanner {
     private fun isSecondLevelKey(line: String): Boolean {
         if (!line.startsWith("  ")) return false
         val third = line.getOrNull(2) ?: return false
-        return third != ' ' && third != '#'
+        return third != ' ' && third != '\t' && third != '#'
     }
 }

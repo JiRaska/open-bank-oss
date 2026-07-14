@@ -193,11 +193,11 @@ governance-auditor (ADR-0164):
 - [ADR-0112](0112-ai-finops-agent.md) — sibling control-plane agent (cost axis), the template this
   agent's shape follows
 - [ADR-0119](0119-ai-devops-agent.md) — sibling control-plane agent (delivery axis)
-- [ADR-0163](0163-control-liveness-sentinel-ai-agent.md) — sibling control-plane agent
-  (operational liveness axis)
-- [ADR-0164](0164-governance-auditor-ai-agent.md) — sibling control-plane agent (merged-PR
-  compliance axis); same "a passing check is not proof the invariant holds" premise applied to the
-  release axis here
+- ADR-0163 (control-liveness-sentinel) — sibling control-plane agent (operational liveness axis);
+  link omitted until that ADR merges — see docs/agents/release-steward.md's same footnote
+- ADR-0164 (governance-auditor) — sibling control-plane agent (merged-PR compliance axis); same
+  "a passing check is not proof the invariant holds" premise applied to the release axis here;
+  link omitted until that ADR merges
 - [ADR-0101](0101-temporal-durable-execution.md) — Temporal orchestration
 - `openbank-infra/scripts/check-release-registration.py` — the manifest/config lockstep gate this
   agent mirrors (incident 1)

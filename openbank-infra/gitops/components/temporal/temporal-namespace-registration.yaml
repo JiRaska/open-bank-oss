@@ -89,6 +89,7 @@ spec:
             # openbank-settlement (its own TemporalConfig @WithDefault, like fx/statements —
             # NOT openbank-default; an earlier comment here was wrong. The live worker polls
             # namespace="openbank-settlement", confirmed by NOT_FOUND on go-live — runbook 0006).
+            # release-steward (ADR-0165) → openbank-governance.
             - name: NAMESPACES
               value: "openbank-default openbank-payments openbank-fx openbank-statements openbank-settlement openbank-finops openbank-devops openbank-liveness openbank-governance"
             - name: RETENTION

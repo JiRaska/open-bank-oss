@@ -68,6 +68,7 @@ spec:
                   - devops-agent
                   - control-liveness-sentinel
                   - governance-auditor
+                  - release-steward
       ports:
         - protocol: TCP
           port: 7233

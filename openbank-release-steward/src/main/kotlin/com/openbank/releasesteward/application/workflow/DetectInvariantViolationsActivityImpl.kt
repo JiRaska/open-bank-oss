@@ -25,6 +25,7 @@ open class DetectInvariantViolationsActivityImpl : DetectInvariantViolationsActi
         addAll(checkAdminUiVersionSync(snapshot.repoState))
         addAll(checkAppVersionOverride(snapshot.repoState))
         addAll(checkOpenApiVersionCollisions(snapshot.openApiPrChanges))
+        addAll(checkOpenApiVersionRegressions(snapshot.openApiPrChanges, snapshot.mainOpenApiVersions))
     }
 
     // Mirrors openbank-infra/scripts/check-release-registration.py's exact set logic, run
@@ -155,6 +156,31 @@ open class DetectInvariantViolationsActivityImpl : DetectInvariantViolationsActi
                 )
             }
 
+    // New capability no existing CI gate has (ADR-0165 incident 4, second half of the Decision
+    // text): compare each open PR's proposed info.version against main's CURRENT value for that
+    // same openapi.yaml, not only against other open PRs' proposed values. Until now only the
+    // pairwise (PR vs PR) comparison existed — snapshot.mainOpenApiVersions was populated by
+    // CollectRepoStateActivityImpl but never read anywhere.
+    private fun checkOpenApiVersionRegressions(
+        prChanges: List<OpenApiPrChange>,
+        mainVersions: Map<String, String>,
+    ): List<ReleaseStewardFinding> = prChanges.mapNotNull { change ->
+        val mainVersion = mainVersions[change.service] ?: return@mapNotNull null
+        if (SemverComparator.isGreaterThan(change.proposedInfoVersion, mainVersion)) return@mapNotNull null
+        newFinding(
+            component = "${change.service}/openapi.yaml",
+            checkType = ReleaseInvariantCheckType.OPENAPI_VERSION_COLLISION,
+            severity = FindingSeverity.CRITICAL,
+            title = "PR #${change.prNumber} proposes info.version ${change.proposedInfoVersion} for " +
+                "${change.service}/openapi.yaml, which is not strictly greater than main's current " +
+                "value $mainVersion — the PR must bump past main before merge (ADR-0165 incident 4)",
+            prNumber = change.prNumber,
+            prUrl = change.prUrl,
+            rawMetricValue = BigDecimal.ZERO,
+            threshold = BigDecimal.ONE,
+        )
+    }
+
     private fun newFinding(
         component: String,
         checkType: ReleaseInvariantCheckType,
@@ -177,4 +203,27 @@ open class DetectInvariantViolationsActivityImpl : DetectInvariantViolationsActi
         threshold = threshold,
         status = FindingStatus.OPEN,
     )
+}
+
+/**
+ * Minimal dotted-numeric SemVer comparator (major.minor.patch) — split out of
+ * [DetectInvariantViolationsActivityImpl] to keep that class's own function count within the
+ * fleet's `TooManyFunctions` detekt threshold, mirroring how `RepoStateReadAdapter` splits out
+ * `AppVersionOverrideScanner`. Missing/unparseable segments default to 0; sufficient for this
+ * repo's disciplined X.Y.Z version.txt/info.version values — full SemVer pre-release/build-
+ * metadata precedence is out of scope for this check.
+ */
+private object SemverComparator {
+    fun isGreaterThan(candidate: String, baseline: String): Boolean {
+        val c = parts(candidate)
+        val b = parts(baseline)
+        for (i in 0 until maxOf(c.size, b.size)) {
+            val cv = c.getOrElse(i) { 0 }
+            val bv = b.getOrElse(i) { 0 }
+            if (cv != bv) return cv > bv
+        }
+        return false
+    }
+
+    private fun parts(v: String) = v.trim().split(".").map { it.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
 }
