@@ -74,18 +74,13 @@ openbank:
     alertmanager-url: ${ALERTMANAGER_URL:http://alertmanager-operated.observability:9093}
     # OpenAI-compatible model backend — DeepInfra, the same provider devops-agent (ADR-0119) and
     # the customer copilot (ADR-0089) already run against; "litellm.ai-platform" is not deployed
-    # anywhere in this repo's gitops (ADR-0163 E2E-wiring note). model.api-key is read separately
-    # (OPTIONAL lookup) so an un-seeded key degrades diagnosis instead of CrashLooping.
+    # anywhere in this repo's gitops (ADR-0163 E2E-wiring note).
     model-endpoint: ${LIVENESS_MODEL_ENDPOINT:https://api.deepinfra.com/v1/openai}
     model-id: ${LIVENESS_MODEL_ID:deepseek-ai/DeepSeek-V3.2}
-    model:
-      api-key: ${LIVENESS_MODEL_API_KEY:}
     github-api-url: ${LIVENESS_GITHUB_API_URL:https://api.github.com}
     github-owner: ${LIVENESS_GITHUB_OWNER:JiRaska}
     github-repo: ${LIVENESS_GITHUB_REPO:open-bank-oss}
     github-proposal-dir: ${LIVENESS_GITHUB_PROPOSAL_DIR:docs/liveness-sentinel-proposals}
-    github:
-      token: ${LIVENESS_GITHUB_TOKEN:}
     # 2x expected interval == the same paging threshold ADR-0160 mechanism 3 defines, so this
     # agent's CRITICAL finding can never silently disagree with the Alertmanager rule.
     stale-heartbeat-multiplier: ${STALE_HEARTBEAT_MULTIPLIER:2.0}

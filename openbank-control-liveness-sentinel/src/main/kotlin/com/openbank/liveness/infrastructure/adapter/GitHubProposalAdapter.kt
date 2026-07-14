@@ -32,7 +32,7 @@ import java.util.Base64
  * writes code to a service or merges (charter: write_proposal=github-pr; gh.pr.merge denied,
  * ADR-0031).
  *
- * Auth is a fine-grained token (openbank.liveness-sentinel.github.token ← LIVENESS_GITHUB_TOKEN)
+ * Auth is a fine-grained token (liveness.github.token ← LIVENESS_GITHUB_TOKEN)
  * read via an OPTIONAL lookup, so an un-seeded token degrades to a descriptive placeholder rather
  * than CrashLooping or breaking the workflow. Any API failure degrades the same way — the finding
  * itself is not lost, only the GitHub side-effect.
@@ -45,9 +45,14 @@ class GitHubProposalAdapter(private val config: LivenessSentinelConfig) : GitHub
 
     private val log = Logger.getLogger(GitHubProposalAdapter::class.java)
 
+    // Deliberately OUTSIDE the openbank.liveness-sentinel prefix LivenessSentinelConfig's strict
+    // @ConfigMapping owns — a key nested under that prefix with no matching interface property
+    // fails boot with SRCFG00050 ("does not map to any root"), which crash-looped this pod on
+    // first real deploy. "liveness.github.token" resolves via SmallRye's env-var relaxed matching
+    // straight from LIVENESS_GITHUB_TOKEN, no application.yaml entry needed.
     private val token: String
         get() = ConfigProvider.getConfig()
-            .getOptionalValue("openbank.liveness-sentinel.github.token", String::class.java).orElse("")
+            .getOptionalValue("liveness.github.token", String::class.java).orElse("")
 
     private val http: HttpClient by lazy {
         HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_S)).build()
@@ -57,10 +62,10 @@ class GitHubProposalAdapter(private val config: LivenessSentinelConfig) : GitHub
     override suspend fun openTicket(finding: LivenessFinding, diagnosis: String): String {
         if (token.isBlank()) {
             log.warn(
-                "openbank.liveness-sentinel.github.token (env LIVENESS_GITHUB_TOKEN) not seeded — " +
+                "liveness.github.token (env LIVENESS_GITHUB_TOKEN) not seeded — " +
                     "no ticket opened (degraded)",
             )
-            return "not opened: openbank.liveness-sentinel.github.token not seeded"
+            return "not opened: liveness.github.token not seeded"
         }
         return try {
             withContext(Dispatchers.IO) {
@@ -85,10 +90,10 @@ class GitHubProposalAdapter(private val config: LivenessSentinelConfig) : GitHub
     override suspend fun openProposalPr(finding: LivenessFinding, fixDiff: String): String {
         if (token.isBlank()) {
             log.warn(
-                "openbank.liveness-sentinel.github.token (env LIVENESS_GITHUB_TOKEN) not seeded — " +
+                "liveness.github.token (env LIVENESS_GITHUB_TOKEN) not seeded — " +
                     "no proposal PR opened (degraded)",
             )
-            return "not opened: openbank.liveness-sentinel.github.token not seeded"
+            return "not opened: liveness.github.token not seeded"
         }
         val shortId = finding.id.take(SHORT_ID_LEN)
         val branch = "control-liveness-sentinel/proposal-$shortId"
