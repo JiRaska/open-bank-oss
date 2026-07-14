@@ -4,7 +4,7 @@
 
 'use client'
 import Link from 'next/link'
-import { GitBranch, BookOpen, Network, FileCode, Shield, ShieldAlert, Cloud, ScrollText, ShieldCheck, LayoutGrid, Smartphone, Bluetooth, Fingerprint } from 'lucide-react'
+import { GitBranch, BookOpen, Network, FileCode, Shield, ShieldAlert, Cloud, ScrollText, ShieldCheck, LayoutGrid, Smartphone, Bluetooth, Fingerprint, FileSignature } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 // Each section's title/desc is a [cs, en] tuple, spread into t(...) at render.
@@ -47,6 +47,17 @@ const sections: {
       'Open BLE proximity-pay standard without QR: iOS→Android / Bank A→B sequence, security layers and a comparison vs QR (ADR-0095)',
     ],
     badge: 'ADR-0095',
+    color: '#6366f1',
+  },
+  {
+    href: '/docs/document-management',
+    icon: <FileSignature size={22} />,
+    title: ['Správa dokumentů', 'Document Management'],
+    desc: [
+      'Šablony, generování PDF a e-podpisová ceremonie: proč je to vlastní ohraničená doména a jak tok jede od editoru po podepsanou událost (ADR-0161, ADR-0162)',
+      'Templating, PDF generation and the e-signature ceremony: why it is its own bounded context and how the flow runs from the editor to the signed event (ADR-0161, ADR-0162)',
+    ],
+    badge: 'ADR-0161 · 0162',
     color: '#6366f1',
   },
   {

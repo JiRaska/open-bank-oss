@@ -1,0 +1,70 @@
+%% title: Document Service ER Schema
+erDiagram
+    document_templates {
+        UUID id PK
+        VARCHAR code "unique with version"
+        VARCHAR version
+        VARCHAR name
+        VARCHAR engine "HANDLEBARS"
+        TEXT body_html
+        VARCHAR locale
+        VARCHAR status "DRAFT|PUBLISHED|RETIRED"
+        VARCHAR product_ref
+        VARCHAR classification
+        TIMESTAMPTZ created_at
+        VARCHAR created_by
+    }
+
+    documents {
+        UUID id PK
+        VARCHAR template_code
+        VARCHAR template_version
+        CHAR_64 sha256
+        VARCHAR storage_key
+        VARCHAR content_type
+        BIGINT size_bytes
+        VARCHAR status "GENERATED|PENDING_SIGNATURE|SIGNED|ARCHIVED"
+        TEXT metadata_json
+        VARCHAR party_ref
+        VARCHAR case_ref
+        VARCHAR product_ref
+        DATE retain_until
+        TIMESTAMPTZ created_at
+    }
+
+    object_store_blobs {
+        VARCHAR storage_key PK
+        BYTEA content
+        VARCHAR content_type
+        JSONB metadata
+        TIMESTAMPTZ created_at
+    }
+
+    signature_ceremonies {
+        UUID id PK
+        INTEGER version "optimistic lock"
+        UUID document_id
+        TEXT signers_json
+        VARCHAR status "DRAFT|PENDING|PARTIALLY_SIGNED|COMPLETED|DECLINED|EXPIRED"
+        VARCHAR signature_level "ADVANCED|QUALIFIED"
+        TIMESTAMPTZ created_at
+    }
+
+    document_outbox {
+        BIGSERIAL id PK
+        UUID event_id UK
+        UUID aggregate_id
+        VARCHAR event_type
+        TEXT payload
+        VARCHAR status "PENDING|SENT|FAILED|DEAD"
+        INTEGER attempt_count
+        TIMESTAMPTZ sent_at
+        TEXT last_error
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    document_templates ||--o{ documents : "renders"
+    documents ||--|| object_store_blobs : "storage_key (ADR-0161 shared adapter)"
+    documents ||--o{ signature_ceremonies : "document_id"
+    documents ||--o{ document_outbox : "aggregate_id"

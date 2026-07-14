@@ -53,6 +53,12 @@ export const PERMISSIONS = {
   // Technical accounts
   "technical-accounts:view":  [ROLES.ADMIN, ROLES.OPERATOR, ROLES.AUDITOR],
   "technical-accounts:edit":  [ROLES.ADMIN],
+  // Document templates (ADR-0162 D6) — legal/compliance template authoring.
+  // No dedicated "legal" role exists yet, so ROLE_COMPLIANCE (the closest
+  // legal/ops persona) gets edit rights alongside ROLE_ADMIN; ROLE_OPERATOR is
+  // view-only (mirrors the ADR's RBAC note verbatim).
+  "templates:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  "templates:edit":           [ROLES.ADMIN, ROLES.COMPLIANCE],
   // System
   "system:view":              [ROLES.ADMIN, ROLES.OPERATOR],
   "system:config":            [ROLES.ADMIN],

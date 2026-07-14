@@ -1,0 +1,10 @@
+# weasyprint — BSD-3-Clause license (https://github.com/Kozea/WeasyPrint/blob/main/LICENSE)
+# HTML/CSS -> PDF renderer, no browser engine. Pinned to a specific recent
+# release per ADR-0162 D3 (default lightweight renderer for PdfRenderPort).
+# >=68.0 required: GHSA-983w-rhvv-gwmv (CVE-2025-68616) — WeasyPrint's default_url_fetcher
+# follows HTTP redirects via urllib without re-invoking a custom url_fetcher's validation,
+# an SSRF bypass. app.py's restricted_url_fetcher already closes this independently (it
+# never calls default_url_fetcher, or lets urllib touch the network, for anything but a
+# data: URI — no http(s) request the fetcher approves can ever be redirected), but pinning
+# a patched release is correct hygiene and satisfies the dependency-review CI gate.
+weasyprint==69.0

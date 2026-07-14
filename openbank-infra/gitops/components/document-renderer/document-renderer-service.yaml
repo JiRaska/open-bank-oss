@@ -1,0 +1,108 @@
+# document-renderer: standalone WeasyPrint HTML->PDF HTTP sidecar (ADR-0162 D3),
+# the default lightweight adapter behind document-service's PdfRenderPort. Lives at
+# /openbank-document-renderer — NOT an `openbank-*-service`: no version.txt, not a
+# release-please component, not part of the Gradle/Kotlin monorepo build (see that
+# directory's README.md / Dockerfile). Stateless: no database, no Kafka, no OPA
+# sidecar — it has no REST API surface needing @Authorize/OPA gating, it is an
+# internal rendering primitive reachable only from document-service (gated by
+# NetworkPolicy, openbank-infra/scripts/gen-network-policies.py), the same trust
+# model as the OPA sidecar itself (see README.md "Ports & paths").
+#
+# No PodMonitor: app.py is Python stdlib http.server + weasyprint only (no OTel/
+# Prometheus client dependency in requirements.txt) — it exposes no /metrics
+# endpoint, so a PodMonitor here would scrape nothing. Add one if/when the app
+# gains real instrumentation.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: document-renderer
+  namespace: documents
+  labels:
+    app.kubernetes.io/name: document-renderer
+    app.kubernetes.io/part-of: documents
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: document-renderer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: document-renderer
+        app.kubernetes.io/part-of: documents
+    spec:
+      # runAsUser/runAsGroup: 999 matches the Dockerfile's `useradd --system` openbank
+      # user exactly (verified: `docker run --rm openbank-document-renderer:local id`
+      # -> uid=999(openbank) gid=999(openbank) — the image built earlier this session).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: document-renderer
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-document-renderer:sandbox-pending-build
+          # NOTE: brand-new image, never pushed to ECR — sandbox-pending-build is a
+          # deliberately-fake placeholder tag (mirrors document-service's own
+          # first-gitops-PR placeholder). It HAS been built + run locally
+          # (docker build -t openbank-document-renderer:local ., per README.md) but
+          # not pushed anywhere — needs a real build+push to ECR before this
+          # Deployment can actually roll out.
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8200
+          # WeasyPrint/Chromium-family renderers are typically memory-hungry per
+          # request, but this is stdlib http.server + WeasyPrint only — no browser
+          # engine (README.md: ~50-150 MB per process vs. ~150-400 MB for headless
+          # Chromium). Moderate limits as a starting point; revisit under real load.
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: document-renderer
+  namespace: documents
+  labels:
+    app.kubernetes.io/name: document-renderer
+spec:
+  selector:
+    app.kubernetes.io/name: document-renderer
+  ports:
+    - name: http
+      port: 8200
+      targetPort: http

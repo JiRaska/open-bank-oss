@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: Apache-2.0
+# Single-owner Postgres for document-service (cluster-wide CNPG operator, ADR-0009).
+# Backs document metadata, blob storage (PostgresBlobStore, ADR-0161 D1 — the default
+# lightweight object-store adapter before a real S3 bucket exists, ADR-0161 D3) and the
+# outbox (dispatch-enabled=true, publishes to openbank.documents.document.event).
+# Database: openbank_documents, owner: openbank. The application-level Postgres schema
+# (documents_schema, per governance.yaml: schemaName) is created by document-service's own
+# Flyway migrations at boot, not by this Cluster's bootstrap.initdb — mirrors every other
+# CNPG-backed service in the fleet (billing-db.yaml et al.).
+# Must reconcile BEFORE the document-service image that carries the datasource config
+# deploys, else Flyway-at-start fails on a missing DB (same pattern as billing-db.yaml /
+# product-catalog-db.yaml / anacredit-db.yaml).
+# NOTE: no S3 WAL/backup here yet — same gap as anacredit-db/billing-db, tracked as a
+# follow-up (#863 pattern).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: document-service-db
+  namespace: documents
+spec:
+  monitoring:
+    enablePodMonitor: true
+  # HA (ADR-0159): primary + hot standby with async streaming replication and
+  # CNPG-managed automated failover. `enablePodAntiAffinity` + required
+  # `kubernetes.io/hostname` keeps the two pods on DIFFERENT NODES — that is both
+  # the HA guarantee and the fix for the single-instance un-drainable-PDB node-roll
+  # block (issue #809): with a standby present the PDB permits one disruption, so
+  # Karpenter drains/rolls a DB-hosting node without the manual delete-primary dance.
+  # The topologySpreadConstraint softly spreads the pair across AZs when capacity
+  # allows. Async replication (no minSyncReplicas) keeps the write path independent
+  # of standby health; synchronous is deferred to a production decision (ADR-0159).
+  instances: 2
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          cnpg.io/cluster: document-service-db
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_documents
+      owner: openbank

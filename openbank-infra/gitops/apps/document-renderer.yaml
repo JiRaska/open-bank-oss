@@ -1,0 +1,40 @@
+# ArgoCD app for document-renderer (ADR-0162 D3): a standalone WeasyPrint
+# HTML->PDF HTTP sidecar behind document-service's PdfRenderPort. Lives at
+# /openbank-document-renderer — NOT an `openbank-*-service`: no version.txt, not
+# a release-please component, not part of the Gradle/Kotlin monorepo build (see
+# that directory's README.md). It is deployed like any other in-cluster
+# workload, just built/versioned on its own independent cadence — the same
+# relationship the OPA sidecar image has to the services that call it.
+#
+# Namespace: `documents`, co-located with its only caller (document-service).
+# This is the simplest topology for a single-consumer internal rendering
+# primitive with no REST API surface of its own worth isolating into a
+# separate bounded context/namespace — reachable only from document-service,
+# gated by NetworkPolicy (openbank-infra/scripts/gen-network-policies.py),
+# never exposed outside the cluster.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: document-renderer
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/document-renderer
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: documents
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s

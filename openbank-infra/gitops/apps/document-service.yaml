@@ -1,0 +1,38 @@
+# ArgoCD app for document-service (ADR-0161: object storage standard for
+# application documents; ADR-0162: document management templating + e-signature
+# architecture). New bounded context -> its own namespace (`documents`, ADR-0037:
+# domain = namespace), not folded into an existing one.
+#
+# Postgres-backed (document-service-db.yaml, single-owner CNPG cluster, database
+# openbank_documents / schema documents_schema per governance.yaml). Produces
+# domain events to Kafka (openbank.documents.document.event). Calls out to the
+# document-renderer sidecar service (document-renderer.yaml, co-located in this
+# same namespace) over plain HTTP for HTML->PDF rendering (ADR-0162 D3) — that is
+# a separate Deployment reached over the cluster network, not a pod-local sidecar
+# container, since it is reused across every document-service pod.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: document-service
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/document-service
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: documents
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s

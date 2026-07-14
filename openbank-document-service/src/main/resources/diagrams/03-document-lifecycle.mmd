@@ -1,0 +1,16 @@
+%% title: Document Lifecycle
+stateDiagram-v2
+    [*] --> GENERATED : POST /render (template PUBLISHED, bytes stored, sha256 computed)
+
+    GENERATED --> PENDING_SIGNATURE : signature ceremony opened over the document
+    PENDING_SIGNATURE --> SIGNED : ceremony COMPLETED (all signers SIGNED, PAdES-sealed in phase-2)
+
+    GENERATED --> ARCHIVED : retention / manual archive
+    SIGNED --> ARCHIVED : retention (retain_until reached)
+
+    ARCHIVED --> [*]
+
+    note right of PENDING_SIGNATURE
+        Ceremony status: DRAFT -> PENDING -> PARTIALLY_SIGNED -> COMPLETED
+        (or DECLINED / EXPIRED). Any signer DECLINED -> ceremony DECLINED.
+    end note

@@ -1,0 +1,18 @@
+# documents namespace (ADR-0037: domain = namespace). App plane. New bounded
+# context (ADR-0161/ADR-0162: object storage + document management/e-signature),
+# not folded into an existing namespace.
+#
+# Holds document-service (this component) AND document-renderer (its
+# single-consumer rendering sidecar, components/document-renderer/) — the two
+# are co-located here deliberately (see document-renderer.yaml's Application
+# header) rather than each owning a namespace.yaml; this file is the one that
+# actually creates it, applied as part of the document-service Application sync.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: documents
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
