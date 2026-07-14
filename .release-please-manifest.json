@@ -12,7 +12,7 @@
   "openbank-clearing-service": "0.7.0",
   "openbank-clearing-simulator": "0.4.4",
   "openbank-consent-service": "0.10.7",
-  "openbank-control-liveness-sentinel": "0.2.0",
+  "openbank-control-liveness-sentinel": "0.3.0",
   "openbank-copilot-service": "0.5.2",
   "openbank-customer-edge": "0.17.4",
   "openbank-devops-agent": "0.3.2",
