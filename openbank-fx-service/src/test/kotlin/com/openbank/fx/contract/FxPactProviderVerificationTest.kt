@@ -110,6 +110,11 @@ class FxPactProviderVerificationTest {
 
     @State("an EUR/CZK rate exists")
     fun stateEurCzkRateExists() = runOnVertxContext {
+        // pact-jvm 4.7.3 invokes each @State SETUP callback twice per interaction (same behavior
+        // documented in party-service's PartyEventPactProviderVerificationTest) — without this
+        // guard, a second run.save() would insert a second, duplicate EUR/CZK SPOT row (no unique
+        // constraint on the pair/type/source/validFrom, so it wouldn't even fail loudly).
+        if (rateRepo.findLatest("EUR", "CZK", RateType.SPOT) != null) return@runOnVertxContext
         val now = Instant.now()
         rateRepo.save(
             FxRate(
