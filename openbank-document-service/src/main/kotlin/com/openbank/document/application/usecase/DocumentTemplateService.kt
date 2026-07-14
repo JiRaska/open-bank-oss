@@ -6,6 +6,7 @@ package com.openbank.document.application.usecase
 
 import com.openbank.document.application.port.`in`.CreateTemplateCommand
 import com.openbank.document.application.port.`in`.DocumentTemplateUseCase
+import com.openbank.document.application.port.out.TemplatePublishConflictException
 import com.openbank.document.application.port.out.TemplateRenderPort
 import com.openbank.document.application.port.out.TemplateRepositoryPort
 import com.openbank.document.domain.model.DocumentTemplate
@@ -44,8 +45,23 @@ class DocumentTemplateService(
 
     // TODO(ADR-0162): emit DocumentTemplatePublished to the outbox on publish once template-scoped
     // outbox co-persistence is wired (the DocumentGenerated path already demonstrates the pattern).
-    override suspend fun publishTemplate(id: UUID): DocumentTemplate =
-        repo.save((repo.findById(id) ?: error("Template not found: $id")).publish())
+    //
+    // Version-resolution policy (ADR-0162): publishing a version supersedes whatever is currently
+    // PUBLISHED for the same `code` — that predecessor is retired atomically in the same
+    // transaction as this publish (repo.publishReplacing), so a code never has two PUBLISHED rows
+    // at once, not even transiently. A concurrent publish of the same code (two operators, or a
+    // retry racing itself) is rejected with a clear conflict rather than silently producing two
+    // "current" versions — the exact defect found live in the seed data before this policy existed.
+    override suspend fun publishTemplate(id: UUID): DocumentTemplate {
+        val template = repo.findById(id) ?: error("Template not found: $id")
+        val toPublish = template.publish()
+        val predecessor = repo.findLatestPublished(template.code)?.takeIf { it.id != template.id }
+        return try {
+            repo.publishReplacing(toPublish, predecessor?.retire())
+        } catch (e: TemplatePublishConflictException) {
+            error("Template ${template.code} is being published concurrently by another request — retry: ${e.message}")
+        }
+    }
 
     override suspend fun retireTemplate(id: UUID): DocumentTemplate =
         repo.save((repo.findById(id) ?: error("Template not found: $id")).retire())

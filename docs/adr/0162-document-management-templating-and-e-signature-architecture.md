@@ -42,9 +42,10 @@ library and rules out embedding AGPL apps (DocuSeal/Documenso) as linked compone
 Document management is its own aggregate set — template registry, rendering, storage,
 lifecycle, and signing ceremony — too distinct to fold into product-catalog (a clean JSONB
 read-model service) and needed by non-product flows anyway. Product-catalog keeps only the
-**reference**: `TermsAndConditions.url` evolves into a `documentTemplateRef(code, version)`
-pointing into document-service. The product↔template *binding* stays with the product; the
-document *machinery* lives in the new service.
+**reference**: `TermsAndConditions` gains `documentTemplateCode`, a `code`-only pointer into
+document-service (see the version-resolution policy under D2 for why not `(code,
+version)`). The product↔template *binding* stays with the product; the document *machinery*
+lives in the new service.
 
 The service is **not money-path** and must stay off the synchronous fund-release path: it
 **emits events** (`DOCUMENT_SIGNED`, `SIGNATURE_CEREMONY_COMPLETED`) that consumers
@@ -68,6 +69,39 @@ RETIRED}`, effective-dated) — unlike product-catalog's soft embedded `versionH
 
 Rendering sits behind `TemplateRenderPort` (data-merge) and `PdfRenderPort` (HTML→PDF), so
 the engine is swappable without touching the domain.
+
+**Version-resolution policy** (added retroactively — this was left implicit long enough
+that a real environment accumulated two coexisting `PUBLISHED` versions of the same
+template `code` with nothing marking either "current"):
+
+- **A `code` has at most one `PUBLISHED` row at any time.** Publishing a new version
+  **retires its predecessor atomically**, in the same transaction — a code is never
+  briefly unpublished, nor ever has two rows simultaneously `PUBLISHED`, not even under a
+  crash mid-operation or two concurrent publish calls. Enforced at two layers: application
+  logic retires the current `PUBLISHED` sibling as part of every publish, and a Postgres
+  **partial unique index** (`uq_document_templates_one_published_per_code`) makes the
+  invariant a hard DB constraint, not just an application convention — a lost race surfaces
+  as an explicit conflict, never a silent second "current" version.
+- **A new document render (or a product's `documentTemplateRef`, D1) that names only a
+  `code` resolves to whatever is currently `PUBLISHED`** — the "latest" a caller gets when
+  it doesn't pin an exact version. A caller pins an exact `(code, version)` only when it
+  deliberately needs a non-current version (e.g. re-rendering against a historical version
+  for a support case).
+- **An already-rendered `Document` keeps the exact `(templateCode, templateVersion)` it was
+  actually generated from, permanently** — snapshotted at render time, never re-resolved.
+  Publishing a newer template version afterwards cannot retroactively change what a
+  customer already saw and signed; a `SignatureCeremony` inherits this same guarantee
+  transitively, since it is scoped to one already-rendered `Document`.
+
+### D1 (continued) — `documentTemplateRef` is a code, not a pinned version
+
+Product-catalog's `TermsAndConditions.documentTemplateCode` (D1) intentionally carries only
+the template **code**, not a `(code, version)` pair: the product should always mean
+"whatever is currently published for this document", so a document-service republish never
+requires touching the product. Combined with the version-resolution policy above, this
+gives both halves of the guarantee this ADR was missing: the product always gets the
+current version, and any document already rendered/signed from an older version is
+unaffected by a later republish.
 
 ### D3 — PDF rendering: `WeasyPrint` default, `Gotenberg` opt-in, behind `PdfRenderPort`
 

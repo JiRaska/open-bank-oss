@@ -33,10 +33,12 @@ object DocumentTemplateSeed {
 
     // v1.1.0 (2026-07-14): added the OpenBank letterhead (inline-SVG logo). Published templates
     // are immutable (DocumentTemplate.publish()/domain rule), so this is a NEW version — new fixed
-    // IDs, not an in-place edit of the v1.0.0 rows already seeded — coexisting with the original
-    // v1.0.0 seed (DocumentTemplateSeeder adds whichever (id) rows are missing, it does not
-    // truncate/replace, so both versions end up in the table; that is correct, not a bug — it is
-    // exactly what "published is immutable, a change ships as a new version" looks like in practice.
+    // IDs, not an in-place edit of the v1.0.0 rows already seeded. Superseding the v1.0.0 rows is
+    // now handled automatically: DocumentTemplateSeeder retires the current PUBLISHED sibling for
+    // a code before inserting its replacement (ADR-0162 version-resolution policy — a code has at
+    // most one PUBLISHED row at a time), and a one-time migration
+    // (V5__enforce_one_published_template_per_code.sql) retired the v1.0.0 rows this list had
+    // already left dangling as PUBLISHED before that policy existed.
     val templates: List<DocumentTemplate> = listOf(
         template(
             id = "1e575a01-0000-4000-9000-000000000011",

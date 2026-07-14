@@ -10,11 +10,29 @@ import com.openbank.document.domain.model.SignatureCeremony
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import java.util.UUID
 
+/**
+ * Thrown by [TemplateRepositoryPort.publishReplacing] when a concurrent publish of the same
+ * template `code` lost the race (a Postgres unique-violation on the partial index that enforces
+ * "at most one PUBLISHED row per code", translated at the persistence-adapter boundary so the
+ * application layer never depends on a framework/SQL exception type — ADR-0002 layering).
+ */
+class TemplatePublishConflictException(message: String) : RuntimeException(message)
+
 /** Persistence port for the [DocumentTemplate] aggregate. */
 interface TemplateRepositoryPort {
     suspend fun save(template: DocumentTemplate): DocumentTemplate
     suspend fun findById(id: UUID): DocumentTemplate?
     suspend fun findPublished(code: String, version: String): DocumentTemplate?
+
+    /**
+     * The current PUBLISHED version for [code] — the "latest" a new render/product reference
+     * resolves to when it pins no exact version (ADR-0162 version-resolution policy). At most one
+     * row can be PUBLISHED per code at a time (enforced by [publishReplacing] plus a DB partial
+     * unique index, `uq_document_templates_one_published_per_code`), so this is a lookup, not a
+     * ranking — the tie-break sort only matters transiently, mid-[publishReplacing], or for
+     * pre-existing data from before that invariant was enforced.
+     */
+    suspend fun findLatestPublished(code: String): DocumentTemplate?
 
     // Named findAllTemplates, not listAll: a Panache-backed implementor already inherits
     // PanacheRepository's own zero-arg `listAll(): Uni<List<Entity>>` — same erased JVM signature,
@@ -26,6 +44,14 @@ interface TemplateRepositoryPort {
     // platform convention used by account-service/ledger-service) is a follow-up if/when the
     // catalog needs stable forward paging past one bounded page.
     suspend fun findAllTemplates(limit: Int): List<DocumentTemplate>
+
+    /**
+     * Publishes [toPublish] and, if [toRetire] is non-null, retires it in the SAME transaction —
+     * so a code's predecessor is never left PUBLISHED alongside its successor, nor briefly
+     * unpublished, even if the process crashes mid-operation (ADR-0162 version-resolution policy:
+     * publishing a version supersedes, and immediately retires, whatever it replaces).
+     */
+    suspend fun publishReplacing(toPublish: DocumentTemplate, toRetire: DocumentTemplate?): DocumentTemplate
 }
 
 /** Persistence port for the [Document] aggregate, including transactional-outbox co-persistence. */

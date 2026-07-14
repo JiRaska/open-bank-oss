@@ -128,6 +128,13 @@ data class TermsAndConditions(
     val effectiveTo: LocalDate? = null,
     val language: String = "cs",
     val summary: String? = null,
+    // Reference by CODE, deliberately not (code, version) (ADR-0162 D1/version-resolution policy):
+    // openbank-document-service enforces at most one PUBLISHED version per code at a time, so a
+    // product always resolves to whatever is currently PUBLISHED for this code -- it never needs
+    // updating just because document-service published a new template version. An already-signed
+    // customer document is unaffected either way: it snapshots the exact template version it was
+    // actually rendered from at render time, not this reference.
+    val documentTemplateCode: String? = null,
 )
 
 data class ProductVersion(

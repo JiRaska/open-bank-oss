@@ -45,7 +45,9 @@ data class TemplateResponse(
 
 data class RenderDocumentRequest(
     val templateCode: String,
-    val templateVersion: String,
+    // Omit to render the current PUBLISHED version of templateCode (ADR-0162 version-resolution
+    // policy) -- pin an exact version only to deliberately render a non-current one.
+    val templateVersion: String? = null,
     val data: Map<String, Any?> = emptyMap(),
     val contentType: String = "application/pdf",
     val partyRef: String? = null,
