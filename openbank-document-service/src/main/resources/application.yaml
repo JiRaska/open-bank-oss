@@ -147,6 +147,14 @@ openbank:
   # nothing needs overriding here for production. Locally/in tests, the projected ServiceAccount
   # token simply doesn't exist at that path, so the adapter falls back to its own DEV-ONLY ephemeral
   # identity without any config needed either.
+  signature:
+    # ADR-0162 D4 continued — go-live gate for real (non-DEV-ONLY) signatures. Default off keeps the
+    # service runnable on the ephemeral fallback (both the seal's in-memory cert and the client's
+    # ephemeral leaf). Flip OPENBANK_SIGNATURE_REQUIRE_TRUSTED_ISSUER=true in the deployment env once
+    # a real seal keystore + the OpenBao pki-document-signing engine are provisioned: any signing act
+    # that then cannot obtain a trusted certificate fails loud (fail-closed) rather than silently
+    # producing evidence-worthless output, and the service refuses to boot without a real seal key.
+    require-trusted-issuer: ${OPENBANK_SIGNATURE_REQUIRE_TRUSTED_ISSUER:false}
 
 mp:
   messaging:

@@ -10,6 +10,7 @@ import org.apache.pdfbox.Loader
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDPage
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.io.ByteArrayOutputStream
 
@@ -21,12 +22,13 @@ import java.io.ByteArrayOutputStream
  */
 class OpenBaoClientSignatureAdapterTest {
 
-    private val adapter = OpenBaoClientSignatureAdapter(
+    private fun adapter(requireTrustedIssuer: Boolean = false) = OpenBaoClientSignatureAdapter(
         baoAddr = "http://openbao.invalid:8200",
         role = "document-service-signing",
         issuePath = "pki-document-signing/issue/client-signing",
         saTokenPath = "/nonexistent/path/token",
         ttl = "300s",
+        requireTrustedIssuer = requireTrustedIssuer,
         objectMapper = ObjectMapper(),
     )
 
@@ -34,11 +36,20 @@ class OpenBaoClientSignatureAdapterTest {
     fun `falls back to a valid ephemeral one-time signature when OpenBao is not reachable`(): Unit = runBlocking {
         val pdf = blankPdf()
 
-        val signed = adapter.signAsClient(pdf, "party-42")
+        val signed = adapter().signAsClient(pdf, "party-42")
 
         val signatures = Loader.loadPDF(signed).use { it.signatureDictionaries }
         assertThat(signatures).hasSize(1)
         assertThat(signatures[0].name).isEqualTo("party-42")
+    }
+
+    @Test
+    fun `fails loud instead of falling back when require-trusted-issuer is set`(): Unit = runBlocking {
+        // Fail-closed go-live gate: with no real OpenBao reachable and the guard on, a signing act
+        // must refuse rather than silently produce an evidence-worthless ephemeral signature.
+        assertThatThrownBy { runBlocking { adapter(requireTrustedIssuer = true).signAsClient(blankPdf(), "party-42") } }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("require-trusted-issuer")
     }
 
     private fun blankPdf(): ByteArray {

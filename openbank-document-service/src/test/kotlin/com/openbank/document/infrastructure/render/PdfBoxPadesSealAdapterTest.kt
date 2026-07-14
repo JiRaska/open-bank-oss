@@ -12,6 +12,7 @@ import org.apache.pdfbox.Loader
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDPage
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.io.ByteArrayOutputStream
 import java.time.Instant
@@ -30,6 +31,7 @@ class PdfBoxPadesSealAdapterTest {
         val adapter = PdfBoxPadesSealAdapter(
             keystorePath = Optional.of("/nonexistent/path/keystore.p12"),
             keystorePassword = Optional.of("irrelevant"),
+            requireTrustedIssuer = false,
         )
 
         val signed = adapter.sealPades(blankPdf(), ceremony())
@@ -41,12 +43,31 @@ class PdfBoxPadesSealAdapterTest {
 
     @Test
     fun `an absent keystore path also falls back to the ephemeral identity`(): Unit = runBlocking {
-        val adapter = PdfBoxPadesSealAdapter(keystorePath = Optional.empty(), keystorePassword = Optional.empty())
+        val adapter = PdfBoxPadesSealAdapter(
+            keystorePath = Optional.empty(),
+            keystorePassword = Optional.empty(),
+            requireTrustedIssuer = false,
+        )
 
         val signed = adapter.sealPades(blankPdf(), ceremony())
 
         val signatures = Loader.loadPDF(signed).use { it.signatureDictionaries }
         assertThat(signatures).hasSize(1)
+    }
+
+    @Test
+    fun `with no usable keystore and the guard on, refuses to start (fail-closed)`() {
+        // Go-live gate: with require-trusted-issuer set and no real keystore, the bean must refuse
+        // to construct (fail boot) rather than seal with an evidence-worthless ephemeral identity.
+        assertThatThrownBy {
+            PdfBoxPadesSealAdapter(
+                keystorePath = Optional.empty(),
+                keystorePassword = Optional.empty(),
+                requireTrustedIssuer = true,
+            )
+        }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("require-trusted-issuer")
     }
 
     private fun ceremony() = SignatureCeremony(
