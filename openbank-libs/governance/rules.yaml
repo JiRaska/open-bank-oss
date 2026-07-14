@@ -609,7 +609,7 @@ provenance:
 dependencies:
   license_allowlist: [Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, EPL-2.0, MPL-2.0, ISC]
   license_denylist: [GPL-2.0, GPL-3.0, AGPL-3.0]   # copyleft -- denied for THIRD-PARTY deps of the Apache-2.0 platform
-  # Carve-out (ADR-0136, supersedes the ADR-0031 D8 separate-repo plan): the four AI agent
+  # Carve-out (ADR-0136, supersedes the ADR-0031 D8 separate-repo plan): the AI agent
   # services are OpenBank's open-core component and are licensed AGPL-3.0-only + a parallel
   # commercial licence -- IN-REPO, not Apache-2.0. The denylist above governs the Apache-2.0
   # platform tree; AGPL-3.0-only is the intended licence of the agent services, so the gate
@@ -622,16 +622,28 @@ dependencies:
         - openbank-copilot-service/
         - openbank-devops-agent/
         - openbank-finops-agent/
+        - openbank-control-liveness-sentinel/
+        - openbank-governance-auditor/
+        - openbank-release-steward/
+        - openbank-docs-truth-agent/
+        - openbank-authz-policy-auditor/
+        - openbank-flaky-test-hunter/
       reason: "open-core: AGPL-3.0-only + commercial dual-licensing of the AI agent services"
       adr: ADR-0136
   license_boundary_exceptions:
-    - description: "AGPL/Apache seam (in-repo). The four agent services are AGPL-3.0-only; no Apache-2.0 module may take a build/compile dependency on them (only network/HTTP use is allowed). They depend on openbank-libs (Apache-2.0), which is permitted -- copyleft may consume permissive code."
+    - description: "AGPL/Apache seam (in-repo). The AI agent services are AGPL-3.0-only; no Apache-2.0 module may take a build/compile dependency on them (only network/HTTP use is allowed). They depend on openbank-libs (Apache-2.0), which is permitted -- copyleft may consume permissive code."
       agpl_modules:
         - openbank-agent-service
         - openbank-copilot-service
         - openbank-devops-agent
         - openbank-finops-agent
-      rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent') as a dependency"
+        - openbank-control-liveness-sentinel
+        - openbank-governance-auditor
+        - openbank-release-steward
+        - openbank-docs-truth-agent
+        - openbank-authz-policy-auditor
+        - openbank-flaky-test-hunter
+      rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent'|':openbank-control-liveness-sentinel'|':openbank-governance-auditor'|':openbank-release-steward'|':openbank-docs-truth-agent'|':openbank-authz-policy-auditor'|':openbank-flaky-test-hunter') as a dependency"
       license: "AGPL-3.0-only"
       adr: ADR-0136
   block_on_cve_severity: [CRITICAL, HIGH]

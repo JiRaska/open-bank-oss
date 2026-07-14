@@ -67,6 +67,7 @@ spec:
                   - finops-agent
                   - devops-agent
                   - control-liveness-sentinel
+                  - governance-auditor
       ports:
         - protocol: TCP
           port: 7233

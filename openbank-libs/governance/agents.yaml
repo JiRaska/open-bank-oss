@@ -367,3 +367,58 @@ agents:
     compliance:
       eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
       dora: "Art. 9 ICT risk detection; Art. 24 testing of ICT systems — fleet-wide correlator for ADR-0160's detection controls"
+
+  - id: governance-auditor
+    plane: control
+    charter: "ADR-0164"
+    description: >
+      Post-hoc auditor of merged-PR governance compliance. For every PR merged to main, re-verifies
+      via the GitHub API that rules.yaml's own review rules were actually followed: approval count
+      vs. the money-path/default requirement, docs/threat-models/<service>.md presence for a
+      money-path change, merge-commit GPG verification, a linked issue in the PR body, and
+      (best-effort) an admin/override-flag bypass. Proposes a compliance-incident ticket through
+      the HITL queue for a human to triage — a violation on an already-merged PR is a human
+      decision, not a diff. Never merges, approves or re-runs anything.
+    enabled: true
+    enforcement: block
+    schedule:
+      daily: "04:30 UTC"
+      reactive: pr-merged-webhook     # triggered per PR merge to main — this agent's natural trigger,
+                                      # unlike the alert-driven goalert-webhook its siblings use
+    data_scope:
+      read:
+        - github-prs-readonly        # merged-PR metadata: reviews, merge-commit verification, body, labels
+        - read.governance            # rules.yaml review + money_path_services — the compliance bar itself
+      pii: none                       # PR/review metadata only; no customer data in scope
+    tools:
+      allow:
+        - tier: read
+          resources: [github, governance]
+        - tier: write_proposal
+          resources: [github-pr]      # opens draft.ticket (primary) or, rarely, a mechanical fix PR
+      deny:
+        - tier: write
+          resources: ["*"]            # explicit: no direct write to any PR/review/merge ever
+        - tier: execute
+          resources: ["*"]
+    requires_human:
+      - any_compliance_incident       # HITL mandatory; a human triages every finding
+      - every: proposal                 # segregation of duties: agent proposes, human disposes
+      - approver_must_differ_from: author     # segregation of duties
+      - record: reason                         # approve/reject reason -> audit
+    limits:
+      tokens_per_run: 50000
+      runs_per_day: 24                # one per merge is common; daily catch-up sweep is one more
+      kill_switch: true
+    audit:
+      capture:
+        - model_id
+        - prompt_hash
+        - tool_calls
+        - policy_decision
+        - findings_detected
+        - governance_check_type_impacted
+        - human_approved_by
+    compliance:
+      eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
+      dora: "Art. 9 ICT risk detection; Art. 5 governance and organisation — re-verifies the repo's own change-control governance was followed"
