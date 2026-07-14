@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.3.0...document-service-v0.4.0) (2026-07-14)
+
+
+### Features
+
+* **document-service,admin-ui:** letterhead + editor UX (new-window preview, syntax highlighting) ([#1083](https://github.com/JiRaska/open-bank-oss/issues/1083)) ([2da7ba6](https://github.com/JiRaska/open-bank-oss/commit/2da7ba6e8adb1bed9cc88d7f2b9c24c49ac39d91))
+
+
+### Bug Fixes
+
+* **document-service:** return bodyHtml from the templates API ([#1073](https://github.com/JiRaska/open-bank-oss/issues/1073)) ([7e49b9b](https://github.com/JiRaska/open-bank-oss/commit/7e49b9b504c69141269751b5fc3e9c8da662dd62))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.2.0...document-service-v0.3.0) (2026-07-14)
 
 
