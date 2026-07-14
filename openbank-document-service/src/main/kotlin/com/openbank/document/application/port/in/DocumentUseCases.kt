@@ -47,6 +47,8 @@ data class OpenCeremonyCommand(
     val signatureLevel: SignatureLevel,
 )
 
+data class IssueOnboardingDocumentCommand(val accountId: UUID, val partyRef: String, val productId: UUID)
+
 /** Authoring and publication of document templates. */
 interface DocumentTemplateUseCase {
     suspend fun createTemplate(cmd: CreateTemplateCommand): DocumentTemplate
@@ -96,4 +98,14 @@ interface SignatureCeremonyUseCase {
         evidenceRef: String? = null,
     ): SignatureCeremony
     suspend fun getCeremony(id: UUID): SignatureCeremony?
+}
+
+/**
+ * Reacts to a new account (ADR-0086 event-driven, non-money-path — never a synchronous gate on
+ * account opening): renders the product's bound onboarding document (if any) and opens a
+ * signature ceremony for the account holder. Idempotent — safe under at-least-once Kafka delivery
+ * / replay (see [com.openbank.document.application.usecase.OnboardingDocumentService]).
+ */
+interface OnboardingDocumentUseCase {
+    suspend fun issueOnboardingDocument(cmd: IssueOnboardingDocumentCommand)
 }

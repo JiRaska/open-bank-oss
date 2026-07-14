@@ -62,6 +62,10 @@ quarkus:
     sca-service:
       url: ${SCA_SERVICE_URL:http://localhost:8121}
       scope: jakarta.inject.Singleton
+    product-catalog-api:
+      url: ${PRODUCT_CATALOG_SERVICE_URL:http://localhost:8104}
+      connect-timeout: 3000
+      read-timeout: 5000
   redis:
     hosts: redis://localhost:6379
   smallrye-reactive-messaging:
@@ -137,6 +141,20 @@ openbank:
   # (same Optional<String> reasoning as objectstore.s3.endpoint-override above) — leaving them
   # wholly absent is what makes PdfBoxPadesSealAdapter fall back to its DEV-ONLY ephemeral
   # certificate. Production sets both via real config/secrets, never a blank-string default.
+  #
+  # ADR-0162 D4 continued: client-pki.* all have code-level defaults (OpenBaoClientSignatureAdapter's
+  # @ConfigProperty defaultValue) pointing at the real in-cluster OpenBao address/mount/role, so
+  # nothing needs overriding here for production. Locally/in tests, the projected ServiceAccount
+  # token simply doesn't exist at that path, so the adapter falls back to its own DEV-ONLY ephemeral
+  # identity without any config needed either.
+  signature:
+    # ADR-0162 D4 continued — go-live gate for real (non-DEV-ONLY) signatures. Default off keeps the
+    # service runnable on the ephemeral fallback (both the seal's in-memory cert and the client's
+    # ephemeral leaf). Flip OPENBANK_SIGNATURE_REQUIRE_TRUSTED_ISSUER=true in the deployment env once
+    # a real seal keystore + the OpenBao pki-document-signing engine are provisioned: any signing act
+    # that then cannot obtain a trusted certificate fails loud (fail-closed) rather than silently
+    # producing evidence-worthless output, and the service refuses to boot without a real seal key.
+    require-trusted-issuer: ${OPENBANK_SIGNATURE_REQUIRE_TRUSTED_ISSUER:false}
 
 mp:
   messaging:
@@ -156,6 +174,16 @@ mp:
         topic: openbank.documents.document.event
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
+    incoming:
+      # ADR-0162 D7: onboarding wiring — consumes account-service's own AccountCreated event
+      # (same topic balance-service's BalanceInitConsumer already consumes) so document-service
+      # stays off the synchronous account-opening path (ADR-0086) entirely.
+      account-created-in:
+        connector: smallrye-kafka
+        topic: openbank.accounts.account.created
+        group.id: openbank-document-service
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto.offset.reset: earliest
 
 # OPA sidecar (ADR-0034). Advisory mode by default.
 opa:

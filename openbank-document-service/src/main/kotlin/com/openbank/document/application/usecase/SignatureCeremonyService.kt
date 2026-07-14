@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.document.application.port.`in`.OpenCeremonyCommand
 import com.openbank.document.application.port.`in`.SignatureCeremonyUseCase
 import com.openbank.document.application.port.out.CeremonyRepositoryPort
+import com.openbank.document.application.port.out.ClientSignatureIssuerPort
 import com.openbank.document.application.port.out.DocumentRepositoryPort
 import com.openbank.document.application.port.out.SignatureSealPort
 import com.openbank.document.application.port.out.SignerVerificationPort
@@ -25,10 +26,13 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * Orchestrates e-signature ceremonies. A SIGNED decision must first pass the SCA-bound
- * [SignerVerificationPort] check (ADR-0162 D4, ADR-0021) — a DECLINED decision does not. On
- * completion it PAdES-seals the stored document bytes via [SignatureSealPort] and emits a
- * [SignatureCeremonyCompleted] outbox event.
+ * Orchestrates e-signature ceremonies (ADR-0162 D4 continued — the two-tier signature model). A
+ * SIGNED decision must first pass the SCA-bound [SignerVerificationPort] check (ADR-0021) — a
+ * DECLINED decision does not. Once verified, the signer's own **electronic signature** is applied
+ * immediately via [ClientSignatureIssuerPort] (a fresh one-time certificate per signing act).
+ * Once every signer reaches a terminal decision, the bank's institutional **electronic seal** is
+ * applied last via [SignatureSealPort] (a stable organizational identity), and a
+ * [SignatureCeremonyCompleted] outbox event is emitted.
  */
 @ApplicationScoped
 class SignatureCeremonyService(
@@ -36,6 +40,7 @@ class SignatureCeremonyService(
     private val documentRepo: DocumentRepositoryPort,
     private val objectStore: ObjectStorePort,
     private val sealPort: SignatureSealPort,
+    private val clientSignaturePort: ClientSignatureIssuerPort,
     private val signerVerificationPort: SignerVerificationPort,
     private val clock: Clock,
     private val objectMapper: ObjectMapper,
@@ -63,13 +68,17 @@ class SignatureCeremonyService(
         decision: SignerStatus,
         evidenceRef: String?,
     ): SignatureCeremony {
+        val ceremony = ceremonyRepo.findById(ceremonyId) ?: error("Ceremony not found: $ceremonyId")
         if (decision == SignerStatus.SIGNED) {
             val verified = evidenceRef != null && signerVerificationPort.verify(partyRef, evidenceRef)
             if (!verified) {
                 error("SCA verification failed for signer $partyRef on ceremony $ceremonyId")
             }
+            // Apply this signer's own one-time electronic signature BEFORE persisting the SIGNED
+            // decision: a decision must never be recorded as SIGNED without a corresponding
+            // signature actually landing on the document.
+            signAsClient(ceremony, partyRef)
         }
-        val ceremony = ceremonyRepo.findById(ceremonyId) ?: error("Ceremony not found: $ceremonyId")
         val now = Instant.now(clock)
         val updated = ceremony.recordDecision(partyRef, decision, now)
         if (updated.status != CeremonyStatus.COMPLETED) {
@@ -96,6 +105,14 @@ class SignatureCeremonyService(
     }
 
     override suspend fun getCeremony(id: UUID): SignatureCeremony? = ceremonyRepo.findById(id)
+
+    private suspend fun signAsClient(ceremony: SignatureCeremony, partyRef: String) {
+        val document = documentRepo.findById(ceremony.documentId)
+            ?: error("Cannot sign ceremony ${ceremony.id}: document ${ceremony.documentId} not found")
+        val pdf = objectStore.get(document.storageKey)
+        val signed = clientSignaturePort.signAsClient(pdf, partyRef)
+        objectStore.put(document.storageKey, signed, document.contentType)
+    }
 
     private suspend fun sealDocument(ceremony: SignatureCeremony) {
         val document = documentRepo.findById(ceremony.documentId)
