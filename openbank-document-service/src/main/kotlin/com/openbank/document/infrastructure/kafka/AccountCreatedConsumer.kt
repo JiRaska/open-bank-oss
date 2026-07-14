@@ -55,9 +55,24 @@ class AccountCreatedConsumer(
             return
         }
 
-        onboardingUseCase.issueOnboardingDocument(
-            IssueOnboardingDocumentCommand(accountId = accountId, partyRef = partyId.toString(), productId = productId),
-        )
+        try {
+            onboardingUseCase.issueOnboardingDocument(
+                IssueOnboardingDocumentCommand(
+                    accountId = accountId,
+                    partyRef = partyId.toString(),
+                    productId = productId,
+                ),
+            )
+        } catch (e: Exception) {
+            // Poison-pill safety: onboarding is best-effort and off the money path (ADR-0086), so a
+            // deterministic downstream failure for ONE account (e.g. a documentTemplateCode with no
+            // PUBLISHED template) must not throw out of the stream and, under smallrye-kafka's default
+            // fail-strategy, wedge onboarding for EVERY subsequent account. Log and ack; a missed
+            // onboarding document is re-triggerable, not a money error. This deliberately trades
+            // at-least-once retry on a transient error for consumer liveness — a bounded retry / DLQ
+            // is a possible follow-up if transient-loss ever proves material.
+            log.errorf(e, "Onboarding-document issuance failed for account %s; skipping (event acked).", accountId)
+        }
     }
 
     private companion object {
