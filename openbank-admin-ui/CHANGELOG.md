@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.46.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.46.0...admin-ui-v0.46.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* **admin-ui:** register the documents namespace for K8s service discovery ([#1068](https://github.com/JiRaska/open-bank-oss/issues/1068)) ([fcf6a1e](https://github.com/JiRaska/open-bank-oss/commit/fcf6a1e93522072e5595d51b2c43d44ed7241707))
+
 ## [0.46.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.45.0...admin-ui-v0.46.0) (2026-07-14)
 
 
