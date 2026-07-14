@@ -163,11 +163,13 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0158](0158-account-opening-validates-against-product-catalog.md) | Account opening validates against product-catalog | Accepted | Complete | — |
 | [0159](0159-cnpg-ha-money-path.md) | High-availability CNPG for money-path databases | Accepted | Shipped | — |
 | [0160](0160-end-to-end-integration-liveness-and-drift-detection-standard.md) | End-to-end integration liveness and drift-detection standard | Accepted | Partial | — |
+| [0161](0161-object-storage-standard-for-application-documents.md) | Object-storage standard for application binary artifacts | Proposed | Planned | — |
+| [0162](0162-document-management-templating-and-e-signature-architecture.md) | Document management, templating & e-signature architecture | Proposed | Planned | — |
 | [0164](0164-governance-auditor-ai-agent.md) | Governance-auditor AI agent | Accepted | Partial | — |
 
 ---
 
-**Numbering gaps:** 0015 0127 0128 0129 0130 0131 0157 0161 0162 0163 do not correspond to a file in this repo's history —
+**Numbering gaps:** 0015 0127 0128 0129 0130 0131 0157 0163 do not correspond to a file in this repo's history —
 confirmed by `git log --diff-filter=A` across all branches, not just an absent
 current file. ADR-0132 was one of these gaps until it was cited in code/config
 comments before the file existed and has since been written down properly

@@ -90,7 +90,7 @@ spec:
             # NOT openbank-default; an earlier comment here was wrong. The live worker polls
             # namespace="openbank-settlement", confirmed by NOT_FOUND on go-live — runbook 0006).
             - name: NAMESPACES
-              value: "openbank-default openbank-payments openbank-fx openbank-statements openbank-settlement openbank-finops openbank-devops openbank-liveness"
+              value: "openbank-default openbank-payments openbank-fx openbank-statements openbank-settlement openbank-finops openbank-devops openbank-liveness openbank-governance"
             - name: RETENTION
               value: "168h"
           command:

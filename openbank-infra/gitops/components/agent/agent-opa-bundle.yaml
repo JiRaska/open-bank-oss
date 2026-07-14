@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: agent-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "f7f28612909f5f40"
+    openbank.tech/policy-checksum: "8315dff99932c3eb"
 data:
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -530,6 +530,8 @@ data:
         requires_human:
           - any_compliance_incident       # HITL mandatory; a human triages every finding
           - every: proposal                 # segregation of duties: agent proposes, human disposes
+          - approver_must_differ_from: author     # segregation of duties
+          - record: reason                         # approve/reject reason -> audit
         limits:
           tokens_per_run: 50000
           runs_per_day: 24                # one per merge is common; daily catch-up sweep is one more
