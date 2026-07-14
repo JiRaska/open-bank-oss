@@ -177,6 +177,38 @@ change_requirements:
         reason: "tpp-registry-service's own docs say the publish side is dormant (\"no domain events are emitted yet\" — outbox transport exists but unused). Not the #889 pattern (a working publish going nowhere): nothing is actually published today. Re-triage once the publish side is wired."
       - topic: "openbank.pid.events"
         reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap."
+  lineage_code_audit:
+    # ADR-0160 mechanism 2. standing-order-service's governance.yaml declares a downstream edge to
+    # transaction-service (relationType: api) — copy-pasted boilerplate with no backing
+    # @RegisterRestClient anywhere in the service. Nothing checked the claim against the actual
+    # fleet, same root cause as issue #889 (a different unverified claim, same failure shape: prose
+    # describing runtime behaviour, never checked against code). Fleet-wide scan, not diff-scoped:
+    # every governance.yaml lineage.downstream edge (relationType api|topic) must be backed by
+    # grep-verifiable code in the SAME service (a matching @RegisterRestClient configKey for api;
+    # an actual topic produced/consumed in common with the target service for topic — a topic edge
+    # doesn't name the specific topic, just the service, so it's a service-level cross-reference),
+    # or be explicitly allowlisted below with a one-line reason (a REST call made through a
+    # shared/generic client this heuristic's exact-match can't see, or a genuinely-stale edge
+    # already tracked for cleanup elsewhere).
+    detect: ["any <service>/governance.yaml lineage.downstream edge"]
+    require:
+      - "api edge has a matching @RegisterRestClient(configKey) in the same service, or an allowlist entry with a reason"
+      - "topic edge has an actual topic overlap with the target service (per mechanism 1's producer/consumer map), or an allowlist entry with a reason"
+    gate: lineage-code-audit
+    enforced: advisory
+    target_enforce_date: "2026-10-15"   # ADR-0144 — later than mechanism 1's date: first scan found a much higher (34/48) violation rate, expect a longer triage
+    # CI producer is LIVE (advisory): .github/scripts/check-governance-lineage.py runs in the
+    # "Validate manifests" job on every PR — fleet-wide scan (not diff-scoped), reuses mechanism 1's
+    # topic map via importlib (check-event-consumer-liveness.py's build_topic_maps), findings are
+    # ::warning annotations. First scan (2026-07-13): 34 of 48 downstream edges have no backing code
+    # found — consistent with mechanism 1's own first-scan rate (13/18, ~72%), i.e. this fleet's
+    # governance.yaml lineage data really is this stale, not primarily a heuristic false-positive
+    # rate. ALL still unallowlisted below (real triage tracked as a fleet-sweep issue, not resolved
+    # by fiat). Flip to enforced once triage brings unallowlisted violations to zero = pass
+    # --enforce to the script in ci.yml (one-line change), same as every other ADR-0144 gate here.
+    blocked_on: "34 unallowlisted lineage edges found on first scan (2026-07-13) need individual triage (stale/wrong governance.yaml edge vs. a real dependency this heuristic's exact-match can't see) — tracked as a fleet-sweep issue, not yet filed"
+    ci_producer: ".github/scripts/check-governance-lineage.py"
+    allowlist: []
   service_code_change:
     detect: ["<service>/src/main/**"]
     require:

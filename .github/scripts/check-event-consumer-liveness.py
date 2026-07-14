@@ -114,14 +114,11 @@ def load_allowlist(rules_path: pathlib.Path) -> dict[str, str]:
     return allowlist
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--root", default=".")
-    parser.add_argument("--rules", default="openbank-libs/governance/rules.yaml")
-    parser.add_argument("--enforce", action="store_true")
-    args = parser.parse_args()
-
-    root = pathlib.Path(args.root)
+def build_topic_maps(root: pathlib.Path) -> tuple[dict[str, set[str]], dict[str, set[str]], list[pathlib.Path]]:
+    """Fleet-wide (producer_topics, consumer_topics, scanned_files). Reused by
+    check-governance-lineage.py (ADR-0160 mechanism 2) via importlib — see that script for why a
+    hyphenated-filename cross-script import needs spec_from_file_location, matching the existing
+    gen_network_policies_test.py idiom, rather than a normal `import`."""
     all_producers: dict[str, set[str]] = {}
     all_consumers: dict[str, set[str]] = {}
 
@@ -133,6 +130,19 @@ def main() -> int:
             all_producers.setdefault(topic, set()).update(services)
         for topic, services in consumers.items():
             all_consumers.setdefault(topic, set()).update(services)
+
+    return all_producers, all_consumers, yaml_files
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", default=".")
+    parser.add_argument("--rules", default="openbank-libs/governance/rules.yaml")
+    parser.add_argument("--enforce", action="store_true")
+    args = parser.parse_args()
+
+    root = pathlib.Path(args.root)
+    all_producers, all_consumers, yaml_files = build_topic_maps(root)
 
     allowlist = load_allowlist(root / args.rules)
 

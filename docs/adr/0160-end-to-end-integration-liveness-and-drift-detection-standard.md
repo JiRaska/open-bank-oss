@@ -5,6 +5,27 @@ Decision-Status: Accepted
 Delivery-Status: Partial
 Author(s): jiri.raska (paired with Claude Opus 4.8)
 
+> **Delivery note (2026-07-13, updated same day).** Mechanism 1 shipped and validated: PR #995
+> (the gate itself, `check-event-consumer-liveness.py`) and PR #994 (the #889 fix it was built to
+> catch — re-running the gate against #994's branch before merge dropped the violation count,
+> proving the check works). The first fleet scan found the real gap was worse than estimated: 13
+> of 18 producer-only topics were REAL_GAP, not the handful expected. #1005 and #1007 fixed 4 of
+> them (one was a topic-**name** typo, not a missing consumer — `sca.challenge.event` vs.
+> `sca.events`, two separately-provisioned topics; #1007's own self-review caught 2 further
+> extraction bugs in the fix before merge). #1008 allowlisted the 3 LEGITIMATE_NO_CONSUMER
+> findings. Full triage in issue #996; 11 REAL_GAP topics remain queued (each needs real business
+> logic, e.g. AML case-opening semantics for a SWIFT wire — not a mechanical fix, intentionally not
+> rushed). Two of the 13 are regulatory/money-path severity and got their own issues: #999
+> (interest withholding tax never remitted to the tax authority) and #1000 (an authorised SEPA
+> direct-debit collection never posts a debit anywhere — no consumer exists at all).
+>
+> Mechanism 3 shipped: PR #1001 (`DomainMetrics.registerWorkflowLiveness`, piloted on
+> standing-order-service's scheduler, which had zero freshness observability before it).
+>
+> **Mechanism 4's design changed from what's written below** — see the amendment after the
+> Decision section. Mechanism 2 has a concrete implementation plan (also below) but is not yet
+> built.
+
 ## Context
 
 Two incidents investigated back-to-back on 2026-07-13 turned out to share one root cause:
@@ -77,6 +98,17 @@ pointed at the declared target; a `consumes` edge needs a matching `@Incoming` o
 topic. This directly targets the #889 root cause — standing-order-service's lineage entry claiming
 a `transaction-service` edge was copy-pasted boilerplate with no backing code, and nothing noticed.
 
+Concrete implementation plan (not yet built): extend `check-event-consumer-liveness.py` rather
+than write a parallel script — it already parses every service's `mp.messaging.outgoing`/`incoming`
+declarations into a topic → {service} map (mechanism 1's own data). Add a second pass that reads
+each service's `governance.yaml` `lineage` block, and for every edge with `relationType: consumes`
+whose declared topic is NOT in mechanism 1's consumer map for that service, or every
+`relationType: api` edge whose declared target has no matching `@RegisterRestClient`/rest-client
+config key pointed at it, emit the same `::warning::` shape as mechanism 1. Same allowlist idiom
+(`rules.yaml: change_requirements.lineage_code_audit.allowlist`), same ADR-0144 advisory-first
+graduation. Reusing mechanism 1's topic map means this is additive to one script, not new
+infrastructure.
+
 **3. Shared workflow-liveness watchdog primitive.**
 `ReconciliationFreshnessWatchdog` already solves "did this scheduled job actually run and
 succeed recently" for one service. Extract it into `openbank-libs-runtime` as
@@ -85,19 +117,48 @@ with `watchdog.recordSuccess(name)`; a Prometheus gauge age-of-last-success page
 `2 × expectedInterval`. This is the direct fix for the 41-day-dead-reconciliation failure mode:
 "job stopped running" becomes an alert, not a silent gap discovered by accident.
 
-**4. Drift-SLA, not drift-log.**
+**4. Drift-SLA, not drift-log.** *(Superseded by the amendment below — kept here for the original
+rationale; see "Amendment 2026-07-13: mechanism 4 redesign" for the actual decision.)*
 `BalanceReconciliationService` (and any future control-account tie-out) reports `hasDrift` as a
 single-snapshot boolean today, which is exactly what made #860's transient backfill artifact
-indistinguishable from a real defect. Change the reconciliation record to carry a rolling window
-(last N runs) and define drift as **actionable** only when it persists across
-`consecutive_drift_threshold` consecutive runs with no intervening backfill/maintenance marker —
-one bad snapshot logs at INFO, sustained drift pages. This does not weaken the control (day-zero
-drift is still visible in the record for audit) — it moves the *alerting* threshold from "any
-snapshot" to "sustained", which is what actually distinguishes signal from a system caught
-mid-write.
+indistinguishable from a real defect. The *goal* stands: one bad snapshot must log, not page;
+sustained drift must page. The *original mechanism* proposed here — a DB rolling window + an
+application-side `consecutive_drift_threshold` counter — turned out not to be the best available
+tool for this job once mechanism 3 shipped a reusable pattern; see the amendment.
 
 None of these four replace human review or existing gates — they are additive CI/observability
 layers targeting specifically the "looks done, isn't verified" failure class.
+
+## Amendment 2026-07-13: mechanism 4 redesign
+
+Critical re-review of the original mechanism 4 (DB rolling window + `consecutive_drift_threshold`
+counter in `BalanceReconciliationService`) found it was not the best available design, for reasons
+that only became visible after mechanism 3 shipped:
+
+- It requires a Flyway migration on a money-path service's schema (2-approval, behavior-regression
+  risk) to solve what is fundamentally an **alerting threshold** problem, not a data-model problem.
+- It hand-rolls "has this condition held for N consecutive samples" as application code — exactly
+  the kind of bespoke stateful logic that is itself a future source of the "looks done, isn't
+  verified" bugs this ADR exists to eliminate (who tests the counter's reset-on-recovery path?).
+- This repo already runs Prometheus/Pyrra for every other SLO in the fleet (ADR-0088), and
+  Prometheus alerting rules have a **native `for:` clause** built for exactly this need: "this
+  expression must stay true for N minutes before the alert fires." That is a battle-tested,
+  zero-new-code way to turn a snapshot into a sustained-condition alert.
+
+**Revised decision:** `BalanceReconciliationService` publishes the per-run drift as a Micrometer
+gauge — `openbank.balance.reconciliation.drift{currency}` (the signed CZK/EUR/GBP difference) —
+via `DomainMetrics`, using the exact additive, no-op-when-no-registry pattern
+`registerWorkflowLiveness` (mechanism 3) already established. A `PrometheusRule` with
+`for: <N × reconciliation interval>` fires only once the drift metric has been non-zero (beyond
+tolerance) across that entire window — one bad snapshot mid-backfill never crosses the `for:`
+threshold; sustained drift does. No schema change, no new counter field, no migration — the
+reconciliation record (audit trail, unchanged) still carries every snapshot for forensics; only
+the *alerting* layer moves to Prometheus, which is the layer that should own "sustained condition"
+semantics in this fleet's existing architecture.
+
+This does not change the ADR's Decision-Status or the problem mechanism 4 solves — it changes the
+*how*, in the same spirit as this ADR's own thesis: prefer the mechanism this fleet has already
+proven, over a new bespoke one.
 
 ## Alternatives considered
 
@@ -146,8 +207,11 @@ layers targeting specifically the "looks done, isn't verified" failure class.
   non-trivial one-time cost, tracked as a fleet-sweep issue, not absorbed into this ADR.
 - Mechanism 3 touches every `@Scheduled` job that opts in — a fleet-wide adoption sweep, not a
   single-service change; done incrementally, money-path services first.
-- Mechanism 4 changes the reconciliation record schema (rolling window) — a Flyway migration on
-  `balance-service`, money-path, needs the usual two-approval + no-behavior-regression discipline.
+- Mechanism 4 (revised, see amendment): no schema change, but does add a `PrometheusRule` that
+  needs its `for:` window tuned against the reconciliation's real cadence — too short reintroduces
+  false pages on legitimate backfills; too long delays a genuine sustained-drift alert. Money-path
+  service (`balance-service`), still needs the usual two-approval discipline for the
+  `DomainMetrics` call site even though there is no migration.
 - A CI check can itself go stale/lie (the exact meta-risk this ADR is about) — mitigated by
   keeping the checks stdlib-only, small, and reviewed like any other code, and by mechanism 2
   cross-checking mechanism 1's own data source (`governance.yaml`) against code.
@@ -183,3 +247,11 @@ layers targeting specifically the "looks done, isn't verified" failure class.
   existing single-footgun instances of the pattern this ADR generalizes
 - issue #855 — balance reconciliation silently dead for 41 days (root cause for mechanism 3)
 - issue #266 — `SERVICE` principal type dead code (root cause for mechanism 2's motivating case)
+- ADR-0088 — SLO-as-code / Pyrra (the proven Prometheus alerting infrastructure mechanism 4's
+  amendment reuses instead of a bespoke DB counter)
+- #994, #995 — the #889 fix and mechanism 1's gate, validated against each other
+- #1001 — mechanism 3 shipped (`WorkflowLivenessWatchdog`, piloted on standing-order-service)
+- #1005, #1007, #1008 — mechanism 1's first fleet-sweep fixes (4 topics fixed, 3 allowlisted)
+- #996 — full triage tracking issue, 11 REAL_GAP topics remain queued
+- #999, #1000 — the 2 regulatory/money-path-severity findings from the #996 triage, each needing
+  its own design decision before implementation (not mechanical fixes)
