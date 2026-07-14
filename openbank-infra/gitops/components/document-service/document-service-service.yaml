@@ -91,6 +91,12 @@ spec:
             # every account.created event. Same in-cluster address billing-service already uses.
             - name: PRODUCT_CATALOG_SERVICE_URL
               value: http://product-catalog.accounts.svc:8104
+            # ADR-0162 D4 (continued): OpenBao pki-document-signing engine address for the client
+            # electronic-signature adapter (OpenBaoClientSignatureAdapter). Declaring it here (rather
+            # than relying only on the @ConfigProperty code default) is what makes gen-network-policies.py
+            # emit the documents -> vault egress edge (ADR-0081) — a code-only default is invisible to it.
+            - name: OPENBANK_SIGNATURE_CLIENT_PKI_BAO_ADDR
+              value: http://openbao.vault.svc:8200
             # ADR-0162 D4 (continued): the bank's stable institutional PAdES-sealing identity,
             # projected from OpenBao KV via es-document-service-signing-keystore.yaml. Absent =
             # PdfBoxPadesSealAdapter falls back to a DEV-ONLY ephemeral cert (loud warning, never
