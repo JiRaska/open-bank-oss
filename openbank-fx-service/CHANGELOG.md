@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.7.7...fx-service-v0.8.0) (2026-07-14)
+
+
+### Features
+
+* **governance:** four-eyes vocabulary for fx/consent/sanctions + sanctions OPA bootstrap ([#1006](https://github.com/JiRaska/open-bank-oss/issues/1006)) ([f5d589e](https://github.com/JiRaska/open-bank-oss/commit/f5d589e17d6bb8c1ed7abfa74f732d2b171fd3f9))
+
+
+### Bug Fixes
+
+* **fx:** wire FX conversion events through the real transactional outbox ([#1054](https://github.com/JiRaska/open-bank-oss/issues/1054)) ([3210b6a](https://github.com/JiRaska/open-bank-oss/commit/3210b6a46b07abf65b42e8d24a951a15c498f249)), closes [#1033](https://github.com/JiRaska/open-bank-oss/issues/1033) [#996](https://github.com/JiRaska/open-bank-oss/issues/996)
+* **pact:** bridge reactive-Panache @State handlers onto a Vert.x context ([#1097](https://github.com/JiRaska/open-bank-oss/issues/1097)) ([b9b496a](https://github.com/JiRaska/open-bank-oss/commit/b9b496a6cfdfb529fed96c6ef8f6944215c81c5c))
+
 ## [0.7.7](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.7.6...fx-service-v0.7.7) (2026-07-12)
 
 
