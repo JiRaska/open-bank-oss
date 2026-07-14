@@ -2,26 +2,34 @@
 # Uloží model API klíč a GitHub token pro control-liveness-sentinel do OpenBao KV
 # a vynutí refresh jeho ExternalSecretu (ADR-0163 E2E-wiring, PR #1087).
 #
-# Usage:
-#   VAULT_TOKEN=hvs.xxx \
-#   LIVENESS_MODEL_API_KEY=di_xxx \
-#   LIVENESS_GITHUB_TOKEN=github_pat_xxx \
-#     ./openbank-infra/scripts/seed-control-liveness-sentinel-secrets.sh
+# Interaktivní — spusť bez ničeho a skript se sám doptá na chybějící hodnoty
+# (vstup se nezobrazuje na terminálu a nikam se neukládá):
 #
-# Vyžaduje:
-#   - kubectl nakonfigurovaný na sandbox cluster (aws eks update-kubeconfig --profile openbank ...)
-#   - VAULT_TOKEN: operator token s write na openbank/* (viz seed-vault-gaps.sh)
-#   - LIVENESS_MODEL_API_KEY: DeepInfra API klíč (https://deepinfra.com/dash/api_keys) —
-#     stejný provider jako devops-agent/copilot; lze i sdílet stávající DeepInfra klíč,
-#     pokud už jeden pro devops-agent existuje (openbank/devops-agent MODEL_API_KEY).
-#   - LIVENESS_GITHUB_TOKEN: fine-grained PAT na JiRaska/open-bank-oss s oprávněním
-#     Issues:write, Contents:write, Pull requests:write (žádný GitHub App flow zde
-#     neexistuje — viz GitHubProposalAdapter.kt).
+#   ./openbank-infra/scripts/seed-control-liveness-sentinel-secrets.sh
+#
+# Vyžaduje mít po ruce (skript řekne přesně kde vzít, když se zeptá):
+#   - kubectl nakonfigurovaný na sandbox cluster
+#   - VAULT_TOKEN: operator token s write na openbank/* (stejný, jaký používáš pro
+#     seed-vault-gaps.sh / seed-nvidia-api-key.sh)
+#   - DeepInfra API klíč (https://deepinfra.com/dash/api_keys) — nebo zopakuj ten,
+#     co už má devops-agent (openbank/devops-agent MODEL_API_KEY)
+#   - fine-grained GitHub PAT na JiRaska/open-bank-oss (Settings → Developer settings
+#     → Fine-grained tokens → Generate new token) s oprávněním Issues:write,
+#     Contents:write, Pull requests:write — žádný GitHub App flow zde neexistuje
+#     (viz GitHubProposalAdapter.kt)
 set -euo pipefail
 
-: "${VAULT_TOKEN:?Set VAULT_TOKEN to an operator token with write access to openbank/*}"
-: "${LIVENESS_MODEL_API_KEY:?Set LIVENESS_MODEL_API_KEY to a DeepInfra API key}"
-: "${LIVENESS_GITHUB_TOKEN:?Set LIVENESS_GITHUB_TOKEN to a fine-grained GitHub PAT (issues+contents+PRs write)}"
+prompt_secret() { # var_name prompt_text
+  local __var="$1" __prompt="$2" __val
+  if [[ -n "${!__var:-}" ]]; then return; fi
+  read -r -s -p "$__prompt: " __val
+  echo >&2
+  printf -v "$__var" '%s' "$__val"
+}
+
+prompt_secret VAULT_TOKEN "OpenBao operator token (VAULT_TOKEN)"
+prompt_secret LIVENESS_MODEL_API_KEY "DeepInfra API key (https://deepinfra.com/dash/api_keys)"
+prompt_secret LIVENESS_GITHUB_TOKEN "GitHub fine-grained PAT (Settings > Developer settings > Fine-grained tokens, scoped to JiRaska/open-bank-oss with Issues/Contents/Pull requests: write)"
 
 vault_kv_put() {
   kubectl -n vault exec -i openbao-0 -- \
