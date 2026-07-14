@@ -4,6 +4,9 @@
 
 package com.openbank.fx.application.usecase
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import com.fasterxml.jackson.module.kotlin.kotlinModule
 import com.openbank.fx.application.port.`in`.ConvertCommand
 import com.openbank.fx.application.port.`in`.GetRateHistoryQuery
 import com.openbank.fx.application.port.`in`.GetRateQuery
@@ -13,7 +16,6 @@ import com.openbank.fx.application.port.out.FraudScoreOutcome
 import com.openbank.fx.application.port.out.FraudScoringPort
 import com.openbank.fx.application.port.out.FraudVerdict
 import com.openbank.fx.application.port.out.FxConversionRepository
-import com.openbank.fx.application.port.out.FxEventPublisher
 import com.openbank.fx.application.port.out.FxRateRepository
 import com.openbank.fx.application.port.out.OpenAmlCaseCommand
 import com.openbank.fx.application.port.out.SanctionsScreeningPort
@@ -27,6 +29,7 @@ import com.openbank.fx.domain.screening.ScreeningMatchStatus
 import com.openbank.fx.domain.screening.ScreeningResult
 import com.openbank.fx.domain.screening.ScreeningRole
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.Runs
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -48,7 +51,9 @@ class FxServiceTest {
 
     private lateinit var rateRepo: FxRateRepository
     private lateinit var convRepo: FxConversionRepository
-    private lateinit var publisher: FxEventPublisher
+    private val objectMapper: ObjectMapper = ObjectMapper()
+        .registerModule(kotlinModule())
+        .registerModule(JavaTimeModule())
     private lateinit var screeningPort: SanctionsScreeningPort
     private lateinit var amlCasePort: AmlCasePort
     private lateinit var metrics: DomainMetrics
@@ -64,18 +69,19 @@ class FxServiceTest {
     fun setUp() {
         rateRepo = mockk()
         convRepo = mockk()
-        publisher = mockk(relaxed = true)
         screeningPort = mockk()
         amlCasePort = mockk()
         metrics = mockk(relaxed = true)
         fraudScoringPort = mockk()
         // Fraud scoring is SHADOW (ADR-0084): default to ALLOW; never affects conversion outcome.
         coEvery { fraudScoringPort.score(any()) } returns FraudScoreOutcome(FraudVerdict.ALLOW, 0, "v0", emptyList())
-        service = FxService(rateRepo, convRepo, publisher, screeningPort, amlCasePort, metrics, fraudScoringPort, clock)
+        service =
+            FxService(rateRepo, convRepo, objectMapper, screeningPort, amlCasePort, metrics, fraudScoringPort, clock)
 
         // By default: not idempotent-replayed, persistence echoes the saved row, AML opens cleanly.
         coEvery { convRepo.findByIdempotencyKey(any()) } returns null
         coEvery { convRepo.save(any()) } answers { firstArg() }
+        coEvery { convRepo.saveWithOutbox(any(), any()) } answers { firstArg() }
         coEvery { amlCasePort.openCase(any()) } just Runs
     }
 
@@ -97,7 +103,7 @@ class FxServiceTest {
         coVerify(exactly = 0) { rateRepo.findLatest(any(), any(), any()) }
         coVerify(exactly = 0) { convRepo.save(any()) }
         coVerify(exactly = 0) { screeningPort.screen(any(), any(), any()) }
-        coVerify(exactly = 0) { publisher.publish(any()) }
+        coVerify(exactly = 0) { convRepo.saveWithOutbox(any(), any()) }
     }
 
     @Test
@@ -127,16 +133,22 @@ class FxServiceTest {
         coEvery { rateRepo.findLatest(any(), any(), any()) } returns fxRate()
         clear()
 
-        val saved = slot<FxConversion>()
-        coEvery { convRepo.save(capture(saved)) } answers { firstArg() }
+        val outboxMessage = slot<OutboxMessage>()
+        coEvery { convRepo.saveWithOutbox(any(), capture(outboxMessage)) } answers { firstArg() }
 
         val result = service.convert(command)
 
         assertThat(result.status).isEqualTo(FxConversionStatus.SETTLED)
         assertThat(result.settledAt).isNotNull()
         coVerify(exactly = 1) { screeningPort.screen(command.partyName, ScreeningRole.DEBTOR, any()) }
-        coVerify(exactly = 1) { publisher.publish(any()) }
+        coVerify(exactly = 1) { convRepo.saveWithOutbox(any(), any()) }
         coVerify(exactly = 0) { amlCasePort.openCase(any()) }
+        // #1033 regression: the outbox row must actually carry a serialized FxConversionExecuted
+        // payload, not an empty/placeholder body — this is exactly what the stub publisher used to
+        // silently drop.
+        assertThat(outboxMessage.captured.eventType).isEqualTo("fx.conversion.executed.v1")
+        assertThat(outboxMessage.captured.aggregateId).isEqualTo(result.id)
+        assertThat(outboxMessage.captured.payload).contains(result.id.toString()).contains("\"toAmount\"")
     }
 
     @Test
@@ -193,7 +205,7 @@ class FxServiceTest {
         assertThat(case.captured.riskLevel).isEqualTo(AmlCaseRiskLevel.CRITICAL)
         assertThat(case.captured.alertCode).isEqualTo("SANCTIONS_HIT")
         assertThat(case.captured.matchedEntity).isEqualTo("OFAC SDN")
-        coVerify(exactly = 0) { publisher.publish(any()) }
+        coVerify(exactly = 0) { convRepo.saveWithOutbox(any(), any()) }
     }
 
     @Test
@@ -212,7 +224,7 @@ class FxServiceTest {
         assertThat(result.settledAt).isNull()
         assertThat(case.captured.riskLevel).isEqualTo(AmlCaseRiskLevel.HIGH)
         assertThat(case.captured.alertCode).isEqualTo("AML_HOLD")
-        coVerify(exactly = 0) { publisher.publish(any()) }
+        coVerify(exactly = 0) { convRepo.saveWithOutbox(any(), any()) }
     }
 
     @Test
@@ -231,7 +243,7 @@ class FxServiceTest {
         assertThat(result.settledAt).isNull()
         assertThat(case.captured.riskLevel).isEqualTo(AmlCaseRiskLevel.MEDIUM)
         assertThat(case.captured.alertCode).isEqualTo("SCREENING_UNAVAILABLE")
-        coVerify(exactly = 0) { publisher.publish(any()) }
+        coVerify(exactly = 0) { convRepo.saveWithOutbox(any(), any()) }
     }
 
     @Test

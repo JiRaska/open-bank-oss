@@ -5,6 +5,7 @@
 package com.openbank.fx.infrastructure.persistence.repository
 
 import com.openbank.fx.application.port.out.FxConversionRepository
+import com.openbank.fx.application.port.out.FxOutboxRepository
 import com.openbank.fx.application.port.out.FxRateRepository
 import com.openbank.fx.domain.model.FxConversion
 import com.openbank.fx.domain.model.FxConversionStatus
@@ -13,6 +14,7 @@ import com.openbank.fx.domain.model.RateSource
 import com.openbank.fx.domain.model.RateType
 import com.openbank.fx.infrastructure.persistence.entity.FxConversionEntity
 import com.openbank.fx.infrastructure.persistence.entity.FxRateEntity
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -132,25 +134,38 @@ class FxConversionRepositoryImpl : FxConversionRepository {
     @Inject
     lateinit var sf: Mutiny.SessionFactory
 
+    @Inject
+    lateinit var outboxRepo: FxOutboxRepository
+
     override suspend fun save(conv: FxConversion): FxConversion {
-        val e = FxConversionEntity().also {
-            it.id = conv.id
-            it.idempotencyKey = conv.idempotencyKey
-            it.partyId = conv.partyId
-            it.accountId = conv.accountId
-            it.fromCurrency = conv.fromCurrency
-            it.toCurrency = conv.toCurrency
-            it.fromAmountMinorUnits = conv.fromAmountMinorUnits
-            it.toAmountMinorUnits = conv.toAmountMinorUnits
-            it.appliedRate = conv.appliedRate
-            it.feeMinorUnits = conv.feeMinorUnits
-            it.rateId = conv.rateId
-            it.status = conv.status.name
-            it.createdAt = conv.createdAt
-            it.settledAt = conv.settledAt
-        }
+        val e = conv.toEntity()
         sf.withTransaction { s, _ -> s.persist(e) }.awaitSuspending()
         return conv
+    }
+
+    override suspend fun saveWithOutbox(conv: FxConversion, outboxMessage: OutboxMessage): FxConversion {
+        val e = conv.toEntity()
+        sf.withTransaction { s, _ ->
+            s.persist(e).chain { _ -> outboxRepo.persistInTransaction(outboxMessage) }
+        }.awaitSuspending()
+        return conv
+    }
+
+    private fun FxConversion.toEntity() = FxConversionEntity().also {
+        it.id = id
+        it.idempotencyKey = idempotencyKey
+        it.partyId = partyId
+        it.accountId = accountId
+        it.fromCurrency = fromCurrency
+        it.toCurrency = toCurrency
+        it.fromAmountMinorUnits = fromAmountMinorUnits
+        it.toAmountMinorUnits = toAmountMinorUnits
+        it.appliedRate = appliedRate
+        it.feeMinorUnits = feeMinorUnits
+        it.rateId = rateId
+        it.status = status.name
+        it.createdAt = createdAt
+        it.settledAt = settledAt
     }
 
     override suspend fun findById(id: UUID): FxConversion? =
