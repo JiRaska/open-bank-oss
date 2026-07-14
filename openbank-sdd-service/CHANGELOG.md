@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.7.1...sdd-service-v0.8.0) (2026-07-14)
+
+
+### Features
+
+* **sdd:** book the debtor debit for an authorised SDD collection ([#1000](https://github.com/JiRaska/open-bank-oss/issues/1000)) ([#1027](https://github.com/JiRaska/open-bank-oss/issues/1027)) ([58869a4](https://github.com/JiRaska/open-bank-oss/commit/58869a43096a705cde93c54d6d9f52020c79198e))
+
 ## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.7.0...sdd-service-v0.7.1) (2026-07-07)
 
 
