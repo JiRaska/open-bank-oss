@@ -136,6 +136,15 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   admission for that image (admin-ui outage, 2026-07-09).
 
 ### OPA / Rego policies (ADR-0031/ADR-0034)
+- **Adding any new agent charter to `agents.yaml` ripples the OPA bundle checksum of unrelated
+  services.** `gen-pid-opa-bundle.sh` / `gen-copilot-opa-bundle.sh` /
+  `gen-customer-edge-opa-bundle.sh` / `gen-notification-opa-bundle.sh` each hash
+  `openbank-libs/governance/agents.yaml` as one of their checksum inputs — a new charter entry for
+  a completely unrelated agent (e.g. a new fleet-monitoring agent) still changes those four
+  services' `openbank.tech/policy-checksum` annotation. `opa-policy.yml`'s "build + verify bundle"
+  job regenerates and diffs all four on every OPA-relevant PR, so a PR that only adds an agent
+  charter fails there unless it also re-runs and commits all five `gen-*-opa-bundle*.sh` outputs
+  (`agent`, `pid`, `copilot`, `customer-edge`, `notifications`), not just its own service's bundle.
 - **An `AI_AGENT` principal's id carries an `agent:` prefix on the REST path, but not on the
   MCP path.** `AuthorizeInterceptor.principalType()` classifies `AI_AGENT` from a JWT `sub`
   prefixed `agent:`, and `principal.id` is that sub verbatim — but `openbank-agent-service`

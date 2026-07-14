@@ -165,6 +165,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0160](0160-end-to-end-integration-liveness-and-drift-detection-standard.md) | End-to-end integration liveness and drift-detection standard | Accepted | Partial | — |
 | [0161](0161-object-storage-standard-for-application-documents.md) | Object-storage standard for application binary artifacts | Proposed | Planned | — |
 | [0162](0162-document-management-templating-and-e-signature-architecture.md) | Document management, templating & e-signature architecture | Proposed | Planned | — |
+| [0163](0163-control-liveness-sentinel-ai-agent.md) | Control-liveness-sentinel AI agent | Accepted | Partial | — |
 
 ---
 

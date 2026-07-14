@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: agent-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "08748ecfb547e85e"
+    openbank.tech/policy-checksum: "cdd8e5ff15617539"
 data:
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -58,6 +58,22 @@ data:
 
     # Every tools.allow / tools.deny pattern across the agent's charter(s) -- factored out so
     # charter_allowed and rest_action_allowed don't each re-walk `some a in charter` themselves.
+    #
+    # SCHEMA NOTE: this only matches charters whose tools.allow/deny are a flat list of pattern
+    # STRINGS (compliance-officer, ledger-domain-engineer, ui-assistant, rca-investigator,
+    # customer-copilot). The standalone background/control-plane agents (finops-agent, devops-agent,
+    # control-liveness-sentinel, governance-auditor, release-steward, docs-truth-agent,
+    # authz-policy-auditor, flaky-test-hunter) instead declare tools.allow as a list of
+    # `{tier, resources}` objects -- `some pattern in a.tools.allow` binds `pattern` to the whole
+    # object for those charters, which glob_match can never match against a string tool name, so
+    # charter_allowed is always false for them here. This is intentionally NOT a security gap
+    # (default-deny fails closed, not open) -- it is simply inert: none of those services call the
+    # MCP /tools/call endpoint this package gates at all (confirmed: no reference to it in any of
+    # their source trees). Their real, live authorization is the standard `@RolesAllowed` REST
+    # security on each service's own endpoints. Their `agents.yaml` charter today documents intent
+    # for governance/audit purposes, not a runtime-enforced grant -- same as every charter's
+    # `requires_human` block, which no code path reads either. Wiring the tier+resources shape into
+    # a live decision here is future work if/when these services are ever fronted by the MCP gateway.
     allowed_or_denied_patterns := {
     	"allow": {pattern |
     		some a in charter
@@ -493,5 +509,56 @@ data:
         compliance:
           eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
           dora: "ICT change management (Art. 8–10); operational resilience via proactive pipeline monitoring"
+
+      - id: control-liveness-sentinel
+        plane: control
+        charter: "ADR-0163"
+        description: >
+          Fleet-wide correlator for the ADR-0160 liveness/drift-detection mechanisms — watches
+          WorkflowLivenessWatchdog heartbeat gauges, the event-consumer-liveness and lineage-vs-code
+          CI gate reports, and reconciliation drift-SLA windows. Surfaces a stale-or-silent control
+          as a finding before it pages, and proposes a durable fix (a code/IaC PR wiring an
+          unmonitored job into the watchdog, or a tracking ticket) through the HITL queue. Never
+          writes to a control directly.
+        enabled: true
+        enforcement: block
+        schedule:
+          daily: "03:00 UTC"
+          reactive: goalert-webhook       # triggered when a WorkflowLivenessWatchdog gauge itself pages
+        data_scope:
+          read:
+            - prometheus-query-readonly   # openbank_workflow_liveness_last_success_age_seconds gauges
+            - read.governance             # rules.yaml advisory allowlists (mechanisms 1/2), ADR-0160
+          pii: none                       # control-heartbeat / CI-gate metadata only; no customer data
+        tools:
+          allow:
+            - tier: read
+              resources: [prometheus, governance]
+            - tier: write_proposal
+              resources: [github-pr]      # opens code/IaC diff PRs or draft.ticket only; no write
+          deny:
+            - tier: write
+              resources: ["*"]            # explicit: no direct write to any control ever
+            - tier: execute
+              resources: ["*"]
+        requires_human:
+          - any_control_or_pipeline_change  # HITL mandatory; a human merges every proposal
+          - every: proposal                 # segregation of duties: agent proposes, human disposes
+        limits:
+          tokens_per_run: 50000
+          runs_per_day: 6
+          kill_switch: true
+        audit:
+          capture:
+            - model_id
+            - prompt_hash
+            - tool_calls
+            - policy_decision
+            - findings_detected
+            - control_mechanism_impacted
+            - human_approved_by
+        compliance:
+          eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
+          dora: "Art. 9 ICT risk detection; Art. 24 testing of ICT systems — fleet-wide correlator for ADR-0160's detection controls"
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}

@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: platform
+primaryDatastore: "none (stateless)"
+schemaName: "n/a"
+dataLineageRole: internal
+dataClassification: internal
+retentionPolicy: "7 years"
+evidenceExported: false
+lineage:
+  # Only edges backed by actual code (ADR-0160 mechanism 2's own "lineage-vs-code" standard,
+  # which this agent enforces on the rest of the fleet — so its own manifest holds to it too).
+  # The GoAlert reactive-trigger webhook and the admin-ui findings/HITL-queue integration are
+  # both still unbuilt (docs/agents/control-liveness-sentinel.md "Known gaps") and are
+  # deliberately NOT listed here until real code backs them.
+  upstream:
+    - serviceName: prometheus
+      relationType: api
+      description: reads WorkflowLivenessWatchdog heartbeat gauges (ADR-0160 mechanism 3)
+  downstream: []
+schemaLineage:
+  ownedSchemas: []
+  dependentSchemas: []
