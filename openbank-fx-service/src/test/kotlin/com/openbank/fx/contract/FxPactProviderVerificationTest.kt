@@ -18,8 +18,13 @@ import com.openbank.fx.domain.model.RateType
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
+import io.vertx.core.Vertx
+import io.vertx.core.impl.ContextInternal
 import jakarta.inject.Inject
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.launch
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
@@ -28,6 +33,9 @@ import org.junit.jupiter.api.extension.ExtendWith
 import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
 
 /**
  * Provider-side verification for the FX rate contract published by transaction-service
@@ -59,10 +67,39 @@ class FxPactProviderVerificationTest {
     @Inject
     lateinit var rateRepo: FxRateRepository
 
+    @Inject
+    lateinit var vertx: Vertx
+
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
         context?.target = HttpTestTarget("localhost", testPort.toInt())
         context?.addStateChangeHandlers(this)
+    }
+
+    /**
+     * Bridges a reactive-Panache block into Pact-JVM's synchronous `@State` callback. Pact-JVM
+     * invokes `@State` methods directly via reflection on the JUnit test thread, which has no
+     * Vert.x context — `Panache.withTransaction`/`withSession` (used by [rateRepo]) requires one,
+     * so a bare `runBlocking { rateRepo.save(...) }` throws `IllegalStateException: No current
+     * Vertx context found`. Same class of bug found live in sca-service's
+     * `ScaPactProviderVerificationTest` (blocking consent-service's deploy); this file has the
+     * identical pattern. Same fix as balance-service's `BalancePactProviderVerificationTest`
+     * (which documents why a plain `vertx.runOnContext { runBlocking { ... } }` is NOT sufficient).
+     */
+    private fun runOnVertxContext(block: suspend () -> Unit) {
+        val future = CompletableFuture<Unit>()
+        val duplicated = (vertx.orCreateContext as ContextInternal).duplicate()
+        VertxContextSafetyToggle.setContextSafe(duplicated, true)
+        val dispatcher = Executor { command -> duplicated.runOnContext { command.run() } }.asCoroutineDispatcher()
+        CoroutineScope(dispatcher).launch {
+            try {
+                block()
+                future.complete(Unit)
+            } catch (t: Throwable) {
+                future.completeExceptionally(t)
+            }
+        }
+        future.get(10, TimeUnit.SECONDS)
     }
 
     @TestTemplate
@@ -72,7 +109,7 @@ class FxPactProviderVerificationTest {
     }
 
     @State("an EUR/CZK rate exists")
-    fun stateEurCzkRateExists(): Unit = runBlocking {
+    fun stateEurCzkRateExists() = runOnVertxContext {
         val now = Instant.now()
         rateRepo.save(
             FxRate(
