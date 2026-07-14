@@ -71,7 +71,22 @@ locals {
   # yq) — the set the retired EC2 AMI baked in. Pinned by digest (immutable +
   # reproducible): bump this when runner-image.yml rebuilds the image. The
   # digest below = the runner-image/Dockerfile in this commit.
-  runner_image   = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.name}.amazonaws.com/openbank-ci-runner@sha256:ce7b1171b6cd4c95552cc1201013664ed2ab51a35d142e996dd118a4152a482f"
+  #
+  # 2026-07-14: bumped from the 2026-06-16 digest (ce7b1171...), which predates
+  # the JDK-preload feature (PR #287, commit 4701ca7d) entirely and left
+  # /opt/openbank-jdk-preload/Java_Temurin-Hotspot_jdk/ present-but-empty on
+  # that image. openbank-build hit this same class of failure on 2026-07-09
+  # (PR #680, live kubectl-patched + this file's `[ ! -d "$preload_root" ]` /
+  # `[ -d "$version_dir" ] || continue` guards added) — but that fix was never
+  # `tofu apply`'d to the live cluster, so openbank-deploy (this file, unpatched)
+  # sat on the same stale digest with the OLD unguarded script and hit
+  # `Init:Error` for 24h+ the first time a job landed there (unglobbed `*/` ->
+  # literal `cp` target, ENOENT). This digest (78949d45...) is the 2026-07-06
+  # `success` build made from the PR #287 commit itself — verified against ECR
+  # push history + the matching workflow run, not just "latest". Applying this
+  # also syncs the already-committed-but-never-applied guard script above onto
+  # openbank-deploy.
+  runner_image   = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.name}.amazonaws.com/openbank-ci-runner@sha256:78949d45c790f7196439cc517b00243d34ec229ee0e702d145ac44c4c3fd4b95"
   runner_command = ["/home/runner/run.sh"]
 
   # -------------------------------------------------------------------------
