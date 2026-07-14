@@ -49,8 +49,14 @@ class PolicyScanAdapter(private val config: AuthzPolicyAuditorConfig) : PolicySc
         val principalTypeComparisons = ruleFiles.flatMap { PolicyTextScanner.principalTypeComparisons(root, it) }
         val unwrappedAgentIdComparisons =
             ruleFiles.flatMap { PolicyTextScanner.unwrappedAgentIdComparisons(root, it) }
-        val restBypassReferences = regoFiles
-            .filterNot { it.name == "agents.rego" || it.name == "agents_test.rego" }
+        // Uses ruleFiles (checks 1/2's already-filtered, non-test rego set), not the broader
+        // regoFiles — otherwise rest_test.rego/copilot_tool_test.rego etc. would be scanned too
+        // (only agents.rego/agents_test.rego were excluded by name), a false-positive risk if a
+        // legitimate unit test ever calls agents.charter_allowed directly to test the predicate in
+        // isolation. ruleFiles already drops every *_test.rego; agents.rego itself still needs its
+        // own name-based exclusion since it is the one legitimate definer/consumer of the predicate.
+        val restBypassReferences = ruleFiles
+            .filterNot { it.name == "agents.rego" }
             .flatMap { PolicyTextScanner.charterAllowedReferences(root, it) }
 
         val charterScan = AgentsYamlScanner.scan(root)
@@ -105,10 +111,35 @@ private object AuthorizeInterceptorScanner {
         val lines = runCatching { file.readLines() }.getOrElse { return emptySet() }
         val startIndex = lines.indexOfFirst { FUNCTION_START.containsMatchIn(it) }
         if (startIndex == -1) return emptySet()
-        val endIndex = ((startIndex + 1) until lines.size).firstOrNull { lines[it].trim() == "}" } ?: lines.lastIndex
+        val endIndex = findFunctionEnd(lines, startIndex)
         return lines.subList(startIndex, (endIndex + 1).coerceAtMost(lines.size))
             .flatMap { line -> STRING_LITERAL.findAll(line).map { it.groupValues[1] } }
             .toSet()
+    }
+
+    // Brace-depth counter (char-by-char from the function-start line) rather than "the first
+    // line that trims to a bare '}' wins" — a nested block (when/if/try) with its own
+    // line-isolated closing brace would otherwise truncate the scan before the function's real
+    // end, silently dropping any principal-type literal declared after it. Doesn't special-case
+    // braces inside string literals/comments — acceptable here since principalType() is a small,
+    // literal-only function and this is a best-effort text scan, not a Kotlin parser (matches the
+    // rest of this file's "grep, not a parser" design).
+    private fun findFunctionEnd(lines: List<String>, startIndex: Int): Int {
+        var depth = 0
+        var seenOpenBrace = false
+        for (i in startIndex until lines.size) {
+            for (ch in lines[i]) {
+                when (ch) {
+                    '{' -> {
+                        depth += 1
+                        seenOpenBrace = true
+                    }
+                    '}' -> depth -= 1
+                }
+            }
+            if (seenOpenBrace && depth <= 0) return i
+        }
+        return lines.lastIndex
     }
 }
 

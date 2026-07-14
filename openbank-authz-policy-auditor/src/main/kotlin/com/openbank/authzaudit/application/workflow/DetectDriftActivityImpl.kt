@@ -135,11 +135,19 @@ open class DetectDriftActivityImpl : DetectDriftActivity {
             }
     }
 
-    // Mirrors agents.rego's own glob_match: equality, or a single embedded/trailing '*'.
+    // Mirrors agents.rego's own glob_match: equality, or a single embedded/trailing '*'. Builds
+    // the regex by escaping each literal segment around the '*' split points individually, NOT
+    // Regex.escape(pattern).replace("\\*", ".*") on the whole string — Regex.escape delegates to
+    // Pattern.quote, which wraps the WHOLE pattern in \Q...\E rather than escaping each special
+    // character in place, so the '*' inside it is never preceded by a literal backslash and the
+    // subsequent replace is a silent no-op. That left every wildcard tools.deny pattern (e.g.
+    // "money.*") matching nothing but its own literal text, so checkDeadDenyGlobs flagged EVERY
+    // real wildcard deny as "dead" even when it correctly matched real tools -- found by
+    // DetectDriftActivityImplTest's dead-deny-glob case.
     private fun globMatches(pattern: String, value: String): Boolean {
         if (pattern == value) return true
         if ('*' !in pattern) return false
-        val regex = Regex("^" + Regex.escape(pattern).replace("\\*", ".*") + "$")
+        val regex = Regex("^" + pattern.split('*').joinToString(".*") { Regex.escape(it) } + "$")
         return regex.matches(value)
     }
 
