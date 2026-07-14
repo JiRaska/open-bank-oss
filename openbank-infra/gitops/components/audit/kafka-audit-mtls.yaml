@@ -117,6 +117,18 @@ spec:
         operations: [Read, Describe]
         host: "*"
       - resource:
+          type: topic
+          name: openbank.fx.conversion.completed
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.documents.document.event
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
           type: group
           name: audit-service
           patternType: literal

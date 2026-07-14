@@ -345,11 +345,10 @@ jobs:
       # ADR-0160 mechanism 1 / rules.yaml: change_requirements.event_consumer_liveness.
       # Fleet-wide scan (not diff-scoped): every Kafka topic a service publishes must have a
       # real @Incoming consumer somewhere in the fleet, or a one-line-reasoned allowlist entry.
-      # ADVISORY (ADR-0144) — findings are ::warning annotations; pyyaml is already installed by
-      # the step above. Flip to enforced once the 19-topic first-scan triage lands = add
-      # --enforce below.
-      - name: "event-consumer liveness (ADR-0160, advisory)"
-        run: python3 .github/scripts/check-event-consumer-liveness.py
+      # ENFORCED (graduated 2026-07-14, ADR-0144): the #996 triage that began with issue #889
+      # brought unallowlisted violations to zero across three rounds.
+      - name: "event-consumer liveness (ADR-0160, enforced)"
+        run: python3 .github/scripts/check-event-consumer-liveness.py --enforce
 
       # ADR-0160 mechanism 2 / rules.yaml: change_requirements.lineage_code_audit. Fleet-wide scan
       # (not diff-scoped): every governance.yaml lineage.downstream edge must be backed by
