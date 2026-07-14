@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.3.0...control-liveness-sentinel-v0.3.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* **control-liveness-sentinel:** boot crash on unmapped config keys ([#1124](https://github.com/JiRaska/open-bank-oss/issues/1124)) ([2b858b3](https://github.com/JiRaska/open-bank-oss/commit/2b858b3f1bbd36b289c35adc0d406b20c2c6c91d))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.2.0...control-liveness-sentinel-v0.3.0) (2026-07-14)
 
 
