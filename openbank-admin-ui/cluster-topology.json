@@ -1,10 +1,10 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-07-14T00:27:49.898Z",
+  "generatedAt": "2026-07-14T06:41:14.300Z",
   "counts": {
-    "namespaces": 58,
-    "networkPolicies": 81,
+    "namespaces": 60,
+    "networkPolicies": 83,
     "externalSecrets": 117,
     "clusterPolicies": 4
   },
@@ -122,6 +122,12 @@
       "declared": true
     },
     {
+      "name": "control-liveness-sentinel",
+      "group": "domain",
+      "role": "control-liveness-sentinel",
+      "declared": true
+    },
+    {
       "name": "customer-edge",
       "group": "domain",
       "role": "Edge pro mobilní app",
@@ -197,6 +203,12 @@
       "name": "fx",
       "group": "domain",
       "role": "Směnárna / FX kurzy",
+      "declared": true
+    },
+    {
+      "name": "governance-auditor",
+      "group": "domain",
+      "role": "governance-auditor",
       "declared": true
     },
     {
@@ -416,9 +428,9 @@
       "icon": "network",
       "status": "planned",
       "analogy": "Zamčené dveře mezi patry — bez propustky se mezi odděleními neprojde.",
-      "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 81 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
+      "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 83 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
       "controls": [
-        "NetworkPolicy (81 / 58)",
+        "NetworkPolicy (83 / 60)",
         "per-namespace deny-by-default (cíl)"
       ],
       "adr": [
@@ -576,13 +588,13 @@
     {
       "item": "Namespace segmentace",
       "plan": "Doménová izolace, 1 ns / doména",
-      "reality": "58 namespaců",
+      "reality": "60 namespaců",
       "status": "live"
     },
     {
       "item": "NetworkPolicy (east-west)",
       "plan": "deny-by-default v každém ns",
-      "reality": "81 / 58 ns má NetworkPolicy → většina provozu otevřená",
+      "reality": "83 / 60 ns má NetworkPolicy → většina provozu otevřená",
       "status": "planned"
     },
     {
