@@ -339,3 +339,14 @@ reports/
 !perf/reports/
 *-sbom.cdx.json
 [0-9]* test-reports-*
+[0-9]* pitest-*
+# PITest (mutation-testing) HTML report accidentally dumped into the repo root
+# (PR #252 baked a full report + a downloaded run artifact into git history).
+# PITest output belongs under build/reports/pitest/, never tracked. Ignore the
+# report root files, the per-source `<Class>.kt.html` pages, and the root-level
+# `com.openbank.*` package report directories.
+/mutations.xml
+/index.html
+/style.css
+/com.openbank.*/
+**/*.kt.html
