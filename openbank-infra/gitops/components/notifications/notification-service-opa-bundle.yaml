@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: notification-service
     app.kubernetes.io/part-of: notifications
   annotations:
-    openbank.tech/policy-checksum: "9389cf18a9484e92"
+    openbank.tech/policy-checksum: "502c99b30084ae66"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2093,5 +2093,60 @@ data:
         compliance:
           eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
           dora: "Art. 9 ICT risk detection; Art. 24 testing of ICT systems — fleet-wide re-verification for the repo's own release-engineering invariants"
+
+      - id: docs-truth-agent
+        plane: control
+        charter: "ADR-0166"
+        description: >
+          Periodic ADR-status-vs-code drift detector. On a weekly sweep plus reactively when any
+          docs/adr/*.md file changes, greps every ADR's Delivery-Status: line against the code/
+          service/class/config key it names: a Shipped/Complete ADR whose named artifact doesn't
+          exist or isn't wired up, a Planned/Partial ADR whose fully-built implementation already
+          exists unmentioned (the ADR-0139/ADR-0140 feature-store incident), and a mismatch between
+          an ADR's or doc's "enforced" claim and rules.yaml's own gate-graduation enforced flag.
+          Findings are almost always a tracking ticket — correcting an ADR's substantive content is
+          a human judgment call — with a rare mechanical PR reserved for the one unambiguous case:
+          flipping just the Delivery-Status: line, nothing else in the file. Never edits ADR
+          decision content, merges a PR, or writes to rules.yaml.
+        enabled: true
+        enforcement: block
+        schedule:
+          weekly: "06:00 UTC"
+          reactive: adr-merge-webhook       # triggered by any merged change under docs/adr/*.md
+        data_scope:
+          read:
+            - read.governance             # docs/adr/*.md Delivery-Status lines, rules.yaml enforced flags,
+                                           # and a grep-based existence check of the artifacts they name
+          pii: none                       # ADR prose and repo file/grep metadata only; no customer data
+        tools:
+          allow:
+            - tier: read
+              resources: [governance]
+            - tier: write_proposal
+              resources: [github-pr]      # opens draft.ticket (primary) or, rarely, a Delivery-Status-only fix PR
+          deny:
+            - tier: write
+              resources: ["*"]            # explicit: no direct write to any ADR's decision content or rules.yaml ever
+            - tier: execute
+              resources: ["*"]
+        requires_human:
+          - any_adr_status_correction     # HITL mandatory; a human reads the ADR and the code to judge the correct status
+          - every: proposal               # segregation of duties: agent proposes, human disposes
+        limits:
+          tokens_per_run: 50000
+          runs_per_day: 4                 # weekly sweep + occasional ADR-merge reactive runs
+          kill_switch: true
+        audit:
+          capture:
+            - model_id
+            - prompt_hash
+            - tool_calls
+            - policy_decision
+            - findings_detected
+            - adr_status_drift_impacted
+            - human_approved_by
+        compliance:
+          eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
+          dora: "Art. 9 ICT risk detection — fleet-wide re-verification that architectural decision records still match the code they describe"
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}

@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: platform
+primaryDatastore: "none (stateless)"
+schemaName: "n/a"
+dataLineageRole: internal
+dataClassification: internal
+retentionPolicy: "7 years"
+evidenceExported: false
+lineage:
+  upstream:
+    - serviceName: github
+      relationType: api
+      description: reads docs/adr/*.md Delivery-Status lines and rules.yaml enforced flags via a
+        repo checkout, and greps the repo for the artifacts each ADR names
+  downstream:
+    - serviceName: admin-ui
+      relationType: api
+      description: exposes ADR-status-vs-code drift findings and HITL approval queue
+schemaLineage:
+  ownedSchemas: []
+  dependentSchemas: []

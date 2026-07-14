@@ -168,6 +168,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0163](0163-control-liveness-sentinel-ai-agent.md) | Control-liveness-sentinel AI agent | Accepted | Partial | — |
 | [0164](0164-governance-auditor-ai-agent.md) | Governance-auditor AI agent | Accepted | Partial | — |
 | [0165](0165-release-steward-ai-agent.md) | Release-steward AI agent | Accepted | Partial | — |
+| [0166](0166-docs-truth-agent-ai-agent.md) | docs-truth-agent AI agent | Accepted | Partial | — |
 
 ---
 
