@@ -37,7 +37,7 @@
   "openbank-product-catalog": "0.10.0",
   "openbank-psd2-service": "0.8.7",
   "openbank-release-steward": "0.2.1",
-  "openbank-sanctions-service": "0.6.5",
+  "openbank-sanctions-service": "0.7.0",
   "openbank-sca-service": "0.8.10",
   "openbank-sdd-service": "0.8.0",
   "openbank-security-scanner": "0.5.4",
