@@ -113,9 +113,18 @@ variable "arc_max_runners" {
   # individual openbank-build-labeled jobs (96 Services CI runs x their per-service
   # matrix), not ~97 — at 8 runners that's still a ~1-2h drain. 12 is the same value
   # already validated safe on 2026-06-04 (bounded by the runners NodePool cpu limit of
-  # 64: 12 build + 0 batch runners, well within limit now that batch is at 0). Revert
-  # to 6 once the backlog clears; this is not meant to be a permanent bump.
-  default = 12
+  # 64: 12 build + 0 batch runners, well within limit now that batch is at 0).
+  # Reverted 12 -> 6 (2026-07-15, same incident, hours later): a separate GitHub Actions
+  # Runner Scale Set bug surfaced mid-drain — the backend keeps redelivering stale
+  # "job available" offers for matrix slots that were fail-fast-cancelled before ever
+  # being created, so a large fraction of runner slots sit idle holding a phantom claim
+  # instead of doing real work. Confirmed this survives pod delete, listener restart,
+  # controller restart, and a full EphemeralRunner purge — it is NOT fixable from this
+  # side (GitHub-side queue state), and a bigger pool does not mitigate it: more slots
+  # just means more concurrent phantom holds, not more real throughput. Root cause
+  # #1149 already stops new inert-push waste at the source, so paying for 12 idle-
+  # capable spot runners no longer buys a proportional drain-speed benefit. Back to 6.
+  default = 6
 }
 
 variable "arc_batch_max_runners" {
