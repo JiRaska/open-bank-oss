@@ -34,7 +34,12 @@ import java.util.UUID
 @ApplicationScoped
 class ScaVerificationAdapter(@RestClient private val client: ScaChallengeClient) : SignerVerificationPort {
 
-    override suspend fun verify(partyRef: String, evidenceRef: String): Boolean {
+    override suspend fun verify(
+        partyRef: String,
+        evidenceRef: String,
+        documentSha256: String?,
+        ceremonyId: String?,
+    ): Boolean {
         if (evidenceRef.isBlank()) return false
         val challengeId = runCatching { UUID.fromString(evidenceRef) }.getOrNull() ?: return false
         val partyId = runCatching { UUID.fromString(partyRef) }.getOrNull() ?: return false
@@ -43,7 +48,12 @@ class ScaVerificationAdapter(@RestClient private val client: ScaChallengeClient)
             if (challenge.status != COMPLETED_STATUS || challenge.partyId != partyId) {
                 return false
             }
-            client.consume(challengeId, ScaConsumeClientRequest(partyId = partyId)).awaitSuspending()
+            val request = ScaConsumeClientRequest(
+                partyId = partyId,
+                documentSha256 = documentSha256,
+                ceremonyId = ceremonyId,
+            )
+            client.consume(challengeId, request).awaitSuspending()
             true
         } catch (e: WebApplicationException) {
             // sca-service returns 403/404 for a challenge that doesn't exist or isn't visible to

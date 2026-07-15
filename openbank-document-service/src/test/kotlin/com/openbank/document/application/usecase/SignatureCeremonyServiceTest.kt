@@ -65,7 +65,10 @@ class SignatureCeremonyServiceTest {
         val sealed = "sealed".toByteArray()
         coEvery { ceremonyRepo.findById(ceremony.id) } returns ceremony
         coEvery { documentRepo.findById(ceremony.documentId) } returns document
-        coEvery { signerVerificationPort.verify("party-1", "evidence-1") } returns true
+        coEvery {
+            signerVerificationPort.verify("party-1", "evidence-1", document.sha256, ceremony.id.toString())
+        } returns
+            true
         // First get() (inside signAsClient) sees the original bytes; the second (inside
         // sealDocument) sees what signAsClient just put -- simulating the object store's own
         // read-your-writes behavior across the two sequential steps.
@@ -92,7 +95,10 @@ class SignatureCeremonyServiceTest {
         val pdf = "pdf-bytes".toByteArray()
         coEvery { ceremonyRepo.findById(ceremony.id) } returns ceremony
         coEvery { documentRepo.findById(ceremony.documentId) } returns document
-        coEvery { signerVerificationPort.verify("party-1", "evidence-1") } returns true
+        coEvery {
+            signerVerificationPort.verify("party-1", "evidence-1", document.sha256, ceremony.id.toString())
+        } returns
+            true
         coEvery { objectStore.get(document.storageKey) } returns pdf
         coEvery { clientSignaturePort.signAsClient(any(), "party-1") } returns pdf
         coEvery { objectStore.put(any(), any(), any()) } returns Unit
@@ -122,8 +128,12 @@ class SignatureCeremonyServiceTest {
     @Test
     fun `a failed SCA verification never applies the client signature`(): Unit = runBlocking {
         val ceremony = ceremony(listOf(signer("party-1")))
+        val document = document()
         coEvery { ceremonyRepo.findById(ceremony.id) } returns ceremony
-        coEvery { signerVerificationPort.verify("party-1", "bad-evidence") } returns false
+        coEvery { documentRepo.findById(ceremony.documentId) } returns document
+        coEvery {
+            signerVerificationPort.verify("party-1", "bad-evidence", document.sha256, ceremony.id.toString())
+        } returns false
 
         assertThatThrownBy {
             runBlocking { service.recordDecision(ceremony.id, "party-1", SignerStatus.SIGNED, "bad-evidence") }
@@ -146,7 +156,7 @@ class SignatureCeremonyServiceTest {
         }.isInstanceOf(IllegalArgumentException::class.java)
 
         coVerify(exactly = 0) { clientSignaturePort.signAsClient(any(), any()) }
-        coVerify(exactly = 0) { signerVerificationPort.verify(any(), any()) }
+        coVerify(exactly = 0) { signerVerificationPort.verify(any(), any(), any(), any()) }
     }
 
     private fun signer(partyRef: String, order: Int = 1) =

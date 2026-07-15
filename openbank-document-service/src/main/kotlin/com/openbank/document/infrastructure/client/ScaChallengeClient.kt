@@ -47,7 +47,13 @@ interface ScaChallengeClient {
     fun consume(@PathParam("id") id: UUID, request: ScaConsumeClientRequest): Uni<ScaChallengeClientResponse>
 }
 
-data class ScaConsumeClientRequest(val partyId: UUID)
+data class ScaConsumeClientRequest(
+    val partyId: UUID,
+    /** Document content address (SHA-256), for a DOCUMENT_SIGNING challenge (ADR-0169 D2). */
+    val documentSha256: String? = null,
+    /** The signature ceremony this consume is scoped to, for a DOCUMENT_SIGNING challenge. */
+    val ceremonyId: String? = null,
+)
 
 /** Mirror of sca-service's `ScaChallengeResponse` (tolerate unknown fields as the contract evolves). */
 @JsonIgnoreProperties(ignoreUnknown = true)
