@@ -108,9 +108,14 @@ variable "arc_max_runners" {
   # a push-to-main lane (per-SHA concurrency group, issue #846), so none of that queue
   # is stale/cancellable, it's genuine backlog. NAT is no longer the constraint (see
   # 2026-06-13 note above) and minRunners stays 0, so this doesn't add idle cost — it
-  # only shortens how long the existing backlog takes to drain. Revert to 6 once the
-  # backlog clears; this is not meant to be a permanent bump.
-  default = 8
+  # only shortens how long the existing backlog takes to drain.
+  # TEMP raised 8 -> 12 (2026-07-15, same incident): the backlog turned out to be 229
+  # individual openbank-build-labeled jobs (96 Services CI runs x their per-service
+  # matrix), not ~97 — at 8 runners that's still a ~1-2h drain. 12 is the same value
+  # already validated safe on 2026-06-04 (bounded by the runners NodePool cpu limit of
+  # 64: 12 build + 0 batch runners, well within limit now that batch is at 0). Revert
+  # to 6 once the backlog clears; this is not meant to be a permanent bump.
+  default = 12
 }
 
 variable "arc_batch_max_runners" {
