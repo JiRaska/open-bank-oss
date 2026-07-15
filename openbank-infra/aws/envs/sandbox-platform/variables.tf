@@ -103,7 +103,14 @@ variable "arc_max_runners" {
   # ~2 batches vs ~3, shaving ~10 min off merge-to-green. Cap at 6 (not 12): each warm
   # runner keeps the on-demand node from consolidating; more than 6 would spill onto many
   # spot nodes and negate the warm-pool benefit.
-  default = 6
+  # TEMP raised 6 -> 8 (2026-07-15): ~55 concurrent agent branches drove a ~97-run,
+  # 21h+-old backlog on `openbank-build` — services-ci.yml intentionally never cancels
+  # a push-to-main lane (per-SHA concurrency group, issue #846), so none of that queue
+  # is stale/cancellable, it's genuine backlog. NAT is no longer the constraint (see
+  # 2026-06-13 note above) and minRunners stays 0, so this doesn't add idle cost — it
+  # only shortens how long the existing backlog takes to drain. Revert to 6 once the
+  # backlog clears; this is not meant to be a permanent bump.
+  default = 8
 }
 
 variable "arc_batch_max_runners" {
