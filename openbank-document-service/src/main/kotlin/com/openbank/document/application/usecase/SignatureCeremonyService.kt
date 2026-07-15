@@ -14,6 +14,7 @@ import com.openbank.document.application.port.out.SignatureSealPort
 import com.openbank.document.application.port.out.SignerVerificationPort
 import com.openbank.document.domain.event.SignatureCeremonyCompleted
 import com.openbank.document.domain.model.CeremonyStatus
+import com.openbank.document.domain.model.Document
 import com.openbank.document.domain.model.SignatureCeremony
 import com.openbank.document.domain.model.Signer
 import com.openbank.document.domain.model.SignerStatus
@@ -76,14 +77,20 @@ class SignatureCeremonyService(
         // signature on the stored document, which it would if signing ran before this check.
         val updated = ceremony.recordDecision(partyRef, decision, now)
         if (decision == SignerStatus.SIGNED) {
-            val verified = evidenceRef != null && signerVerificationPort.verify(partyRef, evidenceRef)
+            // Fetched here (not just inside signAsClient) so its sha256 can scope the SCA check
+            // to THIS exact document + ceremony (RTS Art. 5 dynamic linking, ADR-0169 D2) — an
+            // evidenceRef approved for a different document must not verify here.
+            val document = documentRepo.findById(ceremony.documentId)
+                ?: error("Cannot verify SCA for ceremony $ceremonyId: document ${ceremony.documentId} not found")
+            val verified = evidenceRef != null &&
+                signerVerificationPort.verify(partyRef, evidenceRef, document.sha256, ceremonyId.toString())
             if (!verified) {
                 error("SCA verification failed for signer $partyRef on ceremony $ceremonyId")
             }
             // Apply this signer's own one-time electronic signature only after the decision is
             // validated and SCA-verified, and before persisting: a decision is never recorded as
             // SIGNED without a corresponding signature actually landing on the document.
-            signAsClient(ceremony, partyRef)
+            signAsClient(document, partyRef)
         }
         if (updated.status != CeremonyStatus.COMPLETED) {
             return ceremonyRepo.save(updated)
@@ -113,9 +120,7 @@ class SignatureCeremonyService(
     override suspend fun findByDocumentId(documentId: UUID): SignatureCeremony? =
         ceremonyRepo.findByDocumentId(documentId)
 
-    private suspend fun signAsClient(ceremony: SignatureCeremony, partyRef: String) {
-        val document = documentRepo.findById(ceremony.documentId)
-            ?: error("Cannot sign ceremony ${ceremony.id}: document ${ceremony.documentId} not found")
+    private suspend fun signAsClient(document: Document, partyRef: String) {
         val pdf = objectStore.get(document.storageKey)
         val signed = clientSignaturePort.signAsClient(pdf, partyRef)
         objectStore.put(document.storageKey, signed, document.contentType)

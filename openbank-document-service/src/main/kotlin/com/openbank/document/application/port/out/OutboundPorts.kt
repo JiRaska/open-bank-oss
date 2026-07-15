@@ -132,9 +132,18 @@ interface SignatureSealPort {
  * signer's decision is only accepted as a legally meaningful signature once the [evidenceRef] —
  * a completed SCA challenge/approval reference for [partyRef] — has been verified. A DECLINED
  * decision does not need this check (declining requires no elevated assurance).
+ *
+ * [documentSha256]/[ceremonyId] scope the check to the exact document + ceremony the device
+ * signed (RTS Art. 5 dynamic linking, ADR-0169 D2): an evidenceRef approved for a different
+ * document must not verify here, even if it belongs to the same [partyRef].
  */
 interface SignerVerificationPort {
-    suspend fun verify(partyRef: String, evidenceRef: String): Boolean
+    suspend fun verify(
+        partyRef: String,
+        evidenceRef: String,
+        documentSha256: String? = null,
+        ceremonyId: String? = null,
+    ): Boolean
 }
 
 /**
