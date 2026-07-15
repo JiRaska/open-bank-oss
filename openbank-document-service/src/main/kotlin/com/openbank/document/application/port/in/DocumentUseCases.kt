@@ -5,6 +5,7 @@
 package com.openbank.document.application.port.`in`
 
 import com.openbank.document.domain.model.Document
+import com.openbank.document.domain.model.DocumentStatus
 import com.openbank.document.domain.model.DocumentTemplate
 import com.openbank.document.domain.model.SignatureCeremony
 import com.openbank.document.domain.model.SignatureLevel
@@ -117,4 +118,28 @@ interface SignatureCeremonyUseCase {
  */
 interface OnboardingDocumentUseCase {
     suspend fun issueOnboardingDocument(cmd: IssueOnboardingDocumentCommand)
+
+    /**
+     * Get-or-create the party's onboarding framework agreement in [lang] (ADR-0169 D3), the
+     * customer-driven, language-correct counterpart to the event-driven [issueOnboardingDocument].
+     * Idempotent: an already-SIGNED agreement (any language) is returned untouched; a pending
+     * agreement already in [lang] is returned as-is; a pending agreement in a *different* language
+     * is superseded (archived) and re-rendered in [lang], since language is still changeable before
+     * signing. [lang] is an ISO-639-1 code (`cs`/`en`); anything else falls back to the default.
+     */
+    suspend fun ensureOnboardingAgreement(partyRef: String, lang: String): OnboardingAgreement
 }
+
+/**
+ * Result of [OnboardingDocumentUseCase.ensureOnboardingAgreement]: the ceremony the customer signs
+ * plus the exact rendered framework-agreement document it is scoped to (content-addressed by
+ * [sha256], the value the SCA challenge must bind to — ADR-0169 D2).
+ */
+data class OnboardingAgreement(
+    val ceremonyId: UUID,
+    val documentId: UUID,
+    val templateCode: String,
+    val templateVersion: String,
+    val sha256: String,
+    val documentStatus: DocumentStatus,
+)

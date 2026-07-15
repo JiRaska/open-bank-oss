@@ -4,6 +4,7 @@
 
 package com.openbank.document.infrastructure.rest.dto
 
+import com.openbank.document.application.port.`in`.OnboardingAgreement
 import com.openbank.document.domain.model.Document
 import com.openbank.document.domain.model.DocumentStatus
 import com.openbank.document.domain.model.DocumentTemplate
@@ -102,4 +103,25 @@ fun Document.toResponse() = DocumentResponse(
     productRef = productRef,
     retainUntil = retainUntil,
     createdAt = createdAt,
+)
+
+/** Body for `POST /api/v1/documents/onboarding-agreement` (ADR-0169 D3). */
+data class EnsureOnboardingAgreementRequest(val partyRef: String, val lang: String = "cs")
+
+data class OnboardingAgreementResponse(
+    val ceremonyId: UUID,
+    val documentId: UUID,
+    val templateCode: String,
+    val templateVersion: String,
+    val sha256: String,
+    val documentStatus: DocumentStatus,
+)
+
+fun OnboardingAgreement.toResponse() = OnboardingAgreementResponse(
+    ceremonyId = ceremonyId,
+    documentId = documentId,
+    templateCode = templateCode,
+    templateVersion = templateVersion,
+    sha256 = sha256,
+    documentStatus = documentStatus,
 )

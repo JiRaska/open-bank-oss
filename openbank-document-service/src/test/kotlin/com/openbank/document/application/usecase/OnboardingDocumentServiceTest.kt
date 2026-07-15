@@ -10,16 +10,20 @@ import com.openbank.document.application.port.`in`.IssueOnboardingDocumentComman
 import com.openbank.document.application.port.`in`.OpenCeremonyCommand
 import com.openbank.document.application.port.`in`.RenderDocumentCommand
 import com.openbank.document.application.port.`in`.SignatureCeremonyUseCase
+import com.openbank.document.application.port.out.DocumentRepositoryPort
 import com.openbank.document.application.port.out.DuplicateCeremonyException
 import com.openbank.document.application.port.out.DuplicateDocumentException
 import com.openbank.document.application.port.out.ProductCatalogPort
 import com.openbank.document.domain.model.Document
 import com.openbank.document.domain.model.DocumentStatus
+import com.openbank.document.domain.model.SignatureCeremony
 import com.openbank.document.domain.model.SignatureLevel
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
@@ -36,8 +40,14 @@ class OnboardingDocumentServiceTest {
     private val renderUseCase: DocumentRenderUseCase = mockk()
     private val documentQueryUseCase: DocumentQueryUseCase = mockk()
     private val ceremonyUseCase: SignatureCeremonyUseCase = mockk()
-    private val service =
-        OnboardingDocumentService(productCatalogPort, renderUseCase, documentQueryUseCase, ceremonyUseCase)
+    private val documentRepository: DocumentRepositoryPort = mockk()
+    private val service = OnboardingDocumentService(
+        productCatalogPort,
+        renderUseCase,
+        documentQueryUseCase,
+        ceremonyUseCase,
+        documentRepository,
+    )
 
     private val accountId: UUID = UUID.randomUUID()
     private val productId: UUID = UUID.randomUUID()
@@ -152,21 +162,104 @@ class OnboardingDocumentServiceTest {
         coVerify(exactly = 1) { ceremonyUseCase.openCeremony(any()) }
     }
 
-    private fun document() = Document(
-        id = UUID.randomUUID(),
-        templateCode = "RAMCOVA_SMLOUVA_CS",
-        templateVersion = "1.1.0",
-        sha256 = "abc",
-        storageKey = "documents/1",
-        contentType = "application/pdf",
-        sizeBytes = 10,
-        status = DocumentStatus.GENERATED,
-        metadata = emptyMap(),
-        partyRef = partyRef,
-        caseRef = accountId.toString(),
-        productRef = productId.toString(),
-        retainUntil = null,
-        createdAt = Instant.parse("2026-01-15T10:15:30Z"),
-        idempotencyKey = idempotencyKey,
-    )
+    // ── ensureOnboardingAgreement (ADR-0169 D3) ────────────────────────────────────────────────
+
+    @Test
+    fun `ensure renders a fresh agreement in the requested language and opens a ceremony`(): Unit = runBlocking {
+        val ceremonyId = UUID.randomUUID()
+        coEvery { documentQueryUseCase.listByParty(partyRef) } returns emptyList()
+        val rendered = document(code = "RAMCOVA_SMLOUVA_EN")
+        coEvery { renderUseCase.render(any()) } returns rendered
+        coEvery { ceremonyUseCase.findByDocumentId(rendered.id) } returns null
+        coEvery { ceremonyUseCase.openCeremony(any()) } returns ceremony(ceremonyId)
+
+        val result = service.ensureOnboardingAgreement(partyRef, "en")
+
+        assertThat(result.ceremonyId).isEqualTo(ceremonyId)
+        assertThat(result.documentId).isEqualTo(rendered.id)
+        assertThat(result.templateCode).isEqualTo("RAMCOVA_SMLOUVA_EN")
+        coVerify(exactly = 1) { renderUseCase.render(match { it.templateCode == "RAMCOVA_SMLOUVA_EN" }) }
+    }
+
+    @Test
+    fun `ensure reuses a pending agreement already in the requested language, without re-rendering`(): Unit =
+        runBlocking {
+            val ceremonyId = UUID.randomUUID()
+            val existing = document(code = "RAMCOVA_SMLOUVA_CS", status = DocumentStatus.PENDING_SIGNATURE)
+            coEvery { documentQueryUseCase.listByParty(partyRef) } returns listOf(existing)
+            coEvery { ceremonyUseCase.findByDocumentId(existing.id) } returns ceremony(ceremonyId)
+
+            val result = service.ensureOnboardingAgreement(partyRef, "cs")
+
+            assertThat(result.documentId).isEqualTo(existing.id)
+            assertThat(result.ceremonyId).isEqualTo(ceremonyId)
+            coVerify(exactly = 0) { renderUseCase.render(any()) }
+        }
+
+    @Test
+    fun `ensure returns an already-signed agreement untouched, whatever language was asked`(): Unit = runBlocking {
+        val ceremonyId = UUID.randomUUID()
+        val signed = document(code = "RAMCOVA_SMLOUVA_CS", status = DocumentStatus.SIGNED)
+        coEvery { documentQueryUseCase.listByParty(partyRef) } returns listOf(signed)
+        coEvery { ceremonyUseCase.findByDocumentId(signed.id) } returns ceremony(ceremonyId)
+
+        val result = service.ensureOnboardingAgreement(partyRef, "en")
+
+        assertThat(result.documentId).isEqualTo(signed.id)
+        assertThat(result.documentStatus).isEqualTo(DocumentStatus.SIGNED)
+        coVerify(exactly = 0) { renderUseCase.render(any()) }
+    }
+
+    @Test
+    fun `ensure supersedes a pending agreement in a different language and re-renders`(): Unit = runBlocking {
+        val ceremonyId = UUID.randomUUID()
+        val stale = document(code = "RAMCOVA_SMLOUVA_CS", status = DocumentStatus.PENDING_SIGNATURE)
+        val fresh = document(code = "RAMCOVA_SMLOUVA_EN")
+        coEvery { documentQueryUseCase.listByParty(partyRef) } returns listOf(stale)
+        coEvery { documentRepository.save(any()) } answers { firstArg() }
+        coEvery { renderUseCase.render(any()) } returns fresh
+        coEvery { ceremonyUseCase.findByDocumentId(fresh.id) } returns null
+        coEvery { ceremonyUseCase.openCeremony(any()) } returns ceremony(ceremonyId)
+
+        val result = service.ensureOnboardingAgreement(partyRef, "en")
+
+        assertThat(result.templateCode).isEqualTo("RAMCOVA_SMLOUVA_EN")
+        // the stale CS document is archived before the EN render
+        coVerify(exactly = 1) { documentRepository.save(match { it.status == DocumentStatus.ARCHIVED }) }
+        coVerify(exactly = 1) { renderUseCase.render(match { it.templateCode == "RAMCOVA_SMLOUVA_EN" }) }
+    }
+
+    @Test
+    fun `ensure falls back to the default locale for an unsupported language`(): Unit = runBlocking {
+        coEvery { documentQueryUseCase.listByParty(partyRef) } returns emptyList()
+        val rendered = document(code = "RAMCOVA_SMLOUVA_CS")
+        coEvery { renderUseCase.render(any()) } returns rendered
+        coEvery { ceremonyUseCase.findByDocumentId(rendered.id) } returns null
+        coEvery { ceremonyUseCase.openCeremony(any()) } returns ceremony(UUID.randomUUID())
+
+        service.ensureOnboardingAgreement(partyRef, "de")
+
+        coVerify(exactly = 1) { renderUseCase.render(match { it.templateCode == "RAMCOVA_SMLOUVA_CS" }) }
+    }
+
+    private fun ceremony(id: UUID): SignatureCeremony = mockk { every { this@mockk.id } returns id }
+
+    private fun document(code: String = "RAMCOVA_SMLOUVA_CS", status: DocumentStatus = DocumentStatus.GENERATED) =
+        Document(
+            id = UUID.randomUUID(),
+            templateCode = code,
+            templateVersion = "1.1.0",
+            sha256 = "abc",
+            storageKey = "documents/1",
+            contentType = "application/pdf",
+            sizeBytes = 10,
+            status = status,
+            metadata = emptyMap(),
+            partyRef = partyRef,
+            caseRef = accountId.toString(),
+            productRef = productId.toString(),
+            retainUntil = null,
+            createdAt = Instant.parse("2026-01-15T10:15:30Z"),
+            idempotencyKey = idempotencyKey,
+        )
 }

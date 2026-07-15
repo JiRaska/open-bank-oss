@@ -7,14 +7,17 @@ package com.openbank.document.application.usecase
 import com.openbank.document.application.port.`in`.DocumentQueryUseCase
 import com.openbank.document.application.port.`in`.DocumentRenderUseCase
 import com.openbank.document.application.port.`in`.IssueOnboardingDocumentCommand
+import com.openbank.document.application.port.`in`.OnboardingAgreement
 import com.openbank.document.application.port.`in`.OnboardingDocumentUseCase
 import com.openbank.document.application.port.`in`.OpenCeremonyCommand
 import com.openbank.document.application.port.`in`.RenderDocumentCommand
 import com.openbank.document.application.port.`in`.SignatureCeremonyUseCase
+import com.openbank.document.application.port.out.DocumentRepositoryPort
 import com.openbank.document.application.port.out.DuplicateCeremonyException
 import com.openbank.document.application.port.out.DuplicateDocumentException
 import com.openbank.document.application.port.out.ProductCatalogPort
 import com.openbank.document.domain.model.Document
+import com.openbank.document.domain.model.DocumentStatus
 import com.openbank.document.domain.model.SignatureLevel
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
@@ -43,6 +46,7 @@ class OnboardingDocumentService(
     private val renderUseCase: DocumentRenderUseCase,
     private val documentQueryUseCase: DocumentQueryUseCase,
     private val ceremonyUseCase: SignatureCeremonyUseCase,
+    private val documentRepository: DocumentRepositoryPort,
 ) : OnboardingDocumentUseCase {
 
     private val log = Logger.getLogger(OnboardingDocumentService::class.java)
@@ -123,7 +127,84 @@ class OnboardingDocumentService(
 
     private fun onboardingKey(accountId: UUID) = "$ONBOARDING_KEY_PREFIX$accountId"
 
+    // ── Customer-driven, language-correct onboarding agreement (ADR-0169 D3) ────────────────────
+
+    override suspend fun ensureOnboardingAgreement(partyRef: String, lang: String): OnboardingAgreement {
+        val wantCode = frameworkCode(lang)
+        val agreements = documentQueryUseCase.listByParty(partyRef)
+            .filter { it.templateCode.startsWith(FRAMEWORK_BASE) && it.status != DocumentStatus.ARCHIVED }
+
+        // 1. Already signed (any language): onboarding signing is complete — return it untouched.
+        //    A signed contract is the immutable legal record; never re-render or supersede it.
+        agreements.firstOrNull { it.status == DocumentStatus.SIGNED }?.let { return it.asAgreement(partyRef) }
+
+        // 2. A pending agreement already in the requested language — reuse it (idempotent).
+        agreements.firstOrNull { it.templateCode == wantCode }?.let { return it.asAgreement(partyRef) }
+
+        // 3. Any pending agreement in a DIFFERENT language — supersede it: language is still
+        //    changeable before signing (ADR-0169 D3). Archiving here is safe — step 1 already
+        //    returned for any SIGNED one, so everything left is GENERATED/PENDING_SIGNATURE.
+        agreements.forEach { documentRepository.save(it.archive()) }
+
+        // 4. Render fresh in the requested language + open the ceremony.
+        val document = renderUseCase.render(
+            RenderDocumentCommand(
+                templateCode = wantCode,
+                templateVersion = null,
+                data = emptyMap(),
+                contentType = "application/pdf",
+                partyRef = partyRef,
+                caseRef = "$AGREEMENT_KEY_PREFIX$partyRef",
+                productRef = null,
+                retainUntil = null,
+            ),
+        )
+        val ceremony = openOrFindCeremony(document.id, partyRef)
+        return OnboardingAgreement(
+            ceremonyId = ceremony.id,
+            documentId = document.id,
+            templateCode = document.templateCode,
+            templateVersion = document.templateVersion,
+            sha256 = document.sha256,
+            documentStatus = document.status,
+        )
+    }
+
+    private suspend fun Document.asAgreement(partyRef: String): OnboardingAgreement {
+        val ceremony = openOrFindCeremony(id, partyRef)
+        return OnboardingAgreement(
+            ceremonyId = ceremony.id,
+            documentId = id,
+            templateCode = templateCode,
+            templateVersion = templateVersion,
+            sha256 = sha256,
+            documentStatus = status,
+        )
+    }
+
+    @Suppress("SwallowedException")
+    private suspend fun openOrFindCeremony(documentId: UUID, partyRef: String) =
+        ceremonyUseCase.findByDocumentId(documentId) ?: try {
+            ceremonyUseCase.openCeremony(
+                OpenCeremonyCommand(documentId, listOf(partyRef), SignatureLevel.ADVANCED),
+            )
+        } catch (e: DuplicateCeremonyException) {
+            // A concurrent ensure opened it first — re-read; it is guaranteed present now.
+            ceremonyUseCase.findByDocumentId(documentId)
+                ?: error("Ceremony for document $documentId vanished after DuplicateCeremonyException")
+        }
+
+    /** `cs`/`CS` → `RAMCOVA_SMLOUVA_CS`; unknown languages fall back to the default locale. */
+    private fun frameworkCode(lang: String): String {
+        val locale = lang.trim().uppercase().takeIf { it in SUPPORTED_LOCALES } ?: DEFAULT_LOCALE
+        return "${FRAMEWORK_BASE}_$locale"
+    }
+
     private companion object {
         const val ONBOARDING_KEY_PREFIX = "onboarding:"
+        const val AGREEMENT_KEY_PREFIX = "onboarding-agreement:"
+        const val FRAMEWORK_BASE = "RAMCOVA_SMLOUVA"
+        const val DEFAULT_LOCALE = "CS"
+        val SUPPORTED_LOCALES = setOf("CS", "EN")
     }
 }
