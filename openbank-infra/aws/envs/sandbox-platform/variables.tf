@@ -34,7 +34,17 @@ variable "cnpg_version" {
 variable "arc_controller_version" {
   description = "gha-runner-scale-set-controller Helm chart version."
   type        = string
-  default     = "0.9.3"
+  # Raised 0.9.3 -> 0.14.2 (2026-07-15): 0.9.3 (2024-06-25) predates a real upstream bug
+  # (actions/actions-runner-controller#4091, "EphemeralRunner stuck in failed state if the
+  # job it was allocated to is cancelled") fixed by #4239/#4260, first shipped in 0.13.0
+  # (2025-10-16). Live-confirmed on this cluster: when a matrix job's assignment was
+  # cancelled/superseded, the controller recreated a NEW pod bound to the SAME stale
+  # EphemeralRunner CR/job claim rather than releasing it — surviving `kubectl delete pod`,
+  # a listener restart, and a controller restart; only deleting the EphemeralRunner CR
+  # itself (with a finalizer strip when it hung) actually cleared it. Took the latest
+  # stable (0.14.2, 2026-05-22) rather than stopping at the minimum fix version — no
+  # BREAKING/migration/CRD-manual-step notes in 0.13.1-0.14.2's release notes.
+  default = "0.14.2"
 }
 
 variable "keda_version" {
