@@ -12,27 +12,23 @@ data class InitiateScaCommand(
     val purpose: ScaPurpose,
     val preferredMethod: ScaMethod?,
     val dynamicLinkingData: DynamicLinkingData?,
-    val redirectUrl: String?
+    val redirectUrl: String?,
 )
 
-data class VerifyScaCommand(
-    val challengeId: UUID,
-    val partyId: UUID,
-    val otp: String?
-)
+data class VerifyScaCommand(val challengeId: UUID, val partyId: UUID, val otp: String?)
 
 data class EnrollDeviceCommand(
     val partyId: UUID,
     val credentialId: String,
     val publicKeySpkiB64: String,
-    val algorithm: SignatureAlgorithm
+    val algorithm: SignatureAlgorithm,
 )
 
 data class RecordDeviceDecisionCommand(
     val challengeId: UUID,
     val credentialId: String,
     val decision: DeviceDecisionType,
-    val signatureB64: String
+    val signatureB64: String,
 )
 
 interface InitiateScaUseCase {
@@ -71,7 +67,9 @@ data class ConsumeScaCommand(
     val expectedPartyId: UUID,
     val amount: String?,
     val currency: String?,
-    val creditor: String?
+    val creditor: String?,
+    val documentSha256: String? = null,
+    val ceremonyId: String? = null,
 )
 
 /**

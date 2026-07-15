@@ -65,6 +65,12 @@ class ScaChallengeEntity : PanacheEntityBase() {
     @Column(name = "dynamic_reference")
     var dynamicReference: String? = null
 
+    @Column(name = "dynamic_document_sha256")
+    var dynamicDocumentSha256: String? = null
+
+    @Column(name = "dynamic_ceremony_id")
+    var dynamicCeremonyId: String? = null
+
     @Column(name = "redirect_url")
     var redirectUrl: String? = null
 
@@ -86,13 +92,28 @@ class ScaChallengeEntity : PanacheEntityBase() {
         failureReason = failureReason,
         attemptCount = attemptCount,
         maxAttempts = maxAttempts,
-        dynamicLinkingData = if (dynamicAmount != null || dynamicCreditorIban != null)
-            DynamicLinkingData(dynamicAmount, dynamicCurrency, dynamicCreditorIban, dynamicCreditorName, dynamicReference)
-        else null,
+        dynamicLinkingData = if (hasDynamicLinkingData()) {
+            DynamicLinkingData(
+                dynamicAmount,
+                dynamicCurrency,
+                dynamicCreditorIban,
+                dynamicCreditorName,
+                dynamicReference,
+                dynamicDocumentSha256,
+                dynamicCeremonyId,
+            )
+        } else {
+            null
+        },
         redirectUrl = redirectUrl,
         consumedAt = consumedAt,
-        createdAt = createdAt
+        createdAt = createdAt,
     )
+
+    private fun hasDynamicLinkingData(): Boolean = dynamicAmount != null ||
+        dynamicCreditorIban != null ||
+        dynamicDocumentSha256 != null ||
+        dynamicCeremonyId != null
 
     companion object {
         fun fromDomain(c: ScaChallenge): ScaChallengeEntity = ScaChallengeEntity().apply {
@@ -112,6 +133,8 @@ class ScaChallengeEntity : PanacheEntityBase() {
             dynamicCreditorIban = c.dynamicLinkingData?.creditorIban
             dynamicCreditorName = c.dynamicLinkingData?.creditorName
             dynamicReference = c.dynamicLinkingData?.reference
+            dynamicDocumentSha256 = c.dynamicLinkingData?.documentSha256
+            dynamicCeremonyId = c.dynamicLinkingData?.ceremonyId
             redirectUrl = c.redirectUrl
             consumedAt = c.consumedAt
             createdAt = c.createdAt

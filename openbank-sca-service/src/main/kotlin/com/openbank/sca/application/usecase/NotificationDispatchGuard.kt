@@ -12,9 +12,7 @@ import org.eclipse.microprofile.faulttolerance.Timeout
 import java.util.UUID
 
 @ApplicationScoped
-class NotificationDispatchGuard(
-    private val notificationSender: NotificationSender
-) {
+class NotificationDispatchGuard(private val notificationSender: NotificationSender) {
 
     @Timeout(2000)
     @Retry(maxRetries = 2, delay = 200, jitter = 100, retryOn = [Exception::class])

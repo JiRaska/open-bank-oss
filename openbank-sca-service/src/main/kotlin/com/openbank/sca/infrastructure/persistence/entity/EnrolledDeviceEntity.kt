@@ -40,7 +40,7 @@ class EnrolledDeviceEntity : PanacheEntityBase() {
         credentialId = credentialId,
         publicKeySpkiB64 = publicKeySpki,
         algorithm = algorithm,
-        createdAt = createdAt
+        createdAt = createdAt,
     )
 
     companion object {

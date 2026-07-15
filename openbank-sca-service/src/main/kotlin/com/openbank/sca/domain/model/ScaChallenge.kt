@@ -11,7 +11,7 @@ enum class ScaMethod {
     PUSH_NOTIFICATION,
     SMS_OTP,
     TOTP,
-    BIOMETRIC
+    BIOMETRIC,
 }
 
 enum class ScaPurpose {
@@ -19,7 +19,12 @@ enum class ScaPurpose {
     PAYMENT_INITIATION,
     LOGIN,
     AGENT_ACTION,
-    SENSITIVE_DATA_ACCESS
+    SENSITIVE_DATA_ACCESS,
+
+    /** Biometric approval of a specific e-signature act (ADR-0169 D2) — dynamic-linked to a
+     * document, not a payment: [DynamicLinkingData.documentSha256]/[DynamicLinkingData.ceremonyId]
+     * are populated instead of amount/currency/creditor. */
+    DOCUMENT_SIGNING,
 }
 
 enum class ScaStatus {
@@ -27,7 +32,7 @@ enum class ScaStatus {
     COMPLETED,
     FAILED,
     EXPIRED,
-    CANCELLED
+    CANCELLED,
 }
 
 data class ScaChallenge(
@@ -76,14 +81,30 @@ data class DynamicLinkingData(
     val creditorIban: String?,
     val creditorName: String?,
     val reference: String?,
+    /** Content address (SHA-256) of the exact document the device asserted, for [ScaPurpose.DOCUMENT_SIGNING]. */
+    val documentSha256: String? = null,
+    /** The signature ceremony (document-service) this challenge is scoped to, for [ScaPurpose.DOCUMENT_SIGNING]. */
+    val ceremonyId: String? = null,
 ) {
     /**
      * Does this signed linking data authorise exactly the operation the caller is about to
      * execute? Amount compares numerically ("250.0" == "250.00"), currency case-insensitively,
      * and the creditor account ignoring spaces/case — what the DEVICE signed must equal what
      * the EDGE forwards, or the consume is refused (RTS Art. 5 dynamic linking).
+     *
+     * [documentSha256]/[ceremonyId] are compared the same way (exact match, [documentSha256]
+     * case-insensitively since hex casing isn't semantically meaningful): a document-signing
+     * challenge's evidence must be spent on the SAME document/ceremony it was raised for, never a
+     * different one — this is what makes the biometric approval evidence "I authorised THIS
+     * contract" rather than a bare "I completed some challenge" (ADR-0169 D2).
      */
-    fun authorises(amount: String?, currency: String?, creditor: String?): Boolean {
+    fun authorises(
+        amount: String?,
+        currency: String?,
+        creditor: String?,
+        documentSha256: String? = null,
+        ceremonyId: String? = null,
+    ): Boolean {
         fun amountEq(a: String?, b: String?): Boolean = when {
             a == null && b == null -> true
             a == null || b == null -> false
@@ -93,6 +114,8 @@ data class DynamicLinkingData(
         if (!amountEq(this.amount, amount)) return false
         if (norm(this.currency) != norm(currency)) return false
         if (this.creditorIban != null && norm(this.creditorIban) != norm(creditor)) return false
+        if (norm(this.documentSha256) != norm(documentSha256)) return false
+        if (this.ceremonyId != ceremonyId) return false
         return true
     }
 }
