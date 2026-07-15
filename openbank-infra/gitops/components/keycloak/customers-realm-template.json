@@ -127,6 +127,21 @@
       "attributes": {
         "client_credentials.use_refresh_token": "false"
       }
+    },
+    {
+      "clientId": "openbank-edge-webauthn",
+      "name": "Customer Edge WebAuthn RP",
+      "description": "Service-account client for customer-edge's own WebAuthn RP (ADR-0066 F2, variant B1, WebAuthnKeycloakClient). Creates the Keycloak user for a party enrolling a native passkey (manage-users), then mints that user a real session via RFC 8693 token-exchange scoped to the openbank-app audience (impersonation + a token-exchange fine-grained-authz permission on openbank-app). Kept separate from customer-edge-admin, whose blast radius is deliberately narrower (party_id attribute writes only).",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "attributes": {
+        "client_credentials.use_refresh_token": "false"
+      }
     }
   ],
   "clientScopes": [

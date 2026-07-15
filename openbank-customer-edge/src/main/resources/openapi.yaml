@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.11.0
+  version: 1.12.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -28,6 +28,7 @@ tags:
   - name: SCA
   - name: Devices
   - name: Onboarding
+  - name: WebAuthn
 
 paths:
   /banks:
@@ -655,6 +656,97 @@ paths:
         '404':
           description: Party not found
 
+  /webauthn/register/begin:
+    post:
+      tags: [WebAuthn]
+      summary: Begin native passkey enrollment (ADR-0066 F2)
+      description: >-
+        Not a Keycloak-authenticated route. Requires `Authorization: Bearer <enrollmentTicket>`
+        (from /onboarding/start's response) instead — there is no Keycloak session yet for a
+        brand-new party. Returns a WebAuthn registration challenge for
+        `ASAuthorizationPlatformPublicKeyCredentialProvider`.
+      operationId: webauthnRegisterBegin
+      security: []
+      responses:
+        '200':
+          description: Registration challenge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationChallenge'
+        '401':
+          description: Invalid or expired enrollment ticket
+
+  /webauthn/register/complete:
+    post:
+      tags: [WebAuthn]
+      summary: Complete native passkey enrollment (ADR-0066 F2)
+      description: >-
+        Same `Authorization: Bearer <enrollmentTicket>` requirement as /register/begin. Verifies
+        the attestation (webauthn4j), stores the credential, and ensures a Keycloak user exists
+        for the party — but does NOT itself return a session; call /auth/begin next.
+      operationId: webauthnRegisterComplete
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegistrationCompleteRequest'
+      responses:
+        '204':
+          description: Credential registered
+        '400':
+          description: Malformed request or attestation verification failed
+        '401':
+          description: Invalid or expired enrollment ticket
+
+  /webauthn/auth/begin:
+    post:
+      tags: [WebAuthn]
+      summary: Begin native passkey login (ADR-0066 F2)
+      description: >-
+        Fully unauthenticated — this is how a session is obtained. `allowCredentials` is always
+        empty: the platform authenticator resolves any resident (discoverable) credential for
+        this rpId, matching how the app calls `ASAuthorizationController` (no allow-list).
+      operationId: webauthnAuthBegin
+      security: []
+      responses:
+        '200':
+          description: Authentication challenge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationChallenge'
+
+  /webauthn/auth/complete:
+    post:
+      tags: [WebAuthn]
+      summary: Complete native passkey login (ADR-0066 F2)
+      description: >-
+        Fully unauthenticated. Verifies the assertion (webauthn4j) against the credential stored
+        at enrollment, then mints a real session via Keycloak token-exchange
+        (`WebAuthnKeycloakClient.impersonate`) scoped to the `openbank-app` audience.
+      operationId: webauthnAuthComplete
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthCompleteRequest'
+      responses:
+        '200':
+          description: Session tokens
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
+        '400':
+          description: Malformed request or unknown/expired challenge
+        '401':
+          description: Unknown credential or assertion verification failed
+
 components:
   securitySchemes:
     customerOidc:
@@ -741,6 +833,90 @@ components:
         status:
           type: string
           enum: [PENDING_ACTIVATION]
+        enrollmentTicket:
+          type: string
+          description: >-
+            Short-lived HMAC-signed ticket (ADR-0066 F2). Present it as
+            `Authorization: Bearer <enrollmentTicket>` to /webauthn/register/begin and
+            /webauthn/register/complete to enrol a native passkey for this party before any
+            Keycloak session exists. Expires in 10 minutes.
+
+    RegistrationChallenge:
+      type: object
+      required: [challenge, rpId, userId, userName, displayName]
+      properties:
+        challenge:
+          type: string
+          description: base64url-encoded random bytes
+        rpId:
+          type: string
+          example: open-bank.tech
+        userId:
+          type: string
+          description: base64url-encoded random bytes
+        userName:
+          type: string
+        displayName:
+          type: string
+
+    RegistrationCompleteRequest:
+      type: object
+      required: [credential_id, attestation_object, client_data_json]
+      properties:
+        credential_id:
+          type: string
+          description: base64url
+        attestation_object:
+          type: string
+          description: base64url
+        client_data_json:
+          type: string
+          description: base64url
+
+    AuthenticationChallenge:
+      type: object
+      required: [challenge, rpId]
+      properties:
+        challenge:
+          type: string
+          description: base64url-encoded random bytes
+        rpId:
+          type: string
+          example: open-bank.tech
+        allowCredentials:
+          type: array
+          items:
+            type: string
+          description: Always empty — discoverable-credential (resident key) flow.
+
+    AuthCompleteRequest:
+      type: object
+      required: [credential_id, authenticator_data, client_data_json, signature, user_handle]
+      properties:
+        credential_id:
+          type: string
+          description: base64url
+        authenticator_data:
+          type: string
+          description: base64url
+        client_data_json:
+          type: string
+          description: base64url
+        signature:
+          type: string
+          description: base64url
+        user_handle:
+          type: string
+          description: base64url
+
+    TokenPair:
+      type: object
+      required: [access_token]
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
 
     RegisterPartyRequest:
       type: object

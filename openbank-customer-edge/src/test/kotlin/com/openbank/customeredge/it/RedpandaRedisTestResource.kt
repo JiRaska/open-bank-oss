@@ -61,6 +61,11 @@ class RedpandaRedisTestResource : QuarkusTestResourceLifecycleManager {
             // placeholder satisfies Quarkus's config-property presence check at boot.
             "openbank.upstream.client-secret" to "test-upstream-secret",
             "openbank.edge.keycloak-admin-client-secret" to "test-keycloak-admin-secret",
+            // Same "required, no real defaultValue" story as the two secrets above (ADR-0066 F2
+            // WebAuthn RP — EnrollmentTicketService, WebAuthnKeycloakClient); this test never
+            // exercises either.
+            "openbank.webauthn.enrollment-ticket-secret" to "test-enrollment-ticket-secret",
+            "openbank.webauthn.kc-client-secret" to "test-webauthn-kc-client-secret",
             "quarkus.devservices.enabled" to "false",
         )
     }
