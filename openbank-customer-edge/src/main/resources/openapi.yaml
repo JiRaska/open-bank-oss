@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.12.0
+  version: 1.13.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -29,6 +29,7 @@ tags:
   - name: Devices
   - name: Onboarding
   - name: WebAuthn
+  - name: Documents
 
 paths:
   /banks:
@@ -566,6 +567,105 @@ paths:
       responses:
         '200':
           description: Device list
+
+  /documents/agreements:
+    post:
+      tags: [Documents]
+      summary: Get-or-create the caller's onboarding framework agreement in a language (ADR-0169)
+      description: >-
+        Idempotent. partyRef is taken from the JWT, never the body (IDOR). The client only chooses
+        the language; document-service renders the correct locale and opens the signing ceremony.
+      operationId: ensureAgreement
+      security:
+        - customerOidc: [accounts:read]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lang:
+                  type: string
+                  enum: [cs, en]
+                  default: cs
+      responses:
+        '200':
+          description: The ceremony to sign + the rendered agreement it is scoped to
+
+  /documents/{id}/content:
+    get:
+      tags: [Documents]
+      summary: Stream a document's PDF bytes (owner only)
+      operationId: getDocumentContent
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: PDF bytes
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '404':
+          description: Not found or not owned by the caller
+
+  /signature-ceremonies/{id}:
+    get:
+      tags: [Documents]
+      summary: A signature ceremony's status (signer only)
+      operationId: getCeremony
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Ceremony detail
+        '404':
+          description: Not found or the caller is not a signer
+
+  /signature-ceremonies/{id}/decisions:
+    post:
+      tags: [Documents]
+      summary: Record the caller's signing decision (SCA-bound, ADR-0169)
+      description: >-
+        partyRef is forced to the JWT; evidenceRef (the SCA challenge id) is verified upstream by
+        document-service against sca-service (ADR-0021).
+      operationId: recordDecision
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision:
+                  type: string
+                  enum: [SIGNED, DECLINED]
+                evidenceRef:
+                  type: string
+                  description: SCA challenge id proving the signer's consent (required for SIGNED).
+      responses:
+        '200':
+          description: Decision recorded
+        '404':
+          description: Not found or the caller is not a signer
 
   /onboarding/register:
     post:

@@ -149,6 +149,8 @@ spec:
               value: http://card-issuance-service.payments.svc:8118
             - name: DISPUTE_SERVICE_URL
               value: http://dispute-service.dispute.svc:8135
+            - name: DOCUMENT_SERVICE_URL
+              value: http://document-service.documents.svc:8143
             - name: QUARKUS_MANAGEMENT_HOST
               value: "0.0.0.0"
             # ADR-0034: OPA sidecar is live, flip advisory→enforce (D4→D5 complete).
