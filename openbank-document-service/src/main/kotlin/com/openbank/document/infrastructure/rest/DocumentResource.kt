@@ -8,9 +8,12 @@ import com.openbank.document.application.port.`in`.CreateTemplateCommand
 import com.openbank.document.application.port.`in`.DocumentQueryUseCase
 import com.openbank.document.application.port.`in`.DocumentRenderUseCase
 import com.openbank.document.application.port.`in`.DocumentTemplateUseCase
+import com.openbank.document.application.port.`in`.OnboardingDocumentUseCase
 import com.openbank.document.application.port.`in`.RenderDocumentCommand
 import com.openbank.document.infrastructure.rest.dto.CreateTemplateRequest
 import com.openbank.document.infrastructure.rest.dto.DocumentResponse
+import com.openbank.document.infrastructure.rest.dto.EnsureOnboardingAgreementRequest
+import com.openbank.document.infrastructure.rest.dto.OnboardingAgreementResponse
 import com.openbank.document.infrastructure.rest.dto.PreviewTemplateRequest
 import com.openbank.document.infrastructure.rest.dto.PreviewTemplateResponse
 import com.openbank.document.infrastructure.rest.dto.RenderDocumentRequest
@@ -31,6 +34,10 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import java.util.UUID
 
+// TooManyFunctions: this is the REST surface for the whole document + template + onboarding-agreement
+// area — each endpoint is one thin delegation to a use-case; splitting by URL sub-tree would fragment
+// one cohesive resource for no real gain.
+@Suppress("TooManyFunctions")
 @Path("/api/v1/documents")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -38,7 +45,21 @@ class DocumentResource(
     private val templateUseCase: DocumentTemplateUseCase,
     private val renderUseCase: DocumentRenderUseCase,
     private val queryUseCase: DocumentQueryUseCase,
+    private val onboardingUseCase: OnboardingDocumentUseCase,
 ) {
+
+    /**
+     * Get-or-create the caller-party's onboarding framework agreement in the requested language
+     * (ADR-0169 D3). Idempotent. `customer-edge` proxies this for `ROLE_CUSTOMER`, forcing
+     * `partyRef` to the caller's token so a customer can only ever provision their own agreement.
+     */
+    @POST
+    @Path("/onboarding-agreement")
+    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    suspend fun ensureOnboardingAgreement(req: EnsureOnboardingAgreementRequest): OnboardingAgreementResponse {
+        if (req.partyRef.isBlank()) throw BadRequestException("partyRef is required")
+        return onboardingUseCase.ensureOnboardingAgreement(req.partyRef, req.lang).toResponse()
+    }
 
     @POST
     @Path("/templates")

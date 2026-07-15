@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Document Service API
-  version: 1.1.0
+  version: 1.2.0
   description: >-
     Document Management — templates, rendering, storage with lifecycle/retention metadata,
     and e-signature ceremonies. Not on the synchronous money path (emits events, never a
@@ -119,6 +119,32 @@ paths:
       responses:
         '201':
           description: Document generated
+
+  /api/v1/documents/onboarding-agreement:
+    post:
+      tags: [Documents]
+      summary: Get-or-create a party's onboarding framework agreement in a language (ADR-0169 D3)
+      description: >-
+        Idempotent, language-correct. Returns an already-signed agreement untouched; reuses a
+        pending agreement already in the requested language; supersedes (archives + re-renders) a
+        pending agreement in a different language. customer-edge proxies this for ROLE_CUSTOMER,
+        forcing partyRef to the caller's token.
+      operationId: ensureOnboardingAgreement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnsureOnboardingAgreementRequest'
+      responses:
+        '200':
+          description: The ceremony to sign + the exact rendered agreement it is scoped to
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OnboardingAgreementResponse'
+        '400':
+          description: partyRef is required
 
   /api/v1/documents:
     get:
@@ -335,6 +361,38 @@ components:
           description: >-
             SCA challenge/approval reference (ADR-0021) proving partyRef's identity/consent.
             Required and verified when decision is SIGNED; not required for DECLINED.
+
+    EnsureOnboardingAgreementRequest:
+      type: object
+      required: [partyRef]
+      properties:
+        partyRef:
+          type: string
+        lang:
+          type: string
+          description: ISO-639-1 language (cs/en); unsupported values fall back to the default locale.
+          default: cs
+
+    OnboardingAgreementResponse:
+      type: object
+      required: [ceremonyId, documentId, templateCode, templateVersion, sha256, documentStatus]
+      properties:
+        ceremonyId:
+          type: string
+          format: uuid
+        documentId:
+          type: string
+          format: uuid
+        templateCode:
+          type: string
+        templateVersion:
+          type: string
+        sha256:
+          type: string
+          description: Content address of the exact rendered PDF — the value the SCA challenge binds to (ADR-0169 D2).
+        documentStatus:
+          type: string
+          enum: [GENERATED, PENDING_SIGNATURE, SIGNED, ARCHIVED]
 
     ApiError:
       type: object
