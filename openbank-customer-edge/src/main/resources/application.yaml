@@ -115,6 +115,7 @@ openbank:
     fx-service-url:      ${FX_SERVICE_URL:http://fx-service.fx.svc:8119}
     card-issuance-service-url: ${CARD_ISSUANCE_SERVICE_URL:http://card-issuance-service.payments.svc:8118}
     dispute-service-url: ${DISPUTE_SERVICE_URL:http://dispute-service.dispute.svc:8135}
+    document-service-url: ${DOCUMENT_SERVICE_URL:http://document-service.documents.svc:8143}
     # CNB JERR registry XML — bank code list, refreshed every 24 h (CnbBanksClient).
     # Override with CNB_BANKS_URL env var if the CNB endpoint changes.
     cnb-banks-url: ${CNB_BANKS_URL:https://apl.cnb.cz/apljerrpp/jerr_banky.xml}
