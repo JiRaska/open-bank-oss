@@ -21,13 +21,13 @@ enum class SignatureAlgorithm {
     ES256,
 
     /** Ed25519 (EdDSA). */
-    ED25519
+    ED25519,
 }
 
 /** Outcome the enrolled device asserts for a challenge. */
 enum class DeviceDecisionType {
     APPROVED,
-    DENIED
+    DENIED,
 }
 
 /**
@@ -64,15 +64,28 @@ data class DeviceApprovalDecision(
  * captured signature cannot be replayed for a different amount, a different creditor, or
  * to flip a DENIED into an APPROVED. Null linking fields collapse to empty segments so the
  * format stays stable for login/consent challenges that carry no payment context.
+ *
+ * The [DynamicLinkingData.documentSha256]/[DynamicLinkingData.ceremonyId] segments (ADR-0169
+ * D2) are appended ONLY when at least one is present. This is deliberate, not an oversight: an
+ * unconditional 8-field format would change the signed bytes for every EXISTING purpose
+ * (payment/login/consent/etc.) too, breaking signature verification for every already-deployed
+ * app build the moment this ships — a live-payment regression, not a document-signing one. Since
+ * no purpose has ever populated these two fields before now, appending them only when non-null
+ * is 100% byte-identical to the old format for every challenge that existed before ADR-0169.
  */
 fun ScaChallenge.dynamicLinkingPayload(decision: DeviceDecisionType): ByteArray {
     val dl = dynamicLinkingData
-    return listOf(
+    val segments = mutableListOf(
         id.toString(),
         decision.name,
         dl?.amount ?: "",
         dl?.currency ?: "",
         dl?.creditorIban ?: "",
-        dl?.reference ?: ""
-    ).joinToString("|").toByteArray(Charsets.UTF_8)
+        dl?.reference ?: "",
+    )
+    if (dl != null && (dl.documentSha256 != null || dl.ceremonyId != null)) {
+        segments += dl.documentSha256 ?: ""
+        segments += dl.ceremonyId ?: ""
+    }
+    return segments.joinToString("|").toByteArray(Charsets.UTF_8)
 }

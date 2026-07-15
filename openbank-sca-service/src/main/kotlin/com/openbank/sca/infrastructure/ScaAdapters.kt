@@ -4,10 +4,10 @@
 
 package com.openbank.sca.infrastructure
 
-import com.openbank.sca.application.port.out.OtpGenerator
-import com.openbank.sca.application.port.out.ScaIdempotencyStore
-import com.openbank.sca.application.port.out.OtpStore
 import com.openbank.sca.application.port.out.NotificationSender
+import com.openbank.sca.application.port.out.OtpGenerator
+import com.openbank.sca.application.port.out.OtpStore
+import com.openbank.sca.application.port.out.ScaIdempotencyStore
 import io.quarkus.redis.datasource.ReactiveRedisDataSource
 import io.quarkus.redis.datasource.value.SetArgs
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -49,7 +49,7 @@ class RedisScaIdempotencyStore(private val redis: ReactiveRedisDataSource) : Sca
         strings.set(
             "sca:idempotency:$key",
             challengeId.toString(),
-            SetArgs().ex(ttlSeconds)
+            SetArgs().ex(ttlSeconds),
         ).awaitSuspending()
     }
 }

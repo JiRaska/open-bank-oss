@@ -89,6 +89,6 @@ interface DeviceAssertionVerifier {
         publicKeySpkiB64: String,
         algorithm: SignatureAlgorithm,
         payload: ByteArray,
-        signatureB64: String
+        signatureB64: String,
     ): Boolean
 }

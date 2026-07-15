@@ -351,10 +351,16 @@ class ScaService(
         }
         if (challenge.status != ScaStatus.COMPLETED) throw ScaChallengeNotApprovedException(command.challengeId)
         val linking = challenge.dynamicLinkingData
-        // A challenge that signed nothing cannot authorise a money movement; one that signed
-        // amount+payee must match the operation exactly (RTS Art. 5 dynamic linking).
-        val authorised = linking?.authorises(command.amount, command.currency, command.creditor)
-            ?: (command.amount == null)
+        // A challenge that signed nothing cannot authorise a money movement OR a document
+        // signature; one that signed amount+payee (or a document hash+ceremony) must match the
+        // operation exactly (RTS Art. 5 dynamic linking, extended to documents by ADR-0169 D2).
+        val authorised = linking?.authorises(
+            command.amount,
+            command.currency,
+            command.creditor,
+            command.documentSha256,
+            command.ceremonyId,
+        ) ?: (command.amount == null && command.documentSha256 == null)
         if (!authorised) throw ScaDynamicLinkingMismatchException(command.challengeId)
         if (!repository.markConsumed(command.challengeId)) {
             throw ScaChallengeAlreadyConsumedException(command.challengeId)
@@ -374,6 +380,8 @@ class ScaService(
             "Potvrďte akci bankovního agenta"
         ScaPurpose.SENSITIVE_DATA_ACCESS ->
             "Potvrďte přístup k citlivým údajům"
+        ScaPurpose.DOCUMENT_SIGNING ->
+            "Potvrďte podpis dokumentu"
     }
 
     private fun buildIdempotencyKey(command: InitiateScaCommand, method: ScaMethod): String {

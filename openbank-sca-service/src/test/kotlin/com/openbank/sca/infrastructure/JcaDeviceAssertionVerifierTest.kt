@@ -70,6 +70,5 @@ class JcaDeviceAssertionVerifierTest {
         return Base64.getEncoder().encodeToString(sig.sign())
     }
 
-    private fun spkiB64(keyPair: KeyPair): String =
-        Base64.getEncoder().encodeToString(keyPair.public.encoded)
+    private fun spkiB64(keyPair: KeyPair): String = Base64.getEncoder().encodeToString(keyPair.public.encoded)
 }

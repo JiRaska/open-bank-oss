@@ -3,8 +3,8 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.sca.infrastructure.outbox
 
-import com.openbank.sca.application.port.out.ScaOutboxRepository
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.sca.application.port.out.ScaOutboxRepository
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk

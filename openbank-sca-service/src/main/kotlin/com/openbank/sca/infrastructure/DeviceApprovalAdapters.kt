@@ -36,7 +36,7 @@ class JcaDeviceAssertionVerifier : DeviceAssertionVerifier {
         publicKeySpkiB64: String,
         algorithm: SignatureAlgorithm,
         payload: ByteArray,
-        signatureB64: String
+        signatureB64: String,
     ): Boolean = try {
         val keyBytes = Base64.getDecoder().decode(publicKeySpkiB64)
         val sigBytes = Base64.getDecoder().decode(signatureB64)
@@ -63,17 +63,15 @@ class JcaDeviceAssertionVerifier : DeviceAssertionVerifier {
  * is carried separately by the outbox/audit trail.
  */
 @ApplicationScoped
-class RedisScaDecisionStore(
-    private val redis: ReactiveRedisDataSource,
-    private val objectMapper: ObjectMapper
-) : ScaDecisionStore {
+class RedisScaDecisionStore(private val redis: ReactiveRedisDataSource, private val objectMapper: ObjectMapper) :
+    ScaDecisionStore {
     private val strings = redis.value(String::class.java)
 
     override suspend fun record(decision: DeviceApprovalDecision, ttlSeconds: Long) {
         strings.setex(
             "sca:decision:${decision.challengeId}",
             ttlSeconds,
-            objectMapper.writeValueAsString(decision)
+            objectMapper.writeValueAsString(decision),
         ).awaitSuspending()
     }
 

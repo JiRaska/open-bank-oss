@@ -14,7 +14,9 @@ import jakarta.enterprise.context.ApplicationScoped
 import java.util.UUID
 
 @ApplicationScoped
-class EnrolledDeviceRepositoryImpl : EnrolledDeviceRepository, PanacheRepository<EnrolledDeviceEntity> {
+class EnrolledDeviceRepositoryImpl :
+    EnrolledDeviceRepository,
+    PanacheRepository<EnrolledDeviceEntity> {
 
     override suspend fun save(device: EnrolledDevice): EnrolledDevice {
         val entity = EnrolledDeviceEntity.fromDomain(device)

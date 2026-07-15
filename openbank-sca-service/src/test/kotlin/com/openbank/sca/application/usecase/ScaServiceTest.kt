@@ -781,6 +781,96 @@ class ScaServiceTest {
         }.isInstanceOf(ScaChallengeAlreadyConsumedException::class.java)
     }
 
+    // --- consume: document-signing binding (ADR-0169 D2) ---
+
+    @Test
+    fun `consume marks a document-signing challenge as spent when the hash and ceremony match`(): Unit = runBlocking {
+        val ch = challenge(status = ScaStatus.COMPLETED).copy(
+            purpose = ScaPurpose.DOCUMENT_SIGNING,
+            dynamicLinkingData = DynamicLinkingData(null, null, null, null, null, "abc123", "ceremony-1"),
+        )
+        coEvery { repository.findById(ch.id) } returns ch
+        coEvery { repository.markConsumed(ch.id) } returns true
+
+        val result = service.consume(
+            ConsumeScaCommand(
+                ch.id,
+                ch.partyId,
+                null,
+                null,
+                null,
+                documentSha256 = "abc123",
+                ceremonyId = "ceremony-1",
+            ),
+        )
+
+        assertThat(result.consumedAt).isNotNull()
+        coVerify(exactly = 1) { repository.markConsumed(ch.id) }
+    }
+
+    @Test
+    fun `consume throws ScaDynamicLinkingMismatchException when the document hash does not match`(): Unit =
+        runBlocking {
+            val ch = challenge(status = ScaStatus.COMPLETED).copy(
+                purpose = ScaPurpose.DOCUMENT_SIGNING,
+                dynamicLinkingData = DynamicLinkingData(null, null, null, null, null, "abc123", "ceremony-1"),
+            )
+            coEvery { repository.findById(ch.id) } returns ch
+            assertThatThrownBy {
+                runBlocking {
+                    service.consume(
+                        ConsumeScaCommand(
+                            ch.id,
+                            ch.partyId,
+                            null,
+                            null,
+                            null,
+                            documentSha256 = "def456",
+                            ceremonyId = "ceremony-1",
+                        ),
+                    )
+                }
+            }.isInstanceOf(ScaDynamicLinkingMismatchException::class.java)
+        }
+
+    @Test
+    fun `consume of a document-bound challenge without the hash is rejected — cannot spend as a no-op`(): Unit =
+        runBlocking {
+            val ch = challenge(status = ScaStatus.COMPLETED).copy(
+                purpose = ScaPurpose.DOCUMENT_SIGNING,
+                dynamicLinkingData = DynamicLinkingData(null, null, null, null, null, "abc123", "ceremony-1"),
+            )
+            coEvery { repository.findById(ch.id) } returns ch
+            assertThatThrownBy {
+                runBlocking { service.consume(ConsumeScaCommand(ch.id, ch.partyId, null, null, null)) }
+            }.isInstanceOf(ScaDynamicLinkingMismatchException::class.java)
+        }
+
+    @Test
+    fun `consume rejects a payment challenge presented with document-signing fields`(): Unit = runBlocking {
+        // A payment challenge's linking data has no documentSha256 — it must never authorise a
+        // document signature, however the caller shapes the consume request.
+        val ch = challenge(status = ScaStatus.COMPLETED).copy(
+            dynamicLinkingData = DynamicLinkingData("100.00", "CZK", null, null, null),
+        )
+        coEvery { repository.findById(ch.id) } returns ch
+        assertThatThrownBy {
+            runBlocking {
+                service.consume(
+                    ConsumeScaCommand(
+                        ch.id,
+                        ch.partyId,
+                        "100.00",
+                        "CZK",
+                        null,
+                        documentSha256 = "abc123",
+                        ceremonyId = "x",
+                    ),
+                )
+            }
+        }.isInstanceOf(ScaDynamicLinkingMismatchException::class.java)
+    }
+
     private fun device(partyId: UUID = UUID.randomUUID(), credentialId: String = "cred-1") = EnrolledDevice(
         partyId = partyId,
         credentialId = credentialId,
