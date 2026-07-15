@@ -133,6 +133,22 @@ class SignatureCeremonyServiceTest {
         coVerify(exactly = 0) { clientSignaturePort.signAsClient(any(), any()) }
     }
 
+    @Test
+    fun `an out-of-order SIGNED decision is rejected before any client signature is applied`(): Unit = runBlocking {
+        // party-2 (order 2) tries to sign before party-1: the domain rejects it, and because
+        // validation now runs BEFORE signing, no phantom signature is written (nor is SCA even
+        // consulted). On the pre-fix ordering this same call signed the document, then threw.
+        val ceremony = ceremony(listOf(signer("party-1", order = 1), signer("party-2", order = 2)))
+        coEvery { ceremonyRepo.findById(ceremony.id) } returns ceremony
+
+        assertThatThrownBy {
+            runBlocking { service.recordDecision(ceremony.id, "party-2", SignerStatus.SIGNED, "evidence-2") }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+
+        coVerify(exactly = 0) { clientSignaturePort.signAsClient(any(), any()) }
+        coVerify(exactly = 0) { signerVerificationPort.verify(any(), any()) }
+    }
+
     private fun signer(partyRef: String, order: Int = 1) =
         Signer(partyRef = partyRef, order = order, status = SignerStatus.PENDING, signedAt = null)
 

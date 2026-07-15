@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pid-service
     app.kubernetes.io/part-of: pid
   annotations:
-    openbank.tech/policy-checksum: "3257446097563812"
+    openbank.tech/policy-checksum: "e50655a0a98ac421"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1344,15 +1344,16 @@ data:
         require:
           - "topic has >=1 real @Incoming consumer fleet-wide, or an allowlist entry with a reason"
         gate: event-consumer-liveness
-        enforced: advisory
-        target_enforce_date: "2026-09-15"   # ADR-0144
-        # CI producer is LIVE (advisory): .github/scripts/check-event-consumer-liveness.py runs in
-        # the "Validate manifests" job on every PR — fleet-wide scan (not diff-scoped), findings are
-        # ::warning annotations. First scan (2026-07-13): 19 producer-only topics found, ALL still
-        # unallowlisted below (real triage tracked as a fleet-sweep issue, not resolved by fiat).
-        # Flip to enforced once triage brings unallowlisted violations to zero = pass --enforce to
-        # the script in ci.yml (one-line change), same as every other ADR-0144 gate here.
-        blocked_on: "11 unallowlisted REAL_GAP topics remain from the #996 triage: 13 original REAL_GAP - 4 fixed (#1005 sca topic mismatch, #1007 audit-service fan-out) + 2 more found once the 3 originally-UNCLEAR topics were resolved (cards.events, fx.conversion.completed are REAL_GAP; pid.events is allowlisted below) = 11 — tracked in issue #996, not resolved by fiat"
+        # GRADUATED to enforce 2026-07-14 (ADR-0144): the #996 fleet-sweep triage that started with
+        # issue #889 brought unallowlisted violations to zero across three rounds (#1005 sca topic
+        # mismatch, #1007/#1032/#1050 audit-service fan-out, #1054 fx-service dead-stub producer fix,
+        # this PR's fx.conversion.completed/documents.document.event/payments.swift.event consumers)
+        # — same graduation path check-outbox-dispatch-enabled.sh proved out. check-event-consumer-
+        # liveness.py --root . --enforce reports 0 fleet-wide; ci.yml now passes --enforce.
+        enforced: enforce
+        # CI producer is LIVE and enforced: .github/scripts/check-event-consumer-liveness.py runs in
+        # the "Validate manifests" job on every PR — fleet-wide scan (not diff-scoped). A new topic
+        # published with no consumer and no allowlist entry now fails the build.
         ci_producer: ".github/scripts/check-event-consumer-liveness.py"
         # #996 triage findings, classified LEGITIMATE_NO_CONSUMER (not the #889 failure class):
         allowlist:

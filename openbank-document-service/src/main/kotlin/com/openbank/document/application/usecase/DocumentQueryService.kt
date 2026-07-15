@@ -40,4 +40,6 @@ class DocumentQueryService(
     }
 
     override suspend fun listByParty(partyRef: String): List<Document> = documentRepo.findByParty(partyRef)
+
+    override suspend fun findByIdempotencyKey(key: String): Document? = documentRepo.findByIdempotencyKey(key)
 }

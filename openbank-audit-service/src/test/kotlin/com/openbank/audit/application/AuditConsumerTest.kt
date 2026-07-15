@@ -206,6 +206,80 @@ class AuditConsumerTest {
     }
 
     @Test
+    fun `consume extracts documentId as aggregateId for a document-generated event`(): Unit = runBlocking {
+        val documentId = UUID.randomUUID()
+        val payload = """{"eventType":"DOCUMENT_GENERATED","documentId":"$documentId","templateCode":"x"}"""
+
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify {
+            repo.save(
+                match {
+                    it.aggregateType == "DOCUMENT" && it.aggregateId == documentId.toString()
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `consume extracts ceremonyId as aggregateId for a signature-ceremony-completed event`(): Unit = runBlocking {
+        val ceremonyId = UUID.randomUUID()
+        val payload = """{"eventType":"SIGNATURE_CEREMONY_COMPLETED","ceremonyId":"$ceremonyId"}"""
+
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify {
+            repo.save(
+                match {
+                    it.aggregateType == "SIGNATURE_CEREMONY" && it.aggregateId == ceremonyId.toString()
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `consume extracts conversionId as aggregateId for an fx-conversion-executed event`(): Unit = runBlocking {
+        val conversionId = UUID.randomUUID()
+        val payload = """{"eventType":"fx.conversion.executed.v1","conversionId":"$conversionId","toAmount":100}"""
+
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify {
+            repo.save(
+                match {
+                    it.aggregateType == "FX_CONVERSION" && it.aggregateId == conversionId.toString()
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `consume extracts swiftMessageId as aggregateId for a swift-message-status-changed event`(): Unit =
+        runBlocking {
+            val swiftMessageId = UUID.randomUUID()
+            val payload =
+                """{"eventType":"SWIFT_MESSAGE_STATUS_CHANGED","swiftMessageId":"$swiftMessageId","status":"SENT"}"""
+
+            coEvery { repo.save(any()) } returns Unit
+
+            consumer.consume(payload)
+
+            coVerify {
+                repo.save(
+                    match {
+                        it.aggregateType == "SWIFT_MESSAGE" && it.aggregateId == swiftMessageId.toString()
+                    },
+                )
+            }
+        }
+
+    @Test
     fun `consume extracts the bare id as aggregateId for a sanctions screening event`(): Unit = runBlocking {
         val checkId = UUID.randomUUID()
         val payload = """{"eventType":"sanctions.check.completed.v1","id":"$checkId","status":"CLEAR"}"""

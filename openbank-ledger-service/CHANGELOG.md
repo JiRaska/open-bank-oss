@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.13.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.12.1...ledger-service-v1.13.0) (2026-07-14)
+
+
+### Features
+
+* **ledger:** add operator replay endpoint for historical booked-change events ([#888](https://github.com/JiRaska/open-bank-oss/issues/888)) ([946807f](https://github.com/JiRaska/open-bank-oss/commit/946807f77c2d7e524c14df311f9d93ce9ab92cfb))
+* **ledger:** wire four-eyes enforcement mechanism (ADR-0155) ([#929](https://github.com/JiRaska/open-bank-oss/issues/929)) ([b92c042](https://github.com/JiRaska/open-bank-oss/commit/b92c042af5b25aba65c9d10eea37b2f414b7e540))
+
+
+### Bug Fixes
+
+* **billing,ledger:** unusable fee GL accounts + add ledger pact coverage ([#468](https://github.com/JiRaska/open-bank-oss/issues/468)) ([#859](https://github.com/JiRaska/open-bank-oss/issues/859)) ([3583372](https://github.com/JiRaska/open-bank-oss/commit/3583372f76f5093516289108aa5f248dd481d35e))
+* **ledger,psd2:** dedicated exception types, no more mapper collision ([#526](https://github.com/JiRaska/open-bank-oss/issues/526)) ([#752](https://github.com/JiRaska/open-bank-oss/issues/752)) ([e15464c](https://github.com/JiRaska/open-bank-oss/commit/e15464c58a43c514f3a33c67751c3a75de667e1a))
+* **ledger:** add broker-based Pact provider verification for billing-service ([#1018](https://github.com/JiRaska/open-bank-oss/issues/1018)) ([0e1bee9](https://github.com/JiRaska/open-bank-oss/commit/0e1bee968bc90d2e4ff350ae168141c6a8ab20f2))
+* **ledger:** generic repair for reversal-line corruption since V10 ([#527](https://github.com/JiRaska/open-bank-oss/issues/527)) ([#748](https://github.com/JiRaska/open-bank-oss/issues/748)) ([ca10585](https://github.com/JiRaska/open-bank-oss/commit/ca1058515a3873b5e74e6f7d59398fc3470ed9c8))
+* **ledger:** include REVERSED entries in all balance-reading queries ([#945](https://github.com/JiRaska/open-bank-oss/issues/945)) ([83e070f](https://github.com/JiRaska/open-bank-oss/commit/83e070f62cc931da03ab4da5cf7a28940adf4d1f)), closes [#939](https://github.com/JiRaska/open-bank-oss/issues/939)
+* **ledger:** unbreak main — InMemoryJournalRepository missing appendOutbox ([#902](https://github.com/JiRaska/open-bank-oss/issues/902)) ([7d5e7e1](https://github.com/JiRaska/open-bank-oss/commit/7d5e7e1ada0cccc5dd1f8b1070fa7ff7c50e1d10))
+* **transaction,ledger:** per-currency cash-clearing GL accounts ([#747](https://github.com/JiRaska/open-bank-oss/issues/747)) ([#749](https://github.com/JiRaska/open-bank-oss/issues/749)) ([7e0f934](https://github.com/JiRaska/open-bank-oss/commit/7e0f9341b9d0f92f61665ff4cf981b9d181d73c6))
+
+
+### Security
+
+* **libs-testing,aml,ledger:** add shared authz conformance kit, fix live AML gap ([#467](https://github.com/JiRaska/open-bank-oss/issues/467)) ([#757](https://github.com/JiRaska/open-bank-oss/issues/757)) ([94e9c6d](https://github.com/JiRaska/open-bank-oss/commit/94e9c6d9a20cb2b1bf972bf60dfed1ff90e2443c))
+
 ## [1.12.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.12.0...ledger-service-v1.12.1) (2026-07-12)
 
 

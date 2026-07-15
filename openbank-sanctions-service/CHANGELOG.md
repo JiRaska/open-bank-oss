@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.6.5...sanctions-service-v0.7.0) (2026-07-14)
+
+
+### Features
+
+* **governance:** four-eyes vocabulary for fx/consent/sanctions + sanctions OPA bootstrap ([#1006](https://github.com/JiRaska/open-bank-oss/issues/1006)) ([f5d589e](https://github.com/JiRaska/open-bank-oss/commit/f5d589e17d6bb8c1ed7abfa74f732d2b171fd3f9))
+
+
+### Bug Fixes
+
+* **sanctions:** fail loud, not silent, when a stored entry row is malformed ([#1101](https://github.com/JiRaska/open-bank-oss/issues/1101)) ([a75d887](https://github.com/JiRaska/open-bank-oss/commit/a75d88781ad8843ea9734b60b173d1e22c6234ee))
+
 ## [0.6.5](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.6.4...sanctions-service-v0.6.5) (2026-07-08)
 
 

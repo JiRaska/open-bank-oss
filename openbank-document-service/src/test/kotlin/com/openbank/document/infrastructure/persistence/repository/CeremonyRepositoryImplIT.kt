@@ -4,6 +4,7 @@
 
 package com.openbank.document.infrastructure.persistence.repository
 
+import com.openbank.document.application.port.out.DuplicateCeremonyException
 import com.openbank.document.domain.model.CeremonyStatus
 import com.openbank.document.domain.model.SignatureCeremony
 import com.openbank.document.domain.model.SignatureLevel
@@ -102,4 +103,27 @@ class CeremonyRepositoryImplIT {
         assertThat(reloaded).isNotNull
         assertThat(reloaded!!.signers).isEqualTo(ceremony.signers)
     }
+
+    @Test
+    fun `at most one active ceremony per document, but a new one is allowed after the prior goes terminal`(): Unit =
+        onVertxContext {
+            val documentId = UUID.randomUUID()
+            val first = repo.save(newCeremony().copy(documentId = documentId))
+
+            // A second ACTIVE ceremony for the same document is rejected by the partial unique index.
+            val rejected = try {
+                repo.save(newCeremony().copy(documentId = documentId))
+                null
+            } catch (e: DuplicateCeremonyException) {
+                e
+            }
+            assertThat(rejected).isNotNull
+            assertThat(repo.findByDocumentId(documentId)!!.id).isEqualTo(first.id)
+
+            // Once the first ceremony reaches a terminal DECLINED state it leaves the active index,
+            // so a fresh ceremony for the same document IS allowed (a legitimate re-attempt).
+            repo.save(repo.findById(first.id)!!.copy(status = CeremonyStatus.DECLINED))
+            val retry = repo.save(newCeremony().copy(documentId = documentId))
+            assertThat(retry.id).isNotEqualTo(first.id)
+        }
 }

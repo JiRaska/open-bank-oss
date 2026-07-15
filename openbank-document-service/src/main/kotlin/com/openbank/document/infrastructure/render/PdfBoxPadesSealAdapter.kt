@@ -45,6 +45,14 @@ class PdfBoxPadesSealAdapter(
 
     @ConfigProperty(name = "openbank.signature.keystore-password")
     keystorePassword: Optional<String>,
+
+    // Go-live gate (ADR-0162 D4 continued), shared with OpenBaoClientSignatureAdapter: when set, the
+    // service refuses to start with a DEV-ONLY ephemeral seal identity — better to fail boot than to
+    // apply seals that are worthless as evidence. Defaults off so the service is runnable before a
+    // real organizational keystore is provisioned; flip OPENBANK_SIGNATURE_REQUIRE_TRUSTED_ISSUER=true
+    // in the deployment env once it is.
+    @ConfigProperty(name = "openbank.signature.require-trusted-issuer", defaultValue = "false")
+    requireTrustedIssuer: Boolean,
 ) : SignatureSealPort {
 
     private val logger = Logger.getLogger(PdfBoxPadesSealAdapter::class.java)
@@ -60,6 +68,12 @@ class PdfBoxPadesSealAdapter(
         identity = if (keystorePath.isPresent && Files.exists(Path.of(keystorePath.get()))) {
             loadFromKeystore(keystorePath.get(), keystorePassword.orElse(""))
         } else {
+            check(!requireTrustedIssuer) {
+                "openbank.signature.keystore-path is not configured (or the file is not present) " +
+                    "while openbank.signature.require-trusted-issuer is set — refusing to start with " +
+                    "a DEV-ONLY ephemeral seal identity. Configure a real organizational PKCS12 " +
+                    "keystore (OpenBao KV, ADR-0162 D4 continued) before sealing real documents."
+            }
             logger.warn(
                 "openbank.signature.keystore-path is not configured, or the file does not exist yet " +
                     "at that path — PdfBoxPadesSealAdapter is generating an EPHEMERAL, in-memory, " +
@@ -77,7 +91,13 @@ class PdfBoxPadesSealAdapter(
 
     override suspend fun sealPades(pdf: ByteArray, ceremony: SignatureCeremony): ByteArray =
         withContext(Dispatchers.IO) {
-            PadesSigning.applySignature(pdf, identity, ORGANIZATION_NAME, SEAL_REASON)
+            // Idempotent: don't re-apply the institutional seal if a retry re-enters after the seal
+            // was already written but the ceremony's completion failed to persist.
+            if (PadesSigning.hasSignatureNamed(pdf, ORGANIZATION_NAME)) {
+                pdf
+            } else {
+                PadesSigning.applySignature(pdf, identity, ORGANIZATION_NAME, SEAL_REASON)
+            }
         }
 
     private fun loadFromKeystore(path: String, password: String): SigningIdentity {

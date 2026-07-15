@@ -99,6 +99,14 @@ object PadesSigning {
         )
     }
 
+    /**
+     * True if [pdf] already carries a PAdES signature whose `Name` is [name]. Lets a signing act be
+     * idempotent: a retry after a persistence failure must not layer a second identical signature for
+     * a signer (or the seal) that already signed this document (ADR-0162 D7 robustness).
+     */
+    fun hasSignatureNamed(pdf: ByteArray, name: String): Boolean =
+        Loader.loadPDF(pdf).use { document -> document.signatureDictionaries.any { it.name == name } }
+
     /** Appends one more PAdES signature (an incremental PDF update) using [identity]. */
     fun applySignature(pdf: ByteArray, identity: SigningIdentity, name: String, reason: String): ByteArray =
         Loader.loadPDF(pdf).use { document ->

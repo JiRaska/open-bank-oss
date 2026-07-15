@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.0...clearing-service-v0.7.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* **audit:** consume clearing.batch.event + security.ict/scan.event ([#1007](https://github.com/JiRaska/open-bank-oss/issues/1007)) ([b2f307b](https://github.com/JiRaska/open-bank-oss/commit/b2f307b76f526fa84879ec249c749498b2d1a428))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.6.7...clearing-service-v0.7.0) (2026-07-08)
 
 

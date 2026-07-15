@@ -69,18 +69,22 @@ class SignatureCeremonyService(
         evidenceRef: String?,
     ): SignatureCeremony {
         val ceremony = ceremonyRepo.findById(ceremonyId) ?: error("Ceremony not found: $ceremonyId")
+        val now = Instant.now(clock)
+        // Validate the decision in the domain FIRST — signer order, not-already-decided, ceremony
+        // status — before any object-store mutation. A rejected decision (wrong signer order, a
+        // replayed duplicate, an already-terminal ceremony) must never leave a phantom client
+        // signature on the stored document, which it would if signing ran before this check.
+        val updated = ceremony.recordDecision(partyRef, decision, now)
         if (decision == SignerStatus.SIGNED) {
             val verified = evidenceRef != null && signerVerificationPort.verify(partyRef, evidenceRef)
             if (!verified) {
                 error("SCA verification failed for signer $partyRef on ceremony $ceremonyId")
             }
-            // Apply this signer's own one-time electronic signature BEFORE persisting the SIGNED
-            // decision: a decision must never be recorded as SIGNED without a corresponding
-            // signature actually landing on the document.
+            // Apply this signer's own one-time electronic signature only after the decision is
+            // validated and SCA-verified, and before persisting: a decision is never recorded as
+            // SIGNED without a corresponding signature actually landing on the document.
             signAsClient(ceremony, partyRef)
         }
-        val now = Instant.now(clock)
-        val updated = ceremony.recordDecision(partyRef, decision, now)
         if (updated.status != CeremonyStatus.COMPLETED) {
             return ceremonyRepo.save(updated)
         }
@@ -105,6 +109,9 @@ class SignatureCeremonyService(
     }
 
     override suspend fun getCeremony(id: UUID): SignatureCeremony? = ceremonyRepo.findById(id)
+
+    override suspend fun findByDocumentId(documentId: UUID): SignatureCeremony? =
+        ceremonyRepo.findByDocumentId(documentId)
 
     private suspend fun signAsClient(ceremony: SignatureCeremony, partyRef: String) {
         val document = documentRepo.findById(ceremony.documentId)

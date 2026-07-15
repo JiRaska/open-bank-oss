@@ -25,7 +25,7 @@ interface LivenessSentinelConfig {
      * NOT the "litellm.ai-platform" gateway every sibling agent's charter names: that in-cluster
      * gateway is aspirational (ADR-0031 D6) and is not actually deployed anywhere in this repo's
      * gitops (verified: no LiteLLM Deployment/Service manifest exists, only policy-comment mentions).
-     * The API key is read separately via an OPTIONAL lookup (openbank.liveness-sentinel.model.api-key)
+     * The API key is read separately via an OPTIONAL lookup (liveness.model.api-key)
      * so an un-seeded key degrades the diagnosis call instead of CrashLooping the pod at boot
      * (SmallRye SRCFG00040 on an empty String bind) — mirrors devops-agent's DevOpsConfig exactly.
      */
@@ -38,7 +38,7 @@ interface LivenessSentinelConfig {
 
     /**
      * GitHub for opening tracking tickets / rare mechanical-fix PRs. The token is read separately via
-     * an OPTIONAL lookup (openbank.liveness-sentinel.github.token) so an un-seeded token degrades to
+     * an OPTIONAL lookup (liveness.github.token) so an un-seeded token degrades to
      * "no ticket/PR opened" rather than CrashLooping — mirrors devops-agent's RemediationProposalAdapter.
      */
     @WithDefault("https://api.github.com")

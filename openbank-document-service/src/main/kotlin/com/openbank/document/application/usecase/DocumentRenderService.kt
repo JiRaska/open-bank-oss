@@ -79,6 +79,7 @@ class DocumentRenderService(
             productRef = cmd.productRef,
             retainUntil = cmd.retainUntil,
             createdAt = now,
+            idempotencyKey = cmd.idempotencyKey,
         )
 
         val outboxMessage = OutboxMessage(

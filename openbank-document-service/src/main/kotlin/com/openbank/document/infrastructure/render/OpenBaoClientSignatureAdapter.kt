@@ -67,6 +67,14 @@ class OpenBaoClientSignatureAdapter(
     @ConfigProperty(name = "openbank.signature.client-pki.ttl", defaultValue = "300s")
     private val ttl: String,
 
+    // Go-live gate (ADR-0162 D4 continued): when set, the DEV-ONLY ephemeral fallback below is
+    // DISABLED — a signing act that cannot obtain a real OpenBao-rooted certificate fails loud
+    // instead of silently producing an evidence-worthless signature. Defaults off so the service
+    // stays runnable before the pki-document-signing engine is provisioned; flip
+    // OPENBANK_SIGNATURE_REQUIRE_TRUSTED_ISSUER=true in the deployment env once it is (runbook 0008).
+    @ConfigProperty(name = "openbank.signature.require-trusted-issuer", defaultValue = "false")
+    private val requireTrustedIssuer: Boolean,
+
     private val objectMapper: ObjectMapper,
 ) : ClientSignatureIssuerPort {
 
@@ -77,27 +85,48 @@ class OpenBaoClientSignatureAdapter(
         .build()
 
     override suspend fun signAsClient(pdf: ByteArray, partyRef: String): ByteArray = withContext(Dispatchers.IO) {
-        val identity = issueOneTimeIdentity(partyRef)
-        PadesSigning.applySignature(pdf, identity, partyRef, SIGNATURE_REASON)
+        // Idempotent: a retry after a persistence failure must not layer a second signature for a
+        // signer who has already signed this document.
+        if (PadesSigning.hasSignatureNamed(pdf, partyRef)) {
+            pdf
+        } else {
+            val identity = issueOneTimeIdentity(partyRef)
+            PadesSigning.applySignature(pdf, identity, partyRef, SIGNATURE_REASON)
+        }
     }
 
     @Suppress("TooGenericExceptionCaught")
     private fun issueOneTimeIdentity(partyRef: String): SigningIdentity {
         if (!Files.exists(Path.of(saTokenPath))) {
-            logDevFallback("no projected ServiceAccount token")
-            return PadesSigning.generateEphemeralIdentity(partyRef, EPHEMERAL_VALIDITY_DAYS)
+            return devFallbackOrFail(partyRef, "no projected ServiceAccount token")
         }
         return try {
             val token = login(Files.readString(Path.of(saTokenPath)).trim())
             issueFromOpenBao(token, partyRef)
         } catch (e: Exception) {
-            // Deliberately log only the exception TYPE, never e.message: a Vault/OpenBao HTTP
+            // Deliberately pass only the exception TYPE, never e.message: a Vault/OpenBao HTTP
             // client exception's message can embed response-body fragments, which must never
             // reach a log line (CodeQL java/log-injection -- "insertion of sensitive information
             // into log files"). The class name is enough to diagnose which failure mode fired.
-            logDevFallback(e.javaClass.simpleName)
-            PadesSigning.generateEphemeralIdentity(partyRef, EPHEMERAL_VALIDITY_DAYS)
+            devFallbackOrFail(partyRef, e.javaClass.simpleName)
         }
+    }
+
+    /**
+     * Either takes the DEV-ONLY ephemeral fallback (logging a loud warning) or, when
+     * [requireTrustedIssuer] is set, refuses outright so a SIGNED decision is never recorded against
+     * an evidentially worthless signature (fail-closed — [signAsClient] propagates the failure up
+     * into the ceremony, which does not persist the decision). The failure message carries only the
+     * reason code, never [partyRef] (same CodeQL sensitive-data-in-logs reasoning as [logDevFallback]).
+     */
+    private fun devFallbackOrFail(partyRef: String, reason: String): SigningIdentity {
+        check(!requireTrustedIssuer) {
+            "Refusing to issue a client electronic signature without an OpenBao-rooted one-time " +
+                "certificate ($reason). openbank.signature.require-trusted-issuer is set, so the " +
+                "DEV-ONLY ephemeral fallback is disabled (ADR-0162 D4 continued, runbook 0008)."
+        }
+        logDevFallback(reason)
+        return PadesSigning.generateEphemeralIdentity(partyRef, EPHEMERAL_VALIDITY_DAYS)
     }
 
     // No partyRef (or any other per-signer identifier) in this log line, deliberately: CodeQL's

@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.7.0...document-service-v0.7.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* **document-service:** data-level idempotency + resumability for onboarding issuance ([#1127](https://github.com/JiRaska/open-bank-oss/issues/1127)) ([a4c398b](https://github.com/JiRaska/open-bank-oss/commit/a4c398bce865766b2720255631aa488cecd5cc3b)), closes [#1112](https://github.com/JiRaska/open-bank-oss/issues/1112)
+* **document-service:** poison-pill onboarding consumer + validate decision before signing ([#1123](https://github.com/JiRaska/open-bank-oss/issues/1123)) ([049e997](https://github.com/JiRaska/open-bank-oss/commit/049e9974d21f132c696b62c30fb618405fc63340)), closes [#1112](https://github.com/JiRaska/open-bank-oss/issues/1112)
+
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.6.0...document-service-v0.7.0) (2026-07-14)
+
+
+### Features
+
+* **document-service:** fail-closed go-live gate for real signatures ([#1115](https://github.com/JiRaska/open-bank-oss/issues/1115)) ([b18d9fb](https://github.com/JiRaska/open-bank-oss/commit/b18d9fb6fbb7feabea364ee08f0f929b59fc14de))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.5.0...document-service-v0.6.0) (2026-07-14)
 
 
