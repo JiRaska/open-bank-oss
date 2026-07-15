@@ -73,11 +73,42 @@ jobs:
           # `openbank-infra` (OpenTofu) have no build.gradle.kts, so neither is picked up.
           ALL=$(for d in openbank-*/; do if [ -f "${d}build.gradle.kts" ]; then printf '%s ' "${d%/}"; fi; done)
 
-          if [ "${{ github.event_name }}" = "push" ] \
-             || [ "${{ github.event_name }}" = "schedule" ] \
+          if [ "${{ github.event_name }}" = "schedule" ] \
              || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "Event ${{ github.event_name }} -> build all modules (full-fleet)."
             CHANGED="$ALL"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            # A push to main normally re-runs the WHOLE fleet so every provider
+            # re-verifies every consumer's current contract (Pact matrix completeness,
+            # ADR-0092) and publishes fresh results the SHA's auto-deploy gates on (#846).
+            # But a push that changed ONLY inert paths — release-please version.txt /
+            # CHANGELOG.md / manifest bumps, admin-ui deploy chores, gitops/infra
+            # (openbank-infra), or docs — cannot alter any service's compile inputs OR
+            # any pact, so a ~40-module rebuild produces zero new pacts and re-runs
+            # identical verifications. That was ~69% of a multi-hundred-job main-push
+            # backlog (2026-07-15). Skip the build entirely in that case: all-green still
+            # goes green on an empty matrix (the "nothing to build" path), exactly like a
+            # PR that touches no service module, so branch protection is unaffected.
+            # Any push touching a build-relevant path still triggers the FULL fleet — the
+            # safe direction is over-build, never under-build (an under-build would leave a
+            # stale/missing Pact verification). fetch-depth:0 above guarantees HEAD~1
+            # exists (main is squash-merged => each push is a single commit).
+            FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)
+            echo "Push changed files:"; echo "$FILES"
+            # Inert = provably cannot change a compile input or a contract. Anchored so a
+            # service's own src/ (or ANY build.gradle.kts, openbank-libs, gradle/, contracts
+            # under pacts/) is NEVER matched here and thus never treated as inert. Feed grep
+            # a here-string, NOT `echo | grep` (pipefail + grep early-exit SIGPIPEs echo →
+            # racy false match, the same footgun documented on the PR path below).
+            RELEVANT=$(grep -vE '(^openbank-admin-ui/)|(^openbank-infra/)|(^docs/)|(/version\.txt$)|(/CHANGELOG\.md$)|(^\.release-please-manifest\.json$)|(^release-please-config\.json$)' <<< "$FILES" || true)
+            RELEVANT_COUNT=$(grep -c . <<< "$RELEVANT" || true)
+            if [ "${RELEVANT_COUNT:-0}" -eq 0 ]; then
+              echo "Decision: push changed only inert paths (release/docs/admin-ui/infra) -> build nothing."
+              CHANGED=""
+            else
+              echo "Decision: push changed $RELEVANT_COUNT build-relevant path(s) -> full-fleet (Pact completeness)."
+              CHANGED="$ALL"
+            fi
           else
             BASE="origin/${{ github.base_ref }}"
             # Persistent self-hosted runners REUSE the git workdir between jobs,
