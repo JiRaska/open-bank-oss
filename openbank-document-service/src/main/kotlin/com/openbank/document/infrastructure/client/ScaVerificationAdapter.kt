@@ -14,22 +14,23 @@ import java.util.UUID
 /**
  * [SignerVerificationPort] adapter over `openbank-sca-service` (ADR-0021, ADR-0162 D4).
  *
- * `sca-service`'s API (see its `openapi.yaml`) has no single "verify this approval" endpoint
- * shaped exactly for a third-party caller; the closest clean, real integration point is
- * `GET /api/v1/sca/challenges/{id}`, which returns the challenge's owning `partyId` and its
- * `status`. This adapter treats [evidenceRef] as that challenge id: a signer's decision is
- * considered SCA-verified only if the referenced challenge belongs to [partyRef] and has reached
- * sca-service's real terminal-success status, `COMPLETED` (`ScaChallenge.ScaStatus` — there is no
- * `VERIFIED` value; `isCompleted()`/`complete()` are keyed on `COMPLETED`).
+ * Calls `POST /api/v1/sca/challenges/{id}/consume` directly — the same integration point
+ * `customer-edge`'s payment `scaGate()` uses — rather than pre-checking the challenge's `status`
+ * via `GET .../challenges/{id}` first. A decoupled (PUSH_NOTIFICATION/BIOMETRIC) challenge stays
+ * `PENDING` in storage until something promotes it to `COMPLETED`; `ScaService.consume()` does
+ * that promotion itself, lazily, the moment a signature-verified device decision exists
+ * (`verifyDecoupled`, invoked from inside `consume()`). A plain `GET` never triggers that
+ * promotion, so a status pre-check here would see `PENDING` even for a freshly-approved
+ * challenge and always fail — this adapter had exactly that bug until it was caught wiring up
+ * the app-side document-signing flow (ADR-0170); fixed by dropping the pre-check and letting
+ * `consume()` do both the promotion and the RTS Art. 5 dynamic-linking match in one atomic call.
  *
- * A verified challenge is then spent via `consume` (RTS Art. 5 single-use) so the same
- * [evidenceRef] cannot be replayed for a second decision — sca-service returns 409 CONFLICT
- * (`ScaChallengeAlreadyConsumedException`) on a second attempt, which this adapter treats the same
- * as any other client error: verification fails.
- *
- * This is a real call to sca-service, not a stub — but it does encode an assumption
- * (evidenceRef == an SCA challenge id) that a future, purpose-built "verify approval" endpoint on
- * sca-service could make explicit instead of inferred here.
+ * `consume` is RTS Art. 5 single-use: sca-service returns 409 CONFLICT
+ * (`ScaChallengeAlreadyConsumedException`) if [evidenceRef] is replayed for a second decision,
+ * which this adapter treats the same as any other client error: verification fails. Ownership
+ * (challenge belongs to [partyRef]) and the document/ceremony match are both enforced server-side
+ * by `consume` itself (`ScaChallengePartyMismatchException` / `ScaDynamicLinkingMismatchException`,
+ * both 4xx) — no separate check is needed here.
  */
 @ApplicationScoped
 class ScaVerificationAdapter(@RestClient private val client: ScaChallengeClient) : SignerVerificationPort {
@@ -44,10 +45,6 @@ class ScaVerificationAdapter(@RestClient private val client: ScaChallengeClient)
         val challengeId = runCatching { UUID.fromString(evidenceRef) }.getOrNull() ?: return false
         val partyId = runCatching { UUID.fromString(partyRef) }.getOrNull() ?: return false
         return try {
-            val challenge = client.getChallenge(challengeId).awaitSuspending()
-            if (challenge.status != COMPLETED_STATUS || challenge.partyId != partyId) {
-                return false
-            }
             val request = ScaConsumeClientRequest(
                 partyId = partyId,
                 documentSha256 = documentSha256,
@@ -56,9 +53,10 @@ class ScaVerificationAdapter(@RestClient private val client: ScaChallengeClient)
             client.consume(challengeId, request).awaitSuspending()
             true
         } catch (e: WebApplicationException) {
-            // sca-service returns 403/404 for a challenge that doesn't exist or isn't visible to
-            // this caller, and 409 if `consume` is called on an already-spent challenge (a replay
-            // attempt) — either way verification cannot succeed. A non-4xx failure (network, 5xx)
+            // sca-service returns 403/404 for a challenge that doesn't exist, isn't visible to
+            // this caller, or belongs to another party; 409 if already consumed (replay); 409 if
+            // the document/ceremony don't match what the device signed (dynamic-linking
+            // mismatch) — either way verification cannot succeed. A non-4xx failure (network, 5xx)
             // is a different failure mode and intentionally NOT caught here, so it propagates.
             if (isClientError(e)) false else throw e
         }
@@ -70,7 +68,6 @@ class ScaVerificationAdapter(@RestClient private val client: ScaChallengeClient)
     }
 
     private companion object {
-        const val COMPLETED_STATUS = "COMPLETED"
         val HTTP_CLIENT_ERROR_RANGE = 400..499
     }
 }
