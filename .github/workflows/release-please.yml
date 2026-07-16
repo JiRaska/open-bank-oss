@@ -53,33 +53,42 @@ jobs:
       # close together the run's checked-out manifest can lag the version just tagged
       # (caused kyc-service-v0.4.0 to be mis-tagged v0.3.1 → upload to a missing release).
       rp_outputs: ${{ toJSON(steps.rp.outputs) }}
-    env:
-      # Mirrored into env because the `secrets` context is NOT available in a step-level `if:`
-      # — only job-level env can read it. Used solely to decide whether to mint an App token.
-      GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
     steps:
-      - id: rp
-        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
-        with:
-          # GITOPS_PR_TOKEN (fine-grained PAT), not GITHUB_TOKEN: a release-PR merge made under
-          # GITHUB_TOKEN does NOT trigger another workflow (recursion guard), so the merge would
-          # never trigger the run that cuts the release. The PAT lets the merge re-trigger
-          # release-please (cut the tag + run the evidence job) and rebase the remaining separate
-          # release PRs — so auto-merge below actually drains the queue. Falls back to GITHUB_TOKEN.
-          token: ${{ secrets.GITOPS_PR_TOKEN || secrets.GITHUB_TOKEN }}
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
-
-      # The App exists here ONLY to sign — the `rp` step above deliberately keeps the PAT,
-      # because the PAT's job (re-triggering workflows on merge) already works and switching
-      # release-please's own identity would churn the bot-PR issue-hygiene exemption for no gain.
+      # MUST stay the first step: everything below authenticates as the App, and a
+      # `steps.app_token.outputs.token` read before this step runs is silently the empty
+      # string — which would degrade the `rp` token to GITHUB_TOKEN and stall the whole
+      # release queue without a single red signal.
+      #
+      # Deliberately ungated and unfallback'd. Every other identity available here is a dead
+      # end: GITHUB_TOKEN opens PRs that trigger no workflows (anti-recursion), so the required
+      # checks never run and nothing can ever auto-merge; the GITOPS_PR_TOKEN user PAT works
+      # but is what this repo is retiring. So if the App credentials are missing or invalid,
+      # failing here loudly is the only honest outcome — a fallback would buy a green run that
+      # quietly produces a release queue that can never drain.
       - name: Mint a GitHub App installation token
         id: app_token
-        if: env.GITOPS_APP_ID != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.GITOPS_APP_ID }}
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+
+      - id: rp
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          # An App installation token, not GITHUB_TOKEN: a release-PR merge made under
+          # GITHUB_TOKEN does NOT trigger another workflow (recursion guard), so the merge would
+          # never trigger the run that cuts the release. The App token lets the merge re-trigger
+          # release-please (cut the tag + run the evidence job) and rebase the remaining separate
+          # release PRs — so auto-merge below actually drains the queue.
+          #
+          # This does NOT make release-please's commit signed — it commits through the Git Data
+          # API, which GitHub never signs for any token (see the header comment). The "Re-sign
+          # release PR commits" step below is what handles that, and it is why swapping this
+          # token was safe to do independently: the PAT and the App token behave identically
+          # here, both producing an unsigned commit that gets re-signed afterwards.
+          token: ${{ steps.app_token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
 
       # Rewrite each release branch's unsigned commit as a GitHub-signed one, because
       # release-please structurally cannot emit a signed commit (see the header comment).
@@ -105,7 +114,6 @@ jobs:
         # strand an already-cut tag with no SBOM/SLSA/VEX bundle. The separate
         # verify-release-pr-signatures job is what raises the loud signal instead.
         continue-on-error: true
-        if: steps.app_token.outputs.token != ''
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ steps.app_token.outputs.token }}
@@ -241,15 +249,14 @@ jobs:
       # queue is empty. Idempotent: re-enabling on an already-armed PR is a no-op.
       #
       # Runs AFTER the re-sign step so it arms against the signed head rather than a sha that
-      # is about to be replaced. It stays on the PAT on purpose: arming already works, and the
-      # App token is scoped to the one thing only it can do — signing.
+      # is about to be replaced.
       - name: Enable auto-merge on open release PRs
         # Never let an arming hiccup (API blip on pulls.list) fail the release-please job —
         # that would skip the evidence job (needs: release-please). Draining is best-effort.
         continue-on-error: true
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
-          github-token: ${{ secrets.GITOPS_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.app_token.outputs.token }}
           script: |
             const { data: prs } = await github.rest.pulls.list({
               owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 100,
@@ -284,10 +291,10 @@ jobs:
   # and release-evidence (needs: release-please) would be skipped — costing an already-cut tag
   # its SBOM/SLSA/VEX bundle. As its own job this reds the run without starving anything.
   #
-  # Severity is deliberately conditional on GITOPS_APP_ID. Unset means the App has not been
-  # created yet: re-signing is skipped, every release PR is knowingly unsigned, and failing here
-  # would red main on literally every push — noise that trains people to ignore the signal.
-  # Once the App exists an unsigned PR is a genuine regression, and this fails loudly.
+  # This used to warn rather than fail when GITOPS_APP_ID was unset, because back then no App
+  # existed and every release PR was knowingly unsigned. The App is now the job's only identity
+  # — a missing one fails the run at the mint step — so that branch is gone: any unsigned
+  # release PR reaching here is a real regression.
   verify-release-pr-signatures:
     name: Verify release PR commits are signed
     needs: release-please
@@ -296,8 +303,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    env:
-      GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
     steps:
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
@@ -330,21 +335,12 @@ jobs:
             for (const u of unsigned) {
               core.error(`#${u.pr}: ${u.sha} verified=false reason=${u.reason}`);
             }
-            const detail =
-              `${unsigned.length} unsigned commit(s) across ${new Set(unsigned.map(u => u.pr)).size} open release PR(s); ` +
-              `the main ruleset's required_signatures blocks each of them and those releases will never land.`;
-            if (!process.env.GITOPS_APP_ID) {
-              core.warning(
-                `${detail} Expected for now: GITOPS_APP_ID/GITOPS_APP_PRIVATE_KEY are unset, so the re-sign ` +
-                `step is skipped and release-please's own commits are unsigned by construction. Until the ` +
-                `GitHub App is created and installed, each release PR needs a manual GPG re-sign to land — ` +
-                `auto-merge is already armed and fires on its own once the signature is valid.`
-              );
-              return;
-            }
             core.setFailed(
-              `${detail} The GitHub App IS configured, so the re-sign step should have fixed this — ` +
-              `check the "Re-sign release PR commits" step's warnings in the release-please job.`
+              `${unsigned.length} unsigned commit(s) across ${new Set(unsigned.map(u => u.pr)).size} open release PR(s); ` +
+              `the main ruleset's required_signatures blocks each of them and those releases will never land. ` +
+              `The re-sign step should have fixed this — check its warnings in the release-please job. ` +
+              `To rescue a PR by hand meanwhile: amend its commit locally with a GPG signature and force-push — ` +
+              `auto-merge is already armed and fires on its own once the signature is valid.`
             );
 
   # ---------------------------------------------------------------------------
