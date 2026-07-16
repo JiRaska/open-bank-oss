@@ -44,7 +44,6 @@ open class AccountHolderNameLookupAdapter(
     lateinit var self: AccountHolderNameLookupAdapter
 
     override fun lookupHolderName(iban: String): Uni<String?> = self.lookupWithResilience(iban)
-        .onFailure(::isNotFound).recoverWithItem(null as String?)
         .onFailure().transform { failure ->
             if (failure is NameLookupUnavailableException) failure else NameLookupUnavailableException(failure)
         }
@@ -68,6 +67,13 @@ open class AccountHolderNameLookupAdapter(
                 }
             }
         }
+        // Recover INSIDE the guarded method, not outside it. A 404 is an ordinary answer — "we
+        // hold no name for this IBAN" — but it reaches the caller as a failed Uni, and SmallRye
+        // Fault Tolerance judges this method by the Uni it returns. Recovering outside left
+        // @Retry replaying every unknown IBAN three times and @CircuitBreaker counting each as a
+        // failure, so a handful of them opened the breaker and turned *genuine* verifications
+        // into NO_DATA for 10s. Mapped here, a 404 is simply a success carrying null.
+        .onFailure(::isNotFound).recoverWithItem(null as String?)
 
     /** A 404 on either hop means "we hold no name for this IBAN" — a NO_DATA answer, not an error. */
     private fun isNotFound(failure: Throwable): Boolean = failure is WebApplicationException &&

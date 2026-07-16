@@ -125,4 +125,64 @@ class VopNameMatchPolicyTest {
         assertThatThrownBy { VopNameMatchPolicy(maxEditDistance = -1) }
             .isInstanceOf(IllegalArgumentException::class.java)
     }
+
+    @ParameterizedTest(name = "a name ending in a legal-form's letters is not stripped: \"{0}\" vs \"{1}\"")
+    @CsvSource(
+        // A legal form is only a legal form as a whole token. These names merely END in the
+        // letters of one ("as", "sa", "ab", "ag", "oy"). Stripping by character suffix reduced
+        // both sides to the same core and reported a full MATCH between different people.
+        "Jan Tomas,Jan Tom",
+        "Maria Teresa,Maria Tere",
+        "John Thomas,John Thom",
+        "Petr Lukas,Petr Luk",
+        "Eva Kolomaz,Eva Koloma",
+        "Ivan Zlatohlavek,Ivan Zlatohlav",
+    )
+    fun `a legal form is matched per token, never as a character suffix`(supplied: String, actual: String) {
+        assertThat(policy.match(supplied, actual)).isNotEqualTo(VopOutcome.MATCH)
+    }
+
+    @ParameterizedTest(name = "different legal forms are different entities: \"{0}\" vs \"{1}\"")
+    @CsvSource(
+        // Two DIFFERENT registered forms on the same core are two different companies, and
+        // registering the look-alike form is a known fraud shape. Stripping both would confirm
+        // them as one payee.
+        "Acme s.r.o.,Acme a.s.",
+        "Acme Ltd,Acme LLC",
+        "Acme GmbH,Acme AG",
+        "Acme s.r.o.,Acme spol s r o",
+    )
+    fun `two different legal forms on the same core are not one payee`(supplied: String, actual: String) {
+        assertThat(policy.match(supplied, actual)).isNotEqualTo(VopOutcome.MATCH)
+    }
+
+    @Test
+    fun `the same legal form on both sides is still the same payee`() {
+        // The at-most-one-side rule must not break the ordinary case: the same form written
+        // either way is one company, whatever the punctuation or padding.
+        assertThat(policy.match("Acme s.r.o.", "Acme s.r.o.")).isEqualTo(VopOutcome.MATCH)
+        assertThat(policy.match("Acme, s.r.o.", "Acme s.r.o.")).isEqualTo(VopOutcome.MATCH)
+        assertThat(policy.match("ACME S.R.O.", "acme s.r.o.")).isEqualTo(VopOutcome.MATCH)
+    }
+
+    @Test
+    fun `a leading legal-form token is part of the name`() {
+        // "SRO Praha" is a company genuinely named that; only a TRAILING form is presentation.
+        assertThat(policy.match("SRO Praha", "Praha")).isNotEqualTo(VopOutcome.MATCH)
+        assertThat(policy.match("AS Roma", "Roma")).isNotEqualTo(VopOutcome.MATCH)
+    }
+
+    @Test
+    fun `a name that is only a legal form keeps it`() {
+        // Stripping would leave an empty core, which identifies no one.
+        assertThat(policy.match("Acme", "s.r.o.")).isNotEqualTo(VopOutcome.MATCH)
+    }
+
+    @Test
+    fun `a multi-token legal form is stripped whole`() {
+        // "spol s r o" must win over the "s r o" nested inside it, else "Acme spol s r o" would
+        // strip to "Acme spol" and stop matching "Acme".
+        assertThat(policy.match("Acme spol s r o", "Acme")).isEqualTo(VopOutcome.MATCH)
+        assertThat(policy.match("Acme s r o", "Acme")).isEqualTo(VopOutcome.MATCH)
+    }
 }
