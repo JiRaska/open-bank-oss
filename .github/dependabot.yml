@@ -72,6 +72,18 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    # Majors the ecosystem cannot satisfy yet. Each PR can never go green, so
+    # dependabot would just re-open a red PR every Monday. Drop the entry once
+    # the unblock criterion in #1314 is met.
+    ignore:
+      # eslint 10 removed context.getFilename(); the eslint-plugin-react that
+      # eslint-config-next@16 bundles still calls it and peers on eslint <=9.
+      - dependency-name: "eslint"
+        versions: ["10.x"]
+      # The typescript-eslint parser does not support the TypeScript 7
+      # compiler API (crashes reading ModuleKind 'Cjs').
+      - dependency-name: "typescript"
+        versions: ["7.x"]
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
