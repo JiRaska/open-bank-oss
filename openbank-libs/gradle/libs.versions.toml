@@ -52,7 +52,7 @@ aws-sdk = "2.29.52"
 # (see HandlebarsTemplateRenderer) — that is what keeps it free of arbitrary code
 # execution, not the library version. 4.4.0 is a recent stable pin — verify/bump via
 # Dependabot rather than treating it as hand-curated forever.
-handlebars = "4.4.0"
+handlebars = "4.5.2"
 # Apache PDFBox, Apache-2.0 (ADR-0162 D4 phase 1): PAdES-B PDF signing in
 # PdfBoxPadesSealAdapter. 3.0.3 is the current stable 3.x line — PDDocument loading moved
 # to org.apache.pdfbox.Loader in 3.x (the 2.x `PDDocument.load(...)` statics were removed).
