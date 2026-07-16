@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: copilot-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "95de91b9140672bc"
+    openbank.tech/policy-checksum: "c9639266e9ef2a25"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2459,6 +2459,32 @@ data:
     # stale. Routing by kind; the human-readable form lives in CLAUDE.md ("Capturing what
     # we learn"). This is a process rule (not CI-enforced), but rules.yaml is the source
     # of truth when it and CLAUDE.md disagree.
+    gitops_ref_integrity:
+      script: .github/scripts/check-gitops-secret-refs.py
+      wired_into: .github/workflows/ci.yml   # governance job -> all-green (a REQUIRED check)
+      # THE RULE: every Secret/ConfigMap a gitops workload consumes must be declared by
+      # something in gitops. A manifest that reads a Secret nobody creates passes every gate
+      # we have: the YAML is valid, ArgoCD syncs it (the Rollout is a legal object), CI never
+      # runs the pod, and Kyverno admits it. The pod then sits in CreateContainerConfigError
+      # indefinitely and the only signal is `kubectl describe` on a pod nobody watches.
+      rule: >-
+        Every secretKeyRef / configMapKeyRef / envFrom / volume reference in a gitops workload
+        must resolve to a Secret or ConfigMap declared in gitops -- directly, or via the
+        operator that derives it (ExternalSecret target, cert-manager Certificate secretName,
+        CNPG Cluster credentials).
+      basis: referenced_implies_declared
+      # NOTE: rules.yaml is embedded VERBATIM (comments included) into all 27 OPA bundle
+      # ConfigMaps, so prose here is duplicated 27x and moves every policy-checksum. The full
+      # rationale -- why a grep cannot do this, the CNPG `vop-db-app` case that makes a naive
+      # guard unusable, and the allowlist justification -- lives in the script header, where it
+      # is stored once. Keep this block to the rule itself.
+      # PRIOR ART: vop-service, 2026-07-16 -- shipped in #1195 consuming `vop-oidc`, a name that
+      # appeared exactly ONCE in the repo, at the point of consumption. Its sibling gap (absent
+      # from ALL_SERVICES, #1229) is guarded by deploy_coverage below; this is the same shape one
+      # layer down. Verified by REVERT: with #1232's ExternalSecret removed the guard fails
+      # naming `Secret payments/vop-oidc`; restored, it passes.
+      incident: 2026-07-16
+
     deploy_coverage:
       script: .github/scripts/check-deploy-coverage.sh
       wired_into: .github/workflows/ci.yml   # governance job -> all-green (a REQUIRED check)
