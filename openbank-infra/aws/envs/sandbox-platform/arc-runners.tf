@@ -295,6 +295,37 @@ locals {
     ]
     env             = [{ name = "DOCKER_GROUP_GID", value = "123" }]
     securityContext = { privileged = true }
+    # Memory request (the root-cause fix, and like the runner's ephemeral-storage
+    # request below it is mostly FREE — scheduling only). Without it dind ran at
+    # request=0, which broke twice over:
+    #
+    #  1. SCHEDULING: the scheduler saw a 6Gi pod (runner only), so it packed onto
+    #     c7gd.xlarge (4 vCPU / 8Gi = 6.6Gi allocatable — the `c` family is 2Gi/vCPU
+    #     and this NodePool allows instance-category c/m/r). 6Gi "fits" 6.6Gi, but
+    #     real usage is runner ~5Gi + dind ~0.2Gi + DaemonSets ~0.8Gi ≈ 6.2Gi, which
+    #     crosses the 400Mi eviction threshold. Verified live: evictions happened on
+    #     c7gd.xlarge at `available: 392404Ki`, never on m6gd/r7gd.
+    #  2. EVICTION RANKING: kubelet ranks victims by usage-over-request. A container
+    #     with request=0 is ALWAYS over its request, so the runner pod was picked
+    #     first on any node pressure — the eviction message named dind while it was
+    #     using a mere 99Mi.
+    #
+    # The pod then died mid-build as "The self-hosted runner lost communication with
+    # the server" — the exact symptom the ephemeral-storage request below fixed for
+    # DiskPressure. Same bug, one resource over: ~24% of build jobs died this way and
+    # ~40% of pool job-minutes were wasted (measured 2026-07-16 across 4 main-push
+    # runs; dead jobs averaged 13.9 min vs 6.5 min for successes — they die late, in
+    # the Testcontainers phase, after the expensive work).
+    #
+    # 1Gi request is deliberately above dind's measured footprint (25Mi idle, 182Mi
+    # peak under load incl. its Testcontainers): it makes total pod requests 7Gi,
+    # which is what actually excludes the 6.6Gi c7gd.xlarge and forces Karpenter onto
+    # an m/r-family (or c7gd.2xlarge) node. 3Gi limit leaves room for a heavier
+    # Postgres+Redpanda pair than any service currently boots.
+    resources = {
+      requests = { memory = "1Gi" }
+      limits   = { memory = "3Gi" }
+    }
     volumeMounts = [
       { name = "work", mountPath = "/home/runner/_work" },
       { name = "dind-sock", mountPath = "/var/run" },
@@ -743,8 +774,19 @@ resource "helm_release" "arc_build" {
               # job ("self-hosted runner lost communication"), failing Trivy/builds
               # fleet-wide. 16Gi (14Gi docker-lib cap + work/slack) bounds packing to
               # ≤2 runner pods on a 50Gi node.
+              #
+              # memory limit 12Gi -> 9Gi: the 2x request/limit gap was the other half of
+              # the eviction bug documented on dind above. The scheduler reserved 6Gi but
+              # the pod was allowed 12Gi — nearly 2x the whole 6.6Gi c7gd.xlarge it could
+              # legally be placed on. 9Gi is still generous headroom over reality: the
+              # Gradle daemon is capped at -Xmx3g (gradle.properties / GRADLE_OPTS) and
+              # the measured peak across live builds is ~5Gi (runner container, incl. the
+              # forked test JVMs; Testcontainers themselves live in dind's cgroup, not
+              # here). Capping it means a runaway build now OOMKills its own container —
+              # attributable, and only that job — instead of tripping node memory
+              # pressure and taking a healthy neighbour's job down with it.
               requests = { cpu = "3", memory = "6Gi", "ephemeral-storage" = "16Gi" }
-              limits   = { memory = "12Gi" }
+              limits   = { memory = "9Gi" }
             }
           },
           local.dind_container,
