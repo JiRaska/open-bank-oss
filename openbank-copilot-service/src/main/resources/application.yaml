@@ -25,6 +25,14 @@ quarkus:
       Strict-Transport-Security:
         value: "max-age=31536000; includeSubDomains"
 
+  # Health/metrics on a separate management port, matching the fleet convention and the
+  # Deployment's `management` containerPort that startup/liveness/readiness probes target.
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+
   # Customer session JWT arrives via the customer edge (ADR-0065).
   redis:
     hosts: ${REDIS_URL:redis://localhost:6379}
