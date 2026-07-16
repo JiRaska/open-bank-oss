@@ -3,13 +3,13 @@
 openapi: 3.1.0
 info:
   title: Notification Service API
-  version: 1.4.0
+  version: 1.5.0
   description: Notification delivery management — query sent/pending notifications, manage push device tokens.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
 servers:
-  - url: http://localhost:8125
+  - url: http://localhost:8112
     description: Local development
 tags:
   - name: Notifications
@@ -94,32 +94,39 @@ paths:
   /api/v1/notifications:
     get:
       tags: [Notifications]
-      summary: List notifications
+      summary: List notifications (paginated)
+      description: |
+        Page through notifications, optionally narrowed to one party. Items carry metadata
+        only — the rendered `body` is returned by `GET /api/v1/notifications/{id}`.
       operationId: listNotifications
       parameters:
         - name: partyId
           in: query
+          description: Narrow to a single party. Omit to page the whole store.
           schema:
             type: string
             format: uuid
-        - name: status
+        - name: page
           in: query
-          schema:
-            type: string
-            enum: [PENDING, SENT, FAILED, READ]
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 20
-        - name: offset
-          in: query
+          description: Zero-based page index.
           schema:
             type: integer
             default: 0
+        - name: size
+          in: query
+          description: Page size. Values outside 1..100 are clamped.
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
       responses:
         '200':
-          description: Notifications
+          description: A page of notifications
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPage'
 
   /api/v1/notifications/{id}:
     get:
@@ -302,8 +309,9 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
-    NotificationResponse:
+    NotificationSummary:
       type: object
+      description: Notification metadata, as returned by the list endpoint. Carries no rendered body.
       properties:
         id:
           type: string
@@ -311,22 +319,109 @@ components:
         partyId:
           type: string
           format: uuid
-        type:
+        channel:
+          $ref: '#/components/schemas/NotificationChannel'
+        template:
           type: string
-          enum: [EMAIL, SMS, PUSH]
-        status:
+          description: Template enum name the body was rendered from.
+        recipient:
           type: string
+          description: Email address, phone number, or — for PUSH — the party id (delivery is by registered device token).
         subject:
           type: string
-        body:
-          type: string
+          description: |
+            Rendered subject. Always present: every write path renders one, even though the
+            column and entity permit NULL. If a path ever yields NULL, that IS a breaking
+            contract change and takes the major bump — do not quietly add `nullable` here.
+        status:
+          $ref: '#/components/schemas/NotificationStatus'
         sentAt:
           type: string
           format: date-time
           nullable: true
+        readAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the customer marked it read. Null = unread.
         createdAt:
           type: string
           format: date-time
+
+    NotificationPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationSummary'
+        total:
+          type: integer
+          format: int64
+        page:
+          type: integer
+        size:
+          type: integer
+
+    NotificationResponse:
+      type: object
+      description: |
+        A single notification, including its rendered body. Same fields as
+        NotificationSummary plus `body` — kept flat rather than composed with `allOf`,
+        because oasdiff does not flatten composition and reports every inherited field
+        as removed, which makes the API-contract diff unreadable.
+      properties:
+        id:
+          type: string
+          format: uuid
+        partyId:
+          type: string
+          format: uuid
+        channel:
+          $ref: '#/components/schemas/NotificationChannel'
+        template:
+          type: string
+          description: Template enum name the body was rendered from.
+        recipient:
+          type: string
+          description: Email address, phone number, or — for PUSH — the party id (delivery is by registered device token).
+        subject:
+          type: string
+          description: |
+            Rendered subject. Always present: every write path renders one, even though the
+            column and entity permit NULL. If a path ever yields NULL, that IS a breaking
+            contract change and takes the major bump — do not quietly add `nullable` here.
+        body:
+          type: string
+          description: |
+            The rendered message body. For secret-bearing templates (OTP_CODE,
+            PASSWORD_RESET) this is a redaction placeholder, never the delivered
+            secret — the secret is sent to the customer but never stored.
+        status:
+          $ref: '#/components/schemas/NotificationStatus'
+        sentAt:
+          type: string
+          format: date-time
+          nullable: true
+        readAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the customer marked it read. Null = unread.
+        createdAt:
+          type: string
+          format: date-time
+
+    NotificationChannel:
+      type: string
+      enum: [EMAIL, SMS, PUSH, IN_APP]
+
+    NotificationStatus:
+      type: string
+      enum: [PENDING, SENT, FAILED, BOUNCED]
+      description: |
+        Delivery state. Read-state is tracked separately by `readAt`, not by this field.
+        BOUNCED is declared by the domain model but not currently assigned by any code path.
 
     ApiError:
       type: object
