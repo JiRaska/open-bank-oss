@@ -171,7 +171,18 @@ class WebAuthnResource(
                 signCount = authenticatorData.signCount,
             ),
         )
-        return Response.noContent().build()
+
+        // Mint the session straight from the registration ceremony (ADR-0066 F2). This used to
+        // return 204, forcing the app to run a SECOND ceremony against /auth/begin+complete just
+        // to get a token — a second Face ID prompt during onboarding for no security gain: the
+        // registration verified above is a user-verified (Face ID), user-present ceremony over a
+        // server challenge bound to this origin/rpId, i.e. exactly the factors /auth/complete
+        // checks before calling the same impersonate(). The enrollment ticket already authorised
+        // this party binding.
+        //
+        // The response is additive: a client that only checked the status code keeps working.
+        val (accessToken, refreshToken) = keycloakClient.impersonate(keycloakUserId)
+        return Response.ok(TokenPairDto(accessToken, refreshToken)).build()
     }
 
     // ── Authentication (returning-user login, no browser) ───────────────────────────────────

@@ -157,6 +157,24 @@ class WebAuthnResourceTest {
         verify(exactly = 0) { keycloakClient.ensureUser(any(), any(), any()) }
     }
 
+    // A registration ceremony is user-verified (Face ID) + user-present over a server challenge —
+    // the same factors /auth/complete checks before minting. Returning 204 here forced the app to
+    // run a SECOND ceremony purely to get a token, i.e. a second Face ID prompt in onboarding for
+    // no security gain (ADR-0066 F2). The mint must never fire before the credential is stored.
+    @Test
+    fun `register complete never mints a session when the ceremony is rejected`() {
+        every { ticketService.verify("good-ticket") } returns "party-123"
+        // Malformed clientDataJSON -> the ceremony fails before any credential is stored.
+        val resp = resource.registerComplete(
+            authorization = "Bearer good-ticket",
+            request = RegistrationCompleteRequestDto("id", "attestation", "bm90LWpzb24"),
+        )
+
+        assertThat(resp.status).isNotEqualTo(200)
+        verify(exactly = 0) { keycloakClient.impersonate(any()) }
+        verify(exactly = 0) { credentialStore.save(any()) }
+    }
+
     // ---- auth/begin + auth/complete: fully public, challenge-store gate --------------------
 
     @Test
