@@ -64,6 +64,15 @@ data class UpdatePartyCommand(
     val tradingName: String?,
 )
 
+/**
+ * Revoke/re-grant marketing consent post-onboarding (mobile app Profile screen). Deliberately
+ * NOT a general "update consent" command: `consentGdpr` is an immutable onboarding-time record
+ * (data processing needed to run the account is a contract/legal-obligation basis, not GDPR
+ * Art 6(1)(a) consent, so it isn't something to "revoke" while keeping the account open) —
+ * only the marketing opt-in is genuinely revocable consent under Art 6(1)(a)/ePrivacy.
+ */
+data class UpdateMarketingConsentCommand(val id: UUID, val marketingConsent: Boolean)
+
 data class AddDocumentCommand(
     val partyId: UUID,
     val documentType: DocumentType,
@@ -82,6 +91,9 @@ interface PartyUseCase {
     suspend fun createParty(cmd: CreatePartyCommand): Party
     suspend fun getParty(id: UUID): Party
     suspend fun updateParty(cmd: UpdatePartyCommand): Party
+
+    /** Post-onboarding marketing-consent toggle (mobile app Profile screen, revocable). */
+    suspend fun updateMarketingConsent(cmd: UpdateMarketingConsentCommand): Party
     suspend fun addDocument(cmd: AddDocumentCommand): PartyDocument
     suspend fun listDocuments(partyId: UUID): List<PartyDocument>
 

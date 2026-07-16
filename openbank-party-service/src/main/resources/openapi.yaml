@@ -130,6 +130,25 @@ paths:
         '200':
           description: Updated
 
+  /api/v1/parties/{id}/consent:
+    patch:
+      tags: [Parties]
+      summary: Update the party's post-onboarding marketing consent (revocable; consentGdpr is not — see UpdateConsentRequest)
+      operationId: updateConsent
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateConsentRequest'
+      responses:
+        '200':
+          description: Updated
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/parties/{id}/documents:
     post:
       tags: [Parties]
@@ -390,6 +409,17 @@ components:
           type: string
         address:
           $ref: '#/components/schemas/AddressDto'
+
+    UpdateConsentRequest:
+      type: object
+      required: [marketingConsent]
+      properties:
+        marketingConsent:
+          type: boolean
+          description: >-
+            Live, revocable marketing-communications preference (mobile app Profile screen).
+            Not the onboarding-time consentGdpr snapshot — that isn't Art 6(1)(a) consent and
+            has no update path.
 
     AddDocumentRequest:
       type: object

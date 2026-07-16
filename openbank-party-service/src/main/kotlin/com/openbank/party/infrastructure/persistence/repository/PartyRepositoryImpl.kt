@@ -154,6 +154,7 @@ class PartyRepositoryImpl :
         it.consentGdpr = consentGdpr
         it.consentMarketing = consentMarketing
         it.consentCapturedAt = consentCapturedAt
+        it.consentMarketingUpdatedAt = consentMarketingUpdatedAt
     }
 
     private fun PartyEntity.toDomain() = Party(
@@ -182,6 +183,7 @@ class PartyRepositoryImpl :
         consentGdpr = consentGdpr,
         consentMarketing = consentMarketing,
         consentCapturedAt = consentCapturedAt,
+        consentMarketingUpdatedAt = consentMarketingUpdatedAt,
     )
 }
 

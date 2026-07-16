@@ -18,6 +18,7 @@ import com.openbank.party.application.port.`in`.PartyUseCase
 import com.openbank.party.application.port.`in`.ResolvePartyByRcCommand
 import com.openbank.party.application.port.`in`.SearchPartiesQuery
 import com.openbank.party.application.port.`in`.SelfRegisterPartyCommand
+import com.openbank.party.application.port.`in`.UpdateMarketingConsentCommand
 import com.openbank.party.application.port.`in`.UpdatePartyCommand
 import com.openbank.party.application.port.`in`.UploadDocumentCommand
 import com.openbank.party.domain.model.Address
@@ -143,6 +144,45 @@ class PartyResource {
     suspend fun updateParty(@PathParam("id") id: UUID, req: UpdatePartyRequest): Response {
         val party = partyUseCase.updateParty(
             UpdatePartyCommand(id, req.email, req.phone, req.address?.toDomain(), req.tradingName),
+        )
+        return Response.ok(party.toResponse()).build()
+    }
+
+    /**
+     * Post-onboarding marketing-consent toggle (mobile app Profile screen). Deliberately its own
+     * endpoint rather than folded into [updateParty]: `consentGdpr` is NOT exposed here — it's an
+     * immutable onboarding-time record, not a live togglable consent (see [UpdateMarketingConsentCommand]
+     * kdoc). Audited (ADR-0086): a consent-state change is a compliance-relevant event same as the
+     * GDPR export/erase operations below, even though it isn't itself a GDPR-article action.
+     */
+    @PATCH
+    @Path("/{id}/consent")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "party.consent.update", resource = "#id")
+    @Operation(summary = "Update the party's post-onboarding marketing consent")
+    suspend fun updateConsent(@PathParam("id") id: UUID, req: UpdateConsentRequest): Response {
+        // Old value for the Art 30 audit trail below — read before the write so it reflects the
+        // state actually being changed FROM, not a stale/racing re-read after.
+        val before = partyUseCase.getParty(id).consentMarketing
+        val party = partyUseCase.updateMarketingConsent(UpdateMarketingConsentCommand(id, req.marketingConsent))
+        auditPublisher.publish(
+            AuditEvent(
+                // The caller here is ALWAYS the customer-edge's M2M service identity (ROLE_OPERATOR
+                // client-credentials token), never the customer directly — same trust boundary as
+                // every other edge->party-service call (registerParty, updateParty, …). actorType
+                // reflects that; the customer whose consent changed is resourceId (= the party id),
+                // not the actor.
+                actorId = jwt?.subject ?: jwt?.name ?: "unknown",
+                actorType = "SERVICE",
+                operation = "party.consent.marketing-updated",
+                resourceType = "party",
+                resourceId = id.toString(),
+                result = AuditResult.SUCCESS,
+                payload = mapOf(
+                    "marketingConsentBefore" to (before?.toString() ?: "null"),
+                    "marketingConsentAfter" to req.marketingConsent.toString(),
+                ),
+            ),
         )
         return Response.ok(party.toResponse()).build()
     }
@@ -446,6 +486,7 @@ data class UpdatePartyRequest(
     val tradingName: String?,
     val address: AddressRequest?,
 )
+data class UpdateConsentRequest(val marketingConsent: Boolean)
 data class AddDocumentRequest(
     val documentType: String,
     val documentNumber: String,
@@ -478,6 +519,10 @@ fun Party.toResponse() = mapOf(
     "id" to id, "partyType" to partyType, "status" to status, "legalName" to legalName,
     "tradingName" to tradingName, "email" to email, "phone" to phone,
     "kycStatus" to kycStatus, "address" to address, "createdAt" to createdAt, "updatedAt" to updatedAt,
+    // Onboarding-time consent snapshot (consentGdpr is informational/non-revocable — see
+    // UpdateMarketingConsentCommand kdoc) + the live, revocable marketing preference.
+    "consentGdpr" to consentGdpr, "consentCapturedAt" to consentCapturedAt,
+    "consentMarketing" to consentMarketing, "consentMarketingUpdatedAt" to consentMarketingUpdatedAt,
 )
 
 fun PartyGdprExport.toResponse() = mapOf(
@@ -498,6 +543,13 @@ fun PartyGdprExport.toResponse() = mapOf(
         "amlStatus" to party.amlStatus,
         "createdAt" to party.createdAt,
         "updatedAt" to party.updatedAt,
+        // Consent state is PII the subject agreed to/withheld — belongs in an Art 15 access
+        // export same as everything else here. Gap pre-dates this PR (never wired in when
+        // consentGdpr/consentMarketing were added) — closing it now since it's adjacent.
+        "consentGdpr" to party.consentGdpr,
+        "consentCapturedAt" to party.consentCapturedAt,
+        "consentMarketing" to party.consentMarketing,
+        "consentMarketingUpdatedAt" to party.consentMarketingUpdatedAt,
     ),
     "documents" to documents.map {
         mapOf(

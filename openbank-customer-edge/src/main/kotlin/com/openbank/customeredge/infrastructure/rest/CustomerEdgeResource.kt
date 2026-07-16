@@ -744,10 +744,10 @@ class CustomerEdgeResource(
     // --- Profile (the caller's own party) ---
 
     /**
-     * The caller's own customer profile (name, contact, KYC status, member-since). Party-scoped by the
-     * JWT party — never a client-supplied id — so a customer only ever reads their own (no IDOR). The
-     * party-service response is already customer-safe: it carries no AML status, national id or risk
-     * fields (see Party.toResponse — legalName/email/phone/kycStatus/status/address/createdAt only).
+     * The caller's own customer profile (name, contact, KYC status, member-since, consent state).
+     * Party-scoped by the JWT party — never a client-supplied id — so a customer only ever reads
+     * their own (no IDOR). The party-service response is already customer-safe: it carries no AML
+     * status, national id or risk fields (see Party.toResponse).
      */
     @GET
     @Path("/profile")
@@ -756,6 +756,30 @@ class CustomerEdgeResource(
     fun getProfile(): Response {
         val customer = customer()
         return upstream.get("$partyServiceUrl/api/v1/parties/${customer.partyId}", customer.partyId.toString())
+    }
+
+    /**
+     * Revoke/re-grant marketing consent (mobile app Profile screen). Party-scoped by the JWT party
+     * (the M2M call to party-service always carries the CALLER's own id from the token, never a
+     * client-supplied one), so a customer can only ever change their own consent — no IDOR. Only
+     * `marketingConsent` is accepted here: the onboarding-time `consentGdpr` snapshot has no update
+     * path (it isn't revocable GDPR consent in the first place — see party-service's
+     * UpdateMarketingConsentCommand kdoc).
+     */
+    @PATCH
+    @Path("/profile/consent")
+    @Authorize(action = "customer.profile.consent.update")
+    @Blocking
+    fun updateConsent(body: String): Response {
+        val customer = customer()
+        val marketingConsent = extractBooleanField(objectMapper, body, "marketingConsent")
+            ?: return badRequest("marketingConsent (boolean) is required")
+        val out = """{"marketingConsent":$marketingConsent}"""
+        return upstream.patch(
+            "$partyServiceUrl/api/v1/parties/${customer.partyId}/consent",
+            customer.partyId.toString(),
+            out,
+        )
     }
 
     // --- Transactions ---

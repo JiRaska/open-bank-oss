@@ -42,6 +42,12 @@ data class Party(
     val consentGdpr: Boolean? = null,
     val consentMarketing: Boolean? = null,
     val consentCapturedAt: Instant? = null,
+    /**
+     * Stamped whenever [consentMarketing] changes AFTER onboarding (Profile screen toggle).
+     * Null until the customer changes it post-onboarding — [consentCapturedAt] alone covers
+     * the original onboarding-time value.
+     */
+    val consentMarketingUpdatedAt: Instant? = null,
 )
 
 data class Address(
