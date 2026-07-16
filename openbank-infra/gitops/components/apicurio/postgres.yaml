@@ -18,7 +18,15 @@ spec:
   monitoring:
     enablePodMonitor: true
   instances: 1
-  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  # ECR pull-through instead of ghcr.io (issue #1290, fleet rollout after the #1304 pilot on
+  # pact-broker-db). CNPG instance pods are (correctly) excluded from the Kyverno
+  # ecr-pull-through-rewrite policy: the operator reconciles the running pod's image against
+  # spec.imageName, so a mutating webhook would make the pod permanently drift and get
+  # recreated every ~10s. Setting the ref HERE avoids that — no mutation, nothing to drift
+  # from. Same tag (18.1) as before, only the registry changes; verified this ref resolves
+  # via the pull-through cache before this PR (previously only 16.14 had ever been pulled
+  # through). Non-money-path, single-instance, low-traffic DB — safe rollout candidate.
+  imageName: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/ghcr/cloudnative-pg/postgresql:18.1
   storage:
     storageClass: gp3
     size: 1Gi
