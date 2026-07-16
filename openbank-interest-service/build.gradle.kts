@@ -48,6 +48,12 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+
+    // Consumer-driven contract for the ledger-service postJournal call the ADR-0033 §D
+    // capitalization credit leg makes (ADR-0063). interest-service is the fifth ledger-posting
+    // consumer; every other one already has a pact with openbank-ledger-service as provider.
+    testImplementation(libs.rest.assured.kotlin)
+    testImplementation(libs.pact.consumer)
 }
 
 kover {
@@ -63,4 +69,23 @@ kover {
             }
         }
     }
+}
+
+// Pact: write the generated consumer contract to pacts/ and forward broker config, matching
+// transaction-service/lending-service/billing-service/settlement-service's tasks.withType<Test>
+// block (ADR-0063 P1/P2). Without pact.rootDir the pact lands in the module's build/pacts and
+// .github/workflows/pact-drift-check.yml never sees it.
+tasks.withType<Test> {
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
+    listOf(
+        "pactbroker.url",
+        "pactbroker.auth.username",
+        "pactbroker.auth.password",
+        "pactbroker.enablePending",
+        "pactbroker.providerBranch",
+        "pact.verifier.publishResults",
+        "pact.provider.version",
+        "pact.provider.branch",
+        "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
