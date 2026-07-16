@@ -44,10 +44,10 @@ touches** under that component's directory, regardless of the typed scope.
 
 **This means a `feat`/`fix`/`perf`/`security` PR that only touches a service directory *outside*
 `<service>/src/main/**`** — an `openapi.yaml`-only edit, a gitops/docs-only PR that happens to also
-add a file inside the service dir — **still proposes a release**, even though CLAUDE.md rule 2 says
-only `src/main/**` changes should. release-please sees "a file under this component's directory
-changed" + "what type is the commit"; it has no include/allow-list, so "only `src/main` releases" is
-not expressible.
+add a file inside the service dir — **still proposes a release**, even though
+`rules.yaml: change_requirements.release_scope_mismatch` says only `src/main/**` ought to.
+release-please sees "a file under this component's directory changed" + "what type is the commit";
+it has no include/allow-list, so "only `src/main` releases" is not expressible.
 
 What it *does* have is `exclude-paths` (per package, added in #1277): every package now excludes its
 own `src/test`, so a `src/test/**`-only change no longer proposes a release whatever its type.

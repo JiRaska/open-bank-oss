@@ -18,8 +18,9 @@ ADR-0029):
    commit **type** releases (`feat`/`fix`/`perf`/`security`, or breaking) **and** it touches a file
    under `<service>/` outside that package's `exclude-paths` (today `src/test`, plus `e2e` for
    admin-ui). The commit message *is* the changelog. Neither axis alone is enough:
-   - A hidden type (`refactor` `docs` `test` `build` `ci` `chore`) **never** releases, at any path
-     — the lever when a PR doesn't change shipped code (`rules.yaml: release_scope_mismatch`).
+   - A hidden type (`refactor` `docs` `test` `build` `ci` `chore`) does not release at any path —
+     unless it carries a breaking marker, which renders a ⚠ section and so releases a major. That
+     is the lever when a PR doesn't change shipped code (`rules.yaml: release_scope_mismatch`).
    - The path axis is broader than `src/main`: `governance.yaml`, `Dockerfile`, `build.gradle.kts`
      and the lint baselines all count. There is no include/allow-list — only `exclude-paths`,
      matching **directories** only, so a single file cannot be excluded.
