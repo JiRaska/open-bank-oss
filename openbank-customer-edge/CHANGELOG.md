@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.20.2...customer-edge-v0.21.0) (2026-07-16)
+
+
+### Features
+
+* **customer-edge:** mint the session from the passkey enrolment ceremony ([#1349](https://github.com/JiRaska/open-bank-oss/issues/1349)) ([ed34e32](https://github.com/JiRaska/open-bank-oss/commit/ed34e323bef55918a35c26d20f62749eac545c64))
+
 ## [0.20.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.20.1...customer-edge-v0.20.2) (2026-07-16)
 
 
