@@ -37,19 +37,32 @@ data class LedgerPosting(val reference: String, val partyId: UUID, val amount: M
  * contra-asset); a decrease (partial release) is the reverse. The loan principal GL is never touched by
  * a provisioning entry — provisioning is an impairment overlay, not a change to the recognized asset.
  *
+ * [INTEREST_ACCRUAL_REVERSAL] unwinds a previously booked [INTEREST_ACCRUAL] when the installment it
+ * recognized income for is cancelled before cash ever arrives (a reschedule discarding the unpaid
+ * tail, issue #667/#668): the income was recognized against a receivable that will now never settle,
+ * so both are backed out — the new schedule re-accrues its own installments' interest from scratch.
+ *
  * [RESCHEDULE_FORGIVENESS] books a partial debt-relief amount granted as part of a loan restructuring
  * (issue #667/#668) — the same economic event as [WRITE_OFF] (a realized credit loss, asset off the
  * books), just partial rather than the full remaining exposure, kept as a distinct kind so an audit
  * trail can tell a restructuring's forgiveness apart from a full write-off even though both hit the
  * same GL accounts.
+ *
+ * [WRITE_OFF_INTEREST] derecognizes the accrued-but-unpaid interest receivable at write-off, alongside
+ * the principal [WRITE_OFF]: the income was legitimately earned when the installment fell due, so it is
+ * not reversed out of income — the uncollectible receivable is booked as a credit loss, exactly like
+ * the principal exposure. Kept as a distinct kind so the audit trail can split a write-off's loss into
+ * its principal and interest components.
  */
 enum class PostingKind {
     DISBURSEMENT,
     PRINCIPAL_REPAYMENT,
     INTEREST,
     INTEREST_ACCRUAL,
+    INTEREST_ACCRUAL_REVERSAL,
     INTEREST_SETTLEMENT,
     WRITE_OFF,
+    WRITE_OFF_INTEREST,
     PROVISIONING,
     RESCHEDULE_FORGIVENESS,
 }

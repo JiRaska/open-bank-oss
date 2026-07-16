@@ -30,8 +30,10 @@ data class LendingGlAccounts(
  *   PRINCIPAL_REPAYMENT  DEBIT  Funding Clearing     CREDIT Loans Receivable     (cash in, asset reduced)
  *   INTEREST             DEBIT  Funding Clearing     CREDIT Interest Income       (cash in, income earned — early payment)
  *   INTEREST_ACCRUAL     DEBIT  Interest Receivable  CREDIT Interest Income       (income earned at due date, no cash yet)
+ *   INTEREST_ACCRUAL_REVERSAL DEBIT Interest Income  CREDIT Interest Receivable   (accrual unwound: installment cancelled by reschedule)
  *   INTEREST_SETTLEMENT  DEBIT  Funding Clearing     CREDIT Interest Receivable   (cash in, accrued receivable cleared)
  *   WRITE_OFF            DEBIT  Loan Loss Expense    CREDIT Loans Receivable      (loss booked, asset off)
+ *   WRITE_OFF_INTEREST   DEBIT  Loan Loss Expense    CREDIT Interest Receivable   (accrued receivable uncollectible at write-off)
  *   RESCHEDULE_FORGIVENESS DEBIT Loan Loss Expense   CREDIT Loans Receivable      (partial forgiveness, restructuring)
  *   PROVISIONING (Δ≥0)   DEBIT  Loan Loss Expense    CREDIT Loan Loss Allowance   (impairment increases: more provision)
  *   PROVISIONING (Δ<0)   DEBIT  Loan Loss Allowance  CREDIT Loan Loss Expense    (impairment decreases: partial release)
@@ -68,8 +70,10 @@ object LendingJournalFactory {
             PostingKind.PRINCIPAL_REPAYMENT -> accounts.fundingClearing to accounts.loansReceivable
             PostingKind.INTEREST -> accounts.fundingClearing to accounts.interestIncome
             PostingKind.INTEREST_ACCRUAL -> accounts.interestReceivable to accounts.interestIncome
+            PostingKind.INTEREST_ACCRUAL_REVERSAL -> accounts.interestIncome to accounts.interestReceivable
             PostingKind.INTEREST_SETTLEMENT -> accounts.fundingClearing to accounts.interestReceivable
             PostingKind.WRITE_OFF -> accounts.loanLossExpense to accounts.loansReceivable
+            PostingKind.WRITE_OFF_INTEREST -> accounts.loanLossExpense to accounts.interestReceivable
             PostingKind.RESCHEDULE_FORGIVENESS -> accounts.loanLossExpense to accounts.loansReceivable
             PostingKind.PROVISIONING -> error("unreachable: handled above")
         }

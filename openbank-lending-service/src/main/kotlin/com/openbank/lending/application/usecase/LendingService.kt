@@ -349,6 +349,9 @@ class LendingService(
                         )
                     } else {
                         // Book the loss and remove the asset from the books; we never mutate balances ourselves.
+                        // Ledger first, row mutation last (same as recordRepayment/accrueOne): a crash between
+                        // the two leaves the loan ACTIVE and the retry replays the same idempotency keys, which
+                        // the ledger collapses to the already-booked journals — exactly-once either way.
                         ledger.post(
                             LedgerPosting(
                                 "loan:${loanId.value}:writeoff",
@@ -357,6 +360,7 @@ class LendingService(
                                 PostingKind.WRITE_OFF,
                             ),
                         )
+                            .flatMap { derecognizeAccruedInterest(loan, schedule) }
                             .flatMap { loans.update(loan.copy(status = LoanStatus.WRITTEN_OFF)) }
                             .flatMap { written ->
                                 val wPayload = """{"loanId":"${written.id.value}",""" +
@@ -376,6 +380,31 @@ class LendingService(
             }
         }
 
+    /**
+     * Derecognize the loan's accrued-but-unpaid interest receivable at write-off. Every unpaid
+     * installment the servicing pass already accrued (`interestAccrued`) has an Interest Receivable
+     * balance the write-off would otherwise orphan on the books forever — the principal-only
+     * [PostingKind.WRITE_OFF] never touches it. The sum is deterministic from the schedule (write-off
+     * mutates no installment rows), so a retry recomputes the identical amount under the identical
+     * idempotency key and the ledger collapses the replay.
+     */
+    private fun derecognizeAccruedInterest(loan: Loan, schedule: List<LoanInstallment>): Uni<Unit> {
+        val accruedUnpaid = schedule
+            .filter { !it.paid && it.interestAccrued }
+            .fold(Money.zero(loan.principal.currency.code)) { acc, installment -> acc.plus(installment.interest) }
+        if (!accruedUnpaid.isPositive()) {
+            return Uni.createFrom().item(Unit)
+        }
+        return ledger.post(
+            LedgerPosting(
+                "loan:${loan.id.value}:writeoff:interest",
+                loan.partyId,
+                accruedUnpaid,
+                PostingKind.WRITE_OFF_INTEREST,
+            ),
+        )
+    }
+
     // --- Reschedule / restructuring (forbearance, issue #667/#668) ----------------------------------
 
     /**
@@ -383,8 +412,13 @@ class LendingService(
      * new schedule is generated from the outstanding balance (net of any [RescheduleRequest.principalForgiveness])
      * at the new rate/term/first-due-date, via the same pure [Amortization.schedule] primitive
      * [bookLoan] uses at origination. Already-paid installments are untouched; new rows continue the
-     * installment numbering after the last paid one, so a future repayment's ledger reference
-     * (`"loan:<id>:inst:<number>:..."`) can never collide with an already-posted one.
+     * installment numbering after the highest existing one — paid or not — so a future ledger
+     * reference (`"loan:<id>:inst:<number>:..."`) can never collide with an already-posted one
+     * (an accrued-unpaid row posts its accrual reference before it is ever discarded).
+     *
+     * Any unpaid installment whose interest was already accrued has its accrual REVERSED on the
+     * ledger before the row is deleted (see [reverseAccruedUnpaidInterest]) — otherwise the posted
+     * Interest Receivable could never settle and the new schedule would recognize the same income twice.
      */
     @Suppress("LongMethod") // reschedule mirrors bookLoan's shape: validation + schedule build + persist + post
     override fun reschedule(loanId: LoanId, request: RescheduleRequest, rescheduledBy: String): Uni<Loan> =
@@ -440,7 +474,45 @@ class LendingService(
         } else {
             Uni.createFrom().item(Unit)
         }
-        return forgive.flatMap { buildAndPersistNewSchedule(loan, schedule, newPrincipal, generation, request) }
+        return forgive
+            .flatMap { reverseAccruedUnpaidInterest(loan, schedule, generation) }
+            .flatMap { buildAndPersistNewSchedule(loan, schedule, newPrincipal, generation, request) }
+    }
+
+    /**
+     * Unwind the interest accrual of every unpaid installment the reschedule is about to discard.
+     * Each such row already posted an INTEREST_ACCRUAL (income against a receivable) that its
+     * INTEREST_SETTLEMENT can now never clear — deleting it without this reversal would strand the
+     * receivable on the books AND double-recognize the income once the new schedule re-accrues.
+     *
+     * Ledger first, row deletion last (same as accrueOne's post-then-mark): a crash between the two
+     * leaves the old rows in place, and the retry replays the same generation-scoped idempotency keys
+     * (the loan version only bumps after the delete succeeds), which the ledger collapses to the
+     * already-booked reversals — exactly-once either way.
+     */
+    private fun reverseAccruedUnpaidInterest(
+        loan: Loan,
+        schedule: List<LoanInstallment>,
+        generation: Long,
+    ): Uni<Unit> {
+        // Zero-interest rows are flagged accrued without ever posting (see accrueOne): nothing to reverse.
+        val accruedUnpaid = schedule.filter { !it.paid && it.interestAccrued && it.interest.isPositive() }
+        if (accruedUnpaid.isEmpty()) {
+            return Uni.createFrom().item(Unit)
+        }
+        return Multi.createFrom().iterable(accruedUnpaid)
+            .onItem().transformToUniAndConcatenate { installment ->
+                ledger.post(
+                    LedgerPosting(
+                        "loan:${loan.id.value}:inst:${installment.number}:accrual-reversal:gen$generation",
+                        loan.partyId,
+                        installment.interest,
+                        PostingKind.INTEREST_ACCRUAL_REVERSAL,
+                    ),
+                )
+            }
+            .collect().asList()
+            .replaceWith(Unit)
     }
 
     private fun buildAndPersistNewSchedule(
@@ -450,7 +522,11 @@ class LendingService(
         generation: Long,
         request: RescheduleRequest,
     ): Uni<Loan> {
-        val paidCount = schedule.count { it.paid }
+        // Continue numbering after the HIGHEST existing number, not the paid count: an accrued-unpaid
+        // row being discarded has already posted its "...inst:<n>:accrual" ledger reference, so
+        // recycling its number would collapse the replacement row's own accrual/settlement postings
+        // into the discarded row's journals (the ledger dedupes on that exact string).
+        val lastNumber = schedule.maxOfOrNull { it.number } ?: 0
         val newSchedule = Amortization.schedule(
             principal = newPrincipal,
             nominalAnnualRate = request.newNominalAnnualRate,
@@ -462,7 +538,7 @@ class LendingService(
         val rows = newSchedule.installments.map { i ->
             LoanInstallment(
                 loanId = loan.id,
-                number = paidCount + i.number,
+                number = lastNumber + i.number,
                 dueDate = i.dueDate,
                 openingBalance = i.openingBalance,
                 principal = i.principal,
