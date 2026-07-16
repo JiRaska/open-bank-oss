@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.14.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.13.0...ledger-service-v1.14.0) (2026-07-16)
+
+
+### Features
+
+* **ledger:** persist tie-out runs, freshness watchdog, wire break alert ([#1192](https://github.com/JiRaska/open-bank-oss/issues/1192)) ([25214dd](https://github.com/JiRaska/open-bank-oss/commit/25214dd01adcc8fd6c08ca7445db526bdb799b97))
+
+
+### Bug Fixes
+
+* **ledger:** add balance-service provider states to broker verification ([#1198](https://github.com/JiRaska/open-bank-oss/issues/1198)) ([7214cb0](https://github.com/JiRaska/open-bank-oss/commit/7214cb07dc4ef75c091dfa814a9e153df1a0eea5))
+
 ## [1.13.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.12.1...ledger-service-v1.13.0) (2026-07-14)
 
 
