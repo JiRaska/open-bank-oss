@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.3](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.5.2...copilot-service-v0.5.3) (2026-07-16)
+
+
+### Bug Fixes
+
+* **copilot,product-catalog:** enable the Quarkus management interface so probes hit a real port ([#1165](https://github.com/JiRaska/open-bank-oss/issues/1165)) ([7c8fa2b](https://github.com/JiRaska/open-bank-oss/commit/7c8fa2b76efb9d1d979eb03212f4f5dc42711767))
+
 ## [0.5.2](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.5.1...copilot-service-v0.5.2) (2026-07-07)
 
 
