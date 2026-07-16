@@ -64,6 +64,16 @@ import java.util.concurrent.TimeUnit
  * thing `can-i-deploy` actually reads. `@EnabledIfSystemProperty` keeps it a no-op locally without
  * a broker URL, same as every sibling class — verify a change with `compileTestKotlin` locally;
  * the real verification only runs in CI (`pactbroker.url` set there).
+ *
+ * Two more gotchas hit while landing this revert (#1166), worth knowing before touching this
+ * class again: (1) `services-ci.yml`'s `-Dpact.verifier.publishResults=true` is only set on a
+ * genuine `push` to `main` — a manual `workflow_dispatch` run compiles/runs this test fine but
+ * does NOT publish, so it looks green without ever unblocking `can-i-deploy`. (2) under heavy
+ * concurrent CI load, `gh run rerun`-ing an old `push`-triggered run enough times/hours later can
+ * make `auto-deploy.yml`'s "Detect changed services" step (`git diff HEAD~1 HEAD`) misfire and
+ * rebuild an unrelated service instead — if a rerun's job list doesn't match the PR's actual
+ * files, don't trust it; trigger a fresh `push` (even a trivial one touching this file) instead
+ * of continuing to rerun a stale run object.
  */
 @QuarkusTest
 @QuarkusTestResource(com.openbank.party.it.PostgresRedpandaTestResource::class)
