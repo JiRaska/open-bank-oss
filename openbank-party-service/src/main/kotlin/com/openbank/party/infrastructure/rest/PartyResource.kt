@@ -423,6 +423,10 @@ data class CreatePartyRequest(
     // here so party id == sub and the principal binding holds without a KC admin client.
     // The endpoint is operator-realm-only, so customers cannot mint arbitrary ids.
     val id: String? = null,
+    // Onboarding consent capture (mobile app "Agreement" step, ADR-0069). Null = not
+    // asked/answered — operator-created parties never send these.
+    val consentGdpr: Boolean? = null,
+    val consentMarketing: Boolean? = null,
 ) {
     fun toCommand(key: String): CreatePartyCommand {
         require(!email.isNullOrBlank()) { "email is required" }
@@ -430,6 +434,8 @@ data class CreatePartyRequest(
             key, PartyType.valueOf(partyType), legalName, tradingName,
             dateOfBirth, nationality, taxId, registrationNumber, email, phone, address?.toDomain(),
             id?.takeIf { it.isNotBlank() }?.let { UUID.fromString(it) },
+            consentGdpr = consentGdpr,
+            consentMarketing = consentMarketing,
         )
     }
 }

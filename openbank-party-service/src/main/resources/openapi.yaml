@@ -372,6 +372,14 @@ components:
           type: string
         address:
           $ref: '#/components/schemas/AddressDto'
+        consentGdpr:
+          type: boolean
+          description: >-
+            Onboarding consent capture (mobile app "Agreement" step, ADR-0069). Omitted for
+            operator-created parties. When present, the service stamps a capture timestamp.
+        consentMarketing:
+          type: boolean
+          description: Optional marketing-communications consent from the same onboarding step.
 
     UpdatePartyRequest:
       type: object
