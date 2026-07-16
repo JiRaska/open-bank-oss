@@ -26,8 +26,11 @@
 #   - OIDC → arn:aws:iam::265175468565:role/openbank-arc-build-runner (same as
 #     auto-deploy.yml, has ECR push + KMS cosign alias/openbank-cosign-signing).
 #   - GitOps change lands via a PR (never direct push to main) — normal review gate.
-#   - GITOPS_PR_TOKEN (fine-grained PAT) lets the PR trigger required checks so
-#     auto-merge actually fires; falls back to GITHUB_TOKEN (manual-merge only).
+#   - A GitHub App installation token (GITOPS_APP_ID + GITOPS_APP_PRIVATE_KEY) opens the
+#     PR: it both triggers the required checks and gets its commit signed by GitHub, which
+#     required_signatures demands. Falls back to the GITOPS_PR_TOKEN user PAT (checks run,
+#     but the commit is unsigned → PR strands until re-signed by hand), then to
+#     GITHUB_TOKEN (manual-merge only — its PRs do not trigger workflows). See issue #1269.
 
 name: Admin-UI deploy
 
@@ -87,6 +90,9 @@ jobs:
       AWS_REGION: eu-north-1
       AWS_DEFAULT_REGION: eu-north-1
       MANIFEST: openbank-infra/gitops/components/admin-ui/admin-ui.yaml
+      # Mirrored into env because the `secrets` context is NOT available in a step-level `if:`
+      # — only job-level env can read it. Used solely to decide whether to mint an App token.
+      GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
 
     outputs:
       tag: ${{ steps.build.outputs.tag }}
@@ -410,17 +416,39 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # GitHub signs API-created commits for GitHub *App* tokens (and the web UI's web-flow
+      # key) — never for a user PAT. GITOPS_PR_TOKEN is a user PAT, so `sign-commits: true`
+      # below faithfully routed the commit through the API and GitHub declined to sign it:
+      # every bot deploy commit since #806 came out `verified=false; reason=unsigned`, and
+      # required_signatures stranded the PR until a human re-signed it by hand (issue #1269).
+      # An App installation token is the only option that satisfies both constraints at once:
+      # it triggers the required checks (GITHUB_TOKEN does not) AND its commits get signed
+      # (a PAT's do not).
+      - name: Mint a GitHub App installation token
+        id: app_token
+        if: ${{ steps.rewrite.outputs.changed == 'true' && env.GITOPS_APP_ID != '' }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+
       - name: Open GitOps PR (auto-merge)
         id: gitops_pr
         if: steps.rewrite.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
-          token: ${{ secrets.GITOPS_PR_TOKEN || secrets.GITHUB_TOKEN }}
-          # Create the commit through the GitHub API so it is signed/verified. The
-          # main ruleset enforces required_signatures; a plain git commit here is
-          # unsigned → the deploy PR is blocked forever and the admin UI silently
-          # stops updating (had to be re-signed by hand every time). sign-commits
-          # makes the bot commit verified so auto-merge actually lands it.
+          # Preference order, and why each rung exists:
+          #   1. App installation token — triggers required checks AND gets its commit signed.
+          #      The only rung that actually works end-to-end (issue #1269).
+          #   2. GITOPS_PR_TOKEN (user PAT) — triggers the required checks, but its commit is
+          #      unsigned, so the PR strands until a human re-signs. Kept as a fallback only
+          #      so the pipeline still opens a rescuable PR while the App is being set up.
+          #   3. GITHUB_TOKEN — a PR opened with it does NOT trigger workflows (anti-recursion),
+          #      so the required checks never run and there is nothing to auto-merge against.
+          token: ${{ steps.app_token.outputs.token || secrets.GITOPS_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          # Route the commit through the GitHub API so GitHub can sign it. Necessary but NOT
+          # sufficient on its own — the token above decides whether the signing actually
+          # happens. The "Verify the deploy commit is signed" step below is what proves it did.
           sign-commits: true
           branch: chore/admin-ui-deploy-${{ github.sha }}
           delete-branch: true
@@ -442,11 +470,13 @@ jobs:
       # Uses the same retry pattern as auto-deploy.yml (required checks register with
       # a small lag after PR creation → keep retrying until enablePullRequestAutoMerge
       # accepts, or give up after 8 attempts and leave it for a human).
+      # Runs BEFORE the signature guard on purpose: arming auto-merge is what lets a manual
+      # re-sign land by itself, so it must happen even on the run where the guard then fails.
       - name: Enable auto-merge
         if: steps.gitops_pr.outputs.pull-request-number != ''
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
-          github-token: ${{ secrets.GITOPS_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.app_token.outputs.token || secrets.GITOPS_PR_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const pull_number = Number('${{ steps.gitops_pr.outputs.pull-request-number }}');
             const { data: pr } = await github.rest.pulls.get({
@@ -467,4 +497,41 @@ jobs:
                 await new Promise(r => setTimeout(r, 12000));
               }
             }
-            core.notice('could not enable auto-merge after retries — check GITOPS_PR_TOKEN / branch protection');
+            core.notice('could not enable auto-merge after retries — check the App token / GITOPS_PR_TOKEN / branch protection');
+
+      # The failure this guards against is silent by construction: create-pull-request logs
+      # "Commit verified: false; reason: unsigned" and exits 0, the PR opens with every check
+      # green and auto-merge armed, and it simply never merges. That reads as healthy from
+      # every angle except the one nobody checks — which is how #806 shipped a fix that
+      # no-opped for five days and stranded seven deploy PRs at once (issue #1269).
+      # Fail loudly instead: an unsigned commit means required_signatures WILL strand this PR.
+      #
+      # Keep this LAST in the job, and `always()`: core.setFailed() skips every subsequent
+      # step that is not always(), so any step appended after this one would be silently
+      # starved on exactly the runs where it matters most.
+      - name: Verify the deploy commit is signed
+        if: ${{ always() && steps.gitops_pr.outputs.pull-request-number != '' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ steps.app_token.outputs.token || secrets.GITOPS_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const pull_number = Number('${{ steps.gitops_pr.outputs.pull-request-number }}');
+            const { data: commits } = await github.rest.pulls.listCommits({
+              owner: context.repo.owner, repo: context.repo.repo, pull_number,
+            });
+            const unsigned = commits.filter(c => !c.commit.verification?.verified);
+            if (unsigned.length === 0) {
+              core.info(`all ${commits.length} commit(s) on PR #${pull_number} are signed and verified`);
+              return;
+            }
+            for (const c of unsigned) {
+              core.error(`${c.sha}: verified=false reason=${c.commit.verification?.reason ?? 'unknown'} committer=${c.commit.committer?.name}`);
+            }
+            core.setFailed(
+              `PR #${pull_number} carries ${unsigned.length} unsigned commit(s); the main ruleset's ` +
+              `required_signatures will block it and this deploy will never land. ` +
+              `Most likely cause: no GitHub App token — GITOPS_APP_ID/GITOPS_APP_PRIVATE_KEY unset, so the ` +
+              `run fell back to the GITOPS_PR_TOKEN user PAT, whose API commits GitHub does not sign (issue #1269). ` +
+              `To rescue this PR by hand: amend the commit locally with a GPG signature and force-push — ` +
+              `auto-merge is already armed and fires on its own once the signature is valid.`
+            );
