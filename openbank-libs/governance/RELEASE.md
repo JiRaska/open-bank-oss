@@ -43,13 +43,21 @@ commit message *is* the changelog. release-please attributes a commit to a compo
 touches** under that component's directory, regardless of the typed scope.
 
 **This means a `feat`/`fix`/`perf`/`security` PR that only touches a service directory *outside*
-`<service>/src/main/**`** — a `src/test/**`-only change, an `openapi.yaml`-only edit, a
-gitops/docs-only PR that happens to also add a file inside the service dir — **still proposes a
-release**, even though CLAUDE.md rule 2 says only `src/main/**` changes should. release-please has no
-concept of a sub-path exclusion; it only sees "a file under this component's directory changed" +
-"what type is the commit". This surfaced live in PR #547/#551 (a `src/test/**`-only boot-smoke test
-inside a gitops-registration PR proposed `finrep-service 0.4.0` for an artifact that hadn't changed).
-It's harmless — the rebuilt image is byte-identical, just re-tagged — but noisy, so
+`<service>/src/main/**`** — an `openapi.yaml`-only edit, a gitops/docs-only PR that happens to also
+add a file inside the service dir — **still proposes a release**, even though
+`rules.yaml: change_requirements.release_scope_mismatch` says only `src/main/**` ought to.
+release-please sees "a file under this component's directory changed" + "what type is the commit";
+it has no include/allow-list, so "only `src/main` releases" is not expressible.
+
+What it *does* have is `exclude-paths` (per package, added in #1277): every package now excludes its
+own `src/test`, so a `src/test/**`-only change no longer proposes a release whatever its type.
+Exclusion matches **directory prefixes only** (`file.indexOf(path + '/') === 0`) — a single file
+cannot be excluded, and a commit touching `src/main` *and* `src/test` still releases (a commit is
+skipped only if **all** its files match an exclude).
+
+The gap surfaced live in PR #547/#551 (a `src/test/**`-only boot-smoke test inside a
+gitops-registration PR proposed `finrep-service 0.4.0` for an artifact that hadn't changed) — the
+case `exclude-paths` now covers. For the paths it doesn't cover the noise remains, so
 `check-release-scope-mismatch.py` flags it as an advisory PR-time warning
 (`rules.yaml: change_requirements.release_scope_mismatch`). When it fires and the PR genuinely doesn't
 change the service's shipped code, re-type the commit (`test:`/`docs:`/`chore:`/`refactor:`/`build:`/
