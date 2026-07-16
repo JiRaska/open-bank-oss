@@ -38,6 +38,14 @@ spec:
           env:
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: postgresql://docstruth-db-rw.docs-truth-agent.svc:5432/openbank_docstruth
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://docstruth-db-rw.docs-truth-agent.svc:5432/openbank_docstruth
+            - name: QUARKUS_DATASOURCE_USERNAME
+              valueFrom: {secretKeyRef: {name: docstruth-db-app, key: username}}
+            - name: QUARKUS_DATASOURCE_PASSWORD
+              valueFrom: {secretKeyRef: {name: docstruth-db-app, key: password}}
             - name: TEMPORAL_HOST
               value: temporal-frontend.temporal.svc:7233
             - name: TEMPORAL_ENABLED

@@ -38,6 +38,16 @@ spec:
           env:
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
+            # Postgres (CNPG flakytest-db) — findings + their HITL lifecycle survive pod restarts.
+            # Reactive URL for the app (Panache); JDBC URL for Flyway migrations.
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: postgresql://flakytest-db-rw.flaky-test-hunter.svc:5432/openbank_flakytest
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://flakytest-db-rw.flaky-test-hunter.svc:5432/openbank_flakytest
+            - name: QUARKUS_DATASOURCE_USERNAME
+              valueFrom: {secretKeyRef: {name: flakytest-db-app, key: username}}
+            - name: QUARKUS_DATASOURCE_PASSWORD
+              valueFrom: {secretKeyRef: {name: flakytest-db-app, key: password}}
             - name: TEMPORAL_HOST
               value: temporal-frontend.temporal.svc:7233
             - name: TEMPORAL_ENABLED

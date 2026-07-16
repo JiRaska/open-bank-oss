@@ -10,6 +10,7 @@ import com.openbank.releasesteward.application.port.incoming.RunReleaseStewardCh
 import com.openbank.releasesteward.domain.model.ReleaseStewardFinding
 import com.openbank.releasesteward.domain.model.ReleaseStewardReport
 import com.openbank.releasesteward.domain.model.RunTrigger
+import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.NotFoundException
@@ -26,24 +27,26 @@ class ReleaseStewardResource(
     private val runCheck: RunReleaseStewardCheckUseCase,
     private val getFindings: GetFindingsUseCase,
 ) {
+    // @Blocking: starts a Temporal workflow and waits for it synchronously — must run on a worker
+    // thread, not the event loop. It touches no reactive DB session, so runBlocking is fine here.
     @POST
     @Path("/check/trigger")
     @RolesAllowed("platform-admin")
+    @Blocking
     fun triggerCheck(): ReleaseStewardReport = runBlocking {
         runCheck.run(RunTrigger.OPERATOR_MANUAL)
     }
 
+    // suspend: the reads hit reactive Panache, which needs a Vert.x context — RESTEasy Reactive runs
+    // Kotlin suspend resource methods on one, so the session resolves correctly.
     @GET
     @Path("/findings")
     @RolesAllowed("platform-admin", "platform-viewer")
-    fun getActiveFindings(): List<ReleaseStewardFinding> = runBlocking {
-        getFindings.getActive()
-    }
+    suspend fun getActiveFindings(): List<ReleaseStewardFinding> = getFindings.getActive()
 
     @GET
     @Path("/findings/{id}")
     @RolesAllowed("platform-admin", "platform-viewer")
-    fun getFinding(@PathParam("id") id: String): ReleaseStewardFinding = runBlocking {
+    suspend fun getFinding(@PathParam("id") id: String): ReleaseStewardFinding =
         getFindings.getById(id) ?: throw NotFoundException("Finding $id not found")
-    }
 }
