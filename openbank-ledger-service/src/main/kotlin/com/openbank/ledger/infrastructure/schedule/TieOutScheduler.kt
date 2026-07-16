@@ -7,15 +7,21 @@ package com.openbank.ledger.infrastructure.schedule
 import com.openbank.ledger.application.port.`in`.GetControlAccountTieOutQuery
 import com.openbank.ledger.application.port.`in`.LedgerUseCase
 import com.openbank.ledger.application.port.out.GlAccountRepository
+import com.openbank.ledger.application.port.out.TieOutRunRepository
 import com.openbank.ledger.domain.model.GlAccount
+import com.openbank.ledger.domain.model.TieOutRunRecord
+import com.openbank.ledger.domain.model.TieOutRunStatus
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.runBlocking
 import org.jboss.logging.Logger
+import java.time.Clock
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.UUID
 
 /**
  * Daily sub-ledger tie-out check (ADR-0039 Phase B). Runs at 06:00 CET after the previous
@@ -24,13 +30,19 @@ import java.time.ZoneId
  * For each deposit-control account (2100–2103) asserts:
  *   Σ per-customer sub-ledger net == GL control-account net
  *
- * A non-zero delta increments `openbank.subledger.tieout.break` (fires SubledgerTieOutBreak
- * alert) and logs ERROR. The scheduler never crashes — failures are caught and logged.
+ * A non-zero delta increments `openbank.subledger.tieout.break` (the SubledgerTieOutBreak
+ * PrometheusRule pages on any increase) and logs ERROR. Every run — OK, BREAK or ERROR —
+ * persists a [TieOutRunRecord] so the control is provable from data, and so
+ * [TieOutFreshnessWatchdog] can escalate a MISSING run (the #855 failure mode: a control
+ * that silently stops running is invisible in metrics that only fire on breaks).
+ * The scheduler never crashes — failures are caught, logged and recorded as ERROR.
  */
 @ApplicationScoped
 class TieOutScheduler(
     private val ledgerUseCase: LedgerUseCase,
     private val glAccountRepository: GlAccountRepository,
+    private val runRepository: TieOutRunRepository,
+    private val clock: Clock,
     registry: MeterRegistry,
 ) {
     private val log: Logger = Logger.getLogger(TieOutScheduler::class.java)
@@ -49,7 +61,9 @@ class TieOutScheduler(
     fun runTieOut(): Unit = runBlocking {
         val asOf = LocalDate.now(zone).minusDays(1)
         log.infof("Sub-ledger tie-out check for %s", asOf)
+        var checked = 0
         var breaks = 0
+        var errors = 0
         GlAccount.DEPOSIT_CONTROL_CODES.forEach { code ->
             try {
                 val account = glAccountRepository.findByCode(code) ?: run {
@@ -59,6 +73,7 @@ class TieOutScheduler(
                 val tieOuts = ledgerUseCase.getControlAccountTieOut(
                     GetControlAccountTieOutQuery(controlAccountId = account.id, asOf = asOf),
                 )
+                checked++
                 if (tieOuts.isEmpty()) {
                     log.infof("Tie-out: control account code=%s has no activity as of %s — OK", code, asOf)
                     return@forEach
@@ -77,11 +92,39 @@ class TieOutScheduler(
                     )
                 }
             } catch (@Suppress("TooGenericExceptionCaught") ex: Exception) {
+                errors++
                 log.errorf(ex, "Tie-out check failed for control account code=%s: %s", code, ex.message)
             }
         }
-        if (breaks == 0) {
+        if (breaks == 0 && errors == 0) {
             log.infof("Sub-ledger tie-out OK for %s", asOf)
+        }
+        recordRun(asOf, checked, breaks, errors)
+    }
+
+    private suspend fun recordRun(asOf: LocalDate, checked: Int, breaks: Int, errors: Int) {
+        // BREAK outranks ERROR: a confirmed integrity incident beats an incomplete check.
+        val status = when {
+            breaks > 0 -> TieOutRunStatus.BREAK
+            errors > 0 -> TieOutRunStatus.ERROR
+            else -> TieOutRunStatus.OK
+        }
+        try {
+            runRepository.save(
+                TieOutRunRecord(
+                    id = UUID.randomUUID(),
+                    asOf = asOf,
+                    runAt = Instant.now(clock),
+                    status = status,
+                    accountsChecked = checked,
+                    breaks = breaks,
+                    errors = errors,
+                ),
+            )
+        } catch (@Suppress("TooGenericExceptionCaught") ex: Exception) {
+            // The run itself completed; an unpersisted record must not crash the scheduler.
+            // The freshness watchdog will surface the missing row within its SLA.
+            log.errorf(ex, "Tie-out run record persist failed (status=%s asOf=%s): %s", status, asOf, ex.message)
         }
     }
 }

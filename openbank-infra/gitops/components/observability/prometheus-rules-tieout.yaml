@@ -1,0 +1,40 @@
+# Sub-ledger tie-out break alert (ADR-0039 Phase B). Picked up by the Prometheus operator
+# automatically (ruleSelectorNilUsesHelmValues=false), same as every other PrometheusRule in
+# this directory.
+#
+# WHY THIS EXISTS: TieOutScheduler (ledger-service, 06:00 Europe/Prague) has incremented
+# openbank_subledger_tieout_break_total on every GL ⇄ sub-ledger mismatch since ADR-0039
+# Phase B shipped — but no rule ever referenced the metric, so a confirmed integrity break
+# paged nobody (closing-audit 2026-07-16 finding L-1). A break is a recorded incident by
+# definition: the GL control account and the per-customer sub-ledger disagree, and postings
+# keep flowing against the broken control until someone acts.
+#
+# The 25h window matches the daily cadence + 1h grace (same SLA as the freshness watchdogs):
+# an unresolved break is re-detected and re-incremented by the next 06:00 run, so the alert
+# stays firing until the underlying drift is actually repaired — it cannot silently age out
+# between runs. The complementary "run went missing / errored" case is deliberately NOT a
+# metric rule: TieOutFreshnessWatchdog escalates that via ERROR logs (Alloy → Loki), the
+# pattern balance-service established after issue #855.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-tieout-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.ledger.tieout
+      rules:
+        - alert: SubledgerTieOutBreak
+          expr: increase(openbank_subledger_tieout_break_total[25h]) > 0
+          labels:
+            severity: critical
+          annotations:
+            summary: "Sub-ledger tie-out break detected by the 06:00 ledger tie-out run"
+            description: >-
+              openbank_subledger_tieout_break_total increased within the last daily cycle —
+              the GL deposit-control account and the per-customer sub-ledger net disagree
+              (ADR-0039 Phase B). This is a confirmed integrity incident, not a transient:
+              consult ledger-service logs for the per-currency BREAK lines (control code,
+              glNet, subLedgerNet, delta) and the ledger_tieout_runs table for the run record.
