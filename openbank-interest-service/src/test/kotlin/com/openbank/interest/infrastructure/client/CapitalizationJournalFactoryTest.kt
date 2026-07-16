@@ -271,9 +271,9 @@ class CapitalizationJournalFactoryTest {
     /** The seeded defaults from `V17__interest_capitalization_accounts.sql`. */
     private object TestLedgerConfig : InterestLedgerConfig {
         override fun systemActorId(): UUID = UUID.fromString("00000000-0000-0000-0000-0000000000cc")
-        override fun gl(): InterestLedgerConfig.Gl = Gl
+        override fun gl(): InterestLedgerConfig.Gl = TestGl
 
-        object Gl : InterestLedgerConfig.Gl {
+        object TestGl : InterestLedgerConfig.Gl {
             override fun interestExpenseCzk(): UUID = UUID.fromString("a0000000-0000-0000-0000-000000004010")
             override fun interestExpenseEur(): UUID = UUID.fromString("a0000000-0000-0000-0000-000000004011")
             override fun interestExpenseUsd(): UUID = UUID.fromString("a0000000-0000-0000-0000-000000004012")
