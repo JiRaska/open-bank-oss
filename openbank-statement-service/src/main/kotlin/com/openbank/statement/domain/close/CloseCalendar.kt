@@ -29,7 +29,11 @@ object CloseCalendar {
      *   brand-new pocket starts its legal sequence at the current cadence; pre-registration history
      *   is deliberately not back-invented.
      * - Capped at [maxLookbackMonths] windows as a safety bound, so a long-dormant pocket can never
-     *   enqueue an unbounded backlog in a single run (the next run continues healing).
+     *   enqueue an unbounded backlog in a single run. The cap keeps the OLDEST owed months: the close
+     *   only ever advances `latestClosedPeriodTo` forward, so keeping the newest would permanently
+     *   drop the older months and break the legal sequence. Keeping the oldest also means the newest
+     *   months simply wait for a later run — correct, since balance chaining needs each prior period
+     *   closed first.
      *
      * Returns empty when the pocket is already current (last close == the through month).
      */
@@ -49,8 +53,10 @@ object CloseCalendar {
             windows.add(cursor to monthEnd(cursor))
             cursor = cursor.plusMonths(1)
         }
-        // Keep only the most recent [maxLookbackMonths] when a large gap exists.
-        return if (windows.size > maxLookbackMonths) windows.takeLast(maxLookbackMonths) else windows
+        // Keep only the OLDEST [maxLookbackMonths] when a large gap exists — healing progresses
+        // oldest-first so subsequent runs eventually reach the newest months (takeLast would strand
+        // the dropped older months forever, since the close cursor only moves forward).
+        return if (windows.size > maxLookbackMonths) windows.take(maxLookbackMonths) else windows
     }
 
     private fun monthEnd(firstOfMonth: LocalDate): LocalDate = firstOfMonth.withDayOfMonth(firstOfMonth.lengthOfMonth())

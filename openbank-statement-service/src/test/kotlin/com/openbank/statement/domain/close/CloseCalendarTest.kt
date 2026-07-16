@@ -66,15 +66,37 @@ class CloseCalendarTest {
     }
 
     @Test
-    fun `a large gap is capped at the lookback bound, keeping the most recent months`() {
-        // Last closed Jan 2024; through Mar 2026 (26 months owed) capped to 12 newest.
+    fun `a large gap is capped at the lookback bound, keeping the OLDEST months`() {
+        // Last closed Jan 2024; through Mar 2026 (26 months owed) capped to the 12 oldest. Keeping
+        // the oldest is what lets successive runs heal the whole gap: the close cursor only moves
+        // forward, so months dropped from the newest end would just wait for the next run, whereas
+        // months dropped from the oldest end would be stranded forever.
         val windows = CloseCalendar.monthsToClose(
             LocalDate.parse("2024-01-31"),
             LocalDate.parse("2026-03-31"),
             maxLookbackMonths = 12,
         )
         assertThat(windows).hasSize(12)
-        assertThat(windows.first()).isEqualTo(LocalDate.parse("2025-04-01") to LocalDate.parse("2025-04-30"))
-        assertThat(windows.last()).isEqualTo(LocalDate.parse("2026-03-01") to LocalDate.parse("2026-03-31"))
+        assertThat(windows.first()).isEqualTo(LocalDate.parse("2024-02-01") to LocalDate.parse("2024-02-29"))
+        assertThat(windows.last()).isEqualTo(LocalDate.parse("2025-01-01") to LocalDate.parse("2025-01-31"))
+    }
+
+    @Test
+    fun `successive capped runs converge on the full gap`() {
+        // Simulate the healing loop: after the first capped run closes through Jan 2025, the next
+        // run enumerates from there and reaches the months the cap deferred.
+        val first = CloseCalendar.monthsToClose(
+            LocalDate.parse("2024-01-31"),
+            LocalDate.parse("2026-03-31"),
+            maxLookbackMonths = 12,
+        )
+        val second = CloseCalendar.monthsToClose(first.last().second, LocalDate.parse("2026-03-31"), 12)
+        assertThat(second.first()).isEqualTo(LocalDate.parse("2025-02-01") to LocalDate.parse("2025-02-28"))
+        assertThat(second.last()).isEqualTo(LocalDate.parse("2026-01-01") to LocalDate.parse("2026-01-31"))
+        val third = CloseCalendar.monthsToClose(second.last().second, LocalDate.parse("2026-03-31"), 12)
+        assertThat(third).containsExactly(
+            LocalDate.parse("2026-02-01") to LocalDate.parse("2026-02-28"),
+            LocalDate.parse("2026-03-01") to LocalDate.parse("2026-03-31"),
+        )
     }
 }
