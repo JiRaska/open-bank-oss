@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.8](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.5.7...onboarding-service-v0.5.8) (2026-07-16)
+
+
+### Bug Fixes
+
+* **party-service:** restore @PactBroker on provider verification (unblocks auto-deploy) ([#1166](https://github.com/JiRaska/open-bank-oss/issues/1166)) ([f9f28e5](https://github.com/JiRaska/open-bank-oss/commit/f9f28e5c700d5e98df59416aba4ac669e62e47a3))
+
 ## [0.5.7](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.5.6...onboarding-service-v0.5.7) (2026-07-11)
 
 
