@@ -602,6 +602,22 @@ four_eyes:
     # action (e.g. a dedicated operator-only "enrollOnBehalf" endpoint) before it can be four-eyes
     # gated safely — do not reuse the shared customer/M2M-facing action.
 
+  # ADR-0176 D5: a second, independent four-eyes trigger — exact action names, evaluated by
+  # rest.rego regardless of money-path scope. `verbs` above can never reach notification-service
+  # (it is not, and per the ADR's alternatives should not become, a money_path_services member —
+  # that would drag 2-approval review, a threat model, mutation testing, a coverage floor and an
+  # SLO pair onto the whole service to gate one action, and the verb-based match would still sweep
+  # in M2M callers since it matches by verb, not caller). Kept as a DISJOINT list, not folded into
+  # `verbs`, on purpose: `verbs` is money-path-scope-times-verb; `actions` is an unconditional
+  # exact match. rest_test.rego pins both so they cannot drift into covering each other's cases.
+  actions:
+    - opsmessage.compose                # operator-initiated customer messaging (ADR-0176 D2/D4/D5):
+                                         # a maker composes a catalogue-template message; a second
+                                         # operator must approve before it sends. opsmessage.approve
+                                         # and opsmessage.reject are the checker's own decision and
+                                         # are deliberately NOT listed here — gating them would need
+                                         # a third approver to approve the approval.
+
 # ---------------------------------------------------------------------------------------
 # Feature-flag flip governance (ADR-0067 follow-up, issue #419). The OPA PEP (rest.rego)
 # reads these when authorizing a `featureflag.flip` action:

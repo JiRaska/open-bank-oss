@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: document-service
     app.kubernetes.io/part-of: documents
   annotations:
-    openbank.tech/policy-checksum: "f7d985ec75528070"
+    openbank.tech/policy-checksum: "84c312c6a1ecd44c"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -249,6 +249,39 @@ data:
     # case-by-case rule (some may not be safe for any M2M caller the way sanctions.create is)
     # — tracked separately as issue #750, not folded in here.
 
+    # ADR-0176 D4: operator-initiated customer messaging (compose a catalogue-template message
+    # to a customer) gets its own action namespace, opsmessage.*, deliberately NOT under
+    # notification.* — the edge-service-notification rule above auto-grants every
+    # notification.*-prefixed action to the customer-edge M2M identity via startswith, so an
+    # action named notification.compose here would hand the send capability straight to that
+    # M2M identity. A distinct namespace sidesteps that without touching (or narrowing) the
+    # existing, correctly-scoped edge-service-notification rule.
+    #
+    # This rule does not grant on its own: opsmessage.compose is also listed in rules.yaml's
+    # four_eyes.actions (see the disjunct in four_eyes_required below), so the interceptor still
+    # pauses a maker's first call for a second approver before the handler body ever runs — same
+    # "augments allow, doesn't replace it" shape as the money-path four-eyes rule further down.
+    allowed_reasons contains "opsmessage-compose" if {
+    	input.principal.type == "HUMAN"
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    	role in input.principal.roles
+    	input.action == "opsmessage.compose"
+    }
+
+    # The checker side of the same maker-checker pair (ADR-0176 D5). Deciding an approval is a
+    # single-operator action by design — it is what CONSTITUTES the second pair of eyes, so
+    # opsmessage.approve/reject are deliberately NOT themselves in four_eyes.actions (gating them
+    # would need a third approver to approve the approval). Self-approval (the same operator who
+    # composed the message deciding their own approval) is refused at the application layer
+    # (SelfApprovalNotAllowedException, mirroring ledger-service's ApprovalStore) — OPA has no
+    # notion of "who made the original request" to check that here.
+    allowed_reasons contains "opsmessage-approve" if {
+    	input.principal.type == "HUMAN"
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    	role in input.principal.roles
+    	input.action in {"opsmessage.approve", "opsmessage.reject"}
+    }
+
     # ---------------------------------------------------------------------------------------
     # Money-path actions get the four-eyes gate from rules.yaml. This rule does NOT grant
     # access on its own — it AUGMENTS allow with a flag the interceptor surfaces back to
@@ -292,6 +325,17 @@ data:
     four_eyes_required if {
     	input.action == "featureflag.flip"
     	input.attributes.flag in data.rules.feature_flags.money_path_flags
+    }
+
+    # ADR-0176 D5: extends four-eyes to a non-money-path action by exact name, since
+    # notification-service can never join money_path_scopes above without dragging the whole
+    # money_path_services registration fan-out (threat model, 2-approval review, mutation
+    # testing, coverage floor, SLO pair) onto a service to gate one action — and even then the
+    # verb-based match would sweep in M2M callers by verb name alone, not by caller identity.
+    # Disjunctive with the two rules above by ordinary Rego multi-body semantics; independently
+    # pinned in rest_test.rego per the rules.yaml comment on keeping `verbs` and `actions` disjoint.
+    four_eyes_required if {
+    	input.action in data.rules.four_eyes.actions
     }
 
     # ---------------------------------------------------------------------------------------
@@ -1088,6 +1132,22 @@ data:
         # caller found but the rego already reserves the grant), the risky path needs its own distinct
         # action (e.g. a dedicated operator-only "enrollOnBehalf" endpoint) before it can be four-eyes
         # gated safely — do not reuse the shared customer/M2M-facing action.
+
+      # ADR-0176 D5: a second, independent four-eyes trigger — exact action names, evaluated by
+      # rest.rego regardless of money-path scope. `verbs` above can never reach notification-service
+      # (it is not, and per the ADR's alternatives should not become, a money_path_services member —
+      # that would drag 2-approval review, a threat model, mutation testing, a coverage floor and an
+      # SLO pair onto the whole service to gate one action, and the verb-based match would still sweep
+      # in M2M callers since it matches by verb, not caller). Kept as a DISJOINT list, not folded into
+      # `verbs`, on purpose: `verbs` is money-path-scope-times-verb; `actions` is an unconditional
+      # exact match. rest_test.rego pins both so they cannot drift into covering each other's cases.
+      actions:
+        - opsmessage.compose                # operator-initiated customer messaging (ADR-0176 D2/D4/D5):
+                                             # a maker composes a catalogue-template message; a second
+                                             # operator must approve before it sends. opsmessage.approve
+                                             # and opsmessage.reject are the checker's own decision and
+                                             # are deliberately NOT listed here — gating them would need
+                                             # a third approver to approve the approval.
 
     # ---------------------------------------------------------------------------------------
     # Feature-flag flip governance (ADR-0067 follow-up, issue #419). The OPA PEP (rest.rego)

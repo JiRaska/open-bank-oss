@@ -25,7 +25,7 @@ import data.openbank.rest
 # Mock for rules.yaml bits the policy reads.
 rules := {
 	"money_path_services": ["ledger", "sepa-payment", "card-payment"],
-	"four_eyes": {"verbs": ["transfer", "freeze", "post"]},
+	"four_eyes": {"verbs": ["transfer", "freeze", "post"], "actions": ["opsmessage.compose"]},
 }
 
 # Mock mirroring the REAL rules.yaml shape — money_path_services uses the module name
@@ -239,6 +239,26 @@ test_four_eyes_not_required_for_party_update if {
 # Money-path service but non-money-path verb — no flag (only listed verbs trigger it).
 test_four_eyes_not_required_for_ledger_read if {
 	not rest.four_eyes_required with input as {"action": "ledger.read"}
+		with data.rules as rules
+}
+
+# ADR-0176 D5: four_eyes.actions is a disjoint, exact-name trigger — notification-service is
+# not in money_path_services (nor should it be, per the ADR's alternatives), so the ONLY way
+# opsmessage.compose can be four-eyes-gated is this second disjunct.
+test_four_eyes_required_for_opsmessage_compose if {
+	rest.four_eyes_required with input as {"action": "opsmessage.compose"}
+		with data.rules as rules
+}
+
+# The checker actions are deliberately NOT in four_eyes.actions — approving/rejecting IS the
+# second pair of eyes; gating it would need a third approver to approve the approval.
+test_four_eyes_not_required_for_opsmessage_approve if {
+	not rest.four_eyes_required with input as {"action": "opsmessage.approve"}
+		with data.rules as rules
+}
+
+test_four_eyes_not_required_for_opsmessage_reject if {
+	not rest.four_eyes_required with input as {"action": "opsmessage.reject"}
 		with data.rules as rules
 }
 
@@ -764,5 +784,78 @@ test_deny_human_operator_sanctions_create_via_m2m_rule if {
 		"principal": {"id": "operator-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "sanctions.create",
 		"resource": "",
+	}
+}
+
+# ---------------------------------------------------------------------------------------
+# opsmessage.* (ADR-0176 D4/D5): a distinct action namespace so operator-initiated customer
+# messaging is never auto-granted to the customer-edge M2M identity the way notification.*
+# actions are (edge-service-notification, above). allow alone does not mean "sent" — compose
+# is also a four_eyes.actions entry (tested above), so a real caller still gets paused for a
+# second approver; that pause is AuthorizeInterceptor's job, not OPA's, and is not re-tested
+# here.
+# ---------------------------------------------------------------------------------------
+test_allow_operator_opsmessage_compose if {
+	decision := rest.allow with input as {
+		"principal": {"id": "operator-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "opsmessage.compose",
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	decision.reason == "opsmessage-compose"
+}
+
+test_allow_admin_opsmessage_compose if {
+	decision := rest.allow with input as {
+		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"action": "opsmessage.compose",
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+}
+
+# The checker side — a DIFFERENT operator decides. Self-approval is refused at the
+# application layer (SelfApprovalNotAllowedException), not by this rego rule, which has no
+# notion of who made the original request; only role/identity is checked here.
+test_allow_operator_opsmessage_approve if {
+	decision := rest.allow with input as {
+		"principal": {"id": "operator-2", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "opsmessage.approve",
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	decision.reason == "opsmessage-approve"
+}
+
+test_allow_operator_opsmessage_reject if {
+	decision := rest.allow with input as {
+		"principal": {"id": "operator-2", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "opsmessage.reject",
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	decision.reason == "opsmessage-approve"
+}
+
+# Deny-by-default still holds: an M2M/edge caller does NOT gain opsmessage.* by any of its
+# existing grants — confirms the separate namespace actually sidesteps
+# edge-service-notification's notification.* startswith match (the whole point of D4).
+test_deny_edge_service_opsmessage_compose if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": []},
+		"action": "opsmessage.compose",
+	}
+}
+
+# A customer session (party self-service) does not gain opsmessage.* either — this is an
+# operator/admin-only capability, never a customer-initiated one.
+test_deny_customer_opsmessage_compose if {
+	not rest.allow with input as {
+		"principal": {"id": "11111111-1111-1111-1111-111111111111", "type": "HUMAN", "roles": []},
+		"action": "opsmessage.compose",
 	}
 }
