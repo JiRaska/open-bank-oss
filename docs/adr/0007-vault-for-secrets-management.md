@@ -4,11 +4,39 @@ Date: 2026-05-26
 Status: Accepted
 Delivery-Status: Partial
 
-**Delivery note (updated 2026-07-01):**
-- **Vault infrastructure** — ✅ Shipped: Vault deployed via `openbank-infra/` with ArgoCD; auto-unseal via cloud KMS; External Secrets Operator reads secrets into K8s Secrets for steady-state service operation.
-- **Dynamic database credentials** (per-pod Postgres, TTL ≤ 24h) — ⬜ Pending: services consume static credentials provisioned via External Secrets; Vault database secrets engine not yet wired.
-- **cert-manager PKI integration** — ⬜ Pending: cert-manager installed; Vault PKI engine integration deferred.
-- **HSM (FIPS 140-3)** for eIDAS QSeal and regulated signing keys — ⬜ Pending: deferred until the eIDAS signing use case (ADR-0094) activates in production.
+**Delivery note (updated 2026-07-16):**
+
+> **Naming:** the deployed engine is **OpenBao** (the Linux Foundation fork), not HashiCorp Vault —
+> see [ADR-0027](0027-cloud-agnostic-in-cluster-substrate.md). This ADR's title and body still say
+> "Vault"; the decision it records is unchanged and the API is compatible, so the words are left as
+> written rather than retconned. Read "Vault" as "OpenBao" throughout.
+
+- **Secrets infrastructure** — ✅ Shipped: OpenBao deployed via `openbank-infra/` with ArgoCD;
+  auto-unseal via AWS KMS (`alias/openbank-vault-unseal`, `openbank-infra/gitops/apps/openbao.yaml`);
+  External Secrets Operator projects secrets into K8s Secrets for steady-state service operation.
+- **Dynamic database credentials** (per-pod Postgres, TTL ≤ 24h) — ✅ **Shipped** (corrected
+  2026-07-16; this line previously read "Pending: services consume static credentials … database
+  secrets engine not yet wired", which had been false since [ADR-0099](0099-automated-secret-rotation.md)
+  Tier 1 landed). Seven components consume short-lived credentials from the OpenBao database secrets
+  engine via the dedicated `vault-db` ClusterSecretStore — accounts, audit, balances, fx-service,
+  ledger, notifications, payments (`openbank-infra/gitops/components/*/db-dynamic-externalsecret.yaml`).
+  Lease TTL 24h, max 72h; ESO refreshes hourly to stay ahead of it. The remaining services still use
+  static credentials, so the *rollout* is partial — but the engine is wired, and ADR-0099 owns the
+  rollout from here.
+- **PKI** — 🟡 Partial, and the two halves are worth separating:
+  - The **OpenBao PKI engine is live and issuing**: a `pki-document-signing` root (RSA-2048, 10y)
+    mints per-ceremony `client-signing` leaf certs with a 300s TTL and `no_store=true`
+    (`openbank-infra/gitops/components/openbao/openbao-document-signing-pki.yaml`), and `pki-agent`
+    issues AI-agent charter identity (ADR-0031 D3b).
+  - **cert-manager ↔ OpenBao integration remains deferred.** cert-manager is deployed and does issue
+    TLS, but from Let's Encrypt and a self-signed `openbank-ca`, not from OpenBao
+    (`openbank-infra/gitops/components/platform/clusterissuer.yaml` — no Vault issuer). Services that
+    need an OpenBao-issued cert call the engine directly.
+- **HSM (FIPS 140-3)** for eIDAS QSeal and regulated signing keys — ⬜ Pending: deferred until the
+  eIDAS signing use case (ADR-0094) activates in production. Note the deferral is circular — ADR-0094
+  in turn defers to "KMS/HSM-backed" — and that signing today therefore claims only *advanced*
+  (not qualified) eIDAS assurance. [ADR-0172](0172-cryptographic-key-management-and-lifecycle.md) owns
+  the key-lifecycle picture, including this gap.
 
 ## Context
 

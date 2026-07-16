@@ -174,6 +174,10 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0169](0169-customer-document-access-and-sca-bound-signing.md) | Customer document access & SCA-bound signing over customer-edge | Proposed | Planned | — |
 | [0170](0170-onboarding-e-signature-flow-in-the-customer-app.md) | Onboarding e-signature flow in the customer app | Proposed | Planned | — |
 | [0171](0171-verification-of-payee-for-outbound-credit-transfers.md) | Verification of Payee for outbound credit transfers | Accepted | Partial | — |
+| [0172](0172-cryptographic-key-management-and-lifecycle.md) | Cryptographic key management and lifecycle | Accepted | Partial | — |
+| [0173](0173-capacity-management-and-headroom.md) | Capacity management and headroom | Accepted | Partial | — |
+| [0174](0174-ict-third-party-dependencies-and-exit-strategy.md) | ICT third-party dependencies and exit strategy | Accepted | Partial | — |
+| [0175](0175-data-residency-and-sovereignty.md) | Data residency and sovereignty | Accepted | Partial | — |
 
 ---
 
