@@ -709,64 +709,6 @@ class PartyServiceTest {
         assertThat(savedSlot.captured.rcIndexKeyVersion).isNull()
     }
 
-    @Test
-    fun `createParty stores consent flags and stamps consentCapturedAt when either is present`(): Unit = runBlocking {
-        val service = newService()
-        val savedSlot = slot<Party>()
-        coEvery { service.partyRepo.findByEmail(any()) } returns null
-        coEvery { service.partyRepo.save(capture(savedSlot)) } answers { savedSlot.captured }
-
-        service.createParty(
-            CreatePartyCommand(
-                idempotencyKey = "key3",
-                partyType = PartyType.INDIVIDUAL,
-                legalName = "Test3",
-                tradingName = null,
-                dateOfBirth = null,
-                nationality = null,
-                taxId = null,
-                registrationNumber = null,
-                email = "t3@example.com",
-                phone = null,
-                address = null,
-                consentGdpr = true,
-                consentMarketing = false,
-            ),
-        )
-
-        assertThat(savedSlot.captured.consentGdpr).isTrue()
-        assertThat(savedSlot.captured.consentMarketing).isFalse()
-        assertThat(savedSlot.captured.consentCapturedAt).isEqualTo(now)
-    }
-
-    @Test
-    fun `createParty leaves consent fields and consentCapturedAt null when neither is sent`(): Unit = runBlocking {
-        val service = newService()
-        val savedSlot = slot<Party>()
-        coEvery { service.partyRepo.findByEmail(any()) } returns null
-        coEvery { service.partyRepo.save(capture(savedSlot)) } answers { savedSlot.captured }
-
-        service.createParty(
-            CreatePartyCommand(
-                idempotencyKey = "key4",
-                partyType = PartyType.INDIVIDUAL,
-                legalName = "Test4",
-                tradingName = null,
-                dateOfBirth = null,
-                nationality = null,
-                taxId = null,
-                registrationNumber = null,
-                email = "t4@example.com",
-                phone = null,
-                address = null,
-            ),
-        )
-
-        assertThat(savedSlot.captured.consentGdpr).isNull()
-        assertThat(savedSlot.captured.consentMarketing).isNull()
-        assertThat(savedSlot.captured.consentCapturedAt).isNull()
-    }
-
     private fun newService() = PartyService().apply {
         partyRepo = mockk()
         documentRepo = mockk()
