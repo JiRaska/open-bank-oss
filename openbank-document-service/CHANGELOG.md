@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.8.1...document-service-v0.8.2) (2026-07-16)
+
+
+### Bug Fixes
+
+* **document-service:** upsert in save(), so an onboarding language switch works ([#1279](https://github.com/JiRaska/open-bank-oss/issues/1279)) ([7d5688b](https://github.com/JiRaska/open-bank-oss/commit/7d5688b1fc97d7e9ca1b58ca2aca041c6f84b997))
+
 ## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.8.0...document-service-v0.8.1) (2026-07-16)
 
 
