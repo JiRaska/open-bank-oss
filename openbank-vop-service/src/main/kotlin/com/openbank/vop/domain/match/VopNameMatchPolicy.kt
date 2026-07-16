@@ -58,20 +58,30 @@ class VopNameMatchPolicy(private val maxEditDistance: Int = DEFAULT_MAX_EDIT_DIS
 
         if (supplied == actual) return VopOutcome.MATCH
 
-        val suppliedCore = stripLegalForms(supplied)
-        val actualCore = stripLegalForms(actual)
-        // A legal-form suffix is presentation, not identity: "Acme s.r.o." and "Acme" are the
-        // same payee. Only the suffix differed, so this is a full MATCH, not a near-miss.
-        if (suppliedCore.isNotBlank() && suppliedCore == actualCore) return VopOutcome.MATCH
+        val suppliedTokens = tokenize(supplied)
+        val actualTokens = tokenize(actual)
+        val suppliedStripped = stripLegalForm(suppliedTokens)
+        val actualStripped = stripLegalForm(actualTokens)
+
+        // A legal form is presentation, not identity: "Acme s.r.o." and "Acme" are the same payee,
+        // so drop it when only one side carries one.
+        //
+        // When *both* sides carry one, they are only the same payee if the forms agree — and that
+        // case already returned MATCH on the equality above. Two *different* forms are two
+        // different registered entities: "Acme s.r.o." and "Acme a.s." are distinct companies, and
+        // registering the look-alike form is a known fraud shape. Stripping both would confirm
+        // them as one payee, which is the outcome this control exists to prevent.
+        val bothCarryForm = suppliedStripped != null && actualStripped != null
+        val suppliedCore = if (bothCarryForm) suppliedTokens else suppliedStripped ?: suppliedTokens
+        val actualCore = if (bothCarryForm) actualTokens else actualStripped ?: actualTokens
+
+        if (suppliedCore == actualCore) return VopOutcome.MATCH
 
         return if (isCloseMatch(suppliedCore, actualCore)) VopOutcome.CLOSE_MATCH else VopOutcome.NO_MATCH
     }
 
-    private fun isCloseMatch(supplied: String, actual: String): Boolean {
-        if (supplied.isBlank() || actual.isBlank()) return false
-
-        val suppliedTokens = supplied.split(TOKEN_SEPARATOR).filter { it.isNotBlank() }
-        val actualTokens = actual.split(TOKEN_SEPARATOR).filter { it.isNotBlank() }
+    private fun isCloseMatch(suppliedTokens: List<String>, actualTokens: List<String>): Boolean {
+        if (suppliedTokens.isEmpty() || actualTokens.isEmpty()) return false
 
         // Reordering: "Jiří Raška" vs "Raška Jiří". Same tokens, different order — the payer knows
         // the name, their PSP's field order differs from ours.
@@ -85,7 +95,11 @@ class VopNameMatchPolicy(private val maxEditDistance: Int = DEFAULT_MAX_EDIT_DIS
         if (isSubsetByOneToken(suppliedTokens, actualTokens)) return true
 
         // A single-character typo anywhere in the whole string.
-        return levenshteinWithin(supplied, actual, maxEditDistance)
+        return levenshteinWithin(
+            suppliedTokens.joinToString(" "),
+            actualTokens.joinToString(" "),
+            maxEditDistance,
+        )
     }
 
     /**
@@ -134,26 +148,24 @@ class VopNameMatchPolicy(private val maxEditDistance: Int = DEFAULT_MAX_EDIT_DIS
         }
     }
 
+    private fun tokenize(normalized: String): List<String> =
+        normalized.split(TOKEN_SEPARATOR).filter { it.isNotBlank() }
+
     /**
-     * Strip trailing legal-form designators. Only a *trailing* suffix is removed: "s.r.o." at the
-     * end of "Acme s.r.o." is a legal form, but a company genuinely named "SRO Praha" keeps its
-     * leading token. Returns the input unchanged when stripping would empty it.
+     * [tokens] with one trailing legal-form designator removed, or `null` when they carry none.
+     *
+     * A form is only ever matched as *whole trailing tokens*, never as a character suffix. "as" is
+     * a legal form; "Tomas" is a name that merely ends in those letters. Stripping by character
+     * suffix turned "Jan Tomas" into "Jan Tom" and then reported it a full MATCH against a
+     * different payee — the exact outcome VoP exists to prevent.
+     *
+     * Only a *trailing* form is removed: a company genuinely named "SRO Praha" keeps its leading
+     * token. Longest form first, so "spol s r o" wins over the "s r o" nested inside it. A name
+     * consisting of nothing but a legal form keeps it, since an empty core identifies no one.
      */
-    private fun stripLegalForms(normalized: String): String {
-        var result = normalized
-        var changed = true
-        while (changed) {
-            changed = false
-            for (form in LEGAL_FORMS) {
-                val candidate = result.removeSuffix(form).trim().removeSuffix(",").trim()
-                if (candidate != result && candidate.isNotBlank()) {
-                    result = candidate
-                    changed = true
-                }
-            }
-        }
-        return result
-    }
+    private fun stripLegalForm(tokens: List<String>): List<String>? = LEGAL_FORM_TOKENS.firstOrNull { form ->
+        tokens.size > form.size && tokens.subList(tokens.size - form.size, tokens.size) == form
+    }?.let { form -> tokens.subList(0, tokens.size - form.size) }
 
     companion object {
         /** One character — a typo, not a different name. */
@@ -177,6 +189,14 @@ class VopNameMatchPolicy(private val maxEditDistance: Int = DEFAULT_MAX_EDIT_DIS
             "sa", "s.a.", "sas", "sarl", "s.a.r.l.", "bv", "b.v.", "nv", "n.v.",
             "oy", "ab", "as.", "aps", "spa", "s.p.a.", "srl", "s.r.l.", "sp. z o.o.", "sp z o o",
         )
+
+        /**
+         * [LEGAL_FORMS] pre-tokenised, longest first so a form nested inside a longer one
+         * ("s r o" within "spol s r o") never wins the match.
+         */
+        private val LEGAL_FORM_TOKENS: List<List<String>> = LEGAL_FORMS
+            .map { form -> form.split(TOKEN_SEPARATOR).filter { it.isNotBlank() } }
+            .sortedByDescending { it.size }
 
         /**
          * True iff the Levenshtein edit distance between [a] and [b] is at most [max]. Early-exits

@@ -366,8 +366,17 @@ function PaymentsContent() {
       setCreateError(t('Vyplňte všechna povinná pole', 'Please fill all required fields'))
       return
     }
-    if (f.instant && f.vopStatus !== 'match' && f.vopStatus !== 'close_match') {
-      setCreateError(t('SCT Inst vyžaduje úspěšné ověření příjemce (VoP)', 'SCT Inst requires successful Verification of Payee'))
+    // VoP fails open (ADR-0171 §3): a lookup that produced no name — a non-domestic IBAN, a
+    // scheme outage — must not refuse the payment, or the control breaches the execution-time
+    // obligation it exists to serve. Only an actual name mismatch blocks; no_data proceeds on
+    // the warning the panel above already shows. This gate predates the real backend, when the
+    // mock could only ever return match/close_match/no_match and no_data was unreachable.
+    if (f.instant && (f.vopStatus === 'idle' || f.vopStatus === 'loading')) {
+      setCreateError(t('SCT Inst vyžaduje ověření příjemce (VoP) — spusťte ověření', 'SCT Inst requires Verification of Payee — run the check first'))
+      return
+    }
+    if (f.instant && f.vopStatus === 'no_match') {
+      setCreateError(t('Jméno příjemce nesouhlasí (VoP NO_MATCH) — platbu nelze odeslat', 'Payee name does not match (VoP NO_MATCH) — payment cannot be sent'))
       return
     }
     setCreating(true)
