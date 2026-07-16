@@ -47,7 +47,8 @@ features, and we explicitly defer everything expensive or unverified.
      instead of `gen_random_uuid()`, applied per-service via Flyway *as each service is touched
      for other reasons*. No standalone migration sweep.
    - **App seam:** new code that mints ids in the domain/application layer uses a single libs
-     helper `com.openbank.libs.util.Ids.newId(): UUID` returning a UUIDv7. The helper is
+     helper `com.openbank.libs.domain.identifiers.Ids.newId(): UUID` returning a UUIDv7 (package
+     corrected — see the 2026-07-16 amendment below). The helper is
      framework-free so the domain may call it (ADR-0002). **It must be backed by a vetted
      UUIDv7 generator (or delegate to the DB), not a hand-rolled implementation** — correct
      intra-millisecond monotonicity (RFC 9562 §6.2) is the hard part and the whole point of the
@@ -151,11 +152,43 @@ get their own ADR if a concrete need appears.
 - PSD2:    not applicable.
 - CNB:     not applicable (no change to regulatory reporting content).
 
+## Amendment 2026-07-16: the hand-rolled `Ids` duplicate is removed
+
+Two `Ids` objects existed side by side, both introduced by the ADR-0122 libs split (`e5d76a086`):
+
+- `com.openbank.libs.domain.identifiers.Ids` — delegates to FasterXML JUG's
+  `Generators.timeBasedEpochGenerator()`. 48 call sites.
+- `com.openbank.libs.util.Ids` — a **hand-rolled** UUIDv7 (`SecureRandom` + manual bit assembly),
+  exactly what Tier 1 above rejects. 1 call site (fraud-service `scoreId`). No `@Deprecated`.
+
+The name this ADR originally gave (`com.openbank.libs.util.Ids`) pointed at the hand-rolled one, so
+the document named the implementation that violated its own requirement. Two objects with the same
+simple name and no deprecation marker meant the import line alone decided which generator a call site
+got.
+
+The hand-rolled version's KDoc also over-promised. It claimed values are "globally monotone across
+milliseconds" and "monotonically increasing within the same millisecond (up to 4096 IDs/ms)". Neither
+holds: on a backwards clock step it resets `lastMs` to the earlier value and zeroes `seq`, so new ids
+sort *before* already-issued ones (RFC 9562 §6.2 clock regression is unhandled); and past 4096 ids in
+one millisecond `seq` silently wraps to 0 rather than spinning to the next millisecond. Neither is a
+uniqueness bug — the 62-bit random tail keeps values distinct — but both defeat the ordering the whole
+Tier-1 rationale rests on.
+
+**Resolution:** `com.openbank.libs.util.Ids` is deleted, fraud-service moves to
+`com.openbank.libs.domain.identifiers.Ids`, and the Tier-1 package reference above is corrected. JUG's
+generator was verified empirically to be strictly increasing across 20 000 tight-loop calls (0
+violations), i.e. it holds intra-millisecond monotonicity, which the surviving test suite now asserts
+directly rather than only checking that timestamps are non-decreasing.
+
+**Impact:** none on stored data. Both objects already produced valid v7 values, v4/v7 coexist per
+Tier 1, and existing `fraud_scores.score_id` rows are untouched.
+
 ## References
 
 - Runbook 0003 — PostgreSQL 16→18 major upgrade (CloudNativePG) — the migration this builds on
   (updated with the statistics-preservation note).
-- ADR-0002 — hexagonal architecture (domain has zero framework imports → `Ids` lives in `libs/util`).
+- ADR-0002 — hexagonal architecture (domain has zero framework imports → `Ids` is framework-free).
+- ADR-0122 — libs domain/runtime split (introduced the duplicate removed in the 2026-07-16 amendment).
 - ADR-0079 / ADR-0054 — infra lifecycle and FinOps version gating (why we are on 18).
 - ADR-0081 — container-hardening baseline (seccomp `RuntimeDefault` → why `io_uring` is deferred).
 - ADR-0086 — payment non-repudiation & audit chain (`RETURNING OLD/NEW` opportunity).
