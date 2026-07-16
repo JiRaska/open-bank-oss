@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.14.0...transaction-service-v1.14.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* **transaction-service:** add tests to clear the koverVerify 85% floor ([#1132](https://github.com/JiRaska/open-bank-oss/issues/1132)) ([3609e0b](https://github.com/JiRaska/open-bank-oss/commit/3609e0b3daf906d400fdb802c6eb307e32744693))
+
 ## [1.14.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.13.3...transaction-service-v1.14.0) (2026-07-14)
 
 
