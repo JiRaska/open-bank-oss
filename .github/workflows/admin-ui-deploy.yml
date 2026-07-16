@@ -336,11 +336,20 @@ jobs:
             [ -n "${art_id}" ] || continue
             if api "https://api.github.com/repos/${REPO}/actions/artifacts/${art_id}/zip" \
                 -L -o "/tmp/${art_name}.zip" 2>/dev/null; then
-              unzip -q "/tmp/${art_name}.zip" -d . 2>/dev/null || true
+              # The artifact is named pitest-<service>; its zip top-level is the pitest
+              # report contents (mutations.xml, index.html, com.openbank.*/ …) because
+              # actions/upload-artifact@v7 strips the <service>/build/reports/pitest/
+              # prefix (pitest.yml uploads that dir as `path`). Reconstruct that exact
+              # path so collect-quality-report.mjs finds it — never `-d .`, which dumps
+              # a full report into the repo root and gets it committed (#1104).
+              svc="${art_name#pitest-}"
+              dest="${svc}/build/reports/pitest"
+              mkdir -p "${dest}"
+              unzip -q "/tmp/${art_name}.zip" -d "${dest}" 2>/dev/null || true
               DOWNLOADED=$((DOWNLOADED + 1))
             fi
           done <<< "${ARTIFACTS}"
-          COUNT=$(find . -name "mutations.xml" | wc -l | tr -d ' ')
+          COUNT=$(find . -path "*/build/reports/pitest/mutations.xml" | wc -l | tr -d ' ')
           echo "Staged ${COUNT} mutations.xml files from ${DOWNLOADED} artifacts."
 
       - name: Collect production-readiness scorecard
