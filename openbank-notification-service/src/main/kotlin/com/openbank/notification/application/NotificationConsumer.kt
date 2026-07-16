@@ -10,13 +10,13 @@ import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
 import com.openbank.notification.application.port.out.OversightWebhookPublisher
 import com.openbank.notification.application.port.out.PushMessage
-import jakarta.annotation.PostConstruct
 import com.openbank.notification.application.port.out.PushSender
 import com.openbank.notification.domain.model.NotificationChannel
 import com.openbank.notification.domain.model.NotificationRequest
 import com.openbank.notification.domain.model.NotificationStatus
 import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.domain.model.PushPlatform
+import com.openbank.notification.domain.model.TemplateSensitivity
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
 import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
@@ -24,6 +24,7 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.mailer.Mail
 import io.quarkus.mailer.reactive.ReactiveMailer
 import io.smallrye.mutiny.Uni
+import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
@@ -115,7 +116,9 @@ class NotificationConsumer {
             it.template = req.template.name
             it.recipient = req.recipient
             it.subject = subject
-            it.body = body
+            // Secret-bearing templates persist a placeholder; `body` below still carries the
+            // rendered secret to the delivery adapters, so the customer receives it as usual.
+            it.body = TemplateSensitivity.bodyForStorage(req.template, body)
             it.status = "PENDING"
             it.createdAt = Instant.now(clock)
         }

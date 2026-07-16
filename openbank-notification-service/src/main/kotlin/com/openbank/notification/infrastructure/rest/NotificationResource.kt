@@ -5,6 +5,8 @@
 package com.openbank.notification.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
+import com.openbank.notification.domain.model.NotificationTemplate
+import com.openbank.notification.domain.model.TemplateSensitivity
 import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -82,7 +84,7 @@ class NotificationResource {
                 "template" to n.template,
                 "recipient" to n.recipient,
                 "subject" to n.subject,
-                "body" to n.body,
+                "body" to bodyForRead(n.template, n.body),
                 "status" to n.status,
                 "sentAt" to n.sentAt,
                 "readAt" to n.readAt,
@@ -124,5 +126,23 @@ class NotificationResource {
             .entity(mapOf("code" to "BAD_REQUEST", "message" to "partyId query parameter is required")).build()
         val flipped = repo.markAllRead(partyId)
         return Response.ok(mapOf("marked" to flipped)).build()
+    }
+
+    /**
+     * Second, independent control over the secret-template redaction (the first is
+     * NotificationConsumer, which never persists a rendered secret). Rows written before
+     * that fix — and any row whose write-path redaction failed — are redacted here on the
+     * way out, so two controls must both fail to leak an OTP to an operator. Same
+     * defense-in-depth shape as the ADR-0059 D3 scrubber.
+     *
+     * An unrecognised template returns [stored] verbatim rather than redacting. That is safe
+     * because the write path only ever persists a value that parsed into [NotificationTemplate]
+     * (a payload with any other template is rejected as poison), so an unknown value here means
+     * the enum shrank after the row was written — and any such row was already redacted by the
+     * write path or by V9. Fail-open keeps a legacy row readable instead of 500-ing on it.
+     */
+    private fun bodyForRead(template: String, stored: String): String {
+        val known = NotificationTemplate.entries.firstOrNull { it.name == template } ?: return stored
+        return if (TemplateSensitivity.isSecret(known)) TemplateSensitivity.REDACTED_BODY else stored
     }
 }
