@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fx-service
     app.kubernetes.io/part-of: fx
   annotations:
-    openbank.tech/policy-checksum: "fcb7c8952e6a56f7"
+    openbank.tech/policy-checksum: "c2890c2f0f24471b"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -197,10 +197,18 @@ data:
     # Keycloak service-account token is deterministically "service-account-<clientId>"
     # (verified against a live token from the openbank-edge client, ADR-0065/0034 issue #266)
     # — not forgeable by a human session, which authenticates through a different client.
+    #
+    # `signatureCeremony.` is here for the same reason `document.` is (#1249): the onboarding
+    # agreement is read AND signed through the edge, and recordDecision's verb sits outside
+    # operator-read-any's {list, read} set, so signing 403'd while reading the ceremony passed.
+    # It is not an account-takeover primitive the way device.enroll is: document-service verifies
+    # the signer's evidenceRef against sca-service (SignerVerificationPort, ADR-0021), the edge
+    # forces partyRef from the caller's token and rejects a caller who is not one of the
+    # ceremony's signers, so this grant cannot sign on someone else's behalf.
     allowed_reasons contains "edge-service-notification" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-edge"
-    	some family in {"notification.", "device.", "document."}
+    	some family in {"notification.", "device.", "document.", "signatureCeremony."}
     	startswith(input.action, family)
     }
 
