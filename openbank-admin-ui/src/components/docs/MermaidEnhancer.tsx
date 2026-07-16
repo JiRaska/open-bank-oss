@@ -6,6 +6,7 @@
 
 import { useEffect, useRef } from 'react'
 import DOMPurify from 'dompurify'
+import { MERMAID_CONFIG } from '@/lib/docs/mermaidConfig'
 
 // Tiny client-side enhancer. Wraps server-rendered markdown content and,
 // after mount, scans for the `<pre data-mermaid>` placeholders the
@@ -25,13 +26,7 @@ async function getMermaid(): Promise<MermaidApi> {
   if (mermaidInstance) return mermaidInstance
   const mod = await import('mermaid')
   const m = (mod.default ?? mod) as unknown as MermaidApi
-  m.initialize({
-    startOnLoad: false,
-    theme: 'neutral',
-    fontFamily: 'inherit',
-    flowchart: { useMaxWidth: true, htmlLabels: true },
-    sequence: { useMaxWidth: true },
-  })
+  m.initialize(MERMAID_CONFIG)
   mermaidInstance = m
   return m
 }
@@ -61,10 +56,10 @@ export function MermaidEnhancer({ children, contentKey }: { children: React.Reac
             const { svg } = await m.render(id, src)
             const wrap = document.createElement('div')
             wrap.className = 'mermaid-svg'
-            // Mermaid's flowchart htmlLabels:true lets diagram source embed raw
-            // HTML in node labels, which ends up in the rendered `svg` string —
-            // sanitize before innerHTML so a crafted diagram source can't smuggle
-            // a <script>/event-handler payload into the page.
+            // Defense in depth: MERMAID_CONFIG's htmlLabels:false already keeps
+            // diagram source out of the label markup, but sanitize before
+            // innerHTML anyway so a crafted diagram can't smuggle a
+            // <script>/event-handler payload into the page.
             wrap.innerHTML = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } })
             block.replaceWith(wrap)
           } catch (err) {

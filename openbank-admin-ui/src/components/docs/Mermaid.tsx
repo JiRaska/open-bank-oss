@@ -6,14 +6,10 @@
 
 import { useEffect, useRef, useState } from 'react'
 import mermaid from 'mermaid'
+import DOMPurify from 'dompurify'
+import { MERMAID_CONFIG } from '@/lib/docs/mermaidConfig'
 
-mermaid.initialize({
-  startOnLoad: false,
-  theme: 'neutral',
-  fontFamily: 'inherit',
-  flowchart: { useMaxWidth: true, htmlLabels: true },
-  sequence: { useMaxWidth: true },
-})
+mermaid.initialize(MERMAID_CONFIG)
 
 let seq = 0
 
@@ -32,7 +28,9 @@ export function Mermaid({ chart }: { chart: string }) {
       .render(id, chart)
       .then(({ svg }) => {
         if (!cancelled && ref.current) {
-          ref.current.innerHTML = svg
+          // Same sanitize contract as MermaidEnhancer — never innerHTML a
+          // rendered diagram straight into the page.
+          ref.current.innerHTML = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } })
           setError(null)
         }
       })
