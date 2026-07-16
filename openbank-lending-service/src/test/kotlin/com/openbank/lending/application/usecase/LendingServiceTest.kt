@@ -277,6 +277,8 @@ class LendingServiceTest {
             interestAccrued = true,
         )
         val postings = mutableListOf<LedgerPosting>()
+        // recordRepayment now loads the loan first — a WRITTEN_OFF loan must refuse a recovery (#1245).
+        every { loans.findById(loanId) } returns Uni.createFrom().item(activeLoan(loanId))
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(listOf(installment))
         every { installments.markPaid(instId, any()) } returns Uni.createFrom().item(1)
         every { ledger.post(capture(postings)) } returns Uni.createFrom().item(Unit)
@@ -299,6 +301,8 @@ class LendingServiceTest {
             interestAccrued = false,
         )
         val postings = mutableListOf<LedgerPosting>()
+        // recordRepayment now loads the loan first — a WRITTEN_OFF loan must refuse a recovery (#1245).
+        every { loans.findById(loanId) } returns Uni.createFrom().item(activeLoan(loanId))
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(listOf(installment))
         every { installments.markPaid(instId, any()) } returns Uni.createFrom().item(1)
         every { ledger.post(capture(postings)) } returns Uni.createFrom().item(Unit)
@@ -446,7 +450,7 @@ class LendingServiceTest {
     }
 
     @Test
-    fun `reschedule replaces the unpaid tail, numbering new rows after the last paid installment`() {
+    fun `reschedule replaces the unpaid tail, numbering new rows after the highest existing number`() {
         val loanId = LoanId.random()
         val loan = activeLoan(loanId)
         val schedule = twoInstallmentSchedule(loanId)
@@ -458,9 +462,15 @@ class LendingServiceTest {
 
         assertThat(result.status).isEqualTo(LoanStatus.ACTIVE)
         verify(exactly = 1) { installments.deleteUnpaid(loanId) }
-        // One paid installment (#1) already exists; the new schedule's rows must continue from #2 —
-        // never restart at #1, or a future repayment's ledger reference would collide with the paid one.
-        assertThat(rowsSlot.captured.first().number).isEqualTo(2)
+        // Continue after the HIGHEST existing number (#2), not the paid count (1). This expectation was
+        // `2` and that pinned a weaker rule than the code needs: it only protected against colliding with
+        // a PAID row, while an unpaid row that was already accrued has likewise posted
+        // "loan:<id>:inst:<n>:accrual" — and deleteUnpaid frees its number, so UNIQUE(loan_id, number)
+        // does not catch the recycle. The replacement row's own accrual then collapses into the discarded
+        // row's journal and the income is never posted (#1245). Never recycling any number is the only
+        // rule that holds regardless of accrual state; the cost is gaps, and numbers are identifiers,
+        // not a count.
+        assertThat(rowsSlot.captured.first().number).isEqualTo(3)
         assertThat(rowsSlot.captured.map { it.number }).isSorted()
         assertThat(rowsSlot.captured).hasSize(24)
         verify(exactly = 0) { ledger.post(match { it.kind == PostingKind.RESCHEDULE_FORGIVENESS }) }

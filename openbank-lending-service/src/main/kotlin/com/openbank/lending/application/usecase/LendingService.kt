@@ -69,7 +69,11 @@ import java.util.UUID
 // TooManyFunctions: this is the single application service for the whole bounded context
 // (ADR-0028), implementing eight cohesive inbound-port interfaces — splitting it would scatter
 // one aggregate's orchestration across files for no behavioral benefit.
-@Suppress("LongParameterList", "TooManyFunctions")
+// LargeClass: the accrued-interest work (#1245) pushed it over the budget. Suppressed rather than
+// split in a money-path fix whose point is to be reviewable — an extraction here would bury the
+// three-line economic change in a file move. The same call CustomerEdgeResource made. Splitting the
+// servicing/provisioning loops out is a real follow-up, not a drive-by.
+@Suppress("LongParameterList", "TooManyFunctions", "LargeClass")
 class LendingService(
     private val applications: LoanApplicationRepository,
     private val loans: LoanRepository,
@@ -243,6 +247,32 @@ class LendingService(
     override fun listLoans(partyId: UUID): Uni<List<Loan>> = loans.findByParty(partyId)
 
     override fun recordRepayment(loanId: LoanId, installmentId: UUID): Uni<LoanInstallment> =
+        loans.findById(loanId).flatMap { loan ->
+            when {
+                loan == null ->
+                    Uni.createFrom().failure(IllegalArgumentException("Loan not found: $loanId"))
+                // A WRITTEN_OFF loan's installments still read paid=false / interestAccrued=true —
+                // writeOff derecognizes on the ledger and never mutates the rows. Without this guard a
+                // recovery payment posts PRINCIPAL_REPAYMENT against an asset already credited off by
+                // WRITE_OFF, and INTEREST_SETTLEMENT against a receivable already credited off by
+                // WRITE_OFF_INTEREST — driving both GLs negative. The idempotency keys differ, so the
+                // ledger cannot collapse them.
+                //
+                // A recovery on a written-off loan is NOT a repayment: the asset is gone, so there is
+                // nothing to reduce. It is Dr Funding Clearing / Cr Loan Loss Expense (recovery income)
+                // and needs its own use case — refused here rather than silently mis-booked (#1245).
+                loan.status == LoanStatus.WRITTEN_OFF ->
+                    Uni.createFrom().failure(
+                        IllegalStateException(
+                            "Loan $loanId is WRITTEN_OFF: a recovery is not a repayment and must be " +
+                                "booked as recovery income, not against a derecognized asset",
+                        ),
+                    )
+                else -> recordRepaymentAgainst(loanId, installmentId)
+            }
+        }
+
+    private fun recordRepaymentAgainst(loanId: LoanId, installmentId: UUID): Uni<LoanInstallment> =
         installments.findByLoan(loanId).flatMap { schedule ->
             val target = schedule.firstOrNull { it.id == installmentId }
             when {
@@ -349,6 +379,9 @@ class LendingService(
                         )
                     } else {
                         // Book the loss and remove the asset from the books; we never mutate balances ourselves.
+                        // Ledger first, row mutation last (as accrueOne does — NOT recordRepayment, which
+                        // marks the row paid before posting): a crash between them leaves the loan ACTIVE and
+                        // the retry replays the same idempotency keys, which the ledger collapses.
                         ledger.post(
                             LedgerPosting(
                                 "loan:${loanId.value}:writeoff",
@@ -357,6 +390,7 @@ class LendingService(
                                 PostingKind.WRITE_OFF,
                             ),
                         )
+                            .flatMap { derecognizeAccruedInterest(loan, schedule) }
                             .flatMap { loans.update(loan.copy(status = LoanStatus.WRITTEN_OFF)) }
                             .flatMap { written ->
                                 val wPayload = """{"loanId":"${written.id.value}",""" +
@@ -375,6 +409,43 @@ class LendingService(
                 }
             }
         }
+
+    /**
+     * Derecognize the loan's accrued-but-unpaid interest receivable at write-off. Every unpaid
+     * installment the servicing pass already accrued has an Interest Receivable balance the principal-only
+     * [PostingKind.WRITE_OFF] never touches and would otherwise orphan on the books forever.
+     *
+     * The income stays recognized: an installment can only be accrued once it has fallen due
+     * (`findAccruable` gates on `dueDate <= asOf`), so it was genuinely earned — what failed is
+     * collection, and an uncollectible receivable is a credit loss, not a revenue reversal.
+     *
+     * ONE POSTING PER INSTALLMENT, deliberately. An aggregate `loan:<id>:writeoff:interest` key over a
+     * summed amount looks simpler and is unsafe: the loan is still ACTIVE until `loans.update` runs, so
+     * `findAccruable` can accrue another installment between a crash and the retry. The retry would then
+     * recompute a LARGER sum under the SAME key, and the ledger — which dedupes on the key without
+     * comparing payloads — would silently return the smaller original journal, stranding the difference
+     * on the GL forever. Per-installment keys make a newly-accrued row post its own journal and the
+     * already-handled ones collapse, which is correct under any interleaving (#1245).
+     */
+    private fun derecognizeAccruedInterest(loan: Loan, schedule: List<LoanInstallment>): Uni<Unit> {
+        val accruedUnpaid = schedule.filter { !it.paid && it.interestAccrued && it.interest.isPositive() }
+        if (accruedUnpaid.isEmpty()) {
+            return Uni.createFrom().item(Unit)
+        }
+        return Multi.createFrom().iterable(accruedUnpaid)
+            .onItem().transformToUniAndConcatenate { installment ->
+                ledger.post(
+                    LedgerPosting(
+                        "loan:${loan.id.value}:inst:${installment.number}:writeoff-interest",
+                        loan.partyId,
+                        installment.interest,
+                        PostingKind.WRITE_OFF_INTEREST,
+                    ),
+                )
+            }
+            .collect().asList()
+            .replaceWith(Unit)
+    }
 
     // --- Reschedule / restructuring (forbearance, issue #667/#668) ----------------------------------
 
@@ -415,6 +486,21 @@ class LendingService(
         if (!outstanding.isPositive()) {
             return Uni.createFrom().failure(IllegalStateException("Nothing to reschedule: outstanding balance is zero"))
         }
+        // A newFirstDueDate on or before an already-accrued installment's dueDate re-charges a period
+        // that was already recognized: the old accrual (now capitalized into newPrincipal) AND the new
+        // schedule's first installment both cover it. Nothing rejected this before — it double-charged
+        // on the pre-capitalization code too, just by a smaller amount. Forbearance moves due dates
+        // FORWARD; a backdated one is a data error, not a business case.
+        val lastAccruedDue = schedule.filter { !it.paid && it.interestAccrued }.maxOfOrNull { it.dueDate }
+        if (lastAccruedDue != null && !request.newFirstDueDate.isAfter(lastAccruedDue)) {
+            return Uni.createFrom().failure(
+                IllegalArgumentException(
+                    "newFirstDueDate ${request.newFirstDueDate} must be after the last accrued " +
+                        "installment's dueDate $lastAccruedDue — interest for that period is already " +
+                        "recognized and would be charged twice",
+                ),
+            )
+        }
         if (request.principalForgiveness.amount > outstanding.amount) {
             return Uni.createFrom().failure(
                 IllegalArgumentException(
@@ -422,7 +508,12 @@ class LendingService(
                 ),
             )
         }
-        val newPrincipal = outstanding.minus(request.principalForgiveness)
+        // Accrued-but-unpaid interest on the installments this reschedule is about to discard. Each such
+        // row already posted an INTEREST_ACCRUAL whose INTEREST_SETTLEMENT can now never happen, so the
+        // receivable would be stranded on the GL forever (#1245 / audit N-1). It is CAPITALIZED into the
+        // restructured principal, not reversed — see [capitalizeAccruedUnpaidInterest].
+        val capitalized = accruedUnpaidInterest(loan, schedule)
+        val newPrincipal = outstanding.plus(capitalized).minus(request.principalForgiveness)
         // A monotonically-increasing, DURABLY PERSISTED generation number, not just loan.version + 1
         // computed-and-discarded — the idempotency key below must never repeat across two separate
         // reschedules of the same loan, or the second one's forgiveness would replay the first one's
@@ -440,7 +531,68 @@ class LendingService(
         } else {
             Uni.createFrom().item(Unit)
         }
-        return forgive.flatMap { buildAndPersistNewSchedule(loan, schedule, newPrincipal, generation, request) }
+        return forgive
+            .flatMap { capitalizeAccruedUnpaidInterest(loan, schedule) }
+            .flatMap { buildAndPersistNewSchedule(loan, schedule, newPrincipal, generation, request) }
+    }
+
+    /** Accrued-but-unpaid interest on the installments a reschedule will discard. */
+    private fun accruedUnpaidInterest(loan: Loan, schedule: List<LoanInstallment>): Money = schedule
+        .filter { !it.paid && it.interestAccrued }
+        .fold(Money.zero(loan.principal.currency.code)) { acc, i -> acc.plus(i.interest) }
+
+    /**
+     * Roll the accrued-but-unpaid interest of every installment this reschedule discards into the
+     * restructured principal: `Dr Loans Receivable / Cr Interest Receivable`, one posting per row.
+     *
+     * WHY CAPITALIZE AND NOT REVERSE. `interestAccrued` has exactly one writer — `markAccrued`, called
+     * only from [accrueOne], fed only by `findAccruable` (`WHERE dueDate <= :asOf`). So every row here
+     * has ALREADY FALLEN DUE and its interest was genuinely earned. Reversing the accrual
+     * (Dr Interest Income) would un-earn it: the borrower would owe nothing for a period they held the
+     * money, no relief would be booked against Loan Loss Expense, and `loan.rescheduled` would report
+     * `principalForgiveness: 0.00` while real relief had been granted — debt forgiveness as a silent
+     * side effect, bypassing the one mechanism ADR-0028 gives relief: an explicit
+     * [PostingKind.RESCHEDULE_FORGIVENESS]. (ADR-0028 does not *say* relief may happen only that way —
+     * it is silent on accrued interest at reschedule, which is why this bug existed. The argument above
+     * stands on its own; the ADR merely shows relief is meant to be explicit and auditable.) This is
+     * also the treatment [derecognizeAccruedInterest] applies on write-off, for the identical fact
+     * pattern.
+     *
+     * The "new schedule re-accrues the same income twice" worry does not apply *given a sane
+     * `newFirstDueDate`: [Amortization.schedule] charges `opening × periodRate` from `newFirstDueDate`
+     * forward, so a first period starting after the last accrued due date cannot re-charge it. That
+     * precondition is enforced in [rescheduleAgainst] — without it, `newFirstDueDate` on or before an
+     * accrued installment's `dueDate` double-charges that period (both here and, historically, on the
+     * pre-capitalization code).
+     *
+     * Caveat worth knowing: "fell due therefore earned" is this service's *current* recognition model,
+     * not the IFRS 9 test. Under IFRS 9 5.4.1(b) a credit-impaired (Stage 3) asset accrues on the NET
+     * carrying amount, not gross — and a delinquent loan being forborne is very likely Stage 3. That
+     * indicts [accrueOne]'s gross accrual, not this function: given the accrual happened at gross,
+     * capitalizing is the internally consistent exit.
+     *
+     * Ledger first, row deletion last: a crash between them leaves the old rows in place and the retry
+     * replays the same per-installment keys, which the ledger collapses.
+     */
+    private fun capitalizeAccruedUnpaidInterest(loan: Loan, schedule: List<LoanInstallment>): Uni<Unit> {
+        // Zero-interest rows are flagged accrued without ever posting (see accrueOne): nothing to move.
+        val accruedUnpaid = schedule.filter { !it.paid && it.interestAccrued && it.interest.isPositive() }
+        if (accruedUnpaid.isEmpty()) {
+            return Uni.createFrom().item(Unit)
+        }
+        return Multi.createFrom().iterable(accruedUnpaid)
+            .onItem().transformToUniAndConcatenate { installment ->
+                ledger.post(
+                    LedgerPosting(
+                        "loan:${loan.id.value}:inst:${installment.number}:capitalization",
+                        loan.partyId,
+                        installment.interest,
+                        PostingKind.INTEREST_CAPITALIZATION,
+                    ),
+                )
+            }
+            .collect().asList()
+            .replaceWith(Unit)
     }
 
     private fun buildAndPersistNewSchedule(
@@ -450,7 +602,18 @@ class LendingService(
         generation: Long,
         request: RescheduleRequest,
     ): Uni<Loan> {
-        val paidCount = schedule.count { it.paid }
+        // Continue numbering after the HIGHEST existing number, not the paid count. Two bugs, both live
+        // before this (#1245), both silent:
+        //   * `paidCount` recycles a discarded unpaid row's number. That row already posted
+        //     "loan:<id>:inst:<n>:accrual", and deleteUnpaid frees the number so UNIQUE(loan_id, number)
+        //     does not catch it — so the replacement row's own accrual collapses into the discarded row's
+        //     journal and the income is NEVER POSTED.
+        //   * recordRepayment pays by installment id with no ordering constraint, so the paid set need not
+        //     be a prefix: pay only #5 of 12 and `paidCount` = 1 makes the new row #5 collide with the
+        //     SURVIVING paid row #5 — a hard UNIQUE violation.
+        // maxOfOrNull runs over the full schedule (paid + about-to-be-deleted), and surviving paid rows
+        // always hold numbers below the new block, so numbering is strictly monotonic across generations.
+        val lastNumber = schedule.maxOfOrNull { it.number } ?: 0
         val newSchedule = Amortization.schedule(
             principal = newPrincipal,
             nominalAnnualRate = request.newNominalAnnualRate,
@@ -462,7 +625,7 @@ class LendingService(
         val rows = newSchedule.installments.map { i ->
             LoanInstallment(
                 loanId = loan.id,
-                number = paidCount + i.number,
+                number = lastNumber + i.number,
                 dueDate = i.dueDate,
                 openingBalance = i.openingBalance,
                 principal = i.principal,

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: consent-service
     app.kubernetes.io/part-of: consent
   annotations:
-    openbank.tech/policy-checksum: "9938a679bf6a3401"
+    openbank.tech/policy-checksum: "f8b4c25405bb2a98"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1553,6 +1553,51 @@ data:
           - "no Instant.now() / LocalDateTime.now() / System.currentTimeMillis() / Clock.System.now() in domain or application layer"
         gate: dst-clock-injection
         enforced: enforce                   # ADR-0100 simulation harness live (#1725); gate clean fleet-wide
+      money_path_ledger_economics:
+        # THE RULE: a change to how a money-path service posts to the ledger must be covered by a test that
+        # asserts the resulting GL ACCOUNT BALANCES, not merely which journals were emitted.
+        #
+        # WHY. #1236 (lending, 2026-07-16) shipped a reschedule that silently forgave already-earned
+        # interest — Dr Interest Income where the receivable should have been capitalised — and EVERY check
+        # was green. Its tests asserted mechanics: posting kinds, ordering, reference strings,
+        # idempotency-key equality. The defective code satisfied all of them perfectly: it emitted exactly
+        # the right KIND of journal and merely pointed one leg at the wrong account. No test asked the only
+        # question that matters — after this flow, what does the general ledger say? Reverted in #1247,
+        # re-landed correctly in #1253.
+        #
+        # The failure mode is specific and repeatable: net profit is UNCHANGED, so nothing looks wrong,
+        # while the CLASSIFICATION is wrong — a credit concession lands in a revenue line. Interest Income
+        # and Loan Loss Expense are separately-reported FINREP lines. A mechanics test cannot see this; a
+        # balance test fails on it immediately.
+        #
+        # THE PATTERN: capture the postings, replay them through the service's real journal factory (the
+        # same mapping production uses), net debits/credits per account, assert each balance against a
+        # hardcoded expected value. Reference implementation:
+        # openbank-lending-service/src/test/kotlin/.../LendingGlOutcomeTest.kt.
+        #
+        # A BALANCE TEST IS NOT AUTOMATICALLY AN ECONOMIC TEST. Two traps, both found by review ON THE
+        # REFERENCE IMPLEMENTATION ITSELF — and this entry previously recommended the first one as a virtue:
+        #   * A whole-ledger "debits == credits" assertion is TAUTOLOGICAL when the factory emits one debit
+        #     and one credit of equal value per posting: identically zero for every input, INCLUDING a leg
+        #     mapped to the wrong account — the very defect being guarded against. Assert per-account
+        #     balances against literals instead. The balanced-journal property belongs in the factory's own
+        #     test, where an unbalanced branch could actually appear.
+        #   * A mutation can turn a test red FOR THE WRONG REASON — the unguarded flow dying on an unstubbed
+        #     mock before it ever reaches the ledger, so "no postings were made" passes vacuously. Stub
+        #     enough that the DEFECTIVE path runs, and assert the wrong balance it actually produces.
+        detect:
+          - "money_path service change to a ledger PostingKind, its GL account mapping, or a posting flow"
+        require:
+          - "a test asserting the GL ACCOUNT BALANCES the flow produces, not only the journals it emits"
+          - "a new PostingKind covered by a balance assertion, not only a mapping assertion"
+          - "the test proven to fail against the defect it guards — AND for the right reason, not on an unstubbed mock"
+        gate: none
+        # Deliberately NOT a CI gate. "This test asserts economics" is not detectable by a regex, and a gate
+        # that pretended to check it — grepping for balance assertions, say — would pass a test asserting the
+        # WRONG balances, or one going red on an unstubbed mock. That is worse than an honest convention: it would read as coverage while providing
+        # none, which is the same class of failure it exists to prevent. Enforced by review, under the
+        # money-path two-approval rule.
+        enforced: convention
       release_please_merge:
         # A release-please merge commit that reorders the tail of .release-please-manifest.json can
         # SILENTLY drop a component line while it stays in release-please-config.json. The
