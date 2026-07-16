@@ -27,10 +27,25 @@ metadata:
     app.kubernetes.io/part-of: customer-edge
 spec:
   replicas: 1
-  # Recreate, not the default RollingUpdate: the gp3 PVC below is ReadWriteOnce, so a new pod
-  # would block Pending forever waiting for a volume the outgoing pod still holds.
+  # The gp3 PVC below is ReadWriteOnce, so a replacement pod must never exist alongside the
+  # outgoing one — it would sit Pending forever waiting for a volume the old pod still holds.
+  # maxSurge: 0 enforces exactly that: terminate first, then start.
+  #
+  # `type: Recreate` (the textbook answer, and what reposilite/registry-cache use) is NOT
+  # usable here: this Deployment already exists with Kubernetes' defaulted
+  # `rollingUpdate: {maxSurge: 25%, maxUnavailable: 25%}`, and server-side apply keeps fields
+  # the manifest stops mentioning. The merged object then carries rollingUpdate AND
+  # type: Recreate, which the API server rejects —
+  #   spec.strategy.rollingUpdate: Forbidden: may not be specified when strategy `type` is 'Recreate'
+  # — so ArgoCD cannot even diff, and the WHOLE customer-edge app wedges on ComparisonError
+  # (observed 2026-07-16: PVC stuck Pending, no pod roll, unrelated image bumps blocked).
+  # Recreate would need a manual field delete or Replace=true; staying on RollingUpdate keeps
+  # this purely declarative and is equivalent at replicas: 1.
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: redis
