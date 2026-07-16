@@ -284,6 +284,8 @@ class LendingServiceEdgeCasesTest {
     @Test
     fun `repayment fails when the installment is not on the loan`() {
         val loanId = LoanId.random()
+        // recordRepayment now loads the loan first (#1245).
+        every { loans.findById(loanId) } returns Uni.createFrom().item(activeLoan(loanId))
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(listOf(installment(loanId, 1)))
 
         assertThatThrownBy {
@@ -299,6 +301,8 @@ class LendingServiceEdgeCasesTest {
     fun `repayment refuses an installment that is already paid`() {
         val loanId = LoanId.random()
         val paid = installment(loanId, 1, paid = true)
+        // recordRepayment now loads the loan first (#1245).
+        every { loans.findById(loanId) } returns Uni.createFrom().item(activeLoan(loanId))
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(listOf(paid))
 
         assertThatThrownBy {

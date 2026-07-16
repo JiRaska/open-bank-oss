@@ -42,14 +42,30 @@ data class LedgerPosting(val reference: String, val partyId: UUID, val amount: M
  * books), just partial rather than the full remaining exposure, kept as a distinct kind so an audit
  * trail can tell a restructuring's forgiveness apart from a full write-off even though both hit the
  * same GL accounts.
+ *
+ * [INTEREST_CAPITALIZATION] rolls an accrued-but-unpaid interest receivable into the restructured
+ * principal when a reschedule discards the installment that carried it (#1245). The income is NOT
+ * reversed: an installment can only be accrued once it has fallen due (`findAccruable` gates on
+ * `dueDate <= asOf`), so that interest was genuinely earned — reversing it would silently forgive
+ * it, and ADR-0028 is explicit that debt relief happens ONLY through
+ * [RESCHEDULE_FORGIVENESS]. So the receivable moves into the asset it is now part of, and the
+ * borrower still owes it.
+ *
+ * [WRITE_OFF_INTEREST] derecognizes the accrued-but-unpaid interest receivable at write-off, alongside
+ * the principal [WRITE_OFF]. Same premise as above — the income was earned when the installment fell
+ * due, so it is not reversed; what failed is collection, and an uncollectible receivable is a credit
+ * loss exactly like the principal exposure. Kept as a distinct kind so the audit trail can split a
+ * write-off's loss into its principal and interest components.
  */
 enum class PostingKind {
     DISBURSEMENT,
     PRINCIPAL_REPAYMENT,
     INTEREST,
     INTEREST_ACCRUAL,
+    INTEREST_CAPITALIZATION,
     INTEREST_SETTLEMENT,
     WRITE_OFF,
+    WRITE_OFF_INTEREST,
     PROVISIONING,
     RESCHEDULE_FORGIVENESS,
 }
