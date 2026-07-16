@@ -54,7 +54,10 @@
   ],
   "packages": {
     "openbank-account-service": {
-      "component": "account-service"
+      "component": "account-service",
+      "exclude-paths": [
+        "openbank-account-service/src/test"
+      ]
     },
     "openbank-admin-ui": {
       "component": "admin-ui",
@@ -64,154 +67,305 @@
           "path": "package.json",
           "jsonpath": "$.version"
         }
+      ],
+      "exclude-paths": [
+        "openbank-admin-ui/src/test",
+        "openbank-admin-ui/e2e"
       ]
     },
     "openbank-agent-service": {
-      "component": "agent-service"
+      "component": "agent-service",
+      "exclude-paths": [
+        "openbank-agent-service/src/test"
+      ]
     },
     "openbank-aml-service": {
-      "component": "aml-service"
+      "component": "aml-service",
+      "exclude-paths": [
+        "openbank-aml-service/src/test"
+      ]
     },
     "openbank-anacredit-service": {
-      "component": "anacredit-service"
+      "component": "anacredit-service",
+      "exclude-paths": [
+        "openbank-anacredit-service/src/test"
+      ]
     },
     "openbank-audit-service": {
-      "component": "audit-service"
+      "component": "audit-service",
+      "exclude-paths": [
+        "openbank-audit-service/src/test"
+      ]
     },
     "openbank-authz-policy-auditor": {
-      "component": "authz-policy-auditor"
+      "component": "authz-policy-auditor",
+      "exclude-paths": [
+        "openbank-authz-policy-auditor/src/test"
+      ]
     },
     "openbank-balance-service": {
-      "component": "balance-service"
+      "component": "balance-service",
+      "exclude-paths": [
+        "openbank-balance-service/src/test"
+      ]
     },
     "openbank-billing-service": {
-      "component": "billing-service"
+      "component": "billing-service",
+      "exclude-paths": [
+        "openbank-billing-service/src/test"
+      ]
     },
     "openbank-card-issuance-service": {
-      "component": "card-issuance-service"
+      "component": "card-issuance-service",
+      "exclude-paths": [
+        "openbank-card-issuance-service/src/test"
+      ]
     },
     "openbank-clearing-service": {
-      "component": "clearing-service"
+      "component": "clearing-service",
+      "exclude-paths": [
+        "openbank-clearing-service/src/test"
+      ]
     },
     "openbank-clearing-simulator": {
-      "component": "clearing-simulator"
+      "component": "clearing-simulator",
+      "exclude-paths": [
+        "openbank-clearing-simulator/src/test"
+      ]
     },
     "openbank-consent-service": {
-      "component": "consent-service"
+      "component": "consent-service",
+      "exclude-paths": [
+        "openbank-consent-service/src/test"
+      ]
     },
     "openbank-control-liveness-sentinel": {
-      "component": "control-liveness-sentinel"
+      "component": "control-liveness-sentinel",
+      "exclude-paths": [
+        "openbank-control-liveness-sentinel/src/test"
+      ]
     },
     "openbank-copilot-service": {
-      "component": "copilot-service"
+      "component": "copilot-service",
+      "exclude-paths": [
+        "openbank-copilot-service/src/test"
+      ]
     },
     "openbank-customer-edge": {
-      "component": "customer-edge"
+      "component": "customer-edge",
+      "exclude-paths": [
+        "openbank-customer-edge/src/test"
+      ]
     },
     "openbank-devops-agent": {
-      "component": "devops-agent"
+      "component": "devops-agent",
+      "exclude-paths": [
+        "openbank-devops-agent/src/test"
+      ]
     },
     "openbank-dispute-service": {
-      "component": "dispute-service"
+      "component": "dispute-service",
+      "exclude-paths": [
+        "openbank-dispute-service/src/test"
+      ]
     },
     "openbank-docs-truth-agent": {
-      "component": "docs-truth-agent"
+      "component": "docs-truth-agent",
+      "exclude-paths": [
+        "openbank-docs-truth-agent/src/test"
+      ]
     },
     "openbank-document-service": {
-      "component": "document-service"
+      "component": "document-service",
+      "exclude-paths": [
+        "openbank-document-service/src/test"
+      ]
     },
     "openbank-domestic-payment": {
-      "component": "domestic-payment"
+      "component": "domestic-payment",
+      "exclude-paths": [
+        "openbank-domestic-payment/src/test"
+      ]
     },
     "openbank-finops-agent": {
-      "component": "finops-agent"
+      "component": "finops-agent",
+      "exclude-paths": [
+        "openbank-finops-agent/src/test"
+      ]
     },
     "openbank-finrep-service": {
-      "component": "finrep-service"
+      "component": "finrep-service",
+      "exclude-paths": [
+        "openbank-finrep-service/src/test"
+      ]
     },
     "openbank-flaky-test-hunter": {
-      "component": "flaky-test-hunter"
+      "component": "flaky-test-hunter",
+      "exclude-paths": [
+        "openbank-flaky-test-hunter/src/test"
+      ]
     },
     "openbank-fraud-service": {
-      "component": "fraud-service"
+      "component": "fraud-service",
+      "exclude-paths": [
+        "openbank-fraud-service/src/test"
+      ]
     },
     "openbank-fx-service": {
-      "component": "fx-service"
+      "component": "fx-service",
+      "exclude-paths": [
+        "openbank-fx-service/src/test"
+      ]
     },
     "openbank-governance-auditor": {
-      "component": "governance-auditor"
+      "component": "governance-auditor",
+      "exclude-paths": [
+        "openbank-governance-auditor/src/test"
+      ]
     },
     "openbank-interest-service": {
-      "component": "interest-service"
+      "component": "interest-service",
+      "exclude-paths": [
+        "openbank-interest-service/src/test"
+      ]
     },
     "openbank-kyc-service": {
-      "component": "kyc-service"
+      "component": "kyc-service",
+      "exclude-paths": [
+        "openbank-kyc-service/src/test"
+      ]
     },
     "openbank-ledger-service": {
-      "component": "ledger-service"
+      "component": "ledger-service",
+      "exclude-paths": [
+        "openbank-ledger-service/src/test"
+      ]
     },
     "openbank-lending-service": {
-      "component": "lending-service"
+      "component": "lending-service",
+      "exclude-paths": [
+        "openbank-lending-service/src/test"
+      ]
     },
     "openbank-notification-service": {
-      "component": "notification-service"
+      "component": "notification-service",
+      "exclude-paths": [
+        "openbank-notification-service/src/test"
+      ]
     },
     "openbank-onboarding-service": {
-      "component": "onboarding-service"
+      "component": "onboarding-service",
+      "exclude-paths": [
+        "openbank-onboarding-service/src/test"
+      ]
     },
     "openbank-party-service": {
-      "component": "party-service"
+      "component": "party-service",
+      "exclude-paths": [
+        "openbank-party-service/src/test"
+      ]
     },
     "openbank-pid-service": {
-      "component": "pid-service"
+      "component": "pid-service",
+      "exclude-paths": [
+        "openbank-pid-service/src/test"
+      ]
     },
     "openbank-product-catalog": {
-      "component": "product-catalog"
+      "component": "product-catalog",
+      "exclude-paths": [
+        "openbank-product-catalog/src/test"
+      ]
     },
     "openbank-psd2-service": {
-      "component": "psd2-service"
+      "component": "psd2-service",
+      "exclude-paths": [
+        "openbank-psd2-service/src/test"
+      ]
     },
     "openbank-release-steward": {
-      "component": "release-steward"
+      "component": "release-steward",
+      "exclude-paths": [
+        "openbank-release-steward/src/test"
+      ]
     },
     "openbank-sanctions-service": {
-      "component": "sanctions-service"
+      "component": "sanctions-service",
+      "exclude-paths": [
+        "openbank-sanctions-service/src/test"
+      ]
     },
     "openbank-sca-service": {
-      "component": "sca-service"
+      "component": "sca-service",
+      "exclude-paths": [
+        "openbank-sca-service/src/test"
+      ]
     },
     "openbank-sdd-service": {
-      "component": "sdd-service"
+      "component": "sdd-service",
+      "exclude-paths": [
+        "openbank-sdd-service/src/test"
+      ]
     },
     "openbank-security-scanner": {
-      "component": "security-scanner"
+      "component": "security-scanner",
+      "exclude-paths": [
+        "openbank-security-scanner/src/test"
+      ]
     },
     "openbank-sepa-instant": {
-      "component": "sepa-instant"
+      "component": "sepa-instant",
+      "exclude-paths": [
+        "openbank-sepa-instant/src/test"
+      ]
     },
     "openbank-sepa-payment": {
-      "component": "sepa-payment"
+      "component": "sepa-payment",
+      "exclude-paths": [
+        "openbank-sepa-payment/src/test"
+      ]
     },
     "openbank-settlement-service": {
-      "component": "settlement-service"
+      "component": "settlement-service",
+      "exclude-paths": [
+        "openbank-settlement-service/src/test"
+      ]
     },
     "openbank-standing-order-service": {
-      "component": "standing-order-service"
+      "component": "standing-order-service",
+      "exclude-paths": [
+        "openbank-standing-order-service/src/test"
+      ]
     },
     "openbank-statement-service": {
-      "component": "statement-service"
+      "component": "statement-service",
+      "exclude-paths": [
+        "openbank-statement-service/src/test"
+      ]
     },
     "openbank-swift-service": {
-      "component": "swift-service"
+      "component": "swift-service",
+      "exclude-paths": [
+        "openbank-swift-service/src/test"
+      ]
     },
     "openbank-tpp-registry-service": {
-      "component": "tpp-registry-service"
+      "component": "tpp-registry-service",
+      "exclude-paths": [
+        "openbank-tpp-registry-service/src/test"
+      ]
     },
     "openbank-transaction-service": {
-      "component": "transaction-service"
+      "component": "transaction-service",
+      "exclude-paths": [
+        "openbank-transaction-service/src/test"
+      ]
     },
     "openbank-vop-service": {
-      "component": "vop-service"
+      "component": "vop-service",
+      "exclude-paths": [
+        "openbank-vop-service/src/test"
+      ]
     }
   }
 }
