@@ -9,6 +9,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
 /**
@@ -33,6 +34,13 @@ class WebAuthnResourceTest {
     ).apply {
         rpId = "open-bank.tech"
         origin = "https://open-bank.tech"
+    }
+
+    @BeforeEach
+    fun `default to no access-token identity`() {
+        // The registration routes fall back to Keycloak introspection when the bearer is not a
+        // ticket; unless a test says otherwise, that fallback finds nothing.
+        every { keycloakClient.introspectCustomerToken(any()) } returns null
     }
 
     // ---- register/begin: enrollment ticket gate --------------------------------------------
@@ -84,6 +92,69 @@ class WebAuthnResourceTest {
 
         assertThat(resp.status).isEqualTo(401)
         verify(exactly = 0) { challengeStore.consume(any()) }
+    }
+
+    // ---- register/*: the access-token path (F1 -> F2 bridge, issue #1260 recovery) ---------
+
+    @Test
+    fun `register begin accepts the party's own access token when the bearer is not a ticket`() {
+        // The app's enrollPasskey sends a Keycloak access token, not a ticket. A JWT has the
+        // ticket's three dot-separated parts, so it reaches the ticket service and fails there —
+        // introspection is what must recognise it.
+        every { ticketService.verify("kc-access-token") } returns null
+        every { keycloakClient.introspectCustomerToken("kc-access-token") } returns
+            CustomerTokenIdentity(partyId = "party-123", keycloakUserId = "kc-user-9")
+        every { challengeStore.save(any(), "registration") } returns Unit
+
+        val resp = resource.registerBegin(authorization = "Bearer kc-access-token")
+
+        assertThat(resp.status).isEqualTo(200)
+        assertThat((resp.entity as RegistrationChallengeDto).userName).isEqualTo("party-123")
+    }
+
+    @Test
+    fun `register begin is rejected when introspection does not recognise the token`() {
+        every { ticketService.verify(any()) } returns null
+        every { keycloakClient.introspectCustomerToken("forged") } returns null
+
+        val resp = resource.registerBegin(authorization = "Bearer forged")
+
+        assertThat(resp.status).isEqualTo(401)
+        verify(exactly = 0) { challengeStore.save(any(), any()) }
+    }
+
+    @Test
+    fun `register complete with an access token gets past the auth gate`() {
+        // Proves the token is accepted as an enrolment credential: the request now fails on its
+        // malformed clientDataJSON (400) rather than on authorization (401). The crypto path
+        // beyond this point needs a real authenticator, so it is exercised on a device.
+        every { ticketService.verify(any()) } returns null
+        every { keycloakClient.introspectCustomerToken("kc-access-token") } returns
+            CustomerTokenIdentity(partyId = "party-123", keycloakUserId = "kc-user-9")
+
+        val resp = resource.registerComplete(
+            authorization = "Bearer kc-access-token",
+            request = RegistrationCompleteRequestDto("id", "attestation", "bm90LWpzb24"), // "not-json"
+        )
+
+        assertThat(resp.status).isEqualTo(400)
+    }
+
+    @Test
+    fun `an access-token enroller never has a second Keycloak user created for their party`() {
+        // The token's `sub` IS the user. ensureUser() looks up a synthetic
+        // party+<id>@openbank.internal address, would not find their real one, and would create a
+        // duplicate — binding the new credential to an account holding none of their data.
+        every { ticketService.verify(any()) } returns null
+        every { keycloakClient.introspectCustomerToken("kc-access-token") } returns
+            CustomerTokenIdentity(partyId = "party-123", keycloakUserId = "kc-user-9")
+
+        resource.registerComplete(
+            authorization = "Bearer kc-access-token",
+            request = RegistrationCompleteRequestDto("id", "attestation", "bm90LWpzb24"),
+        )
+
+        verify(exactly = 0) { keycloakClient.ensureUser(any(), any(), any()) }
     }
 
     // ---- auth/begin + auth/complete: fully public, challenge-store gate --------------------

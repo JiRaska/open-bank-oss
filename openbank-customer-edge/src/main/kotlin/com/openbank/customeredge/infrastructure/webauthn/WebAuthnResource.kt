@@ -43,17 +43,19 @@ import java.util.Base64
  * [com.openbank.customeredge.infrastructure.rest.OnboardingResource]'s `startOnboarding`: a
  * class-level `@RolesAllowed` (or being on a class Quarkus's proactive OIDC filter otherwise
  * guards) pre-empts method-level `@PermitAll` with a bare 401 before this code runs. That matters
- * doubly here: [registerBegin]/[registerComplete]'s bearer token is an [EnrollmentTicketService]
- * ticket, not a Keycloak-issued JWT — the OIDC filter would reject it as malformed before this
- * class ever saw it. [authBegin]/[authComplete] need no token at all (obtaining one is the point).
+ * doubly here: [registerBegin]/[registerComplete]'s bearer may be an [EnrollmentTicketService]
+ * ticket rather than a Keycloak-issued JWT — the OIDC filter would reject it as malformed before
+ * this class ever saw it. [authBegin]/[authComplete] need no token at all (obtaining one is the
+ * point). A token-bearing caller is verified out-of-band instead, by
+ * [WebAuthnKeycloakClient.introspectCustomerToken] — see [authorizedEnroller].
  *
- * KNOWN GAP (tracked, not silently swept under the rug): a party that onboarded via the F1 hosted
- * Keycloak flow (`ASWebAuthenticationSession` — the default today) has a passkey registered with
- * *Keycloak's own* WebAuthn RP, not this one. This edge RP has an entirely separate credential
- * store, so [authBegin]/[authComplete] only work for a device that has previously completed
- * [registerBegin]/[registerComplete] against THIS RP. Today that only happens via the native F2
- * onboarding branch (`AppConfig.useNativePasskey`); there is no "register a native edge passkey"
- * flow yet for an already-onboarded F1 user. Out of scope here — see the tracking issue.
+ * A party that onboarded via the F1 hosted Keycloak flow (`ASWebAuthenticationSession`) has a
+ * passkey registered with *Keycloak's own* WebAuthn RP, not this one, and this edge RP keeps an
+ * entirely separate credential store — so [authBegin]/[authComplete] only ever work for a device
+ * that has completed [registerBegin]/[registerComplete] against THIS RP. Such a party bridges
+ * across by enrolling with their access token after a hosted login
+ * ([tech.openbank.app.auth.AuthService.enrollPasskey]); [authorizedEnroller] accepts exactly that,
+ * which is also the recovery path when this RP's credential store is lost (issue #1260).
  */
 @Path("/customer/v1/webauthn")
 @Produces(MediaType.APPLICATION_JSON)
@@ -84,8 +86,8 @@ class WebAuthnResource(
     @PermitAll
     @Blocking
     fun registerBegin(@HeaderParam("Authorization") authorization: String?): Response {
-        val partyId = authorizedPartyId(authorization)
-            ?: return unauthorized("Invalid or expired enrollment ticket")
+        val partyId = authorizedEnroller(authorization)?.partyId
+            ?: return unauthorized("Invalid or expired enrollment credential")
 
         val challenge = randomBytes()
         challengeStore.save(Base64UrlUtil.encodeToString(challenge), PURPOSE_REGISTRATION)
@@ -109,8 +111,9 @@ class WebAuthnResource(
         @HeaderParam("Authorization") authorization: String?,
         request: RegistrationCompleteRequestDto,
     ): Response {
-        val partyId = authorizedPartyId(authorization)
-            ?: return unauthorized("Invalid or expired enrollment ticket")
+        val enroller = authorizedEnroller(authorization)
+            ?: return unauthorized("Invalid or expired enrollment credential")
+        val partyId = enroller.partyId
 
         val clientDataJsonBytes = Base64UrlUtil.decode(request.clientDataJson)
         val challenge = extractChallenge(clientDataJsonBytes)
@@ -140,13 +143,22 @@ class WebAuthnResource(
             ?: return badRequest("Attestation missing credential data")
         val credentialId = Base64UrlUtil.encodeToString(attestedCredentialData.credentialId)
 
-        // party.id == Keycloak sub (ADR-0069 invariant): use the party's own edge-visible identity
-        // (partyId, the enrollment ticket's subject) to derive a synthetic username/email, since
-        // this is a brand-new party with no email known to the edge at this layer. The realm's
-        // party-id protocol mapper (openbank-app client) then carries party_id as a claim on any
-        // future token regardless of how this user later authenticates.
-        val syntheticEmail = "party+$partyId@openbank.internal"
-        val keycloakUserId = keycloakClient.ensureUser(syntheticEmail, partyId, displayName = "OpenBank Customer")
+        // An enroller who authenticated with their own access token ALREADY has a Keycloak user —
+        // bind the credential to that `sub`. Routing them through ensureUser() instead would look
+        // up the synthetic `party+<id>@openbank.internal` address, not find their real one, and
+        // create a SECOND user for the same party: the credential would then mint a session for an
+        // account holding none of their data, and party_id == sub would break for it.
+        //
+        // Only the ticket path lands in ensureUser: party.id == Keycloak sub (ADR-0069 invariant),
+        // and the edge knows no email for a brand-new party at this layer, so it derives a
+        // synthetic one. The realm's party-id protocol mapper (openbank-app client) then carries
+        // party_id as a claim on any future token regardless of how this user later authenticates.
+        val keycloakUserId = enroller.existingKeycloakUserId
+            ?: keycloakClient.ensureUser(
+                email = "party+$partyId@openbank.internal",
+                partyId = partyId,
+                displayName = "OpenBank Customer",
+            )
 
         credentialStore.save(
             RegisteredCredential(
@@ -255,10 +267,40 @@ class WebAuthnResource(
     // ── Internals ─────────────────────────────────────────────────────────────────────────
 
     /** Reads the `Authorization: Bearer <ticket>` header and resolves it to a partyId, or null. */
-    private fun authorizedPartyId(authorization: String?): String? {
-        val ticket = authorization?.removePrefix("Bearer ")?.trim()?.takeIf { it.isNotBlank() } ?: return null
-        return ticketService.verify(ticket)
+    /**
+     * Resolve the party enrolling a credential from the `Authorization` bearer, which may be
+     * EITHER of two credentials — deliberately, and in this order:
+     *
+     *  1. an [EnrollmentTicketService] ticket — the native F2 onboarding branch, where the party
+     *     was just created via M2M and no Keycloak session exists yet;
+     *  2. the party's own Keycloak access token — an already-onboarded user enrolling a native
+     *     credential on this device ([tech.openbank.app.auth.AuthService.enrollPasskey], the F1→F2
+     *     bridge and the only recovery path when this RP's credential store is lost, issue #1260).
+     *
+     * Case 2 was the KNOWN GAP in this class's KDoc: the app has always sent its access token here,
+     * and a JWT happens to have the ticket's three dot-separated parts, so it reached
+     * [EnrollmentTicketService.verify], failed the numeric-expiry parse and fell out as a bare 401.
+     * Enrolment could therefore never succeed for an existing session.
+     *
+     * The ticket is tried first because it is the cheap local HMAC check; a token costs a Keycloak
+     * round-trip. Both fail closed.
+     */
+    private fun authorizedEnroller(authorization: String?): Enroller? {
+        val bearer = authorization?.removePrefix("Bearer ")?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        ticketService.verify(bearer)?.let { partyId ->
+            // Ticket path: brand-new party, no Keycloak user yet — registerComplete creates one.
+            return Enroller(partyId = partyId, existingKeycloakUserId = null)
+        }
+        return keycloakClient.introspectCustomerToken(bearer)
+            ?.let { Enroller(partyId = it.partyId, existingKeycloakUserId = it.keycloakUserId) }
     }
+
+    /**
+     * A party permitted to enrol a credential. [existingKeycloakUserId] is non-null only when the
+     * caller authenticated with their own access token, i.e. the Keycloak user already exists and
+     * must be reused rather than re-created.
+     */
+    private data class Enroller(val partyId: String, val existingKeycloakUserId: String?)
 
     private fun extractChallenge(clientDataJsonBytes: ByteArray): String? = runCatching {
         jsonMapper.readTree(clientDataJsonBytes).get("challenge")?.asText()
