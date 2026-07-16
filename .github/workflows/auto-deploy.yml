@@ -609,6 +609,11 @@ jobs:
       # $GITHUB_OUTPUT persist regardless of the step's own exit code. Empty/unset when the
       # step didn't run at all (no PACT_BROKER_URL) — gitops-pr treats that as "no filter".
       deployable: ${{ steps.check.outputs.deployable }}
+      # 'true' iff the gate step actually started (written before any fallible command).
+      # Lets gitops-pr distinguish "gate absent (no broker) → no filter" from "gate ran but
+      # crashed before a verdict → fail closed", which `deployable` alone cannot: both empty
+      # (issue #1348).
+      gate_ran: ${{ steps.check.outputs.gate_ran }}
     env:
       PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
       PACT_BROKER_USERNAME: ${{ vars.PACT_BROKER_USERNAME }}
@@ -623,13 +628,30 @@ jobs:
         if: ${{ vars.PACT_BROKER_URL != '' }}
         run: |
           set -uo pipefail
+          # Record that the gate actually STARTED, before anything that can fail. This output
+          # persists even if the step later exits non-zero, so gitops-pr can tell "gate never
+          # ran (no broker) → no filter" apart from "gate ran but crashed before a verdict →
+          # fail closed". `deployable` alone cannot: both leave it empty, and that ambiguity
+          # is exactly what made record-deployment record every changed service as deployed
+          # when a flaky pact-CLI download killed the gate (issue #1348).
+          echo "gate_ran=true" >> "$GITHUB_OUTPUT"
           SERVICES='${{ needs.changes.outputs.services }}'
           arch="$(uname -m)"; case "$arch" in aarch64|arm64) a=arm64 ;; *) a=x86_64 ;; esac
           os="$(uname -s | tr '[:upper:]' '[:lower:]')"; case "$os" in darwin) o=osx ;; *) o=linux ;; esac
           tgz="pact-${PACT_STANDALONE_VERSION}-${o}-${a}.tar.gz"
           url="https://github.com/pact-foundation/pact-ruby-standalone/releases/download/v${PACT_STANDALONE_VERSION}/${tgz}"
-          if ! curl -fsSL -o /tmp/pact.tgz "$url"; then
-            echo "::error::could not download pact standalone ($url) — cannot run contract gate"
+          # Retry the flaky github.com release download. The record-deployment step below
+          # already does; this one did NOT, and a single-shot failure here is precisely what
+          # produced the #1348 phantoms. A genuine persistent failure still exits non-zero,
+          # and gate_ran=true + empty deployable then makes gitops-pr fail closed.
+          dl_ok=0
+          for attempt in 1 2 3; do
+            if curl -fsSL --retry 2 --retry-delay 3 -o /tmp/pact.tgz "$url"; then dl_ok=1; break; fi
+            echo "::warning::pact standalone download attempt ${attempt}/3 failed; retrying in 5s"
+            sleep 5
+          done
+          if [ "$dl_ok" -ne 1 ]; then
+            echo "::error::could not download pact standalone ($url) after 3 attempts — cannot run contract gate; gitops-pr will fail closed (deploy nothing) this run"
             exit 1
           fi
           mkdir -p /tmp/pact && tar -xzf /tmp/pact.tgz -C /tmp/pact
@@ -753,6 +775,11 @@ jobs:
       # skipped entirely — no PACT_BROKER_URL) means "no filter, process everything", matching
       # the pre-fix behavior for that case; an explicit `[]` means "checked, none passed".
       DEPLOYABLE_SERVICES: ${{ needs.can-i-deploy.outputs.deployable || '' }}
+      # 'true' when the contract gate ran (whatever its verdict); '' when it was absent
+      # (no PACT_BROKER_URL). GATE_RAN=true together with an empty DEPLOYABLE_SERVICES means
+      # the gate crashed before deciding — the fail-closed guard in the rewrite/record steps
+      # keys on exactly that (issue #1348).
+      GATE_RAN: ${{ needs.can-i-deploy.outputs.gate_ran || '' }}
       # Mirrored into env because the `secrets` context is NOT available in a step-level `if:`
       # — only job-level env can read it. Used solely to decide whether to mint an App token.
       GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
@@ -787,6 +814,19 @@ jobs:
           set -euo pipefail
           IMAGE_TAGS='${{ needs.build-push.outputs.image_tags }}'
           UPDATED=()
+
+          # FAIL CLOSED when the contract gate ran but crashed before emitting a verdict
+          # (GATE_RAN=true, DEPLOYABLE_SERVICES empty). Without this the empty verdict was read
+          # as "no filter" and EVERY changed service got deployed AND recorded to the broker as
+          # a version that was never contract-checked — the money-path fail-open behind #1348.
+          # Deploy nothing this run: the run is already red from can-i-deploy, so it is loud and
+          # re-dispatchable. GATE_RAN empty = no broker at all = the legitimate no-filter case,
+          # left to the per-service logic below.
+          if [ "${GATE_RAN}" = "true" ] && [ -z "${DEPLOYABLE_SERVICES}" ]; then
+            echo "::error::can-i-deploy ran but produced no verdict (crashed before deciding) — failing closed: deploying nothing this run rather than deploying every service unchecked (#1348). Re-dispatch once the gate can run."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           for svc in $(echo "$IMAGE_TAGS" | jq -r 'keys[]'); do
             # DEPLOYABLE_SERVICES empty/unset = can-i-deploy didn't run at all (no filter,
@@ -916,6 +956,16 @@ jobs:
         run: |
           set -uo pipefail
           ALL_CHANGED='${{ needs.changes.outputs.services }}'
+          # Defense in depth for #1348: never record when the gate ran but crashed before a
+          # verdict (GATE_RAN=true, DEPLOYABLE_SERVICES empty). The rewrite step already fails
+          # closed on this (changed=false), so this step's `if` should keep it from running at
+          # all — but if a future refactor decouples them, recording every service here is
+          # exactly the phantom that hard-blocks unrelated services later. GATE_RAN empty = no
+          # broker = the legitimate no-filter case, left to the logic below.
+          if [ "${GATE_RAN}" = "true" ] && [ -z "${DEPLOYABLE_SERVICES}" ]; then
+            echo "::error::can-i-deploy produced no verdict this run — refusing to record any deployment (would phantom-block later deploys, #1348)"
+            exit 1
+          fi
           # Same filter as the "Rewrite image tags" step: only record-deploy services
           # can-i-deploy actually confirmed this run (issue #846) — recording a service that
           # was blocked (and therefore never got its manifest updated) would make the broker
