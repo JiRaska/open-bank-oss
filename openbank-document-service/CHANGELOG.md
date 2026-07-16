@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.8.0...document-service-v0.8.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* **document:** refuse to seal with a throwaway cert (ADR-0172 D2) ([#1298](https://github.com/JiRaska/open-bank-oss/issues/1298)) ([b7fc299](https://github.com/JiRaska/open-bank-oss/commit/b7fc29954be274a7ca483a7a96b60c6f420dfe7c))
+* **document:** warn about the DEV-ONLY seal identity at startup, not at first use ([#1299](https://github.com/JiRaska/open-bank-oss/issues/1299)) ([4834628](https://github.com/JiRaska/open-bank-oss/commit/4834628e9b4ba966e585fd29350d1405423de756)), closes [#1284](https://github.com/JiRaska/open-bank-oss/issues/1284)
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.7.1...document-service-v0.8.0) (2026-07-16)
 
 
