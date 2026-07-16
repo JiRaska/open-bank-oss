@@ -9,6 +9,17 @@ name: Release Please
 # contract version (openapi.yaml:info.version) is a SEPARATE axis governed by ADR-0048 / oasdiff
 # and is intentionally NOT touched here. Rules: openbank-libs/governance/rules.yaml (versioning)
 # and openbank-libs/governance/RELEASE.md.
+#
+# Commit signing: release-please CANNOT sign its own commits, so this workflow re-signs them
+# afterwards (see "Re-sign release PR commits" below). Unlike the deploy workflows — where
+# handing peter-evans/create-pull-request a GitHub App token was the whole fix (#1276) —
+# swapping the token here would change nothing. Signing depends on WHICH endpoint authors the
+# commit, not only on the token type: GitHub auto-signs the GraphQL createCommitOnBranch
+# mutation and the Contents API, but never the Git Data API, whose `signature` field is
+# caller-supplied. release-please@17 delegates to code-suggester@5, which calls
+# `octokit.git.createCommit` (Git Data) and passes no signer — so its commit is unsigned no
+# matter who authenticates. Upstream tracks this as release-please-action#1171 / #1124, both
+# open with no workaround.
 
 on:
   push:
@@ -42,6 +53,10 @@ jobs:
       # close together the run's checked-out manifest can lag the version just tagged
       # (caused kyc-service-v0.4.0 to be mis-tagged v0.3.1 → upload to a missing release).
       rp_outputs: ${{ toJSON(steps.rp.outputs) }}
+    env:
+      # Mirrored into env because the `secrets` context is NOT available in a step-level `if:`
+      # — only job-level env can read it. Used solely to decide whether to mint an App token.
+      GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
     steps:
       - id: rp
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
@@ -55,11 +70,179 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+      # The App exists here ONLY to sign — the `rp` step above deliberately keeps the PAT,
+      # because the PAT's job (re-triggering workflows on merge) already works and switching
+      # release-please's own identity would churn the bot-PR issue-hygiene exemption for no gain.
+      - name: Mint a GitHub App installation token
+        id: app_token
+        if: env.GITOPS_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+
+      # Rewrite each release branch's unsigned commit as a GitHub-signed one, because
+      # release-please structurally cannot emit a signed commit (see the header comment).
+      # Without this the commit lands `verified=false; reason=unsigned`, required_signatures
+      # blocks the PR, and the release strands with every check green and auto-merge armed —
+      # the same silent failure mode as the deploy PRs in #1269, and equally invisible.
+      #
+      # Method: createCommitOnBranch replays the branch's file changes onto a scratch branch
+      # (which GitHub signs), then force-moves the release ref onto the resulting commit. The
+      # scratch branch is what keeps this non-destructive: resetting the release ref back to
+      # its parent and re-committing in place would leave the PR momentarily empty if the
+      # mutation failed in between. No push-triggered workflow watches a scratch branch —
+      # every `on: push` in this repo is filtered to `main` (runner-smoke.yml to
+      # `ci/self-hosted-runner`) — so it fires nothing on create or delete.
+      #
+      # Idempotent by design, because it has to be: release-please force-pushes each release
+      # branch on every push to main, which re-unsigns it. Already-verified PRs are skipped, so
+      # a run that arrives between signing and merging simply re-signs on the next one.
+      - name: Re-sign release PR commits
+        id: resign
+        # Best-effort, same reasoning as the auto-merge step below: a failure here must never
+        # fail this job, because that would skip release-evidence (needs: release-please) and
+        # strand an already-cut tag with no SBOM/SLSA/VEX bundle. The separate
+        # verify-release-pr-signatures job is what raises the loud signal instead.
+        continue-on-error: true
+        if: steps.app_token.outputs.token != ''
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ steps.app_token.outputs.token }}
+          script: |
+            const { owner, repo } = context.repo;
+            const { data: prs } = await github.rest.pulls.list({
+              owner, repo, state: 'open', per_page: 100,
+            });
+            const releasePrs = prs.filter(p =>
+              p.labels.some(l => l.name === 'autorelease: pending') ||
+              p.title.startsWith('chore(main): release'));
+
+            const mutation = `mutation($input: CreateCommitOnBranchInput!) {
+              createCommitOnBranch(input: $input) { commit { oid } }
+            }`;
+
+            let signed = 0, alreadySigned = 0, skipped = 0;
+            for (const pr of releasePrs) {
+              const { data: commits } = await github.rest.pulls.listCommits({
+                owner, repo, pull_number: pr.number,
+              });
+              if (commits.every(c => c.commit.verification?.verified)) {
+                alreadySigned++;
+                continue;
+              }
+              // release-please keeps exactly one commit per release branch (code-suggester
+              // force-pushes a single squashed commit). More than one means someone amended
+              // or pushed by hand — leave it alone rather than silently flattening their work.
+              if (commits.length !== 1) {
+                skipped++;
+                core.warning(`#${pr.number}: ${commits.length} commits, expected 1 — not re-signing`);
+                continue;
+              }
+              const c = commits[0];
+              const parent = c.parents[0]?.sha;
+              if (!parent) {
+                skipped++;
+                core.warning(`#${pr.number}: ${c.sha} has no parent — not re-signing`);
+                continue;
+              }
+
+              // Rebuild the commit's contents from the diff against its own parent — NOT
+              // against main's current head. release-please rebases, so the parent is the only
+              // authoritative base; comparing against a moved main would replay unrelated files.
+              const { data: cmp } = await github.rest.repos.compareCommitsWithBasehead({
+                owner, repo, basehead: `${parent}...${c.sha}`,
+              });
+              const additions = [], deletions = [];
+              let unreadable = null;
+              for (const f of cmp.files ?? []) {
+                if (f.status === 'removed') { deletions.push({ path: f.filename }); continue; }
+                if (f.status === 'renamed' && f.previous_filename) {
+                  deletions.push({ path: f.previous_filename });
+                }
+                const { data: blob } = await github.rest.git.getBlob({ owner, repo, file_sha: f.sha });
+                if (blob.encoding !== 'base64') { unreadable = f.filename; break; }
+                // getBlob line-wraps its base64; the mutation wants it unwrapped.
+                additions.push({ path: f.filename, contents: blob.content.replace(/\n/g, '') });
+              }
+              if (unreadable) {
+                skipped++;
+                core.warning(`#${pr.number}: ${unreadable} blob is not base64 — not re-signing`);
+                continue;
+              }
+              if (!additions.length && !deletions.length) {
+                skipped++;
+                core.warning(`#${pr.number}: ${c.sha} changes no files — not re-signing`);
+                continue;
+              }
+
+              const [headline, ...rest] = c.commit.message.split('\n');
+              const body = rest.join('\n').trim();
+              const scratch = `release-please-sign/${pr.number}-${context.runId}`;
+              try {
+                await github.rest.git.createRef({ owner, repo, ref: `refs/heads/${scratch}`, sha: parent });
+                const res = await github.graphql(mutation, {
+                  input: {
+                    branch: { repositoryNameWithOwner: `${owner}/${repo}`, branchName: scratch },
+                    message: body ? { headline, body } : { headline },
+                    fileChanges: { additions, deletions },
+                    expectedHeadOid: parent,
+                  },
+                });
+                const oid = res.createCommitOnBranch.commit.oid;
+
+                // Prove the replay reproduced the commit EXACTLY before force-moving the ref onto
+                // it. Identical tree sha == byte-identical content, so the only difference left is
+                // the signature. Without this the failure mode is the worst one available: a subtly
+                // wrong fileChanges reconstruction force-pushed onto the release branch, which
+                // auto-merge — already armed — would then happily land as a corrupted release.
+                // A signature is never worth rewriting content to get.
+                const [{ data: was }, { data: now }] = await Promise.all([
+                  github.rest.git.getCommit({ owner, repo, commit_sha: c.sha }),
+                  github.rest.git.getCommit({ owner, repo, commit_sha: oid }),
+                ]);
+                if (was.tree.sha !== now.tree.sha) {
+                  skipped++;
+                  core.warning(`#${pr.number}: replayed tree ${now.tree.sha.slice(0, 8)} != original ${was.tree.sha.slice(0, 8)} — not re-signing`);
+                  continue;
+                }
+
+                // updateRef has no compare-and-swap, so check the release ref still points at
+                // the commit we just rebuilt. Without this, a release-please force-push landing
+                // in the seconds since pulls.list would be clobbered by our older content.
+                const { data: ref } = await github.rest.git.getRef({ owner, repo, ref: `heads/${pr.head.ref}` });
+                if (ref.object.sha !== c.sha) {
+                  skipped++;
+                  core.warning(`#${pr.number}: head moved ${c.sha.slice(0, 8)} -> ${ref.object.sha.slice(0, 8)} mid-flight — not re-signing`);
+                  continue;
+                }
+                await github.rest.git.updateRef({
+                  owner, repo, ref: `heads/${pr.head.ref}`, sha: oid, force: true,
+                });
+                signed++;
+                core.info(`#${pr.number}: re-signed ${c.sha.slice(0, 8)} -> ${oid.slice(0, 8)}`);
+              } catch (e) {
+                skipped++;
+                core.warning(`#${pr.number}: re-sign failed — ${e.message}`);
+              } finally {
+                try {
+                  await github.rest.git.deleteRef({ owner, repo, ref: `heads/${scratch}` });
+                } catch (e) {
+                  core.info(`#${pr.number}: scratch branch ${scratch} not cleaned up — ${e.message}`);
+                }
+              }
+            }
+            core.info(`re-signed ${signed}, already signed ${alreadySigned}, skipped ${skipped}, of ${releasePrs.length} open release PR(s)`);
+
       # Auto-merge every open release PR (ADR-0029 Layer B hygiene): the ruleset requires 0
       # approvals, so GitHub merges each as soon as its required checks pass. With separate PRs
       # they share .release-please-manifest.json and conflict, so they drain sequentially — each
       # merge re-triggers release-please (via the PAT) which rebases the rest, cascading until the
       # queue is empty. Idempotent: re-enabling on an already-armed PR is a no-op.
+      #
+      # Runs AFTER the re-sign step so it arms against the signed head rather than a sha that
+      # is about to be replaced. It stays on the PAT on purpose: arming already works, and the
+      # App token is scoped to the one thing only it can do — signing.
       - name: Enable auto-merge on open release PRs
         # Never let an arming hiccup (API blip on pulls.list) fail the release-please job —
         # that would skip the evidence job (needs: release-please). Draining is best-effort.
@@ -88,6 +271,81 @@ jobs:
               }
             }
             core.info(`processed ${releasePrs.length} open release PR(s)`);
+
+  # ---------------------------------------------------------------------------
+  # Signature guard for the release PRs (issue #1269's failure mode, release axis).
+  # ---------------------------------------------------------------------------
+  # An unsigned release commit fails silently by construction: release-please exits 0, the PR
+  # opens with every check green and auto-merge armed, and it simply never merges. That reads
+  # as healthy from every angle except the one nobody checks — which is how #806's deploy fix
+  # no-opped for five days and stranded seven PRs at once. Assert the outcome instead.
+  #
+  # A SEPARATE job, not a final step of release-please: a failing step there would fail the job,
+  # and release-evidence (needs: release-please) would be skipped — costing an already-cut tag
+  # its SBOM/SLSA/VEX bundle. As its own job this reds the run without starving anything.
+  #
+  # Severity is deliberately conditional on GITOPS_APP_ID. Unset means the App has not been
+  # created yet: re-signing is skipped, every release PR is knowingly unsigned, and failing here
+  # would red main on literally every push — noise that trains people to ignore the signal.
+  # Once the App exists an unsigned PR is a genuine regression, and this fails loudly.
+  verify-release-pr-signatures:
+    name: Verify release PR commits are signed
+    needs: release-please
+    runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const { data: prs } = await github.rest.pulls.list({
+              owner, repo, state: 'open', per_page: 100,
+            });
+            const releasePrs = prs.filter(p =>
+              p.labels.some(l => l.name === 'autorelease: pending') ||
+              p.title.startsWith('chore(main): release'));
+
+            const unsigned = [];
+            for (const pr of releasePrs) {
+              const { data: commits } = await github.rest.pulls.listCommits({
+                owner, repo, pull_number: pr.number,
+              });
+              // Only the PR's own branch commits prove anything. The squash commit on main is
+              // signed by GitHub itself and always reads verified=true — it would pass this
+              // guard while the branch commit that actually blocks the merge stays unsigned.
+              for (const c of commits.filter(c => !c.commit.verification?.verified)) {
+                unsigned.push({ pr: pr.number, sha: c.sha, reason: c.commit.verification?.reason ?? 'unknown' });
+              }
+            }
+
+            if (unsigned.length === 0) {
+              core.info(`all commits on ${releasePrs.length} open release PR(s) are signed and verified`);
+              return;
+            }
+            for (const u of unsigned) {
+              core.error(`#${u.pr}: ${u.sha} verified=false reason=${u.reason}`);
+            }
+            const detail =
+              `${unsigned.length} unsigned commit(s) across ${new Set(unsigned.map(u => u.pr)).size} open release PR(s); ` +
+              `the main ruleset's required_signatures blocks each of them and those releases will never land.`;
+            if (!process.env.GITOPS_APP_ID) {
+              core.warning(
+                `${detail} Expected for now: GITOPS_APP_ID/GITOPS_APP_PRIVATE_KEY are unset, so the re-sign ` +
+                `step is skipped and release-please's own commits are unsigned by construction. Until the ` +
+                `GitHub App is created and installed, each release PR needs a manual GPG re-sign to land — ` +
+                `auto-merge is already armed and fires on its own once the signature is valid.`
+              );
+              return;
+            }
+            core.setFailed(
+              `${detail} The GitHub App IS configured, so the re-sign step should have fixed this — ` +
+              `check the "Re-sign release PR commits" step's warnings in the release-please job.`
+            );
 
   # ---------------------------------------------------------------------------
   # Release evidence bundle (ADR-0029 D2 / ADR-0030 D4).
