@@ -195,6 +195,25 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `charter_allowed` alone lets a fleet-wide hard-denied tool tier or a charter's own `tools.deny`
   glob silently reach a REST action anyway.
 
+### CI / bot commit signing
+- **What signs a bot commit is the *endpoint*, not the token — and `main-protection` enforces
+  `required_signatures`.** GitHub auto-signs the GraphQL `createCommitOnBranch` mutation and the
+  Contents API, and only for a GitHub **App** token — never for a user PAT, and never for the Git
+  Data API (`POST /git/commits`), whose `signature` field is caller-supplied. So
+  `peter-evans/create-pull-request`'s `sign-commits: true` signs *once given an App token* (#1276),
+  while **release-please can never sign whatever token you give it**: it delegates to
+  `code-suggester`, which calls `octokit.git.createCommit` (Git Data) with no signer (upstream
+  release-please-action#1171/#1124, both open; #1289 re-signs the commit afterwards instead).
+  Unsigned + `required_signatures` = a PR stranded with green checks and auto-merge armed, which
+  reads as healthy from every angle except the one nobody checks. Verify the *branch* commit —
+  never the squash commit on `main`, which GitHub signs itself and always reads `verified=true`,
+  proving nothing: `gh api repos/<owner>/<repo>/pulls/<N>/commits --jq '.[].commit.verification'`.
+- **A guard that `setFailed`s must go where a failure costs nothing downstream.** Fail the *last*
+  step of a job with nothing after it (`always()`, since `setFailed` skips later non-`always()`
+  steps); if the job has dependents (`needs:`), make the guard its own job instead — failing in
+  place would skip them. In `release-please.yml` that would have stripped an already-cut tag of its
+  evidence bundle.
+
 ### Reviewing a diff
 - **Use 3-dot diff for pre-merge review:** `git diff origin/main...origin/<branch>` is the actual
   squash delta; 2-dot includes main's post-divergence commits and makes stale branches look like
