@@ -538,6 +538,36 @@ test_deny_operator_document_read_content if {
 	}
 }
 
+# signatureCeremony.recordDecision — the "Sign with biometrics" tap (ADR-0169 D3). Exactly
+# the document.readContent shape one endpoint further on: the verb is outside
+# operator-read-any's {list, read}, so reading the ceremony passed (signatureCeremony.read
+# slipped through on its name) while signing it 403'd, leaving the sign screen stuck with
+# every tap silently failing. Adding only the document. family in #1249 fixed the read leg
+# and left this one denied.
+test_allow_service_signature_ceremony_record_decision if {
+	decision := rest.allow with input as {
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "signatureCeremony.recordDecision",
+		"resource": {"type": "signatureCeremony", "id": "c-1"},
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	decision.reason == "edge-service-notification"
+}
+
+# The same containment as document.readContent: staff carrying ROLE_OPERATOR must not be
+# able to record a signing decision on a customer's agreement. Signing is the customer's
+# act — this rule is pinned to the edge's client_credentials identity, and a human operator
+# session authenticates through a different client, so it can never match.
+test_deny_operator_signature_ceremony_record_decision if {
+	not rest.allow with input as {
+		"principal": {"id": "alice.operator", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "signatureCeremony.recordDecision",
+		"resource": {"type": "signatureCeremony", "id": "c-1"},
+	}
+}
+
 # The rule must NOT open other action families to the edge M2M caller (deny-by-default
 # holds) — operator-read-any also does not cover a write like party.update.
 test_deny_service_outside_notification_family if {
