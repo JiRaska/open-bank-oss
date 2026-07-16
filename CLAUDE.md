@@ -14,9 +14,14 @@ Before a change is "done", run the ship-checklist (`/ship-check` runs the same c
 ADR-0029):
 
 1. **Open a PR.** No direct commits to `main`. Branch `<type>/<scope>-<summary>`; squash-merge via PR.
-2. **Versioning is automatic.** A change under `<service>/src/main/**` is released by **release-please**
-   from your Conventional Commit — so the commit message *is* the changelog. Do **not** hand-edit
-   `version.txt`, `CHANGELOG.md`, or `quarkus.application.version` (it derives from `version.txt`).
+2. **Versioning is automatic.** A change to **any file under `<service>/`** — except the paths listed
+   in that package's `exclude-paths` (currently `src/test`) — is released by **release-please** from
+   your Conventional Commit, so the commit message *is* the changelog. That includes `governance.yaml`,
+   `Dockerfile`, `build.gradle.kts` and the lint baselines: touch one and the service ships a version.
+   release-please offers no include/allow-list (only `exclude-paths`, and only for **directories** —
+   a single file cannot be excluded), so "only `src/main` releases" is not expressible; treat any
+   package-root edit as release-triggering. Do **not** hand-edit `version.txt`, `CHANGELOG.md`, or
+   `quarkus.application.version` (it derives from `version.txt`).
    A module is a released component **iff** it has a `version.txt` (registered in
    [`release-please-config.json`](release-please-config.json) + [`.release-please-manifest.json`](.release-please-manifest.json)).
 3. **API change ⇒ `openapi.yaml` updated + contract test.** Two independent version axes (ADR-0048):
