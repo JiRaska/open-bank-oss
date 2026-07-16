@@ -98,6 +98,24 @@ class NotificationConsumer {
             log.errorf(e, "Failed to parse notification payload: %s", payload)
             return Uni.createFrom().voidItem()
         }
+        // Closed variable schema (ADR-0176 D1, issue #1325). A key the template does not declare
+        // is rejected here, before it can be rendered into a body and persisted — this is what
+        // stops a secret-shaped variable riding an ordinary template into storage, which
+        // TemplateSensitivity cannot catch because it classifies templates, not variables.
+        //
+        // Logs the offending KEYS only, never the values: a rejected payload is exactly the case
+        // where a value is most likely to be a secret, and writing it to a log would recreate the
+        // leak this rejection exists to close.
+        val unknown = req.template.unknownVariables(req.variables)
+        if (unknown.isNotEmpty()) {
+            log.errorf(
+                "Rejected notification: template=%s declares %s but request carried undeclared %s",
+                req.template.name,
+                req.template.variables.sorted(),
+                unknown.sorted(),
+            )
+            return Uni.createFrom().voidItem()
+        }
         return dispatch(req)
             .onFailure().recoverWithUni { e ->
                 // Processing failure (e.g. transient DB error): log and ack. Preserves the prior
@@ -312,27 +330,85 @@ class NotificationConsumer {
     private fun htmlToPlain(html: String): String =
         html.replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
 
+    /**
+     * Renders [template] into a (subject, body) pair.
+     *
+     * Exhaustive by design — there is deliberately **no `else` branch**. The `else` this replaces
+     * dumped every caller-supplied variable into the body (`"$key: $value"`), which is how a
+     * secret could ride an ordinary template into storage (issue #1325), and it silently absorbed
+     * the seven constants nobody had written a render for: they reached real customers as raw
+     * variable dumps. Without the `else`, adding a constant to [NotificationTemplate] is a
+     * COMPILE error here until someone writes its copy — a guard that cannot be forgotten, unlike
+     * the review the classification allow-list depends on (ADR-0176 D1).
+     *
+     * Every `vars[...]` key read here must be declared in that constant's [NotificationTemplate.variables];
+     * anything else is rejected upstream and can never arrive.
+     */
     private fun renderTemplate(template: NotificationTemplate, vars: Map<String, String>): Pair<String, String> =
         when (template) {
             NotificationTemplate.ACCOUNT_OPENED ->
                 "Your OpenBank account is ready" to
-                    "<h2>Welcome to OpenBank!</h2><p>Your account <b>${vars["accountNumber"] ?: ""}</b> has been opened.</p>"
+                    "<h2>Welcome to OpenBank!</h2><p>Your account <b>${vars.v(
+                        "accountNumber",
+                    )}</b> has been opened.</p>"
+            NotificationTemplate.ACCOUNT_CLOSED ->
+                "Your OpenBank account has been closed" to
+                    "<h2>Account Closed</h2><p>Your account <b>${vars.v("accountNumber")}</b> has been closed. " +
+                    "Statements and transaction history remain available on request.</p>"
+            NotificationTemplate.ACCOUNT_FROZEN ->
+                "Your OpenBank account has been frozen" to
+                    "<h2>Account Frozen</h2><p>Access to your account <b>${vars.v("accountNumber")}</b> has been " +
+                    "temporarily suspended. Reason: ${vars.v("reason")}. Please contact support.</p>"
             NotificationTemplate.TRANSACTION_COMPLETED ->
                 "Transaction completed" to
-                    "<p>Transaction of <b>${vars["amount"] ?: ""} ${vars["currency"] ?: ""}</b> completed successfully.</p>"
+                    "<p>Transaction of <b>${vars.v("amount")} ${vars.v("currency")}</b> completed successfully.</p>"
+            NotificationTemplate.TRANSACTION_FAILED ->
+                "Transaction failed" to
+                    "<h2>Transaction Failed</h2><p>Your transaction of <b>${vars.v("amount")} " +
+                    "${vars.v("currency")}</b> could not be completed. Reason: ${vars.v("reason")}. " +
+                    "No funds have left your account.</p>"
             NotificationTemplate.KYC_APPROVED ->
                 "Identity verification approved" to
                     "<h2>KYC Approved</h2><p>Your identity has been verified. You can now use all OpenBank services.</p>"
             NotificationTemplate.KYC_REJECTED ->
                 "Identity verification failed" to
-                    "<h2>KYC Rejected</h2><p>We could not verify your identity. Reason: ${vars["reason"] ?: ""}. Please contact support.</p>"
+                    "<h2>KYC Rejected</h2><p>We could not verify your identity. Reason: ${vars.v(
+                        "reason",
+                    )}. Please contact support.</p>"
+            NotificationTemplate.KYC_DOCUMENT_REQUIRED ->
+                "We need a document from you" to
+                    "<h2>Document Required</h2><p>To finish verifying your identity we need your " +
+                    "<b>${vars.v("documentType")}</b>. You can upload it in the OpenBank app.</p>"
+            NotificationTemplate.CONSENT_GRANTED ->
+                "Access to your account data was granted" to
+                    "<h2>Consent Granted</h2><p>You granted access to your account data " +
+                    "(<b>${vars.v("scope")}</b>). You can withdraw this at any time in the OpenBank app.</p>"
+            NotificationTemplate.CONSENT_REVOKED ->
+                "Access to your account data was withdrawn" to
+                    "<h2>Consent Withdrawn</h2><p>Access to your account data " +
+                    "(<b>${vars.v("scope")}</b>) has been withdrawn. No further data will be shared under it.</p>"
             NotificationTemplate.OTP_CODE ->
                 "Your OpenBank verification code" to
-                    "<h2>Verification Code</h2><p>Your code is: <b>${vars["code"] ?: ""}</b>. Valid for 5 minutes.</p>"
+                    "<h2>Verification Code</h2><p>Your code is: <b>${vars.v("code")}</b>. Valid for 5 minutes.</p>"
+            NotificationTemplate.PASSWORD_RESET ->
+                "Reset your OpenBank password" to
+                    "<h2>Password Reset</h2><p>Use the link below to set a new password. It expires in 15 minutes " +
+                    "and can be used once. If you did not ask for this, ignore this message and your password stays " +
+                    "unchanged.</p><p><a href=\"${vars.v("resetLink")}\">Reset your password</a></p>"
             NotificationTemplate.WELCOME ->
                 "Welcome to OpenBank" to
-                    "<h2>Welcome!</h2><p>Thank you for joining OpenBank, ${vars["name"] ?: ""}.</p>"
-            else -> template.name.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() } to
-                "<p>${vars.entries.joinToString("<br>") { "${it.key}: ${it.value}" }}</p>"
+                    "<h2>Welcome!</h2><p>Thank you for joining OpenBank, ${vars.v("name")}.</p>"
         }
 }
+
+/**
+ * Reads a declared template variable, or "" when the caller omitted it.
+ *
+ * The schema is closed against **undeclared** keys, not against missing ones (see
+ * [NotificationTemplate.variables]): rejecting a partial request would silently drop a real
+ * message, since poison payloads are acked. An omitted variable renders empty, as it always has.
+ *
+ * Top-level rather than a member so `renderTemplate` reads as copy instead of null-handling — the
+ * 16 inline `?: ""` reads it replaces were most of that function's cyclomatic complexity.
+ */
+private fun Map<String, String>.v(key: String): String = this[key] ?: ""
