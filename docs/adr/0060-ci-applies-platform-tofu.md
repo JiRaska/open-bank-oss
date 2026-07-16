@@ -139,4 +139,4 @@ keys). Safety rests on the *trust scope*, not on a trimmed permission list:
   merge surfaced this gap).
 - `openbank-infra/aws/envs/sandbox-platform/ci-tofu-apply.tf` — roles, OIDC, access entries.
 - `.github/workflows/platform-tofu.yml` — the plan/apply pipeline.
-- Issue #274 — the follow-up this realizes; #282 — the Environment/plan upgrade tail.
+- Issue JiRaska/open-bank#274 — the follow-up this realizes; JiRaska/open-bank#282 — the Environment/plan upgrade tail.
