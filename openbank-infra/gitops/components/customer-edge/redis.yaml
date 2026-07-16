@@ -1,6 +1,22 @@
-# Redis for customer-edge: nearby-pay payment sessions (ADR-0087) + WebAuthn RP
-# challenge/credential store (ADR-0066 F2). Ephemeral (sandbox); production should
-# use durable storage for passkey credentials (a flush drops registered passkeys).
+# Redis for customer-edge. Holds a mix of ephemeral and durable state:
+#   - WebAuthn RP CREDENTIALS (ADR-0066 F2, `edge:webauthn:cred:*`) — durable, no TTL: a
+#     registered passkey is an authentication factor, not a session artifact. WebAuthnStore's
+#     own KDoc says so.
+#   - nearby-pay payment sessions (ADR-0087), WebAuthn challenges, rate-limit counters,
+#     pending-onboarding entries — all short-lived/TTL'd, and fine to lose.
+#
+# The durable half is why this is no longer an emptyDir (issue #1260): it ran with
+# `--save "" --appendonly no` over emptyDir, so every pod restart, eviction or node drain
+# silently wiped every registered passkey — fleet-wide, with no error and no alert. Observed
+# live 2026-07-16: the pod restarted at 11:50, DBSIZE dropped to 0, and Face ID login started
+# failing with `{"error":"Unknown credential"}` (401) for a device holding a valid passkey.
+# Losing the credential also resets each `signCount`, blinding the WebAuthn anti-cloning check.
+#
+# AOF (`everysec`) on a gp3 PVC covers exactly that failure mode. Deliberately NOT a CNPG
+# Postgres like the rest of the fleet's durable state: the edge has no DB layer at all, and a
+# lost credential is recoverable (re-enrolment after a hosted login, PR #1268) — so a whole
+# stateful component, on the internet-facing service, for one keyspace was the wrong trade.
+# Backups are therefore out of scope by choice; re-enrolment is the recovery path.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,6 +27,10 @@ metadata:
     app.kubernetes.io/part-of: customer-edge
 spec:
   replicas: 1
+  # Recreate, not the default RollingUpdate: the gp3 PVC below is ReadWriteOnce, so a new pod
+  # would block Pending forever waiting for a volume the outgoing pod still holds.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: redis
@@ -29,7 +49,11 @@ spec:
       containers:
         - name: redis
           image: docker.io/valkey/valkey:8-alpine
-          args: ["--save", "", "--appendonly", "no"]
+          # AOF is what makes the credential keyspace survive a restart; `everysec` bounds the
+          # worst-case loss to ~1s of writes without the per-write fsync cost of `always`.
+          # RDB snapshots stay off (`--save ""`): the AOF is replayed on boot and is strictly
+          # more current, so a second on-disk format would only add I/O.
+          args: ["--save", "", "--appendonly", "yes", "--appendfsync", "everysec"]
           ports:
             - name: redis
               containerPort: 6379
@@ -61,7 +85,31 @@ spec:
               memory: 192Mi
       volumes:
         - name: data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: redis-data
+---
+# The passkey keyspace's actual durability. Prune=false + Delete=false: this volume outliving a
+# careless `kubectl delete -k` or an ArgoCD prune IS the point — deleting it de-registers every
+# customer's passkey, exactly the incident this replaced. Removing it must be a deliberate act.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data
+  namespace: customer-edge
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/part-of: customer-edge
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3
+  resources:
+    requests:
+      # The keyspace is a few hundred bytes per credential plus short-lived sessions; 1Gi is
+      # already orders of magnitude of headroom, and gp3's floor makes anything smaller moot.
+      storage: 1Gi
 ---
 apiVersion: v1
 kind: Service
