@@ -43,6 +43,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import io.mockk.verifyOrder
 import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -368,6 +369,112 @@ class LendingServiceTest {
     }
 
     @Test
+    fun `write-off also derecognizes the accrued-but-unpaid interest receivable`() {
+        val loanId = LoanId.random()
+        val loan = activeLoan(loanId)
+        // #1 paid; #2 and #3 unpaid with interest already accrued (a receivable is on the books);
+        // #4 unpaid but never accrued (no receivable exists for it — must not be derecognized).
+        val schedule = listOf(
+            LoanInstallment(
+                loanId = loanId, number = 1, dueDate = firstDue,
+                openingBalance = eur("12000.00"), principal = eur("946.19"),
+                interest = eur("120.00"), payment = eur("1066.19"), closingBalance = eur("11053.81"),
+                paid = true, paidAt = fixedNow,
+            ),
+            LoanInstallment(
+                loanId = loanId, number = 2, dueDate = firstDue.plusMonths(1),
+                openingBalance = eur("11053.81"), principal = eur("955.65"),
+                interest = eur("110.54"), payment = eur("1066.19"), closingBalance = eur("10098.16"),
+                interestAccrued = true, accruedAt = fixedNow,
+            ),
+            LoanInstallment(
+                loanId = loanId, number = 3, dueDate = firstDue.plusMonths(2),
+                openingBalance = eur("10098.16"), principal = eur("965.21"),
+                interest = eur("100.98"), payment = eur("1066.19"), closingBalance = eur("9132.95"),
+                interestAccrued = true, accruedAt = fixedNow,
+            ),
+            LoanInstallment(
+                loanId = loanId,
+                number = 4,
+                dueDate = firstDue.plusMonths(3),
+                openingBalance = eur("9132.95"),
+                principal = eur("974.86"),
+                interest = eur("91.33"),
+                payment = eur("1066.19"),
+                closingBalance = eur("8158.09"),
+            ),
+        )
+        val postings = mutableListOf<LedgerPosting>()
+        every { loans.findById(loanId) } returns Uni.createFrom().item(loan)
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        every { ledger.post(capture(postings)) } returns Uni.createFrom().item(Unit)
+        every { loans.update(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+
+        service.writeOff(loanId, WriteOffRequest(writtenOffBy = "carol", reason = "insolvency"))
+            .await().indefinitely()
+
+        // Principal loss plus the interest receivable: nothing of the loan stays on the books.
+        assertThat(postings.map { it.kind })
+            .containsExactly(PostingKind.WRITE_OFF, PostingKind.WRITE_OFF_INTEREST)
+        val interestLeg = postings.single { it.kind == PostingKind.WRITE_OFF_INTEREST }
+        // Only the ACCRUED unpaid interest (#2 + #3 = 110.54 + 100.98); #4 never posted a receivable.
+        assertThat(interestLeg.amount).isEqualTo(eur("211.52"))
+        assertThat(interestLeg.reference).isEqualTo("loan:${loanId.value}:writeoff:interest")
+        // Both ledger legs are booked before the loan row is marked WRITTEN_OFF (crash safety).
+        verifyOrder {
+            ledger.post(match { it.kind == PostingKind.WRITE_OFF })
+            ledger.post(match { it.kind == PostingKind.WRITE_OFF_INTEREST })
+            loans.update(any())
+        }
+    }
+
+    @Test
+    fun `write-off retry after a ledger failure replays identical idempotency keys and only then marks the loan`() {
+        val loanId = LoanId.random()
+        val loan = activeLoan(loanId)
+        // Unpaid installment #2 has its interest accrued: a receivable exists to derecognize.
+        val schedule = twoInstallmentSchedule(loanId).map {
+            if (it.paid) it else it.copy(interestAccrued = true, accruedAt = fixedNow)
+        }
+        val postings = mutableListOf<LedgerPosting>()
+        every { loans.findById(loanId) } returns Uni.createFrom().item(loan)
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        // Attempt 1: the principal leg books, the interest leg dies on the wire.
+        every { ledger.post(capture(postings)) } answers {
+            if (firstArg<LedgerPosting>().kind == PostingKind.WRITE_OFF_INTEREST) {
+                Uni.createFrom().failure(IllegalStateException("ledger down"))
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+        }
+
+        assertThatThrownBy {
+            service.writeOff(loanId, WriteOffRequest(writtenOffBy = "carol")).await().indefinitely()
+        }.isInstanceOf(IllegalStateException::class.java).hasMessageContaining("ledger down")
+        // Crash safety: the loan stays ACTIVE until every ledger leg has booked, so a retry re-enters.
+        verify(exactly = 0) { loans.update(any()) }
+
+        // Attempt 2: ledger is back.
+        every { ledger.post(capture(postings)) } returns Uni.createFrom().item(Unit)
+        every { loans.update(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+
+        val written = service.writeOff(loanId, WriteOffRequest(writtenOffBy = "carol")).await().indefinitely()
+
+        assertThat(written.status).isEqualTo(LoanStatus.WRITTEN_OFF)
+        // The retry replays byte-identical idempotency keys, so the ledger collapses the replays —
+        // the principal leg is posted twice here but can only ever book once.
+        val principalRefs = postings.filter { it.kind == PostingKind.WRITE_OFF }.map { it.reference }
+        val interestRefs = postings.filter { it.kind == PostingKind.WRITE_OFF_INTEREST }.map { it.reference }
+        assertThat(principalRefs).hasSize(2).containsOnly("loan:${loanId.value}:writeoff")
+        assertThat(interestRefs).hasSize(2).containsOnly("loan:${loanId.value}:writeoff:interest")
+        assertThat(postings.filter { it.kind == PostingKind.WRITE_OFF_INTEREST }.map { it.amount }.toSet())
+            .containsExactly(eur("110.54"))
+        verify(exactly = 1) { loans.update(any()) }
+    }
+
+    @Test
     fun `write-off refuses a loan that is not ACTIVE`() {
         val loanId = LoanId.random()
         every { loans.findById(loanId) } returns
@@ -446,7 +553,7 @@ class LendingServiceTest {
     }
 
     @Test
-    fun `reschedule replaces the unpaid tail, numbering new rows after the last paid installment`() {
+    fun `reschedule replaces the unpaid tail, numbering new rows after the highest existing installment`() {
         val loanId = LoanId.random()
         val loan = activeLoan(loanId)
         val schedule = twoInstallmentSchedule(loanId)
@@ -458,9 +565,10 @@ class LendingServiceTest {
 
         assertThat(result.status).isEqualTo(LoanStatus.ACTIVE)
         verify(exactly = 1) { installments.deleteUnpaid(loanId) }
-        // One paid installment (#1) already exists; the new schedule's rows must continue from #2 —
-        // never restart at #1, or a future repayment's ledger reference would collide with the paid one.
-        assertThat(rowsSlot.captured.first().number).isEqualTo(2)
+        // Installments #1 (paid) and #2 (unpaid, discarded) already exist; the new schedule's rows must
+        // continue from #3 — never reuse a discarded number, or a future ledger reference
+        // ("loan:<id>:inst:<n>:...") would collide with one the discarded row may already have posted.
+        assertThat(rowsSlot.captured.first().number).isEqualTo(3)
         assertThat(rowsSlot.captured.map { it.number }).isSorted()
         assertThat(rowsSlot.captured).hasSize(24)
         verify(exactly = 0) { ledger.post(match { it.kind == PostingKind.RESCHEDULE_FORGIVENESS }) }
@@ -496,6 +604,101 @@ class LendingServiceTest {
         service.reschedule(loanId, rescheduleRequest(forgiveness = eur("1000.00")), "carol").await().indefinitely()
 
         assertThat(loanSlot.captured.version).isEqualTo(loan.version + 1)
+    }
+
+    @Test
+    fun `reschedule reverses each accrued-unpaid installment's accrual before deleting the tail`() {
+        val loanId = LoanId.random()
+        val loan = activeLoan(loanId)
+        // Unpaid installment #2 already had its interest recognized by the accrual pass: an Interest
+        // Receivable of 110.54 is on the books that its settlement can now never clear.
+        val schedule = twoInstallmentSchedule(loanId).map {
+            if (it.paid) it else it.copy(interestAccrued = true, accruedAt = fixedNow)
+        }
+        mockRescheduleHappyPath(loanId, loan, schedule)
+        val postings = mutableListOf<LedgerPosting>()
+        every { ledger.post(capture(postings)) } returns Uni.createFrom().item(Unit)
+
+        service.reschedule(loanId, rescheduleRequest(), "carol").await().indefinitely()
+
+        assertThat(postings).hasSize(1)
+        val reversal = postings.single()
+        assertThat(reversal.kind).isEqualTo(PostingKind.INTEREST_ACCRUAL_REVERSAL)
+        assertThat(reversal.amount).isEqualTo(eur("110.54"))
+        // Generation-scoped key, same durable-version pattern as the forgiveness posting: a second
+        // reschedule of the same loan can never replay this journal.
+        assertThat(reversal.reference).isEqualTo("loan:${loanId.value}:inst:2:accrual-reversal:gen1")
+        // The ledger reversal is posted BEFORE the row is deleted: a crash in between leaves the row
+        // for the retry, which replays the same key idempotently.
+        verifyOrder {
+            ledger.post(any())
+            installments.deleteUnpaid(loanId)
+        }
+    }
+
+    @Test
+    fun `reschedule posts no reversal for an accrued zero-interest installment`() {
+        val loanId = LoanId.random()
+        val loan = activeLoan(loanId)
+        // A zero-interest row is flagged accrued by the pass without ever posting: nothing to reverse.
+        val schedule = listOf(
+            twoInstallmentSchedule(loanId).first(),
+            LoanInstallment(
+                loanId = loanId, number = 2, dueDate = firstDue.plusMonths(1),
+                openingBalance = eur("11053.81"), principal = eur("1066.19"),
+                interest = eur("0.00"), payment = eur("1066.19"), closingBalance = eur("9987.62"),
+                interestAccrued = true, accruedAt = fixedNow,
+            ),
+        )
+        mockRescheduleHappyPath(loanId, loan, schedule)
+
+        service.reschedule(loanId, rescheduleRequest(), "carol").await().indefinitely()
+
+        verify(exactly = 0) { ledger.post(any()) }
+        verify(exactly = 1) { installments.deleteUnpaid(loanId) }
+    }
+
+    @Test
+    fun `reschedule retry after a ledger failure replays the identical reversal key and never deletes early`() {
+        val loanId = LoanId.random()
+        val loan = activeLoan(loanId)
+        val schedule = twoInstallmentSchedule(loanId).map {
+            if (it.paid) it else it.copy(interestAccrued = true, accruedAt = fixedNow)
+        }
+        val postings = mutableListOf<LedgerPosting>()
+        every { loans.findById(loanId) } returns Uni.createFrom().item(loan)
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        // Attempt 1: the reversal dies on the wire.
+        every { ledger.post(capture(postings)) } returns
+            Uni.createFrom().failure(IllegalStateException("ledger down"))
+
+        assertThatThrownBy {
+            service.reschedule(loanId, rescheduleRequest(), "carol").await().indefinitely()
+        }.isInstanceOf(IllegalStateException::class.java).hasMessageContaining("ledger down")
+        // Nothing was mutated: the rows are still there and the version was not bumped, so the retry
+        // recomputes the same generation and thus the same idempotency key.
+        verify(exactly = 0) { installments.deleteUnpaid(any()) }
+        verify(exactly = 0) { loans.update(any()) }
+
+        // Attempt 2: ledger is back; complete the happy path.
+        every { ledger.post(capture(postings)) } returns Uni.createFrom().item(Unit)
+        every { installments.deleteUnpaid(loanId) } returns Uni.createFrom().item(1)
+        every { installments.saveAll(any()) } answers {
+            @Suppress("UNCHECKED_CAST")
+            Uni.createFrom().item(firstArg<List<LoanInstallment>>())
+        }
+        every { loans.update(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+
+        service.reschedule(loanId, rescheduleRequest(), "carol").await().indefinitely()
+
+        // Both attempts posted the reversal under the byte-identical idempotency key: the ledger
+        // collapses the replay, so the receivable is backed out exactly once.
+        assertThat(postings).hasSize(2)
+        assertThat(postings.map { it.reference }.toSet())
+            .containsExactly("loan:${loanId.value}:inst:2:accrual-reversal:gen1")
+        assertThat(postings.map { it.kind }.toSet()).containsExactly(PostingKind.INTEREST_ACCRUAL_REVERSAL)
+        assertThat(postings.map { it.amount }.toSet()).containsExactly(eur("110.54"))
     }
 
     @Test
