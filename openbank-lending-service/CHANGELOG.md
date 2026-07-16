@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.11.0...lending-service-v0.11.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* **lending:** capitalize accrued interest on reschedule, derecognize it on write-off ([#1253](https://github.com/JiRaska/open-bank-oss/issues/1253)) ([5e14908](https://github.com/JiRaska/open-bank-oss/commit/5e14908a9440eb8614a0c33da0eff4a116e9e666))
+* **lending:** reverse accrued interest on reschedule, derecognize it on write-off ([#1236](https://github.com/JiRaska/open-bank-oss/issues/1236)) ([b18c74e](https://github.com/JiRaska/open-bank-oss/commit/b18c74e8bd3e3d13f11f1d0225c7757d91f2b733)), closes [#470](https://github.com/JiRaska/open-bank-oss/issues/470)
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.10.1...lending-service-v0.11.0) (2026-07-11)
 
 
