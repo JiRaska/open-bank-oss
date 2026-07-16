@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.20.1...customer-edge-v0.20.2) (2026-07-16)
+
+
+### Bug Fixes
+
+* **customer-edge:** ask document-service for the terms PDF with a wildcard accept ([#1337](https://github.com/JiRaska/open-bank-oss/issues/1337)) ([2648580](https://github.com/JiRaska/open-bank-oss/commit/26485804c5cb36b83d798d6252e1e837d24f5087))
+
 ## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.20.0...customer-edge-v0.20.1) (2026-07-16)
 
 
