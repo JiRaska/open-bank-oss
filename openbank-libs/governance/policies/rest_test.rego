@@ -816,6 +816,27 @@ test_allow_admin_opsmessage_compose if {
 	decision.allow == true
 }
 
+# The maker's cheap first step — a SEPARATE action from opsmessage.compose (see the rest.rego
+# comment): if drafting used the same action name, creating a draft would itself be paused by
+# four_eyes_required, defeating the whole point of splitting draft from submit.
+test_allow_operator_opsmessage_draft if {
+	decision := rest.allow with input as {
+		"principal": {"id": "operator-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "opsmessage.draft",
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	decision.reason == "opsmessage-draft"
+}
+
+# opsmessage.draft must never require a second approver — only opsmessage.compose (the submit
+# step) is in rules.yaml's four_eyes.actions.
+test_four_eyes_not_required_for_opsmessage_draft if {
+	not rest.four_eyes_required with input as {"action": "opsmessage.draft"}
+		with data.rules as rules
+}
+
 # The checker side — a DIFFERENT operator decides. Self-approval is refused at the
 # application layer (SelfApprovalNotAllowedException), not by this rego rule, which has no
 # notion of who made the original request; only role/identity is checked here.

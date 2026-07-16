@@ -253,6 +253,20 @@ allowed_reasons contains "opsmessage-compose" if {
 	input.action == "opsmessage.compose"
 }
 
+# The maker's cheap, reversible first step: persist the draft's content (template, reference,
+# purpose) BEFORE the four-eyes gate runs. Deliberately a SEPARATE action from
+# opsmessage.compose, not a second endpoint reusing that name: four_eyes_required matches
+# purely on input.action, so if drafting used "opsmessage.compose" too, creating a draft would
+# itself get paused for a second approver — defeating the entire "draft has nothing to approve
+# yet, only submitting it does" design. opsmessage.draft is intentionally absent from
+# rules.yaml's four_eyes.actions.
+allowed_reasons contains "opsmessage-draft" if {
+	input.principal.type == "HUMAN"
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	input.action == "opsmessage.draft"
+}
+
 # The checker side of the same maker-checker pair (ADR-0176 D5). Deciding an approval is a
 # single-operator action by design — it is what CONSTITUTES the second pair of eyes, so
 # opsmessage.approve/reject are deliberately NOT themselves in four_eyes.actions (gating them
