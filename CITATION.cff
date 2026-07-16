@@ -7,7 +7,14 @@ authors:
     given-names: "Jiří"
 repository-code: "https://github.com/JiRaska/open-bank-oss"
 url: "https://open-bank.tech/"
-license: Apache-2.0
+# Multi-licensed open-core (ADR-0136). CFF assumes an OR relationship between listed
+# licences; the real split is per-component, not reader's choice — see `abstract` below,
+# `LICENSE`, and docs/adr/0136-agent-services-agpl-in-repo-open-core.md, which are
+# authoritative. Both identifiers are listed so the AGPL component is not invisible to
+# tooling that reads only this file.
+license:
+  - Apache-2.0
+  - AGPL-3.0-only
 keywords:
   - banking
   - fintech
@@ -22,4 +29,9 @@ abstract: >-
   Cloud-native, open-source retail banking platform reference implementation:
   Kotlin/Quarkus event-driven microservices with a double-entry ledger,
   ISO 20022 payment rails, machine-enforced governance, supply-chain
-  security, and AI-agent operations baked in as code.
+  security, and AI-agent operations baked in as code. Open-core licensing:
+  the platform is Apache-2.0, while the four AI agent services
+  (openbank-agent-service, openbank-copilot-service, openbank-devops-agent,
+  openbank-finops-agent) are AGPL-3.0-only with a parallel commercial licence
+  (ADR-0136). The split is per-component and not a choice offered to the
+  reader; see LICENSE and docs/adr/0136 for the authoritative boundary.

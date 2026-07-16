@@ -85,13 +85,14 @@ unique-constraint on the `email` column after PII removal.
 Services that retain data under AML/accounting obligations (`audit-service`, `ledger-service`,
 `transaction-service`) must explicitly **not** subscribe to `PARTY_ERASED`.
 
-**5. Retention enforcement (NOT YET IMPLEMENTED).**
+**5. Retention enforcement.** ✅ Shipped (see the delivery note above).
 
 Per-service `@Scheduled` retention jobs enforce these periods (implemented as service-local
 schedulers rather than one central Temporal workflow — each owner deletes its own PII, keeping the
 boundary clean):
 - Session/access logs older than 90 days → delete from audit-service (`SessionLogRetentionScheduler`,
-  behavioural PII only; ships disabled-by-default).
+  behavioural PII only; ships disabled-by-default — enabling it per environment is a deliberate
+  operational decision, not a delivery gap).
 - KYC documents older than `relationshipEndDate + 5 years` → delete from kyc-service
   (`KycRetentionScheduler`, live).
 - Card PII older than `cardExpiry + 5 years` → anonymise in card-issuance-service
