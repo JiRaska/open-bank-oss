@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: Apache-2.0
+# Alerts for the sbom-drift-scanner CronJob (ADR-0030 D5 phase 1).
+#
+# WHY THIS FILE EXISTS: the scanner used to write its findings to a ConfigMap and exit 0 —
+# always. On 2026-07-12 it reported `sepa-payment: no-pod-found` while sepa-payment was in
+# fact down and un-admittable, and nothing escalated: no pod, no alert, no owner. A finding
+# that only lands in a ConfigMap is a finding nobody acts on. The scanner now fails its Job
+# on any actionable finding; these rules turn that failure into an actual page.
+#
+# Prometheus selects PrometheusRules cluster-wide (ruleSelectorNilUsesHelmValues: false in
+# kube-prometheus-stack.yaml), so no selector labels are required for discovery.
+#
+# SEVERITY MUST BE `critical` OR `warning` — nothing else. Alertmanager routes only those two
+# (kube-prometheus-stack.yaml); the top-level route's default receiver is `null`, so any other
+# value (`high`, `medium`, `info`, …) is silently BLACK-HOLED. An alert that routes nowhere is
+# indistinguishable from no alert at all — the exact class of bug this component exists to
+# catch. Do not "normalise" these labels to a severity scale that Alertmanager does not match.
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-sbom-drift-scanner-alerts
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/part-of: openbank
+    app.kubernetes.io/name: sbom-drift-scanner
+spec:
+  groups:
+    - name: openbank.supplychain.driftscanner
+      rules:
+        # Fires when the scanner found real drift (running image != declared image) or a
+        # money-path service with no running pod at all.
+        - alert: SbomDriftScannerFailing
+          expr: kube_job_failed{namespace="admin-ui", job_name=~"sbom-drift-scanner-.*"} > 0
+          for: 5m
+          labels:
+            severity: critical
+            component: supply-chain
+          annotations:
+            summary: "sbom-drift-scanner reported actionable findings"
+            description: >-
+              The daily gitops-image-sync scan failed: at least one money-path service is
+              running an image other than the one origin/main declares, or has NO running pod
+              at all. `no-pod-found` on a money-path service is not benign — it can mean the
+              service cannot be admitted (e.g. an unattested image under the Kyverno Enforce
+              policy) and is simply down. Read the `sbom-drift` ConfigMap in the admin-ui
+              namespace for the per-service detail.
+              NOTE: this scan does NOT verify SBOM attestations — that is the
+              fleet-attestation CI gate (.github/workflows/fleet-attestation.yml).
+
+        # A scanner that silently stops running is indistinguishable from a clean fleet —
+        # exactly the failure mode this whole component exists to avoid. Alert on staleness.
+        - alert: SbomDriftScannerStale
+          # 26h: the schedule is daily (03:10 UTC); allow one missed run plus slack.
+          expr: >-
+            time() - kube_cronjob_status_last_successful_time{namespace="admin-ui",
+            cronjob="sbom-drift-scanner"} > 93600
+          for: 30m
+          labels:
+            severity: warning
+            component: supply-chain
+          annotations:
+            summary: "sbom-drift-scanner has not completed successfully in >26h"
+            description: >-
+              The gitops-image-sync scan has not had a successful run in over 26 hours. Its
+              last report is stale — an absent signal reads exactly like a clean one, so treat
+              this as unknown fleet state rather than a healthy one.

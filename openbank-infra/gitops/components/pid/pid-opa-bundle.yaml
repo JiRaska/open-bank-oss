@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pid-service
     app.kubernetes.io/part-of: pid
   annotations:
-    openbank.tech/policy-checksum: "ccb19defeaeb463b"
+    openbank.tech/policy-checksum: "8ed7d3bc263469c1"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1834,9 +1834,48 @@ data:
       blocked_on: "all four enforce_criteria below must hold; see that list for the specific gap"
       enforce_criteria:
         - "every deployable service's latest release carries a verify-release-evidence-green bundle (admin-ui excepted until it has a non-Gradle SBOM source)"
-        - "the running fleet has been redeployed so every live image carries the cosign SBOM attestation"
-        - "kyverno SBOM-attestation rule flips Audit -> Enforce (Audit is LIVE: verify-sbom-attestation-policy.yaml; the flip is one line once criteria 1-2 hold)"
+        - "the fleet-attestation gate passes: .github/scripts/check-fleet-attestations.sh is GREEN against origin/main (see fleet_attestation_gate below) -- this is a HARD precondition, not a judgement call"
+        - "kyverno SBOM-attestation rule flips Audit -> Enforce (verify-sbom-attestation-policy.yaml; one line once criteria 1-2 hold)"
         - "the advisory gate has run clean for an observation window (no false-positive blocks)"
+
+      # -------------------------------------------------------------------------------------
+      # The fleet-attestation gate: the checkable precondition for ANY image-provenance policy
+      # graduating Audit -> Enforce. Encoded here because the 2026-07-12 graduation was
+      # authorized on a claim ("the running fleet was fully redeployed with attested images")
+      # that was FALSE and that nothing could have falsified -- there was no check to run.
+      # There is now. Run it; do not assert it.
+      # -------------------------------------------------------------------------------------
+      fleet_attestation_gate:
+        script: .github/scripts/check-fleet-attestations.sh
+        workflow: .github/workflows/fleet-attestation.yml   # daily schedule + gitops/producer PRs
+        placeholder_allowlist: .github/scripts/fleet-attestation-placeholders.txt
+        # WHAT IT CHECKS: every openbank-* image referenced anywhere under openbank-infra/gitops/
+        # -- app containers, initContainers AND sidecars -- carries a cosign-signed CycloneDX SBOM
+        # attestation verifiable with the same key + tag scheme kyverno uses at admission.
+        scope: every openbank-* image declared in openbank-infra/gitops (incl. initContainers + sidecars)
+        # WHY DECLARED, NOT RUNNING: kyverno verifies at ADMISSION, never continuously. An
+        # unattested image whose pod already runs keeps running; the violation is LATENT until a
+        # reschedule (node roll, eviction, scale-up) denies the pod permanently, one at a time.
+        # So "PolicyReport shows 0 fail" and "the fleet is healthy" are NOT evidence of coverage
+        # -- they only describe pods that happen to exist right now. NEVER infer "it is running,
+        # therefore it was verified".
+        basis: declared_images_not_running_pods
+        enforcement_rule: >-
+          No image-provenance policy (verify-openbank-image-signatures,
+          verify-openbank-image-sbom-attestation, or any successor) may be set to
+          validationFailureAction: Enforce while this gate fails. A graduation PR must cite a
+          green run of it. An unattested image is never rejected at the moment it is created --
+          only later, at a reschedule nobody scheduled -- so a passing gate is the ONLY evidence
+          that a flip to Enforce is safe.
+        # Producers must make an unattested image impossible rather than merely unlikely:
+        # every openbank-* image producer signs AND attests via the shared helper, and any
+        # provenance failure HARD-FAILS the push (a warning-only path is what created the gap).
+        producer_helper: openbank-infra/scripts/lib/cosign-attest.sh
+        producer_failure_mode: hard_fail   # never warn-and-continue on a provenance failure
+        # trivy defaults to --platform linux/amd64 for REMOTE scans regardless of host arch;
+        # fleet images are arm64-only, so an unqualified `trivy image` fails 100% of the time
+        # and silently yields an unattested image if only the exit code is checked.
+        trivy_platform_required: true
 
     # ---------------------------------------------------------------------------------------
     # Dependency policy (CONTRIBUTING.md security checklist).

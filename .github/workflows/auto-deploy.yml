@@ -479,14 +479,21 @@ jobs:
       # image (ADR-0030 D4), complementing the release-time bundle (release-please.yml) and
       # the image SIGNATURE above. trivy generates the image SBOM (OS layer + jars, which a
       # source scan misses); cosign attest binds it to the image digest with the same KMS key.
-      # Non-fatal: kyverno enforces the signature, not (yet) the attestation, so an attest
-      # hiccup must never block a deploy.
+      #
+      # FATAL as of 2026-07-16. The two comments this step used to carry — "kyverno enforces
+      # the signature, not (yet) the attestation" and "an attest hiccup must never block a
+      # deploy" — were both false once verify-openbank-image-sbom-attestation graduated to
+      # Enforce on 2026-07-12. They were the entire bug: `trivy image` was missing --platform
+      # (it defaults to linux/amd64 on REMOTE scans; these images are arm64-only), so the scan
+      # failed with "no child with platform linux/amd64 in index" on EVERY image, the failure
+      # became a ::warning, continue-on-error swallowed it, and the deploy proceeded green with
+      # an unattested image. Nothing noticed until a pod rescheduled days later and could not
+      # be re-admitted.
+      #
+      # An unattested image cannot be admitted, so a deploy that "succeeds" while producing one
+      # is not a successful deploy — it is a time bomb with a green check. Fail here instead.
       - name: Attest image SBOMs (cosign + KMS)
         timeout-minutes: 15
-        # Strictly non-fatal: kyverno enforces the image signature, not (yet) the
-        # attestation, so nothing here — not even a failed cosign download — may block a
-        # deploy. continue-on-error guarantees the deploy proceeds regardless.
-        continue-on-error: true
         run: |
           set -uo pipefail
           SERVICES='${{ needs.changes.outputs.services }}'
@@ -501,17 +508,33 @@ jobs:
             curl -fsSL -o "$bin" "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-${os}-${arch}"
             chmod +x "$bin"
           fi
+          rc=0
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
             [ -f "${svc}/build/quarkus-app/quarkus-run.jar" ] || continue
             image="${ECR_REGISTRY}/${svc}:${TAG}"
             sbom="${RUNNER_TEMP}/${svc}.cdx.json"
-            if ! trivy image --format cyclonedx --output "$sbom" "$image" 2>/dev/null; then
-              echo "::warning::[${svc}] trivy image SBOM generation failed — skipping attestation"; continue
+            # --platform is REQUIRED: images are built linux/arm64 (line ~364) and trivy
+            # defaults to linux/amd64 for remote scans. Omitting it fails 100% of the time.
+            # Stderr is NOT swallowed (`2>/dev/null` was hiding the platform error for weeks).
+            echo "==> [${svc}] trivy image --platform linux/arm64 (cyclonedx) ${image}"
+            if ! trivy image --platform linux/arm64 --format cyclonedx --output "$sbom" "$image"; then
+              echo "::error::[${svc}] trivy image SBOM generation failed — image would be UNATTESTED and undeployable"; rc=1; continue
             fi
             echo "==> cosign attest (cyclonedx) ${image}"
-            COSIGN_YES=true "$bin" attest --key "$COSIGN_KEY" --type cyclonedx --predicate "$sbom" "$image" \
-              || echo "::warning::[${svc}] cosign attest failed"
+            if ! COSIGN_YES=true "$bin" attest --key "$COSIGN_KEY" --type cyclonedx --predicate "$sbom" "$image"; then
+              echo "::error::[${svc}] cosign attest failed — image UNATTESTED and undeployable"; rc=1; continue
+            fi
+            # Never trust `attest` exit 0 alone — verify the attestation is discoverable the
+            # same way kyverno discovers it at admission (legacy .att tag scheme, cosign v2).
+            if ! COSIGN_YES=true "$bin" verify-attestation --key "$COSIGN_KEY" --type cyclonedx "$image" >/dev/null 2>&1; then
+              echo "::error::[${svc}] cosign verify-attestation failed — the attestation did not land"; rc=1; continue
+            fi
+            echo "    [${svc}] attested + verified"
           done
+          [ "$rc" -eq 0 ] || {
+            echo "::error::One or more images are UNATTESTED. kyverno (verify-openbank-image-sbom-attestation, Enforce) will DENY their pods on the next reschedule."
+            exit 1
+          }
 
       - name: Collect image tags
         id: collect

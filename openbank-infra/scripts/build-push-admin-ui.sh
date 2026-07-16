@@ -329,62 +329,22 @@ docker buildx build \
 
 echo "==> pushed ${IMAGE}"
 
-# Sign with Cosign (ADR-0029/0030 supply-chain). KMS trust root alias/openbank-cosign-signing;
-# kyverno verifies against the matching public key + Rekor tlog.
+# Sign + attest via the shared helper (ADR-0029/0030 supply-chain), so admin-ui does
+# provenance identically to every other producer. KMS trust root
+# alias/openbank-cosign-signing. This block used to be the only correct copy of the attest
+# logic in the tree; it is now the shared implementation (lib/cosign-attest.sh) — which is
+# also where the cosign-v2 pin and its rationale (kyverno 3.2.6 / issue #770) now live.
 #
-# IMPORTANT — cosign v2 is pinned on purpose. kyverno 3.2.6 discovers signatures only via the
-# legacy `sha256-<digest>.sig` tag scheme. cosign v3 writes OCI 1.1 *referrer* signatures on ECR
-# (no .sig tag) which kyverno cannot find ("no signatures found") — under Enforce that rejects
-# every image. cosign v2 writes tag-based signatures kyverno reads. Revisit once kyverno can
-# verify referrers (then cosign v3 is the target). See ADR-0029 / issue #770.
-COSIGN_KEY="${COSIGN_KEY:-awskms:///alias/openbank-cosign-signing}"
-COSIGN_VERSION="${COSIGN_VERSION:-v2.4.3}"
+# Now FATAL rather than best-effort. The old "never blocks the push" behaviour is exactly
+# what let unattested images reach gitops: kyverno's SBOM-attestation policy is Enforce, so
+# a warning here buys a push that cannot be admitted on its next reschedule.
+. "${REPO_ROOT}/openbank-infra/scripts/lib/cosign-attest.sh"
 
-# Echo a cosign v2.x binary path: reuse one on PATH if it is v2, else fetch the pinned release
-# to a cache path. Returns non-zero (empty) if no v2 binary can be obtained.
-resolve_cosign_v2() {
-  if command -v cosign >/dev/null 2>&1 && cosign version 2>/dev/null | grep -Eq 'GitVersion:[[:space:]]*v2\.'; then
-    command -v cosign; return 0
-  fi
-  local os arch bin
-  os="$(uname -s | tr '[:upper:]' '[:lower:]')"
-  case "$(uname -m)" in aarch64|arm64) arch=arm64 ;; x86_64|amd64) arch=amd64 ;; *) return 1 ;; esac
-  bin="${TMPDIR:-/tmp}/cosign-${COSIGN_VERSION}-${os}-${arch}"
-  if [ ! -x "$bin" ]; then
-    curl -fsSL -o "$bin" "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-${os}-${arch}" 2>/dev/null && chmod +x "$bin" || return 1
-  fi
-  printf '%s\n' "$bin"
+cosign_sign_and_attest "$IMAGE" "$PLATFORM" || {
+  echo "ERROR: ${IMAGE} pushed but NOT fully attested — it is NOT deployable." >&2
+  echo "       Fix the provenance failure above and re-run; do not bump gitops to this tag." >&2
+  exit 1
 }
-
-COSIGN_BIN="$(resolve_cosign_v2 || true)"
-if [ -n "${COSIGN_BIN:-}" ]; then
-  echo "==> cosign sign ${IMAGE} (tag-based, $("$COSIGN_BIN" version 2>/dev/null | awk '/GitVersion/{print $2}'))"
-  if COSIGN_YES=true "$COSIGN_BIN" sign --key "${COSIGN_KEY}" "${IMAGE}"; then
-    echo "    signed (key=${COSIGN_KEY})"
-  else
-    echo "WARN: cosign sign failed — image pushed but UNSIGNED (kyverno will Audit-flag it)." >&2
-  fi
-  # Deploy-time provenance: attach a signed CycloneDX SBOM ATTESTATION to the image
-  # (ADR-0030 D4), matching the per-service images in auto-deploy.yml so admin-ui is not
-  # the lone gap when the provenance gate moves Audit->Enforce. Best-effort (never blocks
-  # the push): trivy generates the image SBOM, cosign attest binds it with the same KMS key.
-  if command -v trivy >/dev/null 2>&1; then
-    AUI_SBOM="${TMPDIR:-/tmp}/openbank-admin-ui.cdx.json"
-    if trivy image --platform "${PLATFORM}" --format cyclonedx --output "${AUI_SBOM}" "${IMAGE}" 2>/dev/null; then
-      echo "==> cosign attest (cyclonedx) ${IMAGE}"
-      COSIGN_YES=true "$COSIGN_BIN" attest --key "${COSIGN_KEY}" --type cyclonedx \
-        --predicate "${AUI_SBOM}" "${IMAGE}" \
-        && echo "    attested SBOM (key=${COSIGN_KEY})" \
-        || echo "WARN: cosign attest failed — image SBOM not attested." >&2
-    else
-      echo "WARN: trivy image SBOM generation failed — skipping SBOM attestation." >&2
-    fi
-  else
-    echo "WARN: trivy unavailable — skipping image SBOM attestation." >&2
-  fi
-else
-  echo "WARN: cosign v2 unavailable — image pushed UNSIGNED. Install cosign v2.x or set COSIGN_VERSION (ADR-0029)." >&2
-fi
 
 if [ "${BUMP_MANIFEST}" -eq 1 ]; then
   echo "==> bump ${MANIFEST} -> ${TAG}"

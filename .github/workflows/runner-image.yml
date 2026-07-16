@@ -120,7 +120,11 @@ jobs:
           COSIGN_YES=true cosign sign --key "$COSIGN_KEY" "$IMAGE_DIGEST_REF" \
             || { echo "::warning::cosign sign failed"; exit 1; }
           sbom="${RUNNER_TEMP}/ci-runner.cdx.json"
-          trivy image --format cyclonedx --output "$sbom" "$IMAGE_DIGEST_REF" \
+          # --platform is REQUIRED: this image is built linux/arm64 (see the buildx step) and
+          # trivy defaults to linux/amd64 for REMOTE scans regardless of host arch — without it
+          # the scan fails with "no child with platform linux/amd64 in index" and the image is
+          # left unattested. Same bug that left several fleet images unattested (2026-07-12).
+          trivy image --platform linux/arm64 --format cyclonedx --output "$sbom" "$IMAGE_DIGEST_REF" \
             || { echo "::warning::trivy SBOM generation failed"; exit 1; }
           echo "==> cosign attest (cyclonedx) ${IMAGE_DIGEST_REF}"
           COSIGN_YES=true cosign attest --key "$COSIGN_KEY" --type cyclonedx --predicate "$sbom" "$IMAGE_DIGEST_REF" \

@@ -1,0 +1,23 @@
+# Placeholder image allowlist for .github/scripts/check-fleet-attestations.sh
+#
+# Images declared in openbank-infra/gitops/ that are deliberate FIRST-REGISTRATION
+# placeholders: the tag has never been built or pushed, so the image is absent from ECR
+# entirely. These cannot be admitted to the cluster at all (Kyverno blocks even ArgoCD's
+# dry-run diff for a nonexistent tag, so the app sits at sync status Unknown rather than
+# ImagePullBackOff), and they are NOT an attestation regression — a nonexistent image
+# cannot be an unattested one.
+#
+# This allowlist exists so the gate can reach GREEN and therefore stay credible. A check
+# that is permanently red because of a known placeholder is a check people learn to ignore.
+#
+# STRICT SCOPE — this file may ONLY list images absent from the registry. It can never
+# suppress an UNATTESTED image (present in ECR, no attestation); that class is always fatal
+# and has no allowlist, because that is precisely the class that caused the 2026-07-12
+# admission failures.
+#
+# Remove an entry the moment the service is genuinely built + pushed. One image ref per
+# line, exact match, full registry path.
+
+# finrep-service: first ArgoCD registration (ADR-0097); never built via build-push-service.sh.
+# See the header note in openbank-infra/gitops/components/finrep/finrep-service.yaml.
+265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-finrep-service:sandbox-init
