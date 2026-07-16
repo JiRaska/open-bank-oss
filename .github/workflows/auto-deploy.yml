@@ -111,7 +111,18 @@ jobs:
           # gitops manifest, ADR-0162 onboarding-agreement + ADR-0169 SCA-document-binding
           # PRs (#1137, #1142) merged and released — but never in ALL_SERVICES, so every
           # push since it shipped silently deployed nothing. Added here.
-          ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter'
+            # clearing-simulator: the same gap again, and live. Released (0.4.4), real
+            # Dockerfile (EXPOSE 8139), real gitops manifest — but never in ALL_SERVICES,
+            # so its manifest still pinned the image built on 2026-06-22 and every push
+            # since deployed nothing. It also went unattested for the whole of that window
+            # (its .att dates from the 2026-07-16 hand-fix, its .sig from June), because
+            # the SBOM-attestation policy graduated to Enforce while nothing rebuilt it —
+            # one reschedule in that window and it would have died like keycloak did.
+            # Audit at the time: 50 released components, 47 here; the only legitimate
+            # absentee is admin-ui (own admin-ui-deploy.yml). finrep-service is the third
+            # and needs a Dockerfile first — see #1205, which also tracks a guard so this
+            # list stops drifting out of sync with release-please by hand.
+          ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator'
 
           # Manual dispatch: rebuild the requested module(s), or the full deployable
           # fleet when no input is given. Only services that actually carry a gitops
