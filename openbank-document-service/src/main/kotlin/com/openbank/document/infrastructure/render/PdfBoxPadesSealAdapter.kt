@@ -6,6 +6,7 @@ package com.openbank.document.infrastructure.render
 
 import com.openbank.document.application.port.out.SignatureSealPort
 import com.openbank.document.domain.model.SignatureCeremony
+import io.quarkus.runtime.Startup
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -38,6 +39,13 @@ import java.util.Optional
  * neither requires that sign-off — and its key custody model (file-based PKCS12, or an ephemeral
  * in-memory cert) is explicitly *not* HSM-backed.
  */
+// @Startup, not merely @ApplicationScoped: this bean's init decides whether the seal identity is a
+// real organizational one or a DEV-ONLY ephemeral throwaway, and says so in a loud warning. A
+// CDI-lazy bean would defer that decision — and the warning — to the FIRST signature ceremony, which
+// is the one moment it is too late to be a warning: until then the log is clean and the service
+// reports UP, so nothing tells an operator the seals it is about to apply are worthless as evidence.
+// It is also what makes require-trusted-issuer a boot gate rather than a first-request gate.
+@Startup
 @ApplicationScoped
 class PdfBoxPadesSealAdapter(
     @ConfigProperty(name = "openbank.signature.keystore-path")
