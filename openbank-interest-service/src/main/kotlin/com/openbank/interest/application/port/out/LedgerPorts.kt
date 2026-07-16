@@ -4,8 +4,8 @@
 
 package com.openbank.interest.application.port.out
 
+import com.openbank.libs.domain.money.Money
 import io.smallrye.mutiny.Uni
-import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
 
@@ -21,9 +21,19 @@ import java.util.UUID
  * the remittance moves the bank's cash out, this only records that the customer is owed the net and
  * the state is owed the tax.
  *
- * [grossAmount] must equal [netAmount] + [taxAmount] — [WithholdingTaxPolicy][com.openbank.interest
- * .domain.tax.WithholdingTaxPolicy] guarantees it by construction (`net = gross − tax`), and it is
- * what makes the resulting three-leg entry balance within [currency].
+ * ### Why the amounts are [Money] and not `BigDecimal`
+ *
+ * `LedgerService` re-wraps every incoming line as `Money.of(amount, currencyCode)`, and `Money`
+ * refuses an amount whose scale exceeds the currency's minor units (CZK/EUR/USD/GBP = 2). A posting
+ * carrying a raw `BigDecimal` therefore pushes that invariant across a network boundary, where it
+ * surfaces as an opaque HTTP 400 on **every** capitalization instead of a compile-time obligation —
+ * which is exactly what happened when this port was first written with three bare `BigDecimal`s at
+ * scale 4. lending's `LendingJournalFactory` and transaction-service's `PaymentJournalFactory` are
+ * immune by type (both read `.amount` off a `Money`); this port now is too. Rounding to the
+ * currency's scale happens ONCE, at the source in `InterestService`, before this type is built.
+ *
+ * [gross] must equal [net] + [tax] and all three must share one currency — enforced here, in the
+ * constructor, so an unbalanced or mixed-currency split cannot exist as a value at all.
  */
 data class CapitalizationPosting(
     /** The customer account whose pocket is credited — the sub-ledger dimension of the deposit leg. */
@@ -31,14 +41,28 @@ data class CapitalizationPosting(
     val productId: String,
     /** Period end = the §38d credit date; part of the business identity of this capitalization. */
     val periodTo: LocalDate,
-    val currency: String,
     /** Gross interest earned — the bank's expense. */
-    val grossAmount: BigDecimal,
+    val gross: Money,
     /** Withholding tax retained at source; zero for NOT_WITHHELD / EXEMPT / DEFERRED_FX. */
-    val taxAmount: BigDecimal,
+    val tax: Money,
     /** What the customer actually receives (`gross − tax`). */
-    val netAmount: BigDecimal,
-)
+    val net: Money,
+) {
+    init {
+        require(gross.currency == net.currency && gross.currency == tax.currency) {
+            "Refusing a mixed-currency interest capitalization for account=$accountId " +
+                "product=$productId period=$periodTo: gross=$gross net=$net tax=$tax"
+        }
+        require(gross.amount.compareTo(net.amount.add(tax.amount)) == 0) {
+            "Refusing to post an unbalanced interest capitalization for account=$accountId " +
+                "product=$productId period=$periodTo: gross=${gross.amount} != " +
+                "net=${net.amount} + tax=${tax.amount}"
+        }
+    }
+
+    /** The single ISO-4217 code all three legs are denominated in. */
+    val currency: String get() = gross.currency.code
+}
 
 /**
  * Posts the capitalization split to `openbank-ledger-service`.

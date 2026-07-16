@@ -9,6 +9,8 @@ import com.openbank.interest.application.port.out.*
 import com.openbank.interest.domain.model.*
 import com.openbank.interest.domain.tax.WithholdingTax
 import com.openbank.interest.domain.tax.WithholdingTaxPolicy
+import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
@@ -89,17 +91,84 @@ class InterestService(
         return Uni.createFrom().item(0)
     }
 
+    /**
+     * Capitalizes one `(account, product)` period (ADR-0033 §B/§D): claim → post to the GL → commit.
+     *
+     * ### The claim, and why it exists
+     *
+     * The ledger idempotency key is the capitalization's business identity
+     * (`account, product, periodTo`) and carries **no amount** — on purpose: a key that varied with
+     * the amount would not collide on a retry, it would post a SECOND journal and double-credit the
+     * customer. That makes the key amount-blind, so the accrual set the ledger is told about and the
+     * accrual set the capitalization row records MUST be pinned to be the same set. Reading it twice
+     * is not enough: `findPendingCapitalization` has no lower date bound, so an accrual backfilled
+     * for an earlier date between the two reads silently enlarges the second one. The ledger would
+     * then replay the first journal (100) while this service committed the second amount (120), and
+     * the withholding remittance would pay real cash on 20 CZK the customer never received.
+     *
+     * So the set is **claimed** — flipped `ACCRUING → CAPITALIZING` in its own committed transaction
+     * — before anything is posted, and only a claimed set is ever credited.
+     *
+     * ### Crash recovery
+     *
+     * A crash at any point after the claim leaves the set `CAPITALIZING`. A **plain retry of
+     * `capitalize(accountId, productId, toDate)` recovers it**: this method looks for a claimed set
+     * first, finds that exact one, re-derives the identical gross/net/tax and therefore the identical
+     * idempotency key, and the ledger collapses the replay onto the journal it already booked (or
+     * books it now, if the crash preceded the post). Nothing needs an operator, and there is no way
+     * to wedge: a claimed set is always completable. An accrual backfilled after the claim is
+     * `ACCRUING`, outside it, and falls into the next period — which is the right answer, because it
+     * is not part of the credit the ledger booked.
+     *
+     * The one case that is refused rather than guessed is a claim held for a *different* period end:
+     * completing it under this `toDate` would mint a second key and post a second journal. See
+     * [inFlightClaimFailure].
+     */
     override fun capitalize(accountId: UUID, productId: String, toDate: LocalDate): Uni<InterestCapitalization> =
-        accrualRepo.findPendingCapitalization(accountId, productId, toDate).flatMap { accruals ->
-            // Normalized so a "czk"/"CZK" mix is one currency, not two.
-            val currencies = accruals.map { it.currency.uppercase() }.distinct()
+        accrualRepo.findClaimedForCapitalization(accountId, productId).flatMap { claimed ->
             when {
-                accruals.isEmpty() ->
-                    Uni.createFrom().failure(IllegalStateException("No pending accruals to capitalize"))
-                currencies.size > 1 -> Uni.createFrom().failure(mixedCurrencyFailure(accountId, productId, currencies))
-                else -> capitalizePending(accountId, productId, toDate, accruals, currencies.single())
+                claimed.isEmpty() -> claimAndCapitalize(accountId, productId, toDate)
+                claimed.all { it.claimedPeriodTo == toDate } ->
+                    capitalizeSet(accountId, productId, toDate, claimed, alreadyClaimed = true)
+                else -> Uni.createFrom().failure(inFlightClaimFailure(accountId, productId, toDate, claimed))
             }
         }
+
+    /** No claim outstanding: take a fresh `ACCRUING` set and claim it for [toDate]. */
+    private fun claimAndCapitalize(
+        accountId: UUID,
+        productId: String,
+        toDate: LocalDate,
+    ): Uni<InterestCapitalization> =
+        accrualRepo.findPendingCapitalization(accountId, productId, toDate).flatMap { accruals ->
+            if (accruals.isEmpty()) {
+                Uni.createFrom().failure(IllegalStateException("No pending accruals to capitalize"))
+            } else {
+                capitalizeSet(accountId, productId, toDate, accruals, alreadyClaimed = false)
+            }
+        }
+
+    /**
+     * A `CAPITALIZING` set claimed for another period end. Capitalizing it to [toDate] would derive a
+     * different idempotency key from the one the interrupted attempt used, so the ledger would not
+     * recognise the replay and would post a SECOND journal — for accruals the first journal may
+     * already have credited. There is no safe guess, so refuse and name the retry that fixes it.
+     */
+    private fun inFlightClaimFailure(
+        accountId: UUID,
+        productId: String,
+        toDate: LocalDate,
+        claimed: List<InterestAccrual>,
+    ): IllegalStateException {
+        val periods = claimed.mapNotNull { it.claimedPeriodTo }.distinct().sorted()
+        return IllegalStateException(
+            "Refusing to capitalize account=$accountId product=$productId to periodTo=$toDate: " +
+                "${claimed.size} accrual(s) are already CAPITALIZING, claimed for $periods. Complete that " +
+                "capitalization first by retrying capitalize(account, product, ${periods.firstOrNull()}) — " +
+                "it is idempotent and will collapse onto the journal the interrupted attempt booked. " +
+                "Capitalizing the same accruals to a different period end would post a SECOND journal.",
+        )
+    }
 
     /**
      * A pending set spanning several currencies has no single correct capitalization: the accrued
@@ -116,22 +185,73 @@ class InterestService(
                 "several currencies.",
         )
 
-    /** Capitalizes one single-currency pending set (ADR-0033 §B/§D). See [capitalize] for the guards. */
-    private fun capitalizePending(
+    /**
+     * A negative gross is refused outright, and nothing is claimed, posted or committed.
+     *
+     * It is reachable: `interest_rate_configs.annual_rate` has no CHECK and `createConfig` does not
+     * validate, so a negative rate accrues negative interest. The old code *skipped the ledger* for
+     * a non-positive gross, which committed a capitalization row saying the customer had been
+     * charged while the GL recorded nothing at all — the exact interest-service-vs-GL divergence
+     * this class now exists to prevent. Its KDoc cited V6's `WHERE total_accrued <> 0` as authority,
+     * but V6 excludes only ZERO: it treats a negative capitalization as money-bearing and constrains
+     * it. A negative credit would be `Dr 2100 / Cr 401x` — a debit of the customer's pocket — which
+     * nothing in this service builds and which is a product decision, not a rounding detail.
+     */
+    private fun negativeGrossFailure(
+        accountId: UUID,
+        productId: String,
+        toDate: LocalDate,
+        gross: BigDecimal,
+        currency: String,
+    ) = IllegalStateException(
+        "Refusing to capitalize a NEGATIVE gross for account=$accountId product=$productId " +
+            "periodTo=$toDate: gross=$gross $currency. Charging a customer via the interest " +
+            "capitalization path is not modelled (it would reverse the ADR-0033 §D split to " +
+            "Dr deposit-control / Cr interest-expense); nothing is credited, nothing is withheld " +
+            "and the accruals stay ACCRUING. Check interest_rate_configs.annual_rate for this " +
+            "product — a negative rate is accepted by createConfig today.",
+    )
+
+    /**
+     * Capitalizes one claimed-or-claimable single-currency set (ADR-0033 §B/§D).
+     *
+     * Rounding happens exactly ONCE, here, and to the **currency's** scale — not scale 4. This is
+     * the source: `Money` (and therefore ledger-service, which re-wraps every incoming line as
+     * `Money.of(amount, currencyCode)`) rejects an amount whose scale exceeds the currency's minor
+     * units, so a scale-4 gross 400s every single money-bearing capitalization at the boundary.
+     * Daily accruals stay at scale 6 — `totalAccrued` below is the raw sum — because an accrual is a
+     * running measurement, not money. The capitalization is the actual credit, so it is money, and
+     * it is rounded here rather than at the port so the capitalization row and the GL carry the
+     * identical figures; rounding at the adapter would leave the row and the journal up to 0.005
+     * apart.
+     *
+     * Rounding gross and net independently is safe: [WithholdingTaxPolicy] assesses tax at scale 0
+     * (whole CZK, DOWN), so `round(gross) == round(gross − tax) + tax` exactly and the
+     * `gross = net + tax` invariant [CapitalizationPosting] enforces survives.
+     */
+    private fun capitalizeSet(
         accountId: UUID,
         productId: String,
         toDate: LocalDate,
         accruals: List<InterestAccrual>,
-        currency: String,
+        alreadyClaimed: Boolean,
     ): Uni<InterestCapitalization> {
+        // Normalized so a "czk"/"CZK" mix is one currency, not two.
+        val currencies = accruals.map { it.currency.uppercase() }.distinct()
+        if (currencies.size > 1) return Uni.createFrom().failure(mixedCurrencyFailure(accountId, productId, currencies))
+        val ccy = CurrencyCode.of(currencies.single())
         val total = accruals.fold(BigDecimal.ZERO) { acc, a -> acc + a.accruedAmount }
-        val gross = total.setScale(4, RoundingMode.HALF_UP)
+        val gross = total.setScale(ccy.defaultFractionDigits, RoundingMode.HALF_UP)
+        // Before the claim, so a refusal leaves every accrual ACCRUING and nothing to unwind.
+        if (gross.signum() < 0) {
+            return Uni.createFrom().failure(negativeGrossFailure(accountId, productId, toDate, gross, ccy.code))
+        }
         val periodFrom = accruals.minOf { it.accrualDate }
         val now = OffsetDateTime.now(clock)
         // ADR-0033: withhold at the credit (capitalization), crediting net; record the liability.
         return taxProfilePort.resolve(accountId).flatMap { profile ->
-            val tax = WithholdingTaxPolicy.compute(gross, currency, profile, toDate)
-            val net = tax.netAmount.setScale(4, RoundingMode.HALF_UP)
+            val tax = WithholdingTaxPolicy.compute(gross, ccy.code, profile, toDate)
+            val net = tax.netAmount.setScale(ccy.defaultFractionDigits, RoundingMode.HALF_UP)
             val cap = InterestCapitalization(
                 accountId = accountId,
                 productId = productId,
@@ -142,7 +262,7 @@ class InterestService(
                 grossAmount = gross,
                 taxAmount = tax.taxAmount,
                 netAmount = net,
-                currency = currency,
+                currency = ccy.code,
                 createdAt = now,
             )
             val withholding = WithholdingTax(
@@ -153,37 +273,49 @@ class InterestService(
                 taxableBase = tax.taxableBase,
                 rate = tax.rate,
                 taxAmount = tax.taxAmount,
-                currency = currency,
+                currency = ccy.code,
                 treatment = tax.treatment,
                 exemptCode = tax.exemptCode,
                 createdAt = now,
             )
-            // Ledger FIRST, own rows second (ADR-0033 §D) — see [postCreditLeg].
-            postCreditLeg(cap).flatMap {
-                // ONE transaction for the whole credit: capitalization + withholding + outbox event +
-                // the status-guarded ACCRUING -> CAPITALIZED flip. Previously these were four separate
-                // transactions, so a crash between them could commit the capitalization while leaving
-                // the accruals ACCRUING — a retry then re-credited the customer AND re-booked the tax.
-                capitalizationRepo.saveWithOutbox(
-                    cap,
-                    withholding,
-                    withholdingRecordedEvent(cap, withholding),
-                    accruals.map { it.id },
-                    now,
-                )
-            }
+            claim(accruals, toDate, alreadyClaimed)
+                // Ledger SECOND, own rows THIRD (ADR-0033 §D) — see [postCreditLeg].
+                .flatMap { postCreditLeg(cap, ccy) }
+                .flatMap {
+                    // ONE transaction for the whole credit: capitalization + withholding + outbox
+                    // event + the status-guarded CAPITALIZING -> CAPITALIZED flip. Previously these
+                    // were four separate transactions, so a crash between them could commit the
+                    // capitalization while leaving the accruals claimable — a retry then re-credited
+                    // the customer AND re-booked the tax.
+                    capitalizationRepo.saveWithOutbox(
+                        cap,
+                        withholding,
+                        withholdingRecordedEvent(cap, withholding),
+                        accruals.map { it.id },
+                        now,
+                    )
+                }
         }
     }
+
+    /** Freezes the accrual set for [toDate]; a set recovered from a previous attempt is already frozen. */
+    private fun claim(accruals: List<InterestAccrual>, toDate: LocalDate, alreadyClaimed: Boolean): Uni<Unit> =
+        if (alreadyClaimed) {
+            Uni.createFrom().item(Unit)
+        } else {
+            accrualRepo.claimForCapitalization(accruals.map { it.id }, toDate)
+        }
 
     /**
      * Posts the ADR-0033 §D split to the ledger — DEBIT interest expense (gross), CREDIT the
      * customer's deposit-control pocket (net, sub-ledger = accountId), CREDIT withholding-tax
-     * payable (tax) — **before** the local write set commits.
+     * payable (tax) — **after** the accrual set is claimed and **before** the local write set
+     * commits.
      *
      * Ordering is deliberate and mirrors `LendingService.accrueOne`'s post-then-mark. A crash
-     * between the two leaves the accruals `ACCRUING` and no capitalization row, so the retry
-     * re-runs the whole period and replays the SAME business-derived idempotency key
-     * (`CapitalizationJournalFactory.idempotencyKey` — account + product + period end, never
+     * between the post and the commit leaves the accruals `CAPITALIZING`, so the retry re-derives
+     * the SAME amounts from the SAME claimed set and replays the SAME business-derived idempotency
+     * key (`CapitalizationJournalFactory.idempotencyKey` — account + product + period end, never
      * `cap.id`, which is a fresh UUID per attempt); the ledger collapses that onto the journal it
      * already booked. The result is exactly-once on money. The reverse order — commit, then post —
      * would strand a customer credit that exists in interest-service and nowhere in the GL, which
@@ -197,19 +329,21 @@ class InterestService(
      * no tax: there is nothing to recognize, so no journal is posted — every leg would be zero and
      * the ledger requires ≥2 lines each with `amount > 0`. The capitalization row is still written,
      * which is what V6's partial unique index (`WHERE total_accrued <> 0`) already anticipates as
-     * inert bookkeeping. Same branch as lending's zero-interest installment.
+     * inert bookkeeping. Same branch as lending's zero-interest installment. A NEGATIVE gross is a
+     * different matter entirely and never reaches here — [capitalizeSet] refuses it before the claim
+     * (see [negativeGrossFailure]).
      */
-    private fun postCreditLeg(cap: InterestCapitalization): Uni<Unit> {
-        if (cap.grossAmount.signum() <= 0) return Uni.createFrom().item(Unit)
+    private fun postCreditLeg(cap: InterestCapitalization, ccy: CurrencyCode): Uni<Unit> {
+        val gross = Money(cap.grossAmount, ccy)
+        if (gross.isZero()) return Uni.createFrom().item(Unit)
         return ledgerPostingPort.post(
             CapitalizationPosting(
                 accountId = cap.accountId,
                 productId = cap.productId,
                 periodTo = cap.periodTo,
-                currency = cap.currency,
-                grossAmount = cap.grossAmount,
-                taxAmount = cap.taxAmount,
-                netAmount = cap.netAmount,
+                gross = gross,
+                tax = Money(cap.taxAmount, ccy),
+                net = Money(cap.netAmount, ccy),
             ),
         )
     }

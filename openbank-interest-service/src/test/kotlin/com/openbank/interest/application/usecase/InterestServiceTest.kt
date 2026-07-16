@@ -27,6 +27,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import io.mockk.verifyOrder
 import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -66,12 +67,29 @@ class InterestServiceTest {
     /** Captures the ADR-0033 §D credit leg handed to the ledger, filled by stubCapitalization(). */
     private val postingSlot: CapturingSlot<CapitalizationPosting> = slot()
 
+    /** Captures the ACCRUING -> CAPITALIZING claim the use case takes before it posts. */
+    private val claimIdsSlot: CapturingSlot<List<UUID>> = slot()
+    private val claimPeriodSlot: CapturingSlot<LocalDate> = slot()
+
+    /**
+     * The default world: nothing is CAPITALIZING, so capitalize() takes a fresh ACCRUING set and
+     * claims it. The claim is the finding-2 fix — it freezes the exact accrual set the ledger is
+     * about to be told about, because the idempotency key carries no amount.
+     */
+    private fun stubNoClaimOutstanding() {
+        every { accrualRepo.findClaimedForCapitalization(any(), any()) } returns Uni.createFrom().item(emptyList())
+        every {
+            accrualRepo.claimForCapitalization(capture(claimIdsSlot), capture(claimPeriodSlot))
+        } returns Uni.createFrom().item(Unit)
+    }
+
     /**
      * Stubs the profile lookup, the ledger credit leg, and the ONE atomic write the use case
      * performs: capitalization + withholding + outbox event + the guarded accrual flip all land
      * through `saveWithOutbox`, so there is nothing else for the service to call.
      */
     private fun stubCapitalization(profile: TaxProfile = TaxProfile.FAIL_SAFE_DEFAULT) {
+        stubNoClaimOutstanding()
         every { taxProfilePort.resolve(any()) } returns Uni.createFrom().item(profile)
         every { ledgerPostingPort.post(capture(postingSlot)) } returns Uni.createFrom().item(Unit)
         every {
@@ -226,6 +244,7 @@ class InterestServiceTest {
             sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 18), BigDecimal("60.00"), currency = "CZK"),
         )
 
+        stubNoClaimOutstanding()
         every { taxProfilePort.resolve(any()) } returns Uni.createFrom().item(TaxProfile.FAIL_SAFE_DEFAULT)
         every { ledgerPostingPort.post(any()) } returns Uni.createFrom().item(Unit)
         every { accrualRepo.findPendingCapitalization(accountId, productId, toDate) } returns
@@ -260,12 +279,18 @@ class InterestServiceTest {
         verify(exactly = 1) { ledgerPostingPort.post(any()) }
         assertThat(postingSlot.captured.accountId).isEqualTo(accountId)
         assertThat(postingSlot.captured.currency).isEqualTo("CZK")
-        assertThat(postingSlot.captured.grossAmount).isEqualByComparingTo(BigDecimal("100.0000"))
-        assertThat(postingSlot.captured.taxAmount).isEqualByComparingTo(BigDecimal("15"))
-        assertThat(postingSlot.captured.netAmount).isEqualByComparingTo(BigDecimal("85.0000"))
+        assertThat(postingSlot.captured.gross.amount).isEqualByComparingTo(BigDecimal("100.00"))
+        assertThat(postingSlot.captured.tax.amount).isEqualByComparingTo(BigDecimal("15"))
+        assertThat(postingSlot.captured.net.amount).isEqualByComparingTo(BigDecimal("85.00"))
         // gross = net + tax, so the three-leg entry balances within CZK.
-        assertThat(postingSlot.captured.grossAmount)
-            .isEqualByComparingTo(postingSlot.captured.netAmount.add(postingSlot.captured.taxAmount))
+        assertThat(postingSlot.captured.gross.amount)
+            .isEqualByComparingTo(postingSlot.captured.net.amount.add(postingSlot.captured.tax.amount))
+        // NOT isEqualByComparingTo: scale IS the property that broke (finding 1). The ledger wraps
+        // every line in Money.of(amount, currencyCode) and Money refuses scale > the currency's
+        // minor units, so a scale-4 gross 400s the whole capitalization. isEqualByComparingTo
+        // ignores scale by construction, which is precisely why the old suite could not see it.
+        assertThat(postingSlot.captured.gross.amount.scale()).isEqualTo(2)
+        assertThat(postingSlot.captured.net.amount.scale()).isEqualTo(2)
     }
 
     @Test
@@ -277,6 +302,7 @@ class InterestServiceTest {
             sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 18), BigDecimal("100.00"), currency = "CZK"),
         )
 
+        stubNoClaimOutstanding()
         every { taxProfilePort.resolve(any()) } returns Uni.createFrom().item(TaxProfile.FAIL_SAFE_DEFAULT)
         every { accrualRepo.findPendingCapitalization(accountId, productId, toDate) } returns
             Uni.createFrom().item(accruals)
@@ -289,8 +315,10 @@ class InterestServiceTest {
 
         // The whole point of posting BEFORE the local write: a capitalization row that the GL knows
         // nothing about is unrepairable (its accruals are already CAPITALIZED, so no retry revisits
-        // them). Failing here leaves the accruals ACCRUING and the period simply retries.
+        // them). Failing here leaves the accruals CAPITALIZING — claimed, so the retry re-derives
+        // the identical amount and key, and simply completes.
         verify(exactly = 0) { capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any()) }
+        verify(exactly = 1) { accrualRepo.claimForCapitalization(accruals.map { it.id }, toDate) }
     }
 
     @Test
@@ -326,6 +354,7 @@ class InterestServiceTest {
             sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 19), BigDecimal("5.00"), currency = "EUR"),
         )
 
+        stubNoClaimOutstanding()
         every { accrualRepo.findPendingCapitalization(accountId, productId, toDate) } returns
             Uni.createFrom().item(accruals)
 
@@ -333,8 +362,10 @@ class InterestServiceTest {
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("mixed-currency")
             .hasMessageContaining("[CZK, EUR]")
-        // Nothing is credited, nothing is withheld, and the accruals stay ACCRUING for an operator.
+        // Nothing is credited, nothing is withheld, and the accruals stay ACCRUING for an operator:
+        // the currency check runs BEFORE the claim, so there is nothing to unwind.
         verify(exactly = 0) { capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { accrualRepo.claimForCapitalization(any(), any()) }
         verify(exactly = 0) { taxProfilePort.resolve(any()) }
     }
 
@@ -367,6 +398,7 @@ class InterestServiceTest {
         val productId = "SAVINGS"
         val toDate = LocalDate.of(2026, 1, 20)
 
+        stubNoClaimOutstanding()
         every { accrualRepo.findPendingCapitalization(accountId, productId, toDate) } returns
             Uni.createFrom().item(emptyList())
 
@@ -374,6 +406,153 @@ class InterestServiceTest {
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessage("No pending accruals to capitalize")
         verify(exactly = 0) { capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any()) }
+    }
+
+    // --- The claim (finding 2: the idempotency key is amount-blind) ----------------------------
+
+    @Test
+    fun `capitalize claims the accrual set BEFORE it tells the ledger anything`() {
+        val accountId = UUID.fromString("12121212-1212-1212-1212-121212121212")
+        val productId = "SAVINGS_CZK"
+        val toDate = LocalDate.of(2026, 1, 20)
+        val accruals = listOf(
+            sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 18), BigDecimal("100.00"), currency = "CZK"),
+        )
+        stubCapitalization()
+        every { accrualRepo.findPendingCapitalization(accountId, productId, toDate) } returns
+            Uni.createFrom().item(accruals)
+
+        service.capitalize(accountId, productId, toDate).await().indefinitely()
+
+        // Order is the whole fix: the ledger's idempotency key carries no amount, so the set the
+        // ledger is told about must be frozen before it is told. Claiming after the post would
+        // leave the same window open.
+        verifyOrder {
+            accrualRepo.claimForCapitalization(any(), any())
+            ledgerPostingPort.post(any())
+            capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any())
+        }
+        assertThat(claimIdsSlot.captured).containsExactlyElementsOf(accruals.map { it.id })
+        assertThat(claimPeriodSlot.captured).isEqualTo(toDate)
+    }
+
+    @Test
+    fun `a crashed attempt is recovered by a plain retry, on the SAME claimed set and amount`() {
+        // The finding-2 scenario. First attempt: gross 100, ledger posts J(key, 100), the pod dies
+        // before saveWithOutbox commits. A missed-day accrual for an EARLIER date is then
+        // backfilled. Before the claim, the retry re-read `ACCRUING AND accrualDate <= toDate`
+        // (no lower bound), summed 120, replayed the SAME amount-blind key, got J(100) back from
+        // findByIdempotencyKey without any amount check, and committed a cap row for 120. The GL
+        // moved 100. The remittance then paid real cash on 20 CZK nobody was credited.
+        val accountId = UUID.fromString("13131313-1313-1313-1313-131313131313")
+        val productId = "SAVINGS_CZK"
+        val toDate = LocalDate.of(2026, 1, 20)
+        val claimed = listOf(
+            sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 18), BigDecimal("100.00"), currency = "CZK")
+                .copy(status = AccrualStatus.CAPITALIZING, claimedPeriodTo = toDate),
+        )
+        stubCapitalization()
+        every { accrualRepo.findClaimedForCapitalization(accountId, productId) } returns
+            Uni.createFrom().item(claimed)
+
+        val result = service.capitalize(accountId, productId, toDate).await().indefinitely()
+
+        // The retry credits the CLAIMED 100, not 100 + the backfill: the claimed set is the only
+        // thing it looks at, so the amount matches the journal the interrupted attempt booked.
+        assertThat(result.grossAmount).isEqualByComparingTo(BigDecimal("100.00"))
+        assertThat(postingSlot.captured.gross.amount).isEqualByComparingTo(BigDecimal("100.00"))
+        // The pending query is never even reached, so the backfilled accrual cannot leak in. It
+        // stays ACCRUING and falls into the next period — which is the correct answer.
+        verify(exactly = 0) { accrualRepo.findPendingCapitalization(any(), any(), any()) }
+        // Already claimed: re-claiming would trip the ACCRUING guard and wedge the recovery.
+        verify(exactly = 0) { accrualRepo.claimForCapitalization(any(), any()) }
+        // ...and the credit still completes. A claimed set is never a wedge.
+        verify(exactly = 1) { capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a claim held for a different period end is refused, not silently re-keyed`() {
+        val accountId = UUID.fromString("14141414-1414-1414-1414-141414141414")
+        val productId = "SAVINGS_CZK"
+        val claimed = listOf(
+            sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 18), BigDecimal("100.00"), currency = "CZK")
+                .copy(status = AccrualStatus.CAPITALIZING, claimedPeriodTo = LocalDate.of(2026, 1, 20)),
+        )
+        every { accrualRepo.findClaimedForCapitalization(accountId, productId) } returns
+            Uni.createFrom().item(claimed)
+
+        // periodTo is part of the idempotency key, so completing this claim to 2026-02-20 would
+        // mint a SECOND key and post a SECOND journal for interest the first attempt may already
+        // have credited.
+        assertThatThrownBy {
+            service.capitalize(accountId, productId, LocalDate.of(2026, 2, 20)).await().indefinitely()
+        }.isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("already CAPITALIZING")
+            .hasMessageContaining("2026-01-20")
+
+        verify(exactly = 0) { ledgerPostingPort.post(any()) }
+        verify(exactly = 0) { capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any()) }
+    }
+
+    // --- Negative gross (finding 3) --------------------------------------------------------------
+
+    @Test
+    fun `a negative gross is refused loudly instead of silently skipping the GL`() {
+        val accountId = UUID.fromString("15151515-1515-1515-1515-151515151515")
+        val productId = "SAVINGS_CZK"
+        val toDate = LocalDate.of(2026, 1, 20)
+        // Reachable: interest_rate_configs.annual_rate has no CHECK and createConfig does not
+        // validate, so a negative rate accrues negative interest.
+        val accruals = listOf(
+            sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 18), BigDecimal("-10.00"), currency = "CZK"),
+        )
+        stubNoClaimOutstanding()
+        every { accrualRepo.findPendingCapitalization(accountId, productId, toDate) } returns
+            Uni.createFrom().item(accruals)
+
+        assertThatThrownBy { service.capitalize(accountId, productId, toDate).await().indefinitely() }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("NEGATIVE gross")
+            .hasMessageContaining("-10.00 CZK")
+
+        // The old code returned Unit here and committed the capitalization anyway: the row said the
+        // customer had been CHARGED while the GL recorded nothing. Nothing may commit, and the
+        // accruals must stay claimable so an operator can fix the rate and re-run.
+        verify(exactly = 0) { ledgerPostingPort.post(any()) }
+        verify(exactly = 0) { capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { accrualRepo.claimForCapitalization(any(), any()) }
+        verify(exactly = 0) { taxProfilePort.resolve(any()) }
+    }
+
+    @Test
+    fun `gross is rounded to the currency's minor units, not to scale 4`() {
+        val accountId = UUID.fromString("16161616-1616-1616-1616-161616161616")
+        val productId = "SAVINGS_CZK"
+        val toDate = LocalDate.of(2026, 1, 20)
+        // Accruals carry scale-6 daily amounts; their sum is 100.004999, which used to reach the
+        // ledger as 100.0050 (scale 4) and 400 every time.
+        val accruals = listOf(
+            sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 18), BigDecimal("60.002500"), currency = "CZK"),
+            sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 19), BigDecimal("40.002499"), currency = "CZK"),
+        )
+        stubCapitalization()
+        every { accrualRepo.findPendingCapitalization(accountId, productId, toDate) } returns
+            Uni.createFrom().item(accruals)
+
+        val result = service.capitalize(accountId, productId, toDate).await().indefinitely()
+
+        // Scale asserted explicitly — isEqualByComparingTo would pass on 100.0050 too.
+        assertThat(result.grossAmount.scale()).isEqualTo(2)
+        assertThat(result.grossAmount).isEqualByComparingTo(BigDecimal("100.00"))
+        assertThat(result.netAmount.scale()).isEqualTo(2)
+        // The raw accrual sum is preserved at full precision: it is a measurement, not money, and
+        // V6's partial index keys on it.
+        assertThat(capSlot.captured.totalAccrued).isEqualByComparingTo(BigDecimal("100.004999"))
+        // The cap row and the ledger MUST carry the identical figures — rounding once, here, is
+        // what guarantees it. Rounding at the adapter would leave them up to 0.005 apart.
+        assertThat(postingSlot.captured.gross.amount).isEqualTo(capSlot.captured.grossAmount)
+        assertThat(postingSlot.captured.net.amount).isEqualTo(capSlot.captured.netAmount)
+        assertThat(postingSlot.captured.tax.amount).isEqualTo(capSlot.captured.taxAmount)
     }
 
     @Test

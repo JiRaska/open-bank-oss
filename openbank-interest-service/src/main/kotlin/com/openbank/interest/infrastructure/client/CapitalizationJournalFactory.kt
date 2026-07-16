@@ -81,20 +81,18 @@ object CapitalizationJournalFactory {
     }
 
     fun buildLines(posting: CapitalizationPosting, config: InterestLedgerConfig): List<JournalLineRequest> {
-        val ccy = posting.currency.uppercase()
-        require(posting.grossAmount.compareTo(posting.netAmount.add(posting.taxAmount)) == 0) {
-            "Refusing to post an unbalanced interest capitalization for account=${posting.accountId} " +
-                "product=${posting.productId} period=${posting.periodTo}: gross=${posting.grossAmount} != " +
-                "net=${posting.netAmount} + tax=${posting.taxAmount}"
-        }
+        // Single currency and `gross == net + tax` are guaranteed by CapitalizationPosting's own
+        // constructor, and every amount is already at the currency's scale because it is a Money —
+        // there is nothing left for this factory to re-check or re-round.
+        val ccy = posting.currency
         val expenseGl = interestExpense(ccy, config)
         val depositGl = depositControl(ccy)
         // Only money-bearing legs. See the class note: a zero leg is DB-rejected, and zero tax is
         // the normal case for sub-7-CZK gross and for every non-withheld treatment.
         return listOfNotNull(
-            line(expenseGl, "DEBIT", posting.grossAmount, ccy),
-            line(depositGl, "CREDIT", posting.netAmount, ccy, subAccountId = posting.accountId),
-            line(config.gl().withholdingTaxPayable(), "CREDIT", posting.taxAmount, ccy),
+            line(expenseGl, "DEBIT", posting.gross.amount, ccy),
+            line(depositGl, "CREDIT", posting.net.amount, ccy, subAccountId = posting.accountId),
+            line(config.gl().withholdingTaxPayable(), "CREDIT", posting.tax.amount, ccy),
         )
     }
 

@@ -28,11 +28,16 @@ import java.util.UUID
  * Proves the ADR-0033 capitalization atomicity claim against a REAL Postgres — the thing the mocked
  * use-case tests structurally cannot show. `InterestCapitalizationRepositoryImpl.saveWithOutbox`
  * asserts that the capitalization, the withholding liability, the outbox event and the
- * `ACCRUING → CAPITALIZED` flip either all commit or all roll back; only a live transaction can
+ * `CAPITALIZING → CAPITALIZED` flip either all commit or all roll back; only a live transaction can
  * demonstrate that no partial rows survive a mid-way failure.
  *
+ * The accruals arrive here already `CAPITALIZING` because `InterestService.capitalize` claims the
+ * set (`ACCRUING → CAPITALIZING`, its own committed transaction) BEFORE it posts to the ledger —
+ * see `InterestAccrualRepository.claimForCapitalization`. This IT covers the last leg of that
+ * lifecycle; `CapitalizationLedgerBoundaryIT` covers the whole of it through the use case.
+ *
  * Why this matters concretely: the pre-refactor code ran these as four separate transactions, so a
- * crash after the capitalization commit but before the accrual flip left the accruals `ACCRUING`
+ * crash after the capitalization commit but before the accrual flip left the accruals claimable
  * next to a committed capitalization. The retry then re-credited the customer AND re-booked the
  * withholding tax — a double credit and a double tax liability from one period's interest.
  *
@@ -99,10 +104,10 @@ class CapitalizationTransactionIT {
             periodFrom = LocalDate.of(2026, 1, 18),
             periodTo = periodTo,
             totalAccrued = BigDecimal("100.000000"),
-            capitalizedAmount = BigDecimal("85.0000"),
-            grossAmount = BigDecimal("100.0000"),
-            taxAmount = BigDecimal("15.0000"),
-            netAmount = BigDecimal("85.0000"),
+            capitalizedAmount = BigDecimal("85.00"),
+            grossAmount = BigDecimal("100.00"),
+            taxAmount = BigDecimal("15"),
+            netAmount = BigDecimal("85.00"),
             currency = czk,
             createdAt = OffsetDateTime.parse("2026-01-20T00:00:00Z"),
         )
@@ -112,9 +117,9 @@ class CapitalizationTransactionIT {
         accountId = cap.accountId,
         periodFrom = cap.periodFrom,
         periodTo = cap.periodTo,
-        taxableBase = BigDecimal("100.0000"),
+        taxableBase = BigDecimal("100"),
         rate = BigDecimal("0.1500"),
-        taxAmount = BigDecimal("15.0000"),
+        taxAmount = BigDecimal("15"),
         currency = czk,
         treatment = WithholdingTreatment.WITHHELD,
         createdAt = cap.createdAt,
@@ -166,7 +171,7 @@ class CapitalizationTransactionIT {
     @Test
     fun `commits the capitalization, withholding, event and accrual flip together`() {
         val accountId = UUID.randomUUID()
-        val accrualId = persistAccrual(accountId, "SAVINGS_CZK", AccrualStatus.ACCRUING)
+        val accrualId = persistAccrual(accountId, "SAVINGS_CZK", AccrualStatus.CAPITALIZING)
         val cap = capitalizationOf(accountId)
 
         saveCapitalization(cap, listOf(accrualId))
@@ -188,10 +193,10 @@ class CapitalizationTransactionIT {
         assertThatThrownBy { saveCapitalization(cap, listOf(accrualId)) }
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("Capitalization aborted")
-            .hasMessageContaining("expected to flip 1 ACCRUING accruals, matched 0")
+            .hasMessageContaining("expected to flip 1 CAPITALIZING accruals, matched 0")
 
         // THE point of this test: the failure left NOTHING behind. A committed capitalization here
-        // would mean the customer was credited for interest whose accruals are still ACCRUING —
+        // would mean the customer was credited for interest whose accruals are still claimable —
         // ready to be capitalized (and credited, and taxed) a second time.
         assertThat(capRows(cap.id)).isZero()
         assertThat(whtRows(cap.id)).isZero()
@@ -201,8 +206,8 @@ class CapitalizationTransactionIT {
     @Test
     fun `V6 index rejects a second money-bearing capitalization for the same account, product and period`() {
         val accountId = UUID.randomUUID()
-        val first = persistAccrual(accountId, "SAVINGS_CZK", AccrualStatus.ACCRUING)
-        val second = persistAccrual(accountId, "SAVINGS_CZK", AccrualStatus.ACCRUING, LocalDate.of(2026, 1, 19))
+        val first = persistAccrual(accountId, "SAVINGS_CZK", AccrualStatus.CAPITALIZING)
+        val second = persistAccrual(accountId, "SAVINGS_CZK", AccrualStatus.CAPITALIZING, LocalDate.of(2026, 1, 19))
         val cap1 = capitalizationOf(accountId)
 
         saveCapitalization(cap1, listOf(first))
@@ -214,6 +219,6 @@ class CapitalizationTransactionIT {
             .hasMessageContaining("uq_interest_capitalizations_period")
 
         assertThat(capRows(cap2.id)).isZero()
-        assertThat(accrualStatus(second)).isEqualTo(AccrualStatus.ACCRUING)
+        assertThat(accrualStatus(second)).isEqualTo(AccrualStatus.CAPITALIZING)
     }
 }

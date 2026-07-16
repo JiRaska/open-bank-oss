@@ -8,6 +8,7 @@ import com.openbank.interest.application.port.out.CapitalizationPosting
 import com.openbank.interest.domain.model.InterestCapitalization
 import com.openbank.interest.domain.tax.TaxProfile
 import com.openbank.interest.domain.tax.WithholdingTaxPolicy
+import com.openbank.libs.domain.money.Money
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -38,21 +39,21 @@ class CapitalizationJournalFactoryTest {
     fun `a withheld CZK capitalization splits into three balanced legs`() {
         // gross 100 CZK, resident individual -> base 100, tax 15, net 85 (WithholdingTaxPolicy).
         val lines = CapitalizationJournalFactory.buildLines(
-            posting(gross = "100.0000", tax = "15", net = "85.0000"),
+            posting(gross = "100.00", tax = "15", net = "85.00"),
             config,
         )
 
         assertThat(lines).hasSize(3)
         val debit = lines.single { it.side == "DEBIT" }
         assertThat(debit.glAccountId).isEqualTo(interestExpenseCzk)
-        assertThat(debit.amount).isEqualByComparingTo("100.0000")
+        assertThat(debit.amount).isEqualByComparingTo("100.00")
         // The bank's expense is the GROSS: the customer's tax is still the bank's interest cost,
         // it is merely paid to the state instead of to the customer.
         assertThat(debit.subAccountId).isNull()
 
         val deposit = lines.single { it.glAccountId == depositControlCzk }
         assertThat(deposit.side).isEqualTo("CREDIT")
-        assertThat(deposit.amount).isEqualByComparingTo("85.0000")
+        assertThat(deposit.amount).isEqualByComparingTo("85.00")
 
         val tax = lines.single { it.glAccountId == withholdingTaxPayable }
         assertThat(tax.side).isEqualTo("CREDIT")
@@ -65,7 +66,7 @@ class CapitalizationJournalFactoryTest {
     @Test
     fun `the deposit leg names the customer sub-ledger and no other leg does`() {
         val lines = CapitalizationJournalFactory.buildLines(
-            posting(gross = "100.0000", tax = "15", net = "85.0000"),
+            posting(gross = "100.00", tax = "15", net = "85.00"),
             config,
         )
 
@@ -86,11 +87,11 @@ class CapitalizationJournalFactoryTest {
     fun `a zero-tax capitalization emits two legs, never a zero-amount third`() {
         // Real case, not a contrivance: the statutory whole-CZK DOWN rounding means any gross below
         // 7.00 CZK yields floor(gross) * 0.15 = 0 while the interest is still WITHHELD.
-        val result = WithholdingTaxPolicy.compute(BigDecimal("6.9900"), "CZK", TaxProfile.FAIL_SAFE_DEFAULT, PERIOD_TO)
+        val result = WithholdingTaxPolicy.compute(BigDecimal("6.99"), "CZK", TaxProfile.FAIL_SAFE_DEFAULT, PERIOD_TO)
         assertThat(result.taxAmount).isEqualByComparingTo(BigDecimal.ZERO)
 
         val lines = CapitalizationJournalFactory.buildLines(
-            posting(gross = "6.9900", tax = result.taxAmount.toPlainString(), net = result.netAmount.toPlainString()),
+            posting(gross = "6.99", tax = result.taxAmount.toPlainString(), net = result.netAmount.toPlainString()),
             config,
         )
 
@@ -105,12 +106,12 @@ class CapitalizationJournalFactoryTest {
     @Test
     fun `a not-withheld legal entity is credited gross in two legs`() {
         val lines = CapitalizationJournalFactory.buildLines(
-            posting(gross = "100.0000", tax = "0", net = "100.0000"),
+            posting(gross = "100.00", tax = "0", net = "100.00"),
             config,
         )
 
         assertThat(lines).hasSize(2)
-        assertThat(lines.single { it.side == "CREDIT" }.amount).isEqualByComparingTo("100.0000")
+        assertThat(lines.single { it.side == "CREDIT" }.amount).isEqualByComparingTo("100.00")
         assertBalanced(lines)
     }
 
@@ -119,11 +120,11 @@ class CapitalizationJournalFactoryTest {
     @Test
     fun `non-CZK interest routes to the currency's own control and expense accounts`() {
         // §E: only CZK is withheld in v1; EUR interest is DEFERRED_FX, tax 0, credited gross.
-        val result = WithholdingTaxPolicy.compute(BigDecimal("50.0000"), "EUR", TaxProfile.FAIL_SAFE_DEFAULT, PERIOD_TO)
+        val result = WithholdingTaxPolicy.compute(BigDecimal("50.00"), "EUR", TaxProfile.FAIL_SAFE_DEFAULT, PERIOD_TO)
         assertThat(result.taxAmount).isEqualByComparingTo(BigDecimal.ZERO)
 
         val lines = CapitalizationJournalFactory.buildLines(
-            posting(gross = "50.0000", tax = "0", net = "50.0000", currency = "EUR"),
+            posting(gross = "50.00", tax = "0", net = "50.00", currency = "EUR"),
             config,
         )
 
@@ -143,7 +144,7 @@ class CapitalizationJournalFactoryTest {
     fun `an unseeded currency is refused rather than posted to a guessed account`() {
         assertThatThrownBy {
             CapitalizationJournalFactory.buildLines(
-                posting(gross = "10.0000", tax = "0", net = "10.0000", currency = "PLN"),
+                posting(gross = "10.00", tax = "0", net = "10.00", currency = "PLN"),
                 config,
             )
         }.isInstanceOf(IllegalStateException::class.java)
@@ -179,9 +180,9 @@ class CapitalizationJournalFactoryTest {
 
     @Test
     fun `a different period is a different capitalization`() {
-        val january = CapitalizationJournalFactory.idempotencyKey(posting(gross = "1.0000", tax = "0", net = "1.0000"))
+        val january = CapitalizationJournalFactory.idempotencyKey(posting(gross = "1.00", tax = "0", net = "1.00"))
         val february = CapitalizationJournalFactory.idempotencyKey(
-            posting(gross = "1.0000", tax = "0", net = "1.0000", periodTo = LocalDate.of(2026, 2, 20)),
+            posting(gross = "1.00", tax = "0", net = "1.00", periodTo = LocalDate.of(2026, 2, 20)),
         )
         assertThat(january).isNotEqualTo(february)
     }
@@ -189,17 +190,47 @@ class CapitalizationJournalFactoryTest {
     // --- Guards --------------------------------------------------------------------------------
 
     @Test
-    fun `an unbalanced posting is refused before it reaches the ledger`() {
+    fun `an unbalanced posting cannot even be constructed, let alone reach the ledger`() {
+        // The guard moved from this factory into CapitalizationPosting's own constructor: an
+        // unbalanced split can no longer exist as a value, so no future call site can route around
+        // the check by building its own request.
+        assertThatThrownBy { posting(gross = "100.00", tax = "15", net = "80.00") }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("gross=100.00 != net=80.00 + tax=15")
+    }
+
+    @Test
+    fun `a posting cannot carry an amount the ledger would reject as over-scaled`() {
+        // THE finding-1 defect, pinned at the type. InterestService rounded to scale 4 and handed
+        // three bare BigDecimals to this port; ledger-service re-wraps every line as
+        // Money.of(amount, currencyCode), and Money refuses scale > the currency's minor units.
+        // Every money-bearing capitalization therefore 400'd at the boundary — in every currency,
+        // under every treatment. CapitalizationPosting carries Money now, so the same mistake is a
+        // construction failure here instead of an opaque HTTP 400 in production.
+        assertThatThrownBy { Money.of(BigDecimal("100.0000"), "CZK") }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("Amount scale 4 exceeds currency CZK fraction digits 2")
+    }
+
+    @Test
+    fun `a mixed-currency posting cannot be constructed`() {
         assertThatThrownBy {
-            CapitalizationJournalFactory.buildLines(posting(gross = "100.0000", tax = "15", net = "80.0000"), config)
+            CapitalizationPosting(
+                accountId = accountId,
+                productId = "SAVINGS_CZK",
+                periodTo = PERIOD_TO,
+                gross = Money.of(BigDecimal("100.00"), "CZK"),
+                tax = Money.of(BigDecimal("15"), "CZK"),
+                net = Money.of(BigDecimal("85.00"), "EUR"),
+            )
         }.isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessageContaining("gross=100.0000 != net=80.0000 + tax=15")
+            .hasMessageContaining("mixed-currency")
     }
 
     @Test
     fun `the request dates and author come from the period end and the configured system actor`() {
         val request = CapitalizationJournalFactory.buildRequest(
-            posting(gross = "100.0000", tax = "15", net = "85.0000"),
+            posting(gross = "100.00", tax = "15", net = "85.00"),
             config,
         )
 
@@ -211,7 +242,23 @@ class CapitalizationJournalFactoryTest {
 
     // --- Helpers -------------------------------------------------------------------------------
 
+    /**
+     * Asserts what `LedgerService.postJournal` will actually do with these lines.
+     *
+     * The first block is the part the original version of this helper omitted, and it is why a
+     * 100%-of-the-path defect shipped: the ledger re-wraps every line as
+     * `Money.of(req.amount, req.currencyCode)` / `Money.of(req.baseAmount, req.baseCurrencyCode)`,
+     * and `Money`'s init rejects an over-scaled amount. That is the REAL production class from
+     * openbank-libs-domain, not a restatement of its rule — a hand-written `assertBalanced` can only
+     * ever check the rules its author remembered, and every amount assertion in this file uses
+     * `isEqualByComparingTo`, which ignores scale by construction. So the one property that broke
+     * was invisible to both.
+     */
     private fun assertBalanced(lines: List<JournalLineRequest>) {
+        lines.forEach { l ->
+            Money.of(l.amount, l.currencyCode)
+            Money.of(l.baseAmount, l.baseCurrencyCode)
+        }
         lines.map { it.baseCurrencyCode }.distinct().forEach { ccy ->
             val debits = lines.filter { it.side == "DEBIT" && it.baseCurrencyCode == ccy }
                 .fold(BigDecimal.ZERO) { acc, l -> acc + l.baseAmount }
@@ -233,10 +280,9 @@ class CapitalizationJournalFactoryTest {
         accountId = accountId,
         productId = "SAVINGS_CZK",
         periodTo = periodTo,
-        currency = currency,
-        grossAmount = BigDecimal(gross),
-        taxAmount = BigDecimal(tax),
-        netAmount = BigDecimal(net),
+        gross = Money.of(BigDecimal(gross), currency),
+        tax = Money.of(BigDecimal(tax), currency),
+        net = Money.of(BigDecimal(net), currency),
     )
 
     /** A capitalization built the way `InterestService` builds it — a FRESH `id` every time. */
@@ -246,10 +292,10 @@ class CapitalizationJournalFactoryTest {
         periodFrom = LocalDate.of(2026, 1, 18),
         periodTo = PERIOD_TO,
         totalAccrued = BigDecimal("100.00"),
-        capitalizedAmount = BigDecimal("85.0000"),
-        grossAmount = BigDecimal("100.0000"),
+        capitalizedAmount = BigDecimal("85.00"),
+        grossAmount = BigDecimal("100.00"),
         taxAmount = BigDecimal("15"),
-        netAmount = BigDecimal("85.0000"),
+        netAmount = BigDecimal("85.00"),
         currency = "CZK",
         createdAt = OffsetDateTime.parse("2026-01-20T00:00:00Z"),
     )
@@ -258,10 +304,9 @@ class CapitalizationJournalFactoryTest {
         accountId = cap.accountId,
         productId = cap.productId,
         periodTo = cap.periodTo,
-        currency = cap.currency,
-        grossAmount = cap.grossAmount,
-        taxAmount = cap.taxAmount,
-        netAmount = cap.netAmount,
+        gross = Money.of(cap.grossAmount, cap.currency),
+        tax = Money.of(cap.taxAmount, cap.currency),
+        net = Money.of(cap.netAmount, cap.currency),
     )
 
     private companion object {

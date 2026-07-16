@@ -10,7 +10,18 @@ import java.time.OffsetDateTime
 import java.util.UUID
 
 enum class InterestRateType { FIXED, VARIABLE, TIERED }
-enum class AccrualStatus { ACCRUING, CAPITALIZED, REVERSED, SUSPENDED }
+
+/**
+ * Lifecycle of one daily accrual.
+ *
+ * `ACCRUING` → `CAPITALIZING` → `CAPITALIZED` is the money path. `CAPITALIZING` is the **claim**:
+ * `InterestService.capitalize` freezes the exact set of accruals it is about to credit BEFORE it
+ * posts to the ledger, so the amount the ledger books and the amount the capitalization row records
+ * can never diverge — see `InterestService.capitalize` for the crash/recovery argument.
+ *
+ * `REVERSED`/`SUSPENDED` are declared but have no writer yet.
+ */
+enum class AccrualStatus { ACCRUING, CAPITALIZING, CAPITALIZED, REVERSED, SUSPENDED }
 enum class DayCount { ACT_365, ACT_360, ACT_ACT, THIRTY_360 }
 
 data class InterestRateConfig(
@@ -39,6 +50,16 @@ data class InterestAccrual(
     val accruedAmount: BigDecimal,
     val currency: String = "EUR",
     val status: AccrualStatus = AccrualStatus.ACCRUING,
+    /**
+     * The `periodTo` this accrual was claimed for when it went `CAPITALIZING`, and null otherwise.
+     *
+     * It is what makes a claim recoverable: `capitalize(account, product, toDate)` completes an
+     * in-flight claim only when [claimedPeriodTo] equals the requested `toDate`, because the period
+     * end is part of the ledger idempotency key. Capitalizing a claimed set to a *different* period
+     * end would mint a second key and post a SECOND journal for interest the first attempt may
+     * already have booked.
+     */
+    val claimedPeriodTo: LocalDate? = null,
     val capitalizedAt: OffsetDateTime? = null,
     val createdAt: OffsetDateTime,
 )
@@ -80,5 +101,5 @@ data class AccrualSummary(
     val currency: String,
     val fromDate: LocalDate,
     val toDate: LocalDate,
-    val accrualCount: Int
+    val accrualCount: Int,
 )
