@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.17.4...customer-edge-v0.18.0) (2026-07-16)
+
+
+### Features
+
+* **customer-edge:** document & signature routes for ADR-0169 D1 ([#1139](https://github.com/JiRaska/open-bank-oss/issues/1139)) ([9664622](https://github.com/JiRaska/open-bank-oss/commit/9664622a94b34afa35e29bd064670333344ab78b))
+* **customer-edge:** rebuild WebAuthn RP for native passkey login (ADR-0066 F2) ([#1119](https://github.com/JiRaska/open-bank-oss/issues/1119)) ([bc45776](https://github.com/JiRaska/open-bank-oss/commit/bc45776d483563959e9e697ab7ce8f5dd8722fcb))
+
+
+### Bug Fixes
+
+* **party-service,customer-edge:** forward + persist onboarding consent ([#1157](https://github.com/JiRaska/open-bank-oss/issues/1157)) ([b16b143](https://github.com/JiRaska/open-bank-oss/commit/b16b1437e268b1d58115f9e194e40d31a3cfe596))
+
 ## [0.17.4](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.17.3...customer-edge-v0.17.4) (2026-07-12)
 
 
