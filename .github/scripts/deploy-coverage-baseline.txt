@@ -18,18 +18,16 @@
 # It can only ever shrink. Adding an entry is not a fix; it is a deliberate, reviewable
 # admission of debt and should be argued for in the PR.
 #
-# Why these two cannot simply be added to ALL_SERVICES: their ECR repositories do not
 # exist, and auto-deploy has no create-repository step, so `docker push` would fail with
-# RepositoryNotFoundException. Wiring them up is infra work — tracked in #1205.
 #
 # One component name per line, exact match.
-
-# finrep-service: released 0.5.0, 25 Kotlin sources, compiles, gitops manifest pinned to the
-# ADR-0097 `sandbox-init` placeholder. Never built; ECR repo openbank-finrep-service does not
 # exist. Down at 0/1 since its manifest landed. Tracked in #1205.
-openbank-finrep-service
-
-# vop-service: released 0.1.0, gitops manifest from #1195 pinned to `sandbox-placeholder`.
 # Same shape as finrep, one hour old at the time of writing — which is precisely why this
 # guard exists. Tracked in #1205.
-openbank-vop-service
+
+# EMPTY — and it must stay that way unless someone argues otherwise in a PR.
+#
+# finrep-service and vop-service were the two entries here. Both were fixed rather than
+# tolerated on 2026-07-16: their ECR repositories were created, their first images built,
+# signed and attested, and both are now in ALL_SERVICES. The debt this file recorded lasted
+# a few hours, which is the point of a ratchet.
