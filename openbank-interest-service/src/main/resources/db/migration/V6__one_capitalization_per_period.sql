@@ -1,0 +1,33 @@
+-- ADR-0033 §D: at most ONE capitalization per (account, product, period end).
+--
+-- The application already refuses to double-capitalize: InterestService.capitalize reads only
+-- ACCRUING accruals for the (account, product) and the whole credit — capitalization + withholding
+-- + outbox event + the ACCRUING -> CAPITALIZED flip — commits in one status-guarded transaction
+-- (InterestCapitalizationRepositoryImpl.saveWithOutbox). Two concurrent runs therefore already
+-- resolve: the loser's guarded UPDATE matches 0 rows and its transaction rolls back.
+--
+-- This index is the DB backstop for that invariant — the thing that still holds if a future caller
+-- (the not-yet-built accrual cron, an operator re-driving the REST endpoint, a replayed event)
+-- reaches the table by some path that skips the guard. Double-capitalizing is not a cosmetic
+-- duplicate: it credits the customer twice AND books the withholding-tax liability twice, so the
+-- invariant is worth enforcing in the one place that cannot be bypassed.
+--
+-- Partial (`WHERE total_accrued <> 0`): a zero-accrual capitalization carries no money and no tax,
+-- so a repeat for the same period is inert bookkeeping rather than a double credit. Constraining
+-- only the money-bearing rows keeps the backstop tight on the case that matters without wedging
+-- Flyway on legacy nil rows.
+--
+-- Deliberately NOT keyed on currency: capitalize() rejects a mixed-currency pending set outright
+-- (see InterestService.mixedCurrencyFailure), so one (account, product, period) is single-currency
+-- by construction. If per-(product, currency) capitalization is ever introduced, this index must
+-- gain a currency column in the same change.
+--
+-- Rollback note:
+--   DROP INDEX IF EXISTS uq_interest_capitalizations_period;
+--
+-- Forward-compat note: this CREATE fails loudly if the table already holds money-bearing duplicates
+-- for one (account, product, period_to). That is intentional — duplicated interest credits are a
+-- reconciliation problem for a human, not something a migration may silently delete.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_interest_capitalizations_period
+    ON interest_capitalizations (account_id, product_id, period_to)
+    WHERE total_accrued <> 0;

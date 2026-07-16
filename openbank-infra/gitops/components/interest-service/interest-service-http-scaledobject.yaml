@@ -31,7 +31,12 @@
 #   - No resident listener depends on the pod staying warm (no live cron, see above).
 #   - The KEDA HTTP interceptor parks the first request rather than 5xx-ing it.
 #
-# maxReplicas: 2 — low-QPS operator/admin-driven traffic; no customer-facing fan-out measured.
+# maxReplicas: 1 — low-QPS operator/admin-driven traffic; no customer-facing fan-out measured, so a
+#   second replica buys no throughput. It does buy a concurrency hazard: capitalization and
+#   remittance assembly are money-bearing writes whose correctness now rests on status-guarded
+#   updates plus a unique index (V6). Those guards make a concurrent run fail rather than
+#   double-credit — but a failed guard is still an operator-visible error, and there is no traffic
+#   reason to manufacture the race. Pin to 1 until a measured need for parallelism appears.
 # scaledownPeriod: 300s — mirrors the product-catalog pilot's conservative idle window.
 # targetPendingRequests: 50 — lower than product-catalog's 100; this is an operator tool with
 #   much lower expected concurrency (rate config + accrual/capitalization admin actions).
@@ -59,6 +64,6 @@ spec:
     port: 8125
   replicas:
     min: 0
-    max: 2
+    max: 1
   scaledownPeriod: 300
   targetPendingRequests: 50

@@ -28,8 +28,6 @@ class InterestService(
     private val accrualRepo: InterestAccrualRepository,
     private val capitalizationRepo: InterestCapitalizationRepository,
     private val taxProfilePort: TaxProfilePort,
-    private val withholdingTaxRepo: WithholdingTaxRepository,
-    private val eventOutbox: InterestEventOutbox,
     @ConfigProperty(name = "openbank.interest.day-count-convention", defaultValue = "ACT_365")
     private val defaultDayCount: String,
     private val clock: Clock,
@@ -44,8 +42,6 @@ class InterestService(
         accrualRepo: InterestAccrualRepository,
         capitalizationRepo: InterestCapitalizationRepository,
         taxProfilePort: TaxProfilePort,
-        withholdingTaxRepo: WithholdingTaxRepository,
-        eventOutbox: InterestEventOutbox,
         @ConfigProperty(name = "openbank.interest.day-count-convention", defaultValue = "ACT_365")
         defaultDayCount: String,
     ) : this(
@@ -53,8 +49,6 @@ class InterestService(
         accrualRepo,
         capitalizationRepo,
         taxProfilePort,
-        withholdingTaxRepo,
-        eventOutbox,
         defaultDayCount,
         Clock.systemUTC(),
     )
@@ -93,55 +87,87 @@ class InterestService(
     }
 
     override fun capitalize(accountId: UUID, productId: String, toDate: LocalDate): Uni<InterestCapitalization> =
-        accrualRepo.findPendingCapitalization(accountId, toDate).flatMap { accruals ->
-            if (accruals.isEmpty()) {
-                Uni.createFrom().failure(IllegalStateException("No pending accruals to capitalize"))
-            } else {
-                val total = accruals.fold(BigDecimal.ZERO) { acc, a -> acc + a.accruedAmount }
-                val gross = total.setScale(4, RoundingMode.HALF_UP)
-                val currency = accruals.first().currency
-                val periodFrom = accruals.minOf { it.accrualDate }
-                // ADR-0033: withhold at the credit (capitalization), crediting net; record the liability.
-                taxProfilePort.resolve(accountId).flatMap { profile ->
-                    val tax = WithholdingTaxPolicy.compute(gross, currency, profile, toDate)
-                    val net = tax.netAmount.setScale(4, RoundingMode.HALF_UP)
-                    val cap = InterestCapitalization(
-                        accountId = accountId,
-                        productId = productId,
-                        periodFrom = periodFrom,
-                        periodTo = toDate,
-                        totalAccrued = total,
-                        capitalizedAmount = net,
-                        grossAmount = gross,
-                        taxAmount = tax.taxAmount,
-                        netAmount = net,
-                        currency = currency,
-                        createdAt = OffsetDateTime.now(clock),
-                    )
-                    capitalizationRepo.save(cap).flatMap { savedCap ->
-                        val withholding = WithholdingTax(
-                            capitalizationId = savedCap.id,
-                            accountId = accountId,
-                            periodFrom = periodFrom,
-                            periodTo = toDate,
-                            taxableBase = tax.taxableBase,
-                            rate = tax.rate,
-                            taxAmount = tax.taxAmount,
-                            currency = currency,
-                            treatment = tax.treatment,
-                            exemptCode = tax.exemptCode,
-                            createdAt = OffsetDateTime.now(clock),
-                        )
-                        withholdingTaxRepo.save(withholding).flatMap { savedWithholding ->
-                            eventOutbox.append(withholdingRecordedEvent(savedCap, savedWithholding)).flatMap {
-                                accrualRepo.markCapitalized(accruals.map { it.id }, OffsetDateTime.now(clock))
-                                    .map { savedCap }
-                            }
-                        }
-                    }
-                }
+        accrualRepo.findPendingCapitalization(accountId, productId, toDate).flatMap { accruals ->
+            // Normalized so a "czk"/"CZK" mix is one currency, not two.
+            val currencies = accruals.map { it.currency.uppercase() }.distinct()
+            when {
+                accruals.isEmpty() ->
+                    Uni.createFrom().failure(IllegalStateException("No pending accruals to capitalize"))
+                currencies.size > 1 -> Uni.createFrom().failure(mixedCurrencyFailure(accountId, productId, currencies))
+                else -> capitalizePending(accountId, productId, toDate, accruals, currencies.single())
             }
         }
+
+    /**
+     * A pending set spanning several currencies has no single correct capitalization: the accrued
+     * numerics are not commensurable (summing 100 CZK and 5 EUR into "105" is nonsense), and
+     * [WithholdingTaxPolicy] assesses per currency (§E — only CZK is withheld in v1), so folding
+     * them would also withhold against the wrong base. There is no safe guess, so refuse loudly and
+     * leave every accrual `ACCRUING`: an operator must split the product's accruals per currency.
+     */
+    private fun mixedCurrencyFailure(accountId: UUID, productId: String, currencies: List<String>) =
+        IllegalStateException(
+            "Refusing to capitalize a mixed-currency accrual set for account=$accountId product=$productId: " +
+                "pending accruals are denominated in ${currencies.sorted()}. Interest must be capitalized per " +
+                "(product, currency) — the accruals stay ACCRUING; investigate why one product accrued in " +
+                "several currencies.",
+        )
+
+    /** Capitalizes one single-currency pending set (ADR-0033 §B/§D). See [capitalize] for the guards. */
+    private fun capitalizePending(
+        accountId: UUID,
+        productId: String,
+        toDate: LocalDate,
+        accruals: List<InterestAccrual>,
+        currency: String,
+    ): Uni<InterestCapitalization> {
+        val total = accruals.fold(BigDecimal.ZERO) { acc, a -> acc + a.accruedAmount }
+        val gross = total.setScale(4, RoundingMode.HALF_UP)
+        val periodFrom = accruals.minOf { it.accrualDate }
+        val now = OffsetDateTime.now(clock)
+        // ADR-0033: withhold at the credit (capitalization), crediting net; record the liability.
+        return taxProfilePort.resolve(accountId).flatMap { profile ->
+            val tax = WithholdingTaxPolicy.compute(gross, currency, profile, toDate)
+            val net = tax.netAmount.setScale(4, RoundingMode.HALF_UP)
+            val cap = InterestCapitalization(
+                accountId = accountId,
+                productId = productId,
+                periodFrom = periodFrom,
+                periodTo = toDate,
+                totalAccrued = total,
+                capitalizedAmount = net,
+                grossAmount = gross,
+                taxAmount = tax.taxAmount,
+                netAmount = net,
+                currency = currency,
+                createdAt = now,
+            )
+            val withholding = WithholdingTax(
+                capitalizationId = cap.id,
+                accountId = accountId,
+                periodFrom = periodFrom,
+                periodTo = toDate,
+                taxableBase = tax.taxableBase,
+                rate = tax.rate,
+                taxAmount = tax.taxAmount,
+                currency = currency,
+                treatment = tax.treatment,
+                exemptCode = tax.exemptCode,
+                createdAt = now,
+            )
+            // ONE transaction for the whole credit: capitalization + withholding + outbox event +
+            // the status-guarded ACCRUING -> CAPITALIZED flip. Previously these were four separate
+            // transactions, so a crash between them could commit the capitalization while leaving
+            // the accruals ACCRUING — a retry then re-credited the customer AND re-booked the tax.
+            capitalizationRepo.saveWithOutbox(
+                cap,
+                withholding,
+                withholdingRecordedEvent(cap, withholding),
+                accruals.map { it.id },
+                now,
+            )
+        }
+    }
 
     /** Builds the versioned `interest.withholding.recorded` outbox event (ADR-0033 §F). */
     private fun withholdingRecordedEvent(cap: InterestCapitalization, withholding: WithholdingTax): OutboxMessage {
