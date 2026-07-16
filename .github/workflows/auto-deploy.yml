@@ -53,12 +53,16 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  # One deploy pipeline at a time — a second push while a deploy PR is open would
-  # update the same gitops lines, causing a merge conflict. Cancel the in-flight run
-  # and let the newer commit win.
-  group: auto-deploy-${{ github.ref }}
-  cancel-in-progress: true
+# NOTE: there is deliberately NO workflow-level `concurrency` here. The serialisation this
+# pipeline needs is scoped to `gitops-pr` alone (see that job); applying it workflow-wide
+# cancelled `build-push` MID-FLIGHT, which is how the fleet ended up with unattested images
+# (#1226). `Docker push` and `Attest image SBOMs` are ~180 lines apart in that job, and a
+# cancel between them leaves the image in ECR with no attestation, forever — the superseding
+# run builds its OWN commit's tag and never comes back for the dead run's images. Since
+# verify-openbank-image-sbom-attestation is Enforce, such an image is admitted never, and the
+# deny surfaces whenever the workload next reschedules — days later, far from the cause.
+# Concurrent `build-push` runs are safe: image tags are immutable and per-SHA, so two builds
+# cannot collide. Do not re-add a workflow-level cancel.
 
 jobs:
   # ── 1. Detect which service modules actually changed ─────────────────────────
@@ -698,6 +702,15 @@ jobs:
   gitops-pr:
     name: Gitops PR
     needs: [changes, build-push, can-i-deploy]
+    # The pipeline's ONLY genuine serialisation point, and the sole thing the old
+    # workflow-level concurrency was ever justified by: a second push while a deploy PR is
+    # open would rewrite the same gitops lines and conflict. Cancelling HERE is safe and
+    # keeps the original intent (newer commit wins the PR) — cancelling the whole workflow
+    # was not, because by then build-push had already pushed images it would never attest
+    # (#1226). Anything with side effects outside this job must stay outside this group.
+    concurrency:
+      group: auto-deploy-gitops-pr-${{ github.ref }}
+      cancel-in-progress: true
     # `always()` + explicit build-push check, NOT the default "can-i-deploy must succeed":
     # can-i-deploy's own job status can be red while still emitting a `deployable` output for
     # the services that individually passed (issue #846) — this job must still run to record
