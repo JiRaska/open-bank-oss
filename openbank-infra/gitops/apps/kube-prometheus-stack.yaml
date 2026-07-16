@@ -1,5 +1,5 @@
-# Metrics plane: Prometheus + Grafana + kube-state-metrics + node-exporter
-# (alertmanager disabled — no routing configured in the sandbox). Lean FinOps
+# Metrics plane: Prometheus + Grafana + kube-state-metrics + node-exporter +
+# alertmanager (enabled, with the routing tree configured below). Lean FinOps
 # sizing per ADR-0027: single Prometheus replica, 12h retention, gp3 PVC.
 # serviceMonitorSelectorNilUsesHelmValues=false so app ServiceMonitors are
 # picked up regardless of release labels. Grafana has no Ingress — the edge NLB
@@ -21,10 +21,9 @@ spec:
     helm:
       valuesObject:
         # Alerting plane (ADR-0082 / ADR-0077 Phase 4). Enabled with a lean
-        # single replica. The sandbox routes everything to a no-op receiver so
-        # alerts are visible in the Alertmanager UI + Grafana alert list without
-        # needing creds; prod wires Slack/PagerDuty via ESO (a slack_configs
-        # block referencing a Vault-sourced webhook secret).
+        # single replica. Unmatched alerts fall through to a no-op receiver and
+        # stay visible in the Alertmanager UI + Grafana alert list; `warning`
+        # and `critical` both egress to Slack (see the routing tree below).
         alertmanager:
           enabled: true
           # Single replica -> minAvailable:1 blocks ANY voluntary eviction (Karpenter
@@ -71,21 +70,35 @@ spec:
               routes:
                 # Davis-lite (ADR-0088): auto root-cause enrichment via HolmesGPT.
                 # `continue: true` so the SAME critical alert ALSO falls through to the
-                # GoAlert paging route below — Holmes enriches, it never pages.
+                # delivery routes below — Holmes enriches, it never pages.
                 - matchers:
                     - severity = "critical"
                   receiver: 'holmes-rca'
                   continue: true
                   group_interval: 10m
                   repeat_interval: 12h   # re-investigate a still-firing alert at most twice a day
+                # WHY critical ALSO goes to Slack, not just GoAlert:
+                # both GoAlert and the ntfy it fans out to are cluster-internal with no
+                # Ingress (ADR-0056) — reaching either needs a kubectl port-forward. So a
+                # `critical` alert had NO path to a human who was not already looking at
+                # the cluster, while `warning` egressed to Slack: the more severe the
+                # alert, the less likely anyone saw it. That inversion let a money-path
+                # outage run for days unnoticed. Slack is the delivery leg that actually
+                # works today; `continue: true` keeps the GoAlert leg below intact so the
+                # ADR-0088 "paging inside the perimeter" design still runs (and remains
+                # the eventual goal — this is delivery insurance, not a replacement).
+                - matchers:
+                    - severity = "critical"
+                  receiver: 'slack-alerts'
+                  continue: true
+                  repeat_interval: 1h   # a still-unacked critical re-pings hourly (vs 4h default)
                 - matchers:
                     - severity = "critical"
                   receiver: 'goalert'   # ADR-0088 §D1: page on-call via GoAlert — escalation,
-                  # ack and dedup — which fans out to ntfy. Critical pages, never just Slack.
+                  # ack and dedup — which fans out to ntfy. In-perimeter paging.
                 - matchers:
                     - severity = "warning"
-                  receiver: 'slack-warning'   # ADR-0077 Phase 4: non-paging visibility.
-                  # warning -> Slack only (no on-call page); critical stays on GoAlert above.
+                  receiver: 'slack-alerts'   # ADR-0077 Phase 4: non-paging visibility.
             receivers:
               - name: 'null'
               - name: 'holmes-rca'
@@ -103,12 +116,15 @@ spec:
                   # mounted Secret (url_file) — never committed to git.
                   - url_file: /etc/alertmanager/secrets/goalert-webhook-url/url
                     send_resolved: true
-              - name: 'slack-warning'
+              - name: 'slack-alerts'
                 slack_configs:
-                  # Non-paging warning feed. The incoming-webhook URL is the secret and
-                  # carries its own target channel, so it is read from the mounted Secret
-                  # (api_url_file) — never committed to git. `channel` is required by the
-                  # schema but the incoming webhook posts to its own bound channel.
+                  # Delivery leg for BOTH warning and critical (see routing above) — the
+                  # only receiver that reaches a human outside the cluster perimeter. The
+                  # incoming-webhook URL is the secret and carries its own target channel,
+                  # so it is read from the mounted Secret (api_url_file) — never committed
+                  # to git. `channel` is required by the schema but the incoming webhook
+                  # posts to its own bound channel. The title renders the severity, so a
+                  # critical is distinguishable in the same channel.
                   - api_url_file: /etc/alertmanager/secrets/alertmanager-slack/SLACK_WEBHOOK
                     channel: '#openbank-alerts'
                     send_resolved: true

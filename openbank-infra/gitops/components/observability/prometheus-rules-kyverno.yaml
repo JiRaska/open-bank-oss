@@ -1,0 +1,106 @@
+# Kyverno admission-control alert rules (ADR-0030 D4 / ADR-0082).
+#
+# WHY THIS EXISTS: servicemonitor-kyverno.yaml has scraped Kyverno's metrics since
+# the SOC dashboard needed them, but NOTHING alerted on them — the metrics were
+# dashboard-only. A ClusterPolicy graduating Audit -> Enforce with resources still
+# failing it therefore blocks admission silently: running pods are unaffected (they
+# are not re-admitted), so nothing looks wrong until a pod happens to reschedule and
+# then can never come back. The failure is spread over days and is invisible to
+# every existing signal. These rules make a blocked admission page.
+#
+# Metric names/labels verified against Kyverno v1.12.5 (chart 3.2.6, apps/kyverno.yaml):
+#   kyverno_admission_requests_total  — pkg/webhooks/handlers/metrics.go: labels
+#     resource_kind, resource_namespace, resource_request_operation, request_allowed.
+#     `request_allowed="false"` is the DIRECT "this request was blocked" signal.
+#   kyverno_policy_results_total      — pkg/engine/metrics.go: labels policy_name,
+#     policy_namespace, policy_type, policy_validation_mode ("enforce"|"audit"),
+#     policy_background_mode, resource_kind, resource_namespace,
+#     resource_request_operation, rule_name, rule_result ("pass"|"fail"|"warn"|
+#     "error"|"skip"), rule_type, rule_execution_cause.
+#   (Both are OTel Int64Counters named without `_total`; the Prometheus exporter
+#   appends `_total` — which is why the SOC dashboard queries the `_total` form.)
+#
+# Picked up automatically (ruleSelectorNilUsesHelmValues=false).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-kyverno-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.kyverno.admission
+      rules:
+        # THE alert the SBOM-attestation enforcement incident needed. Any denied
+        # admission request is a workload that cannot start — by the time this fires
+        # a pod is already being turned away. Not scoped to a policy or namespace on
+        # purpose: an Enforce-mode policy denying ANYTHING is a cluster-wide risk,
+        # since the blast radius is "every pod that happens to reschedule".
+        - alert: KyvernoAdmissionDenied
+          expr: |
+            sum by (resource_kind, resource_namespace, resource_request_operation) (
+              increase(kyverno_admission_requests_total{request_allowed="false"}[10m])
+            ) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Kyverno is BLOCKING admission of {{ $labels.resource_kind }} in {{ $labels.resource_namespace }}"
+            description: >-
+              Kyverno denied {{ $value | printf "%.0f" }} {{ $labels.resource_request_operation }}
+              admission request(s) for {{ $labels.resource_kind }} in namespace
+              {{ $labels.resource_namespace }} over the last 10m, sustained for >5m. The workload
+              CANNOT start and will stay down until the policy passes or is relaxed — already-running
+              pods are NOT re-admitted, so this may be silent until a pod reschedules. Find the policy
+              with the KyvernoEnforcePolicyBlocking alert, or:
+              kubectl -n {{ $labels.resource_namespace }} describe <kind> / kubectl logs -n kyverno -l app.kubernetes.io/component=admission-controller
+        # Same event, attributed to the policy + rule that did the blocking. Split from
+        # the alert above because kyverno_admission_requests_total carries no policy_name
+        # (the webhook handler does not know which policy denied) and
+        # kyverno_policy_results_total carries no allow/deny outcome — you need both to
+        # know that something was blocked AND what blocked it.
+        - alert: KyvernoEnforcePolicyBlocking
+          expr: |
+            sum by (policy_name, rule_name, resource_kind, resource_namespace) (
+              increase(kyverno_policy_results_total{
+                policy_validation_mode="enforce",
+                rule_result="fail",
+                policy_background_mode!="true"
+              }[10m])
+            ) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Enforce-mode policy {{ $labels.policy_name }}/{{ $labels.rule_name }} is failing {{ $labels.resource_kind }}"
+            description: >-
+              Kyverno ClusterPolicy {{ $labels.policy_name }} (rule {{ $labels.rule_name }}) is in
+              ENFORCE mode and failed {{ $labels.resource_kind }} in namespace
+              {{ $labels.resource_namespace }} — admission is being denied. Either fix the resource
+              so it satisfies the policy, or drop the policy back to Audit
+              (validationFailureAction: Audit) to unblock while you do.
+        # PREVENTIVE — the signal that would have caught the incident BEFORE it happened.
+        # An Audit-mode policy that is already failing resources is a loaded gun: the day
+        # it graduates to Enforce, every one of those failures becomes a denied admission.
+        # Warning (not critical) because nothing is broken *yet* — Audit blocks nothing.
+        # Treat a firing instance as a blocker on the Audit -> Enforce graduation.
+        - alert: KyvernoAuditPolicyFailingBeforeEnforce
+          expr: |
+            sum by (policy_name, rule_name, resource_kind, resource_namespace) (
+              increase(kyverno_policy_results_total{
+                policy_validation_mode="audit",
+                rule_result="fail"
+              }[1h])
+            ) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Audit-mode policy {{ $labels.policy_name }} would block {{ $labels.resource_kind }} if enforced"
+            description: >-
+              ClusterPolicy {{ $labels.policy_name }} (rule {{ $labels.rule_name }}) is failing
+              {{ $labels.resource_kind }} in {{ $labels.resource_namespace }} while in AUDIT mode —
+              nothing is blocked today, but graduating this policy to Enforce would deny these
+              admissions. Clear the failures BEFORE flipping validationFailureAction to Enforce
+              (ADR-0144 gate graduation).

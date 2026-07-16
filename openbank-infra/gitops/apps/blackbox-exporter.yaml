@@ -56,6 +56,29 @@ spec:
                 valid_status_codes: [200, 301, 302, 401, 403, 404]
                 follow_redirects: true
                 preferred_ip_protocol: ip4
+            # STRICT OIDC-discovery module. `http_app` above accepts 404, so probing
+            # Keycloak's apex with it proves only "nginx answered" — it stayed GREEN
+            # through a total Keycloak outage that broke all admin-ui login, because a
+            # dead IdP behind a live ingress still yields a 404. This module asserts the
+            # realm is actually SERVING OIDC: a hard 200 only, no redirect following (a
+            # bounce to an error page must fail, not be followed to a 200), and the body
+            # must contain the discovery document's own endpoint claims — so an ingress
+            # default-backend or a Keycloak that boots without the realm both fail.
+            # Keep this strict; loosening it re-creates the outage-invisible probe.
+            http_oidc_discovery:
+              prober: http
+              timeout: 10s
+              http:
+                method: GET
+                valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+                valid_status_codes: [200]
+                follow_redirects: false
+                preferred_ip_protocol: ip4
+                fail_if_body_not_matches_regexp:
+                  - '"issuer"'
+                  - '"token_endpoint"'
+                  - '"authorization_endpoint"'
+                  - '"jwks_uri"'
         resources:
           requests:
             cpu: 25m
