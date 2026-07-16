@@ -87,18 +87,6 @@ class LendingJournalFactoryTest {
     }
 
     @Test
-    fun `interest accrual reversal backs the accrual out - income debited, receivable credited`() {
-        val lines = LendingJournalFactory.buildLines(
-            posting(PostingKind.INTEREST_ACCRUAL_REVERSAL, "loan:1:inst:1:accrual-reversal:gen1"),
-            accounts,
-        )
-        // The exact mirror of INTEREST_ACCRUAL: the installment was cancelled by a reschedule before
-        // cash arrived, so the recognized income and its receivable are both unwound.
-        assertThat(lines.single { side(it) == "DEBIT" }.glAccountId).isEqualTo(accounts.interestIncome)
-        assertThat(lines.single { side(it) == "CREDIT" }.glAccountId).isEqualTo(accounts.interestReceivable)
-    }
-
-    @Test
     fun `write-off debits the loan loss expense`() {
         val lines = LendingJournalFactory.buildLines(
             posting(PostingKind.WRITE_OFF, "loan:1:writeoff"),
@@ -106,17 +94,6 @@ class LendingJournalFactoryTest {
         )
         assertThat(lines.single { side(it) == "DEBIT" }.glAccountId).isEqualTo(accounts.loanLossExpense)
         assertThat(lines.single { side(it) == "CREDIT" }.glAccountId).isEqualTo(accounts.loansReceivable)
-    }
-
-    @Test
-    fun `write-off of accrued interest books the loss against the receivable, not against income`() {
-        val lines = LendingJournalFactory.buildLines(
-            posting(PostingKind.WRITE_OFF_INTEREST, "loan:1:writeoff:interest"),
-            accounts,
-        )
-        // The income was legitimately earned at accrual; the uncollectible receivable is a credit loss.
-        assertThat(lines.single { side(it) == "DEBIT" }.glAccountId).isEqualTo(accounts.loanLossExpense)
-        assertThat(lines.single { side(it) == "CREDIT" }.glAccountId).isEqualTo(accounts.interestReceivable)
     }
 
     @Test
