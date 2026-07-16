@@ -1,0 +1,88 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://open-bank.tech/vex/devops-agent",
+  "author": "OpenBank Security",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-50010"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "Netty is a transitive dependency resolved via the Quarkus platform BOM (io.quarkus.platform:quarkus-bom:3.37.2, gradle/libs.versions.toml `quarkus = \"3.37.2\"`), not a directly declared version. `./gradlew :openbank-devops-agent:dependencies --configuration runtimeClasspath` resolves every io.netty:* artifact (netty-common, netty-handler, netty-codec, netty-codec-http2, netty-codec-haproxy, netty-resolver-dns, netty-transport, ...) to 4.1.135.Final, which is exactly the version this CVE was fixed in (upstream advisory: \"Prior to versions 4.1.135.Final and 4.2.15.Final\"). The vulnerable code as it existed before the fix is not present in the shipped artifact."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-48059"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "Netty is a transitive dependency resolved via the Quarkus platform BOM (io.quarkus.platform:quarkus-bom:3.37.2, gradle/libs.versions.toml `quarkus = \"3.37.2\"`), not a directly declared version. `./gradlew :openbank-devops-agent:dependencies --configuration runtimeClasspath` resolves every io.netty:* artifact (netty-common, netty-handler, netty-codec, netty-codec-http2, netty-codec-haproxy, netty-resolver-dns, netty-transport, ...) to 4.1.135.Final, which is exactly the version this CVE was fixed in (upstream advisory: \"Prior to versions 4.1.135.Final and 4.2.15.Final\"). The vulnerable code as it existed before the fix is not present in the shipped artifact."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-48043"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "Netty is a transitive dependency resolved via the Quarkus platform BOM (io.quarkus.platform:quarkus-bom:3.37.2, gradle/libs.versions.toml `quarkus = \"3.37.2\"`), not a directly declared version. `./gradlew :openbank-devops-agent:dependencies --configuration runtimeClasspath` resolves every io.netty:* artifact (netty-common, netty-handler, netty-codec, netty-codec-http2, netty-codec-haproxy, netty-resolver-dns, netty-transport, ...) to 4.1.135.Final, which is exactly the version this CVE was fixed in (upstream advisory: \"Prior to versions 4.1.135.Final and 4.2.15.Final\"). The vulnerable code as it existed before the fix is not present in the shipped artifact."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-47691"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "Netty is a transitive dependency resolved via the Quarkus platform BOM (io.quarkus.platform:quarkus-bom:3.37.2, gradle/libs.versions.toml `quarkus = \"3.37.2\"`), not a directly declared version. `./gradlew :openbank-devops-agent:dependencies --configuration runtimeClasspath` resolves every io.netty:* artifact (netty-common, netty-handler, netty-codec, netty-codec-http2, netty-codec-haproxy, netty-resolver-dns, netty-transport, ...) to 4.1.135.Final, which is exactly the version this CVE was fixed in (upstream advisory: \"Prior to versions 4.1.135.Final and 4.2.15.Final\"). The vulnerable code as it existed before the fix is not present in the shipped artifact."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-47244"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "Netty is a transitive dependency resolved via the Quarkus platform BOM (io.quarkus.platform:quarkus-bom:3.37.2, gradle/libs.versions.toml `quarkus = \"3.37.2\"`), not a directly declared version. `./gradlew :openbank-devops-agent:dependencies --configuration runtimeClasspath` resolves every io.netty:* artifact (netty-common, netty-handler, netty-codec, netty-codec-http2, netty-codec-haproxy, netty-resolver-dns, netty-transport, ...) to 4.1.135.Final, which is exactly the version this CVE was fixed in (upstream advisory: \"Prior to versions 4.1.135.Final and 4.2.15.Final\"). The vulnerable code as it existed before the fix is not present in the shipped artifact."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-45674"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "Netty is a transitive dependency resolved via the Quarkus platform BOM (io.quarkus.platform:quarkus-bom:3.37.2, gradle/libs.versions.toml `quarkus = \"3.37.2\"`), not a directly declared version. `./gradlew :openbank-devops-agent:dependencies --configuration runtimeClasspath` resolves every io.netty:* artifact (netty-common, netty-handler, netty-codec, netty-codec-http2, netty-codec-haproxy, netty-resolver-dns, netty-transport, ...) to 4.1.135.Final, which is exactly the version this CVE was fixed in (upstream advisory: \"Prior to versions 4.1.135.Final and 4.2.15.Final\"). The vulnerable code as it existed before the fix is not present in the shipped artifact."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-45673"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "Netty is a transitive dependency resolved via the Quarkus platform BOM (io.quarkus.platform:quarkus-bom:3.37.2, gradle/libs.versions.toml `quarkus = \"3.37.2\"`), not a directly declared version. `./gradlew :openbank-devops-agent:dependencies --configuration runtimeClasspath` resolves every io.netty:* artifact (netty-common, netty-handler, netty-codec, netty-codec-http2, netty-codec-haproxy, netty-resolver-dns, netty-transport, ...) to 4.1.135.Final, which is exactly the version this CVE was fixed in (upstream advisory: \"Prior to versions 4.1.135.Final and 4.2.15.Final\"). The vulnerable code as it existed before the fix is not present in the shipped artifact."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-45416"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "Netty is a transitive dependency resolved via the Quarkus platform BOM (io.quarkus.platform:quarkus-bom:3.37.2, gradle/libs.versions.toml `quarkus = \"3.37.2\"`), not a directly declared version. `./gradlew :openbank-devops-agent:dependencies --configuration runtimeClasspath` resolves every io.netty:* artifact (netty-common, netty-handler, netty-codec, netty-codec-http2, netty-codec-haproxy, netty-resolver-dns, netty-transport, ...) to 4.1.135.Final, which is exactly the version this CVE was fixed in (upstream advisory: \"Prior to versions 4.1.135.Final and 4.2.15.Final\"). The vulnerable code as it existed before the fix is not present in the shipped artifact."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-44893"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "Netty is a transitive dependency resolved via the Quarkus platform BOM (io.quarkus.platform:quarkus-bom:3.37.2, gradle/libs.versions.toml `quarkus = \"3.37.2\"`), not a directly declared version. `./gradlew :openbank-devops-agent:dependencies --configuration runtimeClasspath` resolves every io.netty:* artifact (netty-common, netty-handler, netty-codec, netty-codec-http2, netty-codec-haproxy, netty-resolver-dns, netty-transport, ...) to 4.1.135.Final, which is exactly the version this CVE was fixed in (upstream advisory: \"Prior to versions 4.1.135.Final and 4.2.15.Final\"). The vulnerable code as it existed before the fix is not present in the shipped artifact."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42198"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "org.postgresql:postgresql (pgjdbc) is a transitive dependency resolved via the Quarkus platform BOM (io.quarkus.platform:quarkus-bom:3.37.2). `./gradlew :openbank-devops-agent:dependencies --configuration runtimeClasspath` resolves org.postgresql:postgresql to 42.7.11, which is exactly the version this CVE was fixed in (upstream advisory: fixed in 42.7.11). The vulnerable unbounded-iteration SCRAM code path is not present in the shipped artifact."
+    }
+  ]
+}
