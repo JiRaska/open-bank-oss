@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.49.0...admin-ui-v0.50.0) (2026-07-16)
+
+
+### Features
+
+* **admin-ui:** show a party's message history on the party detail page ([#1330](https://github.com/JiRaska/open-bank-oss/issues/1330)) ([8e057c8](https://github.com/JiRaska/open-bank-oss/commit/8e057c855c160da2be9e8272dd6fc7b3d1a84b34)), closes [#1326](https://github.com/JiRaska/open-bank-oss/issues/1326)
+
 ## [0.49.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.48.0...admin-ui-v0.49.0) (2026-07-16)
 
 
