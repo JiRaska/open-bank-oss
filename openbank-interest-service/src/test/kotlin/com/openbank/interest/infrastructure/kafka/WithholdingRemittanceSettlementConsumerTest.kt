@@ -141,9 +141,26 @@ class WithholdingRemittanceSettlementConsumerTest {
         verify(exactly = 0) { remitUseCase.settle(any()) }
     }
 
+    /**
+     * The reachable sub-7-CZK case, spelled out because the previous version of this test asserted
+     * the opposite and was wrong: tax is assessed in whole CZK (RoundingMode.DOWN), so a real
+     * `WITHHELD` row on gross 6.00 CZK carries `taxAmount = 0` and is still remittable. Such a
+     * batch owes nothing but MUST reach a terminal state — refusing it left it PENDING forever with
+     * its rows already REMITTED and no re-drive endpoint.
+     */
     @Test
-    fun `a zero amount with a non-empty batch is refused, not booked as 0`(): Unit = runBlocking {
+    fun `a zero total over a non-empty batch settles without touching the rail`(): Unit = runBlocking {
+        every { remitUseCase.settle(remittanceId) } returns Uni.createFrom().item(Unit)
+
         consumer.consume(record(payload = remittedPayload(totalTaxAmount = "\"0\"", itemCount = 12)))
+
+        verify(exactly = 0) { transactionClient.initiateTransaction(any()) }
+        verify(exactly = 1) { remitUseCase.settle(remittanceId) }
+    }
+
+    @Test
+    fun `a negative amount is refused - no policy path can produce one`(): Unit = runBlocking {
+        consumer.consume(record(payload = remittedPayload(totalTaxAmount = "\"-1\"", itemCount = 3)))
 
         verify(exactly = 0) { transactionClient.initiateTransaction(any()) }
         verify(exactly = 0) { remitUseCase.settle(any()) }
