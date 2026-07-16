@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { usePathname } from 'next/navigation'
+import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { Bot, Send, X, Loader2, Wrench, ShieldCheck, ShieldAlert, AlertTriangle } from 'lucide-react'
 
 interface ToolCall { tool: string; allowed: boolean; resultPreview: string }
@@ -15,6 +16,7 @@ interface ModelInfo { id: string; provider: string; sensitivity: string }
 
 export function AgentDock() {
   const pathname = usePathname()
+  const { t } = useLanguage()
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<Msg[]>([])
   const [input, setInput] = useState('')
@@ -70,7 +72,7 @@ export function AgentDock() {
     <>
       {/* Floating bot button — present on every page via root layout */}
       <button
-        aria-label="OpenBank assistant"
+        aria-label={t('OpenBank asistent', 'OpenBank assistant')}
         onClick={() => setOpen(o => !o)}
         style={{
           position: 'fixed', bottom: 24, right: 24, zIndex: 1000,
@@ -97,8 +99,8 @@ export function AgentDock() {
           <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
             <Bot size={16} style={{ color: 'var(--accent)' }} />
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>OpenBank Assistant</div>
-              <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>read-only · policy-gated · audited</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{t('OpenBank asistent', 'OpenBank Assistant')}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{t('jen pro čtení · řízeno politikou · auditováno', 'read-only · policy-gated · audited')}</div>
             </div>
             {models.length > 0 && (
               <select
@@ -115,7 +117,10 @@ export function AgentDock() {
           <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
             {messages.length === 0 && (
               <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.6 }}>
-                Ask about an account, balance or transaction. I can only read, every tool call is policy-checked and audited.
+                {t(
+                  'Zeptejte se na účet, zůstatek nebo transakci. Umím pouze číst, každé volání nástroje je prověřeno politikou a auditováno.',
+                  'Ask about an account, balance or transaction. I can only read, every tool call is policy-checked and audited.',
+                )}
               </div>
             )}
             {messages.map((m, i) => (
@@ -130,7 +135,7 @@ export function AgentDock() {
                     borderRadius: '10px 10px 0 0', padding: '4px 8px',
                   }}>
                     <AlertTriangle size={11} />
-                    Requires your review before acting
+                    {t('Vyžaduje vaši kontrolu před provedením', 'Requires your review before acting')}
                   </div>
                 )}
                 <div style={{
@@ -162,7 +167,7 @@ export function AgentDock() {
             ))}
             {busy && (
               <div style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-tertiary)', fontSize: 12 }}>
-                <Loader2 size={13} className="animate-spin" /> thinking…
+                <Loader2 size={13} className="animate-spin" /> {t('přemýšlím…', 'thinking…')}
               </div>
             )}
           </div>
@@ -173,7 +178,7 @@ export function AgentDock() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
-              placeholder="Ask the assistant…"
+              placeholder={t('Zeptejte se asistenta…', 'Ask the assistant…')}
               disabled={busy}
               style={{ flex: 1, fontSize: 12.5, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text-primary)' }}
             />

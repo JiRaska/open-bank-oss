@@ -35,6 +35,7 @@ import { readFileSync, readdirSync, statSync } from 'fs'
 import path from 'path'
 
 const APP_DIR = path.resolve(__dirname, '../app')
+const COMPONENTS_DIR = path.resolve(__dirname, '../components')
 
 // Auth screens are static, pre-login, single-language by design.
 const EXEMPT = new Set<string>([
@@ -68,12 +69,26 @@ const BASELINE = new Set<string>([
   // ratchet below keeps it that way (any new hardcoded copy fails CI).
 ])
 
-function walk(dir: string): string[] {
+// ── Component baseline: components not yet swept. Burn down; never add to. ───
+// The guard originally scanned ONLY src/app/**/page.tsx, which left src/components
+// — where a large share of user-facing copy actually lives — completely unchecked.
+// Extending the scope surfaced four violators; the two small ones (AgentDock,
+// SbomViewer) were swept in the same change. The two below are long-form
+// documentation components that render large prose blocks (the same category the
+// page baseline used to hold, and which was burned down to empty the same way).
+// They are queued for the bilingual sweep. Same ratchet as pages: a component here
+// that becomes clean MUST be removed, so this set can only ever shrink.
+const COMPONENT_BASELINE = new Set<string>([
+  'docs/BpmnView.tsx',    // BPMN catalogue: long prose, already part cs/part en — needs a real sweep, not a mechanical wrap
+  'docs/ProcessView.tsx', // auth-flow/JWT narrative: same, long-form mixed-language prose
+])
+
+function walk(dir: string, match: (entry: string) => boolean): string[] {
   const out: string[] = []
   for (const entry of readdirSync(dir)) {
     const full = path.join(dir, entry)
-    if (statSync(full).isDirectory()) out.push(...walk(full))
-    else if (entry === 'page.tsx') out.push(full)
+    if (statSync(full).isDirectory()) out.push(...walk(full, match))
+    else if (match(entry)) out.push(full)
   }
   return out
 }
@@ -136,7 +151,7 @@ function findHardcoded(src: string): string[] {
 }
 
 describe('admin-ui bilingual-by-default rule', () => {
-  const pages = walk(APP_DIR)
+  const pages = walk(APP_DIR, e => e === 'page.tsx')
 
   it('discovers page files', () => {
     expect(pages.length).toBeGreaterThan(10)
@@ -153,6 +168,39 @@ describe('admin-ui bilingual-by-default rule', () => {
         expect(
           hardcoded.length,
           `${rel} no longer has hardcoded copy — delete it from BASELINE in i18n.guard.test.ts so the ratchet keeps it clean.`,
+        ).toBeGreaterThan(0)
+      })
+    } else {
+      it(`${rel} renders no hardcoded copy (all strings via t())`, () => {
+        expect(
+          hardcoded,
+          `${rel} has hardcoded copy that won't switch language:\n  - ${hardcoded.join('\n  - ')}\n\nWrap each user-facing string in t('Česky','English') from @/lib/i18n/LanguageContext.`,
+        ).toEqual([])
+      })
+    }
+  }
+})
+
+// A page is only half the surface: the Sidebar, Header, AgentDock and every panel
+// under src/components render copy too, and were never scanned. Same rule, same
+// ratchet — a component that renders human copy renders it through t().
+describe('admin-ui bilingual-by-default rule — components', () => {
+  const components = walk(COMPONENTS_DIR, e => e.endsWith('.tsx'))
+
+  it('discovers component files', () => {
+    expect(components.length).toBeGreaterThan(10)
+  })
+
+  for (const file of components) {
+    const rel = path.relative(COMPONENTS_DIR, file).split(path.sep).join('/')
+    const hardcoded = findHardcoded(readFileSync(file, 'utf8'))
+
+    if (COMPONENT_BASELINE.has(rel)) {
+      // Ratchet: a baseline component that is now clean must leave the baseline.
+      it(`${rel} is still pending i18n (remove from COMPONENT_BASELINE once swept)`, () => {
+        expect(
+          hardcoded.length,
+          `${rel} no longer has hardcoded copy — delete it from COMPONENT_BASELINE in i18n.guard.test.ts so the ratchet keeps it clean.`,
         ).toBeGreaterThan(0)
       })
     } else {

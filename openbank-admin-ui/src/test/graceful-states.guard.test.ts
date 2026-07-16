@@ -25,12 +25,20 @@ import { readFileSync, readdirSync, statSync } from 'fs'
 import path from 'path'
 
 const APP_DIR = path.resolve(__dirname, '../app')
+const COMPONENTS_DIR = path.resolve(__dirname, '../components')
 
 // Auth screens are static (no BFF fetch) and intentionally show their own copy.
 const EXEMPT = new Set<string>([
   'auth/login/page.tsx',
   'auth/error/page.tsx',
   'auth/forbidden/page.tsx',
+])
+
+// <DataUnavailable> is the shared panel the rule points every failure at, so it
+// necessarily contains the "cannot reach" copy itself — it is the implementation
+// of the rule, not a violation of it.
+const COMPONENT_EXEMPT = new Set<string>([
+  'feedback/DataUnavailable.tsx',
 ])
 
 // Each pattern is a raw-error anti-pattern that leaks a backend failure to the
@@ -41,12 +49,12 @@ const BANNED: { re: RegExp; why: string }[] = [
   { re: /[Cc]annot reach|[Cc]ould not reach|[Uu]nable to reach/, why: 'hand-written "cannot reach" copy — use <DataUnavailable kind="unreachable"|"not_deployed"> so the message is consistent and localized' },
 ]
 
-function walk(dir: string): string[] {
+function walk(dir: string, match: (entry: string) => boolean): string[] {
   const out: string[] = []
   for (const entry of readdirSync(dir)) {
     const full = path.join(dir, entry)
-    if (statSync(full).isDirectory()) out.push(...walk(full))
-    else if (entry === 'page.tsx') out.push(full)
+    if (statSync(full).isDirectory()) out.push(...walk(full, match))
+    else if (match(entry)) out.push(full)
   }
   return out
 }
@@ -60,7 +68,7 @@ function stripComments(src: string): string {
 }
 
 describe('admin-ui graceful-state rule', () => {
-  const pages = walk(APP_DIR)
+  const pages = walk(APP_DIR, e => e === 'page.tsx')
 
   it('discovers page files', () => {
     expect(pages.length).toBeGreaterThan(10)
@@ -69,6 +77,29 @@ describe('admin-ui graceful-state rule', () => {
   for (const file of pages) {
     const rel = path.relative(APP_DIR, file).split(path.sep).join('/')
     if (EXEMPT.has(rel)) continue
+
+    it(`${rel} does not leak a raw backend failure`, () => {
+      const code = stripComments(readFileSync(file, 'utf8'))
+      const hits = BANNED.filter(b => b.re.test(code)).map(b => b.why)
+      expect(hits, `${rel} violates the graceful-state rule:\n  - ${hits.join('\n  - ')}\n\nRoute the failure through <DataUnavailable> (src/components/feedback/DataUnavailable.tsx).`).toEqual([])
+    })
+  }
+})
+
+// Components fetch from the BFF too (SbomViewer, CatalogDriftBanner, the agent
+// panels), so the same rule applies to them — they were simply never scanned.
+// No baseline: src/components was already clean when the scope was extended, so
+// this starts fully ratcheted. Keep it that way.
+describe('admin-ui graceful-state rule — components', () => {
+  const components = walk(COMPONENTS_DIR, e => e.endsWith('.tsx'))
+
+  it('discovers component files', () => {
+    expect(components.length).toBeGreaterThan(10)
+  })
+
+  for (const file of components) {
+    const rel = path.relative(COMPONENTS_DIR, file).split(path.sep).join('/')
+    if (COMPONENT_EXEMPT.has(rel)) continue
 
     it(`${rel} does not leak a raw backend failure`, () => {
       const code = stripComments(readFileSync(file, 'utf8'))

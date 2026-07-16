@@ -24,6 +24,13 @@ export default function ServiceConfigPage() {
       const data = await fetchAllServiceConfigSnapshots()
       setSnapshots(data)
       setLastRefresh(new Date())
+    } catch (e) {
+      // The BFF is unreachable (in the sandbox most of the fleet isn't deployed),
+      // which is expected, not exceptional. Keep the last-known-good snapshots and
+      // let `finally` drop the spinner so the page degrades to its empty/stale
+      // state. Without this catch the rejection escaped the effect entirely as an
+      // unhandled promise rejection on every failed poll.
+      console.error('Failed to load service config snapshots', e)
     } finally {
       setLoading(false)
     }
