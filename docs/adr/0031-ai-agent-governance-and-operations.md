@@ -10,7 +10,7 @@ Author(s): jiri.raska
 - **D2 (policy-gated MCP)** — Partial: `OpaPolicyDecisionPoint` + `agents.rego` deny-by-default logic shipped; sidecar enforcement pending (PR #638, D9 phase 1 advisory).
 - **D4 (human-in-the-loop)** — ✅ Shipped: proposal queue + admin-UI approvals (#657); read-only MCP oversight tools across 7 domains (#639).
 - **D5 (AI-attributed audit)** — ⬜ Skeleton present; model-id + prompt-hash enforcement pending.
-- **D8 (AGPL agent-runtime public repo)** — ⬜ Planned (issue #224).
+- **D8 (AGPL agent-runtime public repo)** — ⬜ Planned (issue JiRaska/open-bank#224).
 
 > **Ratification (2026-06-10).** The load-bearing controls are in place and deployed, so the
 > decision is ratified and the phasing (D9) becomes the execution plan:
@@ -25,7 +25,7 @@ Author(s): jiri.raska
 > Ratification does **not** widen blast radius: agents stay `advisory` + proposal-only until the D9
 > gates flip. Acceptance unblocks the remaining tail — enforcement (D2 sidecar), the oversight
 > trigger (D9 phase 2), AI-attributed tool-execution audit (D5), and the AGPL agent-runtime repo
-> (D8, issue #224) — without re-litigating the decision each time.
+> (D8, issue JiRaska/open-bank#224) — without re-litigating the decision each time.
 
 ## Context
 

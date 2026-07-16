@@ -121,7 +121,7 @@ keys). Safety rests on the *trust scope*, not on a trimmed permission list:
   workflow file; actions pinned by SHA.
 - PCI/GDPR/PSD2: unchanged (no CDE/personal data; sandbox account).
 
-## Follow-ups (tracked, issue #282)
+## Follow-ups (tracked, issue JiRaska/open-bank#282)
 
 1. **Reviewer-gated Environment** for apply once the repo is on GitHub Pro/Team
    (move the apply trust to `environment:platform-apply`, switch apply back to

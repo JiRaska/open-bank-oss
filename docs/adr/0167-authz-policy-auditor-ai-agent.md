@@ -83,7 +83,7 @@ control-liveness-sentinel, governance-auditor, release-steward, and docs-truth-a
   4. **REST bypassing `agents.allow`.** Flags any `charter_allowed` reference found outside
      `agents.rego`/`agents_test.rego` — the only place that predicate is meant to be defined and
      consumed; a REST/MCP bridge rule must delegate to `agents.allow` instead.
-  - **Check 5 (charter-vs-deployed-runtime-grant drift, issue #743)** — a charter's declared
+  - **Check 5 (charter-vs-deployed-runtime-grant drift, issue JiRaska/open-bank#743)** — a charter's declared
     `tools.allow` in `agents.yaml` not matching what a service's `application.yaml` actually
     grants at runtime — is a deliberate bootstrap-phase stub. It needs a live-cluster or
     fleet-wide-repo-scan correlation this agent's v1 does not perform, the same "genuinely
