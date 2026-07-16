@@ -11,13 +11,16 @@ import jakarta.annotation.security.PermitAll
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.jwt.JsonWebToken
+import java.time.Instant
 
 /**
  * Public onboarding entry point (ADR-0069).
@@ -53,7 +56,19 @@ class OnboardingResource(
         private const val MAX_LEGAL_NAME_LENGTH = 500
         private const val STATUS_PAYLOAD_TOO_LARGE = 413
         private val VALID_PARTY_TYPES = setOf("INDIVIDUAL", "LEGAL_ENTITY", "SOLE_TRADER")
+
+        private const val TERMS_TTL_MS = 5 * 60 * 1000L
+        private const val STATUS_OK = 200
+        private const val STATUS_BAD_GATEWAY = 502
+
+        // The X-Customer-Party-Id header value for the pre-party terms call — document-service's
+        // template routes don't scope by party, but UpstreamClient always sends the header.
+        private const val ONBOARDING_PARTY_PLACEHOLDER = "onboarding-anonymous"
     }
+
+    // Instance field (the resource is a Quarkus singleton): per-lang cache of the serialized
+    // /terms response so an anonymous burst can't fan out to document-service.
+    private val termsCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, String>>()
 
     @Inject
     lateinit var jsonMapper: ObjectMapper
@@ -66,6 +81,9 @@ class OnboardingResource(
 
     @ConfigProperty(name = "openbank.edge.party-service-url")
     lateinit var partyServiceUrl: String
+
+    @ConfigProperty(name = "openbank.edge.document-service-url")
+    lateinit var documentServiceUrl: String
 
     @POST
     @Path("/start")
@@ -135,4 +153,68 @@ class OnboardingResource(
     @RolesAllowed("ROLE_CUSTOMER")
     @Blocking
     fun registerParty(body: String): Response = customerEdge.registerParty(body)
+
+    /**
+     * The PUBLISHED contractual documents shown on the onboarding consent step (framework
+     * agreement + general terms), before any credential exists — informed consent requires the
+     * text to be READABLE at the moment the user ticks "I agree", and at that point there is no
+     * account, no token and no personalised document yet (the personalised agreement is created
+     * and signed after `account.created`, ADR-0169/0170).
+     *
+     * Same security class as [startOnboarding] above (the already-public onboarding surface,
+     * behind the same ingress rate limit) — deliberately NOT a new exposure category: read-only,
+     * serves only PUBLISHED template text (a bank's public terms — no PII, no party data, no
+     * template internals beyond what every prospective customer must be able to read anyway).
+     *
+     * Upstream call uses the edge M2M token against document-service's template list (the same
+     * ROLE_OPERATOR-gated route the admin cockpit reads); responses are cached for [TERMS_TTL_MS]
+     * per lang so an anonymous burst can't fan out to document-service.
+     */
+    @GET
+    @Path("/terms")
+    @PermitAll
+    @Blocking
+    fun onboardingTerms(@QueryParam("lang") lang: String?): Response {
+        val l = if (lang?.lowercase() == "en") "EN" else "CS"
+        val now = Instant.now().toEpochMilli()
+        termsCache[l]?.let { (at, body) ->
+            if (now - at < TERMS_TTL_MS) {
+                return Response.ok(body).type(MediaType.APPLICATION_JSON).build()
+            }
+        }
+
+        val wanted = listOf("RAMCOVA_SMLOUVA_$l", "VOP_$l")
+        val resp = upstream.get(
+            "$documentServiceUrl/api/v1/documents/templates?limit=100",
+            ONBOARDING_PARTY_PLACEHOLDER,
+        )
+        val raw = (resp.entity as? String).orEmpty()
+        if (resp.status != STATUS_OK) {
+            return Response.status(STATUS_BAD_GATEWAY)
+                .entity("""{"error":"document templates unavailable"}""")
+                .type(MediaType.APPLICATION_JSON).build()
+        }
+        val docs = runCatching {
+            jsonMapper.readTree(raw)
+                .filter { it.get("status")?.asText() == "PUBLISHED" && it.get("code")?.asText() in wanted }
+                // Stable order: agreement first, then terms — the consent screen renders in order.
+                .sortedBy { wanted.indexOf(it.get("code")?.asText()) }
+                .map {
+                    mapOf(
+                        "code" to it.get("code")?.asText(),
+                        "name" to it.get("name")?.asText(),
+                        "version" to it.get("version")?.asText(),
+                        "publishedAt" to it.get("createdAt")?.asText(),
+                        "html" to it.get("bodyHtml")?.asText(),
+                    )
+                }
+        }.getOrElse {
+            return Response.status(STATUS_BAD_GATEWAY)
+                .entity("""{"error":"document templates unreadable"}""")
+                .type(MediaType.APPLICATION_JSON).build()
+        }
+        val body = jsonMapper.writeValueAsString(mapOf("documents" to docs))
+        termsCache[l] = now to body
+        return Response.ok(body).type(MediaType.APPLICATION_JSON).build()
+    }
 }
