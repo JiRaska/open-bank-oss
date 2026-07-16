@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.10.0...product-catalog-v0.10.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* **copilot,product-catalog:** enable the Quarkus management interface so probes hit a real port ([#1165](https://github.com/JiRaska/open-bank-oss/issues/1165)) ([7c8fa2b](https://github.com/JiRaska/open-bank-oss/commit/7c8fa2b76efb9d1d979eb03212f4f5dc42711767))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.9.0...product-catalog-v0.10.0) (2026-07-14)
 
 
