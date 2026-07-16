@@ -18,8 +18,15 @@
 # Not covered here (separate mechanisms):
 #   docker.io  — in-cluster registry-cache via containerd hosts.toml (EC2NodeClass
 #                userData); transparent proxy, no prefix needed.
-#   ghcr.io    — needs GitHub PAT in Secrets Manager; see commented stub in
-#                ecr-pull-through-cache.tf. Left on NAT until creds available.
+#
+# STALE UNTIL 2026-07-16, corrected here: this list used to claim "ghcr.io — needs
+# GitHub PAT in Secrets Manager … Left on NAT until creds available." That has been
+# untrue since 2026-06-14, when the `ghcr` pull-through rule was created — the rule
+# below (rewrite-ghcr) has been rewriting ghcr.io refs ever since, and the cache is
+# populated (e.g. ghcr/jimmidyson/configmap-reload, ghcr/cloudnative-pg/postgresql).
+# #1259 pins alloy's config-reloader straight at ghcr/… and it runs. The note was not
+# harmless: it is the reason nobody moved CNPG off ghcr.io (#1290) — anyone reading it
+# concludes the path does not exist.
 #
 # Exclusion: images already referencing ECR (*.dkr.ecr.*.amazonaws.com) and
 # openbank internal images are never rewritten.
@@ -35,6 +42,13 @@
 # ref end-to-end; it pulls postgres from ghcr.io directly (one image, rarely, mostly
 # node-cached — negligible NAT cost). Applied to all rules: the incompatibility is
 # with image mutation per se, not any one registry.
+#
+# The "negligible" estimate held up when it was finally measured (2026-07-16) — but the
+# conclusion "must pull from ghcr.io directly" does NOT. CNPG owning its ref end-to-end
+# is satisfied by pointing Cluster.spec.imageName at the pull-through
+# (…/ghcr/cloudnative-pg/postgresql:<tag>): no mutation, no drift, no reconcile loop.
+# 70 instance pods x ~281 MB (246 MB postgres + 35 MB bootstrap-controller) still take
+# the NAT path today for no reason other than the stale ghcr note above. See #1290.
 #
 # failurePolicy: Ignore — if Kyverno webhook is down, pods still start (they
 # pull from origin over NAT rather than being blocked). Acceptable for sandbox.

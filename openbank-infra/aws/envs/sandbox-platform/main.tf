@@ -209,10 +209,35 @@ resource "kubectl_manifest" "nodepool_default" {
         consolidationPolicy = "WhenEmptyOrUnderutilized"
         consolidateAfter    = "1m"
         # FinOps: freeze node replacement 20:00–07:00 UTC (overnight).
-        # Karpenter consolidation on idle nodes churn image pulls from ghcr.io /
-        # quay.io over NAT (~100 GB/night, $4-5) because containerd on a fresh
-        # node pulls DaemonSet images before Kyverno ECR-rewrite is active.
         # During the freeze window 0 nodes may be disrupted; outside it, up to 50%.
+        #
+        # ORIGINAL RATIONALE, NOW OBSOLETE — kept because the window is still here and
+        # someone will ask why. It read: "Karpenter consolidation on idle nodes churn
+        # image pulls from ghcr.io / quay.io over NAT (~100 GB/night, $4-5) because
+        # containerd on a fresh node pulls DaemonSet images before Kyverno ECR-rewrite
+        # is active." That was true when written (2026-06-26): a NAT *Gateway* charged
+        # $0.045/GB processed, in both directions.
+        #
+        # It stopped being true four days later. 2026-06-30 replaced the gateway with
+        # `openbank-sandbox-fck-nat`, a t4g.small NAT *instance* — see fck-nat in this
+        # stack. There is now no NAT Gateway in the account at all, so:
+        #   - the $0.045/GB processing charge does not exist;
+        #   - image pulls are INBOUND from the internet, which AWS does not charge.
+        # Measured 2026-07-16 over 14 days (Cost Explorer): NatGateway-Bytes absent
+        # entirely; EUN1-DataTransfer-Out-Bytes $0.63; the only material transfer line is
+        # EUN1-DataTransfer-Regional-Bytes at $32.64 (~$70/mo) — CROSS-AZ, because
+        # fck-nat sits in eu-north-1a while ~2/3 of nodes run in 1b/1c. That is a
+        # different cost with a different fix, and it is mostly pod-to-pod traffic, not
+        # image pulls.
+        #
+        # So this freeze now buys little and costs something: 11h/night of no
+        # consolidation means idle nodes are held until 07:00 UTC, and it is why the
+        # `default` NodePool limit above cannot be raised without a night-surge bill.
+        # DO NOT drop it on the strength of this comment alone — the remaining question
+        # is whether fck-nat (a single t4g.small, cross-AZ for most nodes) can absorb an
+        # unfrozen night's pull burst, which is a throughput question nobody has
+        # measured. Tracked in #1290 along with the last workloads that still need the
+        # NAT path at all (CNPG). Re-evaluate once those are pinned at ECR.
         budgets = [
           # Standard 5-field cron: no disruption 20:00–07:00 UTC daily
           { schedule = "0 20 * * *", duration = "11h", nodes = "0%" },
