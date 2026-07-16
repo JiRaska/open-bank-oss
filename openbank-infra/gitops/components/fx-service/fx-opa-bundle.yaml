@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fx-service
     app.kubernetes.io/part-of: fx
   annotations:
-    openbank.tech/policy-checksum: "d98a7fd4020bc700"
+    openbank.tech/policy-checksum: "b3c97f2ddf5a15aa"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1621,6 +1621,16 @@ data:
       - openbank-sanctions-service             # ADR-0116: real feed screening; four-eyes wired (issue #938 follow-up) on
                                                 # sanctions.clear (deciding a screening hit) — the highest-risk action in this
                                                 # service, since a wrongly-cleared true positive is a real sanctions violation.
+      - openbank-vop-service                   # ADR-0171: Verification of Payee (IPR Art. 5c) — sits on the pre-execution path of
+                                                # every euro credit transfer. Money-path for the same reason sca/consent/fraud are:
+                                                # it gates money movement without moving money itself.
+                                                # four-eyes assessed: the only REST surface is POST /vop/verify (vop.verify), a
+                                                # read-shaped check that mints nothing and decides nothing a human could collude on
+                                                # — there is nothing to maker-checker gate. The action that WOULD deserve a gate is
+                                                # a runtime change to `openbank.vop.max-edit-distance`: widening it silently turns
+                                                # genuine mismatches into reassuring amber warnings (threat model §3 Tampering).
+                                                # It is gitops-only config today, so it is covered by PR review rather than
+                                                # four_eyes.verbs; add a `vop.flip` verb here if it ever becomes operator-tunable.
 
     # ---------------------------------------------------------------------------------------
     # SLOs (issue #669 — operational evidence, scope item 3). Governed data: a single

@@ -10,19 +10,20 @@ import com.openbank.docstruth.application.port.out.GitHubProposalPort
 import com.openbank.docstruth.application.port.out.LlmDiagnosisPort
 import com.openbank.docstruth.domain.model.DocsTruthFinding
 import com.openbank.docstruth.domain.model.FindingStatus
+import io.quarkus.vertx.VertxContextSupport
+import io.smallrye.mutiny.coroutines.asUni
 import jakarta.enterprise.context.ApplicationScoped
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import org.jboss.logging.Logger
 import java.time.Instant
 
-// See CollectRepoScanActivityImpl for why this doesn't use the finops-agent
-// VertxContextSupport.subscribeAndAwait { Dispatchers.Unconfined ... } pattern: Temporal activity
-// methods run on the Temporal SDK's own activity worker thread pool, not a Vert.x event loop, and
-// today every port here (LlmDiagnosisAdapter, GitHubProposalAdapter, InMemoryFindingRepository) is
-// a synchronous stub anyway — there is no genuinely async Mutiny call to bridge onto a Vert.x
-// context for. Plain runBlocking is simpler and exactly as correct; if a port later gains a real
-// non-blocking Mutiny-backed call, that specific port's adapter (not this activity wrapper) is the
-// right place to bridge it.
+// Unlike CollectRepoScanActivityImpl (which touches no DB and so stays on plain runBlocking), this
+// activity persists through the Postgres-backed FindingRepository (ADR-0166). Reactive Panache
+// resolves its session from a Vert.x duplicated context, and Temporal activity methods run on the
+// SDK's own worker thread pool — never an event loop — so each call is bridged onto a Vert.x
+// context here, matching devops-agent/release-steward.
 @ApplicationScoped
 open class DiagnoseAndProposeActivityImpl(
     private val llm: LlmDiagnosisPort,
@@ -33,7 +34,7 @@ open class DiagnoseAndProposeActivityImpl(
     private val log = Logger.getLogger(DiagnoseAndProposeActivityImpl::class.java)
 
     override fun diagnose(finding: DocsTruthFinding, contextMetrics: Map<String, Double>): DocsTruthFinding =
-        runBlocking {
+        runOnVertxContext {
             log.infof("Diagnosing finding %s (%s) for %s", finding.id, finding.checkType, finding.component)
             val rootCause = llm.diagnose(finding, contextMetrics)
             val diagnosed = finding.copy(
@@ -49,7 +50,7 @@ open class DiagnoseAndProposeActivityImpl(
     // (openProposalPr) path is the rare exception, reserved for the one narrow case where flipping
     // just the Delivery-Status: line is unambiguous; every other finding falls through to a
     // tracking ticket (ADR-0166 Decision).
-    override fun propose(finding: DocsTruthFinding): DocsTruthFinding = runBlocking {
+    override fun propose(finding: DocsTruthFinding): DocsTruthFinding = runOnVertxContext {
         log.infof(
             "Proposing disposition for finding %s (%s) on %s",
             finding.id,
@@ -76,5 +77,10 @@ open class DiagnoseAndProposeActivityImpl(
             )
         }
         findingRepository.update(proposed)
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    protected open fun <T> runOnVertxContext(block: suspend () -> T): T = VertxContextSupport.subscribeAndAwait {
+        CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni()
     }
 }

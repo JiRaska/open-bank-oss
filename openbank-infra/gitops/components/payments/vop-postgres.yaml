@@ -1,0 +1,63 @@
+# CNPG Postgres for openbank-vop-service (ADR-0171). Generates the vop-db-app secret
+# (username/password) + vop-db-rw Service the Rollout consumes — CNPG mints these itself, so no
+# ExternalSecret is needed here.
+#
+# instances: 2 per ADR-0159 — VoP is a money-path service (rules.yaml: money_path_services): it sits
+# on the pre-execution path of every euro credit transfer.
+#
+# NOTE on the failure mode, which is unusual for a money-path DB: VoP is fail-OPEN (ADR-0171 §3).
+# If this cluster is down, the service answers NO_DATA and payments still flow with a warning — it
+# does NOT hold payments the way a sanctions-service outage does. HA is here so the *evidence*
+# record (IPR Art. 5c) survives a node roll, not because the payment path stops without it.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: vop-db
+  namespace: payments
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 2
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          cnpg.io/cluster: vop-db
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_vop
+      owner: openbank
+  # WAL archiving to S3 (ADR-0035), matching the other money-path clusters. Credentials via EKS Pod
+  # Identity on the vop-db ServiceAccount (aws/.../db-backups.tf) — barman reads the SDK chain, no
+  # secret. Retention is 30d here (the S3 lifecycle), while the *application* retention for a VoP
+  # record is 13 months (ADR-0171) — the row-level retention sweep owns that, not the backup policy.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/vop-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip

@@ -10,6 +10,7 @@ import com.openbank.docstruth.application.port.incoming.RunDocsTruthCheckUseCase
 import com.openbank.docstruth.domain.model.DocsTruthFinding
 import com.openbank.docstruth.domain.model.DocsTruthReport
 import com.openbank.docstruth.domain.model.RunTrigger
+import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.NotFoundException
@@ -23,24 +24,26 @@ import kotlinx.coroutines.runBlocking
 @Path("/api/v1/docs-truth-agent")
 @Produces(MediaType.APPLICATION_JSON)
 class DocsTruthResource(private val runCheck: RunDocsTruthCheckUseCase, private val getFindings: GetFindingsUseCase) {
+    // @Blocking: starts a Temporal workflow and waits for it synchronously — must run on a worker
+    // thread, not the event loop. It touches no reactive DB session, so runBlocking is fine here.
     @POST
     @Path("/check/trigger")
     @RolesAllowed("platform-admin")
+    @Blocking
     fun triggerCheck(): DocsTruthReport = runBlocking {
         runCheck.run(RunTrigger.OPERATOR_MANUAL)
     }
 
+    // suspend: the reads hit reactive Panache, which needs a Vert.x context — RESTEasy Reactive runs
+    // Kotlin suspend resource methods on one, so the session resolves correctly.
     @GET
     @Path("/findings")
     @RolesAllowed("platform-admin", "platform-viewer")
-    fun getActiveFindings(): List<DocsTruthFinding> = runBlocking {
-        getFindings.getActive()
-    }
+    suspend fun getActiveFindings(): List<DocsTruthFinding> = getFindings.getActive()
 
     @GET
     @Path("/findings/{id}")
     @RolesAllowed("platform-admin", "platform-viewer")
-    fun getFinding(@PathParam("id") id: String): DocsTruthFinding = runBlocking {
+    suspend fun getFinding(@PathParam("id") id: String): DocsTruthFinding =
         getFindings.getById(id) ?: throw NotFoundException("Finding $id not found")
-    }
 }

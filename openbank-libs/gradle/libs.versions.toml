@@ -98,7 +98,6 @@ quarkus-oidc = { module = "io.quarkus:quarkus-oidc" }
 quarkus-oidc-client-reactive-filter = { module = "io.quarkus:quarkus-rest-client-oidc-filter" }
 quarkus-redis-client = { module = "io.quarkus:quarkus-redis-client" }
 webauthn4j-core = { module = "com.webauthn4j:webauthn4j-core", version.ref = "webauthn4j" }
-quarkus-grpc = { module = "io.quarkus:quarkus-grpc" }
 quarkus-config-yaml = { module = "io.quarkus:quarkus-config-yaml" }
 quarkus-smallrye-openapi = { module = "io.quarkus:quarkus-smallrye-openapi" }
 quarkus-vault = { module = "io.quarkiverse.vault:quarkus-vault" }

@@ -36,6 +36,7 @@ export const SERVICES: { name: string; port: number }[] = [
   { name: 'interest-service',       port: 8125 },
   { name: 'dispute-service',        port: 8135 },
   { name: 'sepa-instant',           port: 8127 },
+  { name: 'vop-service',            port: 8149 },
   { name: 'agent-service',          port: 8109 },
   // Extended / reporting — were missing from the probe list before ADR-0071.
   { name: 'lending-service',        port: 8128 },

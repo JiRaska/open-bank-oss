@@ -1,0 +1,142 @@
+quarkus:
+  application:
+    name: openbank-vop-service
+  redis:
+    hosts: ${QUARKUS_REDIS_HOSTS:redis://localhost:6379}
+  http:
+    port: 8149
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,OPTIONS
+      headers: Content-Type,Authorization
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  datasource:
+    db-kind: postgresql
+    username: ${POSTGRES_USER:openbank}
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: ${REACTIVE_URL:postgresql://localhost:5432/openbank_vop}
+    jdbc:
+      url: ${JDBC_URL:jdbc:postgresql://localhost:5432/openbank_vop}
+  hibernate-orm:
+    database:
+      generation: none
+  flyway:
+    migrate-at-start: true
+    validate-on-migrate: false
+    connect-retries: 10
+    connect-retries-interval: 2S
+
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  # Outbound M2M token for the account-service / party-service name lookup. VoP asks about an
+  # account the caller does not own, so it authenticates as the service, not as the payer.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+  rest-client:
+    account-service:
+      url: ${ACCOUNT_SERVICE_URL:http://localhost:8101}
+      scope: jakarta.inject.Singleton
+    party-service:
+      url: ${PARTY_SERVICE_URL:http://localhost:8100}
+      scope: jakarta.inject.Singleton
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+    console:
+      json: true
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-vop-service
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  management:
+    enabled: true
+    port: 8086
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+    oidc:
+      enabled: false
+"%test":
+  quarkus:
+    datasource:
+      username: openbank
+      password: openbank_secret
+      reactive:
+        url: vertx-reactive:postgresql://localhost:5432/openbank_vop_it
+      jdbc:
+        url: jdbc:postgresql://localhost:5432/openbank_vop_it
+    management:
+      enabled: false
+    devservices:
+      enabled: false
+    oidc:
+      enabled: false
+    oidc-client:
+      enabled: false
+
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:true}"
+
+openbank:
+  vop:
+    # IBAN country prefixes we can answer for ourselves. Anything else has no EPC VoP scheme link
+    # and honestly returns NO_DATA / NO_SCHEME_CONNECTIVITY (ADR-0171 §4) rather than a fabricated
+    # verdict — the same honesty the rails apply via the clearing simulator.
+    domestic-iban-prefixes: ${VOP_DOMESTIC_IBAN_PREFIXES:CZ}
+    # Levenshtein budget for a typo-tolerant CLOSE_MATCH. A judgement call with no production data
+    # behind it (ADR-0171) — tune from observed outcome metrics, not from taste.
+    max-edit-distance: ${VOP_MAX_EDIT_DISTANCE:1}
+    rate-limit:
+      # The enumeration control, not throughput management (threat model §4.1). VoP truthfully
+      # answers "does this name hold this IBAN?" to any authenticated caller — that is the
+      # regulation's purpose — so rate is what separates a payer from an enumerator. Fails closed:
+      # if Valkey is unreachable we cannot prove a caller is under the limit, and a 429 degrades to
+      # `no_data` at the caller rather than blocking the payment.
+      enabled: ${VOP_RATE_LIMIT_ENABLED:true}
+      requests-per-minute: ${VOP_RATE_LIMIT_RPM:60}

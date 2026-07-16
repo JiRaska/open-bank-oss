@@ -79,6 +79,7 @@ export const SERVICE_REGISTRY: ServiceEntry[] = [
   { id: 'interest',           label: 'Interest',         group: 'payments',     container: 'openbank-interest-service',       port: 8125 },
   { id: 'dispute',            label: 'Disputes',         group: 'compliance',   container: 'openbank-dispute-service',        port: 8135 },
   { id: 'sepa-instant',       label: 'SEPA Instant',     group: 'payments',     container: 'openbank-sepa-instant',           port: 8127 },
+  { id: 'vop',                label: 'VoP',              group: 'payments',     container: 'openbank-vop-service',           port: 8149 },
   { id: 'customer-edge',     label: 'Customer Edge',    group: 'platform',     container: 'openbank-customer-edge',          port: 8128 },
   { id: 'statement',         label: 'Statements',       group: 'compliance',   container: 'openbank-statement-service',      port: 8136 },
   { id: 'onboarding',        label: 'Onboarding',       group: 'compliance',   container: 'openbank-onboarding-service',     port: 8130 },

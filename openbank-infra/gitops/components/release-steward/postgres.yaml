@@ -1,0 +1,30 @@
+# Single-owner Postgres for release-steward (cluster-wide CNPG operator, ADR-0165). Generates the
+# releasesteward-db-app secret (username/password) + releasesteward-db-rw Service the Deployment uses.
+# NOTE: no S3 WAL/backup here yet — that needs an EKS Pod Identity role (aws/.../db-backups.tf,
+# #863 pattern), tracked as a follow-up. Findings are operational telemetry, not regulated records,
+# so the agent degrades to no-history on data loss rather than breaching a retention obligation.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: releasesteward-db
+  namespace: release-steward
+spec:
+  # DB-layer observability: CNPG's built-in Prometheus exporter on :9187 + a PodMonitor the operator
+  # owns (selected cluster-wide), lighting up cnpg_* metrics with zero app changes.
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_releasesteward
+      owner: openbank

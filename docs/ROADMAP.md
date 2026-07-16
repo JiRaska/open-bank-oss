@@ -80,8 +80,12 @@ Current limitations as of the Beta (June 2026). Updated as milestones ship:
   public traffic.
 - **Contract tests are thin** — Pact Broker is live (pact.open-bank.tech) but published pact coverage
   across the fleet is a known gap.
-- **No DR test, no HA** — single-node sandbox, no failover; PostgreSQL is upgrading to 18 (CNPG,
-  runbook in progress).
+- **HA on money-path DBs only; DR still unproven** — all 17 money-path CNPG clusters run
+  `instances: 2` with live-verified switchover ([ADR-0159](adr/0159-cnpg-ha-money-path.md), shipped
+  2026-07-12); non-money-path databases remain `instances: 1`. Single region, single cluster: the
+  automated DR restore-verify workflow exists but is dispatch-only and not yet on its quarterly
+  schedule, so RTO/RPO targets (M6) are stated, not demonstrated. PostgreSQL is upgrading to 18
+  (CNPG, runbook in progress).
 - **Not licensed to operate as a bank.** See the disclaimer in the README.
 
 ---

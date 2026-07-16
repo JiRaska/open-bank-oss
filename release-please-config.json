@@ -209,6 +209,9 @@
     },
     "openbank-transaction-service": {
       "component": "transaction-service"
+    },
+    "openbank-vop-service": {
+      "component": "vop-service"
     }
   }
 }
