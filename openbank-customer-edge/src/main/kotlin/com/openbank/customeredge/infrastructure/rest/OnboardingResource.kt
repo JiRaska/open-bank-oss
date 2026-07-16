@@ -58,6 +58,9 @@ class OnboardingResource(
         private val VALID_PARTY_TYPES = setOf("INDIVIDUAL", "LEGAL_ENTITY", "SOLE_TRADER")
 
         private const val TERMS_TTL_MS = 5 * 60 * 1000L
+        private const val STATUS_OK = 200
+        private const val STATUS_BAD_GATEWAY = 502
+
         // The X-Customer-Party-Id header value for the pre-party terms call — document-service's
         // template routes don't scope by party, but UpstreamClient always sends the header.
         private const val ONBOARDING_PARTY_PLACEHOLDER = "onboarding-anonymous"
@@ -181,10 +184,13 @@ class OnboardingResource(
         }
 
         val wanted = listOf("RAMCOVA_SMLOUVA_$l", "VOP_$l")
-        val resp = upstream.get("$documentServiceUrl/api/v1/documents/templates?limit=100", ONBOARDING_PARTY_PLACEHOLDER)
+        val resp = upstream.get(
+            "$documentServiceUrl/api/v1/documents/templates?limit=100",
+            ONBOARDING_PARTY_PLACEHOLDER,
+        )
         val raw = (resp.entity as? String).orEmpty()
-        if (resp.status != 200) {
-            return Response.status(502)
+        if (resp.status != STATUS_OK) {
+            return Response.status(STATUS_BAD_GATEWAY)
                 .entity("""{"error":"document templates unavailable"}""")
                 .type(MediaType.APPLICATION_JSON).build()
         }
@@ -203,7 +209,7 @@ class OnboardingResource(
                     )
                 }
         }.getOrElse {
-            return Response.status(502)
+            return Response.status(STATUS_BAD_GATEWAY)
                 .entity("""{"error":"document templates unreadable"}""")
                 .type(MediaType.APPLICATION_JSON).build()
         }
