@@ -39,6 +39,21 @@ spec:
           registry: public.ecr.aws/d7v4f3x6
           repository: alloy
           tag: v1.5.1
+        # Pin the config-reloader sidecar straight at the ECR pull-through cache rather
+        # than letting Kyverno's rewrite-ghcr rule do it. That policy is a mutating
+        # webhook with failurePolicy: Ignore — it FAILS OPEN, so a pod admitted while
+        # Kyverno is momentarily unreachable keeps the ghcr.io ref and containerd pulls
+        # it over NAT. Measured 2026-07-16: 19 of 670 eligible containers were live on
+        # un-rewritten refs, including a node-exporter pod from 00:44 that night.
+        # That silent leak is what the Karpenter overnight consolidation freeze in
+        # main.tf works around (~100 GB/night, $4-5) — a DaemonSet pays it on EVERY new
+        # node, so the rewrite has to be deterministic, not best-effort. Chart default
+        # is ghcr.io/jimmidyson/configmap-reload (verified: helm show values
+        # grafana/alloy --version 0.10.1). Tag stays the chart default.
+        configReloader:
+          image:
+            registry: 265175468565.dkr.ecr.eu-north-1.amazonaws.com
+            repository: ghcr/jimmidyson/configmap-reload
         controller:
           type: daemonset
           # Node-level log collector: run at system-node-critical so the DaemonSet

@@ -356,6 +356,24 @@ spec:
                 authToken: $GLITCHTIP_API_TOKEN
         nodeExporter:
           enabled: true
+        # Pin node-exporter straight at the ECR pull-through cache rather than letting
+        # Kyverno's rewrite-quay rule do it. That policy is a mutating webhook with
+        # failurePolicy: Ignore — it FAILS OPEN, so a pod admitted while Kyverno is
+        # momentarily unreachable keeps the quay.io ref and containerd pulls it over
+        # NAT. Proven here on 2026-07-16: two node-exporter pods created that morning
+        # carried the rewritten ECR ref, while the one created at 00:44 was still on
+        # quay.io — same DaemonSet, same day, different outcome. A DaemonSet pays that
+        # on EVERY new node, which is the leak the Karpenter overnight consolidation
+        # freeze in main.tf works around (~100 GB/night, $4-5).
+        # `image` here is the prometheus-node-exporter SUBCHART's key, not the parent's
+        # (verified: helm show values prometheus-community/prometheus-node-exporter ->
+        # registry: quay.io, repository: prometheus/node-exporter). distroless stays
+        # true, so the chart keeps resolving the -distroless tag suffix; the
+        # pull-through mirrors the tag verbatim.
+        prometheus-node-exporter:
+          image:
+            registry: 265175468565.dkr.ecr.eu-north-1.amazonaws.com
+            repository: quay/prometheus/node-exporter
         # EKS managed control plane: AWS runs (and hides) kube-controller-manager,
         # kube-scheduler, etcd and kube-proxy — none expose scrapeable metrics
         # endpoints to the cluster. Leaving these chart defaults enabled created
