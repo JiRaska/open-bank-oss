@@ -15,6 +15,7 @@ import com.openbank.document.infrastructure.persistence.mapper.toEntity
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -31,11 +32,27 @@ class DocumentRepositoryImpl :
     @Inject
     lateinit var outboxRepo: DocumentOutboxRepositoryImpl
 
-    override suspend fun save(document: Document): Document {
-        val e = document.toEntity(objectMapper)
-        Panache.withTransaction { persist(e) }.awaitSuspending()
-        return e.toDomain(objectMapper)
-    }
+    /**
+     * Upsert, not insert: [save]'s callers hand it a document that already exists — superseding an
+     * agreement archives it in place ([Document.archive] keeps the id, only the status changes).
+     * A plain `persist()` of an id the table already holds is an INSERT, which the primary key
+     * rejects: `duplicate key value violates unique constraint "documents_pkey"` surfacing as a
+     * bare 500 (seen live 2026-07-16 on every onboarding language switch, ADR-0169 D3).
+     *
+     * Mirrors [saveWithOutbox]'s find-then-apply shape, minus the outbox leg. Both run inside
+     * `withTransaction`, so mutating the managed entity is flushed on commit without an explicit
+     * update call.
+     */
+    override suspend fun save(document: Document): Document = Panache.withTransaction {
+        find("id", document.id).firstResult().flatMap { existing ->
+            if (existing != null) {
+                existing.applyFrom(document)
+                Uni.createFrom().item(document)
+            } else {
+                persist(document.toEntity(objectMapper)).replaceWith(document)
+            }
+        }
+    }.awaitSuspending()
 
     override suspend fun findById(id: UUID): Document? =
         Panache.withSession { find("id", id).firstResult() }.awaitSuspending()?.toDomain(objectMapper)

@@ -91,4 +91,29 @@ class DocumentRepositoryImplIT {
         // The original row is the only one under that key.
         assertThat(repo.findByIdempotencyKey(key)!!.id).isNotEqualTo(duplicate.id)
     }
+
+    @Test
+    fun `save updates a document that already exists instead of inserting it again`(): Unit = onVertxContext {
+        // The onboarding language switch archives the stale agreement via save() (ADR-0169 D3).
+        // archive() keeps the id, so this is an UPDATE — a plain persist() would hit
+        // documents_pkey and surface as a 500. OnboardingDocumentServiceTest mocks the repository,
+        // so only a real Postgres catches it.
+        val doc = onboardingDoc("onboarding:${UUID.randomUUID()}")
+        repo.saveWithOutbox(doc, outbox(doc.id))
+
+        val archived = repo.save(doc.copy(status = DocumentStatus.ARCHIVED))
+
+        assertThat(archived.id).isEqualTo(doc.id)
+        assertThat(repo.findById(doc.id)!!.status).isEqualTo(DocumentStatus.ARCHIVED)
+    }
+
+    @Test
+    fun `save inserts a document that does not exist yet`(): Unit = onVertxContext {
+        val doc = onboardingDoc("onboarding:${UUID.randomUUID()}")
+
+        val saved = repo.save(doc)
+
+        assertThat(saved.id).isEqualTo(doc.id)
+        assertThat(repo.findById(doc.id)).isNotNull
+    }
 }
