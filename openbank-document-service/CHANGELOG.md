@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.7.1...document-service-v0.8.0) (2026-07-16)
+
+
+### Features
+
+* **document-service:** idempotent language-correct onboarding agreement (ADR-0169 D3) ([#1137](https://github.com/JiRaska/open-bank-oss/issues/1137)) ([7bf82fa](https://github.com/JiRaska/open-bank-oss/commit/7bf82fa4c723159c8c4813edbba6dea9399c5e4d))
+* **document-service:** scope SCA verification to the exact document (ADR-0169 D2) ([#1142](https://github.com/JiRaska/open-bank-oss/issues/1142)) ([f713a74](https://github.com/JiRaska/open-bank-oss/commit/f713a748559feb19d20cefd4aa10f660c11fe78a))
+
+
+### Bug Fixes
+
+* **document-service:** consume challenge directly instead of a premature status pre-check ([#1155](https://github.com/JiRaska/open-bank-oss/issues/1155)) ([aeb6e20](https://github.com/JiRaska/open-bank-oss/commit/aeb6e2021b2329ba689a7e6127f8657499d4ca3d))
+
 ## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.7.0...document-service-v0.7.1) (2026-07-14)
 
 
