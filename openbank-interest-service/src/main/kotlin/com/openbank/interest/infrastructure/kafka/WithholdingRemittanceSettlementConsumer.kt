@@ -106,22 +106,35 @@ class WithholdingRemittanceSettlementConsumer(
     }
 
     /**
-     * Handles a batch whose decoded tax amount is not positive. A nil period batch (zero amount AND
-     * zero items) is legitimately settled without touching the rail; anything else is refused.
+     * Handles a batch whose decoded tax amount is not positive.
+     *
+     * A zero total is SETTLED without touching the rail, whatever the item count. Zero is not a
+     * decode artefact: [decimalOf] throws on anything unparsable, so a zero that reaches here is
+     * the producer's actual figure. And a zero total over a non-empty batch is ordinary — tax is
+     * assessed in whole CZK (`WithholdingTaxPolicy.TAX_SCALE = 0`, RoundingMode.DOWN per daňový
+     * řád), so any gross below 7.00 CZK yields `taxAmount = 0` while still being `WITHHELD`, and
+     * `WithholdingRemittancePolicy.isRemittable` does not filter those out. Refusing them wedged
+     * the batch PENDING forever — its rows already `REMITTED`, no re-drive endpoint, only SQL out.
+     *
+     * A NEGATIVE total is refused: `taxableBase` is `gross.max(ZERO)` and the rate is positive, so
+     * no policy path can produce one. It means something upstream is genuinely broken, and booking
+     * a negative debit would move money the wrong way.
      */
     private suspend fun settleNilOrRefuse(remittanceId: UUID, totalTaxAmount: BigDecimal, itemCount: Int) {
-        if (totalTaxAmount.signum() == 0 && itemCount == 0) {
-            // Nothing is due for the period — a 0.00 debit would be meaningless noise on the rail.
+        if (totalTaxAmount.signum() == 0) {
+            // Nothing is owed — a 0.00 debit would be meaningless noise on the rail. The batch's
+            // rows are already REMITTED; settling keeps the batch consistent with them.
             remitUseCase.settle(remittanceId).awaitSuspending()
-            log.infof("[withholding-remittance] batch %s is a nil batch — settled without booking", remittanceId)
+            log.infof(
+                "[withholding-remittance] batch %s totals zero tax over %d item(s) — settled without booking",
+                remittanceId,
+                itemCount,
+            )
         } else {
-            // Hard guard: a zero/negative amount with a non-empty batch means the amount failed to
-            // decode (or the producer emitted garbage). Booking 0.00 would mark real tax as paid
-            // without moving money — refuse and keep the batch PENDING.
             log.errorf(
-                "[withholding-remittance] batch %s decoded amount %s with itemCount %d — refusing to " +
-                    "book a zero/negative tax remittance. The batch stays PENDING; investigate the " +
-                    "event payload.",
+                "[withholding-remittance] batch %s decoded a NEGATIVE amount %s with itemCount %d — " +
+                    "refusing to book it. No WithholdingTaxPolicy path can produce a negative tax, so " +
+                    "this is an upstream defect. The batch stays PENDING; investigate the event payload.",
                 remittanceId,
                 totalTaxAmount,
                 itemCount,
