@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.8.10...sca-service-v0.9.0) (2026-07-16)
+
+
+### Features
+
+* **sca:** bind SCA dynamic linking to document signing (ADR-0169 D2) ([#1140](https://github.com/JiRaska/open-bank-oss/issues/1140)) ([9b29570](https://github.com/JiRaska/open-bank-oss/commit/9b29570e5bd3d8f950b15e04cc7fcd4f0d0eef6b))
+
 ## [0.8.10](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.8.9...sca-service-v0.8.10) (2026-07-14)
 
 
