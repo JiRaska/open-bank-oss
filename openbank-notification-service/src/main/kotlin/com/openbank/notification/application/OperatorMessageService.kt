@@ -4,6 +4,7 @@
 
 package com.openbank.notification.application
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.notification.domain.model.OperatorMessageTemplate
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
@@ -58,7 +59,10 @@ class OperatorMessageService {
         }
 
         val (subject, body) = render(request.template, request.variables)
-        val notificationId = UUID.randomUUID()
+        // notificationId is the entity's durable, indexed identifier (ADR-0106) — Ids.newId()
+        // (UUIDv7), not a bare UUID.randomUUID(). Matches NotificationConsumer's existing rows,
+        // which predate this guard.
+        val notificationId = Ids.newId()
         val entity = NotificationEntity().also {
             it.notificationId = notificationId
             it.partyId = request.partyId
