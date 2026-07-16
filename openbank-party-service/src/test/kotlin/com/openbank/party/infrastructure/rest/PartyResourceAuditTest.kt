@@ -8,6 +8,7 @@ import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
 import com.openbank.party.application.port.`in`.ErasePartyCommand
+import com.openbank.party.application.port.`in`.UpdateMarketingConsentCommand
 import com.openbank.party.domain.model.KycStatus
 import com.openbank.party.domain.model.Party
 import com.openbank.party.domain.model.PartyGdprExport
@@ -126,5 +127,41 @@ class PartyResourceAuditTest {
         runCatching { res.exportPartyGdpr(partyId) }
 
         assertThat(events).isEmpty()
+    }
+
+    @Test
+    fun `updateConsent emits an event with both the before and after marketing-consent values`(): Unit = runBlocking {
+        val events = mutableListOf<AuditEvent>()
+        val res = resource(events)
+        coEvery { res.partyUseCase.getParty(partyId) } returns sampleParty().copy(consentMarketing = true)
+        coEvery { res.partyUseCase.updateMarketingConsent(UpdateMarketingConsentCommand(partyId, false)) } returns
+            sampleParty().copy(consentMarketing = false, consentMarketingUpdatedAt = now)
+
+        res.updateConsent(partyId, UpdateConsentRequest(marketingConsent = false))
+
+        assertThat(events).singleElement().satisfies({ e ->
+            assertThat(e.operation).isEqualTo("party.consent.marketing-updated")
+            assertThat(e.actorId).isEqualTo(actorSub)
+            // The actor here is always the customer-edge M2M identity, never the customer directly.
+            assertThat(e.actorType).isEqualTo("SERVICE")
+            assertThat(e.resourceType).isEqualTo("party")
+            assertThat(e.resourceId).isEqualTo(partyId.toString())
+            assertThat(e.result).isEqualTo(AuditResult.SUCCESS)
+            assertThat(e.payload["marketingConsentBefore"]).isEqualTo("true")
+            assertThat(e.payload["marketingConsentAfter"]).isEqualTo("false")
+        })
+    }
+
+    @Test
+    fun `updateConsent records a null before-value when marketing consent was never set`(): Unit = runBlocking {
+        val events = mutableListOf<AuditEvent>()
+        val res = resource(events)
+        coEvery { res.partyUseCase.getParty(partyId) } returns sampleParty()
+        coEvery { res.partyUseCase.updateMarketingConsent(any()) } returns
+            sampleParty().copy(consentMarketing = true, consentMarketingUpdatedAt = now)
+
+        res.updateConsent(partyId, UpdateConsentRequest(marketingConsent = true))
+
+        assertThat(events.single().payload["marketingConsentBefore"]).isEqualTo("null")
     }
 }

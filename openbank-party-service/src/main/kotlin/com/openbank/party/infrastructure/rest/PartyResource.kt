@@ -161,16 +161,27 @@ class PartyResource {
     @Authorize(action = "party.consent.update", resource = "#id")
     @Operation(summary = "Update the party's post-onboarding marketing consent")
     suspend fun updateConsent(@PathParam("id") id: UUID, req: UpdateConsentRequest): Response {
+        // Old value for the Art 30 audit trail below — read before the write so it reflects the
+        // state actually being changed FROM, not a stale/racing re-read after.
+        val before = partyUseCase.getParty(id).consentMarketing
         val party = partyUseCase.updateMarketingConsent(UpdateMarketingConsentCommand(id, req.marketingConsent))
         auditPublisher.publish(
             AuditEvent(
+                // The caller here is ALWAYS the customer-edge's M2M service identity (ROLE_OPERATOR
+                // client-credentials token), never the customer directly — same trust boundary as
+                // every other edge->party-service call (registerParty, updateParty, …). actorType
+                // reflects that; the customer whose consent changed is resourceId (= the party id),
+                // not the actor.
                 actorId = jwt?.subject ?: jwt?.name ?: "unknown",
-                actorType = "HUMAN",
+                actorType = "SERVICE",
                 operation = "party.consent.marketing-updated",
                 resourceType = "party",
                 resourceId = id.toString(),
                 result = AuditResult.SUCCESS,
-                payload = mapOf("marketingConsent" to req.marketingConsent.toString()),
+                payload = mapOf(
+                    "marketingConsentBefore" to (before?.toString() ?: "null"),
+                    "marketingConsentAfter" to req.marketingConsent.toString(),
+                ),
             ),
         )
         return Response.ok(party.toResponse()).build()
@@ -532,6 +543,13 @@ fun PartyGdprExport.toResponse() = mapOf(
         "amlStatus" to party.amlStatus,
         "createdAt" to party.createdAt,
         "updatedAt" to party.updatedAt,
+        // Consent state is PII the subject agreed to/withheld — belongs in an Art 15 access
+        // export same as everything else here. Gap pre-dates this PR (never wired in when
+        // consentGdpr/consentMarketing were added) — closing it now since it's adjacent.
+        "consentGdpr" to party.consentGdpr,
+        "consentCapturedAt" to party.consentCapturedAt,
+        "consentMarketing" to party.consentMarketing,
+        "consentMarketingUpdatedAt" to party.consentMarketingUpdatedAt,
     ),
     "documents" to documents.map {
         mapOf(
