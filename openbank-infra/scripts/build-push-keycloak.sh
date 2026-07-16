@@ -69,6 +69,28 @@ if [ -n "${COSIGN_BIN:-}" ]; then
     echo "WARN: cosign sign failed — image pushed but UNSIGNED (kyverno will reject it under Enforce)." >&2
     exit 1
   fi
+  # Deploy-time provenance: attach a signed CycloneDX SBOM ATTESTATION to the image
+  # (ADR-0030 D4). Kyverno's verify-openbank-image-sbom-attestation policy checks
+  # this independently of the signature above — a signed-but-unattested image is
+  # rejected at pod admission the same as an unsigned one. trivy generates the
+  # image SBOM, cosign attest binds it with the same KMS key (matches
+  # build-push-admin-ui.sh's step).
+  if command -v trivy >/dev/null 2>&1; then
+    KEYCLOAK_SBOM="${TMPDIR:-/tmp}/openbank-keycloak.cdx.json"
+    if trivy image --platform "${PLATFORM}" --format cyclonedx --output "${KEYCLOAK_SBOM}" "${IMAGE}" 2>/dev/null; then
+      echo "==> cosign attest (cyclonedx) ${IMAGE}"
+      COSIGN_YES=true "$COSIGN_BIN" attest --key "${COSIGN_KEY}" --type cyclonedx \
+        --predicate "${KEYCLOAK_SBOM}" "${IMAGE}" \
+        && echo "    attested SBOM (key=${COSIGN_KEY})" \
+        || { echo "ERROR: cosign attest failed — image pushed but SBOM not attested (kyverno will reject it)." >&2; exit 1; }
+    else
+      echo "ERROR: trivy image SBOM generation failed — cannot attest (kyverno will reject the image)." >&2
+      exit 1
+    fi
+  else
+    echo "ERROR: trivy unavailable — cannot attest SBOM (kyverno will reject the image). Install trivy." >&2
+    exit 1
+  fi
 else
   echo "WARN: cosign v2 unavailable — image pushed UNSIGNED. Install cosign v2.x or set COSIGN_VERSION (ADR-0029)." >&2
   exit 1
