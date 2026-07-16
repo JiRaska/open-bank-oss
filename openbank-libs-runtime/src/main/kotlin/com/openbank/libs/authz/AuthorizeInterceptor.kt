@@ -7,6 +7,7 @@ package com.openbank.libs.authz
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.PendingApproval
+import com.openbank.libs.observability.DomainMetrics
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.Priority
 import jakarta.enterprise.inject.Instance
@@ -53,6 +54,14 @@ import kotlin.reflect.jvm.kotlinFunction
  *     so the CI audit can confirm the policy rejects the right calls before
  *     anyone flips enforce on. Advisory must never brick an endpoint when no
  *     sidecar is deployed yet.
+ *
+ * Every decision — either mode — increments `openbank.authz.decisions`
+ * (see [DomainMetrics.authzDecision]), tagged with the `enforced` value in
+ * effect. This is what makes each service's stated rollout precondition ("flip
+ * to true only after an observation window with a clean advisory report")
+ * actually evaluable: `outcome=deny, enforced=false` IS that report. Before
+ * this metric existed the only advisory signal was a WARN line on stdout, so
+ * the precondition could not be checked for any service in the fleet.
  *
  * Failure modes (enforce=true):
  *   - PDP returns `deny`  → `ForbiddenException` (HTTP 403) — the user is
@@ -117,6 +126,13 @@ class AuthorizeInterceptor {
     @Inject
     lateinit var clock: Clock
 
+    // Instance<> for the same reason as `pdp`/`securityContext` above. DomainMetrics ships in this
+    // same JAR and is itself no-op-safe without a MeterRegistry, so it is resolvable in practice —
+    // but a hard @Inject here would make this interceptor's validation depend on it in EVERY
+    // service, which is precisely the fleet-wide build hazard the comments above exist to avoid.
+    @Inject
+    lateinit var metrics: Instance<DomainMetrics>
+
     // Instance<> for the same reason as `pdp`/`securityContext` above: most services
     // never wire an ApprovalStore, so a hard @Inject would break their build.
     @Inject
@@ -145,24 +161,7 @@ class AuthorizeInterceptor {
             ?: return ctx.proceed()
 
         if (!pdp.isResolvable) {
-            // An @Authorize method exists but the service wired no PDP.
-            if (!enforce) {
-                log.warnf(
-                    "advisory: no PolicyDecisionPoint bean for @Authorize %s.%s — proceeding (enforce=false)",
-                    ctx.method.declaringClass.simpleName,
-                    ctx.method.name,
-                )
-                return ctx.proceed()
-            }
-            // Fail closed — an authorization point that cannot reach a decision
-            // must not silently allow. 503 (not 403) flags a wiring/outage, not a
-            // policy denial, so it reads distinctly in the audit trail.
-            log.errorf(
-                "no PolicyDecisionPoint bean for @Authorize method %s.%s — failing closed",
-                ctx.method.declaringClass.simpleName,
-                ctx.method.name,
-            )
-            throw ServiceUnavailableException("policy decision point not configured")
+            return onMissingPdp(ctx, annotation)
         }
         val decisionPoint = pdp.get()
 
@@ -170,6 +169,7 @@ class AuthorizeInterceptor {
         val decision: AuthzDecision = runBlocking {
             runCatching { decisionPoint.allow(query) }
                 .getOrElse { ex ->
+                    record(annotation.action, "pdp_unavailable", query.principal.type)
                     if (!enforce) {
                         log.warnf(
                             "advisory: PDP unavailable for action=%s: %s — proceeding (enforce=false)",
@@ -187,6 +187,9 @@ class AuthorizeInterceptor {
         } ?: return ctx.proceed() // advisory + PDP unavailable: observe, do not block
 
         if (!decision.allow) {
+            // The rollout signal: outcome=deny + enforced=false is the "would DENY" population that
+            // a service's advisory window has to show empty before AUTHZ_ENFORCE can flip.
+            record(annotation.action, "deny", query.principal.type)
             if (!enforce) {
                 log.warnf(
                     "advisory: would DENY action=%s resource=%s principal=%s reason=%s — proceeding (enforce=false)",
@@ -206,8 +209,45 @@ class AuthorizeInterceptor {
             )
             throw ForbiddenException(decision.reason ?: "policy denied")
         }
+        record(annotation.action, "allow", query.principal.type)
         return requireFourEyesOrProceed(ctx, annotation, query, decision)
     }
+
+    /**
+     * An `@Authorize` method exists but the service wired no [PolicyDecisionPoint]. Advisory
+     * proceeds; enforce fails CLOSED with 503 (not 403) — an authorization point that cannot reach
+     * a decision must not silently allow, and an outage must not read as a flurry of policy denials
+     * in the audit trail.
+     */
+    private fun onMissingPdp(ctx: InvocationContext, annotation: Authorize): Any? {
+        // No query was built yet, so the principal type is not yet known — hence the "unknown" tag.
+        record(annotation.action, "pdp_unconfigured", "unknown")
+        if (!enforce) {
+            log.warnf(
+                "advisory: no PolicyDecisionPoint bean for @Authorize %s.%s — proceeding (enforce=false)",
+                ctx.method.declaringClass.simpleName,
+                ctx.method.name,
+            )
+            return ctx.proceed()
+        }
+        log.errorf(
+            "no PolicyDecisionPoint bean for @Authorize method %s.%s — failing closed",
+            ctx.method.declaringClass.simpleName,
+            ctx.method.name,
+        )
+        throw ServiceUnavailableException("policy decision point not configured")
+    }
+
+    /**
+     * `null` when no [DomainMetrics] bean resolves, so every call site is a safe-call no-op.
+     * [DomainMetrics] in turn no-ops without a [io.micrometer.core.instrument.MeterRegistry], so a
+     * service with no micrometer extension records nothing and pays nothing.
+     */
+    private val meters: DomainMetrics?
+        get() = if (metrics.isResolvable) metrics.get() else null
+
+    private fun record(action: String, outcome: String, principalType: String) =
+        meters?.authzDecision(action, outcome, enforce, principalType)
 
     /**
      * ADR-0155: gate an otherwise-allowed money-path action behind a second
@@ -222,10 +262,19 @@ class AuthorizeInterceptor {
         decision: AuthzDecision,
     ): Any? {
         val fourEyesRequired = decision.attributes["four_eyes_required"] == true
-        if (!fourEyesRequired || !fourEyesEnforce) {
+        if (!fourEyesRequired) {
+            return ctx.proceed()
+        }
+        if (!fourEyesEnforce) {
+            // OPA asked for a second approver and we are about to proceed without one. Nothing
+            // recorded this before, which made it indistinguishable from "four-eyes not required" —
+            // so a fleet where authz.four-eyes.enforce is false everywhere (the current default,
+            // and never overridden in gitops) looked exactly like a fleet with no flagged actions.
+            meters?.authzFourEyes(annotation.action, "required_not_enforced")
             return ctx.proceed()
         }
         if (!approvalStore.isResolvable) {
+            meters?.authzFourEyes(annotation.action, "no_approval_store")
             // Code review finding: this used to fall into the same silent-proceed branch as
             // "four-eyes not required" / "not enforced", with no log at all — indistinguishable
             // from a service correctly not opting in. Mirrors the log.errorf the PDP-missing
@@ -249,6 +298,7 @@ class AuthorizeInterceptor {
             val approval = runBlocking { store.find(approvalId) }
             if (approval.satisfies(annotation.action, resourceId, maker)) {
                 runBlocking { store.markExecuted(approvalId) }
+                meters?.authzFourEyes(annotation.action, "approval_satisfied")
                 return ctx.proceed()
             }
             log.warnf(
@@ -261,6 +311,7 @@ class AuthorizeInterceptor {
         }
 
         val pending = runBlocking { store.create(annotation.action, resourceId, maker) }
+        meters?.authzFourEyes(annotation.action, "pending_approval")
         log.infof(
             "four-eyes: action=%s resource=%s maker=%s requires a second approver — approvalId=%s",
             annotation.action,

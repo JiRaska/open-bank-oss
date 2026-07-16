@@ -9,6 +9,8 @@ import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.InvalidApprovalStateException
 import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
+import com.openbank.libs.observability.DomainMetrics
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.security.identity.SecurityIdentity
@@ -41,12 +43,30 @@ class AuthorizeInterceptorTest {
     private lateinit var interceptor: AuthorizeInterceptor
     private lateinit var sc: SecurityContext
     private lateinit var identity: SecurityIdentity
+    private lateinit var registry: SimpleMeterRegistry
+
+    /** Counter value for the given name+tags, or 0.0 when the meter was never created. */
+    private fun counter(name: String, vararg tags: String): Double =
+        registry.find(name).tags(*tags).counter()?.count() ?: 0.0
 
     @BeforeEach
     fun setUp() {
         sc = mockk()
         identity = mockk()
+        // A real registry (not a mock) so the tests assert the metric a scrape would actually see,
+        // tags included — a mock would only prove the interceptor called a method.
+        registry = SimpleMeterRegistry()
+        val domainMetrics = DomainMetrics().apply {
+            registryInstance = mockk {
+                every { isResolvable } returns true
+                every { get() } returns this@AuthorizeInterceptorTest.registry
+            }
+        }
         interceptor = AuthorizeInterceptor().apply {
+            metrics = mockk {
+                every { isResolvable } returns true
+                every { get() } returns domainMetrics
+            }
             // securityContext / identity are now Instance<> (lazy) so libs doesn't force a
             // SecurityIdentity bean on non-security services — mirror the pdp wrapping.
             securityContext = mockk { every { get() } returns sc }
@@ -135,6 +155,116 @@ class AuthorizeInterceptorTest {
         val ctx = makeCtx(annotatedMethod)
         val result = interceptor.authorize(ctx)
         assertThat(result).isEqualTo("ok")
+    }
+
+    // ── openbank.authz.decisions (ADR-0034 D5 rollout signal) ────────────────
+    //
+    // Each of these fails on the pre-metric interceptor, where the only advisory signal was a WARN
+    // line on stdout. That absence is what made every service's stated rollout precondition ("flip
+    // to true only after an observation window with a clean advisory report") unevaluable.
+
+    private fun denyingPdp() = object : PolicyDecisionPoint {
+        override suspend fun allow(query: AuthzQuery): AuthzDecision =
+            AuthzDecision(allow = false, reason = "insufficient role", policyVersion = "v1")
+    }
+
+    private fun allowingPdp(attributes: Map<String, Any> = emptyMap()) = object : PolicyDecisionPoint {
+        override suspend fun allow(query: AuthzQuery): AuthzDecision =
+            AuthzDecision(allow = true, reason = "ok", policyVersion = "v1", attributes = attributes)
+    }
+
+    private fun wirePdp(pdp: PolicyDecisionPoint) {
+        interceptor.pdp = mockk {
+            every { isResolvable } returns true
+            every { get() } returns pdp
+        }
+    }
+
+    @Test
+    fun `advisory deny is counted as would-DENY, tagged enforced=false`() {
+        interceptor.enforce = false
+        every { identity.roles } returns emptySet()
+        wirePdp(denyingPdp())
+
+        assertThat(interceptor.authorize(makeCtx(annotatedMethod))).isEqualTo("ok")
+
+        // This exact series is the "advisory report" a rollout needs empty before flipping.
+        assertThat(
+            counter(
+                "openbank.authz.decisions",
+                "action", "party.read", "outcome", "deny",
+                "enforced", "false", "principal_type", "HUMAN",
+            ),
+        ).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `enforced deny is counted separately from an advisory deny`() {
+        every { identity.roles } returns emptySet()
+        wirePdp(denyingPdp())
+
+        assertThatThrownBy { interceptor.authorize(makeCtx(annotatedMethod)) }
+            .isInstanceOf(ForbiddenException::class.java)
+
+        assertThat(counter("openbank.authz.decisions", "outcome", "deny", "enforced", "true"))
+            .isEqualTo(1.0)
+        // The enforced=false series must stay untouched, or the two populations are conflated and
+        // the whole rollout signal is worthless.
+        assertThat(counter("openbank.authz.decisions", "outcome", "deny", "enforced", "false"))
+            .isZero()
+    }
+
+    @Test
+    fun `allow is counted`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        wirePdp(allowingPdp())
+
+        interceptor.authorize(makeCtx(annotatedMethod))
+
+        assertThat(counter("openbank.authz.decisions", "outcome", "allow", "enforced", "true"))
+            .isEqualTo(1.0)
+    }
+
+    @Test
+    fun `missing PDP bean is counted as pdp_unconfigured`() {
+        every { identity.roles } returns emptySet()
+        interceptor.pdp = mockk { every { isResolvable } returns false }
+
+        assertThatThrownBy { interceptor.authorize(makeCtx(annotatedMethod)) }
+            .isInstanceOf(ServiceUnavailableException::class.java)
+
+        assertThat(counter("openbank.authz.decisions", "outcome", "pdp_unconfigured"))
+            .isEqualTo(1.0)
+    }
+
+    @Test
+    fun `four_eyes_required with enforcement off is counted, not silently dropped`() {
+        // The fleet's current state: every service that declares the key sets
+        // ${AUTHZ_FOUR_EYES_ENFORCE:false} and gitops never overrides it. OPA computes the flag and
+        // the interceptor proceeds anyway — previously with no signal whatsoever, so a real
+        // maker-checker gap looked identical to "no action is flagged".
+        interceptor.fourEyesEnforce = false
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        wirePdp(allowingPdp(mapOf("four_eyes_required" to true)))
+
+        assertThat(interceptor.authorize(makeCtx(annotatedMethod))).isEqualTo("ok")
+
+        assertThat(
+            counter("openbank.authz.four_eyes", "action", "party.read", "outcome", "required_not_enforced"),
+        ).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `an allow with no four-eyes flag records no four_eyes series`() {
+        // Guards the counter's meaning: if it fired on every allow, a non-zero
+        // required_not_enforced would say nothing about a real gap.
+        interceptor.fourEyesEnforce = false
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        wirePdp(allowingPdp())
+
+        interceptor.authorize(makeCtx(annotatedMethod))
+
+        assertThat(registry.find("openbank.authz.four_eyes").counters()).isEmpty()
     }
 
     @Test

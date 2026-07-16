@@ -252,6 +252,52 @@ class DomainMetrics {
         counter("openbank.aml.hits", "severity", severity)
     }
 
+    // ── Authorization (ADR-0034 D5) ───────────────────────────────────────────
+
+    /**
+     * Increment on every `@Authorize` decision, whatever the outcome.
+     *
+     * This exists because advisory mode (`authz.enforce=false`) previously left **no signal but a
+     * WARN log line**. Every service's gitops manifest states the rollout precondition as "flip to
+     * true only after an observation window with a clean advisory report" — but with no metric,
+     * that report was not obtainable for any service, so the precondition could not be evaluated at
+     * all. The `enforced` tag is the point: `outcome=deny, enforced=false` is exactly the
+     * "would DENY" population a rollout needs to be empty before flipping.
+     *
+     * @param action        the `@Authorize(action = ...)` value, e.g. `card.block` — a bounded set
+     * @param outcome       `allow` | `deny` | `pdp_unavailable` | `pdp_unconfigured`
+     * @param enforced      the `authz.enforce` value in effect for this call. `false` means the
+     *                      call PROCEEDED regardless of `outcome`
+     * @param principalType `HUMAN` | `AI_AGENT` | `ANONYMOUS` | `unknown` (unknown only when the
+     *                      decision failed before a query could be built)
+     */
+    fun authzDecision(action: String, outcome: String, enforced: Boolean, principalType: String) {
+        counter(
+            "openbank.authz.decisions",
+            "action", action,
+            "outcome", outcome,
+            "enforced", enforced.toString(),
+            "principal_type", principalType,
+        )
+    }
+
+    /**
+     * Increment when OPA flags an allowed action `four_eyes_required` (ADR-0155).
+     *
+     * `required_not_enforced` is the one that matters: the policy asked for a second approver and
+     * the interceptor proceeded anyway because `authz.four-eyes.enforce` is false. That is the
+     * fleet's current default and it was previously invisible — the policy computes the flag, the
+     * interceptor drops it silently, and nothing distinguishes that from "four-eyes not required".
+     * A non-zero `required_not_enforced` is a live maker-checker gap, not a curiosity.
+     *
+     * @param action   the `@Authorize(action = ...)` value
+     * @param outcome  `required_not_enforced` | `no_approval_store` | `pending_approval` |
+     *                 `approval_satisfied`
+     */
+    fun authzFourEyes(action: String, outcome: String) {
+        counter("openbank.authz.four_eyes", "action", action, "outcome", outcome)
+    }
+
     // ── Outbox ────────────────────────────────────────────────────────────────
 
     /**
