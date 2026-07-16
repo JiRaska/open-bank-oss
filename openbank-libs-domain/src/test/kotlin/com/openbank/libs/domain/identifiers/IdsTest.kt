@@ -59,6 +59,17 @@ class IdsTest {
     }
 
     @Test
+    fun `newId is strictly increasing within a tight loop, including inside one millisecond`() {
+        // Stronger than the timestamp check above: a tight loop issues many ids inside the SAME
+        // millisecond, where ordering rests entirely on intra-ms monotonicity (RFC 9562 §6.2) —
+        // the part ADR-0106 calls out as the hard one, and the whole point of the locality claim.
+        // A generator that randomises the sub-ms bits still passes the timestamp test and fails here.
+        val ids = (1..10_000).map { Ids.newId() }
+        assertThat(ids).isSorted
+        assertThat(ids.zipWithNext().count { (a, b) -> a >= b }).isZero
+    }
+
+    @Test
     fun `EntityId random factories now mint UUIDv7`() {
         // The whole point of wiring Ids into the typesafe factories (ADR-0106).
         assertThat(AccountId.random().value.version()).isEqualTo(7)
