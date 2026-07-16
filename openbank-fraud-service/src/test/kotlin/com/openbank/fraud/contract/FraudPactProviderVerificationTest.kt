@@ -10,13 +10,14 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
-import au.com.dius.pact.provider.junitsupport.loader.PactFolder
+import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
 
 /**
@@ -26,8 +27,21 @@ import org.junit.jupiter.api.extension.ExtendWith
  * verification lives in FraudPactProviderVerificationTest") but never existed (issue #468) —
  * the consumer contract was committed and generated, but nothing on the provider side replayed it.
  *
- * git-pact (`@PactFolder`), mirroring `LedgerPactProviderVerificationTest` /
- * `AccountEventPactProviderVerificationTest`: always runs, no broker/CI secret required.
+ * `@PactBroker` (not `@PactFolder`) — the same fix #1166/#1333 applied to party-service and
+ * account-service. `_service-ci.yml` publishes every consumer's pacts to the broker on a main
+ * push, but reading the pact from a git-committed file (`@PactFolder`) instead of pulling it back
+ * OUT of the broker means Pact-JVM has no broker-side interaction to attach a verification result
+ * to — so this class verified the contract correctly but never published a result for ANY
+ * fraud-service version, real or otherwise. `can-i-deploy` reads the broker and nothing else, so
+ * it permanently saw "no verified pact" for sepa-payment (a money-path consumer) and hard-blocked
+ * its deploy — confirmed live: `sepa-payment` #844 (a real bug fix) has sat undeployed since
+ * 2026-07-12 with "There is no verified pact between openbank-sepa-payment and openbank-fraud-service"
+ * (issue #1348). Rewriting the broker's stale/phantom deployed-version record (a separate bug,
+ * also #1348) would NOT have unblocked this — there would still be no verification for whatever
+ * the correct version is, until this class actually publishes one.
+ *
+ * `@EnabledIfSystemProperty` keeps it a no-op locally and on the PR lane, where no broker is
+ * configured, matching every other broker-based provider test in the fleet.
  *
  * IMPORTANT: if `SepaPaymentFraudServicePactConsumerTest` changes the contract, regenerate
  * (`./gradlew :openbank-sepa-payment:test --tests "*SepaPaymentFraudServicePactConsumerTest*"`)
@@ -37,8 +51,9 @@ import org.junit.jupiter.api.extension.ExtendWith
 @QuarkusTestResource(com.openbank.fraud.it.PostgresRedisTestResource::class)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_SERVICE", "ROLE_OPERATOR"])
 @Provider("openbank-fraud-service")
-@PactFolder("../pacts")
+@PactBroker(enablePendingPacts = "true")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
+@EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class FraudPactProviderVerificationTest {
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
