@@ -30,11 +30,20 @@ import java.time.Instant
 import java.util.Calendar
 import java.util.Date
 
-/** A signing identity (private key + leaf cert + full chain) ready to produce a CMS signature. */
+/**
+ * A signing identity (private key + leaf cert + full chain) ready to produce a CMS signature.
+ *
+ * [ephemeral] marks a throwaway self-signed identity from [PadesSigning.generateEphemeralIdentity].
+ * It is carried on the identity rather than left implicit at the call site because the *only* thing
+ * separating a real seal from a legally worthless one is which identity produced it — and an
+ * adapter that has fallen back has no other way to tell downstream. Callers MUST refuse to sign with
+ * an ephemeral identity outside dev; see `PdfBoxPadesSealAdapter.sealPades`.
+ */
 data class SigningIdentity(
     val privateKey: PrivateKey,
     val certificate: X509Certificate,
     val certificateChain: List<X509Certificate>,
+    val ephemeral: Boolean = false,
 )
 
 /**
@@ -96,6 +105,7 @@ object PadesSigning {
             privateKey = keyPair.private,
             certificate = certificate,
             certificateChain = listOf(certificate),
+            ephemeral = true,
         )
     }
 
