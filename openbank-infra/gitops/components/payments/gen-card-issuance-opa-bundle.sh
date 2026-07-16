@@ -105,7 +105,21 @@ OUT=$REPO/openbank-infra/gitops/components/payments/card-issuance-opa-bundle.yam
 echo "wrote $OUT (checksum $CHECKSUM)"
 
 # The checksum annotation for card-issuance-service's pod template lives inline inside the
-# combined payments-services.yaml manifest — patched by hand below (a blind sed across the
-# whole multi-service file would risk touching another service's identical placeholder).
+# combined payments-services.yaml manifest. A blind sed across the whole multi-service file
+# would touch every other service's annotation too, so scope the substitution to this
+# service's own Rollout block — same awk pattern as the sibling payments generators.
 ROLLOUT=$REPO/openbank-infra/gitops/components/payments/payments-services.yaml
-echo "NOTE: update the card-issuance-service pod template annotation in $ROLLOUT to \"$CHECKSUM\" (not auto-patched — shared multi-service file)."
+if [ -f "$ROLLOUT" ]; then
+  awk -v checksum="$CHECKSUM" '
+    # card-issuance-service is a Deployment, not a Rollout like its payments siblings.
+    /^kind: (Rollout|Deployment)$/ { pending_rollout = 1; print; next }
+    pending_rollout && /^  name: card-issuance-service$/ { in_card_rollout = 1; pending_rollout = 0; print; next }
+    pending_rollout && /^  name:/ { pending_rollout = 0 }
+    /^---$/ { in_card_rollout = 0 }
+    in_card_rollout && /openbank\.tech\/policy-checksum:/ {
+      sub(/openbank\.tech\/policy-checksum: "[^"]*"/, "openbank.tech/policy-checksum: \"" checksum "\"")
+    }
+    { print }
+  ' "$ROLLOUT" > "${ROLLOUT}.tmp" && mv "${ROLLOUT}.tmp" "$ROLLOUT"
+  echo "patched $ROLLOUT card-issuance-service Deployment annotation -> $CHECKSUM"
+fi
