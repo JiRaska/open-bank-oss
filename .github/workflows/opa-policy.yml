@@ -50,13 +50,16 @@ jobs:
           PATTERN="${PATTERN}|^openbank-libs/governance/agents\.yaml$"
           PATTERN="${PATTERN}|^openbank-libs/governance/rules\.yaml$"
           PATTERN="${PATTERN}|^openbank-libs/governance/policies/"
-          PATTERN="${PATTERN}|^openbank-infra/gitops/components/agent/gen-opa-bundle-configmap\.sh$"
-          PATTERN="${PATTERN}|^openbank-infra/gitops/components/agent/agent-opa-bundle\.yaml$"
-          PATTERN="${PATTERN}|^openbank-infra/gitops/components/pid/"
-          PATTERN="${PATTERN}|^openbank-infra/gitops/components/copilot/"
-          PATTERN="${PATTERN}|^openbank-infra/gitops/components/customer-edge/"
-          PATTERN="${PATTERN}|^openbank-infra/gitops/components/notifications/"
           PATTERN="${PATTERN}|^\.github/workflows/opa-policy\.yml$"
+
+          # Every component directory that owns a bundle generator — discovered, never
+          # hard-coded (issue #1184). The old list named only agent/pid/copilot/
+          # customer-edge/notifications, so a hand-edit to any other service's committed
+          # bundle or pod-roll annotation did not even mark the PR policy-relevant, and
+          # `verify` never ran to catch it.
+          while IFS= read -r dir; do
+            PATTERN="${PATTERN}|^$(printf '%s' "$dir" | sed 's/\./\\./g')/"
+          done < <(find openbank-infra/gitops/components -name 'gen-*opa-bundle*.sh' -exec dirname {} \; | sort -u)
 
           if [ "${{ github.event_name }}" = "push" ]; then
             echo "Event push -> always verify (post-merge; keeps the deployed-bundle check current)."
@@ -132,21 +135,51 @@ jobs:
         run: |
           # Each generator writes its ConfigMap AND stamps the matching Deployment/Rollout
           # pod-template annotation (openbank.tech/policy-checksum) — the annotation is what
-          # actually rolls the pods, since subPath mounts do not hot-reload. Regenerate all
-          # four and fail on any diff: a stale bundle OR a stale annotation blocks the merge.
-          ./openbank-infra/gitops/components/pid/gen-pid-opa-bundle.sh
-          ./openbank-infra/gitops/components/copilot/gen-copilot-opa-bundle.sh
-          ./openbank-infra/gitops/components/customer-edge/gen-customer-edge-opa-bundle.sh
-          ./openbank-infra/gitops/components/notifications/gen-notification-opa-bundle.sh
-          if ! git diff --exit-code -- \
-              openbank-infra/gitops/components/pid \
-              openbank-infra/gitops/components/copilot \
-              openbank-infra/gitops/components/customer-edge \
-              openbank-infra/gitops/components/notifications; then
-            echo "::error::A service OPA bundle ConfigMap or its pod-roll checksum annotation is stale — re-run the gen-*-opa-bundle.sh generators and commit the result."
+          # actually rolls the pods, since subPath mounts do not hot-reload. Regenerate every
+          # generator and fail on any diff: a stale bundle OR a stale annotation blocks the merge.
+          #
+          # Discovered, never hard-coded (issue #1184). This step used to name four generators
+          # while 25 of the 26 hash rules.yaml as a checksum input, so any shared-policy edit
+          # left ~21 services' committed bundles and pod-roll annotations stale with no CI
+          # signal. A hard-coded list opts every new service out of this gate by default.
+          # while-read, not `mapfile`: this job's Install OPA step still supports a darwin
+          # runner, and macOS ships bash 3.2 where mapfile does not exist (it would fail
+          # "command not found" and leave GENERATORS empty).
+          GENERATORS=()
+          while IFS= read -r g; do
+            GENERATORS+=("$g")
+          done < <(find openbank-infra/gitops/components -name 'gen-*opa-bundle*.sh' | sort)
+
+          if [ "${#GENERATORS[@]}" -eq 0 ]; then
+            echo "::error::No OPA bundle generators discovered — the find pattern is wrong, not the repo. Refusing to pass a check that verifies nothing."
             exit 1
           fi
-          echo "All service OPA bundles + pod-roll annotations are in sync with the policy source."
+
+          echo "Discovered ${#GENERATORS[@]} bundle generators:"
+          printf '  %s\n' "${GENERATORS[@]}"
+
+          # A non-executable generator silently no-ops a `./…` loop, which would look
+          # identical to "in sync". gen-ledger-opa-bundle.sh shipped 100644 for exactly this
+          # reason and had never run. Fail loudly instead.
+          NON_EXEC=0
+          for g in "${GENERATORS[@]}"; do
+            if [ ! -x "$g" ]; then
+              echo "::error file=${g}::${g} is not executable — commit it mode 100755 (git update-index --chmod=+x)."
+              NON_EXEC=1
+            fi
+          done
+          [ "$NON_EXEC" -eq 0 ] || exit 1
+
+          for g in "${GENERATORS[@]}"; do
+            echo "--- $g"
+            "$g" >/dev/null
+          done
+
+          if ! git diff --exit-code -- openbank-infra/gitops/components; then
+            echo "::error::A service OPA bundle ConfigMap or its pod-roll checksum annotation is stale — re-run the gen-*opa-bundle*.sh generators shown above and commit the result."
+            exit 1
+          fi
+          echo "All ${#GENERATORS[@]} service OPA bundles + pod-roll annotations are in sync with the policy source."
 
   # Gate job — always runs, maps to the required check name (issue #799). Passes
   # when verify succeeded OR was skipped (no policy-relevant changes in this PR);

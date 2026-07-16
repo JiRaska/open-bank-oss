@@ -150,15 +150,25 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   Verify with `cosign verify-attestation` after attesting; never trust `attest` exit 0 alone.
 
 ### OPA / Rego policies (ADR-0031/ADR-0034)
-- **Adding any new agent charter to `agents.yaml` ripples the OPA bundle checksum of unrelated
-  services.** `gen-pid-opa-bundle.sh` / `gen-copilot-opa-bundle.sh` /
-  `gen-customer-edge-opa-bundle.sh` / `gen-notification-opa-bundle.sh` each hash
-  `openbank-libs/governance/agents.yaml` as one of their checksum inputs — a new charter entry for
-  a completely unrelated agent (e.g. a new fleet-monitoring agent) still changes those four
-  services' `openbank.tech/policy-checksum` annotation. `opa-policy.yml`'s "build + verify bundle"
-  job regenerates and diffs all four on every OPA-relevant PR, so a PR that only adds an agent
-  charter fails there unless it also re-runs and commits all five `gen-*-opa-bundle*.sh` outputs
-  (`agent`, `pid`, `copilot`, `customer-edge`, `notifications`), not just its own service's bundle.
+- **Editing any shared policy source ripples the OPA bundle checksum of every service.** Each
+  `openbank-infra/gitops/components/**/gen-*opa-bundle*.sh` embeds `rest.rego`, `agents.rego`,
+  `agents.yaml` and (25 of the 26) `rules.yaml` verbatim into its ConfigMap and hashes them into
+  that service's `openbank.tech/policy-checksum` annotation. So a new charter entry for a
+  completely unrelated agent — or any `rules.yaml` edit — still changes *every* service's bundle
+  and annotation. `opa-policy.yml`'s "build + verify bundle" job discovers the generators with
+  `find` and regenerates **all** of them on every OPA-relevant PR, so your PR fails there unless it
+  re-runs and commits every generator's output, not just your own service's bundle. Regenerate with:
+  ```
+  find openbank-infra/gitops/components -name 'gen-*opa-bundle*.sh' | sort | xargs -n1 bash
+  ```
+  Expect this to roll the pods of every service whose checksum moved — that is the point (subPath
+  mounts do not hot-reload). Do not hand-edit a bundle or an annotation to dodge the diff.
+- **The generator list is discovered, not hard-coded — keep it that way.** Until #1184 the gate
+  named four generators while 25 hashed `rules.yaml`, so ~21 services' committed bundles drifted
+  from the policy source for months with CI green: the deployed OPA data (`data.rules.*`,
+  `data.agents.*`) silently lagged what `rules.yaml` declared. If you add a generator, add nothing
+  to CI — but do commit it mode `100755`: a non-executable generator no-ops a `./…` loop and looks
+  exactly like "in sync" (`gen-ledger-opa-bundle.sh` shipped `100644` and had never once run).
 - **An `AI_AGENT` principal's id carries an `agent:` prefix on the REST path, but not on the
   MCP path.** `AuthorizeInterceptor.principalType()` classifies `AI_AGENT` from a JWT `sub`
   prefixed `agent:`, and `principal.id` is that sub verbatim — but `openbank-agent-service`
