@@ -59,6 +59,18 @@ export const PERMISSIONS = {
   // view-only (mirrors the ADR's RBAC note verbatim).
   "templates:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   "templates:edit":           [ROLES.ADMIN, ROLES.COMPLIANCE],
+  // Customer message history (ADR-0176 D7). ADMIN/OPERATOR only — the intersection of
+  // the two backend gates, which disagree in both directions: notification-service's
+  // @RolesAllowed lists ROLE_VIEWER (whom OPA then denies — no rest.rego rule fires for a
+  // pure viewer), while rest.rego's compliance-read-any admits ROLE_COMPLIANCE (whom
+  // @RolesAllowed then denies). Listing either here would render a tab that 403s.
+  //
+  // NOT a security control — UX/nav gating only. rest.rego's operator-read-any grants
+  // .read/.list on ANY resource to every operator, and the BFF proxy relays the operator's
+  // own bearer with no permission check, so anyone who can reach the console can already
+  // call the endpoint directly. This decides what we *render*, not what they can *fetch*.
+  // Real metadata/body separation needs a policy change — issue #1326.
+  "notifications:view":       [ROLES.ADMIN, ROLES.OPERATOR],
   // System
   "system:view":              [ROLES.ADMIN, ROLES.OPERATOR],
   "system:config":            [ROLES.ADMIN],

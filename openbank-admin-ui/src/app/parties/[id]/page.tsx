@@ -7,11 +7,15 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Users, ArrowLeft, ShieldCheck, FileText, RefreshCw } from 'lucide-react'
+import { Users, ArrowLeft, ShieldCheck, FileText, RefreshCw, Bell, ChevronDown } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { useAuth } from '@/lib/auth/useAuth'
+import { hasPermission } from '@/lib/auth/roles'
+import { AuthGuard } from '@/components/auth/AuthGuard'
+import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
+import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 
-const PARTY_SERVICE = '/api/svc/party-service'
-const KYC_SERVICE   = '/api/svc/kyc-service'
+const PAGE_SIZE = 25
 
 interface Party {
   id: string; partyType: string; status: string; legalName: string; tradingName?: string
@@ -25,34 +29,51 @@ interface KycCase {
   reviewedBy?: string; createdAt: string; updatedAt: string
 }
 
+// The list endpoint's NotificationSummary (notification-service openapi.yaml 1.5.0).
+// Metadata only — `body` is deliberately absent here and is NOT fetched by this page.
+interface NotificationSummary {
+  id: string; partyId: string; channel: string; template: string; recipient: string
+  subject?: string; status: string; sentAt?: string; readAt?: string; createdAt: string
+}
+
 const STATUS_COLOR: Record<string, string> = {
   ACTIVE: 'var(--green)', INACTIVE: 'var(--text-muted)', BLOCKED: 'var(--red)',
 }
 const KYC_COLOR: Record<string, string> = {
   APPROVED: 'var(--green)', PENDING: 'var(--yellow)', REJECTED: 'var(--red)', NOT_STARTED: 'var(--text-muted)',
 }
+const MSG_STATUS_COLOR: Record<string, string> = {
+  SENT: 'var(--green)', FAILED: 'var(--red)', PENDING: 'var(--yellow)', BOUNCED: 'var(--red)',
+}
 
-export default function PartyDetailPage() {
+function PartyDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const { roles } = useAuth()
   const [party, setParty]     = useState<Party | null>(null)
   const [kyc, setKyc]         = useState<KycCase | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError]     = useState<string | null>(null)
+  const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
+  const [tab, setTab] = useState<'overview' | 'messages'>('overview')
+
+  const canSeeMessages = hasPermission(roles, 'notifications:view')
 
   const load = useCallback(async () => {
-    setLoading(true); setError(null)
+    setLoading(true); setUnavailable(null)
     try {
       const [partyRes, kycRes] = await Promise.allSettled([
-        fetch(`${PARTY_SERVICE}/api/v1/parties/${id}`).then(r => r.ok ? r.json() : Promise.reject(r.status)),
-        fetch(`${KYC_SERVICE}/api/v1/kyc/cases/party/${id}`).then(r => r.ok ? r.json() : null),
+        fetch(svcUrl('party-service', `/api/v1/parties/${id}`), { signal: AbortSignal.timeout(5000) }),
+        fetch(svcUrl('kyc-service', `/api/v1/kyc/cases/party/${id}`), { signal: AbortSignal.timeout(5000) }),
       ])
-      if (partyRes.status === 'rejected') throw new Error(`Party not found (${partyRes.reason})`)
-      setParty(partyRes.value)
-      if (kycRes.status === 'fulfilled') setKyc(kycRes.value)
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load party')
+      if (partyRes.status !== 'fulfilled') { setUnavailable({ kind: 'unreachable' }); return }
+      if (!partyRes.value.ok) { setUnavailable({ kind: await classifyBffFailure(partyRes.value) }); return }
+      setParty(await partyRes.value.json())
+      // KYC is supplementary: a party with no case is normal, so a failure here degrades
+      // that card rather than the page.
+      if (kycRes.status === 'fulfilled' && kycRes.value.ok) setKyc(await kycRes.value.json())
+    } catch {
+      setUnavailable({ kind: 'unreachable' })
     } finally { setLoading(false) }
   }, [id])
 
@@ -67,16 +88,22 @@ export default function PartyDetailPage() {
     </div>
   )
 
-  if (error) return (
+  if (unavailable) return (
     <div>
       <div className="page-header">
         <button className="btn btn-secondary" onClick={() => router.back()}><ArrowLeft size={13} /> {t('Zpět', 'Back')}</button>
       </div>
-      <div className="card" style={{ padding: '24px', color: 'var(--red)' }}>{error}</div>
+      <DataUnavailable kind={unavailable.kind} service="Party-service" feature={t('Detail subjektu', 'Party detail')} lang={language} />
     </div>
   )
 
   if (!party) return null
+
+  type TabId = 'overview' | 'messages'
+  const tabs: Array<{ id: TabId; label: string; icon: React.ReactNode; show: boolean }> = [
+    { id: 'overview' as TabId, label: t('Přehled', 'Overview'), icon: <Users size={12} />, show: true },
+    { id: 'messages' as TabId, label: t('Zprávy', 'Messages'), icon: <Bell size={12} />, show: canSeeMessages },
+  ].filter(item => item.show)
 
   return (
     <div>
@@ -102,88 +129,251 @@ export default function PartyDetailPage() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-        {/* Party Details */}
-        <div className="card" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-            <Users size={15} style={{ color: 'var(--accent)' }} />
-            <span style={{ fontWeight: 600, fontSize: '13px' }}>{t('Detaily subjektu', 'Party Details')}</span>
-            <span className="pill" style={{ marginLeft: 'auto', background: `${STATUS_COLOR[party.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[party.status] ?? 'var(--text-muted)' }}>
-              {party.status}
-            </span>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {[
-              [t('Typ', 'Type'),                        party.partyType],
-              [t('Obchodní jméno', 'Legal Name'),       party.legalName],
-              [t('Obchodní název', 'Trading Name'),     party.tradingName ?? '—'],
-              [t('E-mail', 'Email'),                    party.email],
-              [t('Telefon', 'Phone'),                   party.phone ?? '—'],
-              ['Tax ID',                                 party.taxId ?? '—'],
-              [t('Reg. číslo', 'Reg. Number'),          party.registrationNumber ?? '—'],
-              [t('Státní příslušnost', 'Nationality'),  party.nationality ?? '—'],
-              [t('Datum narození', 'Date of Birth'),    party.dateOfBirth ?? '—'],
-              [t('Vytvořeno', 'Created'),               new Date(party.createdAt).toLocaleString()],
-              [t('Aktualizováno', 'Updated'),           new Date(party.updatedAt).toLocaleString()],
-            ].map(([label, value]) => (
-              <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
-                <span style={{ color: 'var(--text-muted)' }}>{label}</span>
-                <span style={{ fontWeight: 500, textAlign: 'right', maxWidth: '200px', wordBreak: 'break-all' }}>{value}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+      {/* Loop var is `item`, never `t` — a callback param named `t` shadows the translation
+          function (see openbank-admin-ui/CLAUDE.md rule #4; sanctions/page.tsx does this). */}
+      <div style={{ display: 'flex', gap: '2px', marginBottom: '16px', flexWrap: 'wrap' }}>
+        {tabs.map(item => (
+          <button
+            key={item.id}
+            onClick={() => setTab(item.id)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '4px', padding: '5px 10px', fontSize: '11px',
+              fontWeight: 600, borderRadius: '5px', border: 'none', cursor: 'pointer',
+              background: tab === item.id ? 'var(--accent)' : 'transparent',
+              color: tab === item.id ? '#fff' : 'var(--text-secondary)', transition: 'all 0.1s',
+            }}
+          >
+            {item.icon}{item.label}
+          </button>
+        ))}
+      </div>
 
-        {/* KYC Status */}
-        <div className="card" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-            <ShieldCheck size={15} style={{ color: 'var(--accent)' }} />
-            <span style={{ fontWeight: 600, fontSize: '13px' }}>{t('Stav KYC', 'KYC Status')}</span>
-            <span className="pill" style={{ marginLeft: 'auto', background: `${KYC_COLOR[party.kycStatus] ?? 'var(--text-muted)'}22`, color: KYC_COLOR[party.kycStatus] ?? 'var(--text-muted)' }}>
-              {party.kycStatus?.replace('_', ' ')}
-            </span>
-          </div>
-          {kyc ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
-                {t('ID případu:', 'Case ID:')} <span style={{ fontFamily: 'var(--font-mono)' }}>{kyc.id}</span>
-              </div>
-              {kyc.checks?.map(check => (
-                <div key={check.checkType} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: '6px' }}>
-                  <span style={{ fontSize: '13px' }}>{check.checkType?.replace(/_/g, ' ') ?? check.checkType}</span>
-                  <span className="pill" style={{ background: `${KYC_COLOR[check.status] ?? 'var(--text-muted)'}22`, color: KYC_COLOR[check.status] ?? 'var(--text-muted)' }}>
-                    {check.status}
-                  </span>
+      {tab === 'overview' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+          {/* Party Details */}
+          <div className="card" style={{ padding: '20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+              <Users size={15} style={{ color: 'var(--accent)' }} />
+              <span style={{ fontWeight: 600, fontSize: '13px' }}>{t('Detaily subjektu', 'Party Details')}</span>
+              <span className="pill" style={{ marginLeft: 'auto', background: `${STATUS_COLOR[party.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[party.status] ?? 'var(--text-muted)' }}>
+                {party.status}
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {[
+                [t('Typ', 'Type'),                        party.partyType],
+                [t('Obchodní jméno', 'Legal Name'),       party.legalName],
+                [t('Obchodní název', 'Trading Name'),     party.tradingName ?? '—'],
+                [t('E-mail', 'Email'),                    party.email],
+                [t('Telefon', 'Phone'),                   party.phone ?? '—'],
+                [t('Daňové ID', 'Tax ID'),                party.taxId ?? '—'],
+                [t('Reg. číslo', 'Reg. Number'),          party.registrationNumber ?? '—'],
+                [t('Státní příslušnost', 'Nationality'),  party.nationality ?? '—'],
+                [t('Datum narození', 'Date of Birth'),    party.dateOfBirth ?? '—'],
+                [t('Vytvořeno', 'Created'),               new Date(party.createdAt).toLocaleString()],
+                [t('Aktualizováno', 'Updated'),           new Date(party.updatedAt).toLocaleString()],
+              ].map(([label, value]) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>{label}</span>
+                  <span style={{ fontWeight: 500, textAlign: 'right', maxWidth: '200px', wordBreak: 'break-all' }}>{value}</span>
                 </div>
               ))}
-              {kyc.reviewedBy && (
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>
-                  {t('Kontroloval:', 'Reviewed by:')} {kyc.reviewedBy}
-                </div>
-              )}
             </div>
-          ) : (
-            <div style={{ color: 'var(--text-muted)', fontSize: '13px', padding: '20px 0', textAlign: 'center' }}>
-              {t('Pro tento subjekt nebyl nalezen žádný případ KYC', 'No KYC case found for this party')}
-            </div>
-          )}
+          </div>
 
-          {/* Address */}
-          {party.address && (
-            <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                <FileText size={13} style={{ color: 'var(--accent)' }} />
-                <span style={{ fontWeight: 600, fontSize: '13px' }}>{t('Adresa', 'Address')}</span>
-              </div>
-              <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
-                {party.address.line1}<br />
-                {party.address.city}, {party.address.postalCode}<br />
-                {party.address.countryCode}
-              </div>
+          {/* KYC Status */}
+          <div className="card" style={{ padding: '20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+              <ShieldCheck size={15} style={{ color: 'var(--accent)' }} />
+              <span style={{ fontWeight: 600, fontSize: '13px' }}>{t('Stav KYC', 'KYC Status')}</span>
+              <span className="pill" style={{ marginLeft: 'auto', background: `${KYC_COLOR[party.kycStatus] ?? 'var(--text-muted)'}22`, color: KYC_COLOR[party.kycStatus] ?? 'var(--text-muted)' }}>
+                {party.kycStatus?.replace('_', ' ')}
+              </span>
             </div>
-          )}
+            {kyc ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                  {t('ID případu:', 'Case ID:')} <span style={{ fontFamily: 'var(--font-mono)' }}>{kyc.id}</span>
+                </div>
+                {kyc.checks?.map(check => (
+                  <div key={check.checkType} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: '6px' }}>
+                    <span style={{ fontSize: '13px' }}>{check.checkType?.replace(/_/g, ' ') ?? check.checkType}</span>
+                    <span className="pill" style={{ background: `${KYC_COLOR[check.status] ?? 'var(--text-muted)'}22`, color: KYC_COLOR[check.status] ?? 'var(--text-muted)' }}>
+                      {check.status}
+                    </span>
+                  </div>
+                ))}
+                {kyc.reviewedBy && (
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>
+                    {t('Kontroloval:', 'Reviewed by:')} {kyc.reviewedBy}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <DataUnavailable kind="no_data" feature={t('Případ KYC', 'KYC case')} lang={language} dense />
+            )}
+
+            {/* Address */}
+            {party.address && (
+              <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                  <FileText size={13} style={{ color: 'var(--accent)' }} />
+                  <span style={{ fontWeight: 600, fontSize: '13px' }}>{t('Adresa', 'Address')}</span>
+                </div>
+                <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
+                  {party.address.line1}<br />
+                  {party.address.city}, {party.address.postalCode}<br />
+                  {party.address.countryCode}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
+
+      {tab === 'messages' && <MessagesTab partyId={party.id} />}
     </div>
+  )
+}
+
+/**
+ * A party's notification history — metadata only.
+ *
+ * The rendered `body` is deliberately never fetched or shown. The list endpoint returns no
+ * body, and this page does not call `GET /notifications/{id}` (which does). That keeps the
+ * tab from putting message content one click from an operator while the read-side authz gap
+ * is open (issue #1326): rest.rego's `operator-read-any` grants `.read`/`.list` on any
+ * resource to every operator, and the BFF relays the operator's own bearer, so the
+ * `notifications:view` permission gating this tab is UX only — it decides what we render,
+ * not what an operator can fetch. Showing bodies here needs the policy fix first.
+ */
+function MessagesTab({ partyId }: { partyId: string }) {
+  // A helper component outside the page needs its own language context (all admin-ui pages
+  // are 'use client') — never reference the page's `t` out of scope (CLAUDE.md rule #4).
+  const { t, language } = useLanguage()
+  const [rows, setRows] = useState<NotificationSummary[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
+
+  const load = useCallback(async (nextPage: number) => {
+    if (nextPage === 0) setLoading(true); else setLoadingMore(true)
+    setUnavailable(null)
+    try {
+      const res = await fetch(
+        svcUrl('notification-service', '/api/v1/notifications', {
+          partyId,
+          page: String(nextPage),
+          size: String(PAGE_SIZE),
+        }),
+        { signal: AbortSignal.timeout(5000) },
+      )
+      if (!res.ok) {
+        const kind = await classifyBffFailure(res)
+        // A bare 404 on the list endpoint means "nothing here", not a broken app.
+        setUnavailable({ kind: kind === 'not_found' ? 'no_data' : kind })
+        return
+      }
+      const data = await res.json()
+      const items: NotificationSummary[] = data.items ?? []
+      setRows(prev => nextPage === 0 ? items : [...prev, ...items])
+      setTotal(data.total ?? items.length)
+      setPage(nextPage)
+    } catch {
+      setUnavailable({ kind: 'unreachable' })
+    } finally { setLoading(false); setLoadingMore(false) }
+  }, [partyId])
+
+  useEffect(() => { load(0) }, [load])
+
+  // The endpoint is offset-paged (page/size/total), not cursor-paged like party search.
+  const hasNextPage = (page + 1) * PAGE_SIZE < total
+
+  return (
+    <div className="card" style={{ overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
+        <Bell size={15} style={{ color: 'var(--accent)' }} />
+        <span style={{ fontWeight: 600, fontSize: '13px' }}>{t('Historie zpráv', 'Message history')}</span>
+        {!loading && !unavailable && (
+          <span className="tag" style={{ marginLeft: 'auto' }}>{rows.length}/{total}</span>
+        )}
+      </div>
+
+      {unavailable && unavailable.kind !== 'no_data' && (
+        <DataUnavailable kind={unavailable.kind} service="Notification-service" feature={t('Historie zpráv', 'Message history')} lang={language} dense />
+      )}
+
+      {(!unavailable || unavailable.kind === 'no_data') && (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>{t('Šablona', 'Template')}</th>
+              <th>{t('Kanál', 'Channel')}</th>
+              <th>{t('Příjemce', 'Recipient')}</th>
+              <th>{t('Předmět', 'Subject')}</th>
+              <th>{t('Stav', 'Status')}</th>
+              <th>{t('Odesláno', 'Sent')}</th>
+              <th>{t('Přečteno', 'Read')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && Array.from({ length: 5 }).map((_, i) => (
+              <tr key={i}>{Array.from({ length: 7 }).map((_, j) => (
+                <td key={j}><div className="skeleton" style={{ height: '14px', width: j === 2 ? '160px' : '80px' }} /></td>
+              ))}</tr>
+            ))}
+            {!loading && rows.length === 0 && (
+              <tr><td colSpan={7} style={{ padding: 0 }}>
+                <DataUnavailable
+                  kind="no_data"
+                  feature={t('Historie zpráv', 'Message history')}
+                  lang={language}
+                  detail={t('Tomuto subjektu nebyla odeslána žádná zpráva.', 'No message has been sent to this party.')}
+                  dense
+                />
+              </td></tr>
+            )}
+            {!loading && rows.map(row => (
+              <tr key={row.id}>
+                <td><span className="tag">{row.template}</span></td>
+                <td><span className="tag">{row.channel}</span></td>
+                <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{row.recipient}</td>
+                <td style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{row.subject ?? '—'}</td>
+                <td>
+                  <span className="pill" style={{ background: `${MSG_STATUS_COLOR[row.status] ?? 'var(--text-muted)'}22`, color: MSG_STATUS_COLOR[row.status] ?? 'var(--text-muted)' }}>
+                    {row.status}
+                  </span>
+                </td>
+                <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{row.sentAt ? new Date(row.sentAt).toLocaleString() : '—'}</td>
+                <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{row.readAt ? new Date(row.readAt).toLocaleString() : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {hasNextPage && !loadingMore && (
+        <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)' }}>
+          <button className="btn btn-secondary" onClick={() => load(page + 1)}>
+            <ChevronDown size={13} /> {t('Načíst další', 'Load more')}
+          </button>
+        </div>
+      )}
+      {loadingMore && (
+        <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: '13px' }}>
+          {t('Načítám…', 'Loading…')}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function PartyDetailPageGuarded() {
+  return (
+    <AuthGuard permission="parties:view">
+      <PartyDetailPage />
+    </AuthGuard>
   )
 }
