@@ -10,6 +10,7 @@ import com.openbank.customeredge.infrastructure.rest.UpstreamClient
 import com.openbank.customeredge.infrastructure.webauthn.EnrollmentTicketService
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -42,11 +43,12 @@ class OnboardingTermsTest {
     }
 
     @Test
-    fun `returns published agreement and terms in stable order`() {
+    fun `returns only the published terms — never the framework agreement`() {
         val upstream = mockk<UpstreamClient>()
         every { upstream.get(any(), any()) } returns templates(
             Triple("VOP_CS", "PUBLISHED", "Všeobecné obchodní podmínky"),
-            Triple("RAMCOVA_SMLOUVA_CS", "RETIRED", "stará"),
+            Triple("VOP_CS", "RETIRED", "staré VOP"),
+            // The agreement is signed one step later, per party — it must never be listed here.
             Triple("RAMCOVA_SMLOUVA_CS", "PUBLISHED", "Rámcová smlouva"),
             Triple("UCET_SMLOUVA_CS", "PUBLISHED", "jiný dokument"),
         )
@@ -55,27 +57,73 @@ class OnboardingTermsTest {
 
         assertThat(resp.status).isEqualTo(200)
         val docs = mapper.readTree(resp.entity as String).get("documents")
-        assertThat(docs.size()).isEqualTo(2)
-        assertThat(docs[0].get("code").asText()).isEqualTo("RAMCOVA_SMLOUVA_CS")
-        assertThat(docs[1].get("code").asText()).isEqualTo("VOP_CS")
-        assertThat(docs[0].get("html").asText()).contains("text RAMCOVA_SMLOUVA_CS")
+        assertThat(docs.size()).isEqualTo(1)
+        assertThat(docs[0].get("code").asText()).isEqualTo("VOP_CS")
         assertThat(docs[0].get("version").asText()).isEqualTo("1.1.0")
+        // Metadata only — the readable bytes come from /terms/{code}/content as a PDF.
+        assertThat(docs[0].has("html")).isFalse()
     }
 
     @Test
-    fun `lang en selects the english templates and anything else falls back to cs`() {
+    fun `lang en selects the english terms and anything else falls back to cs`() {
         val upstream = mockk<UpstreamClient>()
         every { upstream.get(any(), any()) } returns templates(
-            Triple("RAMCOVA_SMLOUVA_EN", "PUBLISHED", "Framework Agreement"),
             Triple("VOP_EN", "PUBLISHED", "General Terms"),
+            Triple("RAMCOVA_SMLOUVA_EN", "PUBLISHED", "Framework Agreement"),
         )
 
         val resp = resource(upstream).onboardingTerms("en")
 
         assertThat(resp.status).isEqualTo(200)
         val docs = mapper.readTree(resp.entity as String).get("documents")
-        assertThat(docs.size()).isEqualTo(2)
-        assertThat(docs[0].get("code").asText()).isEqualTo("RAMCOVA_SMLOUVA_EN")
+        assertThat(docs.size()).isEqualTo(1)
+        assertThat(docs[0].get("code").asText()).isEqualTo("VOP_EN")
+    }
+
+    // ---- /terms/{code}/content -------------------------------------------------
+
+    @Test
+    fun `content renders the published terms to pdf and reuses the render per version`() {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/templates") }, any()) } returns
+            templates(Triple("VOP_CS", "PUBLISHED", "Všeobecné obchodní podmínky"))
+        every { upstream.post(match { it.contains("/render") }, any(), any()) } returns
+            Response.status(201).entity("""{"id":"doc-1"}""").build()
+        every { upstream.getRaw(match { it.contains("/documents/doc-1/content") }, any(), any()) } returns
+            Response.ok("%PDF-1.4".toByteArray()).build()
+
+        val res = resource(upstream)
+        assertThat(res.onboardingTermsContent("VOP_CS").status).isEqualTo(200)
+        assertThat(res.onboardingTermsContent("vop_cs").status).isEqualTo(200)
+
+        // Immutable published version ⇒ rendered once, not once per view.
+        verify(exactly = 1) { upstream.post(match { it.contains("/render") }, any(), any()) }
+    }
+
+    @Test
+    fun `content refuses any code outside the terms allow-list`() {
+        val upstream = mockk<UpstreamClient>()
+
+        // The per-party agreement must not be reachable through the anonymous route.
+        val resp = resource(upstream).onboardingTermsContent("RAMCOVA_SMLOUVA_CS")
+
+        assertThat(resp.status).isEqualTo(404)
+        verify(exactly = 0) { upstream.post(any(), any(), any()) }
+    }
+
+    @Test
+    fun `content maps a failed render to 502 and does not cache the failure`() {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/templates") }, any()) } returns
+            templates(Triple("VOP_CS", "PUBLISHED", "Všeobecné obchodní podmínky"))
+        every { upstream.post(match { it.contains("/render") }, any(), any()) } returns
+            Response.status(500).entity("""{"internal":"boom"}""").build()
+
+        val res = resource(upstream)
+        assertThat(res.onboardingTermsContent("VOP_CS").status).isEqualTo(502)
+        // A failed render must be retried on the next request, never cached as a hole.
+        assertThat(res.onboardingTermsContent("VOP_CS").status).isEqualTo(502)
+        verify(exactly = 2) { upstream.post(match { it.contains("/render") }, any(), any()) }
     }
 
     @Test

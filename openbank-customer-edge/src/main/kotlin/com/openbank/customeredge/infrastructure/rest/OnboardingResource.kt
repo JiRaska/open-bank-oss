@@ -14,6 +14,7 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
@@ -64,11 +65,20 @@ class OnboardingResource(
         // The X-Customer-Party-Id header value for the pre-party terms call — document-service's
         // template routes don't scope by party, but UpstreamClient always sends the header.
         private const val ONBOARDING_PARTY_PLACEHOLDER = "onboarding-anonymous"
+
+        private const val STATUS_CREATED = 201
+        private const val STATUS_NOT_FOUND = 404
+
+        // Only the general terms are servable here — the framework agreement is per-party and
+        // signed one step later (ADR-0169/0170), never fetched anonymously.
+        private val SERVABLE_TERMS_CODES = setOf("VOP_CS", "VOP_EN")
     }
 
-    // Instance field (the resource is a Quarkus singleton): per-lang cache of the serialized
-    // /terms response so an anonymous burst can't fan out to document-service.
+    // Instance fields (the resource is a Quarkus singleton): per-lang cache of the serialized
+    // /terms response so an anonymous burst can't fan out to document-service, and the
+    // rendered-PDF document id per immutable (code, version) so the terms render once.
     private val termsCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, String>>()
+    private val renderedTermsCache = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     @Inject
     lateinit var jsonMapper: ObjectMapper
@@ -155,16 +165,21 @@ class OnboardingResource(
     fun registerParty(body: String): Response = customerEdge.registerParty(body)
 
     /**
-     * The PUBLISHED contractual documents shown on the onboarding consent step (framework
-     * agreement + general terms), before any credential exists — informed consent requires the
-     * text to be READABLE at the moment the user ticks "I agree", and at that point there is no
-     * account, no token and no personalised document yet (the personalised agreement is created
-     * and signed after `account.created`, ADR-0169/0170).
+     * The PUBLISHED general terms (VOP) the onboarding consent step asks the user to agree to.
+     * Informed consent requires the text to be READABLE at the moment the tick happens, and at
+     * that point there is no account, no token and no personalised document yet.
+     *
+     * Deliberately ONLY the terms — NOT the framework agreement. The agreement is a document the
+     * user *signs*, and it is created per-party and signed one step later, after `account.created`
+     * (ADR-0169/0170). Listing it here too made the consent step look like a second signing
+     * screen and duplicated what the sign step already shows.
+     *
+     * Metadata only (code/name/version/publishedAt) — the readable bytes come from
+     * [onboardingTermsContent] as a real PDF, the same artifact class the sign step renders.
      *
      * Same security class as [startOnboarding] above (the already-public onboarding surface,
      * behind the same ingress rate limit) — deliberately NOT a new exposure category: read-only,
-     * serves only PUBLISHED template text (a bank's public terms — no PII, no party data, no
-     * template internals beyond what every prospective customer must be able to read anyway).
+     * serves only PUBLISHED terms (a bank's public terms — no PII, no party data).
      *
      * Upstream call uses the edge M2M token against document-service's template list (the same
      * ROLE_OPERATOR-gated route the admin cockpit reads); responses are cached for [TERMS_TTL_MS]
@@ -183,7 +198,7 @@ class OnboardingResource(
             }
         }
 
-        val wanted = listOf("RAMCOVA_SMLOUVA_$l", "VOP_$l")
+        val wanted = "VOP_$l"
         val resp = upstream.get(
             "$documentServiceUrl/api/v1/documents/templates?limit=100",
             ONBOARDING_PARTY_PLACEHOLDER,
@@ -196,16 +211,13 @@ class OnboardingResource(
         }
         val docs = runCatching {
             jsonMapper.readTree(raw)
-                .filter { it.get("status")?.asText() == "PUBLISHED" && it.get("code")?.asText() in wanted }
-                // Stable order: agreement first, then terms — the consent screen renders in order.
-                .sortedBy { wanted.indexOf(it.get("code")?.asText()) }
+                .filter { it.get("status")?.asText() == "PUBLISHED" && it.get("code")?.asText() == wanted }
                 .map {
                     mapOf(
                         "code" to it.get("code")?.asText(),
                         "name" to it.get("name")?.asText(),
                         "version" to it.get("version")?.asText(),
                         "publishedAt" to it.get("createdAt")?.asText(),
-                        "html" to it.get("bodyHtml")?.asText(),
                     )
                 }
         }.getOrElse {
@@ -216,5 +228,78 @@ class OnboardingResource(
         val body = jsonMapper.writeValueAsString(mapOf("documents" to docs))
         termsCache[l] = now to body
         return Response.ok(body).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
+     * The PUBLISHED terms as a real PDF — the same artifact class the sign step renders, minus
+     * any signature field (nothing is signed here; the user only reads before ticking consent).
+     *
+     * [code] is restricted to [SERVABLE_TERMS_CODES]: the framework agreement is per-party and
+     * belongs to the authenticated sign step, so it can never be pulled through this anonymous
+     * route even by guessing its template code.
+     *
+     * document-service has no stateless render — `POST /documents/render` always persists the
+     * rendered artifact. A published template version is immutable, so the render is cached by
+     * (code, version) and the rendered document id reused: one artifact per published version,
+     * not one per curious visitor.
+     */
+    @GET
+    @Path("/terms/{code}/content")
+    @Produces("application/pdf")
+    @PermitAll
+    @Blocking
+    fun onboardingTermsContent(@PathParam("code") code: String): Response {
+        val wanted = code.uppercase()
+        if (wanted !in SERVABLE_TERMS_CODES) {
+            return Response.status(STATUS_NOT_FOUND)
+                .entity("""{"error":"unknown terms document"}""")
+                .type(MediaType.APPLICATION_JSON).build()
+        }
+
+        val listResp = upstream.get(
+            "$documentServiceUrl/api/v1/documents/templates?limit=100",
+            ONBOARDING_PARTY_PLACEHOLDER,
+        )
+        if (listResp.status != STATUS_OK) {
+            return Response.status(STATUS_BAD_GATEWAY)
+                .entity("""{"error":"document templates unavailable"}""")
+                .type(MediaType.APPLICATION_JSON).build()
+        }
+        val version = runCatching {
+            jsonMapper.readTree((listResp.entity as? String).orEmpty())
+                .firstOrNull {
+                    it.get("code")?.asText() == wanted && it.get("status")?.asText() == "PUBLISHED"
+                }?.get("version")?.asText()
+        }.getOrNull()
+            ?: return Response.status(STATUS_NOT_FOUND)
+                .entity("""{"error":"no published version of this document"}""")
+                .type(MediaType.APPLICATION_JSON).build()
+
+        val documentId = renderedTermsCache.computeIfAbsent("$wanted@$version") {
+            val renderBody = jsonMapper.writeValueAsString(
+                mapOf("templateCode" to wanted, "contentType" to "application/pdf"),
+            )
+            val rendered = upstream.post(
+                "$documentServiceUrl/api/v1/documents/render",
+                ONBOARDING_PARTY_PLACEHOLDER,
+                renderBody,
+            )
+            if (rendered.status != STATUS_CREATED) return@computeIfAbsent ""
+            runCatching {
+                jsonMapper.readTree((rendered.entity as? String).orEmpty()).get("id")?.asText()
+            }.getOrNull().orEmpty()
+        }
+        if (documentId.isBlank()) {
+            renderedTermsCache.remove("$wanted@$version") // don't cache a failed render
+            return Response.status(STATUS_BAD_GATEWAY)
+                .entity("""{"error":"could not render the terms"}""")
+                .type(MediaType.APPLICATION_JSON).build()
+        }
+
+        return upstream.getRaw(
+            "$documentServiceUrl/api/v1/documents/$documentId/content",
+            ONBOARDING_PARTY_PLACEHOLDER,
+            "application/pdf",
+        )
     }
 }
