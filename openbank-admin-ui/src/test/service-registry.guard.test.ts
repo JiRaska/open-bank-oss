@@ -94,7 +94,10 @@ function gitopsWorkloadNames(): Set<string> {
     const src = readFileSync(file, 'utf-8')
     for (const doc of src.split(/^---$/m)) {
       if (!/^kind:\s*(Deployment|Service|Rollout)\s*$/m.test(doc)) continue
-      const m = doc.match(/^metadata:\s*\n(?:\s+.*\n)*?\s+name:\s*([a-z0-9][a-z0-9-]*)\s*$/m)
+      // `[ \t]` rather than `\s`: `\s` matches \n, so `(?:\s+.*\n)*?` could split a run of
+      // " \n" lines many ways and backtrack exponentially (CodeQL js/redos). Indentation is
+      // spaces/tabs only, so pinning it makes each iteration consume exactly one line.
+      const m = doc.match(/^metadata:[ \t]*\n(?:[ \t]+.*\n)*?[ \t]+name:[ \t]*([a-z0-9][a-z0-9-]*)[ \t]*$/m)
       if (m) names.add(m[1])
     }
   }
