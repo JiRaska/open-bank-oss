@@ -21,3 +21,9 @@
 # finrep-service: first ArgoCD registration (ADR-0097); never built via build-push-service.sh.
 # See the header note in openbank-infra/gitops/components/finrep/finrep-service.yaml.
 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-finrep-service:sandbox-init
+
+# vop-service: first registration from #1195 (ADR-0095 Verification of Payee). Same shape as
+# finrep — module and gitops manifest merged, but no Dockerfile, no ECR repo, absent from
+# auto-deploy's ALL_SERVICES, so the tag has never been built. Tracked in #1205 alongside the
+# guard that should have refused to merge a released component in this state.
+265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-placeholder

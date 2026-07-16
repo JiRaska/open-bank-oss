@@ -77,7 +77,14 @@ jobs:
         id: gate
         env:
           FLEET_ATTEST_JSON: ${{ runner.temp }}/fleet-attest.json
+        # `set -o pipefail` is load-bearing, not boilerplate. A `run:` block with no
+        # `shell:` key runs under GitHub's default `bash -e {0}` — which does NOT set
+        # pipefail (only an explicit `shell: bash` gets `-e -o pipefail`). Without it the
+        # pipeline below exits with `tee`'s status, so the gate printed
+        # "FLEET ATTESTATION GATE: FAIL" and the step still went green. Verified against
+        # run 29488481556, which reported FAIL on an absent image and concluded success.
         run: |
+          set -euo pipefail
           .github/scripts/check-fleet-attestations.sh | tee "${RUNNER_TEMP}/gate.log"
 
       - name: Job summary
