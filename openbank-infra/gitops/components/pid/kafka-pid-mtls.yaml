@@ -4,12 +4,18 @@
 #   - party.events       (channel party-events-out)
 #   - openbank.pid.events (channel pid-events-out)
 #
-# Neither topic is under scheme-accepted ACL control, so no Write ACLs are needed here;
-# the KafkaUser is required solely to mint a client certificate for the tls:9093 listener.
+# This user originally carried no ACLs at all: at the time, only payment.scheme-accepted was
+# ACL-guarded and everything else inherited allow.everyone.if.no.acl.found=true, so the
+# KafkaUser existed solely to mint a tls:9093 client certificate. That premise died with
+# #2794, which flipped the gate to `false` cluster-wide (components/kafka/kafka.yaml) —
+# deny-by-default now applies to EVERY resource, so an authenticated principal with no ACLs
+# is denied on its own domain-event topics. Both Write grants below are therefore required
+# for pid's outbox dispatcher to publish at all; without them party.events stays empty and
+# customer-edge's ADR-0072 onboarding auto-resume never fires even once its own ACLs land
+# (kafka-customer-edge-mtls.yaml).
 #
 # Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal for all
-# of this service's Kafka traffic. ACL entries are only required for locked-down topics;
-# own domain-event topics inherit allow.everyone.if.no.acl.found=true.
+# of this service's Kafka traffic.
 #
 # These resources live in `messaging` (where the Strimzi User Operator watches); the User
 # Operator mints a per-user Secret of the same name there (user.crt/key/p12 + user.password
@@ -31,6 +37,24 @@ metadata:
 spec:
   authentication:
     type: tls
+  authorization:
+    type: simple
+    acls:
+      # Outbox dispatcher -> party.events (PartyEventPublisher, channel party-events-out).
+      # Consumed by customer-edge's OnboardingResumeService.
+      - resource:
+          type: topic
+          name: party.events
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      # Outbox dispatcher -> openbank.pid.events (PidOutboxDispatcher, channel pid-events-out).
+      - resource:
+          type: topic
+          name: openbank.pid.events
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
 ---
 # ── ExternalSecret: pid-service keystore ────────────────────────────────────
 # Projects the Strimzi-minted pid-service Secret from `messaging` into `pid`.

@@ -1,0 +1,20 @@
+# Customer audit trail topic (ADR-0086), produced by customer-edge's EdgeAuditPublisher and
+# consumed by audit-service (audit-events-in, kafka-audit-mtls.yaml already grants it Read).
+# Declared explicitly (the broker does not auto-create topics — kafka.yaml) so the Strimzi
+# topic operator manages it and the producer has a destination: the topic did not exist on the
+# broker at all, so even an authorized produce would have failed with UNKNOWN_TOPIC_OR_PARTITION.
+# Lives in `messaging` (the topic operator only watches its own namespace). Single partition +
+# RF 1 for the single-broker sandbox; prod should raise partitions for parallelism and RF to 3.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.customer.audit
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

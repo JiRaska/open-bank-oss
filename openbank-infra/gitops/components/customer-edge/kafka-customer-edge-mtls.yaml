@@ -1,0 +1,120 @@
+# Kafka mTLS identity + ACLs for customer-edge (ADR-0137 fleet gate, issue #686
+# follow-up flagged in customer-edge.yaml / customer-edge-msg-override.yaml).
+#
+# customer-edge has two Kafka channels (openbank-customer-edge application.yaml):
+#   - customer-audit-out -> openbank.customer.audit  (EdgeAuditPublisher, ADR-0086
+#     customer audit trail; audit-service is the consumer)
+#   - party-events-in    <- party.events, group customer-edge-onboarding-resume
+#     (OnboardingResumeService, ADR-0072 four-eyes auto-resume; pid-service produces)
+#
+# Until this change customer-edge had NO KafkaUser at all and pointed at the anonymous
+# plaintext plain:9092 listener. The ADR-0137 fleet sweep (#2665) then flipped the broker
+# to allow.everyone.if.no.acl.found=false (#2794, components/kafka/kafka.yaml), which
+# denies User:ANONYMOUS on every resource — so the edge logs a permanent
+#   TopicAuthorizationException: Topic authorization failed for topics [openbank.customer.audit]
+#   GroupAuthorizationException: Not authorized to access group: customer-edge-onboarding-resume
+# and every customer audit event is dropped (compliance-relevant, ADR-0086). The edge was
+# missed by the sweep's client inventory: it was counted among the "33 migrated" clients but
+# never got a manifest.
+#
+# Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal for all
+# of this service's Kafka traffic. These resources live in `messaging` (where the Strimzi
+# User Operator watches); the User Operator mints a per-user Secret of the same name there
+# (user.crt/key/p12 + user.password + ca.crt). Those secrets are projected into the
+# `customer-edge` namespace by the External Secrets below — the same cross-namespace pattern
+# as kafka-agent-mtls.yaml / kafka-pid-mtls.yaml. `customer-edge` had no ESO Kafka-cert
+# projection before this change.
+#
+# The eso-kafka-cert-reader Role in `messaging` (components/payments/kafka-scheme-accepted-acl.yaml)
+# is resourceNames-scoped, so `customer-edge` is added to its allow-list there.
+---
+# ── KafkaUser: customer-edge ────────────────────────────────────────────────
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers→Strimzi secrets→ESO projection) must land before the
+    # customer-edge Rollout rolls pods onto mTLS; lower waves sync first and ArgoCD blocks
+    # on ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: customer-edge
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      # Producer: EdgeAuditPublisher -> openbank.customer.audit. Write only; the edge never
+      # reads its own audit trail back (audit-service holds the Read grant).
+      - resource:
+          type: topic
+          name: openbank.customer.audit
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      # Consumer: OnboardingResumeService <- party.events (pid-service's party-events-out).
+      # Unprefixed topic name is deliberate and matches the producer — pid-service publishes
+      # `party.events`, distinct from party-service's `openbank.party.events`.
+      - resource:
+          type: topic
+          name: party.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: customer-edge-onboarding-resume
+          patternType: literal
+        operations: [Read]
+        host: "*"
+---
+# ── ExternalSecret: customer-edge keystore ──────────────────────────────────
+# Projects the Strimzi-minted customer-edge Secret from `messaging` into `customer-edge`.
+# `dataFrom.extract` copies every key verbatim, preserving the binary PKCS#12 payload
+# byte-for-byte. deletionPolicy: Retain so a transient store/RBAC blip never deletes a
+# live keystore out from under a running pod.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: customer-edge-kafka-keystore
+  namespace: customer-edge
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: customer-edge-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: customer-edge
+---
+# ── ExternalSecret: cluster CA truststore ───────────────────────────────────
+# Shared cluster-CA truststore projected into `customer-edge` — identical pattern to every
+# other onboarded namespace (payments, pid, platform, audit, …).
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: customer-edge
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert
