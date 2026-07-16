@@ -18,7 +18,11 @@ import { stashRow } from '@/lib/services/rowHandoff'
 // browser bundle and made the browser call backends directly.
 const SEPA_API         = '/api/sepa-payments'
 const DOMESTIC_API     = '/api/domestic-payments'
-const SEPA_INSTANT_API = '/api/svc/sepa-instant-service'
+// The k8s workload is `sepa-instant` (no `-service` suffix) — see
+// openbank-infra/gitops/components/payments/payments-services.yaml. The BFF looks
+// this segment up verbatim against cluster discovery, so the old
+// `sepa-instant-service` key missed and pinned this panel to `not_deployed`.
+const SEPA_INSTANT_API = '/api/svc/sepa-instant'
 
 type Tab = 'all' | 'domestic' | 'sepa' | 'sct-inst'
 type CreateType = 'domestic-standard' | 'domestic-instant' | 'sepa' | 'sct-inst'
@@ -449,7 +453,7 @@ function PaymentsContent() {
               color: sctServiceUp === true ? 'var(--success-text)' : sctServiceUp === false ? 'var(--danger-text)' : 'var(--text-tertiary)',
               border: `1px solid ${sctServiceUp === true ? 'var(--success-border)' : sctServiceUp === false ? 'var(--danger-border)' : 'var(--border)'}` }}>
               {sctServiceUp === true ? <CheckCircle2 size={10} /> : sctServiceUp === false ? <XCircle size={10} /> : <Clock size={10} />}
-              sepa-instant-service :8127
+              sepa-instant :8127
             </span>
           </div>
 

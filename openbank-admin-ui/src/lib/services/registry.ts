@@ -13,6 +13,13 @@
 // the openbank-net network. The `port` is the HTTP port both for the
 // business API and the management endpoints (we have not yet split into a
 // dedicated mgmt port — when we do, add a `mgmtPort` field here).
+//
+// `container` MUST be the real `openbank-*` module directory name — it is not
+// just a compose hostname. In-cluster, `k8sNameOf()` resolves the Kubernetes
+// workload from it, so an invented suffix silently resolves to a non-existent
+// Service and the page renders `not_deployed` forever with no error anywhere.
+// Both invariants — container ⇒ real directory, and k8sNameOf ⇒ real gitops
+// workload — are enforced by src/test/service-registry.guard.test.ts.
 
 export interface ServiceEntry {
   /** URL/sidebar identifier, e.g. "account" or "tpp-registry". */
@@ -25,6 +32,22 @@ export interface ServiceEntry {
   container: string
   /** HTTP port for both business and `/q/...` endpoints. */
   port: number
+  /**
+   * Kubernetes workload name, ONLY when it differs from the module directory.
+   * Defaults to `container` minus the `openbank-` prefix, which holds for every
+   * service but one — `openbank-security-scanner` deploys as
+   * `security-scanner-service`. That single mismatch is why this field exists:
+   * the name used to be derived by string surgery on `container`, so encoding
+   * the k8s name forced `container` to a directory that does not exist, and
+   * encoding the directory silently broke discovery. Prefer `k8sNameOf()` over
+   * re-deriving it at the call site.
+   */
+  k8sName?: string
+}
+
+/** The Kubernetes Deployment/Service name for an entry. */
+export function k8sNameOf(svc: ServiceEntry): string {
+  return svc.k8sName ?? svc.container.replace(/^openbank-/, '')
 }
 
 export const SERVICE_REGISTRY: ServiceEntry[] = [
@@ -48,18 +71,24 @@ export const SERVICE_REGISTRY: ServiceEntry[] = [
   { id: 'aml',                label: 'AML',              group: 'compliance',   container: 'openbank-aml-service',            port: 8117 },
   { id: 'card-issuance',      label: 'Cards',            group: 'payments',     container: 'openbank-card-issuance-service', port: 8118 },
   { id: 'fx',                 label: 'FX',               group: 'payments',     container: 'openbank-fx-service',             port: 8119 },
-  { id: 'security-scanner',   label: 'Security',         group: 'platform',     container: 'openbank-security-scanner-service', port: 8120 },
+  { id: 'security-scanner',   label: 'Security',         group: 'platform',     container: 'openbank-security-scanner',       port: 8120, k8sName: 'security-scanner-service' },
   { id: 'standing-order',     label: 'Standing Orders',  group: 'payments',     container: 'openbank-standing-order-service', port: 8121 },
   { id: 'swift',              label: 'SWIFT',            group: 'payments',     container: 'openbank-swift-service',          port: 8122 },
   { id: 'sanctions',          label: 'Sanctions',        group: 'compliance',   container: 'openbank-sanctions-service',     port: 8123 },
   { id: 'clearing',           label: 'Clearing',         group: 'payments',     container: 'openbank-clearing-service',       port: 8124 },
   { id: 'interest',           label: 'Interest',         group: 'payments',     container: 'openbank-interest-service',       port: 8125 },
   { id: 'dispute',            label: 'Disputes',         group: 'compliance',   container: 'openbank-dispute-service',        port: 8135 },
-  { id: 'sepa-instant',       label: 'SEPA Instant',     group: 'payments',     container: 'openbank-sepa-instant-service',  port: 8127 },
+  { id: 'sepa-instant',       label: 'SEPA Instant',     group: 'payments',     container: 'openbank-sepa-instant',           port: 8127 },
   { id: 'customer-edge',     label: 'Customer Edge',    group: 'platform',     container: 'openbank-customer-edge',          port: 8128 },
   { id: 'statement',         label: 'Statements',       group: 'compliance',   container: 'openbank-statement-service',      port: 8136 },
   { id: 'onboarding',        label: 'Onboarding',       group: 'compliance',   container: 'openbank-onboarding-service',     port: 8130 },
   { id: 'document',          label: 'Documents',        group: 'platform',     container: 'openbank-document-service',       port: 8143 },
+  { id: 'lending',           label: 'Lending',          group: 'payments',     container: 'openbank-lending-service',        port: 8126 },
+  { id: 'sdd',               label: 'SDD',              group: 'payments',     container: 'openbank-sdd-service',            port: 8129 },
+  { id: 'copilot',           label: 'Copilot',          group: 'platform',     container: 'openbank-copilot-service',        port: 8131 },
+  { id: 'fraud',             label: 'Fraud',            group: 'compliance',   container: 'openbank-fraud-service',          port: 8133 },
+  { id: 'analytics-sink',    label: 'Analytics Sink',   group: 'platform',     container: 'openbank-analytics-sink',         port: 8134 },
+  { id: 'anacredit',         label: 'AnaCredit',        group: 'compliance',   container: 'openbank-anacredit-service',      port: 8137 },
 ]
 
 export function findService(id: string): ServiceEntry | undefined {

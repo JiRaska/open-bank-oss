@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from 'next/server'
  * Why a server-side proxy and not a direct browser fetch:
  *   - Browser hits to api.osv.dev would CORS-fail and burn through the
  *     anonymous quota per tab.
- *   - We cache responses in-memory (24h TTL) so a 28-service inventory
+ *   - We cache responses in-memory (24h TTL) so a fleet-wide inventory
  *     refresh hits OSV at most ~4 times (one per distinct component+version),
  *     not 28× per component.
  *   - Server can shed when OSV is slow or rate-limited; the inventory UI

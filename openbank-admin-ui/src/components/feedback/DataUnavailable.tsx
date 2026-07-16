@@ -6,7 +6,7 @@
 //
 // Why this exists: nearly every page fetches from the BFF (`/api/svc/...`) or an
 // admin-ui-internal API (`/api/test-results`, `/api/services/.../sbom`). In the
-// sandbox most of the 28-service fleet isn't deployed, so those calls legitimately
+// sandbox much of the fleet isn't deployed, so those calls legitimately
 // fail (404 "Unknown service", 502 upstream, or an internal route with no data).
 // Historically each page rendered a raw "HTTP 404", which an operator reads as
 // "the app is broken". This component turns every such outcome into a calm,

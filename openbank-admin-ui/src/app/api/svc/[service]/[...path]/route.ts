@@ -6,6 +6,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { inCluster, discoverServices } from '@/lib/discovery'
 import { auth } from '@/auth'
 
+// Off-cluster (local dev / docker-compose) fallback only — in-cluster the proxy
+// resolves via ADR-0051 discovery instead. The KEY is therefore not free-form:
+// it is the caller-supplied `/api/svc/<key>` segment, which in-cluster is looked
+// up verbatim against real Kubernetes workload names. A key that does not match a
+// deployed Deployment/Service/Rollout can only ever work off-cluster and 404s
+// (`Unknown service`) in the sandbox — which is exactly how `sepa-instant-service`
+// left the payments SCT-Inst panel stuck on `not_deployed`. Keys are checked
+// against openbank-infra/gitops by src/test/service-registry.guard.test.ts.
 const SERVICE_MAP: Record<string, { container: string; port: number }> = {
   'account-service':        { container: 'openbank-account-service',        port: 8100 },
   'ledger-service':         { container: 'openbank-ledger-service',         port: 8101 },
@@ -27,14 +35,14 @@ const SERVICE_MAP: Record<string, { container: string; port: number }> = {
   'aml-service':            { container: 'openbank-aml-service',            port: 8117 },
   'card-issuance-service':  { container: 'openbank-card-issuance-service',  port: 8118 },
   'fx-service':             { container: 'openbank-fx-service',             port: 8119 },
-  'security-scanner':       { container: 'openbank-security-scanner',       port: 8120 },
+  'security-scanner-service': { container: 'openbank-security-scanner',     port: 8120 },
   'standing-order-service': { container: 'openbank-standing-order-service', port: 8121 },
   'swift-service':          { container: 'openbank-swift-service',          port: 8122 },
   'sanctions-service':      { container: 'openbank-sanctions-service',      port: 8123 },
   'clearing-service':       { container: 'openbank-clearing-service',       port: 8124 },
   'interest-service':       { container: 'openbank-interest-service',       port: 8125 },
   'dispute-service':        { container: 'openbank-dispute-service',        port: 8135 },
-  'sepa-instant-service':   { container: 'openbank-sepa-instant-service',   port: 8127 },
+  'sepa-instant':           { container: 'openbank-sepa-instant',           port: 8127 },
   'document-service':       { container: 'openbank-document-service',       port: 8143 },
 }
 

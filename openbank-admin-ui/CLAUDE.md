@@ -8,7 +8,7 @@ port or in-cluster `.svc` DNS name. See the root `CLAUDE.md` for monorepo-wide r
 
 ### 1. Graceful-state rule — never leak a raw backend failure
 
-In the sandbox most of the 28-service fleet isn't deployed, so BFF/internal calls legitimately fail. A
+In the sandbox much of the fleet isn't deployed, so BFF/internal calls legitimately fail. A
 page must **never** render a raw `HTTP 404`, a hand-written "Cannot reach X", or a red `alert-error`
 box. Those read as "the app is broken" when the truth is usually "this service isn't deployed here yet".
 
@@ -138,9 +138,19 @@ signature) instead of importing `AgentInsightsPanel`. New agent surfaces must co
 
 ## Versioning
 
-Any change under `src/**` bumps `version.txt` **and** `package.json` `version` (kept equal; the build
-script enforces it). `feat`→minor, `fix`/`perf`→patch, `BREAKING CHANGE`→major. admin-ui is **not** a
-money-path service, so a non-breaking change is auto-merge-eligible after the independent review gate.
+**Do not hand-edit `version.txt` or `package.json` `version` — a feature PR touches neither.**
+release-please owns both: admin-ui is registered in `release-please-config.json` as release-type
+`simple`, with a `package.json` extra-files updater, so it bumps them together on a real release.
+Your Conventional Commit picks the bump (`feat`→minor, `fix`/`perf`→patch, `BREAKING CHANGE`→major)
+— the commit message *is* the changelog.
+
+`check-admin-ui-version-sync.sh` only enforces the *invariant* `version.txt == package.json:version`;
+it is not an instruction to bump them yourself. A hand bump duplicates release-please and races any
+concurrent admin-ui PR for the same number — on 2026-07-16 two PRs both claimed `0.48.1` and one had
+to be rebased.
+
+admin-ui is **not** a money-path service, so a non-breaking change is auto-merge-eligible after the
+independent review gate.
 
 ## E2E tests (Playwright)
 

@@ -46,7 +46,7 @@ export function componentFolder(k8sName: string): string {
  * Why a BFF call failed, distinguished so a page can degrade to a meaningful
  * empty state instead of surfacing a raw "HTTP 404" (which an operator reads as
  * "the app is broken" when in fact the target service simply isn't deployed in
- * this environment — most of the 28-service fleet is not in the sandbox).
+ * this environment — much of the fleet is not in the sandbox).
  *
  * The proxy (src/app/api/svc/[service]/[...path]/route.ts) emits a stable JSON
  * `{ error }` body per case, so we can tell them apart reliably:
