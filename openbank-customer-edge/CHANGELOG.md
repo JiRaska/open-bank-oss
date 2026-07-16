@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.18.0...customer-edge-v0.19.0) (2026-07-16)
+
+
+### Features
+
+* **party-service,customer-edge:** revocable marketing consent (Profile screen) ([#1161](https://github.com/JiRaska/open-bank-oss/issues/1161)) ([dd1d757](https://github.com/JiRaska/open-bank-oss/commit/dd1d7571972abaf4c516c97f29edaa2f121d133f))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.17.4...customer-edge-v0.18.0) (2026-07-16)
 
 
