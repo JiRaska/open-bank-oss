@@ -18,6 +18,7 @@ import com.openbank.party.application.port.`in`.PartyUseCase
 import com.openbank.party.application.port.`in`.ResolvePartyByRcCommand
 import com.openbank.party.application.port.`in`.SearchPartiesQuery
 import com.openbank.party.application.port.`in`.SelfRegisterPartyCommand
+import com.openbank.party.application.port.`in`.UpdateMarketingConsentCommand
 import com.openbank.party.application.port.`in`.UpdatePartyCommand
 import com.openbank.party.application.port.`in`.UploadDocumentCommand
 import com.openbank.party.domain.model.Address
@@ -143,6 +144,34 @@ class PartyResource {
     suspend fun updateParty(@PathParam("id") id: UUID, req: UpdatePartyRequest): Response {
         val party = partyUseCase.updateParty(
             UpdatePartyCommand(id, req.email, req.phone, req.address?.toDomain(), req.tradingName),
+        )
+        return Response.ok(party.toResponse()).build()
+    }
+
+    /**
+     * Post-onboarding marketing-consent toggle (mobile app Profile screen). Deliberately its own
+     * endpoint rather than folded into [updateParty]: `consentGdpr` is NOT exposed here — it's an
+     * immutable onboarding-time record, not a live togglable consent (see [UpdateMarketingConsentCommand]
+     * kdoc). Audited (ADR-0086): a consent-state change is a compliance-relevant event same as the
+     * GDPR export/erase operations below, even though it isn't itself a GDPR-article action.
+     */
+    @PATCH
+    @Path("/{id}/consent")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "party.consent.update", resource = "#id")
+    @Operation(summary = "Update the party's post-onboarding marketing consent")
+    suspend fun updateConsent(@PathParam("id") id: UUID, req: UpdateConsentRequest): Response {
+        val party = partyUseCase.updateMarketingConsent(UpdateMarketingConsentCommand(id, req.marketingConsent))
+        auditPublisher.publish(
+            AuditEvent(
+                actorId = jwt?.subject ?: jwt?.name ?: "unknown",
+                actorType = "HUMAN",
+                operation = "party.consent.marketing-updated",
+                resourceType = "party",
+                resourceId = id.toString(),
+                result = AuditResult.SUCCESS,
+                payload = mapOf("marketingConsent" to req.marketingConsent.toString()),
+            ),
         )
         return Response.ok(party.toResponse()).build()
     }
@@ -446,6 +475,7 @@ data class UpdatePartyRequest(
     val tradingName: String?,
     val address: AddressRequest?,
 )
+data class UpdateConsentRequest(val marketingConsent: Boolean)
 data class AddDocumentRequest(
     val documentType: String,
     val documentNumber: String,
@@ -478,6 +508,10 @@ fun Party.toResponse() = mapOf(
     "id" to id, "partyType" to partyType, "status" to status, "legalName" to legalName,
     "tradingName" to tradingName, "email" to email, "phone" to phone,
     "kycStatus" to kycStatus, "address" to address, "createdAt" to createdAt, "updatedAt" to updatedAt,
+    // Onboarding-time consent snapshot (consentGdpr is informational/non-revocable — see
+    // UpdateMarketingConsentCommand kdoc) + the live, revocable marketing preference.
+    "consentGdpr" to consentGdpr, "consentCapturedAt" to consentCapturedAt,
+    "consentMarketing" to consentMarketing, "consentMarketingUpdatedAt" to consentMarketingUpdatedAt,
 )
 
 fun PartyGdprExport.toResponse() = mapOf(

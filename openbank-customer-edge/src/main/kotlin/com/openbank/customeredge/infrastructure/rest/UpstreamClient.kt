@@ -253,6 +253,24 @@ class UpstreamClient {
             .type(MediaType.APPLICATION_JSON).build()
     }
 
+    /** PATCH with a JSON body + M2M token + party header — e.g. update marketing consent. */
+    fun patch(url: String, partyId: String, body: String): Response = try {
+        val request = HttpRequest.newBuilder()
+            .uri(validatedUri(url))
+            .header("Authorization", "Bearer ${serviceToken()}")
+            .header(PARTY_HEADER, partyId)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .timeout(Duration.ofMillis(requestTimeoutMs))
+            .method("PATCH", HttpRequest.BodyPublishers.ofString(body)).build()
+        val r = http.send(request, HttpResponse.BodyHandlers.ofString())
+        Response.status(r.statusCode()).entity(r.body()).type(MediaType.APPLICATION_JSON).build()
+    } catch (e: Exception) {
+        Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
+        Response.status(502).entity("""{"error":"upstream unavailable"}""")
+            .type(MediaType.APPLICATION_JSON).build()
+    }
+
     /** PUT with a JSON body + M2M token + party header — e.g. set a savings goal (ADR-0153). */
     fun put(url: String, partyId: String, body: String): Response = try {
         val request = HttpRequest.newBuilder()

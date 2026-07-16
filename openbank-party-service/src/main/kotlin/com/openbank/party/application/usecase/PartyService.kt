@@ -96,6 +96,18 @@ class PartyService : PartyUseCase {
         return saved
     }
 
+    override suspend fun updateMarketingConsent(cmd: UpdateMarketingConsentCommand): Party {
+        val party = partyRepo.findById(cmd.id) ?: throw PartyNotFoundException(cmd.id)
+        val updated = party.copy(
+            consentMarketing = cmd.marketingConsent,
+            consentMarketingUpdatedAt = Instant.now(clock),
+            updatedAt = Instant.now(clock),
+        )
+        val saved = partyRepo.update(updated)
+        eventPublisher.publishPartyUpdated(saved)
+        return saved
+    }
+
     /** Computes the RČ blind index when the pepper is configured and [taxId] is a valid Czech RČ. */
     private fun computeRcBlindIndex(taxId: String?): Pair<String?, Int?> {
         if (taxId == null) return null to null

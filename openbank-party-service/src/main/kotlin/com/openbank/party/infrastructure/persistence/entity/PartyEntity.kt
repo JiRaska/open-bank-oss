@@ -92,6 +92,9 @@ class PartyEntity : PanacheEntity() {
 
     @Column(name = "consent_captured_at")
     var consentCapturedAt: Instant? = null
+
+    @Column(name = "consent_marketing_updated_at")
+    var consentMarketingUpdatedAt: Instant? = null
 }
 
 @Entity
