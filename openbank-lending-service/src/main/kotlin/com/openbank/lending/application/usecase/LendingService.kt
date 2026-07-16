@@ -69,7 +69,11 @@ import java.util.UUID
 // TooManyFunctions: this is the single application service for the whole bounded context
 // (ADR-0028), implementing eight cohesive inbound-port interfaces — splitting it would scatter
 // one aggregate's orchestration across files for no behavioral benefit.
-@Suppress("LongParameterList", "TooManyFunctions")
+// LargeClass: the accrued-interest work (#1245) pushed it over the budget. Suppressed rather than
+// split in a money-path fix whose point is to be reviewable — an extraction here would bury the
+// three-line economic change in a file move. The same call CustomerEdgeResource made. Splitting the
+// servicing/provisioning loops out is a real follow-up, not a drive-by.
+@Suppress("LongParameterList", "TooManyFunctions", "LargeClass")
 class LendingService(
     private val applications: LoanApplicationRepository,
     private val loans: LoanRepository,
@@ -482,6 +486,21 @@ class LendingService(
         if (!outstanding.isPositive()) {
             return Uni.createFrom().failure(IllegalStateException("Nothing to reschedule: outstanding balance is zero"))
         }
+        // A newFirstDueDate on or before an already-accrued installment's dueDate re-charges a period
+        // that was already recognized: the old accrual (now capitalized into newPrincipal) AND the new
+        // schedule's first installment both cover it. Nothing rejected this before — it double-charged
+        // on the pre-capitalization code too, just by a smaller amount. Forbearance moves due dates
+        // FORWARD; a backdated one is a data error, not a business case.
+        val lastAccruedDue = schedule.filter { !it.paid && it.interestAccrued }.maxOfOrNull { it.dueDate }
+        if (lastAccruedDue != null && !request.newFirstDueDate.isAfter(lastAccruedDue)) {
+            return Uni.createFrom().failure(
+                IllegalArgumentException(
+                    "newFirstDueDate ${request.newFirstDueDate} must be after the last accrued " +
+                        "installment's dueDate $lastAccruedDue — interest for that period is already " +
+                        "recognized and would be charged twice",
+                ),
+            )
+        }
         if (request.principalForgiveness.amount > outstanding.amount) {
             return Uni.createFrom().failure(
                 IllegalArgumentException(
@@ -532,13 +551,25 @@ class LendingService(
      * (Dr Interest Income) would un-earn it: the borrower would owe nothing for a period they held the
      * money, no relief would be booked against Loan Loss Expense, and `loan.rescheduled` would report
      * `principalForgiveness: 0.00` while real relief had been granted — debt forgiveness as a silent
-     * side effect. ADR-0028 is explicit that relief happens ONLY through
-     * [PostingKind.RESCHEDULE_FORGIVENESS]. It is also the treatment [derecognizeAccruedInterest]
-     * already applies on write-off, for the identical fact pattern.
+     * side effect, bypassing the one mechanism ADR-0028 gives relief: an explicit
+     * [PostingKind.RESCHEDULE_FORGIVENESS]. (ADR-0028 does not *say* relief may happen only that way —
+     * it is silent on accrued interest at reschedule, which is why this bug existed. The argument above
+     * stands on its own; the ADR merely shows relief is meant to be explicit and auditable.) This is
+     * also the treatment [derecognizeAccruedInterest] applies on write-off, for the identical fact
+     * pattern.
      *
-     * (The "new schedule re-accrues the same income twice" worry does not apply: [Amortization.schedule]
-     * charges `opening × periodRate` for periods running from `newFirstDueDate` forward and never
-     * re-charges the elapsed period the old accrual covered. Same principal, different period.)
+     * The "new schedule re-accrues the same income twice" worry does not apply *given a sane
+     * `newFirstDueDate`: [Amortization.schedule] charges `opening × periodRate` from `newFirstDueDate`
+     * forward, so a first period starting after the last accrued due date cannot re-charge it. That
+     * precondition is enforced in [rescheduleAgainst] — without it, `newFirstDueDate` on or before an
+     * accrued installment's `dueDate` double-charges that period (both here and, historically, on the
+     * pre-capitalization code).
+     *
+     * Caveat worth knowing: "fell due therefore earned" is this service's *current* recognition model,
+     * not the IFRS 9 test. Under IFRS 9 5.4.1(b) a credit-impaired (Stage 3) asset accrues on the NET
+     * carrying amount, not gross — and a delinquent loan being forborne is very likely Stage 3. That
+     * indicts [accrueOne]'s gross accrual, not this function: given the accrual happened at gross,
+     * capitalizing is the internally consistent exit.
      *
      * Ledger first, row deletion last: a crash between them leaves the old rows in place and the retry
      * replays the same per-installment keys, which the ledger collapses.

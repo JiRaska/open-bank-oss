@@ -32,7 +32,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-anacredit-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "dd696ce9dc7ee4a2"
+        openbank.tech/policy-checksum: "c837b86b1ceeb3da"
     spec:
       securityContext:
         runAsNonRoot: true

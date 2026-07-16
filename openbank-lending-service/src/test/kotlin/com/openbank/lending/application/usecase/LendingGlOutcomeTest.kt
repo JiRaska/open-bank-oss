@@ -225,19 +225,58 @@ class LendingGlOutcomeTest {
 
     @Test
     fun `a recovery on a written-off loan is refused, not booked against the derecognized asset`() {
+        val schedule = delinquentSchedule()
         val writtenOff = activeLoan().copy(status = LoanStatus.WRITTEN_OFF)
         every { loans.findById(loanId) } returns Uni.createFrom().item(writtenOff)
+        // Stub the whole downstream path ON PURPOSE, even though the guard should short-circuit before
+        // reaching any of it. An earlier version stubbed only findById, so removing the guard made the
+        // flow die on an unstubbed mock — the test went red, but for the WRONG reason, and
+        // `postings.isEmpty()` passed vacuously without ever demonstrating the harm. With these stubs
+        // the unguarded flow RUNS to completion and the assertions below fail on the real GL damage.
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        every { installments.markPaid(any(), any()) } returns Uni.createFrom().item(1)
         val postings = captureLedger()
 
         val failure = runCatching {
-            service.recordRepayment(loanId, delinquentSchedule()[1].id).await().indefinitely()
+            service.recordRepayment(loanId, schedule[1].id).await().indefinitely()
         }.exceptionOrNull()
 
-        // Without the guard: INTEREST_SETTLEMENT credits a receivable WRITE_OFF_INTEREST already cleared,
-        // driving Interest Receivable negative. The idempotency keys differ, so the ledger cannot save us.
         assertThat(failure).isInstanceOf(IllegalStateException::class.java)
         assertThat(failure?.message).contains("WRITTEN_OFF")
         assertThat(postings).describedAs("nothing may be posted for a refused recovery").isEmpty()
+    }
+
+    @Test
+    fun `write-off then recovery must not drive Interest Receivable negative`() {
+        val schedule = delinquentSchedule()
+        val loan = activeLoan()
+        every { loans.findById(loanId) } returnsMany listOf(
+            Uni.createFrom().item(loan), // writeOff sees ACTIVE
+            Uni.createFrom().item(loan.copy(status = LoanStatus.WRITTEN_OFF)), // the recovery attempt
+        )
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        every { installments.markPaid(any(), any()) } returns Uni.createFrom().item(1)
+        every { loans.update(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+        val postings = captureLedger()
+
+        // Both flows against ONE captured ledger: write off the loan, then attempt a recovery on the
+        // installment whose receivable WRITE_OFF_INTEREST just derecognized. writeOff mutates no
+        // installment rows, so #2 still reads paid=false/interestAccrued=true and recordRepayment would
+        // post INTEREST_SETTLEMENT against a receivable that is already gone.
+        service.writeOff(loanId, WriteOffRequest(writtenOffBy = "risk-officer")).await().indefinitely()
+        runCatching { service.recordRepayment(loanId, schedule[1].id).await().indefinitely() }
+
+        val b = ledgerBalances(postings)
+        // THE ECONOMIC ASSERTION. Unguarded this reads -221.08: WRITE_OFF_INTEREST credits 110.54 and
+        // INTEREST_SETTLEMENT credits it again against a receivable of 110.54. The idempotency keys
+        // differ (`inst:2:writeoff-interest` vs `inst:2:interest`), so the ledger cannot collapse them.
+        assertThat(b.of(gl.interestReceivable))
+            .describedAs("a receivable may be cleared once, never twice — it cannot go below -110.54")
+            .isEqualByComparingTo("-110.54")
+        assertThat(b.of(gl.loansReceivable))
+            .describedAs("principal is derecognized once; a recovery must not reduce it again")
+            .isEqualByComparingTo("-11053.81")
     }
 
     // --- reschedule -----------------------------------------------------------------------------
@@ -270,8 +309,8 @@ class LendingGlOutcomeTest {
 
         // THE REGRESSION GUARD. #1236 reversed the accrual here (Dr Interest Income), which would make
         // this -110.54: the February interest owed by nobody and earned by no one — debt relief granted
-        // as a side effect, outside RESCHEDULE_FORGIVENESS and outside the audit trail (ADR-0028 is
-        // explicit that relief happens ONLY through that posting).
+        // as a side effect, bypassing RESCHEDULE_FORGIVENESS — the one mechanism ADR-0028 gives relief,
+        // so that it stays explicit and auditable.
         assertThat(b.of(gl.interestIncome))
             .describedAs("a reschedule must never un-earn interest that already fell due")
             .isEqualByComparingTo("0.00")
@@ -349,6 +388,35 @@ class LendingGlOutcomeTest {
         assertThat(b.of(gl.interestIncome)).isEqualByComparingTo("0.00")
         // Loans receivable: -1000.00 forgiven, +110.54 capitalized.
         assertThat(b.of(gl.loansReceivable)).isEqualByComparingTo("-889.46")
+    }
+
+    @Test
+    fun `a reschedule may not backdate newFirstDueDate onto an already-accrued period`() {
+        val schedule = delinquentSchedule() // #2 accrued, due 2026-02-28
+        every { loans.findById(loanId) } returns Uni.createFrom().item(activeLoan())
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        val postings = captureLedger()
+
+        // Without the guard the new schedule's first installment covers a period the old accrual
+        // already recognized: 110.54 capitalized into newPrincipal AND ~111.64 charged again by the
+        // new row #1 — 222.18 of interest for one month. Nothing rejected this before; the
+        // pre-capitalization code double-charged here too, just by a smaller amount.
+        val failure = runCatching {
+            service.reschedule(
+                loanId,
+                RescheduleRequest(
+                    newNominalAnnualRate = BigDecimal("0.10"),
+                    newTermPeriods = 12,
+                    newFirstDueDate = LocalDate.parse("2026-02-28"), // == accrued #2's dueDate
+                    principalForgiveness = eur("0.00"),
+                ),
+                rescheduledBy = "risk-officer",
+            ).await().indefinitely()
+        }.exceptionOrNull()
+
+        assertThat(failure).isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(failure?.message).contains("already recognized")
+        assertThat(postings).describedAs("a rejected reschedule posts nothing").isEmpty()
     }
 
     @Test
