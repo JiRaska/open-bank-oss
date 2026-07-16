@@ -11,7 +11,7 @@
 # version.txt, so it is built/deployed independently of the fleet's Gradle
 # release axis.
 
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 
 # Build-time-only packages. libpango/libharfbuzz runtime .so's are also
 # installed here so `pip install` can link/validate against them if a
@@ -34,7 +34,7 @@ ENV PATH="/opt/venv/bin:${PATH}"
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-FROM python:3.12-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 # Runtime-only shared libraries WeasyPrint needs (text shaping via Pango +
 # HarfBuzz, image decoding via libjpeg/openjp2). This mirrors the official
