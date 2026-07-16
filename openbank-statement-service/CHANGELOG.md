@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.7](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.5.6...statement-service-v0.5.7) (2026-07-16)
+
+
+### Bug Fixes
+
+* **statement:** paginate booked-entry reads; heal oldest owed months first ([#1191](https://github.com/JiRaska/open-bank-oss/issues/1191)) ([94b0ad8](https://github.com/JiRaska/open-bank-oss/commit/94b0ad893d44cc05ddbaff7ce11c0e1bb80b6241)), closes [#470](https://github.com/JiRaska/open-bank-oss/issues/470)
+
 ## [0.5.6](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.5.5...statement-service-v0.5.6) (2026-07-07)
 
 
