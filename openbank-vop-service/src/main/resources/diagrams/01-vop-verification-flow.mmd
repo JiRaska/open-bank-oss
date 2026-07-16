@@ -1,0 +1,53 @@
+%% title: Verification of Payee — request flow
+sequenceDiagram
+    actor Payer
+    participant VopResource
+    participant RateLimitFilter
+    participant VopVerificationService
+    participant VopNameMatchPolicy
+    participant AccountService
+    participant PartyService
+    participant SchemeRouting as VopSchemeRoutingPort
+    participant Evidence as vop_verification
+
+    Payer->>VopResource: POST /api/v1/vop/verify { creditorIban, creditorName }
+    Note over VopResource: POST, not GET — the IBAN and payee name are personal data\nand must never reach a URL, access log or referer header
+
+    VopResource->>RateLimitFilter: (after authn + OPA vop.verify)
+    alt over 60/min, or Valkey unreachable
+        RateLimitFilter-->>Payer: 429 (fails CLOSED — rate is the enumeration control)
+        Note over RateLimitFilter: Not a payment failure: the caller renders no_data\nand the payment still proceeds with a warning
+    end
+
+    VopResource->>VopVerificationService: verify(iban, payeeName, requestedBy)
+
+    alt domestic IBAN (CZ)
+        VopVerificationService->>AccountService: GET /accounts/iban/{iban}
+        Note over AccountService: account-service holds NO holder name —\nonly the link to a party
+        AccountService-->>VopVerificationService: partyId
+        VopVerificationService->>PartyService: GET /parties/{partyId}
+        PartyService-->>VopVerificationService: legalName / tradingName
+
+        alt no name resolvable
+            VopVerificationService-->>VopResource: NO_DATA (ACCOUNT_NOT_FOUND)
+            Note over VopVerificationService: 200 + no_data, never a 404 — a status code\nthat says "not ours" is an enumeration primitive
+        else lookup failed (timeout / 5xx / circuit open)
+            VopVerificationService-->>VopResource: NO_DATA (LOOKUP_UNAVAILABLE)
+            Note over VopVerificationService: Fails OPEN — the inverse of the sanctions gate.\nNever a hold, never a silent MATCH
+        else name resolved
+            VopVerificationService->>VopNameMatchPolicy: match(supplied, actual)
+            Note over VopNameMatchPolicy: normalise (MatchKey) → exact? MATCH\nreorder / initial / legal form / 1 typo? CLOSE_MATCH\nelse NO_MATCH
+            VopNameMatchPolicy-->>VopVerificationService: outcome
+        end
+    else external IBAN
+        VopVerificationService->>SchemeRouting: verifyExternal(iban, payeeName)
+        Note over SchemeRouting: No EPC VoP scheme link exists here —\nthe seam answers honestly rather than fabricating
+        SchemeRouting-->>VopVerificationService: NO_DATA (NO_SCHEME_CONNECTIVITY)
+    end
+
+    VopVerificationService->>Evidence: record(sha256(iban), sha256(name), outcome, requestedBy)
+    Note over Evidence: Hashes only, never plaintext (GDPR Art. 5(1)(c)).\nBest-effort: a write failure must not fail the payer's check
+
+    VopVerificationService-->>VopResource: VopVerification
+    VopResource-->>Payer: 200 { status, matchedName?, reason?, verifiedAt }
+    Note over VopResource: matchedName is present ONLY for close_match.\nNever echoed on no_match — that asymmetry is what stops\nVoP being an account-holder-name oracle
