@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.8](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.12.7...notification-service-v0.12.8) (2026-07-16)
+
+
+### Bug Fixes
+
+* **notification:** correct openapi.yaml drift from the implemented contract ([#1303](https://github.com/JiRaska/open-bank-oss/issues/1303)) ([8910700](https://github.com/JiRaska/open-bank-oss/commit/8910700c042c224c449deb5db9702670cde389e6)), closes [#1179](https://github.com/JiRaska/open-bank-oss/issues/1179)
+
+
+### Security
+
+* **notification:** never store rendered OTP or password-reset bodies ([#1180](https://github.com/JiRaska/open-bank-oss/issues/1180)) ([d078e52](https://github.com/JiRaska/open-bank-oss/commit/d078e52a63797d03627be9f76af40d4222585f4b)), closes [#1179](https://github.com/JiRaska/open-bank-oss/issues/1179)
+
 ## [0.12.7](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.12.6...notification-service-v0.12.7) (2026-07-11)
 
 
