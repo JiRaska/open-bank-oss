@@ -502,6 +502,17 @@ jobs:
       - name: "admin-ui version sync guard (version.txt == package.json, enforced)"
         run: bash .github/scripts/check-admin-ui-version-sync.sh .
 
+      # Deploy-coverage guard (rules.yaml: deploy_coverage). auto-deploy's ALL_SERVICES is a
+      # hand-maintained list that must stay in sync with release-please's package list, and
+      # nothing checked that it did — so a service could be merged, released and given an
+      # ArgoCD manifest while nothing ever built it. Every push then "succeeds" and deploys
+      # nothing; there is no build failure because there is no build. Six instances by
+      # 2026-07-16 (the 6 control agents, document-service, clearing-simulator, finrep,
+      # vop), each fixed by hand and documented in an auto-deploy.yml comment. The comments
+      # did not stop the seventh. ENFORCED, with a shrink-only baseline for the known debt.
+      - name: "deploy-coverage guard (released + gitops => in ALL_SERVICES, enforced)"
+        run: bash .github/scripts/check-deploy-coverage.sh
+
       # quarkus.application.version override guard (ADR-0029 release_invariant).
       # The convention plugin openbank.quarkus-service reads version.txt into the
       # Gradle project version and the Quarkus Gradle plugin stamps it into
