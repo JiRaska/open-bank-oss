@@ -14,9 +14,18 @@ Before a change is "done", run the ship-checklist (`/ship-check` runs the same c
 ADR-0029):
 
 1. **Open a PR.** No direct commits to `main`. Branch `<type>/<scope>-<summary>`; squash-merge via PR.
-2. **Versioning is automatic.** A change under `<service>/src/main/**` is released by **release-please**
-   from your Conventional Commit — so the commit message *is* the changelog. Do **not** hand-edit
-   `version.txt`, `CHANGELOG.md`, or `quarkus.application.version` (it derives from `version.txt`).
+2. **Versioning is automatic, and needs BOTH axes.** release-please cuts a release only when the
+   commit **type** releases (`feat`/`fix`/`perf`/`security`, or breaking) **and** it touches a file
+   under `<service>/` outside that package's `exclude-paths` (today `src/test`, plus `e2e` for
+   admin-ui). The commit message *is* the changelog. Neither axis alone is enough:
+   - A hidden type (`refactor` `docs` `test` `build` `ci` `chore`) **never** releases, at any path
+     — the lever when a PR doesn't change shipped code (`rules.yaml: release_scope_mismatch`).
+   - The path axis is broader than `src/main`: `governance.yaml`, `Dockerfile`, `build.gradle.kts`
+     and the lint baselines all count. There is no include/allow-list — only `exclude-paths`,
+     matching **directories** only, so a single file cannot be excluded.
+
+   Do **not** hand-edit `version.txt`, `CHANGELOG.md`, or `quarkus.application.version` (it derives
+   from `version.txt`).
    A module is a released component **iff** it has a `version.txt` (registered in
    [`release-please-config.json`](release-please-config.json) + [`.release-please-manifest.json`](.release-please-manifest.json)).
 3. **API change ⇒ `openapi.yaml` updated + contract test.** Two independent version axes (ADR-0048):
@@ -80,6 +89,15 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   set it `true` in `application.yaml`, or events never dispatch (no error, `attempt_count` stays 0).
 - **CDI wiring isn't validated by `ktlintCheck` + unit tests.** Add `:svc:quarkusBuild` to your
   pre-push gate; ArC/CDI failures only surface there.
+- **`@ApplicationScoped` is LAZY — an `init {}` guard or warning does not run at boot.** Quarkus
+  creates the bean via a client proxy on first use, so a constructor that logs "this config is
+  DEV-ONLY" or `check()`s a go-live flag stays silent until the first request that touches it — which
+  for a rarely-called path can be never, or worse, the exact moment it's too late. Found live in
+  `PdfBoxPadesSealAdapter` (#1299): it warns that every PAdES seal is "worthless as evidence" without
+  a real keystore, and that warning had never once appeared in a pod log, while
+  `require-trusted-issuer` — documented as "refuses to **start**" — would have thrown on a *request*,
+  long after the deploy went green. Add `@Startup` (`io.quarkus.runtime.Startup`) to any bean whose
+  `init` is a boot-time gate or a config-sanity warning.
 
 ### ktlint
 - Path-scoped CI only lints changed files, so a pre-existing wildcard import or a latent
@@ -123,6 +141,23 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   old, understated requests; after raising them Karpenter may refuse to provision
   ("all available instance types exceed limits for nodepool"), leaving pods Pending and stalling
   drift rolls. Whenever you raise requests or eviction headroom, re-check the pool's `limits`.
+- **`optional: true` on a secret ref is a deliberate trade, not a default — know which way you want
+  it.** Without it, a missing Secret pins the pod at `CreateContainerConfigError`: loud, impossible to
+  miss, fixed within the hour (vop-oidc, #1232). With it, Kubernetes silently drops the env/volume and
+  the pod runs `2/2` reporting `UP` while the feature it needed is quietly degraded — document-service
+  sealed PDFs with a throwaway cert for two days that way (#1284), and the ONLY signal was an ArgoCD
+  `Degraded` nobody acted on. `optional: true` is right when a rollout-order race must never
+  crash-loop the service (gitops wiring merges before the OpenBao KV secret is seeded) — but then the
+  fallback needs its own loud, *eager* alarm, or the silence is the bug.
+- **An Argo Rollout that never once succeeded deadlocks on a dead `stable`.** If revision 1 never
+  became healthy (image absent, Kyverno denial), `stableRS` stays pinned to it forever; the canary
+  can't scale because canary strategy holds replicas on a stable that can never schedule. The Rollout
+  loops `Progressing` → `Degraded` (`progressDeadlineSeconds`) while a *later* revision serves happily
+  — service up, Rollout permanently red. **Neither `kubectl argo rollouts retry` nor `promote --full`
+  fixes it** — promote skips steps and pauses, not a broken stable. Delete the dead ReplicaSet
+  (`kubectl -n <ns> delete rs <name>-<rev1-hash>`); Argo then adopts the current revision and goes
+  Healthy in ~90s. Verify it owns **zero** pods first (`kubectl get pods -l
+  rollouts-pod-template-hash=<hash>`). Seen on vop-service, 2026-07-16.
 - **`strategy.type: Recreate` + Server-Side Apply = HTTP 403.** Use `RollingUpdate` with
   `maxSurge: 0 / maxUnavailable: 1` for identical zero-concurrency behaviour.
 - **Use explicit registry prefixes for container images** (`docker.io/library/<image>` for official
