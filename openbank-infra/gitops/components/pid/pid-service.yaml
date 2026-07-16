@@ -70,6 +70,19 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # Flyway checksum mismatch on V5-V9 (2026-07-16): the 2026-06-27 repo-wide
+            # MPL->Apache-2.0 relicense (60e0263f, #2276) flipped the SPDX header on every
+            # migration file. V5-V9 were applied 2026-06-16..06-22, i.e. BEFORE it, so their
+            # recorded checksums are the pre-relicense ones; V1-V4 carry no header and still
+            # match. pid-service hadn't been redeployed since, so the mismatch stayed latent
+            # until this rollout hit it — same root cause and fix as onboarding-service V1
+            # (#730). Verified before enabling this: the content at 60e0263f^ reproduces all
+            # five recorded checksums exactly, and the delta to the current files is the
+            # licence header lines only — no SQL executed differently. Remove once the live
+            # schema_history rows are repaired (one successful boot is enough; repair is a
+            # no-op after that).
+            - name: QUARKUS_FLYWAY_REPAIR_AT_START
+              value: "true"
             # Kafka broker for the outbox dispatcher (party-events-out → topic party.events,
             # pid-events-out → topic openbank.pid.events). Strimzi bootstrap, mTLS port (ADR-0137).
             - name: KAFKA_BOOTSTRAP_SERVERS
