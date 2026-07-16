@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.8.0...fraud-service-v0.8.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* **libs:** delete the hand-rolled UUIDv7 Ids that ADR-0106 forbids ([#1244](https://github.com/JiRaska/open-bank-oss/issues/1244)) ([3b73dc2](https://github.com/JiRaska/open-bank-oss/commit/3b73dc2d8552463a9b56d5b67e3b9f7f8fc92ee9)), closes [#1242](https://github.com/JiRaska/open-bank-oss/issues/1242)
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.7.2...fraud-service-v0.8.0) (2026-07-12)
 
 
