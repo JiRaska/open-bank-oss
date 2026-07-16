@@ -137,6 +137,38 @@ allowed_reasons contains "operator-read-any" if {
 	endswith(input.action, sprintf(".%v", [verb]))
 }
 
+# ADR-0176 D4: operator-initiated customer messaging is its own action namespace
+# (opsmessage.*), deliberately NOT notification.* — the edge-service-notification rule below
+# grants every notification.* action to customer-edge's M2M identity via a plain prefix match,
+# and opsmessage.compose must never be reachable that way. A namespace split alone is not
+# sufficient, though: service-account-openbank-edge is classified HUMAN (Keycloak
+# client_credentials tokens never produce principal.type == SERVICE — see
+# authz_policy.principal_type_service_unreachable in rules.yaml) and carries ROLE_OPERATOR in
+# the realm (openbank-infra/gitops/components/keycloak/realm-template.json), so a rule gated on
+# HUMAN + ROLE_OPERATOR alone would silently re-admit that exact M2M identity. The explicit
+# `service-account-` exclusion below is what actually keeps it out — same idiom as
+# m2m-sanctions-screening further down, used there for the opposite purpose (identifying M2M,
+# not excluding it).
+allowed_reasons contains "operator-compose-message" if {
+	input.principal.type == "HUMAN"
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	not startswith(input.principal.id, "service-account-")
+	input.action == "opsmessage.compose"
+}
+
+# Checker side of the same four-eyes flow (ADR-0155 mechanism, ADR-0176 D5 trigger). Deciding
+# an approval is exactly as sensitive as issuing the request it gates, so it gets the identical
+# HUMAN + operator-role + non-service-account shape, not the broader operator-write-any this
+# service otherwise has no equivalent of.
+allowed_reasons contains "operator-decide-message-approval" if {
+	input.principal.type == "HUMAN"
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	not startswith(input.principal.id, "service-account-")
+	input.action == "opsmessage.approval.decide"
+}
+
 # Authenticated customers may perform any `customer.*` action (initiate payments, enroll
 # devices, register, etc.). The JWT `sub` equals the partyId in the customer realm
 # (ADR-0065/0066). Per-handler IDOR guards (e.g. debtorAccountId ownership in
@@ -277,6 +309,17 @@ four_eyes_required if {
 four_eyes_required if {
 	input.action == "featureflag.flip"
 	input.attributes.flag in data.rules.feature_flags.money_path_flags
+}
+
+# Exact-action four-eyes, independent of money-path scope (ADR-0176 D5). Generalises the
+# featureflag.flip clause above into a reusable list (data.rules.four_eyes.actions) rather than
+# a one-off inline check — for an action whose service will never appear in
+# money_path_services (opsmessage.compose today), the verb-based clause above can never match,
+# since it requires deriving a scope FROM money_path_services first. Undefined, not an error,
+# for any bundle whose rules.yaml predates this key — Rego membership over an undefined
+# collection simply does not fire.
+four_eyes_required if {
+	input.action in data.rules.four_eyes.actions
 }
 
 # ---------------------------------------------------------------------------------------

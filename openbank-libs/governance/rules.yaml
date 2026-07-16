@@ -601,6 +601,28 @@ four_eyes:
     # caller found but the rego already reserves the grant), the risky path needs its own distinct
     # action (e.g. a dedicated operator-only "enrollOnBehalf" endpoint) before it can be four-eyes
     # gated safely — do not reuse the shared customer/M2M-facing action.
+  #
+  # actions: exact action names, gated independently of money_path_scopes (ADR-0176 D5).
+  # `verbs` above only ever fires for an action whose SCOPE derives from money_path_services —
+  # notification-service is not, and never will be, on that list (D5's own reasoning), so no verb
+  # addition could reach opsmessage.compose. This generalises the featureflag.flip precedent two
+  # blocks down (an exact action name, independent of money-path scope, already shipped with
+  # ADR-0067) into a reusable list instead of a one-off inline clause. Read disjunctively with
+  # `verbs` in rest.rego's four_eyes_required — a service can be gated by either mechanism, never
+  # both computing the same answer twice.
+  #
+  # The GUARDRAIL above applies here too, unchanged: opsmessage.compose is its own action
+  # namespace specifically so this list-membership can never accidentally cover an M2M-reachable
+  # action — rest.rego's edge-service-notification rule grants notification.* to customer-edge's
+  # M2M identity via a prefix match, and opsmessage.* was kept out of that family for exactly this
+  # reason (ADR-0176 D4).
+  actions:
+    - opsmessage.compose                # ADR-0176 D5: operator-initiated customer messaging.
+                                         # Confirmed no M2M caller — the only allow rule for this
+                                         # action requires HUMAN + (ROLE_OPERATOR or ROLE_ADMIN) and
+                                         # explicitly excludes any service-account-* principal id
+                                         # (rest.rego operator-compose-message), the same exclusion
+                                         # m2m-sanctions-screening uses for the opposite carve-out.
 
 # ---------------------------------------------------------------------------------------
 # Feature-flag flip governance (ADR-0067 follow-up, issue #419). The OPA PEP (rest.rego)

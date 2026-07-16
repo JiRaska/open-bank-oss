@@ -55,6 +55,8 @@ quarkus:
     start-tls: DISABLED
     auth-methods: DISABLED
     from: noreply@openbank.cz
+  redis:
+    hosts: redis://localhost:6379
   shutdown:
     timeout: 30S
   log:
@@ -112,6 +114,17 @@ mp:
         # set via the gitops ConfigMap instead (issue #686).
         topic: openbank.party.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+# ADR-0155 four-eyes, opted into by opsmessage.compose (ADR-0176 D5). Default false, matching
+# every other four-eyes-wired service (lending, balance, sepa-payment, sepa-instant, account) —
+# the mechanism is wired here (ApprovalConfig producing a Redis-backed ApprovalStore) so it CAN
+# be enforced, but flipping it is a deliberate, separate operational decision, not shipped
+# enabled by this PR. Unlike lending-service's identical wiring, this one has a real Redis
+# behind it in gitops (redis.yaml + QUARKUS_REDIS_HOSTS) — see issue #1354 for what happens when
+# a service ships the ApprovalStore bean without that.
+authz:
+  four-eyes:
+    enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
 "%dev":
   quarkus:
     log:
