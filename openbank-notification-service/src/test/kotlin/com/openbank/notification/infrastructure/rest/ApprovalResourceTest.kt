@@ -48,7 +48,7 @@ class ApprovalResourceTest {
     }
 
     @Test
-    fun `decide passes the authenticated principal name as checker, never a body field`() = runBlocking {
+    fun `decide passes the authenticated principal name as checker, never a body field`(): Unit = runBlocking {
         val store = mockk<ApprovalStore> {
             coEvery { decide("approval-1", "checker-1", true) } returns approval()
         }
@@ -63,7 +63,7 @@ class ApprovalResourceTest {
     }
 
     @Test
-    fun `a missing or already-consumed approval id is a 404, not a 200 with a null body`() = runBlocking {
+    fun `a missing or already-consumed approval id is a 404, not a 200 with a null body`(): Unit = runBlocking {
         val store = mockk<ApprovalStore> {
             coEvery { decide("does-not-exist", any(), any()) } returns null
         }
@@ -75,7 +75,7 @@ class ApprovalResourceTest {
     }
 
     @Test
-    fun `an unauthenticated identity resolves to a literal anonymous id, not null or a crash`() = runBlocking {
+    fun `an unauthenticated identity resolves to a literal anonymous id, not null or a crash`(): Unit = runBlocking {
         val store = mockk<ApprovalStore> {
             coEvery { decide("approval-1", "anonymous", true) } returns approval(decidedBy = "anonymous")
         }

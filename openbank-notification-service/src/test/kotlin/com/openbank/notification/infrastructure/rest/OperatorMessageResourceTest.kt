@@ -22,7 +22,7 @@ import java.util.UUID
 class OperatorMessageResourceTest {
 
     @Test
-    fun `a successful compose returns 201 with the new notification id`() = runBlocking {
+    fun `a successful compose returns 201 with the new notification id`(): Unit = runBlocking {
         val id = UUID.randomUUID()
         val service = mockk<OperatorMessageService> {
             coEvery { compose(any()) } returns id
@@ -43,7 +43,7 @@ class OperatorMessageResourceTest {
     }
 
     @Test
-    fun `an undeclared variable is rejected as 400, not an unmapped 500`() = runBlocking {
+    fun `an undeclared variable is rejected as 400, not an unmapped 500`(): Unit = runBlocking {
         val service = mockk<OperatorMessageService> {
             coEvery { compose(any()) } throws
                 OperatorMessageRejected(
