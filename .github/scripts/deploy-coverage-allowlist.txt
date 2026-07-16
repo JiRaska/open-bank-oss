@@ -1,0 +1,18 @@
+# Allowlist for .github/scripts/check-deploy-coverage.sh
+#
+# Released components that ArgoCD deploys but which auto-deploy's ALL_SERVICES legitimately
+# does NOT build — because a DIFFERENT pipeline builds them.
+#
+# STRICT SCOPE. This file answers one question: "is this component built by something else?"
+# It is NOT a place to park a service that nobody builds yet. A component with a gitops
+# manifest and no builder has a tag that rots in place; the failure surfaces weeks later,
+# when a pod reschedules and cannot be admitted (2026-07-16: keycloak, sepa-payment). If you
+# are tempted to add an entry because "we'll wire it up later", the honest move is to wire it
+# up or drop the manifest.
+#
+# One component name per line, exact match.
+
+# admin-ui is built and deployed by .github/workflows/admin-ui-deploy.yml, which runs the
+# full Next.js build, bakes the CI evidence bundles, and pushes via build-push-admin-ui.sh.
+# It is intentionally outside the ~34-service Quarkus fan-out.
+openbank-admin-ui

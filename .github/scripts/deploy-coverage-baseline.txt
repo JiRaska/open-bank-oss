@@ -1,0 +1,33 @@
+# Known-debt BASELINE for .github/scripts/check-deploy-coverage.sh — SHRINK-ONLY.
+#
+# Released components that ArgoCD deploys but nothing builds. These are NOT acceptable;
+# they are the debt that existed when the guard was written. The guard exists to stop the
+# NEXT one, not to bless these.
+#
+# This is deliberately a different file from deploy-coverage-allowlist.txt, and the
+# distinction is the whole point:
+#
+#   allowlist  = "something ELSE builds this"      -> permanent, legitimate (admin-ui)
+#   baseline   = "NOTHING builds this, yet"        -> debt, must shrink to empty
+#
+# Collapsing the two would turn the guard into a rubber stamp: every future "we'll wire it
+# up later" would land in the same file as a legitimate exception and never be revisited.
+# That is how ALL_SERVICES drifted six times over.
+#
+# RATCHET: the guard FAILS if an entry here is no longer violating — you must delete it.
+# It can only ever shrink. Adding an entry is not a fix; it is a deliberate, reviewable
+# admission of debt and should be argued for in the PR.
+#
+# exist, and auto-deploy has no create-repository step, so `docker push` would fail with
+#
+# One component name per line, exact match.
+# exist. Down at 0/1 since its manifest landed. Tracked in #1205.
+# Same shape as finrep, one hour old at the time of writing — which is precisely why this
+# guard exists. Tracked in #1205.
+
+# EMPTY — and it must stay that way unless someone argues otherwise in a PR.
+#
+# finrep-service and vop-service were the two entries here. Both were fixed rather than
+# tolerated on 2026-07-16: their ECR repositories were created, their first images built,
+# signed and attested, and both are now in ALL_SERVICES. The debt this file recorded lasted
+# a few hours, which is the point of a ratchet.

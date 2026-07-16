@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: customer-edge
     app.kubernetes.io/part-of: customer-edge
   annotations:
-    openbank.tech/policy-checksum: "42ceb76dfef6c60b"
+    openbank.tech/policy-checksum: "fd5619c2a6353e60"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1681,6 +1681,47 @@ data:
     # stale. Routing by kind; the human-readable form lives in CLAUDE.md ("Capturing what
     # we learn"). This is a process rule (not CI-enforced), but rules.yaml is the source
     # of truth when it and CLAUDE.md disagree.
+    deploy_coverage:
+      script: .github/scripts/check-deploy-coverage.sh
+      wired_into: .github/workflows/ci.yml   # governance job -> all-green (a REQUIRED check)
+      allowlist: .github/scripts/deploy-coverage-allowlist.txt   # built by a DIFFERENT pipeline
+      baseline: .github/scripts/deploy-coverage-baseline.txt     # known debt -- SHRINK-ONLY
+      # THE RULE: a released component (registered in release-please-config.json) whose image is
+      # referenced anywhere under openbank-infra/gitops/ MUST appear in auto-deploy.yml's
+      # ALL_SERVICES. ALL_SERVICES is hand-maintained; nothing kept it in sync with the package
+      # list, so a service could be merged, released and given an ArgoCD manifest while NOTHING
+      # ever built it. Every push then "succeeds" and deploys nothing -- there is no build
+      # failure, because there is no build. The gitops tag simply rots in place.
+      rule: >-
+        Every released component with a gitops workload image reference must be listed in
+        ALL_SERVICES in .github/workflows/auto-deploy.yml, or allowlisted with the pipeline
+        that builds it instead.
+      # WHY THIS RULE AND NOT "every service needs a Dockerfile": a per-service Dockerfile is NOT
+      # used to build. auto-deploy and build-push-service.sh generate their own from a canonical
+      # template and only grep the per-service file for EXPOSE, defaulting to 8080 when absent --
+      # and EXPOSE is image metadata Kubernetes ignores; the manifest's containerPort is what
+      # binds. Six healthy services (devops-agent, finops-agent, fraud-service, lending-service,
+      # sdd-service, settlement-service) carry no Dockerfile and run fine. A Dockerfile rule would
+      # fail all six for nothing and be switched off within a week.
+      basis: released_and_deployed_implies_built
+      # ALLOWLIST vs BASELINE -- deliberately two files, and the distinction is the point:
+      #   allowlist = "something ELSE builds this"  -> permanent, legitimate (admin-ui)
+      #   baseline  = "NOTHING builds this, yet"    -> debt, must shrink to empty
+      # Collapsing them turns the guard into a rubber stamp: every "we will wire it up later"
+      # lands beside a legitimate exception and is never revisited. That is exactly how
+      # ALL_SERVICES drifted six times.
+      ratchet: >-
+        The baseline may only shrink. The guard FAILS if a baselined component is no longer
+        violating (delete the entry) and FAILS on any violation that is in neither list. Adding
+        a baseline entry is not a fix; it is a reviewable admission of debt.
+      # PRIOR ART -- this class recurred six times before it was guarded, each time fixed by hand
+      # and recorded in an auto-deploy.yml comment. A comment is not a control (see
+      # knowledge_capture): the 6 ADR-0163/0164-0168 control agents; document-service;
+      # clearing-simulator (24 days of pushes deployed nothing, and it went unattested straight
+      # through the 2026-07-12 Enforce graduation -- one reschedule from an outage);
+      # finrep-service; vop-service (merged 2026-07-16, one hour before this guard existed).
+      incident: 2026-07-16
+
     knowledge_capture:
       principle: >
         A corrected non-obvious mistake, a hard-won lesson, or a direction we keep must be
