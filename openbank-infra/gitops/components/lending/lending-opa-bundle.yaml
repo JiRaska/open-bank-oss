@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: lending-service
     app.kubernetes.io/part-of: lending
   annotations:
-    openbank.tech/policy-checksum: "06f072db20456582"
+    openbank.tech/policy-checksum: "9c63bd944f325079"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1359,7 +1359,15 @@ data:
         gate: db-migration
         enforced: advisory
         target_enforce_date: "2026-08-15"   # ADR-0144
-        blocked_on: "no CI script checks a PR touching db/migration for a rollback note — needs a PR-body-parsing check (not yet written)"
+        # The rollback note lives IN the migration, as a `-- Rollback:` comment — single-line or
+        # spanning the following comment lines. blocked_on used to call for a PR-BODY-parsing check,
+        # but the established practice is in-file (96 of 214 migrations when the gate was written,
+        # and every recent one), the file IS part of the PR, and an in-file note is strictly better:
+        # it sits next to the migration forever, where whoever rolls it back is already looking.
+        # The gate also covers the "forward" half of the requirement above — editing an
+        # already-committed migration is a finding, since Flyway checksums the whole file.
+        # Flipping to enforced = pass --enforce in ci.yml (one-line change).
+        ci_producer: "openbank-infra/scripts/check-db-migration.py"
       event_change:
         detect: ["*.avsc", "Avro/JSON schema under */schema/* or */avro/*", "Kotlin data class extending DomainEvent (the actual event contract today — JSON on Kafka via the outbox)"]
         require:
