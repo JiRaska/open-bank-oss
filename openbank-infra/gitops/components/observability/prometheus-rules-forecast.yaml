@@ -93,3 +93,70 @@ spec:
           annotations:
             summary: "Traffic on {{ $labels.service }} dropped far below trend"
             description: "Request rate is >3σ below the last hour's mean for >10m — possible silent upstream outage or wedged consumer."
+    # ADR-0173 D1 — cluster capacity saturation. The gap this closes: the NodePool
+    # `limits` (cpu: 48 / memory: 128Gi, aws/envs/sandbox-platform/main.tf) are both
+    # the FinOps cost control AND the fleet capacity ceiling, and when they bind
+    # Karpenter simply stops provisioning — pods go Pending, nothing alerts. That is
+    # exactly issue #809's second-order failure ("raising requests pinned the pool at
+    # its limits"), and until now the only rules here forecast disk and PVC fill.
+    #
+    # NOT alerting directly on the NodePool cap, deliberately: Karpenter's metrics are
+    # not scraped (`karpenter_nodepools_limit` returns 0 series — verified against the
+    # live Prometheus 2026-07-16), so a `karpenter_*` rule would be a rule that can
+    # never fire. Scraping Karpenter is the better fix and is worth doing; these rules
+    # work with what is actually collected today.
+    - name: openbank.capacity.saturation
+      rules:
+        # THE #809 SIGNAL. When the NodePool cap binds, this is what the cluster looks
+        # like — Karpenter refuses to provision and pods sit Pending indefinitely. A
+        # short spike is normal during a rollout or a scale-from-zero, hence 15m.
+        #
+        # Uses kube_pod_status_phase{phase="Pending"} and NOT
+        # kube_pod_status_unschedulable: the latter's metric NAME is in Prometheus's
+        # label index but it has 0 series even unfiltered (verified live) — an alert on
+        # it would look correct, pass review, and never fire.
+        - alert: PodsPendingSustained
+          expr: sum(kube_pod_status_phase{phase="Pending"}) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $value }} pod(s) Pending for >15m — cluster may be at its capacity ceiling"
+            description: >-
+              Karpenter is not satisfying these pods. First check the NodePool limits
+              (cpu/memory in aws/envs/sandbox-platform/main.tf): when they bind, provisioning
+              stops silently and pods queue — the issue #809 failure mode. Other causes: a
+              taint/affinity nothing satisfies, or the 20:00-07:00 UTC disruption freeze
+              interacting with a rollout. Raising the cap is a FinOps decision (ADR-0173), not
+              a reflex.
+        # Leading indicator: requests committed against what the current nodes can offer.
+        # Karpenter bin-packs by REQUESTS (ADR-0173 §2), so this is the number that decides
+        # whether the next pod fits — not actual usage. High commitment with the cap near
+        # means the next scale-up is the one that fails.
+        - alert: ClusterCpuCommitmentHigh
+          expr: |
+            sum(kube_pod_container_resource_requests{resource="cpu"})
+              / sum(kube_node_status_allocatable{resource="cpu"}) > 0.85
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cluster CPU requests at {{ $value | humanizePercentage }} of allocatable"
+            description: >-
+              Committed CPU is close to what the running nodes can offer. If the NodePool cpu
+              limit is also near, the next pod that needs a new node will go Pending instead
+              (see PodsPendingSustained). Baseline when this rule was written: ~68%.
+        - alert: ClusterMemoryCommitmentHigh
+          expr: |
+            sum(kube_pod_container_resource_requests{resource="memory"})
+              / sum(kube_node_status_allocatable{resource="memory"}) > 0.85
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cluster memory requests at {{ $value | humanizePercentage }} of allocatable"
+            description: >-
+              Memory is the axis that bit in #809 — and note allocatable already has the
+              kubelet eviction headroom subtracted (evictionHard 300Mi / evictionSoft 500Mi in
+              the EC2NodeClass), so this is honest bin-packing arithmetic, not a paper number.
+              Baseline when this rule was written: ~42%.
