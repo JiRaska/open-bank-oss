@@ -34,9 +34,9 @@ import java.util.UUID
  * legitimately dropped a field kyc-service never needed.
  *
  * party-service verifies both via `PartyEventPactProviderVerificationTest`
- * (`@PactFolder("../pacts")` — always runs, no Pact Broker involved). PARTY_CREATED reuses that
- * class's existing `"a party has been created"` state; PARTY_ERASED needed a new one, added
- * alongside this contract.
+ * (`@PactBroker` — CI-only, publishes/consumes results against the broker; skips locally
+ * without `pactbroker.url`). PARTY_CREATED reuses that class's existing `"a party has been
+ * created"` state; PARTY_ERASED needed a new one, added alongside this contract.
  */
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(

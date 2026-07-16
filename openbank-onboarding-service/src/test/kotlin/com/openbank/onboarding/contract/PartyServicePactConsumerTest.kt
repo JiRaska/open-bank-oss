@@ -62,9 +62,10 @@ import java.util.UUID
  * all (by design; it only tracks status-affecting transitions).
  *
  * party-service verifies via `PartyEventPactProviderVerificationTest`
- * (`@PactFolder("../pacts")`, extended with an HTTP target for the REST interaction alongside its
- * existing message-only ones). `"a party has been created"` and `"a party KYC status has
- * changed"` are its existing message states, reused as-is; `"a party has been erased"` is new
+ * (`@PactBroker`, extended with an HTTP target for the REST interaction alongside its
+ * existing message-only ones — CI-only, skips locally without `pactbroker.url`). `"a party has
+ * been created"` and `"a party KYC status has changed"` are its existing message states, reused
+ * as-is; `"a party has been erased"` is new
  * here (also being added independently by the kyc->party edge's PR — expect a trivial rebase
  * conflict on that one state block, not a semantic drift, whichever PR lands second).
  */

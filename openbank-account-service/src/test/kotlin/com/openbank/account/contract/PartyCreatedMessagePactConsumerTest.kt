@@ -27,7 +27,8 @@ import java.util.UUID
  * - PARTY_UPDATED / KYC_STATUS_CHANGED → reconcile account status via `status` field (P2 extension)
  *
  * party-service verifies all three via `PartyEventPactProviderVerificationTest`
- * (`@PactFolder("../pacts")` — always runs, no Pact Broker involved).
+ * (`@PactBroker` — CI-only, publishes/consumes results against the broker; skips locally
+ * without `pactbroker.url`).
  *
  * IMPORTANT — regenerate on change: if this test's `@Pact` methods change (new interaction,
  * different matcher, renamed field), re-run this test (`./gradlew :openbank-account-service:test
