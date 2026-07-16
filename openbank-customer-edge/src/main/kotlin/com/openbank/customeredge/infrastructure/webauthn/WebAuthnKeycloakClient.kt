@@ -32,6 +32,14 @@ import java.time.Duration
  * against `kc.open-bank.tech` 2026-07-14 (both a `client_credentials` token mint and a
  * `requested_subject`+`audience=openbank-app` token-exchange succeeded end to end).
  */
+/**
+ * The identity behind a customer's own access token, as told by Keycloak introspection.
+ * [keycloakUserId] is the token's `sub` — the EXISTING Keycloak user, which is why a caller
+ * holding one must never be routed through [WebAuthnKeycloakClient.ensureUser] (that would mint a
+ * second, synthetic-email user for a party that already has one).
+ */
+data class CustomerTokenIdentity(val partyId: String, val keycloakUserId: String)
+
 @ApplicationScoped
 class WebAuthnKeycloakClient {
 
@@ -167,6 +175,51 @@ class WebAuthnKeycloakClient {
         val refreshToken = tree.get("refresh_token")?.asText()
         Log.debugf("impersonate: minted token for kcUserId=%s", keycloakUserId)
         return accessToken to refreshToken
+    }
+
+    /**
+     * Verify a customer's own Keycloak access token via RFC 7662 introspection and return the
+     * identity it carries, or null if the token is absent/expired/forged/from another realm.
+     *
+     * Why introspection and not the injected [org.eclipse.microprofile.jwt.JsonWebToken]:
+     * [WebAuthnResource] is deliberately un-annotated so that the registration routes can accept an
+     * [EnrollmentTicketService] ticket, which is NOT a JWT. Touching the injected token there would
+     * make Quarkus authenticate the request and reject a ticket-bearing call outright (the very
+     * failure that class's KDoc warns about). Introspection asks Keycloak to do the signature and
+     * expiry checks out-of-band, so the ticket path stays untouched — and rolling one's own JWT
+     * verification here would be strictly worse than delegating to the issuer.
+     *
+     * The endpoint is realm-scoped, so a token minted by any other realm is `active: false`.
+     */
+    fun introspectCustomerToken(accessToken: String): CustomerTokenIdentity? {
+        val formBody = "client_id=$clientId&client_secret=$clientSecret" +
+            "&token=${URLEncoder.encode(accessToken, StandardCharsets.UTF_8)}"
+        val resp = runCatching {
+            http.send(
+                HttpRequest.newBuilder()
+                    .uri(URI.create("$adminUrl/realms/$realm/protocol/openid-connect/token/introspect"))
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .timeout(Duration.ofSeconds(HTTP_TIMEOUT_SECONDS))
+                    .POST(HttpRequest.BodyPublishers.ofString(formBody))
+                    .build(),
+                HttpResponse.BodyHandlers.ofString(),
+            )
+        }.getOrElse { e ->
+            // Fail closed: an unreachable Keycloak must not enrol an unverified credential.
+            Log.warnf(e, "introspectCustomerToken: introspection call failed")
+            return null
+        }
+        if (resp.statusCode() != HTTP_OK) {
+            Log.warnf("introspectCustomerToken: introspection returned %d", resp.statusCode())
+            return null
+        }
+        val tree = runCatching { json.readTree(resp.body()) }.getOrNull() ?: return null
+        if (tree.get("active")?.asBoolean() != true) return null
+        val subject = tree.get("sub")?.asText()?.takeIf { it.isNotBlank() } ?: return null
+        // Same precedence as every other customer route (CustomerEdgeResource.resolvePartyIdClaim):
+        // the explicit party_id claim wins, sub is the ADR-0069 `party.id == sub` fallback.
+        val partyId = tree.get("party_id")?.asText()?.takeIf { it.isNotBlank() } ?: subject
+        return CustomerTokenIdentity(partyId = partyId, keycloakUserId = subject)
     }
 
     companion object {
