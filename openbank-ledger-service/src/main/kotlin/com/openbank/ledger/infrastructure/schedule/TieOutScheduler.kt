@@ -57,49 +57,65 @@ class TieOutScheduler(
         timeZone = "Europe/Prague",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
-    @Suppress("TooGenericExceptionCaught") // scheduler must survive any infra failure (DB, Kafka, serialization)
     fun runTieOut(): Unit = runBlocking {
         val asOf = LocalDate.now(zone).minusDays(1)
         log.infof("Sub-ledger tie-out check for %s", asOf)
-        var checked = 0
-        var breaks = 0
-        var errors = 0
-        GlAccount.DEPOSIT_CONTROL_CODES.forEach { code ->
-            try {
-                val account = glAccountRepository.findByCode(code) ?: run {
-                    log.infof("Tie-out: deposit-control account code=%s not yet seeded — skipping", code)
-                    return@forEach
-                }
-                val tieOuts = ledgerUseCase.getControlAccountTieOut(
-                    GetControlAccountTieOutQuery(controlAccountId = account.id, asOf = asOf),
-                )
-                checked++
-                if (tieOuts.isEmpty()) {
-                    log.infof("Tie-out: control account code=%s has no activity as of %s — OK", code, asOf)
-                    return@forEach
-                }
-                tieOuts.filter { !it.isTiedOut }.forEach { tieOut ->
-                    breakCounter.increment()
-                    breaks++
-                    log.errorf(
-                        "Sub-ledger tie-out BREAK: control account code=%s currency=%s glNet=%s subLedgerNet=%s delta=%s asOf=%s",
-                        code,
-                        tieOut.currency,
-                        tieOut.glNet,
-                        tieOut.subLedgerNet,
-                        tieOut.delta,
-                        asOf,
-                    )
-                }
-            } catch (@Suppress("TooGenericExceptionCaught") ex: Exception) {
-                errors++
-                log.errorf(ex, "Tie-out check failed for control account code=%s: %s", code, ex.message)
-            }
-        }
+        // Aggregate per-account outcomes rather than mutating counters inside the loop lambda:
+        // the accumulation is the same, but it reads as one expression and CodeQL can actually
+        // follow it (mutable captures across a lambda boundary read to it as never-written).
+        val outcomes = GlAccount.DEPOSIT_CONTROL_CODES.map { code -> checkControlAccount(code, asOf) }
+        val checked = outcomes.count { it.checked }
+        val breaks = outcomes.sumOf { it.breaks }
+        val errors = outcomes.count { it.failed }
         if (breaks == 0 && errors == 0) {
             log.infof("Sub-ledger tie-out OK for %s", asOf)
         }
         recordRun(asOf, checked, breaks, errors)
+    }
+
+    /**
+     * Checks one deposit-control account. A missing (not yet seeded) account is neither checked
+     * nor an error; an account with no activity as of the date IS checked and ties out trivially.
+     */
+    @Suppress("TooGenericExceptionCaught") // scheduler must survive any infra failure (DB, Kafka, serialization)
+    private suspend fun checkControlAccount(code: String, asOf: LocalDate): AccountOutcome = try {
+        val account = glAccountRepository.findByCode(code)
+        if (account == null) {
+            log.infof("Tie-out: deposit-control account code=%s not yet seeded — skipping", code)
+            AccountOutcome.SKIPPED
+        } else {
+            val tieOuts = ledgerUseCase.getControlAccountTieOut(
+                GetControlAccountTieOutQuery(controlAccountId = account.id, asOf = asOf),
+            )
+            if (tieOuts.isEmpty()) {
+                log.infof("Tie-out: control account code=%s has no activity as of %s — OK", code, asOf)
+            }
+            val broken = tieOuts.filter { !it.isTiedOut }
+            broken.forEach { tieOut ->
+                breakCounter.increment()
+                log.errorf(
+                    "Sub-ledger tie-out BREAK: control account code=%s currency=%s glNet=%s subLedgerNet=%s delta=%s asOf=%s",
+                    code,
+                    tieOut.currency,
+                    tieOut.glNet,
+                    tieOut.subLedgerNet,
+                    tieOut.delta,
+                    asOf,
+                )
+            }
+            AccountOutcome(checked = true, breaks = broken.size, failed = false)
+        }
+    } catch (ex: Exception) {
+        log.errorf(ex, "Tie-out check failed for control account code=%s: %s", code, ex.message)
+        AccountOutcome.FAILED
+    }
+
+    /** One control account's contribution to the run totals. */
+    private data class AccountOutcome(val checked: Boolean, val breaks: Int, val failed: Boolean) {
+        companion object {
+            val SKIPPED = AccountOutcome(checked = false, breaks = 0, failed = false)
+            val FAILED = AccountOutcome(checked = false, breaks = 0, failed = true)
+        }
     }
 
     private suspend fun recordRun(asOf: LocalDate, checked: Int, breaks: Int, errors: Int) {
