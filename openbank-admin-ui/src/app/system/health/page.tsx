@@ -49,7 +49,17 @@ export default function SystemHealthPage() {
       setGovTimestamp(govs.timestamp)
       setLastRefreshed(new Date())
     }
-    finally { 
+    catch (e) {
+      // Any of the three fetches failing rejects the Promise.all. The BFF being
+      // unreachable is expected (in the sandbox most of the fleet isn't deployed),
+      // so keep the last-known-good maps and let `finally` drop the spinner — the
+      // page degrades to its empty/stale state. Without this catch the rejection
+      // escaped the effect as an unhandled promise rejection on every failed poll.
+      if (currentCounter === refreshCounterRef.current) {
+        console.error('Failed to load service health snapshots', e)
+      }
+    }
+    finally {
       if (currentCounter === refreshCounterRef.current) {
         setLoading(false)
         setRefreshing(false)
