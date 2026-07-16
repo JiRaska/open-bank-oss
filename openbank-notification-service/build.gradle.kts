@@ -17,6 +17,11 @@ dependencies {
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.smallrye.kafka)
+    // Redis-backed ApprovalStore for the ADR-0155 four-eyes mechanism, extended to
+    // opsmessage.compose by ADR-0176 D5. notification-service has no other Redis surface today
+    // — this is the first Redis dependency in this service (same shape as ledger-service's own
+    // first-Redis-dependency comment on its ApprovalConfig).
+    implementation(libs.quarkus.redis.client)
     implementation(libs.quarkus.smallrye.health)
     implementation(libs.quarkus.scheduler)
     implementation(libs.quarkus.micrometer.registry.prometheus)

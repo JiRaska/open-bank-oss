@@ -176,6 +176,16 @@ mp:
     # an unrelated background dispatch against its assertions.
     scheduler:
       enabled: false
+authz:
+  # ADR-0176 D5: four-eyes ENFORCEMENT for opsmessage.compose, independent of the base
+  # allow/deny enforce toggle (which has no YAML override here and so runs on its code
+  # default, authz.enforce=true — this service is NOT advisory-mode today). Stays false
+  # here; flipping it to true is authored to happen day one in sandbox via this service's
+  # own gitops Deployment env (AUTHZ_FOUR_EYES_ENFORCE), not gated on any fleet-wide rollout —
+  # same key every other four-eyes service uses (e.g. ledger-service's application.yaml).
+  four-eyes:
+    enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
+
 openbank:
   rate-limit:
     enabled: true

@@ -23,7 +23,30 @@ enum class NotificationTemplate {
     OTP_CODE,
     PASSWORD_RESET,
     WELCOME,
+
+    /**
+     * ADR-0176 D2: the first operator-composable catalogue template. Deliberately has its
+     * OWN [com.openbank.notification.application.NotificationConsumer.renderTemplate] case
+     * (fixed HTML skeleton, one server-validated variable) rather than falling through to
+     * the generic `else` branch, which does verbatim, unescaped interpolation of the caller
+     * -supplied `variables` map — building the operator-compose path on that branch would
+     * smuggle back exactly the free-text injection D2 exists to prevent (tracked
+     * separately as issue #1325, not fixed by this template's addition).
+     */
+    OPERATOR_ACCOUNT_NOTICE,
 }
+
+/**
+ * ADR-0176 D3: governs what [com.openbank.notification.application.NotificationConsumer.sendPush]
+ * puts in the push payload. `FULL` is today's existing behaviour for every system-triggered
+ * template (unchanged, so no existing caller needs to opt in). `WAKE_SIGNAL_ONLY` — used
+ * exclusively by the operator-message compose path — carries no body text, only a generic
+ * title and the notification id, so the customer app fetches detail on tap via an
+ * authenticated `GET /api/v1/notifications/{id}` (ADR-0135 §3, violated today by the `FULL`
+ * path for `TRANSACTION_COMPLETED`; retrofitting existing templates onto this shape is a
+ * separate, deferred piece of work — this enum only closes the gap for the NEW path).
+ */
+enum class PushContentPolicy { FULL, WAKE_SIGNAL_ONLY }
 
 data class Notification(
     val id: UUID,
@@ -45,4 +68,5 @@ data class NotificationRequest(
     val template: NotificationTemplate,
     val recipient: String,
     val variables: Map<String, String>,
+    val pushContentPolicy: PushContentPolicy = PushContentPolicy.FULL,
 )

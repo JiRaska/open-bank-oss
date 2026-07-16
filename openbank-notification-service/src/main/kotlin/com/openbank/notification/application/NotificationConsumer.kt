@@ -15,6 +15,7 @@ import com.openbank.notification.domain.model.NotificationChannel
 import com.openbank.notification.domain.model.NotificationRequest
 import com.openbank.notification.domain.model.NotificationStatus
 import com.openbank.notification.domain.model.NotificationTemplate
+import com.openbank.notification.domain.model.PushContentPolicy
 import com.openbank.notification.domain.model.PushPlatform
 import com.openbank.notification.domain.model.TemplateSensitivity
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
@@ -107,7 +108,11 @@ class NotificationConsumer {
             }
     }
 
-    private fun dispatch(req: NotificationRequest): Uni<Void> {
+    // internal, not private: OperatorMessageResource (ADR-0176) calls this directly, in-process,
+    // once four-eyes clears an operator-composed message — reusing render/persist/deliver/
+    // oversight unchanged rather than round-tripping through Kafka for a caller that is already
+    // inside this service.
+    internal fun dispatch(req: NotificationRequest): Uni<Void> {
         val (subject, body) = renderTemplate(req.template, req.variables)
         val entity = NotificationEntity().also {
             it.notificationId = UUID.randomUUID()
@@ -256,7 +261,17 @@ class NotificationConsumer {
         body: String,
         entity: NotificationEntity,
     ): Uni<Void> {
-        val pushText = htmlToPlain(body)
+        // ADR-0176 D3: WAKE_SIGNAL_ONLY carries no body text and a generic title — only
+        // notificationId in `data`, so the app fetches detail on tap via an authenticated
+        // GET /api/v1/notifications/{id}. FULL preserves today's existing behaviour for every
+        // system-triggered template unchanged (the ADR-0135 §3 violation this sidesteps for the
+        // new path only; retrofitting existing templates is separate, deferred work).
+        val (pushTitle, pushText, pushData) = when (req.pushContentPolicy) {
+            PushContentPolicy.FULL ->
+                Triple(subject, htmlToPlain(body), mapOf("template" to req.template.name))
+            PushContentPolicy.WAKE_SIGNAL_ONLY ->
+                Triple("You have a new message", "", mapOf("notificationId" to entity.notificationId.toString()))
+        }
         return Panache.withTransaction { deviceTokenRepo.findActiveByParty(req.partyId) }
             .chain { tokens ->
                 if (tokens.isEmpty()) {
@@ -268,7 +283,7 @@ class NotificationConsumer {
                 val targets = tokens.map { Triple(it.deviceId, PushPlatform.valueOf(it.platform), it.token) }
                 val sends = targets.map { (deviceId, platform, token) ->
                     pushSender.send(
-                        PushMessage(platform, token, subject, pushText, mapOf("template" to req.template.name)),
+                        PushMessage(platform, token, pushTitle, pushText, pushData),
                     ).map { result -> deviceId to result }
                 }
                 Uni.join().all(sends).andCollectFailures()
@@ -332,6 +347,15 @@ class NotificationConsumer {
             NotificationTemplate.WELCOME ->
                 "Welcome to OpenBank" to
                     "<h2>Welcome!</h2><p>Thank you for joining OpenBank, ${vars["name"] ?: ""}.</p>"
+            // ADR-0176 D2: the ONLY variable is `referenceId`, already validated by
+            // OperatorMessageResource against `^[A-Za-z0-9-]{1,40}$` before the draft is ever
+            // persisted — never operator-supplied prose. Fixed skeleton, same shape as every
+            // other explicit case above; this template must never fall into the `else` branch
+            // below, which does unescaped, unvalidated interpolation of the whole variables map.
+            NotificationTemplate.OPERATOR_ACCOUNT_NOTICE ->
+                "There's an update on your account" to
+                    "<p>Please open the OpenBank app or contact support for details about your " +
+                    "account. Reference: <b>${vars["referenceId"] ?: ""}</b>.</p>"
             else -> template.name.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() } to
                 "<p>${vars.entries.joinToString("<br>") { "${it.key}: ${it.value}" }}</p>"
         }
