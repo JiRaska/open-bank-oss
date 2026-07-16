@@ -11,16 +11,25 @@ import { BookOpen, FileText, ArrowRight, AlertCircle, Package } from 'lucide-rea
 import { ServerlessTierBadge } from '@/components/finops/ServerlessTierBadge'
 import { ServerlessLegend } from '@/components/finops/ServerlessLegend'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
+import { findService } from '@/lib/services/registry'
 
 // Static fallback / backlog base. The live list comes from the cluster at runtime
 // (see the effect below: /api/services/health → ADR-0051 Kubernetes discovery), so a
 // newly-deployed service appears here automatically with no edit. This array is only
 // the off-cluster (local-dev) fallback AND the docs backlog of services that *should*
 // exist but aren't deployed yet — it is unioned with the live list, never the sole
-// source. Each id maps 1:1 to the docs proxy name (/api/services/[name]/docs): the
-// proxy tries `openbank-<id>-service` then `openbank-<id>`; `libs` → `openbank-libs`.
+// source.
+//
+// Every id here MUST have a SERVICE_REGISTRY entry (src/lib/services/registry.ts).
+// There is NO name-guessing fallback: the docs loader is exact-match on the registry
+// id (`libs` is the one special case — it reads the image-baked bundle instead of a
+// live service). An id with no registry entry renders a card whose docs link 404s
+// with `Unknown service`. A stale comment here once promised an
+// `openbank-<id>-service` → `openbank-<id>` fallback that docs.ts never implemented,
+// which is how 7 such dead cards accumulated. Enforced by
+// src/test/service-registry.guard.test.ts.
 const STATIC_CANDIDATES = [
-  { id: 'libs',                label: 'openbank-libs',         group: 'platform',     desc: 'Sdílená infrastrukturní knihovna pro všech 33 mikroslužeb' },
+  { id: 'libs',                label: 'openbank-libs',         group: 'platform' },
   { id: 'account',             label: 'Account Service',       group: 'core' },
   { id: 'ledger',              label: 'Ledger Service',        group: 'core' },
   { id: 'transaction',         label: 'Transaction Service',   group: 'core' },
@@ -57,7 +66,6 @@ const STATIC_CANDIDATES = [
   { id: 'copilot',             label: 'Copilot Service',       group: 'platform' },
   { id: 'security-scanner',    label: 'Security Scanner',      group: 'platform' },
   { id: 'analytics-sink',      label: 'Analytics Sink',        group: 'platform' },
-  { id: 'api-gateway',         label: 'API Gateway',           group: 'platform' },
 ] as const
 
 const GROUP_LABELS: Record<string, { label: string; color: string }> = {
@@ -78,12 +86,62 @@ interface DocsStatus {
 
 interface Candidate { id: string; label: string; group: string; desc?: string }
 
+// Catalog modules that ship no runtime service: the shared libraries and the IaC
+// module. `kind: 'ui'` (admin-ui) and `kind: 'library'` (openbank-libs) are excluded
+// by kind; these four are classified `component` by generate-catalog.mjs but are not
+// fleet members. Everything else in the catalog is. Kept explicit and tiny — the
+// guard test asserts each entry is still a real catalog module, so a rename fails CI
+// rather than silently skewing the count.
+const NON_FLEET_MODULES = new Set(['infra', 'libs-domain', 'libs-runtime', 'libs-testing'])
+
+/**
+ * Fleet size, derived from the code-generated catalog (ADR-0029 D3) rather than
+ * hand-counted. The previous hardcoded "33" was stale by 21 services; a derived
+ * count cannot drift.
+ */
+function fleetSize(services: { short: string; kind: string }[]): number {
+  return services.filter(
+    s => s.kind !== 'ui' && s.kind !== 'library' && !NON_FLEET_MODULES.has(s.short),
+  ).length
+}
+
+/**
+ * Card id → catalog `short` name, for the drift banner. Resolved through the
+ * registry (`container` minus the `openbank-` prefix IS the catalog short), not by
+ * appending `-service` and hoping — that guess is wrong for every module without the
+ * suffix (sepa-instant, product-catalog, analytics-sink, security-scanner…).
+ * Ids discovered live from the cluster have no registry entry; for those the k8s
+ * workload name already equals the catalog short.
+ *
+ * Deliberately `container`-derived and NOT k8sNameOf(): the catalog is keyed by
+ * module directory, which differs from the k8s workload name for security-scanner.
+ */
+function catalogShortFor(c: Candidate): string {
+  const entry = findService(c.id)
+  return entry ? entry.container.replace(/^openbank-/, '') : c.id
+}
+
 export default function ServicesDocsOverviewPage() {
   const { t } = useLanguage()
   const [candidates, setCandidates] = useState<Candidate[]>(STATIC_CANDIDATES as readonly Candidate[] as Candidate[])
   const [source, setSource] = useState<'kubernetes' | 'static'>('static')
   const [statuses, setStatuses] = useState<Record<string, DocsStatus>>({})
   const [loading, setLoading] = useState(true)
+  const [fleetCount, setFleetCount] = useState<number | null>(null)
+
+  // Fleet size for the openbank-libs card copy, derived from the catalog snapshot.
+  // Degrades to a count-free description if the snapshot is absent (graceful-state
+  // rule #1) — never renders a guessed number.
+  useEffect(() => {
+    let mounted = true
+    fetch('/api/catalog/services', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then((data: { services?: { short: string; kind: string }[] } | null) => {
+        if (mounted && Array.isArray(data?.services)) setFleetCount(fleetSize(data.services))
+      })
+      .catch(() => { /* catalog snapshot absent — omit the number */ })
+    return () => { mounted = false }
+  }, [])
 
   useEffect(() => {
     let mounted = true
@@ -144,6 +202,18 @@ export default function ServicesDocsOverviewPage() {
 
   const withDocs = candidates.filter(c => statuses[c.id]?.hasDocs)
   const withoutDocs = candidates.filter(c => !statuses[c.id]?.hasDocs)
+
+  // openbank-libs is the one card with editorial copy; its fleet count is derived,
+  // never hardcoded.
+  const descFor = (svc: Candidate): string | undefined => {
+    if (svc.desc) return svc.desc
+    if (svc.id !== 'libs') return undefined
+    return fleetCount === null
+      ? t('Sdílená infrastrukturní knihovna pro celou flotilu mikroslužeb',
+           'Shared infrastructure library for the whole microservice fleet')
+      : t(`Sdílená infrastrukturní knihovna pro všech ${fleetCount} mikroslužeb`,
+           `Shared infrastructure library for all ${fleetCount} microservices`)
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -226,9 +296,9 @@ export default function ServicesDocsOverviewPage() {
                   <span style={{ color: GROUP_LABELS[svc.group]?.color }}>{GROUP_LABELS[svc.group]?.label}</span>
                   <ServerlessTierBadge serviceId={svc.id} dense />
                 </div>
-                {('desc' in svc) && (svc as any).desc && (
+                {descFor(svc) && (
                   <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-                    {(svc as any).desc}
+                    {descFor(svc)}
                   </div>
                 )}
               </Link>
@@ -275,9 +345,7 @@ export default function ServicesDocsOverviewPage() {
           </div>
         </section>
       )}
-      <CatalogDriftBanner present={candidates.map(c =>
-        c.id.endsWith('-payment') || c.id.endsWith('-instant') ? c.id : c.id + '-service'
-      )} />
+      <CatalogDriftBanner present={candidates.map(catalogShortFor)} />
     </div>
   )
 }

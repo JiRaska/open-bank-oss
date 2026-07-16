@@ -21,7 +21,7 @@
 
 import { promises as fs } from 'fs'
 import path from 'path'
-import { findService, serviceBaseUrl, type ServiceEntry } from './registry'
+import { findService, serviceBaseUrl, k8sNameOf, type ServiceEntry } from './registry'
 import { inCluster, resolveInClusterBaseUrl } from '@/lib/discovery'
 
 const FETCH_TIMEOUT_MS = 2000
@@ -196,8 +196,7 @@ async function docFromBundle(serviceDir: string, slug: string, requestedLang: st
  */
 async function liveBaseUrl(svc: ServiceEntry): Promise<string | null> {
   if (inCluster()) {
-    const k8sName = svc.container.replace(/^openbank-/, '')
-    return resolveInClusterBaseUrl(k8sName)
+    return resolveInClusterBaseUrl(k8sNameOf(svc))
   }
   return serviceBaseUrl(svc)
 }

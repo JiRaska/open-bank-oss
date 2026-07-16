@@ -5,7 +5,7 @@
 // ── Admin-UI graceful-state rule (enforced) ────────────────────────────────
 //
 // Why this guard exists: nearly every page fetches from the BFF (`/api/svc/...`)
-// or an admin-ui-internal API. In the sandbox most of the 28-service fleet isn't
+// or an admin-ui-internal API. In the sandbox much of the fleet isn't
 // deployed, so those calls legitimately fail. Historically each page re-invented
 // its own error rendering — a raw `HTTP 404`, a hand-written "Cannot reach X", a
 // red `alert-error` box — which an operator reads as "the app is broken", and

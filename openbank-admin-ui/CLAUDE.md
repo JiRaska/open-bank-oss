@@ -8,7 +8,7 @@ port or in-cluster `.svc` DNS name. See the root `CLAUDE.md` for monorepo-wide r
 
 ### 1. Graceful-state rule — never leak a raw backend failure
 
-In the sandbox most of the 28-service fleet isn't deployed, so BFF/internal calls legitimately fail. A
+In the sandbox much of the fleet isn't deployed, so BFF/internal calls legitimately fail. A
 page must **never** render a raw `HTTP 404`, a hand-written "Cannot reach X", or a red `alert-error`
 box. Those read as "the app is broken" when the truth is usually "this service isn't deployed here yet".
 
