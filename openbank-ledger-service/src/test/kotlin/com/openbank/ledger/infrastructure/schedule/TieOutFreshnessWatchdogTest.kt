@@ -41,25 +41,25 @@ class TieOutFreshnessWatchdogTest {
     )
 
     @Test
-    fun `handles absence of any run`() = runBlocking {
+    fun `handles absence of any run`(): Unit = runBlocking {
         coEvery { runs.findLatest() } returns null
         watchdog.checkFreshness() // must not throw; logs ERROR
     }
 
     @Test
-    fun `fresh OK run passes quietly`() = runBlocking {
+    fun `fresh OK run passes quietly`(): Unit = runBlocking {
         coEvery { runs.findLatest() } returns run(Duration.ofHours(4), TieOutRunStatus.OK)
         watchdog.checkFreshness()
     }
 
     @Test
-    fun `stale run is escalated without throwing`() = runBlocking {
+    fun `stale run is escalated without throwing`(): Unit = runBlocking {
         coEvery { runs.findLatest() } returns run(Duration.ofHours(26), TieOutRunStatus.OK)
         watchdog.checkFreshness()
     }
 
     @Test
-    fun `fresh ERROR run is escalated without throwing`() = runBlocking {
+    fun `fresh ERROR run is escalated without throwing`(): Unit = runBlocking {
         coEvery { runs.findLatest() } returns run(Duration.ofHours(4), TieOutRunStatus.ERROR)
         watchdog.checkFreshness()
     }
