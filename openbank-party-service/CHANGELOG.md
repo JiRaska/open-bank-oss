@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.8.2...party-service-v0.8.3) (2026-07-16)
+
+
+### Bug Fixes
+
+* **party-service,customer-edge:** forward + persist onboarding consent ([#1157](https://github.com/JiRaska/open-bank-oss/issues/1157)) ([b16b143](https://github.com/JiRaska/open-bank-oss/commit/b16b1437e268b1d58115f9e194e40d31a3cfe596))
+
 ## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.8.1...party-service-v0.8.2) (2026-07-11)
 
 
