@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.15.1...account-service-v0.15.2) (2026-07-16)
+
+
+### Bug Fixes
+
+* **party-service:** restore @PactBroker on provider verification (unblocks auto-deploy) ([#1166](https://github.com/JiRaska/open-bank-oss/issues/1166)) ([f9f28e5](https://github.com/JiRaska/open-bank-oss/commit/f9f28e5c700d5e98df59416aba4ac669e62e47a3))
+
 ## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.15.0...account-service-v0.15.1) (2026-07-11)
 
 
