@@ -133,7 +133,21 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   platform linux/amd64 in index` — silently, if the caller only checks the exit code. Pass
   `--platform` explicitly, matching the arch the image was actually built for. A skipped SBOM
   attestation here means Kyverno's `verify-openbank-image-sbom-attestation` policy blocks every pod
-  admission for that image (admin-ui outage, 2026-07-09).
+  admission for that image (admin-ui outage, 2026-07-09). Producers must call the shared
+  `openbank-infra/scripts/lib/cosign-attest.sh` (which passes `--platform` and hard-fails), never
+  hand-roll `trivy`+`cosign attest` again.
+- **Kyverno verifies at ADMISSION, not continuously — a running pod is NOT evidence its image is
+  attested.** An unattested image keeps running; it is denied only on the next reschedule (node
+  roll, eviction, scale-up) and then can never restart, one pod at a time. So "the fleet is
+  healthy" / "PolicyReport shows 0 fail" only describes pods that happen to exist right now, and
+  never justifies an Audit→Enforce flip. Run `.github/scripts/check-fleet-attestations.sh` (daily
+  via `fleet-attestation.yml`) — it checks every image *declared* in gitops, incl. initContainers
+  and sidecars, so a gap is caught while still latent. Green gate before any Enforce graduation
+  (`rules.yaml: provenance.fleet_attestation_gate`).
+- **A provenance failure must fail the build that caused it.** `continue-on-error` /
+  `|| echo "::warning::"` on a sign/attest step buys a green deploy that produces an
+  undeployable image — the damage lands days later on whoever is on call, not on the author.
+  Verify with `cosign verify-attestation` after attesting; never trust `attest` exit 0 alone.
 
 ### OPA / Rego policies (ADR-0031/ADR-0034)
 - **Adding any new agent charter to `agents.yaml` ripples the OPA bundle checksum of unrelated

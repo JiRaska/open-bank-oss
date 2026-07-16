@@ -1,0 +1,147 @@
+# Fleet SBOM-attestation gate (ADR-0030 D4, rules.yaml provenance.enforce_criteria).
+#
+# Verifies that EVERY openbank-* image declared anywhere under openbank-infra/gitops/ —
+# app containers, initContainers and sidecars alike — carries a cosign-signed CycloneDX
+# SBOM attestation that kyverno's verify-openbank-image-sbom-attestation ClusterPolicy
+# (Enforce) would accept.
+#
+# WHY ON A SCHEDULE, not just on PRs:
+#   kyverno verifies at ADMISSION, not continuously. An unattested image whose pod is
+#   already running keeps running — the gap is LATENT and invisible until something
+#   reschedules that pod (node roll, eviction, scale-up), at which point the pod is denied
+#   and can never restart. A green fleet proves nothing. The daily run is what turns a
+#   latent gap into a ticket BEFORE a reschedule turns it into an outage.
+#
+# WHY ON gitops/producer PRs:
+#   catches an image bumped into gitops that was never attested, at review time.
+name: Fleet attestation
+
+on:
+  schedule:
+    # 02:40 UTC daily — ahead of sbom-drift-scanner's 03:10 in-cluster slot, so a fleet
+    # provenance gap is already known by the time the sync-drift report lands.
+    - cron: "40 2 * * *"
+  pull_request:
+    paths:
+      - "openbank-infra/gitops/**"
+      - "openbank-infra/scripts/build-push-*.sh"
+      - "openbank-infra/scripts/lib/cosign-attest.sh"
+      - ".github/scripts/check-fleet-attestations.sh"
+      - ".github/scripts/fleet-attestation-placeholders.txt"
+      - ".github/workflows/fleet-attestation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fleet-attestation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint gate script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # ci.yml's shellcheck only globs openbank-infra/scripts — this script lives under
+      # .github/scripts, so it would otherwise never be linted.
+      - name: shellcheck
+        run: shellcheck -S warning .github/scripts/check-fleet-attestations.sh
+
+  verify:
+    name: Verify fleet attestations
+    runs-on: ubuntu-latest
+    # Needs the AWS OIDC role to read ECR. Fork PRs cannot assume it, so skip rather than
+    # fail red on a contribution that could never have run this.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    permissions:
+      contents: read
+      id-token: write # AWS OIDC
+    env:
+      AWS_REGION: eu-north-1
+      ECR_REGISTRY: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d # v5.0.0
+        with:
+          role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+
+      - name: Verify every declared openbank-* image is attested
+        id: gate
+        env:
+          FLEET_ATTEST_JSON: ${{ runner.temp }}/fleet-attest.json
+        run: |
+          .github/scripts/check-fleet-attestations.sh | tee "${RUNNER_TEMP}/gate.log"
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Fleet SBOM-attestation gate"
+            echo
+            echo '```'
+            tail -40 "${RUNNER_TEMP}/gate.log" 2>/dev/null || echo "(gate produced no output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fleet-attestation-report
+          path: ${{ runner.temp }}/fleet-attest.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # A latent provenance gap must page someone, not just turn a scheduled run red — an
+  # unread red schedule is how sbom-drift-scanner's `no-pod-found` sat unactioned. On the
+  # scheduled run only (a PR failure is already visible to its author), file/refresh an
+  # issue so the gap has an owner and a paper trail.
+  raise-issue:
+    name: Raise issue on gap
+    needs: verify
+    if: ${{ failure() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Open or refresh the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          TITLE="Fleet attestation gap detected (latent admission failure)"
+          # Heredoc body is deliberately flush-left: `run: |` strips only the common YAML
+          # indent, so an indented body would carry leading spaces into the issue markdown.
+          BODY=$(cat <<EOF
+          The daily fleet-attestation gate FAILED: at least one openbank-* image declared in
+          \`openbank-infra/gitops/\` has no valid CycloneDX SBOM attestation.
+
+          **This is latent, not cosmetic.** Affected pods keep running until something
+          reschedules them (node roll, eviction, scale-up) — then kyverno
+          (\`verify-openbank-image-sbom-attestation\`, Enforce) denies admission and they can
+          never restart. Fix before a reschedule, not after.
+
+          Run: ${RUN_URL} — the job summary and the \`fleet-attestation-report\` artifact list
+          the exact images.
+
+          Rebuild + attest each affected image via its producer script; provenance hard-fails at
+          push (\`openbank-infra/scripts/lib/cosign-attest.sh\`).
+          EOF
+          )
+          existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$BODY"
+          else
+            gh issue create --title "$TITLE" --body "$BODY" --label fleet-health --label "severity:high"
+          fi

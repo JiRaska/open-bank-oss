@@ -9,25 +9,39 @@
 # phase 3 (true in-container filesystem drift) are deliberately out of scope
 # here — see the ADR-0030 D5 design note.
 #
+# ⚠ NAME WARNING — this CronJob does NOT verify SBOMs or attestations.
+# Despite "sbom" in its name it answers exactly one question: is the pod
+# currently RUNNING the image GitOps (origin/main) currently DECLARES? The
+# authoritative SBOM-attestation check is the CI gate
+# .github/scripts/check-fleet-attestations.sh (workflow: fleet-attestation.yml),
+# which covers the WHOLE fleet, not just the money-path list below.
+# The name is retained only because the `sbom-drift` ConfigMap is a published
+# contract consumed by the admin-ui BFF (SBOM_DRIFT_PATH); renaming is tracked
+# as a follow-up rather than bundled into a supply-chain fix.
+#
 # Design note — why this checks GitOps sync, not the cosign attestation
-# itself: the original design intended to re-verify each running pod's
-# CycloneDX attestation directly (cosign verify-attestation against ECR).
-# Live testing during implementation found that's both unreachable and
-# redundant:
-#   - Unreachable: cosign's registry client (and the AWS CLI's ECR auth
-#     token exchange) needs actual AWS credentials, not just "the node has
+# itself. The original design intended to re-verify each running pod's
+# CycloneDX attestation directly. One of the two reasons recorded for dropping
+# that was WRONG, and the correction is the whole point of this component:
+#   - Unreachable (still true): cosign's registry client (and the AWS CLI's ECR
+#     auth token exchange) needs actual AWS credentials, not just "the node has
 #     ecr:* permissions" — this cluster's EKS nodes set the IMDS hop-limit to
 #     block non-host-network pods from reaching instance-profile credentials
 #     (a deliberate hardening), so a plain pod gets "Unable to locate
-#     credentials" / registry 401s with no IRSA. Standing up a new IAM role +
-#     OIDC trust policy for this is a real infra change, not a k8s-manifest
-#     one — out of scope for this pass; flagged as a possible follow-up if a
-#     genuine need for live attestation re-verification emerges.
-#   - Redundant: Kyverno's verify-openbank-image-sbom-attestation ClusterPolicy
-#     is Enforce (issue #310) — every pod that is currently RUNNING already
-#     passed cosign attestation verification at admission time, by definition.
-#     Re-checking it here would at best restate what admission already
-#     guaranteed, for the cost of the IAM work above.
+#     credentials" / registry 401s with no IRSA. That is why the attestation
+#     check lives in CI, which already holds a GitHub-OIDC role with ECR read —
+#     no new IAM, and it runs daily on a schedule.
+#   - "Redundant" (FALSE — this reasoning caused an outage): the claim was that
+#     Kyverno's verify-openbank-image-sbom-attestation is Enforce, so every
+#     RUNNING pod already passed attestation verification by definition.
+#     Kyverno verifies at ADMISSION, not continuously. A pod admitted while the
+#     policy was still Audit — i.e. most of the fleet — proves nothing at all,
+#     and keeps running indefinitely because nothing re-evaluates it. The
+#     violation is LATENT until the pod reschedules, and only then does it fail,
+#     permanently and one pod at a time. On 2026-07-12 exactly that happened:
+#     several images had no attestation, the running fleet looked healthy, and
+#     the gap surfaced only as pods rescheduled. "It is running, therefore it
+#     was verified" is not a valid inference — never re-derive it.
 # What's left — "is the running pod what GitOps currently says should be
 # deployed" — is exactly the ArgoCD-sync-drift signal issue #846 this session
 # spent most of its time on (money-path services silently stuck on day-zero
@@ -510,12 +524,48 @@ spec:
                           "inSync": in_sync,
                       }
 
+                  # Findings that must not sit silently in a ConfigMap.
+                  #
+                  # `no-pod-found` for a money-path service is NOT a benign skip: a service
+                  # with zero running pods is either scaled to zero or unable to start at all
+                  # (e.g. denied at admission). sepa-payment reported `no-pod-found` on the
+                  # morning of 2026-07-12 while it was in fact down and un-admittable, and
+                  # because this job exited 0 and only wrote a ConfigMap, nothing escalated.
+                  # Anything actionable now FAILS the Job, which surfaces via the
+                  # SbomDriftScannerFailing / kube_job_failed alert (prometheus-rules.yaml).
+                  drifted = [s for s, r in results.items()
+                             if r.get("status") == "checked" and not r.get("inSync")]
+                  missing = [s for s, r in results.items()
+                             if r.get("status") == "no-pod-found"]
+
+                  summary = {
+                      # State plainly what this report does and does NOT cover, so a reader
+                      # of the ConfigMap cannot mistake it for an SBOM/attestation check.
+                      "checkScope": "gitops-image-tag-sync-only",
+                      "doesNotVerify": "SBOM attestations — see CI gate fleet-attestation.yml",
+                      "coverage": "money-path services only (not the full openbank-* fleet)",
+                      "scannedAt": None,
+                      "services": results,
+                      "driftedServices": drifted,
+                      "noPodServices": missing,
+                      "ok": not drifted and not missing,
+                  }
                   with open("/work/final.json", "w") as f:
-                      json.dump({"scannedAt": None, "services": results}, f)
+                      json.dump(summary, f)
                   print(f"Written /work/final.json: {len(results)} services", flush=True)
+
+                  if drifted or missing:
+                      print(f"FAIL drifted={drifted} noPod={missing}", flush=True)
+                      # Exit AFTER writing the report: the publish container still needs it,
+                      # so the ConfigMap reflects the failure rather than going stale.
+                      raise SystemExit(1)
+                  print("OK: every money-path service runs its declared image.", flush=True)
                   PYEOF
 
-                  python3 /tmp/compare.py
+                  # `|| true`: a findings-exit must still let the publish container run and
+                  # surface the report. The Job is failed explicitly by the publish container
+                  # once it has published, so the alert fires WITH a readable report attached.
+                  python3 /tmp/compare.py || echo "findings" > /work/findings
               volumeMounts:
                 - name: work
                   mountPath: /work
@@ -536,6 +586,7 @@ spec:
                   value: /tmp
               args:
                 - |
+                  set -eu
                   NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
                   sed "s/\"scannedAt\": null/\"scannedAt\": \"${NOW}\"/" /work/final.json > /tmp/final.json
 
@@ -545,6 +596,16 @@ spec:
                     --namespace admin-ui \
                     --from-file=sbom-drift.json=/tmp/final.json \
                     --dry-run=client -o yaml | kubectl apply -f -
+                  echo "Published."
+
+                  # Publish FIRST, then fail — so the alert fires with the report already
+                  # readable in the ConfigMap. A finding that only ever lands in a ConfigMap
+                  # is a finding nobody acts on; this Job failing is what raises the alarm
+                  # (SbomDriftScannerFailing in prometheus-rules.yaml).
+                  if [ -f /work/findings ]; then
+                    echo "ERROR: drift or missing pods detected — see the report above." >&2
+                    exit 1
+                  fi
                   echo "Done."
               volumeMounts:
                 - name: work
