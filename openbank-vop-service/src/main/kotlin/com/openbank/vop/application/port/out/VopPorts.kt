@@ -41,7 +41,7 @@ interface VopSchemeRoutingPort {
     fun verifyExternal(iban: String, suppliedName: String): Uni<VopVerification>
 }
 
-/** Evidence store: one row per verification (ADR-0171 §6). Inputs are hashed, never plaintext. */
+/** Evidence store: one row per verification (ADR-0171 §7). Inputs are hashed, never plaintext. */
 interface VopVerificationRecordPort {
     fun record(
         ibanHash: String,

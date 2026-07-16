@@ -44,7 +44,7 @@ data class ValidVerifyPayeeRequest(val creditorIban: String, val creditorName: S
  *
  * [status] serialises to the EPC/admin-UI wire values `match` / `close_match` / `no_match` /
  * `no_data`. [matchedName] is present ONLY for `close_match` — never for `no_match`, which would
- * turn this endpoint into an account-holder-name disclosure oracle (ADR-0171 §5).
+ * turn this endpoint into an account-holder-name disclosure oracle (ADR-0171 §6).
  */
 data class VerifyPayeeResponse(
     val status: String,

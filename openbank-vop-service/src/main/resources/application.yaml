@@ -1,6 +1,8 @@
 quarkus:
   application:
     name: openbank-vop-service
+  redis:
+    hosts: ${QUARKUS_REDIS_HOSTS:redis://localhost:6379}
   http:
     port: 8149
     cors:
@@ -130,3 +132,11 @@ openbank:
     # Levenshtein budget for a typo-tolerant CLOSE_MATCH. A judgement call with no production data
     # behind it (ADR-0171) — tune from observed outcome metrics, not from taste.
     max-edit-distance: ${VOP_MAX_EDIT_DISTANCE:1}
+    rate-limit:
+      # The enumeration control, not throughput management (threat model §4.1). VoP truthfully
+      # answers "does this name hold this IBAN?" to any authenticated caller — that is the
+      # regulation's purpose — so rate is what separates a payer from an enumerator. Fails closed:
+      # if Valkey is unreachable we cannot prove a caller is under the limit, and a 429 degrades to
+      # `no_data` at the caller rather than blocking the payment.
+      enabled: ${VOP_RATE_LIMIT_ENABLED:true}
+      requests-per-minute: ${VOP_RATE_LIMIT_RPM:60}

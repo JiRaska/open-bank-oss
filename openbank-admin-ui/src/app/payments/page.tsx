@@ -23,7 +23,9 @@ const DOMESTIC_API     = '/api/domestic-payments'
 // this segment up verbatim against cluster discovery, so the old
 // `sepa-instant-service` key missed and pinned this panel to `not_deployed`.
 const SEPA_INSTANT_API = '/api/svc/sepa-instant'
-const VOP_API          = '/api/svc/openbank-vop-service'
+// The BFF key is the k8s Service name: in-cluster it resolves to
+// http://<key>.<namespace>.svc:<port> (see api/svc/[service]/[...path]/route.ts).
+const VOP_API          = '/api/svc/vop-service'
 
 type Tab = 'all' | 'domestic' | 'sepa' | 'sct-inst'
 type CreateType = 'domestic-standard' | 'domestic-instant' | 'sepa' | 'sct-inst'
@@ -205,7 +207,7 @@ function VopSection({ formData, setFormData }: { formData: SepaFormData; setForm
                 return
               }
               const body = await res.json() as { status: VopStatus; matchedName?: string | null }
-              // matchedName is only ever populated for close_match (ADR-0171 §5) — the backend
+              // matchedName is only ever populated for close_match (ADR-0171 §6) — the backend
               // will not echo a name on no_match, so there is nothing to guard here beyond
               // rendering what we are given.
               setFormData(prev => ({ ...prev, vopStatus: body.status, vopResult: body.matchedName ?? body.status }))

@@ -761,3 +761,55 @@ spec:
         metric: traces_spanmetrics_latency_bucket{service="openbank-sanctions-service",le="1"}
       total:
         metric: traces_spanmetrics_calls_total{service="openbank-sanctions-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-vop-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-vop-service
+spec:
+  target: "99.9"
+  window: 30d
+  # NOTE (ADR-0171): VoP fails OPEN, so an error here does not fail a payment — the caller
+  # renders no_data and the payment proceeds with a warning. This SLO therefore measures the
+  # health of a *regulatory* control (IPR Art. 5c: the payer must be told), not payment
+  # availability. Burning this budget means payers are going unwarned, which is the compliance
+  # failure, even while the money path itself looks green.
+  description: "openbank-vop-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-vop-service",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-vop-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-vop-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-vop-service
+spec:
+  target: "99"
+  window: 30d
+  # The fleet-uniform 1s threshold is tight for VoP: a verify is a two-hop lookup
+  # (account-service -> party-service, ADR-0171 §4) on the payer's critical path, so this is
+  # the SLO most likely to surface the latency cost the ADR accepts as a known negative.
+  description: "openbank-vop-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-vop-service",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-vop-service"}

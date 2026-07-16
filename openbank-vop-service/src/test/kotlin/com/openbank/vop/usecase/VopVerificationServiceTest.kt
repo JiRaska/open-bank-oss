@@ -85,7 +85,7 @@ class VopVerificationServiceTest {
         val result = verify(domesticIban, "Petr Novák")
 
         assertThat(result.outcome).isEqualTo(VopOutcome.NO_MATCH)
-        // The whole anti-oracle defence (ADR-0171 §5): an attacker who guesses wrong learns only
+        // The whole anti-oracle defence (ADR-0171 §6): an attacker who guesses wrong learns only
         // that they guessed wrong, never the real name.
         assertThat(result.matchedName).isNull()
     }

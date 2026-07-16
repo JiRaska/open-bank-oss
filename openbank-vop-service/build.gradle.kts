@@ -23,6 +23,10 @@ dependencies {
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
+    // Valkey-backed per-requester rate limit (ADR-0132 shape). Not throughput management: VoP is
+    // a name oracle by construction, so the rate is the enumeration control (threat model §4.1).
+    // Shared, not in-process — a local counter gives an attacker limit x replicas.
+    implementation(libs.quarkus.redis.client)
     // ADR-0171 §4: the payee name lives two hops away — account-service (IBAN -> partyId) then
     // party-service (partyId -> legal/trading name). account-service holds no holder name at all.
     // The oidc-client filter mints the openbank-services M2M token both hops require.

@@ -87,7 +87,7 @@ class VopVerificationService(
     /**
      * Turn a name comparison into a verification. The matched name rides along ONLY for
      * CLOSE_MATCH — on NO_MATCH we must never echo a name the payer did not already know
-     * (ADR-0171 §5); [VopVerification] enforces this invariant too.
+     * (ADR-0171 §6); [VopVerification] enforces this invariant too.
      */
     private fun decide(suppliedName: String, holderName: String): VopVerification =
         when (val outcome = policy.match(suppliedName, holderName)) {

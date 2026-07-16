@@ -17,7 +17,7 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * Evidence that a VoP check ran (ADR-0171 §6).
+ * Evidence that a VoP check ran (ADR-0171 §7).
  *
  * Note what is NOT here: the payee name and the IBAN in plaintext. Only their SHA-256 hashes are
  * stored. An evidence record needs to prove the control ran and what it decided — it does not need

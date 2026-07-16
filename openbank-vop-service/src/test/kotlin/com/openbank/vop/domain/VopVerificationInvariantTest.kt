@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test
 import java.time.Instant
 
 /**
- * The name-disclosure invariant (ADR-0171 §5) is the whole defence against VoP becoming an
+ * The name-disclosure invariant (ADR-0171 §6) is the whole defence against VoP becoming an
  * account-holder-name oracle, so it is enforced in the type, not left to callers to remember.
  */
 class VopVerificationInvariantTest {

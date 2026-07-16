@@ -16,7 +16,7 @@ import org.hibernate.reactive.mutiny.Mutiny
 import org.jboss.logging.Logger
 
 /**
- * Writes the VoP evidence row (ADR-0171 §6).
+ * Writes the VoP evidence row (ADR-0171 §7).
  *
  * Recording is best-effort **on purpose**: a failure to write the evidence row must not fail the
  * verification the payer is waiting on. VoP is fail-open (ADR-0171 §3), and turning a logging

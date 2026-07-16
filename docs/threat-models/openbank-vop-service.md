@@ -92,7 +92,7 @@ account-service/party-service (M2M, ROLE_SERVICE); vop-service → its own Postg
 
 ### Information disclosure — **the primary threat**
 - **Name enumeration: guess an IBAN, learn who holds it.** Mitigated by the response asymmetry
-  (ADR-0171 §5), enforced in `VopVerification`'s init block, not left to callers:
+  (ADR-0171 §6), enforced in `VopVerification`'s init block, not left to callers:
   - `no_match` returns the outcome **only** — a wrong guess teaches the attacker nothing but that
     they were wrong.
   - `close_match` returns the real name — but only to someone who already *nearly* knew it, which
@@ -112,16 +112,19 @@ account-service/party-service (M2M, ROLE_SERVICE); vop-service → its own Postg
 - **Residual, and it is real:** a `close_match` is still a name disclosure to a near-guesser. An
   attacker with a partial name ("J. Novák" + an IBAN) can convert it into the full name. This is
   inherent to the scheme — the regulation requires the payer be able to correct a near-miss — and
-  is why rate limiting is load-bearing rather than hygiene.
+  is why the rate limit (§4.1) is load-bearing rather than hygiene: it does not remove this
+  disclosure, it bounds how many times an attacker can attempt it.
 
 ### Denial of service
 - **VoP outage stalls the payment path.** Mitigated by design: VoP fails **open**. A lookup failure
   yields `no_data` + a warning, never a hold. `@CircuitBreaker`/`@Retry`/`@Timeout` (3 s) on the
   lookup adapter bound the blast radius; the two-hop lookup is the latency risk.
-- **VoP used to DoS account-service/party-service.** Every verify is two downstream calls. An
-  unthrottled VoP amplifies 1 request into 2 on services that are themselves money-path.
-  **Residual — the same rate limit that stops enumeration also stops this amplification; without
-  it, VoP is an amplification vector into account-service.**
+- **VoP used to DoS account-service/party-service.** Every verify is two downstream calls, so VoP
+  amplifies 1 request into 2 on services that are themselves money-path. Bounded by the same
+  per-requester rate limit that stops enumeration (§4.1) — the two threats share one control.
+  **Residual:** the limit is per *principal*, so N compromised or colluding principals still
+  amplify N-fold; there is no global cap. The circuit breaker on the lookup adapter is the
+  backstop that stops VoP hammering a downstream that is already failing.
 
 ### Elevation of privilege
 - **Owner-scoping bypass.** VoP deliberately does *not* send `X-Customer-Party-Id` to
@@ -140,9 +143,9 @@ account-service/party-service (M2M, ROLE_SERVICE); vop-service → its own Postg
 
 | # | Item | Status |
 |---|------|--------|
-| 1 | **Rate limiting is not yet enforced at the edge.** The single most important control in this document. Until it exists, an authenticated caller can enumerate names at whatever rate the service sustains. | **Open — blocking for any real deployment.** The audit (§4.3) notes the platform has no WAF or distributed edge rate limiting at all. |
+| 1 | **Per-requester rate limit** — the single most important control in this document. `VopRateLimitFilter` + `VopRateLimiter`: fixed 60s window keyed on `principal.name`, 60 req/min default, Valkey-backed so the window is shared across replicas (an in-process counter would give an attacker `limit × replicas` and reset on every pod roll). **Fails closed** — if Valkey is unreachable we cannot prove a caller is under the limit, so we 429. That does not contradict VoP failing open: a 429 makes the caller render `no_data`, so the payment still flows with a warning. | **Shipped.** Still no WAF / edge rate limiting at the platform level (audit §4.3), so this is an application-layer control only: it bounds an authenticated caller, not a volumetric attack on the endpoint. |
 | 2 | Per-requester anomaly detection (a principal whose `no_match` rate spikes is enumerating, not paying) — the `ix_vop_verification_verified_at` index exists to support it; the detector does not. | Open |
 | 3 | Requester side is a seam, not a capability: external IBANs always `no_data`. Not a security gap; a delivery gap (ADR-0171 §4). | Accepted |
 | 4 | Retention enforcement (13 months) has no scheduler yet — follow the ADR-0118 `*RetentionScheduler` pattern. | Open |
 | 5 | `CLOSE_MATCH` thresholds are unvalidated guesses. Too loose reassures fraud victims; too tight trains payers to click through warnings. Tune from outcome metrics. | Open |
-| 6 | Fraud reimbursement / liability shift (IPR Art. 5d) is out of scope (ADR-0171 §7). VoP produces the evidence a claims process would need, but no claims process exists. | Accepted, tracked |
+| 6 | Fraud reimbursement / liability shift (IPR Art. 5d) is out of scope (ADR-0171 §8). VoP produces the evidence a claims process would need, but no claims process exists. | Accepted, tracked |

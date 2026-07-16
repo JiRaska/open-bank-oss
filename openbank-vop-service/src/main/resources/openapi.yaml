@@ -82,7 +82,7 @@ components:
             The account-holder name. Present ONLY for close_match, where the scheme requires the
             payer to be able to correct a near-miss they already almost knew. NEVER returned for
             no_match — that asymmetry is what stops this endpoint being a name-disclosure oracle
-            (ADR-0171 §5).
+            (ADR-0171 §6).
         reason:
           type: string
           nullable: true

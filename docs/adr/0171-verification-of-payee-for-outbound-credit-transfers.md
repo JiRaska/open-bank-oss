@@ -77,16 +77,25 @@ the drift. `CLOSE_MATCH` covers the cases the scheme intends: token reordering (
   is where a real EPC routing adapter plugs in; we do not pretend to have one. This mirrors the
   honesty the clearing simulator applies to the rails.
 
-**5. Never echo a name we were not given.** On `NO_MATCH` the response carries the outcome only.
+**5. Rate is the enumeration control, not authorization.** VoP truthfully answers "does this name
+hold this IBAN?" to any authenticated caller — that is the regulation's purpose, and a payer must
+be able to check a payee they do not own, so authorization cannot bound the oracle. A per-requester
+Valkey-backed limit (`VopRateLimitFilter`, 60/min default, the ADR-0132 shape) is what separates a
+payer from an enumerator, and it **fails closed**: if the store is unreachable we cannot prove a
+caller is under the limit, so we 429. That does not contradict §3 — a 429 makes the caller render
+`no_data`, so the payment still flows with a warning. It also caps the 1→2 amplification into
+account-service and party-service.
+
+**6. Never echo a name we were not given.** On `NO_MATCH` the response carries the outcome only.
 On `CLOSE_MATCH` it may return the actual name, because the scheme requires the payer to be able
 to correct a near-miss, and the payer has already demonstrated near-knowledge of it. This
 asymmetry is the whole defence against turning VoP into an account-holder-name disclosure
 oracle — see the threat model.
 
-**6. Every verification is recorded.** One `vop_verification` row per request (outcome, hashed
+**7. Every verification is recorded.** One `vop_verification` row per request (outcome, hashed
 inputs, requester, timestamp) — evidence the control ran.
 
-**7. Fraud reimbursement is explicitly out of scope.** The IPR/PSD3 liability shift — the PSP
+**8. Fraud reimbursement is explicitly out of scope.** The IPR/PSD3 liability shift — the PSP
 bears the loss where it failed to warn — needs a claims process and a dispute path. The audit
 flags it as absent (`grep reimburs` = 0 hits); this ADR does not close it, and VoP alone must not
 be read as discharging it.

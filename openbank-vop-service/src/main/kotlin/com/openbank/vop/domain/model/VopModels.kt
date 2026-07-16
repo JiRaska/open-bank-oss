@@ -16,7 +16,7 @@ enum class VopOutcome {
     MATCH,
 
     /** Near-miss the payer can plausibly correct — reordered tokens, an initial, a legal-form
-     *  suffix, or a one-character typo. The actual name MAY be returned (ADR-0171 §5). */
+     *  suffix, or a one-character typo. The actual name MAY be returned (ADR-0171 §6). */
     CLOSE_MATCH,
 
     /** Both names are known and they are not the same name. The actual name is NEVER returned. */
@@ -47,7 +47,7 @@ enum class VopNoDataReason {
 
 /**
  * A completed verification. [matchedName] is populated only for [VopOutcome.CLOSE_MATCH] — the
- * asymmetry that stops VoP becoming an account-holder-name disclosure oracle (ADR-0171 §5).
+ * asymmetry that stops VoP becoming an account-holder-name disclosure oracle (ADR-0171 §6).
  */
 data class VopVerification(
     val outcome: VopOutcome,
@@ -57,7 +57,7 @@ data class VopVerification(
 ) {
     init {
         require(outcome == VopOutcome.CLOSE_MATCH || matchedName == null) {
-            "matchedName may only be disclosed for CLOSE_MATCH (ADR-0171 §5), not for $outcome"
+            "matchedName may only be disclosed for CLOSE_MATCH (ADR-0171 §6), not for $outcome"
         }
         require((outcome == VopOutcome.NO_DATA) == (noDataReason != null)) {
             "noDataReason must be set iff the outcome is NO_DATA, but outcome=$outcome reason=$noDataReason"
