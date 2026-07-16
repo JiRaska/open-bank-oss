@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.1...kyc-service-v0.10.2) (2026-07-16)
+
+
+### Bug Fixes
+
+* **party-service:** restore @PactBroker on provider verification (unblocks auto-deploy) ([#1166](https://github.com/JiRaska/open-bank-oss/issues/1166)) ([f9f28e5](https://github.com/JiRaska/open-bank-oss/commit/f9f28e5c700d5e98df59416aba4ac669e62e47a3))
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.0...kyc-service-v0.10.1) (2026-07-09)
 
 
