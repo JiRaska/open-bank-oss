@@ -61,7 +61,7 @@ metadata:
 spec:
   acme:
     server: https://acme-staging-v02.api.letsencrypt.org/directory
-    email: jiri@iraska.cz
+    email: jiri@open-bank.tech
     privateKeySecretRef:
       name: letsencrypt-staging-account
     solvers:
@@ -76,7 +76,7 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: jiri@iraska.cz
+    email: jiri@open-bank.tech
     privateKeySecretRef:
       name: letsencrypt-prod-account
     solvers:

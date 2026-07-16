@@ -11,5 +11,5 @@ AI-native governance with policy-gated agents and human-in-the-loop controls, an
 - [Platform](https://open-bank.tech/platform.html): Live governance (DORA/PSD2/GDPR), FinOps, BCP, AI governance, cloud architecture
 
 ## Contact
-- Email: jiri@iraska.cz
+- Email: hello@open-bank.tech
 - LinkedIn: https://www.linkedin.com/in/jiriraska

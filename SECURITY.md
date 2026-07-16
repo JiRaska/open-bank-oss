@@ -18,12 +18,20 @@ Only the `main` branch and the latest tagged release receive security fixes duri
 
 ### Channel
 
-Report privately via:
+Report privately via one of:
 
-**GitHub Security Advisories** (preferred):
-https://github.com/JiRaska/open-bank-oss/security/advisories/new
+1. **GitHub Security Advisories** (preferred):
+   https://github.com/JiRaska/open-bank-oss/security/advisories/new
 
-GitHub Security Advisories provide a private collaboration space where maintainers and reporters can discuss, develop, and publish coordinated fixes.
+   GitHub Security Advisories provide a private collaboration space where maintainers and reporters can discuss, develop, and publish coordinated fixes.
+
+2. **Email** (no GitHub account needed):
+   security@open-bank.tech
+
+   This mailbox is unencrypted by default. If your report involves live exploit details you consider highly sensitive, say so in your first message and we'll agree on a secure delivery method before you send them.
+
+Machine-readable contact metadata is published per [RFC 9116](https://www.rfc-editor.org/rfc/rfc9116) at
+[`open-bank.tech/.well-known/security.txt`](https://open-bank.tech/.well-known/security.txt).
 
 ### What to include
 
