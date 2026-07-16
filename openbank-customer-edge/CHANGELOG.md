@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.19.0...customer-edge-v0.20.0) (2026-07-16)
+
+
+### Features
+
+* **customer-edge:** serve published consent documents to the onboarding step ([#1254](https://github.com/JiRaska/open-bank-oss/issues/1254)) ([c1b6ac6](https://github.com/JiRaska/open-bank-oss/commit/c1b6ac65c8fbdaede5364f161a85e48f03073946))
+
+
+### Bug Fixes
+
+* **customer-edge:** accept a customer's access token to enrol a native passkey ([#1268](https://github.com/JiRaska/open-bank-oss/issues/1268)) ([fa1712c](https://github.com/JiRaska/open-bank-oss/commit/fa1712c561a7c3ab385abf8ce899f7bb83acbdfe))
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.18.0...customer-edge-v0.19.0) (2026-07-16)
 
 
