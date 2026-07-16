@@ -143,106 +143,108 @@
         <error line="45" column="29" source="standard:annotation" />
         <error line="45" column="58" source="standard:annotation" />
         <error line="46" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="46" column="37" source="standard:annotation" />
+        <error line="46" column="40" source="standard:annotation" />
         <error line="47" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="47" column="33" source="standard:annotation" />
-        <error line="50" column="8" source="standard:annotation" />
-        <error line="52" column="8" source="standard:annotation" />
-        <error line="52" column="43" source="standard:annotation" />
-        <error line="53" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="53" column="60" source="standard:annotation" />
+        <error line="47" column="37" source="standard:annotation" />
+        <error line="48" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="48" column="33" source="standard:annotation" />
+        <error line="51" column="8" source="standard:annotation" />
+        <error line="53" column="8" source="standard:annotation" />
+        <error line="53" column="43" source="standard:annotation" />
         <error line="54" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="54" column="33" source="standard:annotation" />
+        <error line="54" column="60" source="standard:annotation" />
         <error line="55" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="55" column="34" source="standard:annotation" />
+        <error line="55" column="33" source="standard:annotation" />
         <error line="56" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="56" column="32" source="standard:annotation" />
+        <error line="56" column="34" source="standard:annotation" />
         <error line="57" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="57" column="63" source="standard:annotation" />
+        <error line="57" column="32" source="standard:annotation" />
         <error line="58" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="58" column="68" source="standard:annotation" />
+        <error line="58" column="63" source="standard:annotation" />
         <error line="59" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="59" column="62" source="standard:annotation" />
+        <error line="59" column="68" source="standard:annotation" />
         <error line="60" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="60" column="60" source="standard:annotation" />
+        <error line="60" column="62" source="standard:annotation" />
         <error line="61" column="1" source="standard:spacing-between-declarations-with-annotations" />
         <error line="61" column="60" source="standard:annotation" />
         <error line="62" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="62" column="43" source="standard:annotation" />
+        <error line="62" column="60" source="standard:annotation" />
         <error line="63" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="63" column="65" source="standard:annotation" />
+        <error line="63" column="43" source="standard:annotation" />
         <error line="64" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="64" column="33" source="standard:annotation" />
-        <error line="67" column="8" source="standard:annotation" />
-        <error line="69" column="8" source="standard:annotation" />
-        <error line="69" column="43" source="standard:annotation" />
-        <error line="70" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="70" column="67" source="standard:annotation" />
+        <error line="64" column="65" source="standard:annotation" />
+        <error line="65" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="65" column="33" source="standard:annotation" />
+        <error line="68" column="8" source="standard:annotation" />
+        <error line="70" column="8" source="standard:annotation" />
+        <error line="70" column="43" source="standard:annotation" />
         <error line="71" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="71" column="60" source="standard:annotation" />
+        <error line="71" column="67" source="standard:annotation" />
         <error line="72" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="72" column="32" source="standard:annotation" />
+        <error line="72" column="60" source="standard:annotation" />
         <error line="73" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="73" column="34" source="standard:annotation" />
+        <error line="73" column="32" source="standard:annotation" />
         <error line="74" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="74" column="32" source="standard:annotation" />
+        <error line="74" column="34" source="standard:annotation" />
         <error line="75" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="75" column="62" source="standard:annotation" />
+        <error line="75" column="32" source="standard:annotation" />
         <error line="76" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="76" column="53" source="standard:annotation" />
+        <error line="76" column="62" source="standard:annotation" />
         <error line="77" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="77" column="60" source="standard:annotation" />
+        <error line="77" column="53" source="standard:annotation" />
         <error line="78" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="78" column="43" source="standard:annotation" />
+        <error line="78" column="60" source="standard:annotation" />
         <error line="79" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="79" column="13" source="standard:argument-list-wrapping" />
-        <error line="79" column="31" source="standard:argument-list-wrapping" />
-        <error line="79" column="32" source="standard:annotation" />
-        <error line="79" column="45" source="standard:argument-list-wrapping" />
-        <error line="79" column="60" source="standard:argument-list-wrapping" />
-        <error line="79" column="61" source="standard:annotation" />
-        <error line="79" column="121" source="standard:max-line-length" />
+        <error line="79" column="43" source="standard:annotation" />
         <error line="80" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="80" column="34" source="standard:annotation" />
+        <error line="80" column="13" source="standard:argument-list-wrapping" />
+        <error line="80" column="31" source="standard:argument-list-wrapping" />
+        <error line="80" column="32" source="standard:annotation" />
+        <error line="80" column="45" source="standard:argument-list-wrapping" />
+        <error line="80" column="60" source="standard:argument-list-wrapping" />
+        <error line="80" column="61" source="standard:annotation" />
+        <error line="80" column="121" source="standard:max-line-length" />
         <error line="81" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="81" column="13" source="standard:argument-list-wrapping" />
-        <error line="81" column="28" source="standard:argument-list-wrapping" />
-        <error line="81" column="29" source="standard:annotation" />
-        <error line="81" column="42" source="standard:argument-list-wrapping" />
-        <error line="81" column="57" source="standard:argument-list-wrapping" />
-        <error line="81" column="58" source="standard:annotation" />
-        <error line="81" column="121" source="standard:max-line-length" />
+        <error line="81" column="34" source="standard:annotation" />
         <error line="82" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="82" column="63" source="standard:annotation" />
+        <error line="82" column="13" source="standard:argument-list-wrapping" />
+        <error line="82" column="28" source="standard:argument-list-wrapping" />
+        <error line="82" column="29" source="standard:annotation" />
+        <error line="82" column="42" source="standard:argument-list-wrapping" />
+        <error line="82" column="57" source="standard:argument-list-wrapping" />
+        <error line="82" column="58" source="standard:annotation" />
+        <error line="82" column="121" source="standard:max-line-length" />
         <error line="83" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="83" column="33" source="standard:annotation" />
-        <error line="86" column="8" source="standard:annotation" />
-        <error line="88" column="8" source="standard:annotation" />
-        <error line="88" column="43" source="standard:annotation" />
-        <error line="89" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="89" column="34" source="standard:annotation" />
+        <error line="83" column="63" source="standard:annotation" />
+        <error line="84" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="84" column="33" source="standard:annotation" />
+        <error line="87" column="8" source="standard:annotation" />
+        <error line="89" column="8" source="standard:annotation" />
+        <error line="89" column="43" source="standard:annotation" />
         <error line="90" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="90" column="35" source="standard:annotation" />
+        <error line="90" column="34" source="standard:annotation" />
         <error line="91" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="91" column="32" source="standard:annotation" />
+        <error line="91" column="35" source="standard:annotation" />
         <error line="92" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="92" column="43" source="standard:annotation" />
+        <error line="92" column="32" source="standard:annotation" />
         <error line="93" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="93" column="66" source="standard:annotation" />
+        <error line="93" column="43" source="standard:annotation" />
         <error line="94" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="94" column="33" source="standard:annotation" />
+        <error line="94" column="66" source="standard:annotation" />
         <error line="95" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="95" column="31" source="standard:annotation" />
+        <error line="95" column="33" source="standard:annotation" />
         <error line="96" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="96" column="13" source="standard:argument-list-wrapping" />
-        <error line="96" column="28" source="standard:argument-list-wrapping" />
-        <error line="96" column="29" source="standard:annotation" />
-        <error line="96" column="42" source="standard:argument-list-wrapping" />
-        <error line="96" column="57" source="standard:argument-list-wrapping" />
-        <error line="96" column="58" source="standard:annotation" />
-        <error line="96" column="121" source="standard:max-line-length" />
+        <error line="96" column="31" source="standard:annotation" />
         <error line="97" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="97" column="33" source="standard:annotation" />
+        <error line="97" column="13" source="standard:argument-list-wrapping" />
+        <error line="97" column="28" source="standard:argument-list-wrapping" />
+        <error line="97" column="29" source="standard:annotation" />
+        <error line="97" column="42" source="standard:argument-list-wrapping" />
+        <error line="97" column="57" source="standard:argument-list-wrapping" />
+        <error line="97" column="58" source="standard:annotation" />
+        <error line="97" column="121" source="standard:max-line-length" />
+        <error line="98" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="98" column="33" source="standard:annotation" />
     </file>
     <file name="src/main/kotlin/com/openbank/interest/infrastructure/persistence/mapper/InterestMapper.kt">
         <error line="7" column="1" source="standard:no-wildcard-imports" />
