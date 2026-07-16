@@ -13,9 +13,8 @@ Služba dodržuje hexagonální architekturu (porty a adaptéry) předepsanou [A
         │       │                   ├─► SanctionsScreeningPort ─────────►│──► sanctions-service
         │       │                   ├─► AmlCasePort ────────────────────►│──► aml-service
         │       │                   ├─► SctInstPaymentRepository ───────►│──► PostgreSQL
-        │       │                   └─► SctInstEventPublisher / outbox ─►│
-        │       │                                                        │
-        │  OutboxDispatcher (@Scheduled 5s) ──► Kafka emitter ──────────►│──► openbank.sepa.instant.events
+        │       │                   └─► SctInstEventPublisher ──────────►│──► openbank.sepa.instant.events
+        │       │                       (přímý Kafka emitter, bez outboxu)│
         └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -36,7 +35,7 @@ Služba dodržuje hexagonální architekturu (porty a adaptéry) předepsanou [A
 Use-cases a porty.
 
 - **Vstupní porty** (`port/in`): `SubmitSctInstPaymentUseCase`, `GetSctInstPaymentUseCase`, `RecallSctInstPaymentUseCase` + `SubmitSctInstCommand`.
-- **Výstupní porty** (`port/out`): `SctInstPaymentRepository`, `SctInstEventPublisher`, `SanctionsScreeningPort` (+ `ScreeningUnavailableException`), `AmlCasePort` (+ `OpenAmlCaseCommand`, `AmlCaseRiskLevel`), `SctInstOutboxPort`.
+- **Výstupní porty** (`port/out`): `SctInstPaymentRepository`, `SctInstEventPublisher`, `SanctionsScreeningPort` (+ `ScreeningUnavailableException`), `AmlCasePort` (+ `OpenAmlCaseCommand`, `AmlCaseRiskLevel`).
 - `usecase/SctInstPaymentService` — orchestruje sankční bránu (viz tok níže).
 
 ### Adaptéry (`infrastructure/`)
@@ -44,9 +43,8 @@ Use-cases a porty.
 - `rest/ExceptionMappers` — `NotFoundException → 404`, `BadRequestException → 400`.
 - `client/SanctionsScreeningAdapter` + `SanctionsServiceClient` — REST klient k sanctions-service; mapuje vzdálený stav na lokální `ScreeningMatchStatus`, při nedostupnosti vyhodí `ScreeningUnavailableException`.
 - `client/AmlCaseAdapter` + `AmlServiceClient` — REST klient k case store aml-service.
-- `persistence/` — `SctInstPaymentEntity` / `SctInstOutboxEntity`, Panache reaktivní repozitáře, `SctInstMapper`.
-- `outbox/SctInstOutboxDispatcher` — plánovaný poller.
-- `kafka/` — `KafkaSctInstEventPublisher`, `KafkaSctInstOutboxEventPublisher`.
+- `persistence/` — `SctInstPaymentEntity`, Panache reaktivní repozitář, `SctInstMapper`.
+- `kafka/` — `KafkaSctInstEventPublisher`.
 - `authz/AuthzProducer` — zapojuje libs authz klienta (ADR-0034).
 
 ## Tok sankční brány (ADR-0032, adaptace na okamžitou linku)
@@ -64,9 +62,9 @@ Při `submit(command)`:
 
 Otevření AML případu je **best-effort** (`openCaseQuietly`): výpadek case store zaloguje chybu, ale nikdy nesmí překlopit již vynesený sankční verdikt.
 
-## Tok outbox → Kafka
+## Publikování do Kafky
 
-Doménové události se ukládají do `sct_inst_outbox` ve stejné transakci jako agregát. `SctInstOutboxDispatcher` běží `@Scheduled(every = "5s", delayed = "5s", concurrentExecution = SKIP)`, načte až `BATCH_SIZE = 25` zpracovatelných řádků uvnitř Panache session, odešle každý payload do kanálu `sct-inst-events-out` (Kafka topic `openbank.sepa.instant.events`), pak řádek označí jako odeslaný nebo neúspěšný. To dává at-least-once doručení oddělené od request cesty.
+Události životního cyklu (`SctInstPaymentSubmitted`/`Settled`/`Rejected`/…) publikuje `SctInstPaymentService` přímo při každém přechodu přes `SctInstEventPublisher` → `KafkaSctInstEventPublisher`, který je odesílá do kanálu `sct-inst-events-out` (Kafka topic `openbank.sepa.instant.events`). Jde o přímý, synchronní emitter — ne o transakční outbox — takže doručení není atomické s DB zápisem. Dřívější transakční outbox pipeline (`SctInstOutboxPort`/`SctInstOutboxDispatcher`) byla postavená, ale nikdy napojená na žádné reálné volání, a byla odstraněna (issue #1034); reálně používaná pipeline byla vždy `KafkaSctInstEventPublisher`.
 
 ## Odolnost a rate limiting
 

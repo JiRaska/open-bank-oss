@@ -36,7 +36,7 @@ Pure Kotlin, no Quarkus.
 Use-cases and ports.
 
 - **Inbound ports** (`port/in`): `SubmitSctInstPaymentUseCase`, `GetSctInstPaymentUseCase`, `RecallSctInstPaymentUseCase` + `SubmitSctInstCommand`.
-- **Outbound ports** (`port/out`): `SctInstPaymentRepository`, `SctInstEventPublisher`, `SanctionsScreeningPort` (+ `ScreeningUnavailableException`), `AmlCasePort` (+ `OpenAmlCaseCommand`, `AmlCaseRiskLevel`), `SctInstOutboxPort`.
+- **Outbound ports** (`port/out`): `SctInstPaymentRepository`, `SctInstEventPublisher`, `SanctionsScreeningPort` (+ `ScreeningUnavailableException`), `AmlCasePort` (+ `OpenAmlCaseCommand`, `AmlCaseRiskLevel`).
 - `usecase/SctInstPaymentService` — orchestrates the screening gate (see flow below).
 
 ### Adapters (`infrastructure/`)
@@ -44,9 +44,8 @@ Use-cases and ports.
 - `rest/ExceptionMappers` — `NotFoundException → 404`, `BadRequestException → 400`.
 - `client/SanctionsScreeningAdapter` + `SanctionsServiceClient` — REST client to sanctions-service; maps remote status onto the local `ScreeningMatchStatus`, raises `ScreeningUnavailableException` when unreachable.
 - `client/AmlCaseAdapter` + `AmlServiceClient` — REST client to aml-service case store.
-- `persistence/` — `SctInstPaymentEntity` / `SctInstOutboxEntity`, Panache reactive repositories, `SctInstMapper`.
-- `outbox/SctInstOutboxDispatcher` — scheduled poller.
-- `kafka/` — `KafkaSctInstEventPublisher`, `KafkaSctInstOutboxEventPublisher`.
+- `persistence/` — `SctInstPaymentEntity`, Panache reactive repository, `SctInstMapper`.
+- `kafka/` — `KafkaSctInstEventPublisher`.
 - `authz/AuthzProducer` — wires the libs authz client (ADR-0034).
 
 ## Screening gate flow (ADR-0032, instant-rail adaptation)
@@ -64,9 +63,9 @@ On `submit(command)`:
 
 Opening the AML case is **best-effort** (`openCaseQuietly`): a case-store outage logs an error but must never flip the screening verdict already rendered.
 
-## Outbox → Kafka flow
+## Kafka publishing
 
-Domain events are persisted to `sct_inst_outbox` in the same transaction as the aggregate. `SctInstOutboxDispatcher` runs `@Scheduled(every = "5s", delayed = "5s", concurrentExecution = SKIP)`, reads up to `BATCH_SIZE = 25` processable rows inside a Panache session, emits each payload to the `sct-inst-events-out` channel (Kafka topic `openbank.sepa.instant.events`), then marks the row sent or failed. This gives at-least-once delivery decoupled from the request path.
+Lifecycle events (`SctInstPaymentSubmitted`/`Settled`/`Rejected`/…) are published directly from `SctInstPaymentService` at each transition via `SctInstEventPublisher` → `KafkaSctInstEventPublisher`, which emits to the `sct-inst-events-out` channel (Kafka topic `openbank.sepa.instant.events`). This is a direct, synchronous-emitter publish — not a transactional outbox — so delivery is not atomic with the DB write. An earlier transactional-outbox pipeline (`SctInstOutboxPort`/`SctInstOutboxDispatcher`) was built but never wired to a real call site and has been removed (issue #1034); `KafkaSctInstEventPublisher` was always the pipeline actually in use.
 
 ## Resilience & rate limiting
 
