@@ -1,0 +1,45 @@
+%% title: VoP outcome decision — and what each answer discloses
+flowchart TD
+    START([POST /vop/verify<br/>creditorIban + creditorName]) --> RATE{under the<br/>rate limit?}
+    RATE -->|no, or Valkey down| R429["429 — fails CLOSED<br/><i>caller renders no_data;<br/>the payment still proceeds</i>"]
+    RATE -->|yes| IBAN{IBAN valid?<br/>Iban.of check digits}
+    IBAN -->|no| R400["400 — malformed<br/><i>a statement about the caller's own input;<br/>nothing of ours leaks</i>"]
+    IBAN -->|yes| DOMESTIC{domestic IBAN?<br/>openbank.vop.domestic-iban-prefixes}
+
+    DOMESTIC -->|no| SCHEME["VopSchemeRoutingPort"]
+    SCHEME --> NOSCHEME["<b>no_data</b><br/>NO_SCHEME_CONNECTIVITY<br/><i>no EPC link — we say so<br/>rather than fabricate</i>"]
+
+    DOMESTIC -->|yes| LOOKUP["account-service → partyId<br/>party-service → legalName"]
+    LOOKUP -->|"timeout / 5xx / circuit open"| UNAVAIL["<b>no_data</b><br/>LOOKUP_UNAVAILABLE<br/><i>fails OPEN — never a hold,<br/>never a silent match</i>"]
+    LOOKUP -->|"no name held"| NOTFOUND["<b>no_data</b><br/>ACCOUNT_NOT_FOUND<br/><i>200, never 404 — a 404 would say<br/>'not our account'</i>"]
+    LOOKUP -->|name resolved| NORM["VopNameMatchPolicy<br/>MatchKey.normalize:<br/>NFD, strip diacritics,<br/>lowercase, collapse space"]
+
+    NORM --> EXACT{normalised<br/>equal?}
+    EXACT -->|yes| MATCH["<b>match</b><br/><i>no name returned —<br/>the payer supplied it</i>"]
+    EXACT -->|no| LEGAL{equal after<br/>stripping a trailing<br/>legal form?<br/>'Acme s.r.o.' vs 'Acme'}
+    LEGAL -->|yes| MATCH
+    LEGAL -->|no| NEAR{near miss?}
+
+    NEAR -->|"tokens reordered<br/>'Raška Jiří' vs 'Jiří Raška'"| CLOSE
+    NEAR -->|"an initial<br/>'J. Raška' vs 'Jiří Raška'"| CLOSE
+    NEAR -->|"one dropped token,<br/>≥2 left to corroborate"| CLOSE
+    NEAR -->|"≤1 character typo"| CLOSE
+    NEAR -->|none of these| NOMATCH
+
+    CLOSE["<b>close_match</b><br/><i>returns the real name —<br/>only to someone who<br/>already nearly knew it</i>"]
+    NOMATCH["<b>no_match</b><br/><i>outcome ONLY — a wrong guess<br/>teaches an attacker nothing<br/>but that they were wrong</i>"]
+
+    classDef discloses fill:#fde68a,stroke:#d97706,color:#000
+    classDef silent fill:#dcfce7,stroke:#16a34a,color:#000
+    classDef nodata fill:#e0e7ff,stroke:#6366f1,color:#000
+    classDef refused fill:#fee2e2,stroke:#dc2626,color:#000
+    class CLOSE discloses
+    class MATCH,NOMATCH silent
+    class NOSCHEME,UNAVAIL,NOTFOUND nodata
+    class R429,R400 refused
+
+%% The colouring is the point: exactly ONE leaf (close_match) discloses an
+%% account-holder name, and only to a caller who already nearly knew it. Every
+%% no_data leaf is a truthful "we could not check", never a silent match —
+%% under IPR Art. 5c a truthful "unverified" discharges the duty to inform in a
+%% way a fabricated "match" would not.
