@@ -11,6 +11,7 @@ import com.openbank.ledger.application.port.out.TieOutRunRepository
 import com.openbank.ledger.domain.model.GlAccount
 import com.openbank.ledger.domain.model.TieOutRunRecord
 import com.openbank.ledger.domain.model.TieOutRunStatus
+import com.openbank.libs.domain.identifiers.Ids
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.scheduler.Scheduled
@@ -21,7 +22,6 @@ import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import java.util.UUID
 
 /**
  * Daily sub-ledger tie-out check (ADR-0039 Phase B). Runs at 06:00 CET after the previous
@@ -112,7 +112,9 @@ class TieOutScheduler(
         try {
             runRepository.save(
                 TieOutRunRecord(
-                    id = UUID.randomUUID(),
+                    // Durable, time-ordered run id (ADR-0106): rows are written chronologically
+                    // and read newest-first, so UUIDv7 keeps the B-tree insert local.
+                    id = Ids.newId(),
                     asOf = asOf,
                     runAt = Instant.now(clock),
                     status = status,

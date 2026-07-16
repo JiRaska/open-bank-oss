@@ -4,6 +4,7 @@
 
 package com.openbank.ledger.infrastructure.persistence.entity
 
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntityBase
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
@@ -19,7 +20,7 @@ import java.util.UUID
 class TieOutRunEntity : PanacheEntityBase {
     @Id
     @Column(name = "id")
-    var id: UUID = UUID.randomUUID()
+    var id: UUID = Ids.newId()
 
     @Column(name = "as_of", nullable = false)
     var asOf: LocalDate = LocalDate.EPOCH
