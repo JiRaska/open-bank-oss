@@ -13,7 +13,7 @@
 # unattested image is admitted never, so the gap only surfaces when a pod happens to
 # reschedule, long after the push that caused it.
 #
-# Two invariants this helper exists to hold:
+# Three invariants this helper exists to hold:
 #
 #   1. --platform is ALWAYS passed to `trivy image`. trivy defaults to linux/amd64 for
 #      REMOTE (registry) scans regardless of host arch. Fleet images are built
@@ -23,6 +23,13 @@
 #   2. A failed attestation is FATAL (return 1). The image is verified with
 #      `cosign verify-attestation` after the fact, so "attest exited 0" is not taken
 #      on trust. A silently-unattested image is an image that cannot be deployed.
+#   3. The SBOM is proven substantive BEFORE it is attested, and the post-attest verify
+#      is bound to the envelope THIS run pushed. `cosign attest` APPENDS an envelope to
+#      the image's `.att` tag rather than replacing, and `cosign verify-attestation`
+#      passes when ANY envelope verifies — so an unqualified verify can be reporting on
+#      a previous build's good SBOM while the envelope just pushed is empty. cosign v2
+#      offers no "verify the newest envelope" flag (--policy is any-match too), so the
+#      binding is done here, on the CycloneDX serialNumber trivy mints per run.
 #
 # cosign v2 is pinned ON PURPOSE: kyverno 3.2.6 discovers signatures/attestations only
 # via the legacy `sha256-<digest>.sig` / `.att` tag scheme. cosign v3 writes OCI 1.1
@@ -58,14 +65,54 @@ resolve_cosign_v2() {
   printf '%s\n' "$bin"
 }
 
+# assert_cyclonedx_sbom <sbom-file>
+#
+# Fail unless the file is a substantive CycloneDX document. trivy can exit 0 having
+# written a truncated or component-less BOM (a partial scan, a disk-full write, a broken
+# image index); attesting one produces provenance that is technically present and
+# substantively worthless — exactly the "silently-bad provenance step" this helper exists
+# to stop. Echoes the BOM serialNumber on success; it is unique per trivy run, which is
+# what lets the post-attest verify below bind to THIS run's envelope.
+assert_cyclonedx_sbom() {
+  local sbom="$1" format components serial
+
+  if ! jq -e . "$sbom" >/dev/null 2>&1; then
+    echo "ERROR: ${sbom} is not valid JSON — trivy produced a truncated SBOM." >&2
+    return 1
+  fi
+  format="$(jq -r '.bomFormat // empty' "$sbom")"
+  if [ "$format" != "CycloneDX" ]; then
+    echo "ERROR: ${sbom} has bomFormat='${format}', expected 'CycloneDX'." >&2
+    return 1
+  fi
+  # Type-check before counting: jq's `length` is defined on every type, so a scalar
+  # `.components` ("scan_failed", 5) would report a non-zero "count" and sail through.
+  components="$(jq -r 'if (.components | type) == "array" then (.components | length) else 0 end' "$sbom")"
+  if [ "$components" -lt 1 ]; then
+    echo "ERROR: ${sbom} has no components array, or it is empty — refusing to attest" >&2
+    echo "       an SBOM that inventories nothing." >&2
+    return 1
+  fi
+  serial="$(jq -r '.serialNumber // empty' "$sbom")"
+  if [ -z "$serial" ]; then
+    echo "ERROR: ${sbom} carries no serialNumber — the attestation could not be bound" >&2
+    echo "       to this run, so it would not be provable. Refusing to attest." >&2
+    return 1
+  fi
+
+  echo "    SBOM sane: ${components} components, serialNumber=${serial}" >&2
+  printf '%s\n' "$serial"
+}
+
 # cosign_attest_sbom <image-ref> <platform> [cosign-bin]
 #
-# Generate a CycloneDX SBOM for the image with trivy, bind it to the image digest with
-# `cosign attest`, then PROVE it landed with `cosign verify-attestation`. Returns 0 only
-# if the attestation is verifiable afterwards; returns 1 on any failure.
+# Generate a CycloneDX SBOM for the image with trivy, check it is substantive, bind it to
+# the image digest with `cosign attest`, then PROVE that this run's envelope landed with
+# `cosign verify-attestation`. Returns 0 only if that envelope is verifiable afterwards;
+# returns 1 on any failure.
 cosign_attest_sbom() {
   local image="$1" platform="$2" bin="${3:-}"
-  local sbom
+  local sbom serial envelopes
 
   if [ -z "$image" ] || [ -z "$platform" ]; then
     echo "ERROR: cosign_attest_sbom requires <image> <platform>." >&2
@@ -83,6 +130,10 @@ cosign_attest_sbom() {
     echo "ERROR: trivy unavailable — cannot generate the SBOM for ${image}." >&2
     return 1
   fi
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "ERROR: jq unavailable — cannot check the SBOM or bind the attestation to it." >&2
+    return 1
+  fi
 
   sbom="${TMPDIR:-/tmp}/$(echo "$image" | tr '/:@' '___').cdx.json"
 
@@ -92,6 +143,10 @@ cosign_attest_sbom() {
     echo "ERROR: trivy SBOM generation failed for ${image} (platform=${platform})." >&2
     return 1
   fi
+
+  # Check the SBOM BEFORE attesting: a junk predicate that reaches `cosign attest` is
+  # permanent — the envelope cannot be un-pushed, only outlived by the next real build.
+  serial="$(assert_cyclonedx_sbom "$sbom")" || return 1
 
   echo "==> cosign attest (cyclonedx) ${image}"
   if ! COSIGN_YES=true "$bin" attest --key "$COSIGN_KEY" --type cyclonedx \
@@ -103,13 +158,28 @@ cosign_attest_sbom() {
   # Never trust `attest` exit 0 alone: verify the attestation is actually discoverable
   # the same way kyverno will discover it at admission.
   echo "==> cosign verify-attestation ${image}"
-  if ! COSIGN_YES=true "$bin" verify-attestation --key "$COSIGN_KEY" --type cyclonedx \
-       "$image" >/dev/null 2>&1; then
+  if ! envelopes="$(COSIGN_YES=true "$bin" verify-attestation --key "$COSIGN_KEY" \
+       --type cyclonedx "$image" 2>/dev/null)"; then
     echo "ERROR: cosign verify-attestation failed for ${image} — the attestation did not land." >&2
     return 1
   fi
 
-  echo "    attested + verified SBOM (key=${COSIGN_KEY})"
+  # …and do not trust that a PASS is about this run. verify-attestation prints every
+  # envelope that verified, one JSON line each, and exits 0 if ANY of them did; since
+  # `attest` appends, an older good envelope covers for a new bad one. Require the
+  # serialNumber of the SBOM just generated to appear among them. `try … catch empty`
+  # keeps a pre-existing undecodable envelope from failing the run on someone else's
+  # behalf — only the absence of OUR serial is fatal.
+  if ! printf '%s\n' "$envelopes" | jq -e -s --arg serial "$serial" \
+       '[ .[] | try (.payload | @base64d | fromjson | .predicate.serialNumber) catch empty ]
+        | index($serial) != null' >/dev/null 2>&1; then
+    echo "ERROR: cosign verify-attestation for ${image} verified no envelope carrying this" >&2
+    echo "       run's SBOM (serialNumber=${serial}). The attestation that verified belongs" >&2
+    echo "       to an earlier build — this image's own provenance did not land." >&2
+    return 1
+  fi
+
+  echo "    attested + verified SBOM (key=${COSIGN_KEY}, serialNumber=${serial})"
   return 0
 }
 

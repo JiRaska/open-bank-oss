@@ -147,7 +147,21 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
 - **A provenance failure must fail the build that caused it.** `continue-on-error` /
   `|| echo "::warning::"` on a sign/attest step buys a green deploy that produces an
   undeployable image — the damage lands days later on whoever is on call, not on the author.
-  Verify with `cosign verify-attestation` after attesting; never trust `attest` exit 0 alone.
+  Verify with `cosign verify-attestation` after attesting; never trust `attest` exit 0 alone —
+  but see the next bullet: an unqualified verify does not prove YOUR envelope is the good one.
+- **`cosign attest` is ADDITIVE, so a green `verify-attestation` is not necessarily about your
+  build.** Each attest APPENDS an envelope to the image's `.att` tag instead of replacing, and
+  `verify-attestation` exits 0 if **any** envelope verifies. cosign v2 has no strict/newest-envelope
+  flag (`--policy` is any-match too — it errors only when *zero* attestations match). So a trivy run
+  that emits a truncated SBOM and still exits 0 pushes a junk predicate, and the verify passes
+  against an *earlier* build's envelope: green build, image shipped with provenance that is
+  technically present and substantively worthless. Proven live — an image carrying both a
+  549-component SBOM and a 2-byte `{}` predicate verifies PASS. Two layers, both needed: check the
+  SBOM BEFORE attesting (parses as JSON, `bomFormat == "CycloneDX"`, non-zero `components` — a junk
+  envelope, once pushed, can never be un-pushed, only outlived by the next real build), and bind the
+  post-attest verify to the run by requiring the CycloneDX `serialNumber` trivy minted for THIS SBOM
+  to appear among the envelopes that verified. `openbank-infra/scripts/lib/cosign-attest.sh` does
+  both — source it, never hand-roll `attest` + `verify`.
 
 ### OPA / Rego policies (ADR-0031/ADR-0034)
 - **Editing any shared policy source ripples the OPA bundle checksum of every service.** Each
