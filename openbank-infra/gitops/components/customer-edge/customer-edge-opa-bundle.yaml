@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: customer-edge
     app.kubernetes.io/part-of: customer-edge
   annotations:
-    openbank.tech/policy-checksum: "96a52341b116fd98"
+    openbank.tech/policy-checksum: "743e1d9301e23601"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -164,10 +164,21 @@ data:
     	startswith(input.action, "customer.")
     }
 
-    # The customer-edge's M2M identity calling notification-service on a customer's behalf.
-    # The edge authenticates the CUSTOMER itself (customer-self-action above + per-handler
-    # IDOR guards) and injects the authoritative partyId query param the downstream handlers
+    # The customer-edge's M2M identity calling notification-, sca- or document-service on a
+    # customer's behalf. The edge authenticates the CUSTOMER itself (customer-self-action above
+    # + per-handler IDOR guards) and injects the authoritative partyId the downstream handlers
     # scope by — so this check only needs to recognise the edge principal.
+    #
+    # The `document.` family covers the onboarding framework agreement (ADR-0169/0170): the
+    # app reads the PDF bytes and signs them through CustomerDocumentResource, which fetches
+    # the metadata first and 404s a non-owner before ever streaming content — the per-handler
+    # IDOR guard this rule relies on. `document.read` (metadata) previously slipped through
+    # operator-read-any by accident of its name while `document.readContent` (the bytes) fell
+    # outside that rule's {list, read} verb set and was denied, so the sign screen rendered
+    # "getDocumentContent failed: 403" with no way to complete onboarding. Granting the family
+    # to the edge identity — rather than widening operator-read-any's verb taxonomy — keeps the
+    # reach on the edge principal instead of handing every ROLE_OPERATOR staff session the
+    # contents of any customer's signed agreement.
     #
     # NOTE (found during ADR-0034 Phase 5 rollout, issue #266): AuthorizeInterceptor never
     # produces principal.type == "SERVICE" — M2M calls authenticate with a Keycloak
@@ -190,7 +201,7 @@ data:
     allowed_reasons contains "edge-service-notification" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-edge"
-    	some family in {"notification.", "device."}
+    	some family in {"notification.", "device.", "document."}
     	startswith(input.action, family)
     }
 
