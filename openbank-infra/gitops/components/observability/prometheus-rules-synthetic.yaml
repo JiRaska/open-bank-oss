@@ -12,14 +12,37 @@ spec:
   groups:
     - name: openbank.synthetic
       rules:
+        # Generic edge-probe failure. The OIDC-discovery job is excluded here and handled
+        # by OIDCDiscoveryDown below — same condition, but that alert can name the actual
+        # blast radius (login is broken) and the right remediation, and excluding it keeps
+        # one outage from paging twice under two alertnames.
         - alert: SyntheticProbeDown
-          expr: probe_success == 0
+          expr: probe_success{job!="synthetic-oidc-discovery"} == 0
           for: 3m
           labels:
             severity: critical
           annotations:
             summary: "Synthetic probe failing: {{ $labels.instance }}"
             description: "Blackbox probe to {{ $labels.instance }} has failed for >3m — the public endpoint is down or unreachable from in-cluster."
+        # The login alert (probes-synthetic.yaml: synthetic-oidc-discovery). Fires when a
+        # Keycloak realm stops serving its OIDC discovery document — i.e. nobody can log
+        # in. This is deliberately its own alert because no other signal sees it: the
+        # admin-ui probe returns 200 from the landing page without Keycloak, and the
+        # lenient http_app edge probe accepts the 404 a dead Keycloak still returns.
+        - alert: OIDCDiscoveryDown
+          expr: probe_success{job="synthetic-oidc-discovery"} == 0
+          for: 3m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Keycloak OIDC discovery failing: {{ $labels.instance }}"
+            description: >-
+              The OIDC discovery document at {{ $labels.instance }} has not served a valid 200 for
+              >3m — the realm is not serving OIDC, so LOGIN IS BROKEN for everything that depends on
+              it (realm `openbank` = admin-ui staff login; realm `openbank-customers` = customer /
+              mobile login). Note the admin-ui and edge probes can stay GREEN through this.
+              Check: kubectl -n iam get pods -l app=keycloak — and if the pod is absent rather than
+              unhealthy, check whether admission was denied (KyvernoAdmissionDenied).
         - alert: SyntheticProbeSlow
           expr: probe_duration_seconds > 5
           for: 10m

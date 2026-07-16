@@ -17,6 +17,10 @@ spec:
   scrapeTimeout: 12s
   # Strict 2xx — admin-ui serves a real 200 at "/", so a non-2xx here is a
   # genuine regression worth paging on.
+  # SCOPE (do not over-trust this probe): "/" is the unauthenticated landing page and
+  # returns 200 whether or not Keycloak is alive, so this stays GREEN through a total
+  # login outage. It proves the admin-ui pod + ingress + cert only. The OIDC path is
+  # covered by the synthetic-oidc-discovery probe below — that is the login signal.
   module: http_2xx
   prober:
     url: blackbox-exporter:9115
@@ -76,3 +80,37 @@ spec:
         - https://api.open-bank.tech
       labels:
         tier: api
+---
+# The login signal. Every other edge probe is blind to a dead IdP: admin.open-bank.tech
+# serves its landing page 200 without Keycloak, and kc.open-bank.tech is probed with the
+# lenient http_app module, which accepts the 404 a dead Keycloak behind a live ingress
+# returns. Result: a Keycloak outage that broke ALL admin-ui login left every synthetic
+# probe green. This probe exercises the OIDC discovery document itself with the strict
+# http_oidc_discovery module (hard 200 + the discovery claims must be in the body), so
+# the realm must genuinely be serving OIDC for it to pass.
+#
+# Both realms are covered because they fail independently and have different blast radii:
+#   openbank            -> admin-ui staff login (KEYCLOAK_REALM in components/admin-ui)
+#   openbank-customers  -> customer-facing / mobile login
+# Discovery is a public, unauthenticated endpoint — no credential is involved in probing it.
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: synthetic-oidc-discovery
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  jobName: synthetic-oidc-discovery
+  interval: 60s
+  scrapeTimeout: 12s
+  module: http_oidc_discovery
+  prober:
+    url: blackbox-exporter:9115
+  targets:
+    staticConfig:
+      static:
+        - https://kc.open-bank.tech/realms/openbank/.well-known/openid-configuration
+        - https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
+      labels:
+        tier: iam

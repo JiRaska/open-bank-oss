@@ -81,6 +81,10 @@ spec:
         # failed: error-rate ≥5% or p95 latency ≥1s). Rollout auto-reverts to
         # stable, but operators need to know so they can investigate the root
         # cause before the next deploy attempt (ADR-0098).
+        # NOTE: the argo-rollouts controller labels rollout_phase with `namespace` + `name`
+        # (controller/metrics/prommetrics.go: namespaceNameLabels), NOT `rollout` — the
+        # original `{{ $labels.rollout }}` here rendered EMPTY, so the page never said which
+        # rollout aborted. Use $labels.name.
         - alert: RolloutAnalysisAborted
           expr: |
             rollout_phase{phase="Aborted"} == 1
@@ -88,9 +92,9 @@ spec:
           labels:
             severity: warning
           annotations:
-            summary: "Rollout {{ $labels.rollout }} aborted in {{ $labels.namespace }}"
+            summary: "Rollout {{ $labels.name }} aborted in {{ $labels.namespace }}"
             description: >-
-              Canary analysis failed for {{ $labels.rollout }} (namespace {{ $labels.namespace }}).
+              Canary analysis failed for {{ $labels.name }} (namespace {{ $labels.namespace }}).
               Traffic has been reverted to stable. Check AnalysisRun for failing metric
               (error-rate or p95-latency). Next deploy will restart the canary cycle.
         # Fires when a Rollout is stuck degraded — pod failed to become healthy
@@ -104,9 +108,9 @@ spec:
           labels:
             severity: warning
           annotations:
-            summary: "Rollout {{ $labels.rollout }} degraded in {{ $labels.namespace }}"
+            summary: "Rollout {{ $labels.name }} degraded in {{ $labels.namespace }}"
             description: >-
-              Rollout {{ $labels.rollout }} (namespace {{ $labels.namespace }}) exceeded
+              Rollout {{ $labels.name }} (namespace {{ $labels.namespace }}) exceeded
               the 10-minute progress deadline — canary pods did not become healthy.
               Likely cause: OOMKilled, CrashLoopBackOff, missing secret/configmap, or
               image pull error. Traffic reverted to stable.

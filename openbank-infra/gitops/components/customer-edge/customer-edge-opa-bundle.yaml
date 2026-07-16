@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: customer-edge
     app.kubernetes.io/part-of: customer-edge
   annotations:
-    openbank.tech/policy-checksum: "5a283a52d4713e6f"
+    openbank.tech/policy-checksum: "61fc22473f673876"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -889,6 +889,23 @@ data:
       # the SLO burn-rate should page before the blunter absolute-latency alert does.
       latency_threshold_seconds: 1
       latency_window: 30d
+
+    # ---------------------------------------------------------------------------------------
+    # Alert delivery (ADR-0082 / ADR-0088). Keep this section terse: rules.yaml is embedded
+    # verbatim into every OPA sidecar bundle ConfigMap. Full rationale lives in ci_producer.
+    # ---------------------------------------------------------------------------------------
+    alerting:
+      # At least one Alertmanager route matching severity=critical must end at a receiver that
+      # egresses the cluster (external integration, or a webhook with a literal non-cluster
+      # URL; a url_file counts as unprovable). In-perimeter paging (GoAlert -> ntfy, ADR-0088
+      # D1) may stay alongside it, but not as the only leg. Guards the "severity inversion":
+      # critical routed only to no-Ingress in-cluster receivers (ADR-0056) while warning
+      # reached Slack, so the most severe alerts were the least likely to be seen.
+      critical_alerts_must_egress: true
+      enforced: enforce
+      ci_producer: ".github/scripts/check-critical-alert-egress.py"
+      checked_manifest: "openbank-infra/gitops/apps/kube-prometheus-stack.yaml"
+
     review:
       default_approvals: 1
       money_path_approvals: 2               # CONTRIBUTING.md + branch protection

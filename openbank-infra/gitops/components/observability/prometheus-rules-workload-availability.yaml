@@ -1,0 +1,106 @@
+# Workload total-unavailability alert rules (ADR-0082).
+#
+# WHY THIS EXISTS: kube-prometheus-stack's `defaultRules` are never overridden, so the
+# only workload-stuck signals were the chart defaults — KubeDeploymentReplicasMismatch /
+# KubePodNotReady — which are `severity: warning`. Warning routes to Slack as a low-signal
+# feed nobody treats as an outage, and, crucially, the chart defaults cover Deployments and
+# StatefulSets ONLY: they do not know what an Argo Rollout is. Much of the fleet
+# (sepa-payment, party-service, ledger, ...) runs as argoproj.io/v1alpha1 Rollouts, so a
+# Rollout stuck at zero available replicas produced NO alert of any severity.
+#
+# These rules say the one thing that is unambiguously an outage — "this workload has no
+# running pods at all, and it is supposed to" — at `critical`, across all three kinds.
+#
+# THE SCALE-TO-ZERO GUARD (`desired > 0`) IS LOAD-BEARING: finops-scaledown's CronJobs
+# (ADR-0057) and the per-service KEDA ScaledObjects deliberately scale workloads —
+# including money-path ones — to zero overnight and at weekends, via the `scale`
+# subresource. That sets spec/desired replicas to 0, so an intentionally parked workload
+# never matches. Without this guard these alerts would fire across the fleet every night
+# at 22:00 Europe/Prague and be muted within a week.
+#
+# Metric names/labels verified:
+#   kube_deployment_status_replicas_available{deployment,namespace}
+#   kube_deployment_spec_replicas{deployment,namespace}
+#   kube_statefulset_status_replicas_ready{statefulset,namespace}
+#   kube_statefulset_replicas{statefulset,namespace}
+#     — kube-state-metrics (bundled in kube-prometheus-stack 87.0.0); the same metrics the
+#       chart's own rules-1.14/kubernetes-apps.yaml default rules query.
+#   rollout_info_replicas_available{namespace,name}
+#   rollout_info_replicas_desired{namespace,name}
+#     — argo-rollouts controller/metrics/prommetrics.go @ v1.9.0 (chart 2.41.0,
+#       apps/argo-rollouts.yaml). NOTE the label is `name`, NOT `rollout`.
+#
+# Each expression aggregates with `max by (...)` BEFORE the `and on (...)` join, rather
+# than comparing the raw series. That is not cosmetic: both exporters run a single replica
+# today, but argo-rollouts is documented right in apps/argo-rollouts.yaml as "scale to 2
+# for HA in prod", and a second controller replica would export a second series per
+# rollout. Joining raw series would then abort with "found duplicate series for the match
+# group" and the alert would silently stop evaluating — the exact failure mode these rules
+# exist to catch. Aggregating first is correct at 1 replica and stays correct at N.
+#
+# Picked up automatically (ruleSelectorNilUsesHelmValues=false).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-workload-availability-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.workload.availability
+      rules:
+        # Argo Rollouts — the gap the chart defaults leave completely open.
+        - alert: RolloutNoAvailableReplicas
+          expr: |
+            max by (namespace, name) (rollout_info_replicas_available) == 0
+              and on (namespace, name)
+            max by (namespace, name) (rollout_info_replicas_desired) > 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Rollout {{ $labels.name }} has ZERO available replicas ({{ $labels.namespace }})"
+            description: >-
+              Rollout {{ $labels.name }} in namespace {{ $labels.namespace }} has had no available
+              replicas for >15m while still desiring at least one — the service is DOWN (this is not
+              an off-hours scale-down; those set desired replicas to 0 and are excluded). Likely
+              causes: admission denied by a Kyverno policy (see KyvernoAdmissionDenied),
+              ImagePullBackOff, CrashLoopBackOff, OOMKilled, missing secret/configmap, or no node
+              with capacity. Check: kubectl -n {{ $labels.namespace }} get pods,
+              kubectl argo rollouts get rollout {{ $labels.name }} -n {{ $labels.namespace }}
+        # Deployments — chart default exists but is warning-only. keycloak (iam) and
+        # admin-ui are Deployments; keycloak at zero replicas takes down ALL admin-ui login.
+        - alert: DeploymentNoAvailableReplicas
+          expr: |
+            max by (namespace, deployment) (kube_deployment_status_replicas_available) == 0
+              and on (namespace, deployment)
+            max by (namespace, deployment) (kube_deployment_spec_replicas) > 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Deployment {{ $labels.deployment }} has ZERO available replicas ({{ $labels.namespace }})"
+            description: >-
+              Deployment {{ $labels.deployment }} in namespace {{ $labels.namespace }} has had no
+              available replicas for >15m while spec.replicas > 0 — the service is DOWN (off-hours
+              scale-down sets spec.replicas to 0 and is excluded). Likely causes: admission denied by
+              a Kyverno policy (see KyvernoAdmissionDenied), ImagePullBackOff, CrashLoopBackOff,
+              OOMKilled, missing secret/configmap, or unschedulable.
+              Check: kubectl -n {{ $labels.namespace }} describe deploy {{ $labels.deployment }}
+        # StatefulSets — postgres/kafka and friends. Same class of gap.
+        - alert: StatefulSetNoReadyReplicas
+          expr: |
+            max by (namespace, statefulset) (kube_statefulset_status_replicas_ready) == 0
+              and on (namespace, statefulset)
+            max by (namespace, statefulset) (kube_statefulset_replicas) > 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "StatefulSet {{ $labels.statefulset }} has ZERO ready replicas ({{ $labels.namespace }})"
+            description: >-
+              StatefulSet {{ $labels.statefulset }} in namespace {{ $labels.namespace }} has had no
+              ready replicas for >15m while desiring at least one — likely a datastore outage, which
+              takes its dependent services down with it. Check:
+              kubectl -n {{ $labels.namespace }} describe sts {{ $labels.statefulset }}
