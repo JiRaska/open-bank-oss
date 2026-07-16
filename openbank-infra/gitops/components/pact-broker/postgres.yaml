@@ -20,10 +20,27 @@ spec:
   monitoring:
     enablePodMonitor: true
   instances: 1
-  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  # ECR pull-through instead of ghcr.io — the ADR-0092 pilot for #1290. CNPG instance
+  # pods are (correctly) excluded from the Kyverno ecr-pull-through-rewrite policy: the
+  # operator reconciles the running pod's image against spec.imageName, so a mutating
+  # webhook makes the pod permanently drift and it recreates it every ~10s (that is what
+  # looped pact-broker-db and fraud-db when rewrite-ghcr landed). Setting the ref HERE is
+  # the mechanism the policy's own comment asks for — "CNPG must own its image ref
+  # end-to-end" — with no mutation and nothing to drift from.
+  # Tag stays 16.14 = what this cluster actually runs. The 18.1 that was declared here
+  # never applied (see the storage note below) and adopting it would be a Postgres MAJOR
+  # upgrade — a separate, deliberate decision, not a side effect of changing a registry.
+  imageName: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/ghcr/cloudnative-pg/postgresql:16.14
   storage:
     storageClass: gp3
-    size: 1Gi
+    # 5Gi = the live PVC. It was declared 1Gi in 343aef3f8 while the volume was already
+    # 5Gi, and CNPG's webhook refuses to shrink storage:
+    #   spec.storage: Invalid value: "1Gi": can't shrink existing storage from 5Gi to 1Gi
+    # Every sync of this Application has failed since 2026-06-30 as a result — 16 days,
+    # invisibly, because the workload stayed Healthy and only sync status went Unknown.
+    # That is also why the 18.1 above was never applied. Do not "tidy" this back down:
+    # the declared size must track the volume, which can grow but never shrink.
+    size: 5Gi
   resources:
     requests:
       cpu: 100m
