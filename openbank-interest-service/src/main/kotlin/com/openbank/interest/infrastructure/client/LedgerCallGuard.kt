@@ -18,8 +18,10 @@ import org.eclipse.microprofile.rest.client.inject.RestClient
  * ledger collapses them onto the already-booked journal. The circuit breaker stops hammering a
  * degraded ledger and lets the caller fail fast (DORA Art. 11 operational resilience).
  *
- * Failing fast is the correct outcome here: capitalize() posts BEFORE it commits its own rows, so a
- * ledger outage leaves the accruals `ACCRUING` and the period simply capitalizes on the next run.
+ * Failing fast is the correct outcome here: capitalize() claims the accrual set (`ACCRUING` ->
+ * `CAPITALIZING`) BEFORE this call, so a ledger outage leaves the accruals `CAPITALIZING`, not
+ * `ACCRUING` — a retry of the same request finds the same claimed set and the period simply
+ * capitalizes on the next run.
  */
 @ApplicationScoped
 class LedgerCallGuard(@RestClient private val ledgerClient: LedgerRestClient) {

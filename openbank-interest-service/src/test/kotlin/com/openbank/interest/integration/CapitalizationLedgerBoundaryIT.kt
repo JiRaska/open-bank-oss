@@ -111,8 +111,24 @@ class CapitalizationLedgerBoundaryIT {
         assertThat(cap.totalAccrued).isEqualByComparingTo(BigDecimal("100.004999"))
 
         // ...and the row that was actually committed to Postgres says the same thing.
-        assertThat(persistedCap(cap.id).grossAmount).isEqualByComparingTo(cap.grossAmount)
-        assertThat(persistedCap(cap.id).netAmount).isEqualByComparingTo(cap.netAmount)
+        //
+        // isEqualByComparingTo is the right comparator for the VALUE here (unlike the scale-4-vs-2
+        // bug this suite exists to catch, there is no rounding step between "cap" and "persisted" —
+        // both are the same in-memory BigDecimal before and after the round-trip, so a numeric
+        // comparison genuinely proves the row is faithful). It is NOT the whole story: this table's
+        // gross_amount/net_amount columns are NUMERIC(20,4) (V3__withholding_tax.sql), so Postgres
+        // always returns scale 4 regardless of what was written — "100.00" round-trips as "100.0000".
+        // That is a representation gap from what was actually posted to the ledger at currency scale,
+        // even though the value is numerically identical. Asserting the scale explicitly here, rather
+        // than silently normalizing it away, is what makes that gap visible instead of hidden — see
+        // the linked issue for narrowing the column to currency scale.
+        val persisted = persistedCap(cap.id)
+        assertThat(persisted.grossAmount).isEqualByComparingTo(cap.grossAmount)
+        assertThat(persisted.netAmount).isEqualByComparingTo(cap.netAmount)
+        val scaleGapNote =
+            "interest_capitalizations.gross_amount is NUMERIC(20,4); this is scale 4 even though " +
+                "the ledger was posted at currency scale (2) -- a known representation gap, not a value bug"
+        assertThat(persisted.grossAmount.scale()).`as`(scaleGapNote).isEqualTo(4)
     }
 
     // --- Finding 2: the idempotency key is amount-blind -----------------------------------------
