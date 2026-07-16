@@ -510,6 +510,34 @@ test_allow_service_device_list if {
 	decision.allow == true
 }
 
+# document.readContent — the onboarding framework agreement's PDF bytes (ADR-0169/0170).
+# The verb sits outside operator-read-any's {list, read} set, so before the document.
+# family was added here the edge could read a document's METADATA (document.read slipped
+# through operator-read-any on its name) but never its CONTENT: the app's sign screen died
+# on "getDocumentContent failed: 403" and onboarding could not complete.
+test_allow_service_document_read_content if {
+	decision := rest.allow with input as {
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "document.readContent",
+		"resource": {"type": "document", "id": "d-1"},
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	decision.reason == "edge-service-notification"
+}
+
+# Staff must NOT reach a customer's signed agreement bytes off the back of this fix:
+# operator-read-any's {list, read} verbs do not cover readContent, and this rule is pinned
+# to the edge's client_credentials identity — a real ROLE_OPERATOR session is not it.
+test_deny_operator_document_read_content if {
+	not rest.allow with input as {
+		"principal": {"id": "alice.operator", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "document.readContent",
+		"resource": {"type": "document", "id": "d-1"},
+	}
+}
+
 # The rule must NOT open other action families to the edge M2M caller (deny-by-default
 # holds) — operator-read-any also does not cover a write like party.update.
 test_deny_service_outside_notification_family if {
