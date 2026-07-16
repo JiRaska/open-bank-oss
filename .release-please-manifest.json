@@ -22,7 +22,7 @@
   "openbank-domestic-payment": "0.10.0",
   "openbank-finops-agent": "0.2.3",
   "openbank-finrep-service": "0.5.0",
-  "openbank-flaky-test-hunter": "0.2.0",
+  "openbank-flaky-test-hunter": "0.3.0",
   "openbank-fraud-service": "0.8.0",
   "openbank-fx-service": "0.8.0",
   "openbank-governance-auditor": "0.3.0",
