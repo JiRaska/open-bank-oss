@@ -65,9 +65,15 @@ class WithholdingTaxRepositoryImpl @Inject constructor(
     @WithTransaction override fun markRemitted(ids: List<UUID>, remittanceId: UUID): Uni<Int> {
         if (ids.isEmpty()) return Uni.createFrom().item(0)
         return sf.withTransaction { s ->
+            // Status guard: only RECORDED rows may advance to REMITTED — an unguarded bulk update
+            // would silently re-stamp rows already folded into another batch (or RECONCILED /
+            // REVERSED ones). The caller compares the returned count against ids.size and fails
+            // the assembly on a mismatch.
             s.createMutationQuery(
-                "UPDATE WithholdingTaxEntity SET status = :st, remittanceId = :r WHERE id IN :ids",
+                "UPDATE WithholdingTaxEntity SET status = :st, remittanceId = :r " +
+                    "WHERE id IN :ids AND status = :recorded",
             ).setParameter("st", WithholdingTaxStatus.REMITTED)
+                .setParameter("recorded", WithholdingTaxStatus.RECORDED)
                 .setParameter("r", remittanceId).setParameter("ids", ids).executeUpdate()
         }
     }

@@ -19,6 +19,7 @@ import io.mockk.slot
 import io.mockk.verify
 import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -81,6 +82,30 @@ class WithholdingRemittanceServiceTest {
         verify(exactly = 1) { remittanceRepo.save(any()) }
         verify(exactly = 1) { withholdingTaxRepo.markRemitted(any(), any()) }
         verify(exactly = 1) { eventOutbox.append(any()) }
+    }
+
+    @Test
+    fun `a short RECORDED to REMITTED mark fails the assembly instead of emitting the batch`() {
+        val records = listOf(withheld(BigDecimal("15")), withheld(BigDecimal("85")))
+
+        every { remittanceRepo.findByPeriod(2026, 1) } returns Uni.createFrom().nullItem()
+        every {
+            withholdingTaxRepo.findRecordedForPeriod(
+                LocalDate.of(2026, 1, 1),
+                LocalDate.of(2026, 1, 31),
+            )
+        } returns Uni.createFrom().item(records)
+        every { remittanceRepo.save(any()) } answers { Uni.createFrom().item(firstArg<WithholdingRemittance>()) }
+        // The status-guarded UPDATE matched only one of the two rows — a concurrent assembly (or a
+        // reversal) took the other. The assembled totals no longer describe what was marked.
+        every { withholdingTaxRepo.markRemitted(any(), any()) } returns Uni.createFrom().item(1)
+
+        assertThatThrownBy { service.assembleRemittance(2026, 1).await().indefinitely() }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("expected to mark 2 RECORDED withholdings REMITTED, matched 1")
+
+        // Crucially: no event, so the rail is never asked to pay an unsubstantiated figure.
+        verify(exactly = 0) { eventOutbox.append(any()) }
     }
 
     @Test

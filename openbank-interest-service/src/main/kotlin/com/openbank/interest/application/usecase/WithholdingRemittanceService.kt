@@ -59,8 +59,17 @@ class WithholdingRemittanceService(
                         OffsetDateTime.now(clock),
                     )
                     remittanceRepo.save(remittance).flatMap { saved ->
-                        withholdingTaxRepo.markRemitted(saved.withholdingIds, saved.id).flatMap {
-                            eventOutbox.append(remittedEvent(saved)).map { saved }
+                        withholdingTaxRepo.markRemitted(saved.withholdingIds, saved.id).flatMap { updated ->
+                            if (updated != saved.withholdingIds.size) {
+                                // markRemitted only advances rows still RECORDED. A short count means
+                                // some row was folded into another batch (or reversed) between the
+                                // read and the write — the assembled totals no longer describe what
+                                // was actually marked, so emitting the remitted event would ask the
+                                // rail to pay a figure we cannot substantiate. Fail the assembly.
+                                Uni.createFrom().failure(shortMarkFailure(saved, updated))
+                            } else {
+                                eventOutbox.append(remittedEvent(saved)).map { saved }
+                            }
                         }
                     }
                 }
@@ -73,6 +82,13 @@ class WithholdingRemittanceService(
     override fun listRemittances(): Uni<List<WithholdingRemittance>> = remittanceRepo.findAll()
 
     override fun settle(remittanceId: UUID): Uni<Unit> = remittanceRepo.markSettled(remittanceId).replaceWith(Unit)
+
+    /** The loud failure for a short `RECORDED → REMITTED` mark — see the call site for why. */
+    private fun shortMarkFailure(saved: WithholdingRemittance, updated: Int) = IllegalStateException(
+        "Remittance ${saved.id} (${saved.periodYear}-${saved.periodMonth}) aborted: expected to mark " +
+            "${saved.withholdingIds.size} RECORDED withholdings REMITTED, matched $updated — concurrent " +
+            "assembly or reversed rows; the batch was not emitted.",
+    )
 
     /** Builds the versioned `interest.withholding.remitted` outbox event (ADR-0038). */
     private fun remittedEvent(r: WithholdingRemittance): OutboxMessage {

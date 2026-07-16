@@ -6,10 +6,8 @@ package com.openbank.interest.application.usecase
 
 import com.openbank.interest.application.port.out.InterestAccrualRepository
 import com.openbank.interest.application.port.out.InterestCapitalizationRepository
-import com.openbank.interest.application.port.out.InterestEventOutbox
 import com.openbank.interest.application.port.out.InterestRateConfigRepository
 import com.openbank.interest.application.port.out.TaxProfilePort
-import com.openbank.interest.application.port.out.WithholdingTaxRepository
 import com.openbank.interest.domain.model.AccrualRequest
 import com.openbank.interest.domain.model.AccrualStatus
 import com.openbank.interest.domain.model.AccrualSummary
@@ -21,6 +19,7 @@ import com.openbank.interest.domain.model.InterestRateType
 import com.openbank.interest.domain.tax.TaxProfile
 import com.openbank.interest.domain.tax.WithholdingTax
 import com.openbank.interest.domain.tax.WithholdingTreatment
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.CapturingSlot
 import io.mockk.every
 import io.mockk.mockk
@@ -45,26 +44,37 @@ class InterestServiceTest {
     private val accrualRepo = mockk<InterestAccrualRepository>()
     private val capitalizationRepo = mockk<InterestCapitalizationRepository>()
     private val taxProfilePort = mockk<TaxProfilePort>()
-    private val withholdingTaxRepo = mockk<WithholdingTaxRepository>()
-    private val eventOutbox = mockk<InterestEventOutbox>()
     private val service = InterestService(
         configRepo,
         accrualRepo,
         capitalizationRepo,
         taxProfilePort,
-        withholdingTaxRepo,
-        eventOutbox,
         "ACT_365",
         clock,
     )
 
-    /** Default capitalization collaborators: resolve a profile, echo the saved withholding, append OK. */
-    private fun stubCapitalizationCollaborators(profile: TaxProfile = TaxProfile.FAIL_SAFE_DEFAULT) {
+    // Captures of the single-transaction capitalization write, filled by stubCapitalization().
+    private val capSlot: CapturingSlot<InterestCapitalization> = slot()
+    private val whtSlot: CapturingSlot<WithholdingTax> = slot()
+    private val eventSlot: CapturingSlot<OutboxMessage> = slot()
+    private val accrualIdsSlot: CapturingSlot<List<UUID>> = slot()
+
+    /**
+     * Stubs the profile lookup and the ONE atomic write the use case now performs: capitalization +
+     * withholding + outbox event + the guarded accrual flip all land through `saveWithOutbox`, so
+     * there is nothing else for the service to call.
+     */
+    private fun stubCapitalization(profile: TaxProfile = TaxProfile.FAIL_SAFE_DEFAULT) {
         every { taxProfilePort.resolve(any()) } returns Uni.createFrom().item(profile)
-        every { withholdingTaxRepo.save(any()) } answers {
-            Uni.createFrom().item(firstArg<WithholdingTax>())
-        }
-        every { eventOutbox.append(any()) } returns Uni.createFrom().nullItem()
+        every {
+            capitalizationRepo.saveWithOutbox(
+                capture(capSlot),
+                capture(whtSlot),
+                capture(eventSlot),
+                capture(accrualIdsSlot),
+                any(),
+            )
+        } answers { Uni.createFrom().item(firstArg<InterestCapitalization>()) }
     }
 
     @Test
@@ -124,20 +134,10 @@ class InterestServiceTest {
             sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 18), BigDecimal("1.20")),
             sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 19), BigDecimal("2.30")),
         )
-        val capSlot: CapturingSlot<InterestCapitalization> = slot()
-        val whtSlot: CapturingSlot<WithholdingTax> = slot()
-        stubCapitalizationCollaborators()
+        stubCapitalization()
 
-        every { accrualRepo.findPendingCapitalization(accountId, toDate) } returns
+        every { accrualRepo.findPendingCapitalization(accountId, productId, toDate) } returns
             Uni.createFrom().item(accruals)
-        every { capitalizationRepo.save(capture(capSlot)) } answers {
-            Uni.createFrom().item(firstArg<InterestCapitalization>())
-        }
-        every { withholdingTaxRepo.save(capture(whtSlot)) } answers {
-            Uni.createFrom().item(firstArg<WithholdingTax>())
-        }
-        every { accrualRepo.markCapitalized(accruals.map { it.id }, any()) } returns
-            Uni.createFrom().item(2)
 
         val result = service.capitalize(accountId, productId, toDate).await().indefinitely()
 
@@ -150,11 +150,9 @@ class InterestServiceTest {
         assertThat(whtSlot.captured.treatment).isEqualTo(WithholdingTreatment.DEFERRED_FX)
         assertThat(whtSlot.captured.taxAmount).isEqualByComparingTo(BigDecimal("0"))
         assertThat(result.capitalizedAmount).isEqualByComparingTo(BigDecimal("3.5000"))
-        verify(exactly = 1) { accrualRepo.findPendingCapitalization(accountId, toDate) }
-        verify(exactly = 1) { capitalizationRepo.save(any()) }
-        verify(exactly = 1) { withholdingTaxRepo.save(any()) }
-        verify(exactly = 1) { eventOutbox.append(any()) }
-        verify(exactly = 1) { accrualRepo.markCapitalized(accruals.map { it.id }, any()) }
+        // The product filter is part of the query, not a post-filter: the repo must never be asked
+        // for an account's accruals across products.
+        verify(exactly = 1) { accrualRepo.findPendingCapitalization(accountId, productId, toDate) }
     }
 
     @Test
@@ -166,20 +164,10 @@ class InterestServiceTest {
             sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 18), BigDecimal("60.00"), currency = "CZK"),
             sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 19), BigDecimal("40.00"), currency = "CZK"),
         )
-        val capSlot: CapturingSlot<InterestCapitalization> = slot()
-        val whtSlot: CapturingSlot<WithholdingTax> = slot()
-        stubCapitalizationCollaborators() // resident individual default -> 15 %
+        stubCapitalization() // resident individual default -> 15 %
 
-        every { accrualRepo.findPendingCapitalization(accountId, toDate) } returns
+        every { accrualRepo.findPendingCapitalization(accountId, productId, toDate) } returns
             Uni.createFrom().item(accruals)
-        every { capitalizationRepo.save(capture(capSlot)) } answers {
-            Uni.createFrom().item(firstArg<InterestCapitalization>())
-        }
-        every { withholdingTaxRepo.save(capture(whtSlot)) } answers {
-            Uni.createFrom().item(firstArg<WithholdingTax>())
-        }
-        every { accrualRepo.markCapitalized(accruals.map { it.id }, any()) } returns
-            Uni.createFrom().item(2)
 
         val result = service.capitalize(accountId, productId, toDate).await().indefinitely()
 
@@ -194,8 +182,99 @@ class InterestServiceTest {
         assertThat(whtSlot.captured.taxAmount).isEqualByComparingTo(BigDecimal("15"))
         assertThat(whtSlot.captured.capitalizationId).isEqualTo(capSlot.captured.id)
         assertThat(result.capitalizedAmount).isEqualByComparingTo(BigDecimal("85.0000"))
-        verify(exactly = 1) { withholdingTaxRepo.save(any()) }
-        verify(exactly = 1) { eventOutbox.append(any()) }
+    }
+
+    @Test
+    fun `capitalization, withholding, event and accrual flip are handed to ONE transaction`() {
+        val accountId = UUID.fromString("99999999-9999-9999-9999-999999999999")
+        val productId = "SAVINGS_CZK"
+        val toDate = LocalDate.of(2026, 1, 20)
+        val accruals = listOf(
+            sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 18), BigDecimal("60.00"), currency = "CZK"),
+            sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 19), BigDecimal("40.00"), currency = "CZK"),
+        )
+        stubCapitalization()
+
+        every { accrualRepo.findPendingCapitalization(accountId, productId, toDate) } returns
+            Uni.createFrom().item(accruals)
+
+        service.capitalize(accountId, productId, toDate).await().indefinitely()
+
+        // Exactly one write call: the four legs of a credit can no longer be committed separately.
+        verify(exactly = 1) { capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any()) }
+        // ...and the accrual flip is part of that same call, carrying every source accrual.
+        assertThat(accrualIdsSlot.captured).containsExactlyElementsOf(accruals.map { it.id })
+        assertThat(eventSlot.captured.eventType).isEqualTo("interest.withholding.recorded.v1")
+        assertThat(eventSlot.captured.aggregateId).isEqualTo(capSlot.captured.id)
+        assertThat(eventSlot.captured.payload).contains("\"taxAmount\":\"15\"")
+    }
+
+    @Test
+    fun `a failing single transaction surfaces the failure and writes nothing else`() {
+        val accountId = UUID.fromString("dddddddd-dddd-dddd-dddd-dddddddddddd")
+        val productId = "SAVINGS_CZK"
+        val toDate = LocalDate.of(2026, 1, 20)
+        val accruals = listOf(
+            sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 18), BigDecimal("60.00"), currency = "CZK"),
+        )
+
+        every { taxProfilePort.resolve(any()) } returns Uni.createFrom().item(TaxProfile.FAIL_SAFE_DEFAULT)
+        every { accrualRepo.findPendingCapitalization(accountId, productId, toDate) } returns
+            Uni.createFrom().item(accruals)
+        // Mirrors the repo's status guard tripping (a concurrent run flipped the accruals first):
+        // the whole write set rolls back, so the use case must propagate, not swallow-and-continue.
+        every { capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any()) } returns
+            Uni.createFrom().failure(IllegalStateException("Capitalization aborted: expected to flip 1, matched 0"))
+
+        assertThatThrownBy { service.capitalize(accountId, productId, toDate).await().indefinitely() }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("Capitalization aborted")
+    }
+
+    @Test
+    fun `capitalize refuses a mixed-currency accrual set instead of summing it`() {
+        val accountId = UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc")
+        val productId = "SAVINGS"
+        val toDate = LocalDate.of(2026, 1, 20)
+        // 100 CZK + 5 EUR is not "105" of anything, and only the CZK leg is withholdable (§E).
+        val accruals = listOf(
+            sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 18), BigDecimal("100.00"), currency = "CZK"),
+            sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 19), BigDecimal("5.00"), currency = "EUR"),
+        )
+
+        every { accrualRepo.findPendingCapitalization(accountId, productId, toDate) } returns
+            Uni.createFrom().item(accruals)
+
+        assertThatThrownBy { service.capitalize(accountId, productId, toDate).await().indefinitely() }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("mixed-currency")
+            .hasMessageContaining("[CZK, EUR]")
+        // Nothing is credited, nothing is withheld, and the accruals stay ACCRUING for an operator.
+        verify(exactly = 0) { capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { taxProfilePort.resolve(any()) }
+    }
+
+    @Test
+    fun `a single currency in mixed casing is one currency, not a mixed set`() {
+        val accountId = UUID.fromString("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
+        val productId = "SAVINGS_CZK"
+        val toDate = LocalDate.of(2026, 1, 20)
+        val accruals = listOf(
+            sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 18), BigDecimal("60.00"), currency = "czk"),
+            sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 19), BigDecimal("40.00"), currency = "CZK"),
+        )
+        stubCapitalization()
+
+        every { accrualRepo.findPendingCapitalization(accountId, productId, toDate) } returns
+            Uni.createFrom().item(accruals)
+
+        service.capitalize(accountId, productId, toDate).await().indefinitely()
+
+        // Normalized to the canonical code, and still withheld as CZK interest.
+        assertThat(capSlot.captured.currency).isEqualTo("CZK")
+        assertThat(whtSlot.captured.currency).isEqualTo("CZK")
+        assertThat(whtSlot.captured.treatment).isEqualTo(WithholdingTreatment.WITHHELD)
+        assertThat(capSlot.captured.taxAmount).isEqualByComparingTo(BigDecimal("15"))
     }
 
     @Test
@@ -204,14 +283,13 @@ class InterestServiceTest {
         val productId = "SAVINGS"
         val toDate = LocalDate.of(2026, 1, 20)
 
-        every { accrualRepo.findPendingCapitalization(accountId, toDate) } returns
+        every { accrualRepo.findPendingCapitalization(accountId, productId, toDate) } returns
             Uni.createFrom().item(emptyList())
 
         assertThatThrownBy { service.capitalize(accountId, productId, toDate).await().indefinitely() }
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessage("No pending accruals to capitalize")
-        verify(exactly = 0) { capitalizationRepo.save(any()) }
-        verify(exactly = 0) { accrualRepo.markCapitalized(any(), any()) }
+        verify(exactly = 0) { capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any()) }
     }
 
     @Test

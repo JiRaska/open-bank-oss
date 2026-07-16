@@ -7,6 +7,8 @@ package com.openbank.interest.application.port.out
 import com.openbank.interest.domain.model.InterestAccrual
 import com.openbank.interest.domain.model.InterestCapitalization
 import com.openbank.interest.domain.model.InterestRateConfig
+import com.openbank.interest.domain.tax.WithholdingTax
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.smallrye.mutiny.Uni
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -28,8 +30,13 @@ interface InterestAccrualRepository {
     fun save(accrual: InterestAccrual): Uni<InterestAccrual>
     fun findAll(): Uni<List<InterestAccrual>>
     fun findByAccountId(accountId: UUID, from: LocalDate?, to: LocalDate?): Uni<List<InterestAccrual>>
-    fun findPendingCapitalization(accountId: UUID, toDate: LocalDate): Uni<List<InterestAccrual>>
-    fun markCapitalized(ids: List<UUID>, capitalizedAt: OffsetDateTime): Uni<Int>
+
+    /**
+     * Pending (`ACCRUING`) accruals for one `(account, product)` up to [toDate]. Filtering by
+     * product is essential: an account can accrue under several products, and folding another
+     * product's accruals into this capitalization would credit them against the wrong product.
+     */
+    fun findPendingCapitalization(accountId: UUID, productId: String, toDate: LocalDate): Uni<List<InterestAccrual>>
     fun sumAccrued(accountId: UUID, from: LocalDate, to: LocalDate): Uni<BigDecimal>
 }
 
@@ -37,4 +44,23 @@ interface InterestAccrualRepository {
 interface InterestCapitalizationRepository {
     fun save(cap: InterestCapitalization): Uni<InterestCapitalization>
     fun findByAccountId(accountId: UUID): Uni<List<InterestCapitalization>>
+
+    /**
+     * Persists the capitalization, its paired withholding-tax liability and the outbox event, and
+     * flips the source accruals `ACCRUING → CAPITALIZED`, all in ONE database transaction (same
+     * atomic shape as statement-service's `saveWithOutbox`). A crash or failure anywhere rolls the
+     * whole write set back, so a retry re-runs from a clean slate instead of re-crediting
+     * already-capitalized accruals (duplicate interest + duplicate withholding).
+     *
+     * The accrual flip is status-guarded (`AND status = 'ACCRUING'`): if any of [accrualIds] was
+     * capitalized by a concurrent run, the row count mismatches and the transaction fails — no
+     * partial rows survive.
+     */
+    fun saveWithOutbox(
+        cap: InterestCapitalization,
+        withholding: WithholdingTax,
+        event: OutboxMessage,
+        accrualIds: List<UUID>,
+        capitalizedAt: OffsetDateTime,
+    ): Uni<InterestCapitalization>
 }

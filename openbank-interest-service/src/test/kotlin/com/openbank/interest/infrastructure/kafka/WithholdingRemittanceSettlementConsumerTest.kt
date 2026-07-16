@@ -8,6 +8,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.interest.application.port.`in`.RemitWithholdingUseCase
 import com.openbank.interest.infrastructure.client.InitiateTransactionRequest
 import com.openbank.interest.infrastructure.client.TransactionServiceClient
+import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -15,6 +16,7 @@ import io.mockk.verify
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
+import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.util.UUID
@@ -34,25 +36,39 @@ class WithholdingRemittanceSettlementConsumerTest {
 
     private val remittanceId = UUID.fromString("00000000-0000-0000-0000-0000000000d1")
 
-    private fun remittedEvent(
-        eventType: String = "interest.withholding.remitted.v1",
-        totalTaxAmount: String = "1234.00",
+    /**
+     * Payload exactly as `WithholdingRemittanceService.remittedEvent` writes it: NO `eventType`
+     * field (the type travels only as the `ce-type` header, ADR-0050 N3) and BigDecimal fields
+     * serialized as JSON *strings* — the encoding that made `decimalValue()` return zero.
+     */
+    private fun remittedPayload(
+        totalTaxAmount: String = "\"1234.00\"",
+        itemCount: Int = 12,
         currency: String = "CZK",
-    ): String = mapper.writeValueAsString(
-        mapOf(
-            "schemaVersion" to 1,
-            "eventType" to eventType,
-            "remittanceId" to remittanceId,
-            "periodYear" to 2026,
-            "periodMonth" to 6,
-            "authority" to "CZ_FU",
-            "currency" to currency,
-            "totalTaxAmount" to totalTaxAmount.toBigDecimal(),
-            "itemCount" to 12,
-            "dueDate" to "2026-07-31",
-            "status" to "PENDING",
-        ),
-    )
+    ): String = """{"schemaVersion":1,""" +
+        """"remittanceId":"$remittanceId","periodYear":2026,"periodMonth":6,""" +
+        """"authority":"CZ_FU","currency":"$currency",""" +
+        """"totalTaxAmount":$totalTaxAmount,"itemCount":$itemCount,""" +
+        """"dueDate":"2026-07-31","status":"PENDING"}"""
+
+    /**
+     * Builds the record the way `KafkaInterestOutboxEventPublisher` produces it: key = aggregate
+     * id (N2), `ce-id`/`idempotency-key`/`ce-type` headers from [OutboxKafkaHeaders] (N3), raw
+     * outbox payload as the value.
+     */
+    private fun record(
+        payload: String = remittedPayload(),
+        eventType: String? = "interest.withholding.remitted.v1",
+    ): ConsumerRecord<String, String> {
+        val record = ConsumerRecord("openbank.interest.accrual.event", 0, 0L, remittanceId.toString(), payload)
+        val eventId = UUID.randomUUID().toString()
+        record.headers().add(OutboxKafkaHeaders.HEADER_EVENT_ID, eventId.toByteArray())
+        record.headers().add(OutboxKafkaHeaders.HEADER_IDEMPOTENCY_KEY, eventId.toByteArray())
+        if (eventType != null) {
+            record.headers().add(OutboxKafkaHeaders.HEADER_EVENT_TYPE, eventType.toByteArray())
+        }
+        return record
+    }
 
     @Test
     fun `books the remittance debit and settles the batch on a 2xx`(): Unit = runBlocking {
@@ -61,15 +77,29 @@ class WithholdingRemittanceSettlementConsumerTest {
             Uni.createFrom().item(Response.status(201).build())
         every { remitUseCase.settle(remittanceId) } returns Uni.createFrom().item(Unit)
 
-        consumer.consume(remittedEvent())
+        consumer.consume(record())
 
         assertThat(req.captured.idempotencyKey).isEqualTo("interest-withholding-$remittanceId")
         assertThat(req.captured.type).isEqualTo("DEBIT")
         assertThat(req.captured.sourceAccountId).isEqualTo(UUID.fromString(sourceAccountId))
+        // The string-encoded amount must decode to the real value, not decimalValue()'s ZERO.
         assertThat(req.captured.amount).isEqualByComparingTo("1234.00")
         assertThat(req.captured.currencyCode).isEqualTo("CZK")
         assertThat(req.captured.rail).isEqualTo("DOMESTIC")
         assertThat(req.captured.instructionType).isEqualTo("ONE_OFF")
+        verify(exactly = 1) { remitUseCase.settle(remittanceId) }
+    }
+
+    @Test
+    fun `a numeric totalTaxAmount encoding is accepted too`(): Unit = runBlocking {
+        val req = slot<InitiateTransactionRequest>()
+        every { transactionClient.initiateTransaction(capture(req)) } returns
+            Uni.createFrom().item(Response.status(201).build())
+        every { remitUseCase.settle(remittanceId) } returns Uni.createFrom().item(Unit)
+
+        consumer.consume(record(payload = remittedPayload(totalTaxAmount = "1234.00")))
+
+        assertThat(req.captured.amount).isEqualByComparingTo("1234.00")
         verify(exactly = 1) { remitUseCase.settle(remittanceId) }
     }
 
@@ -79,7 +109,7 @@ class WithholdingRemittanceSettlementConsumerTest {
             Uni.createFrom().item(Response.status(409).build())
         every { remitUseCase.settle(remittanceId) } returns Uni.createFrom().item(Unit)
 
-        consumer.consume(remittedEvent())
+        consumer.consume(record())
 
         verify(exactly = 1) { remitUseCase.settle(remittanceId) }
     }
@@ -89,23 +119,49 @@ class WithholdingRemittanceSettlementConsumerTest {
         every { transactionClient.initiateTransaction(any()) } returns
             Uni.createFrom().item(Response.status(500).build())
 
-        consumer.consume(remittedEvent())
+        consumer.consume(record())
 
         verify(exactly = 1) { transactionClient.initiateTransaction(any()) }
         verify(exactly = 0) { remitUseCase.settle(any()) }
     }
 
     @Test
-    fun `an accrual event that is not a remitted event is ignored`(): Unit = runBlocking {
-        consumer.consume(remittedEvent(eventType = "interest.accrual.recorded.v1"))
+    fun `an accrual event with a different ce-type header is ignored`(): Unit = runBlocking {
+        consumer.consume(record(eventType = "interest.withholding.recorded.v1"))
 
         verify(exactly = 0) { transactionClient.initiateTransaction(any()) }
         verify(exactly = 0) { remitUseCase.settle(any()) }
     }
 
     @Test
+    fun `a record without a ce-type header is ignored`(): Unit = runBlocking {
+        consumer.consume(record(eventType = null))
+
+        verify(exactly = 0) { transactionClient.initiateTransaction(any()) }
+        verify(exactly = 0) { remitUseCase.settle(any()) }
+    }
+
+    @Test
+    fun `a zero amount with a non-empty batch is refused, not booked as 0`(): Unit = runBlocking {
+        consumer.consume(record(payload = remittedPayload(totalTaxAmount = "\"0\"", itemCount = 12)))
+
+        verify(exactly = 0) { transactionClient.initiateTransaction(any()) }
+        verify(exactly = 0) { remitUseCase.settle(any()) }
+    }
+
+    @Test
+    fun `a nil batch (zero amount, zero items) settles without touching the rail`(): Unit = runBlocking {
+        every { remitUseCase.settle(remittanceId) } returns Uni.createFrom().item(Unit)
+
+        consumer.consume(record(payload = remittedPayload(totalTaxAmount = "\"0\"", itemCount = 0)))
+
+        verify(exactly = 0) { transactionClient.initiateTransaction(any()) }
+        verify(exactly = 1) { remitUseCase.settle(remittanceId) }
+    }
+
+    @Test
     fun `a malformed payload is swallowed, not thrown`(): Unit = runBlocking {
-        consumer.consume("{bad-json")
+        consumer.consume(record(payload = "{bad-json"))
 
         verify(exactly = 0) { transactionClient.initiateTransaction(any()) }
     }

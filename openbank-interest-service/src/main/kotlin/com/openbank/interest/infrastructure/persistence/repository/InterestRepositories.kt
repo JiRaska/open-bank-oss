@@ -6,8 +6,11 @@ package com.openbank.interest.infrastructure.persistence.repository
 
 import com.openbank.interest.application.port.out.*
 import com.openbank.interest.domain.model.*
+import com.openbank.interest.domain.tax.WithholdingTax
 import com.openbank.interest.infrastructure.persistence.entity.*
 import com.openbank.interest.infrastructure.persistence.mapper.InterestMapper
+import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.persistence.outbox.OutboxStatus
 import io.quarkus.hibernate.reactive.panache.common.WithSession
 import io.quarkus.hibernate.reactive.panache.common.WithTransaction
 import io.smallrye.mutiny.Uni
@@ -15,6 +18,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.hibernate.reactive.mutiny.Mutiny
 import java.math.BigDecimal
+import java.time.Clock
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -58,17 +62,15 @@ class InterestAccrualRepositoryImpl @Inject constructor(
             sf.withSession { s -> s.createQuery("FROM InterestAccrualEntity WHERE accountId = :a ORDER BY accrualDate DESC", InterestAccrualEntity::class.java).setParameter("a", accountId).resultList }
         return q.map { it.map(mapper::toDomain) }
     }
-    @WithSession override fun findPendingCapitalization(accountId: UUID, toDate: LocalDate): Uni<List<InterestAccrual>> =
-        sf.withSession { s -> s.createQuery("FROM InterestAccrualEntity WHERE accountId = :a AND status = 'ACCRUING' AND accrualDate <= :d ORDER BY accrualDate ASC", InterestAccrualEntity::class.java).setParameter("a", accountId).setParameter("d", toDate).resultList }.map { it.map(mapper::toDomain) }
-    @WithTransaction override fun markCapitalized(ids: List<UUID>, capitalizedAt: OffsetDateTime): Uni<Int> =
-        sf.withTransaction { s -> s.createMutationQuery("UPDATE InterestAccrualEntity SET status = 'CAPITALIZED', capitalizedAt = :t WHERE id IN :ids").setParameter("t", capitalizedAt).setParameter("ids", ids).executeUpdate() }
+    @WithSession override fun findPendingCapitalization(accountId: UUID, productId: String, toDate: LocalDate): Uni<List<InterestAccrual>> =
+        sf.withSession { s -> s.createQuery("FROM InterestAccrualEntity WHERE accountId = :a AND productId = :p AND status = 'ACCRUING' AND accrualDate <= :d ORDER BY accrualDate ASC", InterestAccrualEntity::class.java).setParameter("a", accountId).setParameter("p", productId).setParameter("d", toDate).resultList }.map { it.map(mapper::toDomain) }
     @WithSession override fun sumAccrued(accountId: UUID, from: LocalDate, to: LocalDate): Uni<BigDecimal> =
         sf.withSession { s -> s.createQuery("SELECT COALESCE(SUM(accruedAmount), 0) FROM InterestAccrualEntity WHERE accountId = :a AND accrualDate >= :f AND accrualDate <= :t AND status = 'ACCRUING'", BigDecimal::class.java).setParameter("a", accountId).setParameter("f", from).setParameter("t", to).singleResult }
 }
 
 @ApplicationScoped
 class InterestCapitalizationRepositoryImpl @Inject constructor(
-    private val sf: Mutiny.SessionFactory, private val mapper: InterestMapper
+    private val sf: Mutiny.SessionFactory, private val mapper: InterestMapper, private val clock: Clock
 ) : InterestCapitalizationRepository {
     @WithTransaction override fun save(cap: InterestCapitalization): Uni<InterestCapitalization> {
         val e = mapper.toEntity(cap)
@@ -76,4 +78,56 @@ class InterestCapitalizationRepositoryImpl @Inject constructor(
     }
     @WithSession override fun findByAccountId(accountId: UUID): Uni<List<InterestCapitalization>> =
         sf.withSession { s -> s.createQuery("FROM InterestCapitalizationEntity WHERE accountId = :a ORDER BY createdAt DESC", InterestCapitalizationEntity::class.java).setParameter("a", accountId).resultList }.map { it.map(mapper::toDomain) }
+
+    // All four writes of a capitalization share ONE transaction (same shape as statement-service's
+    // saveWithOutbox): capitalization + withholding + outbox event + the guarded accrual flip. A
+    // failure anywhere — including the row-count guard below — rolls the whole set back, so a retry
+    // never re-credits accruals that a previous partial run already capitalized.
+    @WithTransaction
+    override fun saveWithOutbox(
+        cap: InterestCapitalization,
+        withholding: WithholdingTax,
+        event: OutboxMessage,
+        accrualIds: List<UUID>,
+        capitalizedAt: OffsetDateTime,
+    ): Uni<InterestCapitalization> {
+        val capEntity = mapper.toEntity(cap)
+        val whtEntity = mapper.toEntity(withholding)
+        val outboxEntity = InterestOutboxEntity().apply {
+            eventId = event.eventId
+            aggregateId = event.aggregateId
+            eventType = event.eventType
+            payload = event.payload
+            status = OutboxStatus.PENDING.name
+            attemptCount = 0
+            createdAt = event.createdAt
+            updatedAt = clock.instant()
+        }
+        return sf.withTransaction { s ->
+            s.persist(capEntity)
+                .chain { _ -> s.persist(whtEntity) }
+                .chain { _ -> s.persist(outboxEntity) }
+                .chain { _ ->
+                    // Status guard: only rows still ACCRUING flip. A count mismatch means another
+                    // writer capitalized (or reversed) some of them meanwhile — abort + roll back.
+                    s.createMutationQuery(
+                        "UPDATE InterestAccrualEntity SET status = 'CAPITALIZED', capitalizedAt = :t " +
+                            "WHERE id IN :ids AND status = 'ACCRUING'",
+                    ).setParameter("t", capitalizedAt).setParameter("ids", accrualIds).executeUpdate()
+                }
+                .flatMap { updated ->
+                    if (updated != accrualIds.size) {
+                        Uni.createFrom().failure(
+                            IllegalStateException(
+                                "Capitalization aborted: expected to flip ${accrualIds.size} ACCRUING accruals, " +
+                                    "matched $updated (account=${cap.accountId}, product=${cap.productId}, " +
+                                    "periodTo=${cap.periodTo}) — concurrent capitalization or reversed accruals; rolled back",
+                            ),
+                        )
+                    } else {
+                        Uni.createFrom().item(mapper.toDomain(capEntity))
+                    }
+                }
+        }
+    }
 }
