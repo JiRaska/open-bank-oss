@@ -5,6 +5,15 @@ Decision-Status: Proposed
 Delivery-Status: Planned
 Author(s): jiri.raska
 
+**Correction note (2026-07-16, issue #1331).** The first version of this ADR shipped with a false
+premise. Force 3 claimed marketing consent did not exist; it does — live, revocable and audited
+(#1157/#1161), merged seven hours before this ADR. The claim came from a grep run against a local
+checkout hundreds of commits behind `origin/main`, and a broken probe's silence became a stated
+fact. Force 3, D6 and D1 are rewritten below; the false rejection of an alternative is removed; two
+compliance citations are downgraded to unverified. **What is corrected is recorded, not
+overwritten** — the errors are as instructive as the decisions, and an ADR that quietly rewrites its
+own reasoning teaches nothing.
+
 ## Context
 
 Support staff need to send a customer a message from the admin console, and to see that
@@ -41,14 +50,26 @@ Five forces make the naive version — a textarea wired to a new endpoint — th
    note records payload minimisation as complete. Adding a compose path on top of an unenforced
    rule would entrench the violation.
 
-3. **There is no marketing consent to check, only the appearance of one.** Four sources
-   disagree. `notification-service`'s own compliance doc says marketing-style templates require
-   Art. 6(1)(a) consent "managed upstream (consent-service)". consent-service has no marketing
-   scope — `ConsentScope` covers AISP/PISP/CBPII, the `AGENT_*` scopes, and `TELEMETRY_RUM`. The
-   actual `marketing_consent` column lives in party-service and is mapped to no entity, so
-   nothing reads or writes it. And the admin-ui compliance page asserts the control is `ok`.
-   `grep -rn "consent" openbank-notification-service/src/main/kotlin/` returns zero matches. Any
-   marketing send today would rest on a control that does not exist.
+3. **Marketing consent exists, but nothing in the send path reads it — and it lives in the wrong
+   service.** Two distinct problems, previously (and wrongly) stated as one.
+
+   *The consent is real.* `consent_marketing` + `consent_marketing_updated_at` (party-service
+   `V12__consent_capture.sql` / `V13__marketing_consent_updated_at.sql`, #1157/#1161) are mapped on
+   `PartyEntity`, read and written by `PartyRepositoryImpl`, exposed as `PATCH` on `PartyResource`
+   via `UpdateMarketingConsentCommand` with an ADR-0086 audit event, and revocable by the customer
+   through `PATCH /customer/v1/profile/consent` on customer-edge. There is also a **dead**
+   `marketing_consent` column (`V2__compliance_fields.sql`) with zero readers — the earlier draft
+   cited that one and concluded no control existed.
+
+   *Nothing checks it.* `grep -rin "consent"` over notification-service's Kotlin returns four
+   matches, all `CONSENT_GRANTED`/`CONSENT_REVOKED` template names. None is a check. That is a
+   wiring gap in one service, not a missing control.
+
+   *It is in the wrong place.* A marketing opt-in is a GDPR Art. 7 consent — ADR-0126's regime 2,
+   for which ADR-0126 declares `openbank-consent-service` the **single consent authority**. But
+   `ConsentScope` has no marketing scope (`grep -rin marketing` over consent-service → zero), and
+   #1161 put the consent in party-service instead. **Two ADRs say one thing and the code does
+   another**, and that conflict outranks this ADR — see D6.
 
 4. **Four-eyes cannot currently express this gate.** The ADR-0155 mechanism is wired fleet-wide
    (`AuthorizeInterceptor.requireFourEyes` → HTTP 202 + `X-Approval-Id`), but `rest.rego`
@@ -67,32 +88,66 @@ Five forces make the naive version — a textarea wired to a new endpoint — th
 ## Decision
 
 We will add operator-initiated messaging as a **catalogue-driven, service-message-only,
-maker-checker-gated** capability, and codify the classification model the service has been
-missing.
+maker-checker-gated** capability, and close the input-validation gap the service has always had:
+templates accept whatever variables a caller sends.
 
-### D1 — Template sensitivity is a domain classification
+### D1 — A closed variable schema per template; sensitivity is the second control
 
-Every `NotificationTemplate` carries a sensitivity class. The first class ships already
-(`TemplateSensitivity`, issue #1179): **SECRET** templates (`OTP_CODE`, `PASSWORD_RESET`) render
-an authentication secret, are delivered, and are **never stored** — the body column holds a
-placeholder and the read path redacts again, so two independent controls must both fail (the
-ADR-0059 D3 shape).
+**Secrecy is a property of the variables, not of the template.** The first draft missed this, and
+so does the code that shipped for #1179. `TemplateSensitivity` (#1180) is a **binary predicate** —
+`SECRET_TEMPLATES: Set<NotificationTemplate>` + `isSecret()` + `bodyForStorage()` — keyed on the
+template. But `renderTemplate` maps only 6 of the 13 constants; the other 7 fall to an `else` branch
+that dumps every caller-supplied variable into the body. So:
 
-This ADR extends the model to the remaining classes, which govern who may read a body and what
-may reach a push payload:
+```
+template: ACCOUNT_FROZEN   (not SECRET → stored)
+variables: { "code": "483920" }
+→ else branch renders "code: 483920" → bodyForStorage(ACCOUNT_FROZEN, …) → stored in cleartext
+```
 
-| Class | Examples | Stored body | Push payload | Admin-UI body |
-|---|---|---|---|---|
-| `SECRET` | `OTP_CODE`, `PASSWORD_RESET` | placeholder only | never | never |
-| `OPERATIONAL` | `TRANSACTION_FAILED`, `ACCOUNT_FROZEN` | yes | wake signal only | operator + |
-| `SERVICE` | `TRANSACTION_COMPLETED`, `ACCOUNT_OPENED` | yes | wake signal only | operator + |
-| `MARKETING` | `WELCOME` | yes | wake signal only | operator + |
+A template-keyed allow-list cannot express *"this correctly-classified template received a
+secret-shaped variable"*. Worse, the review gate the first draft proposed is blind here: the leak
+lives in the branch that has **no per-template code to review** (issue #1325).
 
-Classification is a positive allow-list in the domain layer, adjacent to the enum. A template
-whose render embeds a secret and is not classified is a **review** failure, not a test failure —
-`renderTemplate` and the allow-list must be reviewed together. Stated plainly because the
-pinning test cannot catch it: it pins the set's contents, so a new enum constant leaves it
-unchanged and passing.
+The primary control is therefore D2's own reasoning applied to the enum:
+
+1. **A closed variable schema per template.** Declare the variables each template accepts; reject
+   unknown keys at the consumer boundary. A `code` on `ACCOUNT_FROZEN` becomes a poison payload.
+2. **Delete the `else` branch; make the `when` exhaustive.** A new constant then fails to
+   *compile* until someone writes its render and declares its variables — a compiler error, not a
+   review failure. That is the only guard that does not depend on a human noticing.
+
+`TemplateSensitivity` stays as the **second, independent control** (ADR-0059 D3 shape) — it is
+useful, it just cannot be the only one.
+
+**And it stays a predicate.** The first draft proposed replacing the shipped boolean with a
+four-class lattice — `SECRET` / `OPERATIONAL` / `SERVICE` / `MARKETING`. That model was invented
+complexity, and writing the table out honestly is what exposes it:
+
+| Class | Stored body | Push payload | Admin-UI body |
+|---|---|---|---|
+| `SECRET` | placeholder only | never | never |
+| `OPERATIONAL` | yes | wake signal only | operator + |
+| `SERVICE` | yes | wake signal only | operator + |
+| `MARKETING` | yes | wake signal only | operator + |
+
+The bottom three rows are **byte-identical across every column**. They classify nothing: no
+behaviour anywhere reads the difference. Sensitivity has exactly two meaningful values — *does the
+rendered body carry an authentication secret, or not* — which is precisely
+`TemplateSensitivity.isSecret()` as it already exists. **We keep the shipped predicate unchanged**
+and drop the lattice.
+
+Two further corrections the collapse makes moot but which are worth recording. `WELCOME` is **not**
+marketing: its rendered body ("Thank you for joining OpenBank, {name}") promotes no product. The
+first draft inherited that label from an unexamined comment in `OversightWebhook.kt` — and had it
+been right, D6's marketing hard-deny would have made the **live onboarding flow non-compliant
+today**, which the draft never noticed. And the first draft used the name `MARKETING` on both this
+axis and D6's, so one template was simultaneously deliverable (D1) and refused (D6). Sensitivity and
+purpose are orthogonal, and now only one of them uses the word.
+
+The lesson generalises past this ADR: a classification whose rows share every column is decoration.
+If adding a class changes no behaviour, it is a comment with extra steps — and it costs a migration,
+a type, and a reviewer's attention to learn that.
 
 ### D2 — Operator messages are catalogue entries, not free text
 
@@ -143,53 +198,129 @@ We will add `four_eyes.actions` to `rules.yaml`: a list of **exact action names*
 second approver, evaluated by `rest.rego` independently of money-path scope. `opsmessage.compose`
 is its first entry.
 
-**This extends ADR-0155, whose title and scope are "four-eyes enforcement for *money-path*
-actions".** That scoping is precisely what force 4 runs into: the mechanism is sound and
-fleet-wide, but its trigger is coupled to a service list `notification-service` will never
-join. ADR-0176 decouples the trigger from that list without changing the mechanism — ADR-0155
-is extended, not superseded, and its money-path defaults stand untouched.
+**This generalizes the `featureflag.flip` precedent, not ADR-0155's scope.** The first draft framed
+D5 as extending ADR-0155 and decoupling a trigger "coupled to a service list". That oversells it:
+`four_eyes_required` already has **two** clauses, and the second is not money-path-scoped at all —
 
-The existing `four_eyes.verbs` list keeps its money-path coupling; the two are read
-disjunctively. Adding `notification-service` to `money_path_services` instead is rejected below.
+```rego
+four_eyes_required if {
+	input.action == "featureflag.flip"
+	input.attributes.flag in data.rules.feature_flags.money_path_flags
+}
+```
 
-The approval flow itself is reused unchanged from ADR-0155 via `libs/approval/ApprovalStore`:
-the maker gets HTTP 202, a second principal decides, the maker retries with `X-Approval-Id`, and
-self-approval is refused by `SelfApprovalNotAllowedException`. Enforcement is behind
-`AUTHZ_FOUR_EYES_ENFORCE`, `false` fleet-wide today. This action is authored to be enforced from
-day one in sandbox; that flip is not gated on the fleet-wide rollout.
+an exact action name gated on a `rules.yaml` list, shipped with ADR-0067. D5 is a third clause in
+that same shape. Less novel, and correspondingly less risky.
 
-### D6 — Purpose is explicit, and marketing is refused until consent is real
+The authoritative argument is one the first draft never cited — `rules.yaml`'s own four-eyes
+guardrail ends: *"the risky path needs its own distinct action (e.g. a dedicated operator-only
+`enrollOnBehalf` endpoint) before it can be four-eyes gated safely — do not reuse the shared
+customer/M2M-facing action."* D4+D5 is exactly that prescription.
 
-Every operator message declares a purpose, which fixes its lawful basis:
+The existing `four_eyes.verbs` list keeps its money-path coupling; the two are read disjunctively.
 
-| Purpose | Lawful basis | Consent gate |
-|---|---|---|
-| `SERVICE` | Art. 6(1)(b) contract performance | none |
-| `LEGAL` | Art. 6(1)(c) legal obligation | none |
-| `MARKETING` | Art. 6(1)(a) consent + Act No. 480/2004 §7 | **hard-denied** |
+**Prerequisite, and it is a fail-open one.** `AuthorizeInterceptor` proceeds *without* the gate when
+no `ApprovalStore` bean is wired — it logs an error and calls `ctx.proceed()`. notification-service
+has no `ApprovalStore` producer, no decide endpoint, no `SelfApprovalNotAllowedMapper`, no
+`authz.four-eyes.enforce` key, and **no Redis client** (the only `ApprovalStore` impl is
+`RedisApprovalStore`). Flip `AUTHZ_FOUR_EYES_ENFORCE=true` today and `opsmessage.compose` would
+execute unapproved with a log line as the only trace. So D5 is not "reused unchanged": it is five
+files plus a Redis dependency, and **the wiring must land before the flag, never after.**
 
-`MARKETING` is refused at the API — not merely hidden in the UI — until a real consent gate
-exists. That gate needs a marketing scope in consent-service, `marketing_consent` mapped in
-party-service, a check in notification-service, and the false `ok` on the admin-ui compliance
-page corrected. Work on marketing-consent revocation is already in flight; this ADR does not
-front-run it.
+**Bundle ripple.** `gen-notification-opa-bundle.sh` hashes `rules.yaml` into its checksum, as do
+~25 of the 27 generators. Adding `four_eyes.actions` rolls every one of those pods and turns the
+`opa-policy.yml` verify job red unless all are regenerated and committed in the same PR.
+
+### D6 — Purpose is a property of the catalogue entry, and marketing stays refused
+
+Every message carries a purpose, which fixes its lawful basis and its channel rules:
+
+| Purpose | Lawful basis | Channel rule | Consent gate |
+|---|---|---|---|
+| `LEGAL` | Art. 6(1)(c) legal obligation | any | none |
+| `SERVICE` | Art. 6(1)(b) **only where genuinely necessary** to perform the contract; otherwise Art. 6(1)(f) | any | none, but Art. 21(1) objection applies to the 6(1)(f) cases |
+| `MARKETING` | Art. 6(1)(a) consent + Art. 7 | §7(3) soft opt-in is **email-only**; push/SMS always need consent | **hard-denied** |
+
+**Purpose binds to the catalogue entry, not to the message.** This reverses the first draft, which
+argued for an operator-declared per-message field. Under D2 an operator can only pick a versioned,
+reviewed entry — so purpose is a property of that entry's *meaning*, fixed at review time by the
+people who write it, and unfalsifiable by the sender. Make it operator-declared and the `MARKETING`
+hard-deny becomes an honour system: label a promo-shaped template `SERVICE` and the gate passes
+silently. D2 and D6 were in direct tension; D6 loses.
+
+**`SERVICE` is not a blanket 6(1)(b).** EDPB Guidelines 2/2019 read "necessary for the performance
+of a contract" strictly, and most service messages are *useful*, not *necessary*. This is not
+paperwork: the Art. 21(1) right to object exists **only** for 6(1)(e)/(f), so labelling a
+legitimate-interest message 6(1)(b) deletes the customer's right to object and writes a false
+Art. 30 record. Each catalogue entry states its basis explicitly and defends it; there is no default.
+(Art. 21(2) — objection to direct marketing — applies regardless of basis, so this loss is specific
+to service messages.)
+
+**Art. 6(1)(a) for marketing is a deliberate choice, not the only lawful one.** Recital 47 says
+direct-marketing processing *"may be regarded as carried out for a legitimate interest"* — permissive,
+case-by-case. Art. 6(1)(f) is therefore available. We take consent anyway, because #1161 already
+collects a revocable one and a consent the customer can withdraw from a Profile screen is the
+posture we want for a bank. Choosing the stricter basis is the decision; it is recorded here so it
+is not mistaken for the only option.
+
+**`MARKETING` stays hard-denied at the API** — not merely hidden in the UI. Not because the consent
+is missing (it is not, see force 3), but because **notification-service does not read it and the
+authoritative location is undecided**. The gate needs: the split-brain below resolved, then a check
+in notification-service against whichever service wins, then the admin-ui compliance page's note
+corrected (`docs/compliance/page.tsx` still cites the dead `marketing_consent` V2 column — its `ok`
+status is now defensible, its reason is stale).
+
+**The split-brain this ADR must not paper over.** ADR-0126 declares consent-service the single
+authority for all three consent regimes, including GDPR Art. 7 — which is what a marketing opt-in
+is. #1161 put it in party-service. Asking for a consent-service scope (as this ADR does) sides with
+ADR-0126 against the shipped code; that is a real decision and it is **not this ADR's to make**.
+Someone must choose: consent-service grows a marketing scope and the party-service column becomes a
+projection, or ADR-0126's "single authority" is amended to carve out simple per-party opt-ins.
+Tracked in #1331. Until then D6's marketing row is a placeholder pointing at an unsettled address.
 
 This is also the repo's first explicit treatment of **purpose limitation** (GDPR Art. 5(1)(b)).
 No ADR covers it today, and `AuditEvent` has no purpose or legal-basis field — it infers purpose
-from the `operation` string. Carrying purpose as a first-class field on the message, rather than
-inferring it from the template, is what makes the consent gate checkable at all.
+from the `operation` string. Binding purpose to the catalogue entry is what makes the gate
+checkable: the value is fixed by review, carried into the audit record, and cannot be chosen by
+the person the gate exists to constrain.
 
-### D7 — Reading a customer's history is role-split and recorded
+### D7 — The history tab shows metadata only, because the read gate is not ours to set
 
 The admin-ui party detail page gains a messages tab backed by the existing
-`GET /notifications?partyId=`. Metadata (template, channel, status, timestamps) is visible to
-`ROLE_OPERATOR`/`ROLE_ADMIN` under a new `notifications:view` permission. Bodies follow D1.
+`GET /notifications?partyId=`, showing **metadata only** (template, channel, status, timestamps).
+Bodies are not fetched: the list endpoint returns none, and the page does not call
+`GET /notifications/{id}`, which does.
 
-Reads emit an audit event. This is the honest gap in this ADR: the default `AuditEventPublisher`
-binding is a log line, no Kafka implementation exists outside agent-service, `@Audited` has no
-interceptor, and audit-service consumes no notification topic. Recording operator reads therefore
-needs real wiring, tracked separately — a fleet-wide accountability gap this feature surfaces
-rather than creates. We will not claim Art. 5(2) coverage for read access until it lands.
+**`notifications:view` is UX gating, not a security control.** The first draft claimed this
+permission role-splits read access. It does not, and the reason is the same force 5 already named:
+`operator-read-any` grants `.read`/`.list` on *any* resource to every `ROLE_OPERATOR`, and the
+admin-ui BFF relays the operator's own bearer with **no permission check of its own** (`grep -cE
+"hasPermission|requirePermission"` over the proxy → 0). A UI permission decides what we *render*,
+never what an operator can *fetch* — anyone who can open the console can already call the endpoint
+from devtools. The tab therefore adds **convenience, not exposure**, and the permission's comment
+in `roles.ts` says so, so nobody later mistakes it for a boundary.
+
+Real metadata/body separation needs a `rest.rego` change — either splitting the read into a
+metadata action and a body action, or carving the namespace out of `operator-read-any` (which is
+prefix-blind). That is issue #1326 and it gates showing bodies at all.
+
+**The role gates disagree with each other, in both directions.** `@RolesAllowed` on
+`NotificationResource` lists `ROLE_VIEWER`, whom OPA then denies (no rule fires for a pure viewer);
+`rest.rego`'s `compliance-read-any` admits `ROLE_COMPLIANCE`, whom `@RolesAllowed` then denies.
+Neither is a hole — the intersection fails closed at `ROLE_OPERATOR`/`ROLE_ADMIN` — but both are
+dead grants that mislead anyone reading one file alone. Also `classifyBffFailure` has no 403 branch,
+so either denial surfaces as a generic "error". Catalogued in #1326.
+
+**Reads are not audited, and this ADR does not pretend otherwise.** The default
+`AuditEventPublisher` binding is a log line, no Kafka implementation exists outside agent-service,
+`@Audited` has no interceptor, and audit-service consumes no notification topic. Recording operator
+reads needs real wiring, tracked separately — a fleet-wide accountability gap this feature surfaces
+rather than creates. We do not claim Art. 5(2) coverage for read access until it lands.
+
+One consequence worth naming: the tab converts dormant, over-retained rows into a live staff-facing
+lookup surface. That is an Art. 5(1)(b) purpose shift (delivery record → staff retrieval), and it
+raises the stakes of the unenforced 2-year retention (`governance.yaml` declares it; no purge job
+exists) even though it does not create that breach.
 
 Erasure already works (`PartyErasureConsumer` hard-deletes on `PARTY_ERASED`); the tab renders
 the empty state and does not distinguish "erased" from "never messaged".
@@ -203,9 +334,11 @@ the empty state and does not distinguish "erased" from "never messaged".
   no purge job. Revisit only given an operational need the catalogue provably cannot serve.
 - **Add `notification-service` to `money_path_services`** so the existing four-eyes computation
   applies. Rejected: it drags 2-approval review, a mandatory threat model, mutation testing, a
-  coverage floor and a required SLO object pair onto the whole service to gate one action — and
-  it still would not work, because the gate matches by *verb*, so a `send`-shaped action would
-  sweep in the M2M callers the `rules.yaml` guardrail explicitly warns about.
+  coverage floor and a required SLO object pair onto the whole service to gate one action.
+  (The first draft also claimed it "still would not work". That was false and is withdrawn:
+  `money_path_scopes` would derive the scope `notification`, and `notification.send` ends in a
+  `four_eyes.verbs` entry, so the gate *would* fire. The cost above is reason enough on its own —
+  a rejection does not need a second, wrong argument propping it up.)
 - **Reuse `notification.send` as the action name.** Rejected: `send` is already a `four_eyes`
   verb (`swift.send`), and `notification.*` is auto-granted to customer-edge by the
   `edge-service-notification` rule. Two independent traps in one name.
@@ -240,26 +373,52 @@ the empty state and does not distinguish "erased" from "never messaged".
   delivery before any of this works.
 
 **Neutral**
-- The catalogue overlaps conceptually with `openbank-document-service` templating (ADR-0162).
-  Kept separate: that renders documents, this renders messages, and merging them would couple two
-  lifecycles over a superficial similarity.
+- **The catalogue should reuse `openbank-document-service`'s template registry, not reinvent it.**
+  The first draft rejected this as "coupling two lifecycles over a superficial similarity". That
+  does not survive contact with the code: the PDF coupling is one line in `DocumentRenderService`,
+  and everything worth reusing is already PDF-free — `TemplateStatus { DRAFT, PUBLISHED, RETIRED }`,
+  `TemplateRepositoryPort.findLatestPublished(code)`, a **DB-enforced** partial unique index
+  (one PUBLISHED per code), and `TemplateRenderPort.renderHtml(template, data)`, which does no I/O
+  and no PDF. ADR-0162 states the engine is swappable without touching the domain, and an HTML-only
+  path already ships (`previewRender`). Meanwhile D2 promises a catalogue "versioned, reviewed, and
+  rendered server-side exactly as today's enum templates are" — but today's templates are a
+  hardcoded Kotlin `when` with **no versioning at all**, which is the one property `DocumentTemplate`
+  exists to provide. Reuse `TemplateRepositoryPort` + `TemplateRenderPort` + the one-published-per-code
+  invariant; do **not** reuse `DocumentRenderUseCase`, `Document` (PDF/WORM-shaped, SHA-256 addressed,
+  `retain_until`) or `PdfRenderPort`. A message must never become a `Document`. Roughly ten new lines
+  are needed for a `code → HTML` path, since no such use case exists today.
 
 ## Compliance impact
 
-- GDPR Art. 5(1)(b): purpose limitation — first explicit treatment in the repo (D6).
-- GDPR Art. 5(1)(c): data minimisation — secret bodies never stored (D1); push payloads carry no
+Read from the primary texts, at engineering grade — not legal advice. The 6(1)(b)-vs-6(1)(f)
+classification of service messages (D6) in particular should be confirmed with counsel before it
+is encoded in an Art. 30 record.
+
+- GDPR Art. 5(1)(b): purpose limitation — first explicit treatment in the repo (D6). Also the
+  purpose shift D7 introduces: delivery record → staff lookup surface.
+- GDPR Art. 5(1)(c): data minimisation — secrets never stored (D1); push payloads carry no
   content (D3).
-- GDPR Art. 5(2): accountability — operator reads recorded (D7), **not yet honest**: depends on
-  audit wiring that does not exist. Not claimed as covered until it lands.
-- GDPR Art. 6(1)(a)/(b)/(c): lawful basis fixed per purpose; marketing hard-denied (D6).
-- GDPR Art. 7: demonstrable consent — the precondition marketing is blocked on (D6).
-- GDPR Art. 21: right to object — marketing preference; blocked with D6.
-- Act No. 480/2004 Coll. §7 (CZ, obchodní sdělení): commercial communications need prior consent
-  — the second, independent reason marketing is refused (D6).
-- PSD2 Art. 97 / ADR-0021: SCA channel integrity — a stored OTP lets staff complete a customer's
-  SCA (D1).
-- DORA Art. 9(4)(b): protection of ICT assets — dual control on the operator write path (D5).
+- GDPR Art. 5(1)(e): storage limitation — **not met**. `governance.yaml` declares 2 years; no purge
+  job exists. Pre-existing, not created here, but D7 raises its stakes.
+- GDPR Art. 5(2): accountability — **not claimed**. Operator reads are unrecorded; the audit
+  wiring does not exist (D7).
+- GDPR Art. 6(1)(a): marketing — a deliberate choice over the 6(1)(f) that Recital 47 permits (D6).
+- GDPR Art. 6(1)(b)/(f): service messages — 6(1)(b) only where genuinely necessary per EDPB
+  Guidelines 2/2019; otherwise 6(1)(f), which preserves the Art. 21(1) objection right (D6).
+- GDPR Art. 7: demonstrable, withdrawable consent — satisfied by #1161's revocable opt-in; the open
+  question is *which service owns it* (D6).
+- GDPR Art. 21: (1) objection on particular grounds — only for 6(1)(e)/(f), hence the D6 care over
+  `SERVICE`. (2) objection to direct marketing — applies regardless of basis.
+- Act No. 480/2004 Coll. (CZ): §7(2) consent for commercial communications by electronic means —
+  §2's *"zejména"* makes that non-exhaustive, so it reaches push and SMS. §7(3)'s soft opt-in is
+  *"pro elektronickou poštu"* — email only (D6).
 - ČNB: four-eyes on customer-facing staff actions, consistent with ADR-0116's KYC role split.
+- **Unverified, flagged rather than claimed.** The first draft hooked "a stored OTP breaks SCA" to
+  PSD2 Art. 97 (which governs *when* SCA applies; confidentiality of personalised security
+  credentials is plausibly RTS (EU) 2018/389 Art. 22), and dual control to DORA Art. 9(4)(b) (which
+  concerns data corruption/loss and unauthorised access, and does not obviously mandate it). Both
+  look over-hooked. Neither has been checked against the primary text; do not cite them onward
+  until someone has.
 
 ## References
 
@@ -274,6 +433,11 @@ the empty state and does not distinguish "erased" from "never messaged".
   (`ApprovalStore`, `requireFourEyes`, HTTP 202), trigger decoupled from the money-path list
 - ADR-0162 (document templating) — the adjacent templating engine, deliberately not reused
 - `openbank-libs/governance/rules.yaml` — `four_eyes`, `money_path_services`, the verb guardrail
-- Issue #1179 — secret-bearing bodies stored readable (D1's shipped first slice)
+- Issue #1179 / PR #1180 — secret bodies stored readable; the shipped `TemplateSensitivity` predicate
+- Issue #1325 — secret-bearing *variables* bypass that predicate via `renderTemplate`'s `else`
+  branch; the gap D1's variable schema closes
+- Issue #1326 — operator read of message history is unconstrained; a UI permission cannot gate it (D7)
+- Issue #1331 — this ADR's false premise, and the party-service vs consent-service split-brain (D6)
+- PR #1303 — the `openapi.yaml` drift correction the D7 tab's `page`/`size` paging depends on
 - GDPR (EU) 2016/679, Art. 5, 6, 7, 21
 - Act No. 480/2004 Coll. §7 (CZ) — commercial communications
