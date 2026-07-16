@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react'
 import { ChevronRight, ChevronDown, Download, Package, Scale, Layers, Loader2, GitCompareArrows } from 'lucide-react'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 interface SbomSummary {
   service: string
@@ -48,6 +49,7 @@ interface Props {
 }
 
 export function SbomViewer({ serviceName }: Props) {
+  const { t } = useLanguage()
   const [open, setOpen] = useState(false)
   const [data, setData] = useState<SbomSummary | null>(null)
   // 'not_generated' = the SBOM simply wasn't baked into this image build (HTTP
@@ -161,7 +163,7 @@ export function SbomViewer({ serviceName }: Props) {
           {loading && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-tertiary)', fontSize: '12px' }}>
               <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
-              Loading SBOM…
+              {t('Načítání SBOM…', 'Loading SBOM…')}
             </div>
           )}
 
