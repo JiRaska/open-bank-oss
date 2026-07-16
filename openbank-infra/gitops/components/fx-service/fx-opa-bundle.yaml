@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fx-service
     app.kubernetes.io/part-of: fx
   annotations:
-    openbank.tech/policy-checksum: "7586fafec5231bba"
+    openbank.tech/policy-checksum: "c65f42f08fa2d73a"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -432,6 +432,22 @@ data:
 
     # Every tools.allow / tools.deny pattern across the agent's charter(s) -- factored out so
     # charter_allowed and rest_action_allowed don't each re-walk `some a in charter` themselves.
+    #
+    # SCHEMA NOTE: this only matches charters whose tools.allow/deny are a flat list of pattern
+    # STRINGS (compliance-officer, ledger-domain-engineer, ui-assistant, rca-investigator,
+    # customer-copilot). The standalone background/control-plane agents (finops-agent, devops-agent,
+    # control-liveness-sentinel, governance-auditor, release-steward, docs-truth-agent,
+    # authz-policy-auditor, flaky-test-hunter) instead declare tools.allow as a list of
+    # `{tier, resources}` objects -- `some pattern in a.tools.allow` binds `pattern` to the whole
+    # object for those charters, which glob_match can never match against a string tool name, so
+    # charter_allowed is always false for them here. This is intentionally NOT a security gap
+    # (default-deny fails closed, not open) -- it is simply inert: none of those services call the
+    # MCP /tools/call endpoint this package gates at all (confirmed: no reference to it in any of
+    # their source trees). Their real, live authorization is the standard `@RolesAllowed` REST
+    # security on each service's own endpoints. Their `agents.yaml` charter today documents intent
+    # for governance/audit purposes, not a runtime-enforced grant -- same as every charter's
+    # `requires_human` block, which no code path reads either. Wiring the tier+resources shape into
+    # a live decision here is future work if/when these services are ever fronted by the MCP gateway.
     allowed_or_denied_patterns := {
     	"allow": {pattern |
     		some a in charter
@@ -867,6 +883,345 @@ data:
         compliance:
           eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
           dora: "ICT change management (Art. 8–10); operational resilience via proactive pipeline monitoring"
+
+      - id: control-liveness-sentinel
+        plane: control
+        charter: "ADR-0163"
+        description: >
+          Fleet-wide correlator for the ADR-0160 liveness/drift-detection mechanisms — watches
+          WorkflowLivenessWatchdog heartbeat gauges, the event-consumer-liveness and lineage-vs-code
+          CI gate reports, and reconciliation drift-SLA windows. Surfaces a stale-or-silent control
+          as a finding before it pages, and proposes a durable fix (a code/IaC PR wiring an
+          unmonitored job into the watchdog, or a tracking ticket) through the HITL queue. Never
+          writes to a control directly.
+        enabled: true
+        enforcement: block
+        schedule:
+          daily: "03:00 UTC"
+          reactive: goalert-webhook       # triggered when a WorkflowLivenessWatchdog gauge itself pages
+        data_scope:
+          read:
+            - prometheus-query-readonly   # openbank_workflow_liveness_last_success_age_seconds gauges
+            - read.governance             # rules.yaml advisory allowlists (mechanisms 1/2), ADR-0160
+          pii: none                       # control-heartbeat / CI-gate metadata only; no customer data
+        tools:
+          allow:
+            - tier: read
+              resources: [prometheus, governance]
+            - tier: write_proposal
+              resources: [github-pr]      # opens code/IaC diff PRs or draft.ticket only; no write
+          deny:
+            - tier: write
+              resources: ["*"]            # explicit: no direct write to any control ever
+            - tier: execute
+              resources: ["*"]
+        requires_human:
+          - any_control_or_pipeline_change  # HITL mandatory; a human merges every proposal
+          - every: proposal                 # segregation of duties: agent proposes, human disposes
+        limits:
+          tokens_per_run: 50000
+          runs_per_day: 6
+          kill_switch: true
+        audit:
+          capture:
+            - model_id
+            - prompt_hash
+            - tool_calls
+            - policy_decision
+            - findings_detected
+            - control_mechanism_impacted
+            - human_approved_by
+        compliance:
+          eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
+          dora: "Art. 9 ICT risk detection; Art. 24 testing of ICT systems — fleet-wide correlator for ADR-0160's detection controls"
+
+      - id: governance-auditor
+        plane: control
+        charter: "ADR-0164"
+        description: >
+          Post-hoc auditor of merged-PR governance compliance. For every PR merged to main, re-verifies
+          via the GitHub API that rules.yaml's own review rules were actually followed: approval count
+          vs. the money-path/default requirement, docs/threat-models/<service>.md presence for a
+          money-path change, merge-commit GPG verification, a linked issue in the PR body, and
+          (best-effort) an admin/override-flag bypass. Proposes a compliance-incident ticket through
+          the HITL queue for a human to triage — a violation on an already-merged PR is a human
+          decision, not a diff. Never merges, approves or re-runs anything.
+        enabled: true
+        enforcement: block
+        schedule:
+          daily: "04:30 UTC"
+          reactive: pr-merged-webhook     # triggered per PR merge to main — this agent's natural trigger,
+                                          # unlike the alert-driven goalert-webhook its siblings use
+        data_scope:
+          read:
+            - github-prs-readonly        # merged-PR metadata: reviews, merge-commit verification, body, labels
+            - read.governance            # rules.yaml review + money_path_services — the compliance bar itself
+          pii: none                       # PR/review metadata only; no customer data in scope
+        tools:
+          allow:
+            - tier: read
+              resources: [github, governance]
+            - tier: write_proposal
+              resources: [github-pr]      # opens draft.ticket (primary) or, rarely, a mechanical fix PR
+          deny:
+            - tier: write
+              resources: ["*"]            # explicit: no direct write to any PR/review/merge ever
+            - tier: execute
+              resources: ["*"]
+        requires_human:
+          - any_compliance_incident       # HITL mandatory; a human triages every finding
+          - every: proposal                 # segregation of duties: agent proposes, human disposes
+          - approver_must_differ_from: author     # segregation of duties
+          - record: reason                         # approve/reject reason -> audit
+        limits:
+          tokens_per_run: 50000
+          runs_per_day: 24                # one per merge is common; daily catch-up sweep is one more
+          kill_switch: true
+        audit:
+          capture:
+            - model_id
+            - prompt_hash
+            - tool_calls
+            - policy_decision
+            - findings_detected
+            - governance_check_type_impacted
+            - human_approved_by
+        compliance:
+          eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
+          dora: "Art. 9 ICT risk detection; Art. 5 governance and organisation — re-verifies the repo's own change-control governance was followed"
+
+      - id: release-steward
+        plane: control
+        charter: "ADR-0165"
+        description: >
+          Periodic guardian of the release-please / version-axis invariants. Checks
+          release-please-config.json vs .release-please-manifest.json lockstep, admin-ui
+          package.json vs version.txt sync, a fleet-wide scan for services that set
+          quarkus.application.version explicitly (proactively, ahead of the reactive
+          check-app-version-override.sh CI gate), and open-PR openapi.yaml:info.version
+          collision detection across every open PR touching a spec. Proposes a triage ticket
+          for judgment-call drift (manifest baseline, version-sync side, which racing PR
+          re-bumps) and, for the one mechanically fixable case (an explicit
+          quarkus.application.version key), a scaffold PR through the HITL queue. Never
+          edits version.txt, merges a release-please PR, or writes to openapi.yaml directly.
+        enabled: true
+        enforcement: block
+        schedule:
+          daily: "05:00 UTC"
+          reactive: release-please-merge-webhook   # triggered by every release-please PR merge —
+                                                    # this agent's natural trigger, the moment
+                                                    # incidents 1/2 have historically been introduced
+        data_scope:
+          read:
+            - read.governance             # release-please-config.json, .release-please-manifest.json,
+                                           # per-service application.yaml (repo-checkout reads)
+            - github-prs-readonly         # open PRs touching any openapi.yaml, for the collision check
+          pii: none                       # release/version metadata only; no customer data in scope
+        tools:
+          allow:
+            - tier: read
+              resources: [governance, github]
+            - tier: write_proposal
+              resources: [github-pr]      # opens draft.ticket (primary) or, rarely, a mechanical fix PR
+          deny:
+            - tier: write
+              resources: ["*"]            # explicit: no direct write to version.txt/openapi.yaml/manifest ever
+            - tier: execute
+              resources: ["*"]
+        requires_human:
+          - any_release_or_version_drift  # HITL mandatory; a human picks the correct baseline/side
+          - every: proposal                 # segregation of duties: agent proposes, human disposes
+        limits:
+          tokens_per_run: 50000
+          runs_per_day: 12                # daily sweep + one per release-please merge is common
+          kill_switch: true
+        audit:
+          capture:
+            - model_id
+            - prompt_hash
+            - tool_calls
+            - policy_decision
+            - findings_detected
+            - release_invariant_impacted
+            - human_approved_by
+        compliance:
+          eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
+          dora: "Art. 9 ICT risk detection; Art. 24 testing of ICT systems — fleet-wide re-verification for the repo's own release-engineering invariants"
+
+      - id: docs-truth-agent
+        plane: control
+        charter: "ADR-0166"
+        description: >
+          Periodic ADR-status-vs-code drift detector. On a weekly sweep plus reactively when any
+          docs/adr/*.md file changes, greps every ADR's Delivery-Status: line against the code/
+          service/class/config key it names: a Shipped/Complete ADR whose named artifact doesn't
+          exist or isn't wired up, a Planned/Partial ADR whose fully-built implementation already
+          exists unmentioned (the ADR-0139/ADR-0140 feature-store incident), and a mismatch between
+          an ADR's or doc's "enforced" claim and rules.yaml's own gate-graduation enforced flag.
+          Findings are almost always a tracking ticket — correcting an ADR's substantive content is
+          a human judgment call — with a rare mechanical PR reserved for the one unambiguous case:
+          flipping just the Delivery-Status: line, nothing else in the file. Never edits ADR
+          decision content, merges a PR, or writes to rules.yaml.
+        enabled: true
+        enforcement: block
+        schedule:
+          weekly: "06:00 UTC"
+          reactive: adr-merge-webhook       # triggered by any merged change under docs/adr/*.md
+        data_scope:
+          read:
+            - read.governance             # docs/adr/*.md Delivery-Status lines, rules.yaml enforced flags,
+                                           # and a grep-based existence check of the artifacts they name
+          pii: none                       # ADR prose and repo file/grep metadata only; no customer data
+        tools:
+          allow:
+            - tier: read
+              resources: [governance]
+            - tier: write_proposal
+              resources: [github-pr]      # opens draft.ticket (primary) or, rarely, a Delivery-Status-only fix PR
+          deny:
+            - tier: write
+              resources: ["*"]            # explicit: no direct write to any ADR's decision content or rules.yaml ever
+            - tier: execute
+              resources: ["*"]
+        requires_human:
+          - any_adr_status_correction     # HITL mandatory; a human reads the ADR and the code to judge the correct status
+          - every: proposal               # segregation of duties: agent proposes, human disposes
+        limits:
+          tokens_per_run: 50000
+          runs_per_day: 4                 # weekly sweep + occasional ADR-merge reactive runs
+          kill_switch: true
+        audit:
+          capture:
+            - model_id
+            - prompt_hash
+            - tool_calls
+            - policy_decision
+            - findings_detected
+            - adr_status_drift_impacted
+            - human_approved_by
+        compliance:
+          eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
+          dora: "Art. 9 ICT risk detection — fleet-wide re-verification that architectural decision records still match the code they describe"
+
+      - id: authz-policy-auditor
+        plane: control
+        charter: "ADR-0167"
+        description: >
+          Static analyzer for the fleet's OPA/Rego authorization policies (rest.rego, agents.rego,
+          copilot_tool.rego) and the agents.yaml charters that feed them. Cross-references every rule
+          condition against AuthorizeInterceptor's actual emitted principal-type/id vocabulary: a rule
+          gated on a classification value the interceptor never emits, an agent-id comparison missing
+          the trim_prefix normalization the REST bridge path needs, an agents.yaml charter's
+          tools.allow/deny drifting from the tool_tiers registry, and a REST rule bypassing
+          agents.allow by calling charter_allowed directly. Proposes a tracking ticket through the
+          HITL queue for every finding -- this agent never opens a fix PR, even for the fleet's usual
+          "one narrow mechanical case," because a wrong auto-fix on an authorization rule is a live
+          security exposure. Never writes to a .rego policy or agents.yaml directly.
+        enabled: true
+        enforcement: block
+        schedule:
+          weekly: "07:00 UTC"
+          reactive: policy-source-changed-webhook   # triggered when any .rego policy or agents.yaml changes
+        data_scope:
+          read:
+            - read.governance             # openbank-infra/opa/policies/*.rego, openbank-libs/governance/
+                                           # policies/*.rego, agents.yaml, and AuthorizeInterceptor.kt via
+                                           # a repo checkout
+          pii: none                       # policy source text and rule metadata only; no customer data
+        tools:
+          allow:
+            - tier: read
+              resources: [governance]
+            - tier: write_proposal
+              resources: [github-pr]      # opens draft.ticket ONLY -- never a fix PR (ADR-0167 Decision)
+          deny:
+            - tier: write
+              resources: ["*"]            # explicit: no direct write to any .rego policy or agents.yaml ever
+            - tier: execute
+              resources: ["*"]
+        requires_human:
+          - any_authz_policy_finding      # HITL mandatory; a human reads the rego/charter diff and the
+                                           # code path it gates before anything changes
+          - every: proposal                 # segregation of duties: agent proposes, human disposes
+          - two_person_review: authz_policy_findings   # stricter than every sibling agent's single-
+                                           # approval HITL gate (mirrors rules.yaml review.
+                                           # money_path_approvals: 2): a wrong disposition of an
+                                           # authz-policy finding is a live security exposure, not a
+                                           # documentation/cost/release nit, so this charter asks for a
+                                           # second reviewer before a finding is closed out
+        limits:
+          tokens_per_run: 50000
+          runs_per_day: 8                 # weekly sweep + occasional policy-source-changed reactive runs
+          kill_switch: true
+        audit:
+          capture:
+            - model_id
+            - prompt_hash
+            - tool_calls
+            - policy_decision
+            - findings_detected
+            - authz_check_type_impacted
+            - human_approved_by
+        compliance:
+          eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
+          dora: "Art. 9 ICT risk detection; Art. 5 ICT risk management framework — fleet-wide static verification that authorization-policy rules can actually fire as intended"
+
+      - id: flaky-test-hunter
+        plane: development
+        charter: "ADR-0168"
+        description: >
+          Static analyzer for fleet-wide silent-test-failure patterns in Kotlin test sources.
+          Generalizes the check-test-runblocking-unit.sh CI guard (expression-body test functions
+          using runBlocking/runTest/GlobalScope.launch/GlobalScope.async without an explicit ': Unit'
+          return type, which JUnit5 silently drops instead of running) beyond its one hardcoded
+          builder, flags Pact provider verification tests gated on pactbroker.url (always skipped by
+          a local './gradlew test' run) and any provider with two colliding @Provider test classes,
+          and cross-checks declared-vs-executed @Test counts per module. Proposes a tracking ticket
+          through the HITL queue for nearly every finding -- guessing wrong on a fix here (suspend fun
+          vs ': Unit', which @Provider class should own an interaction) risks silently masking a real
+          bug instead of fixing it. Never writes to a test file directly.
+        enabled: true
+        enforcement: block
+        schedule:
+          weekly: "08:00 UTC"
+          reactive: ci-test-suite-failure-webhook   # triggered when a CI test-suite run reports a failure
+        data_scope:
+          read:
+            - read.governance             # every module's src/test/kotlin tree, .github/scripts/*.sh CI
+                                           # guard scripts, and build/test-results/test/*.xml JUnit
+                                           # reports via a repo checkout
+          pii: none                       # test source text and JUnit report metadata only; no customer data
+        tools:
+          allow:
+            - tier: read
+              resources: [governance]
+            - tier: write_proposal
+              resources: [github-pr]      # opens draft.ticket by default; gh.pr.open stays wired but is
+                                           # rarely used (ADR-0168 Decision)
+          deny:
+            - tier: write
+              resources: ["*"]            # explicit: no direct write to any test file ever
+            - tier: execute
+              resources: ["*"]            # never invokes a build/test run itself
+        requires_human:
+          - any_flaky_test_finding        # HITL mandatory; a human reads the test's intent before a fix lands
+          - every: proposal                 # segregation of duties: agent proposes, human disposes
+        limits:
+          tokens_per_run: 50000
+          runs_per_day: 8                 # weekly sweep + occasional CI-test-suite-failure reactive runs
+          kill_switch: true
+        audit:
+          capture:
+            - model_id
+            - prompt_hash
+            - tool_calls
+            - policy_decision
+            - findings_detected
+            - flaky_test_check_type_impacted
+            - human_approved_by
+        compliance:
+          eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
+          dora: "Art. 9 ICT risk detection; Art. 5 ICT risk management framework — fleet-wide static verification that a test suite's reported green state reflects tests that actually ran"
   rules-data.yaml: |
     # SPDX-License-Identifier: Apache-2.0
     # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
@@ -1029,16 +1384,56 @@ data:
         require:
           - "topic has >=1 real @Incoming consumer fleet-wide, or an allowlist entry with a reason"
         gate: event-consumer-liveness
-        enforced: advisory
-        target_enforce_date: "2026-09-15"   # ADR-0144
-        # CI producer is LIVE (advisory): .github/scripts/check-event-consumer-liveness.py runs in
-        # the "Validate manifests" job on every PR — fleet-wide scan (not diff-scoped), findings are
-        # ::warning annotations. First scan (2026-07-13): 19 producer-only topics found, ALL still
-        # unallowlisted below (real triage tracked as a fleet-sweep issue, not resolved by fiat).
-        # Flip to enforced once triage brings unallowlisted violations to zero = pass --enforce to
-        # the script in ci.yml (one-line change), same as every other ADR-0144 gate here.
-        blocked_on: "19 pre-existing producer-only topics need individual triage (real gap vs. legitimate allowlist entry) before this can graduate to enforce — tracked as a fleet-sweep issue, not yet filed"
+        # GRADUATED to enforce 2026-07-14 (ADR-0144): the #996 fleet-sweep triage that started with
+        # issue #889 brought unallowlisted violations to zero across three rounds (#1005 sca topic
+        # mismatch, #1007/#1032/#1050 audit-service fan-out, #1054 fx-service dead-stub producer fix,
+        # this PR's fx.conversion.completed/documents.document.event/payments.swift.event consumers)
+        # — same graduation path check-outbox-dispatch-enabled.sh proved out. check-event-consumer-
+        # liveness.py --root . --enforce reports 0 fleet-wide; ci.yml now passes --enforce.
+        enforced: enforce
+        # CI producer is LIVE and enforced: .github/scripts/check-event-consumer-liveness.py runs in
+        # the "Validate manifests" job on every PR — fleet-wide scan (not diff-scoped). A new topic
+        # published with no consumer and no allowlist entry now fails the build.
         ci_producer: ".github/scripts/check-event-consumer-liveness.py"
+        # #996 triage findings, classified LEGITIMATE_NO_CONSUMER (not the #889 failure class):
+        allowlist:
+          - topic: "openbank.psd2.events"
+            reason: "psd2-service docs consistently describe this as audit-trail + external TPP-webhook delivery, not an intra-fleet reaction — no OpenBank service is meant to consume it."
+          - topic: "openbank.tpp.registry.event"
+            reason: "tpp-registry-service's own docs say the publish side is dormant (\"no domain events are emitted yet\" — outbox transport exists but unused). Not the #889 pattern (a working publish going nowhere): nothing is actually published today. Re-triage once the publish side is wired."
+          - topic: "openbank.pid.events"
+            reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap."
+      lineage_code_audit:
+        # ADR-0160 mechanism 2. standing-order-service's governance.yaml declares a downstream edge to
+        # transaction-service (relationType: api) — copy-pasted boilerplate with no backing
+        # @RegisterRestClient anywhere in the service. Nothing checked the claim against the actual
+        # fleet, same root cause as issue #889 (a different unverified claim, same failure shape: prose
+        # describing runtime behaviour, never checked against code). Fleet-wide scan, not diff-scoped:
+        # every governance.yaml lineage.downstream edge (relationType api|topic) must be backed by
+        # grep-verifiable code in the SAME service (a matching @RegisterRestClient configKey for api;
+        # an actual topic produced/consumed in common with the target service for topic — a topic edge
+        # doesn't name the specific topic, just the service, so it's a service-level cross-reference),
+        # or be explicitly allowlisted below with a one-line reason (a REST call made through a
+        # shared/generic client this heuristic's exact-match can't see, or a genuinely-stale edge
+        # already tracked for cleanup elsewhere).
+        detect: ["any <service>/governance.yaml lineage.downstream edge"]
+        require:
+          - "api edge has a matching @RegisterRestClient(configKey) in the same service, or an allowlist entry with a reason"
+          - "topic edge has an actual topic overlap with the target service (per mechanism 1's producer/consumer map), or an allowlist entry with a reason"
+        gate: lineage-code-audit
+        enforced: advisory
+        target_enforce_date: "2026-10-15"   # ADR-0144 — later than mechanism 1's date: first scan found a much higher (34/48) violation rate, expect a longer triage
+        # CI producer is LIVE (advisory): .github/scripts/check-governance-lineage.py runs in the
+        # "Validate manifests" job on every PR — fleet-wide scan (not diff-scoped), reuses mechanism 1's
+        # topic map via importlib (check-event-consumer-liveness.py's build_topic_maps), findings are
+        # ::warning annotations. First scan (2026-07-13): 34 of 48 downstream edges have no backing code
+        # found — consistent with mechanism 1's own first-scan rate (13/18, ~72%), i.e. this fleet's
+        # governance.yaml lineage data really is this stale, not primarily a heuristic false-positive
+        # rate. ALL still unallowlisted below (real triage tracked as a fleet-sweep issue, not resolved
+        # by fiat). Flip to enforced once triage brings unallowlisted violations to zero = pass
+        # --enforce to the script in ci.yml (one-line change), same as every other ADR-0144 gate here.
+        blocked_on: "34 unallowlisted lineage edges found on first scan (2026-07-13) need individual triage (stale/wrong governance.yaml edge vs. a real dependency this heuristic's exact-match can't see) — tracked as a fleet-sweep issue, not yet filed"
+        ci_producer: ".github/scripts/check-governance-lineage.py"
         allowlist: []
       service_code_change:
         detect: ["<service>/src/main/**"]
@@ -1251,6 +1646,23 @@ data:
       # the SLO burn-rate should page before the blunter absolute-latency alert does.
       latency_threshold_seconds: 1
       latency_window: 30d
+
+    # ---------------------------------------------------------------------------------------
+    # Alert delivery (ADR-0082 / ADR-0088). Keep this section terse: rules.yaml is embedded
+    # verbatim into every OPA sidecar bundle ConfigMap. Full rationale lives in ci_producer.
+    # ---------------------------------------------------------------------------------------
+    alerting:
+      # At least one Alertmanager route matching severity=critical must end at a receiver that
+      # egresses the cluster (external integration, or a webhook with a literal non-cluster
+      # URL; a url_file counts as unprovable). In-perimeter paging (GoAlert -> ntfy, ADR-0088
+      # D1) may stay alongside it, but not as the only leg. Guards the "severity inversion":
+      # critical routed only to no-Ingress in-cluster receivers (ADR-0056) while warning
+      # reached Slack, so the most severe alerts were the least likely to be seen.
+      critical_alerts_must_egress: true
+      enforced: enforce
+      ci_producer: ".github/scripts/check-critical-alert-egress.py"
+      checked_manifest: "openbank-infra/gitops/apps/kube-prometheus-stack.yaml"
+
     review:
       default_approvals: 1
       money_path_approvals: 2               # CONTRIBUTING.md + branch protection
@@ -1472,7 +1884,7 @@ data:
     dependencies:
       license_allowlist: [Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, EPL-2.0, MPL-2.0, ISC]
       license_denylist: [GPL-2.0, GPL-3.0, AGPL-3.0]   # copyleft -- denied for THIRD-PARTY deps of the Apache-2.0 platform
-      # Carve-out (ADR-0136, supersedes the ADR-0031 D8 separate-repo plan): the four AI agent
+      # Carve-out (ADR-0136, supersedes the ADR-0031 D8 separate-repo plan): the AI agent
       # services are OpenBank's open-core component and are licensed AGPL-3.0-only + a parallel
       # commercial licence -- IN-REPO, not Apache-2.0. The denylist above governs the Apache-2.0
       # platform tree; AGPL-3.0-only is the intended licence of the agent services, so the gate
@@ -1485,16 +1897,28 @@ data:
             - openbank-copilot-service/
             - openbank-devops-agent/
             - openbank-finops-agent/
+            - openbank-control-liveness-sentinel/
+            - openbank-governance-auditor/
+            - openbank-release-steward/
+            - openbank-docs-truth-agent/
+            - openbank-authz-policy-auditor/
+            - openbank-flaky-test-hunter/
           reason: "open-core: AGPL-3.0-only + commercial dual-licensing of the AI agent services"
           adr: ADR-0136
       license_boundary_exceptions:
-        - description: "AGPL/Apache seam (in-repo). The four agent services are AGPL-3.0-only; no Apache-2.0 module may take a build/compile dependency on them (only network/HTTP use is allowed). They depend on openbank-libs (Apache-2.0), which is permitted -- copyleft may consume permissive code."
+        - description: "AGPL/Apache seam (in-repo). The AI agent services are AGPL-3.0-only; no Apache-2.0 module may take a build/compile dependency on them (only network/HTTP use is allowed). They depend on openbank-libs (Apache-2.0), which is permitted -- copyleft may consume permissive code."
           agpl_modules:
             - openbank-agent-service
             - openbank-copilot-service
             - openbank-devops-agent
             - openbank-finops-agent
-          rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent') as a dependency"
+            - openbank-control-liveness-sentinel
+            - openbank-governance-auditor
+            - openbank-release-steward
+            - openbank-docs-truth-agent
+            - openbank-authz-policy-auditor
+            - openbank-flaky-test-hunter
+          rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent'|':openbank-control-liveness-sentinel'|':openbank-governance-auditor'|':openbank-release-steward'|':openbank-docs-truth-agent'|':openbank-authz-policy-auditor'|':openbank-flaky-test-hunter') as a dependency"
           license: "AGPL-3.0-only"
           adr: ADR-0136
       block_on_cve_severity: [CRITICAL, HIGH]
