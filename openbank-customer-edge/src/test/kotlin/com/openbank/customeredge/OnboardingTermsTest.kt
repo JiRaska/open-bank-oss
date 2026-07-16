@@ -11,6 +11,7 @@ import com.openbank.customeredge.infrastructure.webauthn.EnrollmentTicketService
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -98,6 +99,25 @@ class OnboardingTermsTest {
 
         // Immutable published version ⇒ rendered once, not once per view.
         verify(exactly = 1) { upstream.post(match { it.contains("/render") }, any(), any()) }
+    }
+
+    // document-service's content route is @Produces(APPLICATION_OCTET_STREAM). Asking it for
+    // application/pdf makes RESTEasy fail method selection and answer 404 "Unable to find
+    // matching target resource method" — which the edge then could not serialise either, so the
+    // app saw a bare 406 instead of the terms. Found on a live pod; pinned here.
+    @Test
+    fun `content asks the upstream with a wildcard accept, never a narrow pdf accept`() {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/templates") }, any()) } returns
+            templates(Triple("VOP_CS", "PUBLISHED", "Všeobecné obchodní podmínky"))
+        every { upstream.post(match { it.contains("/render") }, any(), any()) } returns
+            Response.status(201).entity("""{"id":"doc-1"}""").build()
+        every { upstream.getRaw(any(), any(), any()) } returns
+            Response.ok("%PDF-1.4".toByteArray()).build()
+
+        resource(upstream).onboardingTermsContent("VOP_CS")
+
+        verify { upstream.getRaw(any(), any(), MediaType.WILDCARD) }
     }
 
     @Test

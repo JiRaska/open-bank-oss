@@ -245,7 +245,6 @@ class OnboardingResource(
      */
     @GET
     @Path("/terms/{code}/content")
-    @Produces("application/pdf")
     @PermitAll
     @Blocking
     fun onboardingTermsContent(@PathParam("code") code: String): Response {
@@ -296,10 +295,14 @@ class OnboardingResource(
                 .type(MediaType.APPLICATION_JSON).build()
         }
 
+        // Accept MUST be wildcard, not application/pdf: document-service's content route is
+        // @Produces(APPLICATION_OCTET_STREAM), so a narrow Accept makes RESTEasy fail method
+        // selection and answer 404 "Unable to find matching target resource method" instead of
+        // the bytes. Mirrors CustomerDocumentResource.documentContent, the working precedent.
         return upstream.getRaw(
             "$documentServiceUrl/api/v1/documents/$documentId/content",
             ONBOARDING_PARTY_PLACEHOLDER,
-            "application/pdf",
+            MediaType.WILDCARD,
         )
     }
 }
