@@ -405,15 +405,15 @@ jobs:
           set -uo pipefail
           SERVICES='${{ needs.changes.outputs.services }}'
           TAG="${{ steps.build.outputs.tag }}"
-          COSIGN_KEY="awskms:///alias/openbank-cosign-signing"
-          COSIGN_VERSION="v2.4.3"
-          arch="$(uname -m)"; case "$arch" in aarch64) arch=arm64 ;; x86_64) arch=amd64 ;; esac
-          os="$(uname -s | tr '[:upper:]' '[:lower:]')"; case "$os" in darwin) os=darwin ;; *) os=linux ;; esac
-          bin="$(command -v cosign || true)"
-          if ! { [ -n "$bin" ] && cosign version 2>/dev/null | grep -Eq 'GitVersion:[[:space:]]*v2\.'; }; then
-            bin="${RUNNER_TEMP}/cosign2"
-            curl -fsSL -o "$bin" "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-${os}-${arch}"
-            chmod +x "$bin"
+          # `resolve_cosign_v2` and the v2 pin live in the shared helper — this step used to
+          # carry its own copy of both. Sign and attest stay two steps because the trivy CVE
+          # gate runs between them, so this uses the resolver directly rather than
+          # `cosign_sign_and_attest`.
+          . openbank-infra/scripts/lib/cosign-attest.sh
+          bin="$(resolve_cosign_v2 || true)"
+          if [ -z "$bin" ]; then
+            echo "::error::cosign v2 unavailable — images would be pushed UNSIGNED and kyverno would reject them"
+            exit 1
           fi
           rc=0
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
@@ -509,36 +509,24 @@ jobs:
           set -uo pipefail
           SERVICES='${{ needs.changes.outputs.services }}'
           TAG="${{ steps.build.outputs.tag }}"
-          COSIGN_KEY="awskms:///alias/openbank-cosign-signing"
-          COSIGN_VERSION="v2.4.3"
-          arch="$(uname -m)"; case "$arch" in aarch64) arch=arm64 ;; x86_64) arch=amd64 ;; esac
-          os="$(uname -s | tr '[:upper:]' '[:lower:]')"; case "$os" in darwin) os=darwin ;; *) os=linux ;; esac
-          bin="$(command -v cosign || true)"
-          if ! { [ -n "$bin" ] && cosign version 2>/dev/null | grep -Eq 'GitVersion:[[:space:]]*v2\.'; }; then
-            bin="${RUNNER_TEMP}/cosign2"
-            curl -fsSL -o "$bin" "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-${os}-${arch}"
-            chmod +x "$bin"
-          fi
+          # The trivy invocation, the cosign-v2 pin, the mandatory --platform and the
+          # post-attest proof all live in the shared helper, which every build-push-*.sh
+          # already uses. This step carried its own copy and so missed the hardening added
+          # in #1197: `cosign attest` APPENDS to the .att tag, and a bare
+          # `verify-attestation` passes if ANY envelope verifies — so it could not tell that
+          # THIS run's SBOM landed, only that some envelope on the image was good. The helper
+          # sanity-checks the SBOM (parses, bomFormat, non-zero components) and binds the
+          # verify to the CycloneDX serialNumber trivy mints per run.
+          . openbank-infra/scripts/lib/cosign-attest.sh
           rc=0
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
             [ -f "${svc}/build/quarkus-app/quarkus-run.jar" ] || continue
             image="${ECR_REGISTRY}/${svc}:${TAG}"
-            sbom="${RUNNER_TEMP}/${svc}.cdx.json"
-            # --platform is REQUIRED: images are built linux/arm64 (line ~364) and trivy
-            # defaults to linux/amd64 for remote scans. Omitting it fails 100% of the time.
-            # Stderr is NOT swallowed (`2>/dev/null` was hiding the platform error for weeks).
-            echo "==> [${svc}] trivy image --platform linux/arm64 (cyclonedx) ${image}"
-            if ! trivy image --platform linux/arm64 --format cyclonedx --output "$sbom" "$image"; then
-              echo "::error::[${svc}] trivy image SBOM generation failed — image would be UNATTESTED and undeployable"; rc=1; continue
-            fi
-            echo "==> cosign attest (cyclonedx) ${image}"
-            if ! COSIGN_YES=true "$bin" attest --key "$COSIGN_KEY" --type cyclonedx --predicate "$sbom" "$image"; then
-              echo "::error::[${svc}] cosign attest failed — image UNATTESTED and undeployable"; rc=1; continue
-            fi
-            # Never trust `attest` exit 0 alone — verify the attestation is discoverable the
-            # same way kyverno discovers it at admission (legacy .att tag scheme, cosign v2).
-            if ! COSIGN_YES=true "$bin" verify-attestation --key "$COSIGN_KEY" --type cyclonedx "$image" >/dev/null 2>&1; then
-              echo "::error::[${svc}] cosign verify-attestation failed — the attestation did not land"; rc=1; continue
+            # Per-service rc rather than an early exit: report EVERY broken image in one run,
+            # so a second failure is not hidden behind the first.
+            if ! cosign_attest_sbom "$image" "linux/arm64"; then
+              echo "::error::[${svc}] SBOM attestation failed — image UNATTESTED and undeployable"
+              rc=1; continue
             fi
             echo "    [${svc}] attested + verified"
           done
