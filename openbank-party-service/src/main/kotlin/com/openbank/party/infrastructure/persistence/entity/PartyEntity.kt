@@ -82,6 +82,16 @@ class PartyEntity : PanacheEntity() {
     /** Which pepper key version produced [rcBlindIndex]; used during pepper rotation. */
     @Column(name = "rc_index_key_version")
     var rcIndexKeyVersion: Int? = null
+
+    /** Onboarding consent capture (mobile app "Agreement" step) — null = not asked/answered. */
+    @Column(name = "consent_gdpr")
+    var consentGdpr: Boolean? = null
+
+    @Column(name = "consent_marketing")
+    var consentMarketing: Boolean? = null
+
+    @Column(name = "consent_captured_at")
+    var consentCapturedAt: Instant? = null
 }
 
 @Entity

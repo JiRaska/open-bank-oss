@@ -962,6 +962,73 @@ class CustomerEdgeResourceTest {
     }
 
     @Test
+    fun `registerParty forwards consentGdpr and consentMarketing to party-service`() {
+        val sub = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        var forwarded: String? = null
+        every { upstream.post(match { it.contains("/api/v1/parties") }, any(), any(), any()) } answers {
+            forwarded = thirdArg()
+            Response.status(201)
+                .entity("""{"id":"$sub","status":"PENDING_KYC"}""").build()
+        }
+        val resource = CustomerEdgeResource(
+            upstream,
+            mockk(relaxed = true),
+            PaymentSessionStore(),
+            mockk(relaxed = true),
+            Clock.systemUTC(),
+        ).apply {
+            jwt = mockk {
+                every { getClaim<String>("party_id") } returns null
+                every { subject } returns sub.toString()
+            }
+            objectMapper = ObjectMapper()
+            partyServiceUrl = "http://party"
+        }
+
+        val resp = resource.registerParty(
+            """{"legalName":"Jan Novák","email":"jan@example.cz","consentGdpr":true,"consentMarketing":false}""",
+        )
+
+        assertThat(resp.status).isEqualTo(201)
+        val node = mapper.readTree(forwarded!!)
+        assertThat(node.get("consentGdpr").asBoolean()).isTrue()
+        assertThat(node.get("consentMarketing").asBoolean()).isFalse()
+    }
+
+    @Test
+    fun `registerParty omits consent fields entirely when the body doesn't send them`() {
+        val sub = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        var forwarded: String? = null
+        every { upstream.post(match { it.contains("/api/v1/parties") }, any(), any(), any()) } answers {
+            forwarded = thirdArg()
+            Response.status(201)
+                .entity("""{"id":"$sub","status":"PENDING_KYC"}""").build()
+        }
+        val resource = CustomerEdgeResource(
+            upstream,
+            mockk(relaxed = true),
+            PaymentSessionStore(),
+            mockk(relaxed = true),
+            Clock.systemUTC(),
+        ).apply {
+            jwt = mockk {
+                every { getClaim<String>("party_id") } returns null
+                every { subject } returns sub.toString()
+            }
+            objectMapper = ObjectMapper()
+            partyServiceUrl = "http://party"
+        }
+
+        resource.registerParty("""{"legalName":"Jan Novák","email":"jan@example.cz"}""")
+
+        val node = mapper.readTree(forwarded!!)
+        assertThat(node.has("consentGdpr")).isFalse()
+        assertThat(node.has("consentMarketing")).isFalse()
+    }
+
+    @Test
     fun `registerParty falls back to the token name and email claims when the body omits them`() {
         val sub = UUID.randomUUID()
         val upstream = mockk<UpstreamClient>()

@@ -33,6 +33,15 @@ data class Party(
     /** ADR-0072: HMAC-SHA256(pepper, canonical_rc) blind index — null if no RČ or non-Czech. */
     val rcBlindIndex: String? = null,
     val rcIndexKeyVersion: Int? = null,
+    /**
+     * Onboarding consent capture (mobile app "Agreement" step). Null = not asked / not answered
+     * (e.g. operator-created parties). `consentCapturedAt` is stamped whenever either value is
+     * present, giving a minimal "when was this consent given" audit trail — it does NOT version
+     * the consent text itself; that's a follow-up if the wording needs to change over time.
+     */
+    val consentGdpr: Boolean? = null,
+    val consentMarketing: Boolean? = null,
+    val consentCapturedAt: Instant? = null,
 )
 
 data class Address(

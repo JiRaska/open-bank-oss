@@ -1440,6 +1440,10 @@ class CustomerEdgeResource(
         extractTextField(objectMapper, body, "phone")?.let { out.put("phone", it) }
         extractTextField(objectMapper, body, "dateOfBirth")?.let { out.put("dateOfBirth", it) }
         extractTextField(objectMapper, body, "nationality")?.let { out.put("nationality", it) }
+        // Onboarding consent capture (mobile app "Agreement" step) — previously accepted by the
+        // app's request model but silently dropped here before reaching party-service.
+        extractBooleanField(objectMapper, body, "consentGdpr")?.let { out.put("consentGdpr", it) }
+        extractBooleanField(objectMapper, body, "consentMarketing")?.let { out.put("consentMarketing", it) }
 
         // Identity-resolution dedup gate (ADR-0072 §6 / ADR-0094): short-circuits to an existing
         // party (reuse) or a neutral pending state when pid resolves this applicant; null = proceed.
@@ -2035,6 +2039,14 @@ class CustomerEdgeResource(
             (mapper.readTree(json) as? ObjectNode)?.get(field)?.takeIf {
                 it.isTextual
             }?.asText()?.takeIf { it.isNotBlank() }
+        }.getOrNull()
+
+        /**
+         * Pull a single boolean field from a JSON object body, or null if absent/wrong type.
+         * Package-visible for tests.
+         */
+        internal fun extractBooleanField(mapper: ObjectMapper, json: String, field: String): Boolean? = runCatching {
+            (mapper.readTree(json) as? ObjectNode)?.get(field)?.takeIf { it.isBoolean }?.asBoolean()
         }.getOrNull()
 
         /**

@@ -151,6 +151,9 @@ class PartyRepositoryImpl :
         it.keycloakSub = keycloakSub
         it.rcBlindIndex = rcBlindIndex
         it.rcIndexKeyVersion = rcIndexKeyVersion
+        it.consentGdpr = consentGdpr
+        it.consentMarketing = consentMarketing
+        it.consentCapturedAt = consentCapturedAt
     }
 
     private fun PartyEntity.toDomain() = Party(
@@ -176,6 +179,9 @@ class PartyRepositoryImpl :
         amlStatus = AmlStatus.valueOf(amlStatus),
         rcBlindIndex = rcBlindIndex,
         rcIndexKeyVersion = rcIndexKeyVersion,
+        consentGdpr = consentGdpr,
+        consentMarketing = consentMarketing,
+        consentCapturedAt = consentCapturedAt,
     )
 }
 

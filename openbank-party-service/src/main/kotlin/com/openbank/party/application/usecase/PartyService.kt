@@ -60,6 +60,11 @@ class PartyService : PartyUseCase {
             partyRepo.findById(requested)?.let { return it }
         }
         val (rcIndex, rcKeyVer) = computeRcBlindIndex(cmd.taxId)
+        val consentCapturedAt = if (cmd.consentGdpr != null || cmd.consentMarketing != null) {
+            Instant.now(clock)
+        } else {
+            null
+        }
         val party = Party(
             id = cmd.id ?: UUID.randomUUID(),
             // B1 invariant for self-service onboarding: id == Keycloak sub. Mirror it into
@@ -81,6 +86,9 @@ class PartyService : PartyUseCase {
             updatedAt = Instant.now(clock),
             rcBlindIndex = rcIndex,
             rcIndexKeyVersion = rcKeyVer,
+            consentGdpr = cmd.consentGdpr,
+            consentMarketing = cmd.consentMarketing,
+            consentCapturedAt = consentCapturedAt,
         )
         val saved = partyRepo.save(party)
         eventPublisher.publishPartyCreated(saved)

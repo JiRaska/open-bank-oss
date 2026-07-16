@@ -51,6 +51,9 @@ data class CreatePartyCommand(
     val address: Address?,
     /** Explicit party id (ADR-0069 §B1: id == Keycloak sub for self-service onboarding). */
     val id: UUID? = null,
+    /** Onboarding consent capture (mobile app "Agreement" step). Null = not asked/answered. */
+    val consentGdpr: Boolean? = null,
+    val consentMarketing: Boolean? = null,
 )
 
 data class UpdatePartyCommand(
