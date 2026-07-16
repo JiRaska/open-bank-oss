@@ -1213,6 +1213,46 @@ finops_cost_groups:
 # stale. Routing by kind; the human-readable form lives in CLAUDE.md ("Capturing what
 # we learn"). This is a process rule (not CI-enforced), but rules.yaml is the source
 # of truth when it and CLAUDE.md disagree.
+gitops_ref_integrity:
+  script: .github/scripts/check-gitops-secret-refs.py
+  wired_into: .github/workflows/ci.yml   # governance job -> all-green (a REQUIRED check)
+  # THE RULE: every Secret/ConfigMap a gitops workload consumes must be declared by
+  # something in gitops. A manifest that reads a Secret nobody creates passes every gate
+  # we have: the YAML is valid, ArgoCD syncs it (the Rollout is a legal object), CI never
+  # runs the pod, and Kyverno admits it. The pod then sits in CreateContainerConfigError
+  # indefinitely and the only signal is `kubectl describe` on a pod nobody watches.
+  rule: >-
+    Every secretKeyRef / configMapKeyRef / envFrom / volume reference in a gitops workload
+    must resolve to a Secret or ConfigMap declared in gitops -- directly, or via the
+    operator that derives it (ExternalSecret target, cert-manager Certificate secretName,
+    CNPG Cluster credentials).
+  basis: referenced_implies_declared
+  # WHAT COUNTS AS A DECLARATION -- and why a plain grep cannot do this: there is not one
+  # literal `kind: Secret` in gitops. Every Secret is produced by an operator from a
+  # declaration, so a name-existence check would flag all 300+ of them. The guard models the
+  # producers instead: ExternalSecret -> spec.target.name; Certificate -> spec.secretName;
+  # CNPG Cluster -> <name>-{app,superuser,ca,server,replication}. The CNPG case is the one
+  # that matters: `vop-db-app` is real and correct yet appears nowhere as a declaration --
+  # the operator derives it from the Cluster name. A guard that cannot model that fails every
+  # database-backed service, gets muted, and protects nothing (the same reasoning that killed
+  # the Dockerfile rule under deploy_coverage).
+  # ALLOWLIST: in-script (IGNORED_NAMES), deliberately tiny -- every entry is a hole.
+  # openbao-db-admin-passwords is the only interesting one: ClusterSecretStore `vault-kv` is
+  # backed by openbao itself, so projecting OpenBao's own DB admin passwords through ESO
+  # would make it bootstrap from itself. Genuinely out-of-band. Its flip side is real
+  # fragility -- hand-created, no ownerReferences, nothing recreates it if the vault
+  # namespace is rebuilt, and the weekly ADR-0099 rotation CronJob would then fail quietly.
+  # PRIOR ART: vop-service, 2026-07-16. Shipped in #1195 consuming `vop-oidc`, which appeared
+  # exactly ONCE in the repo -- at the point of consumption. 26 restarts over 10 minutes with
+  # `Error: secret "vop-oidc" not found`, every dashboard green, found by hand (#1232). Its
+  # sibling gap (absent from ALL_SERVICES, #1229) is guarded by deploy_coverage below; this is
+  # the same shape one layer down and only surfaced after that one was fixed. Two of vop's
+  # three gaps were "a name referenced but never declared".
+  # VERIFIED BY REVERT, not by running green: with #1232's ExternalSecret removed the guard
+  # fails naming `Secret payments/vop-oidc`; restored, it passes. A guard only proven to run
+  # is not proven to fire.
+  incident: 2026-07-16
+
 deploy_coverage:
   script: .github/scripts/check-deploy-coverage.sh
   wired_into: .github/workflows/ci.yml   # governance job -> all-green (a REQUIRED check)

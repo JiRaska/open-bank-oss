@@ -513,6 +513,15 @@ jobs:
       - name: "deploy-coverage guard (released + gitops => in ALL_SERVICES, enforced)"
         run: bash .github/scripts/check-deploy-coverage.sh
 
+      # gitops ref-integrity guard (rules.yaml: gitops_ref_integrity). The layer below
+      # deploy-coverage: that one proves a service gets BUILT, this one proves the manifest
+      # it deploys can actually START. A secretKeyRef to a Secret nobody declares passes
+      # YAML validation, ArgoCD sync and Kyverno admission alike — the pod then sits in
+      # CreateContainerConfigError forever with no signal but `kubectl describe`. vop-service
+      # burned an hour on exactly this (#1232) right after #1229 fixed its ALL_SERVICES gap.
+      - name: "gitops ref-integrity guard (referenced Secret/ConfigMap => declared)"
+        run: python3 .github/scripts/check-gitops-secret-refs.py
+
       # quarkus.application.version override guard (ADR-0029 release_invariant).
       # The convention plugin openbank.quarkus-service reads version.txt into the
       # Gradle project version and the Quarkus Gradle plugin stamps it into
