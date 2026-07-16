@@ -313,6 +313,7 @@ rules:
       - anacredit-service               # issue #638: LoanStageEventConsumer (ADR-0037 follow-up)
       - agent-service                   # issue #686: oversight-triggers consumer, ns platform (first ESO client there)
       - document-service                # ADR-0161/0162: document lifecycle events, ns documents (first ESO client there)
+      - customer-edge                   # ADR-0086 audit trail + ADR-0072 resume, ns customer-edge (first ESO Kafka client there); missed by the #2665 sweep
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1

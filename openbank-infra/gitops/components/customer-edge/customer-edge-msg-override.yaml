@@ -24,11 +24,9 @@
 # as onboarding-service's msg-override ConfigMap
 # (openbank-infra/gitops/components/onboarding/onboarding-service-msg-override.yaml).
 #
-# NOTE: this fix is config-wiring only. customer-edge has no KafkaUser ACL / mTLS setup at
-# all yet and is still on the anonymous plaintext :9092 listener, which the cluster now
-# denies (`allow.everyone.if.no.acl.found: "false"`) — so party-events-in is not actually
-# consumable in the live cluster until a separate KafkaUser + mTLS change lands (out of
-# scope here; see the comment in customer-edge.yaml).
+# The KafkaUser + mTLS wiring this fix originally depended on (and flagged as out of scope)
+# now exists: kafka-customer-edge-mtls.yaml grants the `customer-edge` principal Read on this
+# group, and customer-edge.yaml points the client at the tls:9093 listener.
 apiVersion: v1
 kind: ConfigMap
 metadata:
