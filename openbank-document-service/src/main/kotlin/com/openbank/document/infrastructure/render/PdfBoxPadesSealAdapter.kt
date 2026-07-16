@@ -53,6 +53,24 @@ class PdfBoxPadesSealAdapter(
     // in the deployment env once it is.
     @ConfigProperty(name = "openbank.signature.require-trusted-issuer", defaultValue = "false")
     requireTrustedIssuer: Boolean,
+
+    // The seal-time half of the same gate (ADR-0172 D2), and the one that actually protects evidence.
+    //
+    // `require-trusted-issuer` is a BOOT gate and defaults off on purpose: the rollout order (gitops
+    // env/volume wiring vs. OpenBao KV seeding) must never be able to crash-loop this service. That
+    // is a good constraint — but it left the fallback with nothing stopping it, so a service whose
+    // keystore secret failed to materialise would boot fine, log one WARN, and then happily seal
+    // documents with a throwaway cert. A misconfiguration silently produced legally worthless
+    // evidence that looked successful.
+    //
+    // So this gate is seal-time, not boot-time: booting on an ephemeral identity stays allowed
+    // (rollout-safe), but SIGNING with one does not. Defaults to `false` — fail closed — and is
+    // overridden to `true` only in %dev/%test (application.yaml), so the service is still runnable
+    // out of the box. Any deployment that genuinely wants throwaway seals must say so out loud with
+    // OPENBANK_SIGNATURE_ALLOW_EPHEMERAL_SEALS=true, which is a reviewable line in gitops rather
+    // than an invisible code default.
+    @ConfigProperty(name = "openbank.signature.allow-ephemeral-seals", defaultValue = "false")
+    private val allowEphemeralSeals: Boolean,
 ) : SignatureSealPort {
 
     private val logger = Logger.getLogger(PdfBoxPadesSealAdapter::class.java)
@@ -91,6 +109,20 @@ class PdfBoxPadesSealAdapter(
 
     override suspend fun sealPades(pdf: ByteArray, ceremony: SignatureCeremony): ByteArray =
         withContext(Dispatchers.IO) {
+            // Fail CLOSED before touching the PDF (ADR-0172 D2). An ephemeral identity produces a
+            // signature that is cryptographically well-formed and legally worthless — the failure
+            // mode that matters, because the output looks exactly like success. Refusing here means
+            // the ceremony errors loudly and no false evidence is ever written; the alternative is a
+            // sealed PDF nobody can rely on and nobody noticed.
+            check(!identity.ephemeral || allowEphemeralSeals) {
+                "Refusing to apply an institutional PAdES seal with a DEV-ONLY ephemeral identity: " +
+                    "the resulting signature would be worthless as evidence (self-signed, never " +
+                    "issued by any trusted CA, private key gone on restart). Provision the real " +
+                    "organizational PKCS12 keystore at openbank.signature.keystore-path (seeded into " +
+                    "OpenBao KV per docs/runbooks/0008-openbao-document-signing-pki.md), or set " +
+                    "openbank.signature.allow-ephemeral-seals=true to accept throwaway seals in a " +
+                    "non-production environment. ceremonyId=${ceremony.id}"
+            }
             // Idempotent: don't re-apply the institutional seal if a retry re-enters after the seal
             // was already written but the ceremony's completion failed to persist.
             if (PadesSigning.hasSignatureNamed(pdf, ORGANIZATION_NAME)) {

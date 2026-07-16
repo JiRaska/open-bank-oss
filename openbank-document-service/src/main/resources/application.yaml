@@ -103,6 +103,11 @@ quarkus:
         json: false
     oidc:
       enabled: false
+  openbank:
+    signature:
+      # No organizational keystore locally, so the seal falls back to a throwaway cert. Allow it —
+      # a dev seal is not evidence of anything and nobody is relying on it (ADR-0172 D2).
+      allow-ephemeral-seals: true
 "%test":
   quarkus:
     oidc:
@@ -111,6 +116,9 @@ quarkus:
       enabled: false
     management:
       enabled: false
+  openbank:
+    signature:
+      allow-ephemeral-seals: true
 openbank:
   rate-limit:
     enabled: true
@@ -155,6 +163,20 @@ openbank:
     # that then cannot obtain a trusted certificate fails loud (fail-closed) rather than silently
     # producing evidence-worthless output, and the service refuses to boot without a real seal key.
     require-trusted-issuer: ${OPENBANK_SIGNATURE_REQUIRE_TRUSTED_ISSUER:false}
+    # ADR-0172 D2 — the seal-time half of the same gate, and the one that protects evidence.
+    #
+    # `require-trusted-issuer` above is a BOOT gate and is off by default on purpose: the rollout
+    # order (gitops env/volume wiring vs. OpenBao KV seeding) must never crash-loop this service.
+    # That left the ephemeral fallback with nothing stopping it — a service whose keystore secret
+    # failed to materialise booted fine, logged one WARN, then sealed documents with a throwaway
+    # cert. Legally worthless output that looks exactly like success.
+    #
+    # So: booting on an ephemeral identity stays allowed; SIGNING with one does not. Fail closed by
+    # default. %dev/%test override to true below so the service is runnable out of the box. Any
+    # environment that genuinely wants throwaway seals must say so out loud with
+    # OPENBANK_SIGNATURE_ALLOW_EPHEMERAL_SEALS=true — a reviewable line in gitops, not an invisible
+    # code default.
+    allow-ephemeral-seals: ${OPENBANK_SIGNATURE_ALLOW_EPHEMERAL_SEALS:false}
 
 mp:
   messaging:
