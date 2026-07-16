@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: notification-service
     app.kubernetes.io/part-of: notifications
   annotations:
-    openbank.tech/policy-checksum: "565a265c64ebf01e"
+    openbank.tech/policy-checksum: "0afd8614d31dcdfd"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1229,6 +1229,27 @@ data:
       # (shares the domain package string for its JPA converters but IS the framework
       # side of the ADR-0122 split).
       ci_producer: ".github/scripts/check-domain-purity.sh"
+
+    # ---------------------------------------------------------------------------------------
+    # OPA bundle sync (issue #1184). Keep terse: this file is embedded verbatim into every
+    # bundle it describes, so editing it rolls every checksum below. Rationale in ci_producer.
+    # ---------------------------------------------------------------------------------------
+    opa_bundle_sync:
+      # The gate must DISCOVER the generators, never name them. A hard-coded list opts each
+      # new service out by default: until #1187 it named 4 of the 26 gen-*opa-bundle*.sh
+      # scripts while 25 embed this file, so ~21 services' committed bundles served stale
+      # data.rules.* / data.agents.* for months with CI green.
+      generators_discovered_not_listed: true
+      generator_glob: "openbank-infra/gitops/components/**/gen-*opa-bundle*.sh"
+      # A 100644 generator no-ops a ./... loop and is indistinguishable from "in sync" —
+      # gen-ledger-opa-bundle.sh shipped that way and had never once run.
+      generators_must_be_executable: true
+      # Each generator hashes its embedded sources into openbank.tech/policy-checksum, which
+      # must match in BOTH the ConfigMap and the service's Rollout/Deployment: subPath mounts
+      # do not hot-reload, so the annotation is what actually rolls the pod onto new policy.
+      checksum_annotation: "openbank.tech/policy-checksum"
+      enforced: enforce
+      ci_producer: ".github/workflows/opa-policy.yml"   # `verify` job
 
     # ---------------------------------------------------------------------------------------
     # REST/MCP authorization policy invariants (ADR-0034 Phase 5, issue #266). rest.rego is
