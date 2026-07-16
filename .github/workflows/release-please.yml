@@ -191,6 +191,22 @@ jobs:
                 });
                 const oid = res.createCommitOnBranch.commit.oid;
 
+                // Prove the replay reproduced the commit EXACTLY before force-moving the ref onto
+                // it. Identical tree sha == byte-identical content, so the only difference left is
+                // the signature. Without this the failure mode is the worst one available: a subtly
+                // wrong fileChanges reconstruction force-pushed onto the release branch, which
+                // auto-merge — already armed — would then happily land as a corrupted release.
+                // A signature is never worth rewriting content to get.
+                const [{ data: was }, { data: now }] = await Promise.all([
+                  github.rest.git.getCommit({ owner, repo, commit_sha: c.sha }),
+                  github.rest.git.getCommit({ owner, repo, commit_sha: oid }),
+                ]);
+                if (was.tree.sha !== now.tree.sha) {
+                  skipped++;
+                  core.warning(`#${pr.number}: replayed tree ${now.tree.sha.slice(0, 8)} != original ${was.tree.sha.slice(0, 8)} — not re-signing`);
+                  continue;
+                }
+
                 // updateRef has no compare-and-swap, so check the release ref still points at
                 // the commit we just rebuilt. Without this, a release-please force-push landing
                 // in the seconds since pulls.list would be clobbered by our older content.
