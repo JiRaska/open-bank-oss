@@ -78,4 +78,27 @@ class LedgerPactBrokerProviderVerificationTest {
     fun stateWithSeededChartOfAccounts() {
         // No-op — see docstring.
     }
+
+    /**
+     * The broker serves EVERY consumer's pact for this provider, not just billing-service's, so
+     * this class must handle every state its git-pact counterpart does: a state this class lacks
+     * fails verification with MissingStateChangeMethod, the result publishes as a failure, and
+     * `can-i-deploy` then blocks ledger-service deploys on a pair that is otherwise healthy —
+     * which is exactly what happened to balance-service's two trial-balance interactions and kept
+     * the #945 reversal fix out of the sandbox.
+     *
+     * Bodies mirror [LedgerPactProviderVerificationTest] verbatim (no-op by design): the pact uses
+     * type matchers, so any valid trial-balance response satisfies the contract shape, and seeding
+     * real double-entry data here would couple the provider test to the internal posting API — the
+     * anti-pattern Pact exists to avoid. LedgerApiIT covers the seeded-data path.
+     */
+    @State("ledger has journal entries for the reporting date")
+    fun stateWithJournalEntries() {
+        // No-op — see docstring.
+    }
+
+    @State("ledger has no journal entries")
+    fun stateWithNoJournalEntries() {
+        // No setup needed — a fresh Testcontainer DB has no journals by default.
+    }
 }
