@@ -23,6 +23,7 @@ const DOMESTIC_API     = '/api/domestic-payments'
 // this segment up verbatim against cluster discovery, so the old
 // `sepa-instant-service` key missed and pinned this panel to `not_deployed`.
 const SEPA_INSTANT_API = '/api/svc/sepa-instant'
+const VOP_API          = '/api/svc/openbank-vop-service'
 
 type Tab = 'all' | 'domestic' | 'sepa' | 'sct-inst'
 type CreateType = 'domestic-standard' | 'domestic-instant' | 'sepa' | 'sct-inst'
@@ -188,13 +189,31 @@ function VopSection({ formData, setFormData }: { formData: SepaFormData; setForm
         <input className="input" style={{ flex: 1 }} placeholder={t('Jméno příjemce pro ověření', 'Payee name to verify')}
           value={formData.creditorName} onChange={e => setFormData({ ...formData, vopStatus: 'idle', vopResult: null, creditorName: e.target.value })} />
         <button type="button" className="btn btn-secondary btn-sm" disabled={!formData.creditorIban || !formData.creditorName || formData.vopStatus === 'loading'}
-          onClick={() => {
-            setFormData({ ...formData, vopStatus: 'loading', vopResult: null })
-            setTimeout(() => {
-              const outcomes: VopStatus[] = ['match', 'close_match', 'no_match', 'no_data']
-              const r = outcomes[Math.floor(Math.random() * 2.5)]
-              setFormData(prev => ({ ...prev, vopStatus: r, vopResult: r }))
-            }, 1200)
+          onClick={async () => {
+            setFormData(prev => ({ ...prev, vopStatus: 'loading', vopResult: null }))
+            try {
+              const res = await fetch(`${VOP_API}/api/v1/vop/verify`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ creditorIban: formData.creditorIban, creditorName: formData.creditorName }),
+              })
+              if (!res.ok) {
+                // The service answered, but not with a verdict. That is not a payee mismatch —
+                // never render it as no_match, which would tell the operator the payee is wrong
+                // when we never actually checked.
+                setFormData(prev => ({ ...prev, vopStatus: 'no_data', vopResult: null }))
+                return
+              }
+              const body = await res.json() as { status: VopStatus; matchedName?: string | null }
+              // matchedName is only ever populated for close_match (ADR-0171 §5) — the backend
+              // will not echo a name on no_match, so there is nothing to guard here beyond
+              // rendering what we are given.
+              setFormData(prev => ({ ...prev, vopStatus: body.status, vopResult: body.matchedName ?? body.status }))
+            } catch {
+              // VoP is fail-open (ADR-0171 §3): an unreachable service must not block the payment,
+              // but it must never look like a successful verification either.
+              setFormData(prev => ({ ...prev, vopStatus: 'no_data', vopResult: null }))
+            }
           }}>
           <ShieldCheck size={12} />{t('Ověřit', 'Verify')}
         </button>
@@ -203,6 +222,10 @@ function VopSection({ formData, setFormData }: { formData: SepaFormData; setForm
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 600, color: vopColor[formData.vopStatus] }}>
           {vopIcon(formData.vopStatus)}
           {vopLabel[formData.vopStatus]}
+          {/* Only close_match carries a name — the backend never echoes one on no_match. */}
+          {formData.vopStatus === 'close_match' && formData.vopResult && formData.vopResult !== 'close_match' && (
+            <span style={{ fontWeight: 400 }}>{t('— na účtu:', '— on account:')} {formData.vopResult}</span>
+          )}
         </div>
       )}
     </div>

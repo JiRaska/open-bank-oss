@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+openapi: 3.0.3
+info:
+  title: OpenBank Verification of Payee Service
+  description: >-
+    Verification of Payee (ADR-0171) — Regulation (EU) 2024/886 Art. 5c. Checks a payer-supplied
+    payee name against the name held on the payee's IBAN and returns match / close_match /
+    no_match / no_data.
+
+    Two routes: a domestic IBAN is resolved locally (account-service -> party-service); an
+    external IBAN has no EPC VoP scheme link in this platform and honestly returns no_data with
+    reason no_scheme_connectivity rather than a fabricated verdict.
+
+    VoP informs the payer; it does not block a payment. A lookup outage yields no_data, never a
+    silent match — the deliberate inverse of the fail-closed sanctions gate (ADR-0032).
+  version: 1.0.0
+tags:
+  - name: Verification of Payee
+paths:
+  /api/v1/vop/verify:
+    post:
+      tags: [Verification of Payee]
+      summary: Verify a payee name against an IBAN
+      description: >-
+        A POST, not a GET, despite being a read: the IBAN and payee name are personal data and must
+        never appear in a URL, an access log, or a referer header.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerifyPayeeRequest' }
+      responses:
+        '200':
+          description: The verification outcome
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VerifyPayeeResponse' }
+        '400':
+          description: Malformed request — a missing field or an IBAN that fails its check digits
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Denied by policy (OPA)
+        '429':
+          description: >-
+            Rate limit exceeded. Load-bearing, not hygiene: an unthrottled VoP endpoint is an
+            account-holder-name enumeration oracle (see docs/threat-models/openbank-vop-service.md).
+components:
+  schemas:
+    VerifyPayeeRequest:
+      type: object
+      required: [creditorIban, creditorName]
+      properties:
+        creditorIban:
+          type: string
+          maxLength: 34
+          description: The payee's IBAN as supplied by the payer.
+          example: CZ6508000000192000145399
+        creditorName:
+          type: string
+          maxLength: 140
+          description: The payee name as supplied by the payer. 140 is the SEPA name length.
+          example: Jiří Raška
+    VerifyPayeeResponse:
+      type: object
+      required: [status, verifiedAt]
+      properties:
+        status:
+          type: string
+          enum: [match, close_match, no_match, no_data]
+          description: >-
+            The EPC VoP outcome. match = the same name. close_match = a near-miss the payer can
+            correct (reordered tokens, an initial, a legal-form suffix, a one-character typo).
+            no_match = both names known and different. no_data = no answer available; never treat
+            as a match.
+        matchedName:
+          type: string
+          nullable: true
+          description: >-
+            The account-holder name. Present ONLY for close_match, where the scheme requires the
+            payer to be able to correct a near-miss they already almost knew. NEVER returned for
+            no_match — that asymmetry is what stops this endpoint being a name-disclosure oracle
+            (ADR-0171 §5).
+        reason:
+          type: string
+          nullable: true
+          enum: [no_scheme_connectivity, account_not_found, name_not_available, lookup_unavailable]
+          description: Present only when status is no_data — why no answer was available.
+        verifiedAt:
+          type: string
+          format: date-time

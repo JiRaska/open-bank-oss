@@ -173,6 +173,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0168](0168-flaky-test-hunter-ai-agent.md) | flaky-test-hunter AI agent | Accepted | Partial | — |
 | [0169](0169-customer-document-access-and-sca-bound-signing.md) | Customer document access & SCA-bound signing over customer-edge | Proposed | Planned | — |
 | [0170](0170-onboarding-e-signature-flow-in-the-customer-app.md) | Onboarding e-signature flow in the customer app | Proposed | Planned | — |
+| [0171](0171-verification-of-payee-for-outbound-credit-transfers.md) | Verification of Payee for outbound credit transfers | Accepted | Partial | — |
 
 ---
 
