@@ -85,9 +85,12 @@ assert_cyclonedx_sbom() {
     echo "ERROR: ${sbom} has bomFormat='${format}', expected 'CycloneDX'." >&2
     return 1
   fi
-  components="$(jq -r '.components // [] | length' "$sbom")"
+  # Type-check before counting: jq's `length` is defined on every type, so a scalar
+  # `.components` ("scan_failed", 5) would report a non-zero "count" and sail through.
+  components="$(jq -r 'if (.components | type) == "array" then (.components | length) else 0 end' "$sbom")"
   if [ "$components" -lt 1 ]; then
-    echo "ERROR: ${sbom} lists zero components — refusing to attest an empty SBOM." >&2
+    echo "ERROR: ${sbom} has no components array, or it is empty — refusing to attest" >&2
+    echo "       an SBOM that inventories nothing." >&2
     return 1
   fi
   serial="$(jq -r '.serialNumber // empty' "$sbom")"
