@@ -620,6 +620,17 @@ jobs:
           sudo install -m 0755 /tmp/oasdiff /usr/local/bin/oasdiff
           python3 .github/scripts/check-api-contract.py --base "${PR_DIFF_BASE}"
 
+      # ADVISORY until rules.yaml change_classes.db_change flips to enforced
+      # (target 2026-08-15, ADR-0144) — add --enforce to the invocation to flip.
+      # Covers BOTH halves of db_change.require: an added migration carries a
+      # `-- Rollback:` note, and an already-committed migration is not edited
+      # (Flyway checksums the whole file — an edit to an applied migration fails
+      # startup with `checksum mismatch`). PR-only and diff-scoped against the
+      # resolved PR diff base, same as api-contract above.
+      - name: "db-migration gate — rollback note + forward-only (rules.yaml db_change, advisory)"
+        if: github.event_name == 'pull_request'
+        run: python3 openbank-infra/scripts/check-db-migration.py --base "${PR_DIFF_BASE}"
+
       # rules.yaml event_change / ADR-0006: schema-compat gate. The fleet's event
       # contract is the set of Kotlin data classes extending DomainEvent (JSON on
       # Kafka via the outbox; no .avsc files exist yet — the script covers those
