@@ -178,6 +178,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0173](0173-capacity-management-and-headroom.md) | Capacity management and headroom | Accepted | Partial | — |
 | [0174](0174-ict-third-party-dependencies-and-exit-strategy.md) | ICT third-party dependencies and exit strategy | Accepted | Partial | — |
 | [0175](0175-data-residency-and-sovereignty.md) | Data residency and sovereignty | Accepted | Partial | — |
+| [0176](0176-operator-initiated-customer-messaging.md) | Operator-initiated customer messaging | Proposed | Planned | — |
 
 ---
 
