@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.49.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.48.0...admin-ui-v0.49.0) (2026-07-16)
+
+
+### Features
+
+* **vop:** add Verification of Payee backend; give control-plane agents episodic memory ([#1195](https://github.com/JiRaska/open-bank-oss/issues/1195)) ([91460fc](https://github.com/JiRaska/open-bank-oss/commit/91460fcc62bb72f4a99953e51e90374597dda9c3))
+
+
+### Bug Fixes
+
+* **admin-ui:** collect .tsx tests, measure coverage, render-smoke all 81 pages ([#1176](https://github.com/JiRaska/open-bank-oss/issues/1176)) ([86eabc2](https://github.com/JiRaska/open-bank-oss/commit/86eabc2f1e5445bda6388f86c560045bf9885d86))
+* **admin-ui:** correct service registry drift and guard it in CI ([#1168](https://github.com/JiRaska/open-bank-oss/issues/1168)) ([c3d6650](https://github.com/JiRaska/open-bank-oss/commit/c3d66504532e62b1ab5ba399cec25c6359b75fa2))
+* **admin-ui:** render mermaid labels as SVG text so they survive sanitizing ([#1164](https://github.com/JiRaska/open-bank-oss/issues/1164)) ([269e1fb](https://github.com/JiRaska/open-bank-oss/commit/269e1fb56e05fb1cb678694242e9699090f50066))
+* **vop:** match legal forms per token so a different payee is never confirmed ([#1207](https://github.com/JiRaska/open-bank-oss/issues/1207)) ([d808a5c](https://github.com/JiRaska/open-bank-oss/commit/d808a5c64da3ef805a7bb6fc4a8c90544d8fb753)), closes [#1204](https://github.com/JiRaska/open-bank-oss/issues/1204) [#1195](https://github.com/JiRaska/open-bank-oss/issues/1195)
+
 ## [0.48.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.47.0...admin-ui-v0.48.0) (2026-07-14)
 
 
