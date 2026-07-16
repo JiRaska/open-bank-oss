@@ -12,7 +12,7 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
-import au.com.dius.pact.provider.junitsupport.loader.PactFolder
+import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.party.application.port.out.PartyRepository
@@ -34,6 +34,7 @@ import kotlinx.coroutines.launch
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
 import java.time.Instant
 import java.util.UUID
@@ -46,29 +47,31 @@ import java.util.concurrent.TimeUnit
  * issue #468's onboarding->party/kyc/sca edge with the REST `PUT /{id}/kyc-status` interaction).
  * Boots Quarkus (needed for the HTTP interaction; the message ones don't use it) and picks a
  * per-interaction target the same way `TransactionPactProviderVerificationTest` does — a single
- * `@Provider` class must verify every pact the broker/folder returns, so splitting HTTP and
- * message into two classes collides (this repo's own "one @Provider test per provider" rule).
- * `@TestSecurity` matches the kyc-status endpoint's `@RolesAllowed("ROLE_ADMIN", "ROLE_KYC")`.
+ * `@Provider` class must verify every pact the broker returns, so splitting HTTP and message into
+ * two classes collides (this repo's own "one @Provider test per provider" rule). `@TestSecurity`
+ * matches the kyc-status endpoint's `@RolesAllowed("ROLE_ADMIN", "ROLE_KYC")`.
  *
- * Reads the consumer pact from the git-pact folder (`@PactFolder`, resolved relative to this
- * module's working directory at `../pacts` = the monorepo-root `pacts/` dir) and replays each
- * interaction. This always runs — no broker, no gate, no CI secret required (ADR-0063 chose
- * git-pact over a Pact Broker for exactly this reason: zero new infra dependency).
- *
- * IMPORTANT: if a consumer's `@Pact` method changes (new interaction, different matcher, renamed
- * field), regenerate that consumer's pact JSON and commit it in the same PR, or this test will
- * fail — or worse, pass against a stale contract that no longer matches what the consumer
- * actually expects.
- *
- * `@IgnoreNoPactsToVerify(ignoreIoErrors)` makes a missing/unreadable pact file a skip, not a
- * failure — relevant if the folder is ever emptied ahead of a broker migration.
+ * `@PactBroker` (not `@PactFolder`) — matches every other provider-verification test in this repo
+ * (`TransactionPactProviderVerificationTest`, `BalancePactProviderVerificationTest`, etc.).
+ * 2026-07-07 (#371) had switched this specific class to `@PactFolder("../pacts")` for local-dev
+ * ergonomics (ADR-0063: no broker secret needed to run it locally) — but that meant party-service
+ * CI never published a verification result to the broker again, for ANY consumer. kyc-service's
+ * and onboarding-service's consumer contracts (added 2026-07-12, five days later) therefore never
+ * got a single verification recorded — not stale, never-run — which silently wedged ADR-0092's
+ * `can-i-deploy` gate: party-service's sandbox auto-deploy hard-blocked for 4 days straight with
+ * no way to unblock from the consumer side (there's nothing to re-run there; they don't verify
+ * party-service, they only publish their own pacts). Reverting to `@PactBroker` restores the one
+ * thing `can-i-deploy` actually reads. `@EnabledIfSystemProperty` keeps it a no-op locally without
+ * a broker URL, same as every sibling class — verify a change with `compileTestKotlin` locally;
+ * the real verification only runs in CI (`pactbroker.url` set there).
  */
 @QuarkusTest
 @QuarkusTestResource(com.openbank.party.it.PostgresRedpandaTestResource::class)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_KYC"])
 @Provider("openbank-party-service")
-@PactFolder("../pacts")
+@PactBroker(enablePendingPacts = "true")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
+@EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class PartyEventPactProviderVerificationTest {
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
