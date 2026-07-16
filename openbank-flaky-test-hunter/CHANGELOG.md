@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.2.0...flaky-test-hunter-v0.3.0) (2026-07-16)
+
+
+### Features
+
+* **vop:** add Verification of Payee backend; give control-plane agents episodic memory ([#1195](https://github.com/JiRaska/open-bank-oss/issues/1195)) ([91460fc](https://github.com/JiRaska/open-bank-oss/commit/91460fcc62bb72f4a99953e51e90374597dda9c3))
+
 ## [0.2.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.1.0...flaky-test-hunter-v0.2.0) (2026-07-14)
 
 
