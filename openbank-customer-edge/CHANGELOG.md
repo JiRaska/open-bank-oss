@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.20.0...customer-edge-v0.20.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* **customer-edge:** consent step serves only the terms, as a PDF ([#1310](https://github.com/JiRaska/open-bank-oss/issues/1310)) ([1dec331](https://github.com/JiRaska/open-bank-oss/commit/1dec331f858db53d9818520e16fd44f4a8de0ad1))
+
 ## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.19.0...customer-edge-v0.20.0) (2026-07-16)
 
 
