@@ -7,8 +7,10 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.notification.domain.model.NotificationChannel
 import com.openbank.notification.domain.model.NotificationRequest
 import com.openbank.notification.domain.model.NotificationTemplate
+import com.openbank.notification.domain.model.TemplateSensitivity
 import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
 import io.quarkus.hibernate.reactive.panache.Panache
+import io.quarkus.mailer.MockMailbox
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
@@ -62,6 +64,9 @@ class NotificationConsumerIT {
     lateinit var objectMapper: ObjectMapper
 
     @Inject
+    lateinit var mailbox: MockMailbox
+
+    @Inject
     @Connector("smallrye-in-memory")
     lateinit var connector: InMemoryConnector
 
@@ -74,6 +79,27 @@ class NotificationConsumerIT {
     private fun statusFor(partyId: UUID): String? = VertxContextSupport.subscribeAndAwait {
         Panache.withSession { repository.find("partyId", partyId).firstResult() }
     }?.status
+
+    private fun bodyFor(partyId: UUID): String? = VertxContextSupport.subscribeAndAwait {
+        Panache.withSession { repository.find("partyId", partyId).firstResult() }
+    }?.body
+
+    /** Drive one request through the in-memory inbound channel and wait for the ack. */
+    private fun consumeAndAwait(request: NotificationRequest) {
+        val source: InMemorySource<Message<String>> = connector.source("notification-events-in")
+        source.runOnVertxContext(true)
+        val acked = CompletableFuture<Void>()
+        source.send(
+            Message.of(
+                objectMapper.writeValueAsString(request),
+                Supplier<CompletionStage<Void>> {
+                    acked.complete(null)
+                    CompletableFuture.completedFuture<Void>(null)
+                },
+            ),
+        )
+        acked.get(20, TimeUnit.SECONDS)
+    }
 
     @Test
     fun `consumed message is persisted and acked (drives the offset commit)`() {
@@ -112,5 +138,58 @@ class NotificationConsumerIT {
         // SENT (the %test profile mocks the mailer, so the email leg succeeds).
         assertThat(countFor(partyId)).isEqualTo(1L)
         assertThat(statusFor(partyId)).isEqualTo("SENT")
+    }
+
+    /**
+     * The redaction must bite at the storage boundary and nowhere earlier: the customer still
+     * receives the real OTP, the database never holds it. Asserting both halves in one test is
+     * the point — redacting at render time would also make the stored body safe, while silently
+     * mailing the customer a useless placeholder.
+     */
+    @Test
+    fun `OTP is delivered to the customer but never stored (ADR-0021, GDPR Art 5(1)(c))`() {
+        val partyId = UUID.randomUUID()
+        val code = "828913"
+        mailbox.clear()
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.EMAIL,
+                template = NotificationTemplate.OTP_CODE,
+                recipient = "otp-recipient@example.com",
+                variables = mapOf("code" to code),
+            ),
+        )
+
+        // Delivered: the mail that left the service carries the real code.
+        val sent = mailbox.getMailMessagesSentTo("otp-recipient@example.com")
+        assertThat(sent).hasSize(1)
+        assertThat(sent.first().html).contains(code)
+
+        // Stored: the row exists and is SENT, but its body is the placeholder — an operator
+        // reading it through NotificationResource cannot recover the code.
+        assertThat(countFor(partyId)).isEqualTo(1L)
+        assertThat(statusFor(partyId)).isEqualTo("SENT")
+        assertThat(bodyFor(partyId)).isEqualTo(TemplateSensitivity.REDACTED_BODY)
+        assertThat(bodyFor(partyId)).doesNotContain(code)
+    }
+
+    /** An ordinary template is untouched — redaction is an allow-list, not a blanket. */
+    @Test
+    fun `non-secret template still stores its rendered body`() {
+        val partyId = UUID.randomUUID()
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.EMAIL,
+                template = NotificationTemplate.WELCOME,
+                recipient = "welcome-recipient@example.com",
+                variables = mapOf("name" to "Alice"),
+            ),
+        )
+
+        assertThat(bodyFor(partyId)).contains("Alice")
+        assertThat(bodyFor(partyId)).isNotEqualTo(TemplateSensitivity.REDACTED_BODY)
     }
 }

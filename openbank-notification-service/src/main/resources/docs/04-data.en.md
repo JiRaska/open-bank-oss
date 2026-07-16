@@ -18,6 +18,9 @@
 | V4 | `V4__dispatch_control_sequences.sql` | `dispatch_control_log_seq`, `dispatch_resume_proposal_seq` (Hibernate sequence fix) |
 | V5 | `V5__notification_sequences.sql` | `notifications_seq`, `notification_outbox_seq` (Hibernate sequence fix) |
 | V6 | `V6__create_device_tokens.sql` | `device_tokens` table + unique `(platform, token)`, `(party_id, status)` index, `device_tokens_seq` |
+| V7 | `V7__device_token_lifecycle_columns.sql` | `registered_at`, `refreshed_at` on `device_tokens` (ADR-0135 §2 token TTL) |
+| V8 | `V8__notification_read_state.sql` | `read_at` on `notifications` + partial index `idx_notifications_party_unread` |
+| V9 | `V9__redact_secret_notification_bodies.sql` | one-off redaction of stored `OTP_CODE` / `PASSWORD_RESET` bodies (see *Secret-bearing templates* below) |
 
 Each migration file carries an inline **rollback note** (e.g. V6: `DROP TABLE device_tokens; DROP SEQUENCE device_tokens_seq;`). Never rewrite an applied migration (checksum-mismatch startup failure) — use `QUARKUS_FLYWAY_REPAIR_AT_START=true` if a live DB drifts.
 
@@ -34,11 +37,28 @@ Each migration file carries an inline **rollback note** (e.g. V6: `DROP TABLE de
 | `template` | VARCHAR(50) | template enum name |
 | `recipient` | VARCHAR(255) | **PII** — email address / phone / device target |
 | `subject` | VARCHAR(500) | rendered subject (may contain content) |
-| `body` | TEXT | rendered body — **may contain PII** (names, masked amounts, OTP) |
+| `body` | TEXT | rendered body — **may contain PII** (names, amounts). Never an authentication secret: see *Secret-bearing templates* |
 | `status` | VARCHAR(10) | PENDING / SENT / FAILED / BOUNCED |
 | `metadata` | JSONB | free-form, default `{}` |
 | `sent_at` | TIMESTAMPTZ | delivery time |
 | `created_at` | TIMESTAMPTZ | default `NOW()` |
+
+#### Secret-bearing templates
+
+`OTP_CODE` and `PASSWORD_RESET` render an authentication secret into the message body. The
+secret is delivered to the customer but **never persisted**: `NotificationConsumer` stores
+`TemplateSensitivity.REDACTED_BODY` in its place, and `NotificationResource` redacts again on
+read (two independent controls, the ADR-0059 D3 shape). V9 cleared the rows written before this.
+
+Why: `body` is readable by any `ROLE_OPERATOR` — both via `@RolesAllowed` and via the shared
+`rest.rego` `operator-read-any` rule, which grants `.read`/`.list` on any resource to every
+operator. Staff able to read a customer's OTP can complete that customer's SCA (ADR-0021). The
+secret is also spent on delivery, so keeping it fails GDPR Art. 5(1)(c) data minimisation.
+
+Classification lives in `domain/model/TemplateSensitivity.kt` as a positive allow-list, pinned by
+`TemplateSensitivityTest` so any edit to the set is deliberate. Adding a template whose render
+embeds a secret **without** classifying it is not caught by a test — review `renderTemplate` and
+this allow-list together.
 
 ### `notification_outbox`
 
@@ -73,7 +93,7 @@ Unique `(platform, token)` → re-registration upserts; index `(party_id, status
 | Field | Classification | Control |
 |---|---|---|
 | `notifications.recipient` | direct PII (email / phone) | masked in logs (PiiMask); not exposed in oversight signals |
-| `notifications.body` / `subject` | possible PII / secret (OTP) | OTP/secret templates never egress to oversight |
+| `notifications.body` / `subject` | possible PII | secret-bearing templates (OTP_CODE, PASSWORD_RESET) are delivered but never stored — redacted on write and again on read; no template egresses to oversight |
 | `notifications.party_id`, `device_tokens.party_id` | pseudonymous identifier | links to party-service |
 | `device_tokens.token` | PII-adjacent provider token | write-only over REST, masked in logs |
 | `dispatch_control_log.actor` / `dispatch_resume_proposal.*_by` | operator identity | audit-logged, internal only |
