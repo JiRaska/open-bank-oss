@@ -43,17 +43,16 @@ class DocumentRepositoryImpl :
      * `withTransaction`, so mutating the managed entity is flushed on commit without an explicit
      * update call.
      */
-    override suspend fun save(document: Document): Document =
-        Panache.withTransaction {
-            find("id", document.id).firstResult().flatMap { existing ->
-                if (existing != null) {
-                    existing.applyFrom(document)
-                    Uni.createFrom().item(document)
-                } else {
-                    persist(document.toEntity(objectMapper)).replaceWith(document)
-                }
+    override suspend fun save(document: Document): Document = Panache.withTransaction {
+        find("id", document.id).firstResult().flatMap { existing ->
+            if (existing != null) {
+                existing.applyFrom(document)
+                Uni.createFrom().item(document)
+            } else {
+                persist(document.toEntity(objectMapper)).replaceWith(document)
             }
-        }.awaitSuspending()
+        }
+    }.awaitSuspending()
 
     override suspend fun findById(id: UUID): Document? =
         Panache.withSession { find("id", id).firstResult() }.awaitSuspending()?.toDomain(objectMapper)
