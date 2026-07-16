@@ -198,6 +198,7 @@ spec:
             httpGet:
               path: /health?bundles=true
               port: 8181
+            initialDelaySeconds: 5
             periodSeconds: 10
             failureThreshold: 3
           livenessProbe:
