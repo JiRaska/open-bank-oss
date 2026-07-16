@@ -99,6 +99,10 @@ async function serviceBaseUrl(svcKey: string): Promise<ResolvedService | null> {
 const FORWARD_HEADERS = [
   'content-type', 'accept', 'authorization',
   'idempotency-key', 'x-request-id', 'x-correlation-id',
+  // ADR-0155/ADR-0176: the maker's four-eyes retry carries this header once a checker has
+  // approved (AuthorizeInterceptor). Without forwarding it, every retry looks identical to the
+  // original request and gets 202'd again forever.
+  'x-approval-id',
 ]
 
 export const dynamic = 'force-dynamic'

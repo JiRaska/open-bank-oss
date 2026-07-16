@@ -7,13 +7,14 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Users, ArrowLeft, ShieldCheck, FileText, RefreshCw, Bell, ChevronDown } from 'lucide-react'
+import { Users, ArrowLeft, ShieldCheck, FileText, RefreshCw, Bell, ChevronDown, Send, Clock } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { useAuth } from '@/lib/auth/useAuth'
 import { hasPermission } from '@/lib/auth/roles'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { opsMessageApi } from '@/lib/api'
 
 const PAGE_SIZE = 25
 
@@ -231,7 +232,7 @@ function PartyDetailPage() {
         </div>
       )}
 
-      {tab === 'messages' && <MessagesTab partyId={party.id} />}
+      {tab === 'messages' && <MessagesTab partyId={party.id} roles={roles} />}
     </div>
   )
 }
@@ -247,7 +248,7 @@ function PartyDetailPage() {
  * `notifications:view` permission gating this tab is UX only — it decides what we render,
  * not what an operator can fetch. Showing bodies here needs the policy fix first.
  */
-function MessagesTab({ partyId }: { partyId: string }) {
+function MessagesTab({ partyId, roles }: { partyId: string; roles: string[] }) {
   // A helper component outside the page needs its own language context (all admin-ui pages
   // are 'use client') — never reference the page's `t` out of scope (CLAUDE.md rule #4).
   const { t, language } = useLanguage()
@@ -257,6 +258,16 @@ function MessagesTab({ partyId }: { partyId: string }) {
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
+
+  const canCompose = hasPermission(roles, 'opsmessage:compose')
+  const [sending, setSending] = useState(false)
+  const [composeError, setComposeError] = useState<string | null>(null)
+  // Set once the maker's first submit call returns 202 — nothing here polls automatically
+  // (ADR-0176 introduces the fleet's first 202/X-Approval-Id UI flow; a real approval
+  // notification channel is a separate, larger piece of work). The maker clicks "Retry send"
+  // themselves once a colleague has approved it.
+  const [pendingSubmit, setPendingSubmit] = useState<{ id: string; approvalId?: string } | null>(null)
+  const [retrying, setRetrying] = useState(false)
 
   const load = useCallback(async (nextPage: number) => {
     if (nextPage === 0) setLoading(true); else setLoadingMore(true)
@@ -291,8 +302,86 @@ function MessagesTab({ partyId }: { partyId: string }) {
   // The endpoint is offset-paged (page/size/total), not cursor-paged like party search.
   const hasNextPage = (page + 1) * PAGE_SIZE < total
 
+  const REFERENCE_ID_PATTERN = /^[A-Za-z0-9-]{1,40}$/
+
+  // ADR-0176 D2: OPERATOR_ACCOUNT_NOTICE is the only composable template today, so the operator
+  // supplies just a reference code — never free text. Two calls, mirroring
+  // OperatorMessageResource's own KDoc: draft persists the content, submit is the four-eyes
+  // -gated one and pauses (202) until a different operator approves it.
+  async function sendMessage() {
+    const referenceId = window.prompt(
+      t('Referenční kód (např. TICKET-123):', 'Reference (e.g. TICKET-123):'),
+    )
+    if (referenceId === null) return
+    if (!REFERENCE_ID_PATTERN.test(referenceId)) {
+      setComposeError(t(
+        'Referenční kód musí obsahovat 1–40 alfanumerických znaků nebo pomlček.',
+        'Reference must be 1-40 alphanumeric characters or hyphens.',
+      ))
+      return
+    }
+    setSending(true); setComposeError(null)
+    try {
+      const drafted = await opsMessageApi.draft({ partyId, template: 'OPERATOR_ACCOUNT_NOTICE', referenceId, purpose: 'SERVICE' })
+      const result = await opsMessageApi.submit(drafted.id)
+      if (result.status === 'PENDING_APPROVAL') {
+        setPendingSubmit({ id: drafted.id, approvalId: result.approvalId })
+      } else {
+        // Only reached if four-eyes enforcement is off in this environment — still a real
+        // send, so refresh the history to show it.
+        load(0)
+      }
+    } catch {
+      // Never surface a raw backend message for a user-initiated write (CLAUDE.md rule).
+      setComposeError(t(
+        'Zprávu se nepodařilo odeslat. Zkuste to prosím znovu.',
+        'The message could not be sent. Please try again.',
+      ))
+    } finally { setSending(false) }
+  }
+
+  async function retrySubmit() {
+    if (!pendingSubmit) return
+    setRetrying(true)
+    try {
+      const result = await opsMessageApi.submit(pendingSubmit.id, pendingSubmit.approvalId)
+      if (result.status !== 'PENDING_APPROVAL') {
+        setPendingSubmit(null)
+        load(0)
+      }
+      // Still PENDING_APPROVAL: nobody has decided it yet — leave the banner up.
+    } catch {
+      // A 409 (already resolved) or 403 (rejected/self-approval) most often means someone
+      // already decided it — leave the banner up rather than guessing; the Pending approvals
+      // queue on the Notifications page has the authoritative status.
+    } finally { setRetrying(false) }
+  }
+
   return (
-    <div className="card" style={{ overflow: 'hidden' }}>
+    <>
+      {canCompose && (
+        <div className="card" style={{ padding: '14px 20px', marginBottom: '16px' }}>
+          {pendingSubmit ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Clock size={15} style={{ color: 'var(--yellow)' }} />
+              <span style={{ fontSize: '13px' }}>
+                {t('Zpráva čeká na schválení druhým operátorem.', 'Message is awaiting a second operator’s approval.')}
+              </span>
+              <button className="btn btn-secondary" style={{ marginLeft: 'auto' }} onClick={retrySubmit} disabled={retrying}>
+                <RefreshCw size={13} /> {retrying ? t('Zkouším…', 'Retrying…') : t('Zkusit znovu odeslat', 'Retry send')}
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <button className="btn btn-secondary" onClick={sendMessage} disabled={sending}>
+                <Send size={13} /> {sending ? t('Odesílám…', 'Sending…') : t('Poslat zprávu', 'Send message')}
+              </button>
+              {composeError && <span style={{ fontSize: '12px', color: 'var(--red)' }}>{composeError}</span>}
+            </div>
+          )}
+        </div>
+      )}
+      <div className="card" style={{ overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
         <Bell size={15} style={{ color: 'var(--accent)' }} />
         <span style={{ fontWeight: 600, fontSize: '13px' }}>{t('Historie zpráv', 'Message history')}</span>
@@ -366,7 +455,8 @@ function MessagesTab({ partyId }: { partyId: string }) {
           {t('Načítám…', 'Loading…')}
         </div>
       )}
-    </div>
+      </div>
+    </>
   )
 }
 

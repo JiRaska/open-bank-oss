@@ -7,6 +7,7 @@ import type { GovernanceManifestEntry } from '@/lib/governance/manifest'
 
 const ACCOUNT_SERVICE = '/api/svc/account-service'
 const TRANSACTION_SERVICE = '/api/svc/transaction-service'
+const NOTIFICATION_SERVICE = '/api/svc/notification-service'
 
 export const SERVICES: { name: string; port: number }[] = [
   { name: 'account-service',        port: 8100 },
@@ -96,6 +97,49 @@ export const accountApi = {
     apiFetchSimple<Account>(`${ACCOUNT_SERVICE}/api/v1/accounts/${id}/freeze`, { method: 'POST', body: JSON.stringify({ reason }) }),
   unfreeze: (id: string, reason: string) =>
     apiFetchSimple<Account>(`${ACCOUNT_SERVICE}/api/v1/accounts/${id}/unfreeze`, { method: 'POST', body: JSON.stringify({ reason }) }),
+}
+
+// Operator-initiated customer messaging (ADR-0176). draft/submit is a two-call maker
+// step — see openbank-notification-service's OperatorMessageResource KDoc for why a single
+// annotated endpoint cannot both create the row and be the four-eyes-gated one.
+export interface OperatorMessage {
+  id: string; partyId: string; template: string; referenceId: string; purpose: string; status: string
+}
+// The 202-pending shape AuthorizeInterceptor returns on submit's first (un-approved) call.
+// Shares `status` with OperatorMessage so callers can branch on one field regardless of which
+// shape actually came back.
+export interface OpsMessageSubmitResult {
+  status: string; approvalId?: string; id?: string
+}
+
+export const opsMessageApi = {
+  draft: (data: { partyId: string; template: string; referenceId: string; purpose: string }) =>
+    apiFetchSimple<OperatorMessage>(`${NOTIFICATION_SERVICE}/api/v1/opsmessages`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  // No approvalId yet -> first call, expect back {status:"PENDING_APPROVAL", approvalId}.
+  // With approvalId (the maker's retry, once a different operator has approved) -> expect back
+  // the sent OperatorMessage, status "SENT".
+  submit: (id: string, approvalId?: string) =>
+    apiFetchSimple<OpsMessageSubmitResult>(`${NOTIFICATION_SERVICE}/api/v1/opsmessages/${id}/submit`, {
+      method: 'POST',
+      headers: approvalId ? { 'X-Approval-Id': approvalId } : undefined,
+    }),
+  listPending: (page = 0, size = 20) =>
+    apiFetchSimple<{ items: OperatorMessage[]; total: number }>(
+      `${NOTIFICATION_SERVICE}/api/v1/opsmessages?page=${page}&size=${size}`,
+    ),
+  approve: (id: string) =>
+    apiFetchSimple<{ id: string; status: string }>(
+      `${NOTIFICATION_SERVICE}/api/v1/opsmessages/approvals/${id}/approve`,
+      { method: 'POST' },
+    ),
+  reject: (id: string) =>
+    apiFetchSimple<{ id: string; status: string }>(
+      `${NOTIFICATION_SERVICE}/api/v1/opsmessages/approvals/${id}/reject`,
+      { method: 'POST' },
+    ),
 }
 
 const LEDGER_SERVICE = '/api/svc/ledger-service'
