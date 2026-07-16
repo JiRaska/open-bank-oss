@@ -4,9 +4,11 @@
 
 package com.openbank.interest.application.usecase
 
+import com.openbank.interest.application.port.out.CapitalizationPosting
 import com.openbank.interest.application.port.out.InterestAccrualRepository
 import com.openbank.interest.application.port.out.InterestCapitalizationRepository
 import com.openbank.interest.application.port.out.InterestRateConfigRepository
+import com.openbank.interest.application.port.out.LedgerPostingPort
 import com.openbank.interest.application.port.out.TaxProfilePort
 import com.openbank.interest.domain.model.AccrualRequest
 import com.openbank.interest.domain.model.AccrualStatus
@@ -44,11 +46,13 @@ class InterestServiceTest {
     private val accrualRepo = mockk<InterestAccrualRepository>()
     private val capitalizationRepo = mockk<InterestCapitalizationRepository>()
     private val taxProfilePort = mockk<TaxProfilePort>()
+    private val ledgerPostingPort = mockk<LedgerPostingPort>()
     private val service = InterestService(
         configRepo,
         accrualRepo,
         capitalizationRepo,
         taxProfilePort,
+        ledgerPostingPort,
         "ACT_365",
         clock,
     )
@@ -59,13 +63,17 @@ class InterestServiceTest {
     private val eventSlot: CapturingSlot<OutboxMessage> = slot()
     private val accrualIdsSlot: CapturingSlot<List<UUID>> = slot()
 
+    /** Captures the ADR-0033 §D credit leg handed to the ledger, filled by stubCapitalization(). */
+    private val postingSlot: CapturingSlot<CapitalizationPosting> = slot()
+
     /**
-     * Stubs the profile lookup and the ONE atomic write the use case now performs: capitalization +
-     * withholding + outbox event + the guarded accrual flip all land through `saveWithOutbox`, so
-     * there is nothing else for the service to call.
+     * Stubs the profile lookup, the ledger credit leg, and the ONE atomic write the use case
+     * performs: capitalization + withholding + outbox event + the guarded accrual flip all land
+     * through `saveWithOutbox`, so there is nothing else for the service to call.
      */
     private fun stubCapitalization(profile: TaxProfile = TaxProfile.FAIL_SAFE_DEFAULT) {
         every { taxProfilePort.resolve(any()) } returns Uni.createFrom().item(profile)
+        every { ledgerPostingPort.post(capture(postingSlot)) } returns Uni.createFrom().item(Unit)
         every {
             capitalizationRepo.saveWithOutbox(
                 capture(capSlot),
@@ -219,6 +227,7 @@ class InterestServiceTest {
         )
 
         every { taxProfilePort.resolve(any()) } returns Uni.createFrom().item(TaxProfile.FAIL_SAFE_DEFAULT)
+        every { ledgerPostingPort.post(any()) } returns Uni.createFrom().item(Unit)
         every { accrualRepo.findPendingCapitalization(accountId, productId, toDate) } returns
             Uni.createFrom().item(accruals)
         // Mirrors the repo's status guard tripping (a concurrent run flipped the accruals first):
@@ -229,6 +238,81 @@ class InterestServiceTest {
         assertThatThrownBy { service.capitalize(accountId, productId, toDate).await().indefinitely() }
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("Capitalization aborted")
+    }
+
+    @Test
+    fun `the ledger credit leg carries gross-net-tax and the customer sub-ledger`() {
+        val accountId = UUID.fromString("77777777-7777-7777-7777-777777777777")
+        val productId = "SAVINGS_CZK"
+        val toDate = LocalDate.of(2026, 1, 20)
+        val accruals = listOf(
+            sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 18), BigDecimal("100.00"), currency = "CZK"),
+        )
+        stubCapitalization()
+
+        every { accrualRepo.findPendingCapitalization(accountId, productId, toDate) } returns
+            Uni.createFrom().item(accruals)
+
+        service.capitalize(accountId, productId, toDate).await().indefinitely()
+
+        // Without this the bank remits withholding tax on interest it never credited (the ADR-0033
+        // §D hole): the split must reach the ledger, not just interest-service's own tables.
+        verify(exactly = 1) { ledgerPostingPort.post(any()) }
+        assertThat(postingSlot.captured.accountId).isEqualTo(accountId)
+        assertThat(postingSlot.captured.currency).isEqualTo("CZK")
+        assertThat(postingSlot.captured.grossAmount).isEqualByComparingTo(BigDecimal("100.0000"))
+        assertThat(postingSlot.captured.taxAmount).isEqualByComparingTo(BigDecimal("15"))
+        assertThat(postingSlot.captured.netAmount).isEqualByComparingTo(BigDecimal("85.0000"))
+        // gross = net + tax, so the three-leg entry balances within CZK.
+        assertThat(postingSlot.captured.grossAmount)
+            .isEqualByComparingTo(postingSlot.captured.netAmount.add(postingSlot.captured.taxAmount))
+    }
+
+    @Test
+    fun `a ledger failure leaves NO capitalization row (post before transaction)`() {
+        val accountId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        val productId = "SAVINGS_CZK"
+        val toDate = LocalDate.of(2026, 1, 20)
+        val accruals = listOf(
+            sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 18), BigDecimal("100.00"), currency = "CZK"),
+        )
+
+        every { taxProfilePort.resolve(any()) } returns Uni.createFrom().item(TaxProfile.FAIL_SAFE_DEFAULT)
+        every { accrualRepo.findPendingCapitalization(accountId, productId, toDate) } returns
+            Uni.createFrom().item(accruals)
+        every { ledgerPostingPort.post(any()) } returns
+            Uni.createFrom().failure(IllegalStateException("ledger unavailable"))
+
+        assertThatThrownBy { service.capitalize(accountId, productId, toDate).await().indefinitely() }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("ledger unavailable")
+
+        // The whole point of posting BEFORE the local write: a capitalization row that the GL knows
+        // nothing about is unrepairable (its accruals are already CAPITALIZED, so no retry revisits
+        // them). Failing here leaves the accruals ACCRUING and the period simply retries.
+        verify(exactly = 0) { capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a zero-gross period books no journal but still records the capitalization`() {
+        val accountId = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+        val productId = "SAVINGS_CZK"
+        val toDate = LocalDate.of(2026, 1, 20)
+        // A zero-balance account still runs the accrual pass; it accrues nothing worth crediting.
+        val accruals = listOf(
+            sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 18), BigDecimal("0.00"), currency = "CZK"),
+        )
+        stubCapitalization()
+
+        every { accrualRepo.findPendingCapitalization(accountId, productId, toDate) } returns
+            Uni.createFrom().item(accruals)
+
+        service.capitalize(accountId, productId, toDate).await().indefinitely()
+
+        // Every leg would be zero, and the ledger requires >=2 lines each with amount > 0.
+        verify(exactly = 0) { ledgerPostingPort.post(any()) }
+        verify(exactly = 1) { capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any()) }
+        assertThat(capSlot.captured.grossAmount).isEqualByComparingTo(BigDecimal.ZERO)
     }
 
     @Test

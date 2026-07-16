@@ -28,6 +28,7 @@ class InterestService(
     private val accrualRepo: InterestAccrualRepository,
     private val capitalizationRepo: InterestCapitalizationRepository,
     private val taxProfilePort: TaxProfilePort,
+    private val ledgerPostingPort: LedgerPostingPort,
     @ConfigProperty(name = "openbank.interest.day-count-convention", defaultValue = "ACT_365")
     private val defaultDayCount: String,
     private val clock: Clock,
@@ -42,6 +43,7 @@ class InterestService(
         accrualRepo: InterestAccrualRepository,
         capitalizationRepo: InterestCapitalizationRepository,
         taxProfilePort: TaxProfilePort,
+        ledgerPostingPort: LedgerPostingPort,
         @ConfigProperty(name = "openbank.interest.day-count-convention", defaultValue = "ACT_365")
         defaultDayCount: String,
     ) : this(
@@ -49,6 +51,7 @@ class InterestService(
         accrualRepo,
         capitalizationRepo,
         taxProfilePort,
+        ledgerPostingPort,
         defaultDayCount,
         Clock.systemUTC(),
     )
@@ -155,18 +158,60 @@ class InterestService(
                 exemptCode = tax.exemptCode,
                 createdAt = now,
             )
-            // ONE transaction for the whole credit: capitalization + withholding + outbox event +
-            // the status-guarded ACCRUING -> CAPITALIZED flip. Previously these were four separate
-            // transactions, so a crash between them could commit the capitalization while leaving
-            // the accruals ACCRUING — a retry then re-credited the customer AND re-booked the tax.
-            capitalizationRepo.saveWithOutbox(
-                cap,
-                withholding,
-                withholdingRecordedEvent(cap, withholding),
-                accruals.map { it.id },
-                now,
-            )
+            // Ledger FIRST, own rows second (ADR-0033 §D) — see [postCreditLeg].
+            postCreditLeg(cap).flatMap {
+                // ONE transaction for the whole credit: capitalization + withholding + outbox event +
+                // the status-guarded ACCRUING -> CAPITALIZED flip. Previously these were four separate
+                // transactions, so a crash between them could commit the capitalization while leaving
+                // the accruals ACCRUING — a retry then re-credited the customer AND re-booked the tax.
+                capitalizationRepo.saveWithOutbox(
+                    cap,
+                    withholding,
+                    withholdingRecordedEvent(cap, withholding),
+                    accruals.map { it.id },
+                    now,
+                )
+            }
         }
+    }
+
+    /**
+     * Posts the ADR-0033 §D split to the ledger — DEBIT interest expense (gross), CREDIT the
+     * customer's deposit-control pocket (net, sub-ledger = accountId), CREDIT withholding-tax
+     * payable (tax) — **before** the local write set commits.
+     *
+     * Ordering is deliberate and mirrors `LendingService.accrueOne`'s post-then-mark. A crash
+     * between the two leaves the accruals `ACCRUING` and no capitalization row, so the retry
+     * re-runs the whole period and replays the SAME business-derived idempotency key
+     * (`CapitalizationJournalFactory.idempotencyKey` — account + product + period end, never
+     * `cap.id`, which is a fresh UUID per attempt); the ledger collapses that onto the journal it
+     * already booked. The result is exactly-once on money. The reverse order — commit, then post —
+     * would strand a customer credit that exists in interest-service and nowhere in the GL, which
+     * no retry can repair because the accruals are already `CAPITALIZED`.
+     *
+     * The REST call is intentionally OUTSIDE `saveWithOutbox`'s transaction: a network call inside
+     * an open DB transaction holds a connection for the ledger's whole round-trip (and its retries),
+     * and a ledger timeout would then be indistinguishable from a rolled-back write.
+     *
+     * A zero-gross period (a zero-balance account still runs the accrual pass) carries no money and
+     * no tax: there is nothing to recognize, so no journal is posted — every leg would be zero and
+     * the ledger requires ≥2 lines each with `amount > 0`. The capitalization row is still written,
+     * which is what V6's partial unique index (`WHERE total_accrued <> 0`) already anticipates as
+     * inert bookkeeping. Same branch as lending's zero-interest installment.
+     */
+    private fun postCreditLeg(cap: InterestCapitalization): Uni<Unit> {
+        if (cap.grossAmount.signum() <= 0) return Uni.createFrom().item(Unit)
+        return ledgerPostingPort.post(
+            CapitalizationPosting(
+                accountId = cap.accountId,
+                productId = cap.productId,
+                periodTo = cap.periodTo,
+                currency = cap.currency,
+                grossAmount = cap.grossAmount,
+                taxAmount = cap.taxAmount,
+                netAmount = cap.netAmount,
+            ),
+        )
     }
 
     /** Builds the versioned `interest.withholding.recorded` outbox event (ADR-0033 §F). */
