@@ -35,11 +35,46 @@ class BookedEntryRestAdapter @Inject constructor(@RestClient private val client:
         to: LocalDate,
     ): Uni<List<StatementEntry>> =
         // transaction-service search returns a {"data":[...]} envelope of entries touching the account
-        // (no currency filter param), so filter to this pocket's currency client-side.
-        client.searchByAccount(accountId, from.toString(), to.toString(), "COMPLETED").map { resp ->
-            resp.data.filter { it.currencyCode == null || it.currencyCode == currency }
+        // (no currency filter param), so filter to this pocket's currency client-side. The endpoint is
+        // paged (limit defaults to 50, coerced to max 200) — page through the whole window, or a busy
+        // pocket's statement would be silently truncated and could never pass reconciliation.
+        fetchAllPages(accountId, from.toString(), to.toString(), offset = 0, acc = emptyList()).map { dtos ->
+            dtos.filter { it.currencyCode == null || it.currencyCode == currency }
                 .map { it.toEntry(accountId, currency) }
         }
+
+    // Accumulates pages in upstream order (transaction-service sorts by initiatedAt desc; concatenating
+    // consecutive offsets preserves that ordering) until a short page signals the end. Fail-closed: if
+    // the window somehow exceeds MAX_ENTRIES the Uni fails loudly — a truncated statement must never be
+    // minted silently (the close records the pocket as failed and a later run retries).
+    private fun fetchAllPages(
+        accountId: UUID,
+        from: String,
+        to: String,
+        offset: Int,
+        acc: List<TransactionDto>,
+    ): Uni<List<TransactionDto>> =
+        client.searchByAccount(accountId, from, to, "COMPLETED", PAGE_SIZE, offset).flatMap { resp ->
+            val all = acc + resp.data
+            when {
+                resp.data.size < PAGE_SIZE -> Uni.createFrom().item(all)
+                all.size >= MAX_ENTRIES -> Uni.createFrom().failure(
+                    IllegalStateException(
+                        "booked-entry pagination exceeded $MAX_ENTRIES entries for account $accountId " +
+                            "($from..$to) — refusing to mint a possibly-truncated statement",
+                    ),
+                )
+                else -> fetchAllPages(accountId, from, to, offset + PAGE_SIZE, all)
+            }
+        }
+
+    private companion object {
+        /** transaction-service coerces `limit` into 1..200 — ask for the max to minimize round-trips. */
+        const val PAGE_SIZE = 200
+
+        /** Hard cap (100 pages) guarding against a non-terminating upstream; far beyond any real month. */
+        const val MAX_ENTRIES = 20_000
+    }
 
     private fun TransactionDto.toEntry(accountId: UUID, pocketCurrency: String): StatementEntry {
         val raw = amount ?: BigDecimal.ZERO

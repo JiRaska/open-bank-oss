@@ -44,6 +44,9 @@ data class TransactionSearchResponse(val data: List<TransactionDto> = emptyList(
 interface TransactionRestClient {
     // No Kotlin default-valued parameter here: a default on an interface method compiles to a
     // synthetic JVM default method, which the Quarkus REST Client rejects.
+    // limit/offset MUST always be passed explicitly: transaction-service defaults limit to 50 and
+    // silently truncates, which capped statements at 50 entries per month (fix: paginate in the
+    // adapter). The upstream coerces limit into 1..200.
     @GET
     @Path("/api/v1/transactions/search")
     fun searchByAccount(
@@ -51,6 +54,8 @@ interface TransactionRestClient {
         @QueryParam("dateFrom") dateFrom: String,
         @QueryParam("dateTo") dateTo: String,
         @QueryParam("status") status: String,
+        @QueryParam("limit") limit: Int,
+        @QueryParam("offset") offset: Int,
     ): Uni<TransactionSearchResponse>
 }
 
