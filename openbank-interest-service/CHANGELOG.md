@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.9.0...interest-service-v0.9.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* **interest:** settle a zero-tax remittance batch instead of wedging it ([#1264](https://github.com/JiRaska/open-bank-oss/issues/1264)) ([8d64381](https://github.com/JiRaska/open-bank-oss/commit/8d64381218c271d325d528950c300ac1168d3a8c))
+* **interest:** settle withholding remittance, make capitalization atomic and per-product ([#1246](https://github.com/JiRaska/open-bank-oss/issues/1246)) ([a798e8b](https://github.com/JiRaska/open-bank-oss/commit/a798e8bbe909dbb8f06c75f249cf9cd4fe4c0ca4)), closes [#999](https://github.com/JiRaska/open-bank-oss/issues/999)
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.8.0...interest-service-v0.9.0) (2026-07-14)
 
 
