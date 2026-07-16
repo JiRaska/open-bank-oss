@@ -598,15 +598,17 @@ jobs:
       #   editorial => info.version PATCH
       # Also asserts the D2 API invariant on HEAD:
       #   major(info.version) == openbank.api.version == newest URL major.
-      # ADVISORY until rules.yaml change_requirements.api_change flips to
-      # enforced (target 2026-08-15, ADR-0144) — findings are ::warning
-      # annotations; add --enforce to the script invocation to flip.
+      # ENFORCED (ADR-0144 graduation, ahead of the 2026-08-15 target). The gate is
+      # diff-scoped: it only classifies the spec change in THIS PR, so the fleet's
+      # historical under-bumping is not retroactively a failure — but from here a PR
+      # that changes a spec must move info.version to match what it did. Bumping is
+      # the one-line fix the error message spells out.
       # oasdiff is a pinned, checksum-verified binary (OpenSSF Pinned-Dependencies),
       # same direct-CLI pattern as gitleaks (ADR-0040). PR-only: the gate diffs
       # against the resolved PR diff base (the CURRENT merge-base, not the
       # creation-time event base.sha — the #524 × #481 ledger merge race);
       # pushes to main have already been classified.
-      - name: "api-contract gate — OpenAPI diff classification (ADR-0048 D5, advisory)"
+      - name: "api-contract gate — OpenAPI diff classification (ADR-0048 D5, enforced)"
         if: github.event_name == 'pull_request'
         env:
           OASDIFF_VERSION: "1.22.0"
@@ -618,7 +620,7 @@ jobs:
           echo "${OASDIFF_SHA256}  /tmp/oasdiff.tar.gz" | sha256sum -c -
           tar -xzf /tmp/oasdiff.tar.gz -C /tmp oasdiff
           sudo install -m 0755 /tmp/oasdiff /usr/local/bin/oasdiff
-          python3 .github/scripts/check-api-contract.py --base "${PR_DIFF_BASE}"
+          python3 .github/scripts/check-api-contract.py --base "${PR_DIFF_BASE}" --enforce
 
       # ADVISORY until rules.yaml change_classes.db_change flips to enforced
       # (target 2026-08-15, ADR-0144) — add --enforce to the invocation to flip.

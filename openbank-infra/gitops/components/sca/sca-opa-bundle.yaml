@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sca-service
     app.kubernetes.io/part-of: sca
   annotations:
-    openbank.tech/policy-checksum: "b8efc92e554c0b78"
+    openbank.tech/policy-checksum: "aabb5970ba5cccaf"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1327,12 +1327,21 @@ data:
           - "single @Provider verification test per provider; per-interaction target for mixed HTTP+message"
         contract_diff_tool: oasdiff
         gate: api-contract
-        enforced: advisory
-        target_enforce_date: "2026-08-15"   # ADR-0144
-        # CI producer is LIVE (advisory): .github/scripts/check-api-contract.py runs in the
-        # "Validate manifests" job on every PR (oasdiff 1.22.0, pinned + checksum-verified).
-        # Classification + api_invariant findings are ::warning annotations. Flipping this
-        # rule to enforced = pass --enforce to the script in ci.yml (one-line change).
+        enforced: enforce                   # ADR-0144 graduation, ahead of the 2026-08-15 target
+        # .github/scripts/check-api-contract.py runs with --enforce in the "Validate manifests"
+        # job on every PR (oasdiff 1.22.0, pinned + checksum-verified): classification and
+        # api_invariant findings are ::error and fail the build.
+        #
+        # Why it graduated early: while advisory, the rule was being ignored — 11 of the 12 most
+        # recent spec-changing commits added or altered endpoints without moving info.version at
+        # all (e.g. #1161 added PATCH /api/v1/parties/{id}/consent and left 1.6.0 -> 1.6.0). An
+        # advisory gate that everyone walks past is worse than none: it reports the rule is held
+        # when it is not.
+        #
+        # The gate is DIFF-SCOPED, so that history is not retroactively a failure — only a PR's
+        # own spec change is classified. The cost of enforcement is therefore one line per
+        # spec-touching PR (bump info.version to match what the diff did), which the error
+        # message spells out.
         ci_producer: ".github/scripts/check-api-contract.py"
       db_change:
         detect: ["src/main/resources/db/migration/*.sql", "Flyway/Liquibase changeset"]
