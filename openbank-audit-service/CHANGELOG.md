@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.6](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.9.5...audit-service-v0.9.6) (2026-07-17)
+
+
+### Bug Fixes
+
+* **audit:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1492](https://github.com/JiRaska/open-bank-oss/issues/1492)) ([4b6dc35](https://github.com/JiRaska/open-bank-oss/commit/4b6dc35dae4e7aa3c0d268dbe3a538441f62a28e))
+
 ## [0.9.5](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.9.4...audit-service-v0.9.5) (2026-07-14)
 
 
