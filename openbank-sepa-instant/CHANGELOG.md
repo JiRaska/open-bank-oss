@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.7.1...sepa-instant-v0.7.2) (2026-07-17)
+
+
+### Bug Fixes
+
+* **sepa-instant:** remove dead SctInstOutboxPort pipeline ([#1364](https://github.com/JiRaska/open-bank-oss/issues/1364)) ([7f65116](https://github.com/JiRaska/open-bank-oss/commit/7f651163f377636b8400d8c43b822231818eeac7)), closes [#1034](https://github.com/JiRaska/open-bank-oss/issues/1034)
+
 ## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.7.0...sepa-instant-v0.7.1) (2026-07-12)
 
 
