@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.8.0...sdd-service-v0.8.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **sdd:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1460](https://github.com/JiRaska/open-bank-oss/issues/1460)) ([a4faec3](https://github.com/JiRaska/open-bank-oss/commit/a4faec33cb021cd863503a2d99bddcfc51ce0101))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.7.1...sdd-service-v0.8.0) (2026-07-14)
 
 
