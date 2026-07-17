@@ -2,11 +2,11 @@
 
 Date: 2026-05-29
 Status: Accepted
-Delivery-Status: Partial
+Delivery-Status: Shipped
 
-**Delivery note (updated 2026-06-30):**
-- **`openbank-libs` coverage gate** — ✅ Shipped: Kover plugin applied to `openbank-libs` with a 39% line-coverage floor; `SecurityContextExtensions` unit test added, raising `libs/security` from 50% to ~59%; gate wired into `check` and enforced per-PR with no new workflow YAML.
-- **Per-service rollout** — ⬜ Pending: applying the plugin + floor to the ~28 `openbank-*` services via a shared convention plugin in `build-logic/` is deferred to the build-logic consolidation (roadmap Fáze 4); no service outside `openbank-libs` has a Kover gate today.
+**Delivery note (updated 2026-07-17):** both phases delivered; the 2026-06-30 "per-service rollout pending" note was stale.
+- **Coverage gate (libs)** — ✅ Shipped: Kover wired into `check`. Since the ADR-0122 libs split the floors live per sub-module — `openbank-libs-domain` (30) and `openbank-libs-runtime` (50); the umbrella `openbank-libs` is `minValue = 0` (no source). `SecurityContextExtensions(.kt/Test.kt)` now sits in `openbank-libs-runtime`. (The old "39% on `openbank-libs` / libs-security 50→59%" wording predates that split.)
+- **Per-service rollout** — ✅ Shipped: the `openbank.quarkus-service` convention plugin in `build-logic/` applies Kover fleet-wide and wires `koverVerify` into `check`; ~53 modules are gated with per-module ratchet floors (e.g. account 65, ledger 65, transaction 85, agent 70, analytics-sink 51). `rules.yaml` carries default 39 / money_path 40; the in-code floors are already higher. Enforced per-PR via `_service-ci.yml` `:<service>:build`, no new workflow YAML.
 
 ## Context
 

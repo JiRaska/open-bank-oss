@@ -5,9 +5,9 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): Jiří Raška
 
-**Delivery note (updated 2026-06-30):**
+**Delivery note (updated 2026-07-17):**
 - **Orchestration/decision logic** — ✅ Shipped: bronze/silver medallion views, PII masking, as-of/SCD2 reporting, reconciliation diffs, date-travel for regulatory snapshots all working and tested.
-- **External integrations** — ⬜ Deferred: ClickHouse client, outbox/export BackfillSource reader, OLTP/warehouse reconciliation readers remain `@Default` no-op stubs; ClickHouse infra tracked separately.
+- **External integrations** — 🟡 Partial: the ClickHouse client (`ClickHouseClient`, `ClickHouseAnalyticsSink`) and both reconciliation readers (`ClickHouseWarehouseStateReader`, `HttpReconciliationSource`) now ship as real `@Alternative @Priority(100)` build-gated adapters (Testcontainers IT `ClickHouseAnalyticsSinkIT`), and ClickHouse infra is wired in `docker-compose.yml`. The default (unset) profile keeps `@Default` no-op fallbacks so the service stays offline-buildable. **Only the outbox/export `BackfillSource` reader remains a `@Default` no-op** (`NoOpBackfillSource`). Caveat: the ClickHouse adapters are `@IfBuildProperty` build-gated and may be pruned from the default uber-jar image unless built with `sink.type=clickhouse` — shipped + IT-proven code, not necessarily active in every image.
 
 ## Context
 

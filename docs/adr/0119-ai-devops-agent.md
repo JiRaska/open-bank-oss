@@ -48,7 +48,7 @@ Temporal-orchestrated (ADR-0101). A durable analysis sweep runs the same five-st
 ```
 collect()  → Prometheus SSDLC/DORA signals
 detect()   → 6 threshold detectors → findings
-diagnose() → LiteLLM gateway RCA (ADR-0031 D6)
+diagnose() → LLM RCA via OpenAI-compatible backend (DeepInfra/DeepSeek, ADR-0089)
 propose()  → durable remediation: code/IaC PR | runbook update | tracking ticket
 queue()    → HITL: a human approves/dismisses; the agent never merges
 ```
@@ -104,8 +104,8 @@ Prometheus (SSDLC/DORA/runner/rollout metrics)    GitHub Actions exporter (D1, d
               │                                                   │
               │  1. collect()  — 5 collect activities             │
               │  2. detect()   — 6 threshold detectors (D1–D6)    │
-              │  3. diagnose() — LiteLLM gateway RCA (STUB)        │
-              │  4. propose()  — PR | runbook | ticket (STUB)     │
+              │  3. diagnose() — LLM RCA (DeepInfra/DeepSeek, live)│
+              │  4. propose()  — GitHub PR (live) | runbook | tkt │
               │  5. queue()    — HITL finding repository          │
               └──────────────────┬───────────────────────────────┘
                                  │
@@ -148,9 +148,11 @@ The agent has a charter in `openbank-libs/governance/agents.yaml`:
   + **6 threshold detectors** (`DetectorId.D1…D6` in `domain/model/DevOpsModels.kt`,
   `DetectFindingsActivityImpl`). **D1 and D5 are inert** until a github-actions exporter and a
   governance-drift feed land.
-- The **LiteLLM** (`LlmDiagnosisAdapter`) and **GitHub-PR** (`RemediationProposalAdapter`)
-  adapters as **structured STUBs** — same posture as finops-agent's P3: the actual
-  `/chat/completions` wiring and PR creation are documented follow-ups.
+- The **LLM** (`LlmDiagnosisAdapter`, a live `/chat/completions` client to DeepInfra/DeepSeek over the
+  OpenAI wire format per ADR-0089 — **not** the LiteLLM proxy) and **GitHub-PR**
+  (`RemediationProposalAdapter`, a live branch→commit→PR REST flow) adapters — **fully wired**, each
+  degrading gracefully to no-op when its `DEVOPS_MODEL_API_KEY` / `DEVOPS_GITHUB_TOKEN` is unseeded.
+  (A step beyond finops-agent's P3, whose LLM adapter is still a stub.)
 - An **in-memory finding repository** (`InMemoryFindingRepository`) — Postgres persistence
   deferred; **Temporal history is the durable record**.
 - The admin-UI **"DevOps Insights (AI)"** panel with placeholder HITL buttons.
@@ -158,7 +160,7 @@ The agent has a charter in `openbank-libs/governance/agents.yaml`:
   (`openbank-infra/gitops/components/devops-agent/`: `devops-agent.yaml`, `namespace.yaml`,
   `network-policies.yaml`).
 
-**Deferred to follow-ups (honestly):** the live LLM call, real PR creation, Postgres
+**Deferred to follow-ups (honestly):** Postgres
 persistence, the HITL approve/reject backend, the github-actions metrics exporter (D1), and
 the SSDLC-drift feed (D5).
 
@@ -189,8 +191,9 @@ the SSDLC-drift feed (D5).
 - Another Temporal workflow = another dependency on the Temporal cluster.
 - D1 and D5 are **inert** until their signal sources (github-actions exporter, SSDLC-drift
   feed) land — the panel will under-report until then; stated plainly rather than faked.
-- The LLM/PR adapters are STUBs — the agent **detects** but does not yet **diagnose or open
-  PRs** until the follow-ups wire `/chat/completions` and PR creation.
+- The LLM/PR adapters are live but degrade to no-op until `DEVOPS_MODEL_API_KEY` /
+  `DEVOPS_GITHUB_TOKEN` are seeded in the pod — until then the agent detects but its diagnose/propose
+  steps silently produce nothing.
 
 **Neutral**
 - The agent is one more `actor` (`actorType = AI_AGENT`) in the same governance machinery as
@@ -216,7 +219,7 @@ the SSDLC-drift feed (D5).
 - [ADR-0101](0101-temporal-durable-execution.md) — Temporal durable orchestration.
 - [ADR-0002](0002-hexagonal-architecture-per-service.md) — hexagonal architecture (ports/adapters).
 - [ADR-0053](0053-ephemeral-scale-to-zero-arc-runners.md) / [ADR-0082](0082-ci-runner-governance.md) — the deploy pipeline + ARC runner pools.
-- `openbank-devops-agent/` — the service (workflow, 5 collect activities, 6 detectors, STUB adapters, in-memory repo).
+- `openbank-devops-agent/` — the service (workflow, 5 collect activities, 6 detectors, live LLM + GitHub-PR adapters, in-memory repo).
 - `openbank-libs/governance/agents.yaml` — the `devops-agent` charter.
 - `openbank-infra/scripts/reregister-runner.sh` — the durable `RUNNER_LABELS` the D3 incident exposed (PR #2284).
 - `openbank-infra/gitops/components/devops-agent/` — gitops manifests.

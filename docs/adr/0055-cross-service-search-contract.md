@@ -7,7 +7,9 @@ Author(s): OpenBank platform
 
 **Delivery note (updated 2026-06-30):**
 - **Phase 1 (library contract)** — ✅ Shipped: `SearchRequest` + `CursorPage`/`CursorEncoder` in `openbank-libs`; page-size clamping [1,100], wildcard semantics, LIKE escaping, and comprehensive tests present (Amendment 2026-06-19).
-- **Integration phases (2–4)** — ⬜ Pending: account-service `pg_trgm` GIN endpoint, product-catalog pagination/auth, admin-UI unification not yet done.
+- **Phase 2 (account-service)** — ✅ Shipped: `GET /api/v1/accounts/search` (pg_trgm GIN via `V10__account_search_trgm.sql`), openapi bump, `AccountSearchApiIT` contract test, threat-model update (money-path). party-service and transaction-service also expose the contract.
+- **Phase 3 (product-catalog)** — 🟡 Partial: the `@Authenticated`/`@Authorize`/`@RolesAllowed` auth gate shipped (the ADR Context "no `@RolesAllowed`" gap is closed); cursor pagination still pending (`list()` remains in-memory `findAll().filter{}`, openapi returns a bare array).
+- **Phase 4 (admin-ui)** — 🟡 Partial: `parties` search is fully on the contract (debounce, min-2, cursor); `accounts`/`transactions` partial; `product-catalog` field is still client-side only. Full unification pending.
 
 > **Amendment 2026-06-19 — Phase 1 complete.** `SearchRequest` + `CursorPage`/`CursorEncoder`
 > ship in `openbank-libs` at `com.openbank.libs.api.search` and
@@ -16,6 +18,8 @@ Author(s): OpenBank platform
 > metacharacter escaping, keyset-only cursor design. Comprehensive unit tests ship alongside.
 > **Phases 2–4 remain** (account-service `pg_trgm` GIN search endpoint, product-catalog
 > cursor pagination + auth gate, admin-ui search-field unification).
+> _(Superseded 2026-07-17: Phase 2 has since shipped in full; product-catalog auth gate shipped,
+> its pagination still pending — see the current delivery note above.)_
 
 ## Context
 

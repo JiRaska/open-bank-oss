@@ -5,9 +5,10 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): Jiří Raška
 
-**Delivery note (updated 2026-06-30):**
-- **Design** — ✅ Complete: per-currency `validateBalance()` logic and FX position/exchange-difference GL structure designed and documented.
-- **Implementation** — ⬜ Pending: revaluation batch job, ČNB rate dependency, and cross-currency entry posting helper not yet deployed; gated on ledger-service deployment window.
+**Delivery note (updated 2026-07-17):**
+- **Implemented** — ✅: per-currency `validateBalance()` is live in `JournalEntry.kt` (in the payment path) and the FX position / exchange-difference GL structure is migrations `V5__fx_position_accounts.sql` / `V6__fx_revaluation_counter_value_accounts.sql` — not merely designed.
+- **Revaluation job + ČNB dependency** — ✅ Shipped (delivered via ADR-0046): `FxRevaluationService` / `FxRevaluationScheduler` (`@Scheduled` 15:00 Europe/Prague + `ClusterLock`) / `FxRevaluationResource`, and the `CnbRateProvider` port + `FxServiceCnbRateAdapter` (resilient) backed by fx-service ingestion. The 2026-06-30 "not yet deployed" note was stale.
+- **Outstanding** — ⬜: the cross-currency `FxConversionPosting` helper is implemented and unit-tested but has **no production caller** (customer FX conversions don't post through it yet). This is the single genuine gap keeping the status Partial.
 
 ## Context
 

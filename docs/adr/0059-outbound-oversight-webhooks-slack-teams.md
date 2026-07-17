@@ -2,12 +2,13 @@
 
 Date: 2026-06-02
 Status: Accepted
-Delivery-Status: Partial
+Delivery-Status: Complete
 Author(s): jiri.raska
 
-**Delivery note (updated 2026-06-30):**
-- **Security design** — ✅ Complete: allow-list schema (`OversightSignal`), `PiiMask` integration, fail-closed egress, off-by-default + Vault secret pattern all designed.
-- **Renderers and delivery** — ⬜ Pending: Slack/Teams renderers, webhook delivery binding, and outbox janitor for failed rows not yet coded.
+**Delivery note (updated 2026-07-17):** v1 scope fully delivered; the 2026-06-30 "renderers/delivery pending" note was stale (all of it had shipped by 2026-06-29).
+- **Security design** — ✅ Complete: allow-list schema (`OversightSignal`), a local defense-in-depth PII scrubber (`scrubPii`, IBAN/PAN/email — not the shared `openbank-libs/security` `PiiMask`), fail-closed egress, off-by-default + Vault secret pattern.
+- **Renderers and delivery** — ✅ Complete: Slack + Teams renderers (`OversightWebhook.renderText`/`renderSlackPayload`), HttpClient adapters (`SlackOversightWebhookPublisher`, `TeamsOversightWebhookPublisher`), dispatch fan-out (`NotificationConsumer.publishOversight`), and the nightly dead-letter janitor (`NotificationOutboxDeadLetterJanitorJob`) — all shipped and tested (unit + `OversightWebhookIT`).
+- **Follow-ups (post-v1):** Kafka-durable audit (webhook-sent is currently log-backed via `LoggingAuditEventPublisher`) and N-in-M-minutes event windowing.
 
 ## Context
 

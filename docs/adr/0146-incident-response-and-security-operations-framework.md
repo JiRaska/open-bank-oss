@@ -5,14 +5,19 @@ Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | 
 Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only -->
 Author(s): jiri.raska
 
-**Delivery note (2026-07-02):** `docs/bcp/incident-response.md` ships the
+**Delivery note (updated 2026-07-17):** `docs/bcp/incident-response.md` ships the
 policy half — severity tiers, declaration timing, the ICT register field
 list, and an honest (not fabricated) escalation section naming the
-bus-factor-1 gap directly per this ADR's own review note. **Not yet
-built:** the register itself is a documented field list, not a running
-system (no storage, no CI wiring, no admin-UI surface); the key-ceremony
-runbooks under `docs/runbooks/key-ceremonies/` referenced in section 5 are
-not yet written. Partial, not Shipped.
+bus-factor-1 gap directly per this ADR's own review note. **Partially
+built:** the register is deployed as a running in-memory REST service
+(`IctIncidentResource`/`IctIncidentService` in `openbank-security-scanner`,
+P1–P4 severity model, Kafka events on `openbank.security.ict.incident`,
+role-gated, gitops-deployed) — so the 2026-07-02 "not a running system / no
+CI wiring" claim was wrong. It still lacks **durable storage** (in-memory
+`ConcurrentHashMap` only, lost on restart — no `ict_incident` table), has **no
+admin-UI surface**, and has only authz (not functional) test coverage. The
+key-ceremony runbooks under `docs/runbooks/key-ceremonies/` referenced in
+section 5 are not yet written. Partial, not Shipped.
 
 ## Context
 

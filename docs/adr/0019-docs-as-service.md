@@ -7,8 +7,9 @@ Supersedes: nothing (additive)
 Implements: openbank-libs `com.openbank.libs.docs`
 
 **Delivery note (updated 2026-07-01):**
-- **Phases 1–3 + 5b** — ✅ Shipped: `DocsResource`/`DocsCatalog`/`ClasspathMarkdownLoader` in `openbank-libs`; account-service and balance-service pilot (7 sections × 2 languages + diagrams); admin-ui server-rendered docs page with i18n cookie, version chip, and Mermaid diagram viewer; `DiagramsCatalog` + `_diagrams/{slug}` endpoint.
-- **Phase 4 (fleet rollout)** — ⬜ Pending: per-service documentation content authoring for the remaining ~30 services; each service needs `src/main/resources/docs/*.md` files populated.
+- **Phases 1–3** — ✅ Shipped: `DocsResource`/`DocsCatalog`/`ClasspathMarkdownLoader` (now in `openbank-libs-domain`/`-runtime`, package `com.openbank.libs.docs`, after the ADR-0122 split); account-service and balance-service pilot (7 sections × 2 languages + diagrams); admin-ui server-rendered docs page with i18n cookie, version chip, and inline Mermaid rendering (embedded ` ```mermaid ` fences via `MermaidEnhancer`).
+- **Phase 4 (fleet rollout)** — ✅ Shipped: 38 services each ship a full 14-file `docs/` tree (526 `.md`, genuine prose) + a 3-file `diagrams/` tree (114 `.mmd`). The "remaining ~30 services / needs `docs/*.md` populated" note was stale.
+- **Phase 5b (diagram serving)** — ⬜ **Pending**, not shipped: there is no `DiagramsCatalog` class, no `_diagrams/{slug}` endpoint, no `diagrams` field on `IndexPayload`, and no admin-ui `/diagrams/[slug]` route; schema is `openbank.docs.v3`, not v4. The `.mmd` files exist as content and render only as embedded fences — the three named Phase-5b artifacts do not exist.
 
 ## Context
 
@@ -150,7 +151,7 @@ identical to the API versioning rule from ADR 0009.
 - Backstage-compatible file layout (`docs/`, `<slug>.<lang>.md`) — future
   migration to a real TechDocs server is a file move, not a rewrite.
 - Same `/q/...` ergonomics ops already know from health/metrics/openapi.
-- Unit-testable in libs (`DocsCatalogTest`, `DiagramsCatalogTest`) without
+- Unit-testable in libs (`DocsCatalogTest`) without
   touching Quarkus.
 
 **Negative / accepted trade-offs.**
@@ -175,9 +176,10 @@ identical to the API versioning rule from ADR 0009.
 - ✅ admin-ui live fetch via `/api/svc` proxy (Phase 3)
 - ✅ Well-known endpoint chips — openapi / swagger / health / metrics / info /
   docsMeta (Phase 5)
-- ✅ Diagram auto-render — `DiagramsCatalog`, `_diagrams/{slug}` endpoint,
-  admin-ui `/services/[name]/diagrams/[slug]` viewer (Phase 5b)
-- 🟡 Phase 4 fleet rollout — pending content authoring per service
+- ✅ Phase 4 fleet rollout — 38 services ship full `docs/` trees (526 md) + `diagrams/` (114 mmd)
+- ⬜ Diagram auto-render (Phase 5b) — NOT shipped: `DiagramsCatalog`, `_diagrams/{slug}` endpoint, and
+  the admin-ui `/services/[name]/diagrams/[slug]` viewer do not exist; schema is v3, not v4. `.mmd`
+  files render only as embedded ` ```mermaid ` fences today.
 
 ## Related
 

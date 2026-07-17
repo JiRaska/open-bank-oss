@@ -28,7 +28,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0017](0017-secrets-via-vault.md) | Move runtime secrets from application.yaml to HashiCorp Vault | Accepted | Partial | — |
 | [0018](0018-opa-for-fine-grained-authz.md) | OPA (Open Policy Agent) for fine-grained per-resource authorization | Superseded by ADR-0034 | N/A | — |
 | [0019](0019-docs-as-service.md) | Docs-as-Service — services self-publish their bundled documentation | Accepted | Partial | — |
-| [0020](0020-code-coverage-kover-regression-floor.md) | Code coverage: Kover with a per-module regression floor | Accepted | Partial | — |
+| [0020](0020-code-coverage-kover-regression-floor.md) | Code coverage: Kover with a per-module regression floor | Accepted | Shipped | — |
 | [0021](0021-sca-decoupled-device-approval-no-auto-approve.md) | SCA push/biometric: decoupled device approval, never auto-approve | Accepted | Shipped | — |
 | [0022](0022-analytics-layer-event-fed-clickhouse.md) | Analytics/reporting layer: event-fed ClickHouse, not CDC, not a lakehouse | Accepted | Partial | — |
 | [0023](0023-analytics-regulatory-hardening.md) | Analytics layer: closing the 9 regulatory findings (CNB/EBA/DORA/GDPR/BCBS 239) | Accepted | Partial | — |
@@ -67,7 +67,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0056](0056-admin-ui-bff-sole-browser-to-cluster-path.md) | Admin-UI BFF as the sole browser→cluster path | Accepted | Shipped | — |
 | [0057](0057-scale-to-zero-workload-tiers-and-finops-classifier.md) | Scale-to-zero workload tiers and a FinOps classifier | Accepted | Shipped | — |
 | [0058](0058-fck-nat-egress-cost-sandbox.md) | Replace the managed NAT Gateway with fck-nat in the sandbox | Accepted | Shipped | — |
-| [0059](0059-outbound-oversight-webhooks-slack-teams.md) | Outbound oversight webhooks (Slack/Teams): anonymized, allow-listed, opt-in egress | Accepted | Partial | — |
+| [0059](0059-outbound-oversight-webhooks-slack-teams.md) | Outbound oversight webhooks (Slack/Teams): anonymized, allow-listed, opt-in egress | Accepted | Complete | — |
 | [0060](0060-ci-applies-platform-tofu.md) | CI applies the platform OpenTofu (OIDC, manual-dispatch) | Accepted | Shipped | — |
 | [0061](0061-dora-metrics-from-in-house-sources.md) | DORA metrics from in-house sources, derived + snapshotted | Accepted | Partial | — |
 | [0062](0062-finops-cost-allocation-showback.md) | FinOps cost allocation: requests-weighted showback by service, domain and business flow | Accepted | Shipped | — |
@@ -91,7 +91,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0080](0080-pentest-remediation-p0-p2.md) | Pentest remediation (admin.open-bank.tech) — P0/P1/P2 | Accepted | Partial | — |
 | [0081](0081-cluster-segmentation-and-container-hardening-baseline.md) | Cluster segmentation & container hardening baseline | Accepted | Shipped | — |
 | [0082](0082-ci-runner-governance.md) | CI runner governance — trust-tiered persistent pools, no human in the merge path | Superseded by ADR-0053 | N/A | — |
-| [0083](0083-t1-http-scale-to-zero-native-pilot.md) | T1 (HTTP → 0): native-image + KEDA HTTP add-on pilot on product-catalog | Accepted | Shipped | — |
+| [0083](0083-t1-http-scale-to-zero-native-pilot.md) | T1 (HTTP → 0): native-image + KEDA HTTP add-on pilot on product-catalog | Accepted | Partial | — |
 | [0084](0084-fraud-detection-bounded-context.md) | Fraud detection bounded context — real-time transaction risk scoring | Accepted | Shipped | — |
 | [0085](0085-complaints-handling.md) | Complaints handling — regulatory complaints as a first-class process | Accepted | Partial | — |
 | [0086](0086-customer-payment-non-repudiation-and-audit-chain.md) | Customer payment non-repudiation — SCA settlement gate, identity threading, audit chain | Accepted | Shipped | — |

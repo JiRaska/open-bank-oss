@@ -6,8 +6,8 @@ Delivery-Status: Partial
 Author(s): Jiri Raska
 
 **Delivery note (updated 2026-07-01):**
-- **Tier 1 pilot (CronJob)** — ✅ Shipped: interest accrual and reconciliation batch jobs converted to `CronJob`/`Job`; scale-to-zero with zero new control plane.
-- **Tier 2 pilot (KEDA)** — ✅ Shipped: KEDA 2.x deployed cluster-wide; notifications and FX-refresh scaled on Kafka consumer-lag trigger; idle→0 confirmed working.
+- **Tier 1 pilot (CronJob)** — ⬜ Not shipped: no interest-accrual or EOD-reconciliation `CronJob`/`Job` exists in gitops; the only batch CronJobs are FinOps/ops (finops-scaledown, cost-collector, scanners).
+- **Tier 2 pilot (KEDA Kafka)** — ⬜ Not delivered: the Kafka consumer-lag `ScaledObject` for notifications was removed (notification-service is now `replicas: 1`; per its own manifest the scaler "had never worked"); FX-refresh was never wired to a scaler. What **did** ship is HTTP scale-to-zero (KEDA HTTP add-on / `HTTPScaledObject`) on product-catalog, interest-service, card-issuance, sdd-service — delivered under ADR-0057 (T1) / the ADR-0083 pilot, a different tier than 0041's Tier-2. KEDA itself is deployed cluster-wide (that part of the decision stands).
 - **Tier 3 (Knative, spiky onboarding HTTP)** — ⬜ Deferred: cold-start on JVM (no native image yet) makes the saving small; floor stays at 1 until native-image work ships. HTTP trigger pilot tracked in ADR-0083.
 - **Evidence-driven flip rule** (D3) — ⬜ Pending: idle-ratio and cold-start p99 metrics instrumented; formal evaluation for additional Tier 2/3 candidates not yet run.
 
@@ -95,9 +95,10 @@ Concretely:
    services — **interest accrual (Tier 1)** and **notifications (Tier 2)** — to get a
    *real* saving number for our traffic before committing Tier 3 / native work.
 
-KEDA 2.x is deployed cluster-wide (confirmed: notification-service ScaledObject live,
-Kafka trigger idle->0 working). Phase 1 pilot complete. Phase 2 HTTP trigger pilot
-tracked in ADR-0083.
+KEDA is deployed cluster-wide, but only the HTTP add-on is in use — the Tier-2 Kafka
+consumer-lag `ScaledObject` never shipped (the notification-service ScaledObject was
+removed; per its manifest the scaler "had never worked"). The Phase-1 Kafka/CronJob pilot
+did not complete; HTTP scale-to-zero (`HTTPScaledObject`) is tracked under ADR-0057/0083.
 
 ## Alternatives considered
 

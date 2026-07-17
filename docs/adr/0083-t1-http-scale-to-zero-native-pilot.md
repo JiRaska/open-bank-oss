@@ -2,7 +2,7 @@
 
 Date: 2026-06-02
 Status: Accepted
-Delivery-Status: Shipped
+Delivery-Status: Partial
 Author(s): Jiri Raska
 
 > **Correction (2026-07-05).** A prior edit (#2800, 2026-06-30) marked this ADR
@@ -168,6 +168,19 @@ Author(s): Jiri Raska
 > re-measurement and, if warranted, a re-declaration (this is a non-money-path service, so
 > demoting off T1 does not need the `t0_baseline` 2-approval bar — a straightforward
 > `rules.yaml` edit with the new measurement suffices).
+>
+> **Update (2026-07-17) — reverted; Delivery-Status flipped Shipped → Partial.** The
+> 2026-07-06 re-declaration above was itself rolled back afterward and is now superseded.
+> On `origin/main` today the live state is JVM, not native, and not scaling to zero:
+> gitops `components/accounts/product-catalog.yaml` runs the JVM fast-jar image (native
+> cutover #1e53d0a7a reverted by #412d084a7 / #765, 2026-07-11); `Dockerfile.native`
+> exists but its own header says "not deployed to the fleet"; the `HTTPScaledObject` is
+> held at `replicas.min: 1` (label `finops-tier: T0`) because onboarding-path callers
+> reach the ClusterIP directly (not the interceptor), so `min: 0` caused `Connection
+> refused` and silent onboarding failure; `rules.yaml` now carries
+> `openbank-product-catalog: T0` (T1 → T0, 2026-07-17). The enablers exist in code but
+> the live T1 pilot is not delivered — re-declare only once every in-cluster caller goes
+> through the interceptor and the SLO is re-measured on that path.
 
 ## Context
 
