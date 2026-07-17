@@ -5,13 +5,18 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): Claude (session: Phase 5b consolidation)
 
-**Delivery note (updated 2026-07-05):**
+**Delivery note (updated 2026-07-17):** the enforcement axis — the part that was materially stale in
+the 2026-07-05 note — is now fully live; the header stays `Partial` only for the D2 bundle-distribution
+mechanism (below).
 - **D1 (single OPA namespace)** — ✅ Shipped: `data.openbank.{agents,rest,shared}` unified; bundle in `openbank-libs/governance/`.
 - **D3 (Kotlin `@Authorize` API)** — ✅ Shipped: interceptor, `OpaSidecarPolicyDecisionPoint`, `AllowAllPolicyDecisionPoint`; fleet sweep complete — all 30 REST services annotated.
-- **Phase 5 (enforcement flip, non-money-path)** — ✅ Shipped: 13 non-money-path services flipped to `authz.enforce: true`; OPA deny→403, unavailable→503. (The PR numbers previously cited here, #1363-#1365, don't resolve in this repo — pre-public-repo-transition references, same pattern as the ADR numbering gap in `README.md`; the shipped state itself is independently verified in gitops config, not just the PR citation.)
-- **Phase 5 (money-path)** — ⬜ Pending: 14 money-path services (account, balance, ledger, transaction, ...) still advisory; each needs 2 approvals + threat-model update. Tracked in issue #266.
-- **D2 (MCP enforcement sidecar)** — ⬜ Pending (advisory mode). The PR previously cited here, #638, doesn't resolve in this repo either (same pre-public-transition pattern). Tracked in issue #266.
-- **D4 (k8s sidecar deployment)** — ⬜ Pending. Tracked in issue #266.
+- **D4 (k8s sidecar deployment)** — ✅ Shipped (was recorded Pending): the OPA sidecar is deployed fleet-wide (19 gitops manifests carry it) — enforcement below depends on it, so it cannot be pending.
+- **Phase 5 (enforcement flip, non-money-path)** — ✅ Shipped: non-money-path services run `AUTHZ_ENFORCE=true`; OPA deny→403, unavailable→503.
+- **Phase 5 (money-path)** — ✅ Shipped (was recorded ⬜ Pending "14 still advisory" as of 2026-07-05; **corrected 2026-07-17**): **all 16 money-path services in `rules.yaml` now run `AUTHZ_ENFORCE=true` in gitops** — account, balance, ledger, transaction, sepa-payment, sepa-instant, domestic-payment, clearing, swift, fx, lending, sca, consent, fraud, billing, settlement (verified per-service in the `payments/*`, `ledger`, `accounts`, `balances`, `consent`, … gitops components). The "14 still advisory" line in the 2026-06-19 amendment below is thereby superseded — kept as the point-in-time record, per this repo's "record, don't overwrite" convention.
+- **D2 / MCP-plane enforcement** — ✅ Enforced (was recorded "Pending, advisory mode"): the agent MCP `/tools/call` gate runs `AGENT_POLICY_ENFORCEMENT=block` in gitops (ADR-0080 P0 in-process charter allow-list). The OPA decision on the MCP path degrades to advisory only on PDP transport error (fail-open by design), not as a standing posture.
+- **D2 / bundle distribution** — ⬜ the reason the header stays `Partial`: the policy bundle currently ships as per-service ConfigMaps (`gen-*-opa-bundle.sh`), not the single Cosign-signed OCI artifact the D2 decision sketched. A deviation, not verified further here.
+- **Break-glass:** `AUTHZ_ENFORCE=false` in a service's gitops env ConfigMap.
+- **Axis caveat:** `AUTHZ_ENFORCE` (OPA authz, deny→403) is a **different axis** from four-eyes (`authz.four-eyes.enforce`, ADR-0155), which remains off fleet-wide — this note does not claim money-path is fully locked down.
 Amends: ADR-0018 (OPA for fine-grained authz, Proposed)
 Extends: ADR-0031 (AI agent governance, Accepted)
 
