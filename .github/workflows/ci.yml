@@ -401,11 +401,18 @@ jobs:
       # merge ref). Residual gap: a PR whose last CI run predates the competing
       # merge and that merges with no later run is still unseen by ANY run-time
       # base choice — that needs required-up-to-date branches or a merge queue.
-      # A merge queue is NOT available: it requires an organization-owned repo and this
-      # one is personal, so the ruleset rejects the rule outright (#1465). The
-      # merge_group branch below is therefore inert — kept correct for the day the repo
-      # moves under an org, but it closes nothing today. The gap above stays open unless
-      # strict_required_status_checks_policy (require branches up to date) is turned on.
+      # Neither prevention is in force, so that gap is not PREVENTED — it is DETECTED:
+      #   * a merge queue is NOT available (needs an org-owned repo; this account is
+      #     personal, so the ruleset rejects the rule outright — 422, #1465). The
+      #     merge_group branch below is therefore inert, kept correct for the day the
+      #     repo moves under an org.
+      #   * required-up-to-date branches would work, but measured too expensive here:
+      #     main takes a merge every ~93 s, so a service PR needs ~8 CI re-runs and
+      #     ~70 min to land — a tax on every merge to close a race that needs two PRs
+      #     on one spec, when 1 in 60 PRs touches a spec at all.
+      # api-contract-post-merge.yml re-classifies each spec landing on main against what
+      # main actually was, and raises an issue if it is mis-versioned. That catches this
+      # gap after the fact rather than closing it — the bad merge still happens.
       - name: "resolve PR diff base (current merge-base, not creation-time base.sha)"
         # merge_group too: every diff-scoped gate below reads PR_DIFF_BASE, so if this step
         # skipped in the queue they would all skip with it and `Validate manifests` would go
@@ -637,12 +644,25 @@ jobs:
       # that changes a spec must move info.version to match what it did. Bumping is
       # the one-line fix the error message spells out.
       # oasdiff is a pinned, checksum-verified binary (OpenSSF Pinned-Dependencies),
-      # same direct-CLI pattern as gitleaks (ADR-0040). PR-only: the gate diffs
-      # against the resolved PR diff base (the CURRENT merge-base, not the
-      # creation-time event base.sha — the #524 × #481 ledger merge race);
-      # pushes to main have already been classified.
+      # same direct-CLI pattern as gitleaks (ADR-0040). The gate diffs against the
+      # resolved PR diff base — the CURRENT merge-base, not the creation-time event
+      # base.sha (the #524 × #481 ledger merge race, fixed in #534).
+      #
+      # This step used to end "pushes to main have already been classified". That was
+      # the false premise behind the residual gap described above: a push to main was
+      # classified by the PR that produced it, but only against that PR's base AT ITS
+      # LAST RUN. If a competing spec merged after that run, the classification is
+      # stale and this gate never sees the collision — main takes the second PR's
+      # endpoints under a version the first already claimed, green all the way.
+      # api-contract-post-merge.yml now re-classifies every spec that lands on main
+      # against what main actually was, and raises an issue when one is mis-versioned
+      # (#1465). Detection, not prevention: it cannot block a merge that already
+      # happened — see that workflow's header for why neither prevention was viable.
       - name: "api-contract gate — OpenAPI diff classification (ADR-0048 D5, enforced)"
-        # merge_group too: the race a merge queue exists to close (#481 x #524): two spec PRs both claiming one info.version.
+        # merge_group is listed for completeness only — it can never fire: a merge queue
+        # needs an org-owned repo and this account is personal (#1465). If that ever
+        # changes, the queue closes the residual gap and the post-merge guard becomes a
+        # backstop rather than the only net.
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
           OASDIFF_VERSION: "1.22.0"
