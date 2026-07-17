@@ -36,6 +36,11 @@ dependencies {
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
+
+    // #1201: isolated PostgreSQL per test JVM via Testcontainers (dispute-service had no IT infra yet).
+    testImplementation(libs.testcontainers)
+    testImplementation(libs.testcontainers.junit)
+    testImplementation(libs.testcontainers.postgresql)
 }
 
 kover {
