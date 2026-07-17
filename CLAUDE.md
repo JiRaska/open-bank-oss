@@ -249,6 +249,34 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   steps); if the job has dependents (`needs:`), make the guard its own job instead — failing in
   place would skip them. In `release-please.yml` that would have stripped an already-cut tag of its
   evidence bundle.
+- **`git rebase` drops the signature off EVERY rebased commit, and `--amend -S` only fixes the
+  tip.** A 3-commit branch rebased and re-signed with `--amend` still strands on
+  `required_signatures` with two unsigned commits behind the tip. Re-sign the whole range:
+  `GIT_SEQUENCE_EDITOR=true git rebase -i --exec 'git commit --amend --no-edit -S' origin/main`,
+  then verify via the API (`gh api .../pulls/<N>/commits --jq '.[].commit.verification'`) — not
+  `gh pr view`.
+
+### Dependency graph & PR-time CVE gating (ADR-0030; `rules.yaml: dependencies.pr_time_cve_gate`)
+- **`dependency-review` only ever diffs *submitted* dependency graphs — so `dependency-submission`
+  MUST keep its `pull_request` trigger, or the Gradle half of the gate silently passes.** GitHub
+  parses npm/pip/docker/actions manifests natively but **not Gradle**; the PR-head graph exists only
+  because `dependency-submission.yml` also runs on `pull_request` (#1421). Nothing else covers it:
+  Trivy's Java support is JAR / `pom.xml` / `gradle.lockfile` / `*.sbt.lock` only and this repo has
+  **zero** lockfiles, and CodeQL is neither a dependency scanner nor a required check. Delete that
+  trigger as "redundant CI" and `block_on_cve_severity` becomes decoration — green, checking nothing.
+- **`retry-on-snapshot-warnings` retries even when no submission is coming.** GitHub answers
+  `No snapshots were found for the head SHA` whether or not a graph is on its way, so armed
+  unconditionally it burns its whole window on every PR that touches no manifest (measured: **>11
+  min**). Arm it only on dependency-touching PRs. Size the window from the **end-to-end** wait, not
+  the resolve: the fleet resolve takes ~734 s but the snapshot only becomes queryable ~24 min in
+  (GitHub indexes the graph *after* the submission API returns), so gradle/actions' documented 600 s
+  cannot work here.
+- **A red push-triggered workflow on `main` is addressed to nobody.** `dependency-submission` died
+  of `Java heap space` for three days; every run went red and no one looked, while Dependabot alerts
+  and the PR-time gate both quietly read the stale graph — neither goes red when it is stale. Any
+  workflow whose *output* something else silently depends on needs an escalation path (raise/refresh
+  a tracking issue, as `fleet-attestation.yml` and now `dependency-submission.yml` do). Its
+  `GRADLE_OPTS` heap is a ratchet with nothing measuring it — expect to raise it again.
 
 ### Reviewing a diff
 - **Use 3-dot diff for pre-merge review:** `git diff origin/main...origin/<branch>` is the actual
