@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.notification.application.port.out.OversightWebhookPublisher
 import com.openbank.notification.application.port.out.PushMessage
 import com.openbank.notification.application.port.out.PushSender
@@ -34,7 +35,6 @@ import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
-import java.util.UUID
 import java.util.concurrent.Executor
 
 @ApplicationScoped
@@ -131,7 +131,7 @@ class NotificationConsumer {
     private fun dispatch(req: NotificationRequest): Uni<Void> {
         val (subject, body) = renderTemplate(req.template, req.variables)
         val entity = NotificationEntity().also {
-            it.notificationId = UUID.randomUUID()
+            it.notificationId = Ids.newId()
             it.partyId = req.partyId
             it.channel = req.channel.name
             it.template = req.template.name

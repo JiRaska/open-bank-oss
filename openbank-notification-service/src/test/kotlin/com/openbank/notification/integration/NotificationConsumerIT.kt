@@ -95,6 +95,10 @@ class NotificationConsumerIT {
         Panache.withSession { repository.find("partyId", partyId).firstResult() }
     }?.body
 
+    private fun notificationIdFor(partyId: UUID): UUID? = VertxContextSupport.subscribeAndAwait {
+        Panache.withSession { repository.find("partyId", partyId).firstResult() }
+    }?.notificationId
+
     /** Drive one request through the in-memory inbound channel and wait for the ack. */
     private fun consumeAndAwait(request: NotificationRequest) {
         val source: InMemorySource<Message<String>> = connector.source("notification-events-in")
@@ -149,6 +153,7 @@ class NotificationConsumerIT {
         // SENT (the %test profile mocks the mailer, so the email leg succeeds).
         assertThat(countFor(partyId)).isEqualTo(1L)
         assertThat(statusFor(partyId)).isEqualTo("SENT")
+        assertThat(notificationIdFor(partyId)?.version()).isEqualTo(7)
     }
 
     /**
