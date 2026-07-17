@@ -124,19 +124,36 @@ jobs:
       # stronger control, so the shim is redundant (and unsupported on this host).
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      # Resolve GRADLE_USER_HOME: prefer the node-local hostPath cache injected by
-      # arc-runners.tf (GRADLE_USER_HOME_NODE_CACHE=/var/cache/gradle-svc) on ARC
-      # ephemeral runners; fall back to workspace-relative path on Mac/Hetzner.
-      # NOTE: env context is NOT available in job-level env: blocks of reusable
-      # workflows (workflow_call) — GitHub rejects the expression at parse time with
-      # "Unrecognized named-value: 'env'" — so we resolve it here in a step where
-      # env IS available. See GitHub docs: contexts available in reusable workflows.
+      # Resolve GRADLE_USER_HOME by runner class:
+      #  - ARC ephemeral (GRADLE_USER_HOME_NODE_CACHE set by arc-runners.tf): node-local
+      #    hostPath cache, per-service.
+      #  - other self-hosted (Mac/Hetzner): workspace-relative, per-service.
+      #    Both keep the home PER-SERVICE so one job's `gradle --stop` post-action can't
+      #    kill a sibling job's daemon on the SHARED persistent registry (the documented
+      #    "1-of-28-fails / daemon disappeared" incident).
+      #  - GitHub-hosted (the PR lane): the DEFAULT ~/.gradle. Each hosted matrix job gets
+      #    its OWN ephemeral runner, so there is no sibling daemon to protect and the
+      #    per-service isolation is not just moot but HARMFUL: a non-standard home defeats
+      #    setup-gradle's cross-job cache restore, so the PR lane was rebuilding build-logic
+      #    and re-resolving dependencies from cold every run ("Gradle User Home cache not
+      #    found"). With the default home it restores the warm cache fleet-lint keeps on
+      #    main. Measured on openbank-domestic-payment: ~82 s restored vs ~204 s cold — the
+      #    restore is read-only (see cache-read-only below), so it adds nothing to the
+      #    Actions cache quota.
+      # NOTE: env context is NOT available in job-level env: blocks of reusable workflows
+      # (workflow_call) — GitHub rejects "Unrecognized named-value: 'env'" at parse time —
+      # so this is resolved in a step where env IS available.
       - name: Resolve GRADLE_USER_HOME
+        env:
+          RUNNER_ENV: ${{ runner.environment }}
         run: |
           if [ -n "${GRADLE_USER_HOME_NODE_CACHE:-}" ]; then
             echo "GRADLE_USER_HOME=${GRADLE_USER_HOME_NODE_CACHE}/${{ inputs.service }}" >> "$GITHUB_ENV"
-          else
+          elif [ "${RUNNER_ENV}" = "self-hosted" ]; then
             echo "GRADLE_USER_HOME=${{ github.workspace }}/../../.gradle-svc/${{ inputs.service }}" >> "$GITHUB_ENV"
+          else
+            # GitHub-hosted PR lane: default home so setup-gradle restores the shared cache.
+            echo "GRADLE_USER_HOME=${HOME}/.gradle" >> "$GITHUB_ENV"
           fi
 
       # Normalize the Testcontainers Docker endpoint across the MIXED runner pool
@@ -370,6 +387,17 @@ jobs:
           # cache to fall back on — so the cache is enabled there and disabled
           # on the self-hosted main lane.
           cache-disabled: ${{ runner.environment == 'self-hosted' }}
+          # On the hosted PR lane: RESTORE the warm cache fleet-lint keeps on main, but
+          # never WRITE. Writing 26 per-service home caches on PR branches would churn the
+          # Actions cache quota (already ~96% full) and re-trigger the "storage quota has
+          # been hit" build failures noted above. Read-only gets the ~120 s speedup (paired
+          # with the default GRADLE_USER_HOME resolved above, which is what lets the restore
+          # actually hit) at zero quota cost. Ignored on self-hosted (cache-disabled there).
+          cache-read-only: ${{ runner.environment != 'self-hosted' }}
+          # Enable the cross-job OS-level fallback restore so a service build can reuse
+          # fleet-lint's / another service's home cache instead of requiring an exact
+          # per-job match (which never exists — the self-hosted main lane writes no cache).
+          gradle-home-cache-strict-match: false
 
       # No --no-daemon (ADR-0043): on a persistent runner the Gradle daemon is kept
       # warm and reused across jobs, so the JVM + 30-module configuration is not paid
