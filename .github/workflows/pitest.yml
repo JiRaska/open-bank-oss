@@ -24,6 +24,9 @@ jobs:
   pitest:
     name: pitest / ${{ matrix.service }}
     runs-on: ubuntu-latest
+    # Mutation testing re-runs the domain test suite once per surviving mutant — the
+    # likeliest job in the fleet to hang rather than fail cleanly (issue #1412).
+    timeout-minutes: 60
     permissions:
       contents: read
     strategy:
