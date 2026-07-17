@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.6](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.13.5...notification-service-v0.13.6) (2026-07-17)
+
+
+### Bug Fixes
+
+* **notification:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1539](https://github.com/JiRaska/open-bank-oss/issues/1539)) ([0af8f0f](https://github.com/JiRaska/open-bank-oss/commit/0af8f0f07562ee329fe0bf1d677a23666d9654c5))
+
 ## [0.13.5](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.13.4...notification-service-v0.13.5) (2026-07-17)
 
 
