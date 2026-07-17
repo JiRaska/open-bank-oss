@@ -90,6 +90,20 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   set it `true` in `application.yaml`, or events never dispatch (no error, `attempt_count` stays 0).
 - **CDI wiring isn't validated by `ktlintCheck` + unit tests.** Add `:svc:quarkusBuild` to your
   pre-push gate; ArC/CDI failures only surface there.
+- **Panache reactive `persist()` on an application-assigned `@Id` is INSERT-only — use `merge` for
+  updates.** An aggregate whose `@Id` is set by the app (not `@GeneratedValue`) fails *every*
+  lifecycle transition with `duplicate key value violates ... _pkey` at flush if the repo `save`
+  calls `persist`/`persistAndFlush`: Hibernate schedules an INSERT and never an UPDATE, because a
+  non-null assigned id can't distinguish transient from detached. Use
+  `Panache.getSession().flatMap { it.merge(entity) }` (the upsert SDD's `SddMandateRepositoryImpl`
+  already documents). Invisible to unit tests that mock the repository — consent-service shipped this
+  way and every revoke/reject/activate 500'd, caught only by a real-DB IT (ADR-0126 D3, #1521).
+- **A `Panache.withTransaction`/`withSession` reactive repo can't be called from a bare
+  `@QuarkusTest` thread** — `runBlocking { repo.save(...) }` throws `No current Vertx context found`.
+  Only a real HTTP request carries a Vert.x context: drive the flow through the REST endpoint
+  (RestAssured + `@TestSecurity`) and assert the row with a plain JDBC read. This is also the only
+  way to prove transactional-outbox atomicity (status change + outbox row commit together) — a mocked
+  repo can't. Pattern: `LendingOutboxWriteIT`, `ConsentRevocationOutboxIT`.
 - **`@ApplicationScoped` is LAZY — an `init {}` guard or warning does not run at boot.** Quarkus
   creates the bean via a client proxy on first use, so a constructor that logs "this config is
   DEV-ONLY" or `check()`s a go-live flag stays silent until the first request that touches it — which

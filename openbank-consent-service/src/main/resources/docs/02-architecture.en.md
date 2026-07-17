@@ -15,8 +15,9 @@ The service follows the OpenBank hexagonal architecture (ADR 0002): a framework-
         │                             │ ports out                   │
         │     ┌───────────────────────┼───────────────────────┐    │
         │     ▼                       ▼                       ▼     │
-        │ ConsentRepository    ConsentEventPublisher   ScaChallengeClient
-        │  (Panache/PG)         (outbox insert)         (REST → sca)  │
+        │ ConsentRepository    ConsentOutboxRepository ScaChallengeClient
+        │  (status + outbox,    (dispatch → Kafka)      (REST → sca)  │
+        │   one transaction)                                          │
         └─────┬───────────────────────┬───────────────────┬─────────┘
               ▼                        ▼                   ▼
         PostgreSQL              consent_outbox        sca-service
@@ -39,14 +40,14 @@ The service follows the OpenBank hexagonal architecture (ADR 0002): a framework-
 ### Application (`application/`)
 
 - **Inbound ports** (`port/in/ConsentUseCases.kt`): `CreateConsentUseCase`, `ActivateConsentUseCase`, `RevokeConsentUseCase`, `GetConsentUseCase`, `ValidateConsentUseCase`, with their command DTOs.
-- **Outbound ports** (`port/out/`): `ConsentRepository`, `ConsentEventPublisher`, `ScaChallengeClient`, plus the outbox ports (`ConsentOutboxRepository`, `ConsentOutboxEventPublisher`).
+- **Outbound ports** (`port/out/`): `ConsentRepository` (its `save(consent, event)` persists the status change and the outbox row in one transaction), `ScaChallengeClient`, plus the outbox ports (`ConsentOutboxRepository`, `ConsentOutboxEventPublisher`).
 - `usecase/ConsentService.kt` — the single `@ApplicationScoped` implementation of all five inbound ports. It also re-applies the validity cap defensively and defines the typed domain exceptions (e.g. `ConsentNotFoundException`, `ConsentNotOwnedByPartyException`, `ConsentScaNotCompletedException`).
 
 ### Adapters (`infrastructure/`)
 
 - **REST in** — `rest/ConsentResource.kt` (`@Path("/api/v1/consents")`), DTOs in `rest/dto/`, and `rest/ExceptionMappers.kt` mapping domain exceptions to `ApiError` + HTTP status.
 - **Persistence** — `persistence/entity/ConsentEntity.kt` + `ConsentOutboxEntity.kt` (Panache reactive), `persistence/repository/ConsentRepositoryImpl.kt` + `ConsentOutboxRepositoryImpl.kt`.
-- **Messaging / outbox** — `outbox/ConsentOutboxDispatcher.kt` (scheduled), `messaging/KafkaConsentOutboxEventPublisher.kt` and `messaging/KafkaConsentEventPublisher.kt`.
+- **Messaging / outbox** — `outbox/ConsentOutboxDispatcher.kt` (scheduled) and `messaging/KafkaConsentOutboxEventPublisher.kt`. Lifecycle events reach Kafka only via the outbox (there is no direct-emit publisher).
 - **SCA client** — `client/ScaChallengeClient.kt`: a MicroProfile `@RegisterRestClient(configKey = "sca-service")` wrapped by a resilient adapter.
 - **Authz** — `authz/AuthzProducer.kt` produces an `OpaSidecarPolicyDecisionPoint` for the libs `@Authorize` interceptor (ADR 0034).
 - **Idempotency** — `idempotency/IdempotencyConfig.kt` wires the libs `IdempotencyStore` (Redis).
@@ -93,8 +94,7 @@ The dispatcher swallows top-level errors so the scheduler never crashes; per-eve
 | Port | Direction | Adapter |
 |---|---|---|
 | `CreateConsentUseCase` / `ActivateConsentUseCase` / `RevokeConsentUseCase` / `GetConsentUseCase` / `ValidateConsentUseCase` | in | `ConsentResource` |
-| `ConsentRepository` | out | `ConsentRepositoryImpl` (Panache reactive, PostgreSQL) |
-| `ConsentEventPublisher` | out | outbox insert (then dispatcher → Kafka) |
+| `ConsentRepository` | out | `ConsentRepositoryImpl` (Panache reactive, PostgreSQL); `save(consent, event)` writes the status change + outbox row in one transaction (then dispatcher → Kafka) |
 | `ConsentOutboxRepository` / `ConsentOutboxEventPublisher` | out | `ConsentOutboxRepositoryImpl` / `KafkaConsentOutboxEventPublisher` |
 | `ScaChallengeClient` | out | `ResilientScaChallengeClient` → `sca-service` |
 | `PolicyDecisionPoint` | out | `OpaSidecarPolicyDecisionPoint` (OPA sidecar) |

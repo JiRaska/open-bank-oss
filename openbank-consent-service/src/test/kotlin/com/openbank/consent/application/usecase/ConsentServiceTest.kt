@@ -7,7 +7,6 @@ package com.openbank.consent.application.usecase
 import com.openbank.consent.application.port.`in`.CreateConsentCommand
 import com.openbank.consent.application.port.`in`.RevokeConsentCommand
 import com.openbank.consent.application.port.`in`.ValidateConsentCommand
-import com.openbank.consent.application.port.out.ConsentEventPublisher
 import com.openbank.consent.application.port.out.ConsentRepository
 import com.openbank.consent.application.port.out.ScaChallengeClient
 import com.openbank.consent.application.port.out.ScaChallengeSnapshot
@@ -37,10 +36,9 @@ import java.util.UUID
 class ConsentServiceTest {
 
     private val consentRepository = mockk<ConsentRepository>()
-    private val eventPublisher = mockk<ConsentEventPublisher>(relaxed = true)
     private val scaChallengeClient = mockk<ScaChallengeClient>()
     private val fixedClock = Clock.fixed(Instant.parse("2024-01-15T10:00:00Z"), ZoneOffset.UTC)
-    private val service = ConsentService(consentRepository, eventPublisher, scaChallengeClient, fixedClock)
+    private val service = ConsentService(consentRepository, scaChallengeClient, fixedClock)
 
     private val partyId = UUID.randomUUID()
     private val consentId = UUID.randomUUID()
@@ -113,11 +111,11 @@ class ConsentServiceTest {
     }
 
     @Test
-    fun `revokeConsent publishes ConsentRevoked event`(): Unit = runBlocking {
+    fun `revokeConsent persists the status change and ConsentRevoked to the outbox atomically`(): Unit = runBlocking {
         val consent = consent()
         val savedConsent = slot<Consent>()
         coEvery { consentRepository.findById(consentId) } returns consent
-        coEvery { consentRepository.save(capture(savedConsent)) } answers { firstArg() }
+        coEvery { consentRepository.save(capture(savedConsent), any()) } answers { firstArg() }
 
         val result = service.revokeConsent(
             RevokeConsentCommand(
@@ -128,8 +126,10 @@ class ConsentServiceTest {
         )
 
         assertThat(result.status).isEqualTo(ConsentStatus.REVOKED)
+        assertThat(savedConsent.captured.status).isEqualTo(ConsentStatus.REVOKED)
         coVerify(exactly = 1) {
-            eventPublisher.publish(
+            consentRepository.save(
+                match<Consent> { it.status == ConsentStatus.REVOKED },
                 match<ConsentRevoked> {
                     it.aggregateId == consentId && it.partyId == partyId && it.reason == "customer request"
                 },
@@ -309,14 +309,15 @@ class ConsentServiceTest {
         coEvery { consentRepository.findById(consentId) } returns consent(status = ConsentStatus.PENDING_SCA)
         coEvery { scaChallengeClient.getChallenge(scaSessionId) } returns
             ScaChallengeSnapshot(scaSessionId, partyId, "CONSENT_GRANT", "COMPLETED")
-        coEvery { consentRepository.save(capture(saved)) } answers { firstArg() }
+        coEvery { consentRepository.save(capture(saved), any()) } answers { firstArg() }
 
         val result = service.activateConsent(consentId, scaSessionId)
 
         assertThat(result.status).isEqualTo(ConsentStatus.ACTIVE)
         assertThat(saved.captured.scaSessionId).isEqualTo(scaSessionId)
         coVerify(exactly = 1) {
-            eventPublisher.publish(
+            consentRepository.save(
+                match<Consent> { it.status == ConsentStatus.ACTIVE },
                 match<ConsentGranted> { it.aggregateId == consentId && it.partyId == partyId },
             )
         }
@@ -332,15 +333,16 @@ class ConsentServiceTest {
     }
 
     @Test
-    fun `rejectConsent rejects and publishes ConsentRejected`(): Unit = runBlocking {
+    fun `rejectConsent persists the status change and ConsentRejected to the outbox atomically`(): Unit = runBlocking {
         coEvery { consentRepository.findById(consentId) } returns consent(status = ConsentStatus.PENDING_SCA)
-        coEvery { consentRepository.save(any()) } answers { firstArg() }
+        coEvery { consentRepository.save(any(), any()) } answers { firstArg() }
 
         val result = service.rejectConsent(consentId, "declined")
 
         assertThat(result.status).isEqualTo(ConsentStatus.REJECTED)
         coVerify(exactly = 1) {
-            eventPublisher.publish(
+            consentRepository.save(
+                match<Consent> { it.status == ConsentStatus.REJECTED },
                 match<ConsentRejected> { it.aggregateId == consentId && it.reason == "declined" },
             )
         }

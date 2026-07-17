@@ -4,12 +4,8 @@
 
 package com.openbank.consent.infrastructure
 
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.openbank.consent.application.port.out.ConsentOutboxRepository
 import com.openbank.consent.application.port.out.ConsentRepository
 import com.openbank.consent.domain.event.ConsentExpired
-import com.openbank.libs.domain.identifiers.Ids
-import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.logging.Log
 import io.quarkus.scheduler.Scheduled
 import io.smallrye.mutiny.Multi
@@ -27,6 +23,9 @@ import java.time.OffsetDateTime
  * false for in-process validation, but downstream consumers never receive the ConsentExpired
  * event and cannot cease data processing (GDPR Art. 17 / PSD2 RTS Art. 10).
  *
+ * The status flip and the outbox enqueue share ONE transaction ([ConsentRepository.markExpired]),
+ * so the sweep cannot mark a consent EXPIRED without durably enqueueing its event.
+ *
  * Runs hourly at minute 5 to avoid the top-of-hour spike. The Uni pipeline is fully reactive;
  * subscribe() hands off to the Vert.x I/O pool, never blocking the scheduler thread.
  */
@@ -35,12 +34,6 @@ class ConsentExpirationJob {
 
     @Inject
     lateinit var consentRepo: ConsentRepository
-
-    @Inject
-    lateinit var outboxRepo: ConsentOutboxRepository
-
-    @Inject
-    lateinit var objectMapper: ObjectMapper
 
     @Inject
     lateinit var clock: Clock
@@ -66,26 +59,16 @@ class ConsentExpirationJob {
             if (expired.isEmpty()) return@flatMap Uni.createFrom().item(0)
             Multi.createFrom().iterable(expired)
                 .onItem().transformToUniAndConcatenate { consent ->
-                    consentRepo.markExpired(consent.id, threshold)
-                        .flatMap { transitioned ->
-                            if (!transitioned) return@flatMap Uni.createFrom().item(0)
-                            outboxRepo.persistInTransaction(
-                                OutboxMessage(
-                                    eventId = Ids.newId(),
-                                    aggregateId = consent.id,
-                                    eventType = "ConsentExpired",
-                                    payload = objectMapper.writeValueAsString(
-                                        ConsentExpired(
-                                            aggregateId = consent.id,
-                                            partyId = consent.partyId,
-                                            granteeId = consent.granteeId,
-                                            occurredAt = threshold.toInstant(),
-                                        ),
-                                    ),
-                                    createdAt = threshold.toInstant(),
-                                ),
-                            ).map { 1 }
-                        }
+                    consentRepo.markExpired(
+                        consent.id,
+                        threshold,
+                        ConsentExpired(
+                            aggregateId = consent.id,
+                            partyId = consent.partyId,
+                            granteeId = consent.granteeId,
+                            occurredAt = threshold.toInstant(),
+                        ),
+                    ).map { transitioned -> if (transitioned) 1 else 0 }
                 }
                 .collect().asList()
                 .map { results -> results.sum() }

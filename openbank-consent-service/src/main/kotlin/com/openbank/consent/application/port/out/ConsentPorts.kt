@@ -4,11 +4,8 @@
 
 package com.openbank.consent.application.port.out
 
-import com.openbank.consent.domain.event.ConsentExpired
-import com.openbank.consent.domain.event.ConsentGranted
-import com.openbank.consent.domain.event.ConsentRejected
-import com.openbank.consent.domain.event.ConsentRevoked
 import com.openbank.consent.domain.model.Consent
+import com.openbank.libs.domain.event.DomainEvent
 import io.smallrye.mutiny.Uni
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -17,6 +14,16 @@ import java.util.UUID
 interface ConsentRepository {
 
     suspend fun save(consent: Consent): Consent
+
+    /**
+     * Persist the consent aggregate state change AND [event] to the transactional outbox in a
+     * SINGLE database transaction (transactional outbox, ADR-0126 §D3). The event is durable iff
+     * the status change commits, and
+     * [com.openbank.consent.infrastructure.outbox.ConsentOutboxDispatcher] relays it to Kafka
+     * at-least-once — closing the direct-Kafka dual-write that silently dropped the event on a
+     * crash between the DB commit and the send.
+     */
+    suspend fun save(consent: Consent, event: DomainEvent): Consent
 
     suspend fun findById(id: UUID): Consent?
 
@@ -34,23 +41,14 @@ interface ConsentRepository {
     fun findExpiredActive(threshold: OffsetDateTime): Uni<List<Consent>>
 
     /**
-     * Atomically transition a single consent from ACTIVE → [status] if and only if
-     * the row is still ACTIVE (optimistic guard). Returns a Uni<Boolean>: true if
-     * the row was updated, false if it was already in a terminal state.
+     * Atomically transition a single consent from ACTIVE → EXPIRED if and only if the row is still
+     * ACTIVE (optimistic guard) AND enqueue [event] to the transactional outbox in the SAME
+     * transaction (ADR-0126 §D4). Returns a Uni<Boolean>: true if the row transitioned (and the
+     * event was enqueued), false if it was already in a terminal state (no event). Mirrors the
+     * command-path [save] atomicity so the sweep cannot mark a consent EXPIRED without durably
+     * enqueueing the ConsentExpired event.
      */
-    fun markExpired(id: UUID, expiredAt: OffsetDateTime): Uni<Boolean>
-}
-
-/** Outbound port that publishes consent domain events to the transport (Kafka). */
-interface ConsentEventPublisher {
-
-    suspend fun publish(event: ConsentGranted)
-
-    suspend fun publish(event: ConsentRevoked)
-
-    suspend fun publish(event: ConsentExpired)
-
-    suspend fun publish(event: ConsentRejected)
+    fun markExpired(id: UUID, expiredAt: OffsetDateTime, event: DomainEvent): Uni<Boolean>
 }
 
 /** Read-model snapshot of an SCA challenge as fetched from the sca-service. */
