@@ -43,7 +43,7 @@ Vyhrazené **management rozhraní** je zapnuté na portu **8085** (`quarkus.mana
 | `FCM_SERVICE_ACCOUNT_JSON` | (nenastaveno) | FCM service-account JSON (Vault) |
 | `FCM_PROJECT_ID` | (nenastaveno) | volitelné, fallback z JSON |
 | `APNS_ENABLED` | `false` | zapnutí APNs push adaptéru |
-| `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_BUNDLE_ID` | / / `cz.openbank.app` | APNs identifikátory |
+| `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_BUNDLE_ID` | / / `tech.openbank.app` | APNs identifikátory |
 | `APNS_PRIVATE_KEY` | (nenastaveno) | .p8 PKCS#8 EC klíč (Vault) |
 | `APNS_SANDBOX` | `false` | true → APNs sandbox host |
 | `BUILD_TIME` / `GIT_COMMIT` | `unknown` | build metadata v `/api/v1/info` |
