@@ -11,13 +11,14 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
-import au.com.dius.pact.provider.junitsupport.loader.PactFolder
+import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.account.domain.event.AccountCreatedEvent
 import com.openbank.account.domain.model.AccountType
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
 import java.util.UUID
 
@@ -32,12 +33,23 @@ import java.util.UUID
  * emit, and Pact checks it against the consumer contract. Messages are built from real domain
  * types and serialized with the same Jackson modules so the contract verifies the real wire shape.
  *
- * Reads the consumer pact from the git-pact folder (`@PactFolder`, resolved relative to this
- * module's working directory at `../pacts` = the monorepo-root `pacts/` dir) and replays each
- * interaction. This always runs — no broker, no gate, no CI secret required (ADR-0063 chose
- * git-pact over a Pact Broker for exactly this reason: zero new infra dependency), matching the
- * pattern already applied to `LedgerPactProviderVerificationTest` (openbank-ledger-service) and
- * `PartyEventPactProviderVerificationTest` (openbank-party-service).
+ * `@PactBroker` (not `@PactFolder`) — the same fix #1166 applied to party-service, for the same
+ * reason. `_service-ci.yml` publishes every consumer's pacts to the broker on a main push, but
+ * #372 (2026-07-07) had switched this class to `@PactFolder("../pacts")`, so nothing ever pulled
+ * those pacts BACK OUT of the broker to verify them and publish a result. `can-i-deploy` reads the
+ * broker and nothing else, so it permanently saw "no verified pact" for every consumer of
+ * account-service and blocked their deploys — confirmed live: notification-service #1180 and #1303
+ * both merged clean, built green, then failed the gate with "There is no verified pact between
+ * openbank-notification-service and openbank-account-service".
+ *
+ * `@EnabledIfSystemProperty` keeps it a no-op locally and on the PR lane, where no broker is
+ * configured — matching every other broker-based provider test in the fleet.
+ *
+ * A [MessageTestTarget] alone is correct here: both pacts naming account-service as provider are
+ * message-only (balance-service's AccountCreated, notification-service's TRANSACTION_COMPLETED),
+ * so unlike `PartyEventPactProviderVerificationTest` there is no HTTP interaction to dispatch to
+ * and no Quarkus instance to boot. If an HTTP consumer contract against account-service is ever
+ * added, this needs party-service's per-interaction target dispatch.
  *
  * IMPORTANT: if `AccountCreatedMessagePactConsumerTest` (openbank-balance-service) changes the
  * contract, regenerate the pact JSON (`./gradlew :openbank-balance-service:test --tests
@@ -45,12 +57,12 @@ import java.util.UUID
  * service-openbank-account-service.json` in the same PR, or this test will fail against a stale
  * contract.
  *
- * `@IgnoreNoPactsToVerify(ignoreIoErrors)` makes a missing/unreadable pact file a skip, not a
- * failure — relevant if the folder is ever emptied ahead of a broker migration.
+ * `@IgnoreNoPactsToVerify(ignoreIoErrors)` makes a missing/unreadable pact a skip, not a failure.
  */
 @Provider("openbank-account-service")
-@PactFolder("../pacts")
+@PactBroker(enablePendingPacts = "true")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
+@EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class AccountEventPactProviderVerificationTest {
 
     private val objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
