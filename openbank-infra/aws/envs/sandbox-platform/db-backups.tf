@@ -180,6 +180,21 @@ locals {
     sdd          = { namespace = "sdd", sa = "sdd-db" }
     tpp-registry = { namespace = "tpp-registry", sa = "tpp-registry-db" }
     vop          = { namespace = "payments", sa = "vop-db" }
+    # Added by #1444 (second wave). These 11 declared NO backup at all — they never even
+    # attempted an archive, so nothing alerted, and they would have had no recovery point the
+    # first time anyone needed one. The matching barmanObjectStore + ScheduledBackup + a bounded
+    # max_wal_size were added to their gitops manifests in the same change.
+    anacredit        = { namespace = "anacredit", sa = "anacredit-db" }
+    authzaudit       = { namespace = "authz-policy-auditor", sa = "authzaudit-db" }
+    billing          = { namespace = "billing", sa = "billing-db" }
+    devops           = { namespace = "devops-agent", sa = "devops-db" }
+    docstruth        = { namespace = "docs-truth-agent", sa = "docstruth-db" }
+    document-service = { namespace = "documents", sa = "document-service-db" }
+    flakytest        = { namespace = "flaky-test-hunter", sa = "flakytest-db" }
+    govaudit         = { namespace = "governance-auditor", sa = "govaudit-db" }
+    liveness         = { namespace = "control-liveness-sentinel", sa = "liveness-db" }
+    product-catalog  = { namespace = "accounts", sa = "product-catalog-db" }
+    releasesteward   = { namespace = "release-steward", sa = "releasesteward-db" }
   }
 }
 

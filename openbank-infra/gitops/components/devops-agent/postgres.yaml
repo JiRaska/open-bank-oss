@@ -32,7 +32,33 @@ spec:
   postgresql:
     parameters:
       wal_keep_size: "64MB"
+      # Bound WAL so a checkpoint spike or bulk load cannot fill the 2Gi volume (#1432).
+      max_wal_size: "512MB"
+  # WAL archiving + daily base backups to S3 (ADR-0035, #863 pattern). Credentials via EKS
+  # Pod Identity on the devops-db ServiceAccount (aws/.../db-backups.tf) — barman reads the
+  # SDK chain, no secret. Sandbox S3 lifecycle expires after 35d; prod needs compliance retention.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/devops-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
   bootstrap:
     initdb:
       database: openbank_devops
       owner: openbank
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: devops-db-daily
+  namespace: devops-agent
+spec:
+  schedule: "0 15 3 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: devops-db

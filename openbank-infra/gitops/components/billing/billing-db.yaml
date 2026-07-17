@@ -7,7 +7,7 @@
 # `openbank` owner) and a billing-db-rw Service the Deployment uses. Must reconcile BEFORE the
 # billing-service image that carries the datasource config deploys, else Flyway-at-start fails on
 # a missing DB (same pattern as product-catalog-db.yaml / anacredit-db.yaml).
-# NOTE: no S3 WAL/backup here yet — same gap as anacredit-db, tracked as a follow-up (#863 pattern).
+# S3 WAL archiving + daily base backups are configured below (#1444).
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -47,7 +47,33 @@ spec:
   postgresql:
     parameters:
       wal_keep_size: "64MB"
+      # Bound WAL so a checkpoint spike or bulk load cannot fill the 2Gi volume (#1432).
+      max_wal_size: "512MB"
+  # WAL archiving + daily base backups to S3 (ADR-0035, #863 pattern). Credentials via EKS
+  # Pod Identity on the billing-db ServiceAccount (aws/.../db-backups.tf) — barman reads the
+  # SDK chain, no secret. Sandbox S3 lifecycle expires after 35d; prod needs compliance retention.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/billing-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
   bootstrap:
     initdb:
       database: openbank_billing
       owner: openbank
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: billing-db-daily
+  namespace: billing
+spec:
+  schedule: "0 11 3 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: billing-db
