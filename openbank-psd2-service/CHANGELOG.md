@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.8](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.8.7...psd2-service-v0.8.8) (2026-07-17)
+
+
+### Bug Fixes
+
+* **psd2:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1461](https://github.com/JiRaska/open-bank-oss/issues/1461)) ([3dd2f0b](https://github.com/JiRaska/open-bank-oss/commit/3dd2f0b391c68301255e5076438ed55887029a9c))
+
 ## [0.8.7](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.8.6...psd2-service-v0.8.7) (2026-07-11)
 
 
