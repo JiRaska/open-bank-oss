@@ -11,7 +11,7 @@ import { useAuth } from '@/lib/auth/useAuth'
 import { hasPermission } from '@/lib/auth/roles'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { opsMessageApi, type OperatorMessage } from '@/lib/api'
+import { opsMessageApi } from '@/lib/api'
 
 const NOTIFICATION_SERVICE = '/api/svc/notification-service'
 
@@ -99,7 +99,7 @@ export default function NotificationsPage() {
         ))}
       </div>
 
-      {canApprove && <PendingOperatorMessages />}
+      {canApprove && <OperatorMessageApprovals />}
 
       {unavailable && (
         <div className="card" style={{ padding: 0, marginBottom: '16px' }}>
@@ -167,117 +167,87 @@ export default function NotificationsPage() {
 }
 
 /**
- * Operator-initiated customer messages awaiting a second approver (ADR-0176 D5). Backed by
- * OperatorMessageResource.listPending — reuses the opsmessage.approve grant, since
- * ApprovalStore itself has no query to list pending approvals (see that endpoint's KDoc).
+ * Four-eyes checker surface for operator-initiated messages (ADR-0176 D5). A maker's compose
+ * call (`POST /api/v1/notifications/messages`) is paused with 202 + a pending-approval id when
+ * `AUTHZ_FOUR_EYES_ENFORCE=true`; a DIFFERENT operator decides it here via the single
+ * `PATCH /api/v1/notifications/approvals/{id}` endpoint. SelfApprovalNotAllowedException refuses
+ * a maker deciding their own request server-side (403).
  *
- * A DIFFERENT operator than the one who composed the message must decide it —
- * SelfApprovalNotAllowedException refuses it server-side if the same operator tries. This
- * component doesn't try to hide the "compose" button from the maker (there's no reliable
- * client-side way to know in advance who composed which row before deciding), it just
- * surfaces the server's rejection as a plain error if it happens.
+ * Deliberately NOT an auto-loaded queue: the shipped backend (ApprovalStore) exposes no query to
+ * enumerate pending approvals — there is no list endpoint — so the checker acts on the approval
+ * id the maker relays out of band (shown on the maker's party-page banner). A backend list
+ * endpoint would let this become a real queue; that is remaining ADR-0176 work.
  */
-function PendingOperatorMessages() {
+function OperatorMessageApprovals() {
   const { t } = useLanguage()
-  const [rows, setRows] = useState<OperatorMessage[]>([])
-  const [loading, setLoading] = useState(true)
-  const [busyId, setBusyId] = useState<string | null>(null)
-  const [rowError, setRowError] = useState<Record<string, string>>({})
+  const [approvalId, setApprovalId] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const decide = async (approve: boolean) => {
+    const id = approvalId.trim()
+    if (!id) return
+    setBusy(true); setResult(null)
     try {
-      const { items } = await opsMessageApi.listPending()
-      setRows(items)
+      const decision = await opsMessageApi.decide(id, approve)
+      setResult({ ok: true, text: `${t('Rozhodnutí uloženo', 'Decision recorded')}: ${decision.status}` })
+      setApprovalId('')
     } catch {
-      setRows([])
+      // Most often SelfApprovalNotAllowedException / already-decided — never surface the raw
+      // backend message for a user-initiated write (graceful-state rule).
+      setResult({ ok: false, text: t(
+        'Rozhodnutí se nezdařilo. Zkontrolujte ID schválení — jiný operátor už možná rozhodl, nebo jste zprávu vytvořili vy.',
+        'The decision failed. Check the approval id — another operator may have already decided it, or you composed this message yourself.',
+      ) })
     } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { load() }, [load])
-
-  const decide = async (row: OperatorMessage, approve: boolean) => {
-    setBusyId(row.id)
-    setRowError(prev => { const next = { ...prev }; delete next[row.id]; return next })
-    try {
-      if (approve) await opsMessageApi.approve(row.id)
-      else await opsMessageApi.reject(row.id)
-      await load()
-    } catch {
-      // Most often SelfApprovalNotAllowedException (the maker tried to decide their own
-      // message) — never surface the raw backend message for a user-initiated write.
-      setRowError(prev => ({
-        ...prev,
-        [row.id]: t(
-          'Rozhodnutí se nezdařilo. Jiný operátor už možná rozhodl, nebo jste zprávu sami vytvořili.',
-          'The decision failed. Another operator may have already decided it, or you composed this message yourself.',
-        ),
-      }))
-    } finally {
-      setBusyId(null)
+      setBusy(false)
     }
   }
-
-  if (!loading && rows.length === 0) return null
 
   return (
     <div className="card" style={{ overflow: 'hidden', marginBottom: '16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
         <Clock size={15} style={{ color: 'var(--yellow)' }} />
         <span style={{ fontWeight: 600, fontSize: '13px' }}>
-          {t('Zprávy čekající na schválení', 'Messages awaiting approval')}
+          {t('Schválení zpráv (princip čtyř očí)', 'Message approvals (four-eyes)')}
         </span>
-        {!loading && <span className="tag" style={{ marginLeft: 'auto' }}>{rows.length}</span>}
       </div>
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>{t('Šablona', 'Template')}</th>
-            <th>{t('Reference', 'Reference')}</th>
-            <th>{t('Účel', 'Purpose')}</th>
-            <th>{t('Akce', 'Actions')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {loading && Array.from({ length: 2 }).map((_, i) => (
-            <tr key={i}>{Array.from({ length: 4 }).map((_, j) => (
-              <td key={j}><div className="skeleton" style={{ height: '14px', width: '80px' }} /></td>
-            ))}</tr>
-          ))}
-          {!loading && rows.map(row => (
-            <tr key={row.id}>
-              <td><span className="tag">{row.template}</span></td>
-              <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{row.referenceId}</td>
-              <td><span className="tag">{row.purpose}</span></td>
-              <td>
-                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                  <button
-                    className="btn btn-secondary"
-                    style={{ color: 'var(--green)' }}
-                    onClick={() => decide(row, true)}
-                    disabled={busyId === row.id}
-                  >
-                    <Check size={13} /> {t('Schválit', 'Approve')}
-                  </button>
-                  <button
-                    className="btn btn-secondary"
-                    style={{ color: 'var(--red)' }}
-                    onClick={() => decide(row, false)}
-                    disabled={busyId === row.id}
-                  >
-                    <X size={13} /> {t('Zamítnout', 'Reject')}
-                  </button>
-                  {rowError[row.id] && (
-                    <span style={{ fontSize: '11px', color: 'var(--red)' }}>{rowError[row.id]}</span>
-                  )}
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+          {t(
+            'Zadejte ID schválení, které vám předal operátor odesílající zprávu, a rozhodněte. Vlastní zprávu schválit nelze.',
+            'Enter the approval id the composing operator gave you, then decide. You cannot approve your own message.',
+          )}
+        </span>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            className="input"
+            style={{ flex: 1, minWidth: '240px', fontFamily: 'var(--font-mono)' }}
+            value={approvalId}
+            onChange={e => setApprovalId(e.target.value)}
+            placeholder={t('ID schválení', 'Approval id')}
+          />
+          <button
+            className="btn btn-secondary"
+            style={{ color: 'var(--green)' }}
+            onClick={() => decide(true)}
+            disabled={busy || !approvalId.trim()}
+          >
+            <Check size={13} /> {t('Schválit', 'Approve')}
+          </button>
+          <button
+            className="btn btn-secondary"
+            style={{ color: 'var(--red)' }}
+            onClick={() => decide(false)}
+            disabled={busy || !approvalId.trim()}
+          >
+            <X size={13} /> {t('Zamítnout', 'Reject')}
+          </button>
+        </div>
+        {result && (
+          <span style={{ fontSize: '12px', color: result.ok ? 'var(--green)' : 'var(--red)' }}>{result.text}</span>
+        )}
+      </div>
     </div>
   )
 }

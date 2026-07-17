@@ -99,47 +99,72 @@ export const accountApi = {
     apiFetchSimple<Account>(`${ACCOUNT_SERVICE}/api/v1/accounts/${id}/unfreeze`, { method: 'POST', body: JSON.stringify({ reason }) }),
 }
 
-// Operator-initiated customer messaging (ADR-0176). draft/submit is a two-call maker
-// step — see openbank-notification-service's OperatorMessageResource KDoc for why a single
-// annotated endpoint cannot both create the row and be the four-eyes-gated one.
-export interface OperatorMessage {
-  id: string; partyId: string; template: string; referenceId: string; purpose: string; status: string
+// Operator-initiated customer messaging (ADR-0176 D2/D5). Mirrors the SHIPPED
+// notification-service contract exactly (OperatorMessageResource + ApprovalResource +
+// openapi.yaml), not the draft/submit two-call sketch the ADR record used:
+//   - compose is a SINGLE call — POST /api/v1/notifications/messages — that both persists
+//     and sends. It is itself the four-eyes-gated action (`@Authorize("opsmessage.compose",
+//     resource="#request")`); AuthorizeInterceptor pauses it with 202 when four-eyes
+//     enforcement is on and lets the maker replay the byte-identical body once approved.
+//   - the checker decides via a SINGLE PATCH /api/v1/notifications/approvals/{id} {approve},
+//     not separate approve/reject verbs.
+export type OperatorMessageTemplate = 'GENERIC_NOTICE' | 'SUPPORT_FOLLOWUP'
+
+// Each template's EXACT required variable keys (notification-service OperatorMessageTemplate).
+// The compose request must carry exactly these keys — extra AND missing are both rejected 400.
+export const OPERATOR_MESSAGE_TEMPLATE_VARS: Record<OperatorMessageTemplate, readonly string[]> = {
+  GENERIC_NOTICE: ['subject', 'note'],
+  SUPPORT_FOLLOWUP: ['ticketReference'],
 }
-// The 202-pending shape AuthorizeInterceptor returns on submit's first (un-approved) call.
-// Shares `status` with OperatorMessage so callers can branch on one field regardless of which
-// shape actually came back.
-export interface OpsMessageSubmitResult {
-  status: string; approvalId?: string; id?: string
+
+export interface ComposeMessageRequest {
+  partyId: string
+  template: OperatorMessageTemplate
+  recipient: string
+  variables: Record<string, string>
+}
+
+// compose resolves to one of two backend shapes: 201 ComposeMessageResponse ({id}) when the
+// message was sent, or the AuthorizeInterceptor 202 body ({status, approvalId}) when four-eyes
+// enforcement paused it pending a second operator. Callers branch on `status`.
+export type ComposeResult =
+  | { status: 'SENT'; id: string }
+  | { status: 'PENDING_APPROVAL'; approvalId: string }
+
+// PATCH /approvals/{id} -> ApprovalResponse.
+export interface ApprovalDecision {
+  id: string; action: string; resourceId: string | null; status: string; decidedBy: string | null
 }
 
 export const opsMessageApi = {
-  draft: (data: { partyId: string; template: string; referenceId: string; purpose: string }) =>
-    apiFetchSimple<OperatorMessage>(`${NOTIFICATION_SERVICE}/api/v1/opsmessages`, {
+  // 201 -> {status:'SENT', id}. 202 (four-eyes on) -> {status:'PENDING_APPROVAL', approvalId}:
+  // relay that id to a DIFFERENT operator to decide, then replay this exact request (same body)
+  // with `approvalId` set — the interceptor binds the approval to the request's content, so the
+  // retry must be byte-identical or it mints a fresh pending approval.
+  compose: async (req: ComposeMessageRequest, approvalId?: string): Promise<ComposeResult> => {
+    const res = await fetch(`${NOTIFICATION_SERVICE}/api/v1/notifications/messages`, {
       method: 'POST',
-      body: JSON.stringify(data),
+      headers: { 'Content-Type': 'application/json', ...(approvalId ? { 'X-Approval-Id': approvalId } : {}) },
+      body: JSON.stringify(req),
+    })
+    if (res.status === 202) {
+      const body = await res.json().catch(() => ({}))
+      return { status: 'PENDING_APPROVAL', approvalId: body.approvalId }
+    }
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ message: res.statusText }))
+      throw new Error(error.message || `HTTP ${res.status}`)
+    }
+    const body = await res.json()
+    return { status: 'SENT', id: body.id }
+  },
+  // Checker decision (ApprovalResource.decide): one PATCH with an approve boolean. Self-approval
+  // is refused server-side (403); an unknown/already-decided id is 404/409 — all thrown here.
+  decide: (id: string, approve: boolean) =>
+    apiFetchSimple<ApprovalDecision>(`${NOTIFICATION_SERVICE}/api/v1/notifications/approvals/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ approve }),
     }),
-  // No approvalId yet -> first call, expect back {status:"PENDING_APPROVAL", approvalId}.
-  // With approvalId (the maker's retry, once a different operator has approved) -> expect back
-  // the sent OperatorMessage, status "SENT".
-  submit: (id: string, approvalId?: string) =>
-    apiFetchSimple<OpsMessageSubmitResult>(`${NOTIFICATION_SERVICE}/api/v1/opsmessages/${id}/submit`, {
-      method: 'POST',
-      headers: approvalId ? { 'X-Approval-Id': approvalId } : undefined,
-    }),
-  listPending: (page = 0, size = 20) =>
-    apiFetchSimple<{ items: OperatorMessage[]; total: number }>(
-      `${NOTIFICATION_SERVICE}/api/v1/opsmessages?page=${page}&size=${size}`,
-    ),
-  approve: (id: string) =>
-    apiFetchSimple<{ id: string; status: string }>(
-      `${NOTIFICATION_SERVICE}/api/v1/opsmessages/approvals/${id}/approve`,
-      { method: 'POST' },
-    ),
-  reject: (id: string) =>
-    apiFetchSimple<{ id: string; status: string }>(
-      `${NOTIFICATION_SERVICE}/api/v1/opsmessages/approvals/${id}/reject`,
-      { method: 'POST' },
-    ),
 }
 
 const LEDGER_SERVICE = '/api/svc/ledger-service'
