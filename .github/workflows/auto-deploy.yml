@@ -748,8 +748,23 @@ jobs:
     # keeps the original intent (newer commit wins the PR) — cancelling the whole workflow
     # was not, because by then build-push had already pushed images it would never attest
     # (#1226). Anything with side effects outside this job must stay outside this group.
+    #
+    # Keyed on `github.ref` alone this over-cancels two different ways (issues #1332, #1336):
+    #   - A `workflow_dispatch` recovery run shares `refs/heads/main` with every routine push.
+    #     The ops-recovery full-fleet rebuild takes ~40 minutes; any push landing inside that
+    #     window shares the group and cancels the dispatch's PR step after 34 images were
+    #     already built, pushed, signed and attested — for nothing (#1336).
+    #   - Two routine pushes touching *disjoint* services (e.g. billing vs. lending) also
+    #     share the group today and cancel each other, even though they'd rewrite different
+    #     lines of different gitops manifests and can't conflict (#1332 path 1).
+    # Folding in the event type + the changed-service set fixes both while preserving the
+    # one case that genuinely needs serialising: two pushes that changed the *same* service
+    # set still share a group and the newer one still wins, exactly as designed.
     concurrency:
-      group: auto-deploy-gitops-pr-${{ github.ref }}
+      group: >-
+        auto-deploy-gitops-pr-${{ github.ref }}-${{
+          github.event_name == 'workflow_dispatch' && github.run_id || needs.changes.outputs.services
+        }}
       cancel-in-progress: true
     # `always()` + explicit build-push check, NOT the default "can-i-deploy must succeed":
     # can-i-deploy's own job status can be red while still emitting a `deployable` output for
@@ -1086,3 +1101,50 @@ jobs:
               `To rescue this PR by hand: amend the commit locally with a GPG signature and force-push — ` +
               `auto-merge is already armed and fires on its own once the signature is valid.`
             );
+
+  # ── 4. Make a stranded deploy visible (issue #1332) ───────────────────────────
+  # "Merged + green CI" is silently NOT the same as "deployed". A service whose build-push
+  # succeeded but whose gitops-pr step then got cancelled (concurrency group collision) or
+  # failed (e.g. the App token / signing guard above) produces no error at the workflow level
+  # that names the service — the run just ends `cancelled` or is buried in a job most people
+  # never open. This job is the "at minimum a job summary" half of #1332's ask: it does not
+  # fix either underlying cause (that's the concurrency-group change above, plus whatever
+  # fixes a signing/can-i-deploy failure) — it only guarantees the outcome is visible without
+  # reading run logs.
+  deploy-signal:
+    name: Deploy signal
+    needs: [changes, build-push, gitops-pr]
+    if: always() && needs.changes.outputs.any == 'true' && needs.build-push.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Report undelivered deploy
+        env:
+          CHANGED_SERVICES: ${{ needs.changes.outputs.services }}
+          GITOPS_PR_RESULT: ${{ needs.gitops-pr.result }}
+          RUN_SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          if [ "$GITOPS_PR_RESULT" = "success" ]; then
+            echo "gitops-pr succeeded for ${RUN_SHA::8} — nothing to report."
+            exit 0
+          fi
+          {
+            echo "## :rotating_light: Deploy did not land for \`${RUN_SHA:0:8}\`"
+            echo
+            echo "\`build-push\` succeeded, building images for these changed services:"
+            echo
+            echo '```json'
+            echo "$CHANGED_SERVICES"
+            echo '```'
+            echo
+            echo "but \`gitops-pr\` ended **${GITOPS_PR_RESULT}** — no manifest PR (or none of the" \
+                 "services above got recorded/merged). This means the build was thrown away:" \
+                 "re-dispatch to recover (\`gh workflow run auto-deploy.yml -f services=<svc>\`), or" \
+                 "inspect the \`gitops-pr\` job for the concurrency-group / signing / can-i-deploy" \
+                 "failure that stopped it."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "::error::deploy for ${RUN_SHA::8} did not land — gitops-pr ended ${GITOPS_PR_RESULT} after build-push succeeded (services: ${CHANGED_SERVICES})"
+          # Fail the job (only this new, non-blocking job — nothing downstream needs it) so the
+          # run's overall status flags red and is findable without opening every job's log.
+          exit 1
