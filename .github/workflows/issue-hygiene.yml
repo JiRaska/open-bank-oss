@@ -19,21 +19,13 @@ name: Issue hygiene
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
-  # A required check must also report in the merge queue's `merge_group` context or the
-  # queue stalls forever waiting for a status that can never arrive.
-  merge_group:
 
 permissions:
   contents: read
 
 concurrency:
-  # `github.event.pull_request.number` is EMPTY on merge_group, which would collapse every
-  # queue entry into one shared group and let them cancel each other — a wedged queue. Fall
-  # back to github.ref, which on merge_group is the per-entry
-  # refs/heads/gh-readonly-queue/main/pr-N-<sha> and is therefore unique.
-  group: issue-hygiene-${{ github.event.pull_request.number || github.ref }}
-  # Never cancel a queue check: a cancelled run reports nothing and the entry hangs.
-  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
+  group: issue-hygiene-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   issue-hygiene:
@@ -42,18 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10  # measured max 6s
     steps:
-      # Deliberate pass-through in the merge queue. This gate lints the PR *body*, which a
-      # merge_group payload does not carry — and unlike a code check it cannot go stale
-      # between PR and queue, because queueing does not alter the body it already passed on.
-      # Branch on the STEP, not the job: a job skipped by an `if:` still reports its own
-      # status, so two jobs sharing the name `issue-hygiene` would report two conflicting
-      # statuses for one required check.
-      - name: Merge queue — already enforced on the pull request
-        if: github.event_name == 'merge_group'
-        run: echo "merge_group carries no PR body to lint; this gate ran on the PR itself, which queueing does not alter."
-
       - name: Lint PR "Linked issues"
-        if: github.event_name == 'pull_request'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |

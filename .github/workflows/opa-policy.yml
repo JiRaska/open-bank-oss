@@ -21,17 +21,13 @@ on:
   push:
     branches: [main]
   pull_request:
-  # A required check must also report in the merge queue's `merge_group` context, or the
-  # queue stalls forever waiting for a status that can never arrive.
-  merge_group:
 
 permissions:
   contents: read
 
 concurrency:
   group: opa-policy-${{ github.ref }}
-  # Never cancel a queue check — a cancelled run reports no status and the entry hangs.
-  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
+  cancel-in-progress: true
 
 jobs:
   changes:
@@ -65,16 +61,8 @@ jobs:
             PATTERN="${PATTERN}|^$(printf '%s' "$dir" | sed 's/\./\\./g')/"
           done < <(find openbank-infra/gitops/components -name 'gen-*opa-bundle*.sh' -exec dirname {} \; | sort -u)
 
-          if [ "${{ github.event_name }}" = "push" ] || [ "${{ github.event_name }}" = "merge_group" ]; then
-            # push: post-merge, keeps the deployed-bundle check current.
-            # merge_group: always verify rather than re-deriving a diff. `github.base_ref` is
-            # EMPTY on merge_group, so the diff path below would compute BASE="origin/" and die
-            # on `git diff origin/ HEAD` — wedging the queue. Verifying unconditionally is also
-            # the safer direction (this repo's rule is over-verify, never under-verify) and the
-            # gate is cheap (~19s median), and it is precisely the case a queue exists for: the
-            # bundle regeneration must be re-checked against main + the entries ahead of this
-            # one, since a competing governance PR restamps all 44 bundle files.
-            echo "Event ${{ github.event_name }} -> always verify."
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "Event push -> always verify (post-merge; keeps the deployed-bundle check current)."
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             BASE="origin/${{ github.base_ref }}"

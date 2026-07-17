@@ -24,10 +24,6 @@ on:
   schedule:
     - cron: "0 3 * * *" # 03:00 UTC daily
   workflow_dispatch: {}
-  # `all-green` is a required check, so it must also report in the merge queue's
-  # `merge_group` context or the queue stalls forever waiting for a status that can
-  # never arrive.
-  merge_group:
 
 permissions:
   contents: read
@@ -45,12 +41,8 @@ concurrency:
   # (issue #846). Key push-to-main by SHA so every commit gets its own lane and is never
   # cancelled; PR pushes keep the superseding behavior (a new push to the same branch
   # should cancel the old run).
-  # merge_group needs the same never-cancel treatment as push-to-main, for a different
-  # reason: a cancelled queue run reports no status, so the entry waits on it forever.
-  # (Its github.ref is the per-entry gh-readonly-queue/... branch, so entries never share
-  # a lane anyway — this only guards a re-run of the same entry.)
   group: services-ci-${{ github.ref }}-${{ github.event_name == 'schedule' && 'nightly' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || 'ci') }}
-  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') && github.event_name != 'merge_group' }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
 jobs:
   changes:
@@ -68,10 +60,6 @@ jobs:
         with:
           fetch-depth: 0
       - id: detect
-        env:
-          # Empty on every event except merge_group; the `:-` default keeps `set -u` from
-          # killing the step on the PR/push paths, which never read it.
-          MQ_BASE_SHA: ${{ github.event.merge_group.base_sha || '' }}
         run: |
           set -euo pipefail
           # Canonical Gradle module list — DISCOVERED from the tree exactly like
@@ -122,39 +110,24 @@ jobs:
               CHANGED="$ALL"
             fi
           else
-            # pull_request AND merge_group share every decision below — only the diff base
-            # differs. The queue must fan out by the same rules as the PR, or it would build
-            # a different set of services than the one the PR was reviewed on.
-            if [ "${{ github.event_name }}" = "merge_group" ]; then
-              # The queue already built this entry on main + the entries ahead of it, and
-              # `merge_group.base_sha` IS that base: nothing to derive, no stale-ref hazard.
-              # Note `github.base_ref` is EMPTY on merge_group, so the PR path below would
-              # compute BASE="origin/" and die on `git diff origin/ HEAD` — a wedged queue.
-              # base_sha..HEAD is exactly this PR's changes as they land on the real
-              # post-merge tree, which is the point of queueing.
-              MB="${MQ_BASE_SHA}"
-              echo "Detect: merge_group base_sha=${MB}"
-            else
-              BASE="origin/${{ github.base_ref }}"
-              # Persistent self-hosted runners REUSE the git workdir between jobs,
-              # so the `origin/<base>` remote-tracking ref can be stale from an
-              # earlier run. Force it to the true remote tip with an explicit
-              # refspec (a bare `git fetch origin main` updates FETCH_HEAD but does
-              # NOT reliably move refs/remotes/origin/main). A stale base silently
-              # mis-computes the diff and under-builds changed services — a
-              # branch-protection hole. Full depth (no --depth=1): a shallow graft
-              # would break merge-base once main advances past this PR's base.
-              git fetch --no-tags --force origin \
-                "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" \
-                >/dev/null 2>&1 || true
-              # Compute the merge-base explicitly rather than leaning on the
-              # three-dot shorthand's ref resolution, then diff from it. Equivalent
-              # to BASE...HEAD but observable and robust to odd ref state.
-              MB=$(git merge-base "$BASE" HEAD 2>/dev/null || echo "$BASE")
-              echo "Detect: base=$BASE merge-base=$MB"
-            fi
+            BASE="origin/${{ github.base_ref }}"
+            # Persistent self-hosted runners REUSE the git workdir between jobs,
+            # so the `origin/<base>` remote-tracking ref can be stale from an
+            # earlier run. Force it to the true remote tip with an explicit
+            # refspec (a bare `git fetch origin main` updates FETCH_HEAD but does
+            # NOT reliably move refs/remotes/origin/main). A stale base silently
+            # mis-computes the diff and under-builds changed services — a
+            # branch-protection hole. Full depth (no --depth=1): a shallow graft
+            # would break merge-base once main advances past this PR's base.
+            git fetch --no-tags --force origin \
+              "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" \
+              >/dev/null 2>&1 || true
+            # Compute the merge-base explicitly rather than leaning on the
+            # three-dot shorthand's ref resolution, then diff from it. Equivalent
+            # to BASE...HEAD but observable and robust to odd ref state.
+            MB=$(git merge-base "$BASE" HEAD 2>/dev/null || echo "$BASE")
             FILES=$(git diff --name-only "$MB" HEAD)
-            echo "Detect: changed-files=$(grep -c . <<< "$FILES" || true)"
+            echo "Detect: base=$BASE merge-base=$MB changed-files=$(echo "$FILES" | grep -c . || true)"
             echo "Changed files:"; echo "$FILES" | sed 's/^/  /'
 
             # Code-global inputs every module compiles/tests against -> rebuild all.
