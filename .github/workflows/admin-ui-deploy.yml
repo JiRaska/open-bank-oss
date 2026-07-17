@@ -189,11 +189,30 @@ jobs:
             --use
           docker buildx inspect ob-deploy-builder
       - name: Stage per-service SBOMs from latest security run
-        # security.yml uploads `per-service-sboms` (openbank-*-sbom.cdx.json) on every
-        # main push. We download and stage them as openbank-*/build/reports/bom.json so
-        # the Dockerfile sbom-collector stage bundles them — without running Gradle here.
-        # Best-effort: if no artifact can be downloaded after retries the step exits 0
-        # and SBOMs degrade gracefully to "not available".
+        # security.yml uploads `per-service-sboms` (openbank-*-sbom.cdx.json). We download
+        # and stage them as openbank-*/build/reports/bom.json so the Dockerfile
+        # sbom-collector stage bundles them — without running Gradle here.
+        #
+        # Look the artifact up BY NAME across all runs (newest first), not by scanning a
+        # window of recent security.yml runs. The run-window approach could not work:
+        # security.yml runs on every main push (dozens/day) but emits per-service-sboms
+        # only when dependencies change (its detect-deps gate), so the freshest SBOM is
+        # routinely OLDER than the last 30 runs. Measured 2026-07-17: the 30-run window
+        # spanned 18 h while the newest non-expired artifact was ~2 h older than its
+        # oldest run — i.e. the scan missed it every single time, then slept 2×90 s
+        # before degrading to "SBOMs unavailable". The retry+sleep never had a
+        # mechanism to help: re-querying the same runs cannot conjure an artifact that
+        # was never uploaded there. This is the same by-name lookup the JUnit staging
+        # step below already uses.
+        #
+        # Provenance: per-service-sboms is uploaded only by security.yml's
+        # sbom-per-service job, which is gated on detect-deps and never runs on PRs —
+        # so the artifact always comes from a main push or a scheduled audit. The
+        # head_branch == main filter below asserts that here rather than depending on a
+        # condition in another workflow, because these SBOMs get baked into a shipped image.
+        #
+        # Best-effort: nothing to stage exits 0 (SBOMs degrade to "not available") but
+        # emits a ::warning:: — the previous silent exit is what let this bug hide.
         #
         # Uses curl + python3 (not gh CLI) because the self-hosted Mac mini runner user
         # (/home/runner) does not have gh in PATH. curl and python3 are standard macOS tools.
@@ -205,36 +224,24 @@ jobs:
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
           staged=false
-          for attempt in 1 2 3; do
-            # security.yml now emits per-service-sboms only when dependencies change
-            # (not on every main commit), so the freshest SBOM may be several runs
-            # back. Scan a wider window (30) and pick the first run that still has a
-            # non-expired artifact — the SBOM is valid until deps change again.
-            RUN_IDS=$(api \
-              "https://api.github.com/repos/${REPO}/actions/workflows/security.yml/runs?branch=main&status=success&per_page=30" \
-              | python3 -c "import json,sys; [print(r['id']) for r in json.load(sys.stdin).get('workflow_runs',[])]" \
-              2>/dev/null || true)
-            for RUN_ID in ${RUN_IDS}; do
-              ARTIFACT_ID=$(api \
-                "https://api.github.com/repos/${REPO}/actions/runs/${RUN_ID}/artifacts?per_page=100" \
-                | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if x['name']=='per-service-sboms' and not x['expired']]; print(a[0]['id'] if a else '')" \
-                2>/dev/null || true)
-              [ -z "${ARTIFACT_ID}" ] && continue
-              mkdir -p sbom-downloads
-              if api "https://api.github.com/repos/${REPO}/actions/artifacts/${ARTIFACT_ID}/zip" \
-                  -L -o /tmp/per-service-sboms.zip 2>/dev/null; then
-                unzip -q /tmp/per-service-sboms.zip -d sbom-downloads/ 2>/dev/null || true
-                echo "Downloaded per-service-sboms from security run ${RUN_ID} (artifact ${ARTIFACT_ID})"
-                staged=true
-                break 2
-              fi
-            done
-            echo "Attempt ${attempt}/3: no usable security artifact yet; waiting 90 s…"
-            [ "${attempt}" -lt 3 ] && sleep 90
-          done
+          # Sort by created_at ourselves: the API's ordering is not contractual.
+          ARTIFACT=$(api \
+            "https://api.github.com/repos/${REPO}/actions/artifacts?name=per-service-sboms&per_page=20" \
+            | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if not x['expired'] and (x.get('workflow_run') or {}).get('head_branch')=='main']; a.sort(key=lambda x: x['created_at'], reverse=True); print(str(a[0]['id'])+' '+a[0]['created_at'] if a else '')" \
+            2>/dev/null || true)
+          if [ -n "${ARTIFACT}" ]; then
+            ARTIFACT_ID="${ARTIFACT%% *}"
+            mkdir -p sbom-downloads
+            if api "https://api.github.com/repos/${REPO}/actions/artifacts/${ARTIFACT_ID}/zip" \
+                -L -o /tmp/per-service-sboms.zip 2>/dev/null; then
+              unzip -q /tmp/per-service-sboms.zip -d sbom-downloads/ 2>/dev/null || true
+              echo "Downloaded per-service-sboms artifact ${ARTIFACT_ID} (created ${ARTIFACT#* })"
+              staged=true
+            fi
+          fi
 
           if [ "${staged}" != "true" ]; then
-            echo "No per-service-sboms artifact found after retries — skipping (SBOMs will show as unavailable)."
+            echo "::warning title=SBOM staging degraded::no non-expired per-service-sboms artifact from a main run — the admin-ui image ships without bundled per-service SBOMs (they will show as unavailable). security.yml's sbom-per-service job may not have run within the 14-day artifact retention."
             exit 0
           fi
 
