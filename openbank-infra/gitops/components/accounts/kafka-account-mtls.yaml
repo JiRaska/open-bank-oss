@@ -3,6 +3,7 @@
 # account-service topics:
 #   Produces: openbank.accounts.account.created (two channels: account-events-out + account-outbox-out)
 #             openbank.notification.requests (notification-requests-out)
+#             dead-letter-topic-party-events-in (SmallRye DLQ for party-events-in, failure-strategy)
 #   Consumes: openbank.party.events (group: openbank-account-service, ADR-0073 party lifecycle)
 ---
 apiVersion: kafka.strimzi.io/v1
@@ -37,6 +38,16 @@ spec:
           name: openbank.party.events
           patternType: literal
         operations: [Read, Describe]
+        host: "*"
+      # SmallRye dead-letter topic for the party-events-in channel (failure-strategy:
+      # dead-letter-queue). Without Write here, the DLQ send itself fails and the consumer
+      # wedges on the very failure it was meant to park — the same ANONYMOUS-vs-ACL lockout
+      # class that took party-service down (#1476). Default SmallRye name = dead-letter-topic-<channel>.
+      - resource:
+          type: topic
+          name: dead-letter-topic-party-events-in
+          patternType: literal
+        operations: [Write, Describe]
         host: "*"
       - resource:
           type: group
