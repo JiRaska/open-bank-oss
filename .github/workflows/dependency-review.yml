@@ -14,7 +14,10 @@ permissions:
 jobs:
   dependency-review:
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
-    timeout-minutes: 10
+    # 25 > the retry window below, which must in turn outlast dependency-submission.yml
+    # (measured ~11 min for the full-fleet resolve) or this job would give up before the
+    # graph it is waiting for exists.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -23,6 +26,22 @@ jobs:
         with:
           fail-on-severity: high
           comment-summary-in-pr: always
+          # This action only ever diffs SUBMITTED dependency graphs. Gradle — the fleet's
+          # primary language — is not natively parsed by GitHub, so until
+          # dependency-submission.yml also ran on pull_request (#1419) the Gradle half of
+          # every PR was invisible here and vulnerable deps landed unreviewed, to surface
+          # later as Dependabot alerts on main.
+          #
+          # On a dependency-touching PR that submission job runs concurrently with this
+          # one, so the head-SHA snapshot may not exist yet when this starts: retry until
+          # it does. gradle/actions documents 600 s, but the fleet's resolve was MEASURED
+          # at ~670 s, so 600 would time out before the snapshot ever landed — 1200 leaves
+          # room for the resolve plus queue time.
+          #
+          # On a PR that touches no dependency manifest, no submission runs and there is no
+          # snapshot warning to retry on, so this returns at its usual few seconds.
+          retry-on-snapshot-warnings: true
+          retry-on-snapshot-warnings-timeout: 1200
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
           # starlette (pulled in transitively via schemathesis==3.39.16's own
           # starlette<1,>=0.13 pin — .github/workflows/requirements/schemathesis.txt)
