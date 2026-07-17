@@ -126,110 +126,22 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   NOT equivalent, since real staff also carry `ROLE_OPERATOR` and would over-grant. Enforced by
   `.github/scripts/check-no-service-principal-type.sh` (`rules.yaml: authz_policy`).
 
-### GitOps / Kubernetes
-- **A no-swap node under memory pressure can hang whole-guest instead of OOM-killing.** Kernel
-  reclaim livelocks; kubelet and the SSM agent starve together while EC2 status checks stay `ok`,
-  so the node lingers NotReady and singleton pods (e.g. the ArgoCD application-controller) strand
-  (issue #809). Diagnosis shortcut: CloudWatch `CPUUtilization` pinned at a constant high plateau
-  for hours = livelock — terminate the instance, don't debug the guest. The defenses are layered
-  and ALL needed: honest memory *requests* (Karpenter bin-packs by requests — an undeclared
-  ~200Mi-per-node DaemonSet is what actually kills 4Gi nodes), kubelet eviction headroom in the
-  EC2NodeClass (the AMI default `memory.available<100Mi` reacts too late), memory *limits* on
-  singletons (a container OOM-kill self-heals; a dead node doesn't), and Karpenter `NodeRepair`
-  as the backstop (EKS node auto repair covers only managed node groups, and consolidation cannot
-  touch a node holding a `do-not-disrupt` pod).
-- **Right-sizing requests can pin a NodePool at its `limits` cap.** The cap was calibrated to the
-  old, understated requests; after raising them Karpenter may refuse to provision
-  ("all available instance types exceed limits for nodepool"), leaving pods Pending and stalling
-  drift rolls. Whenever you raise requests or eviction headroom, re-check the pool's `limits`.
-- **`optional: true` on a secret ref is a deliberate trade, not a default — know which way you want
-  it.** Without it, a missing Secret pins the pod at `CreateContainerConfigError`: loud, impossible to
-  miss, fixed within the hour (vop-oidc, #1232). With it, Kubernetes silently drops the env/volume and
-  the pod runs `2/2` reporting `UP` while the feature it needed is quietly degraded — document-service
-  sealed PDFs with a throwaway cert for two days that way (#1284), and the ONLY signal was an ArgoCD
-  `Degraded` nobody acted on. `optional: true` is right when a rollout-order race must never
-  crash-loop the service (gitops wiring merges before the OpenBao KV secret is seeded) — but then the
-  fallback needs its own loud, *eager* alarm, or the silence is the bug.
-- **An Argo Rollout that never once succeeded deadlocks on a dead `stable`.** If revision 1 never
-  became healthy (image absent, Kyverno denial), `stableRS` stays pinned to it forever; the canary
-  can't scale because canary strategy holds replicas on a stable that can never schedule. The Rollout
-  loops `Progressing` → `Degraded` (`progressDeadlineSeconds`) while a *later* revision serves happily
-  — service up, Rollout permanently red. **Neither `kubectl argo rollouts retry` nor `promote --full`
-  fixes it** — promote skips steps and pauses, not a broken stable. Delete the dead ReplicaSet
-  (`kubectl -n <ns> delete rs <name>-<rev1-hash>`); Argo then adopts the current revision and goes
-  Healthy in ~90s. Verify it owns **zero** pods first (`kubectl get pods -l
-  rollouts-pod-template-hash=<hash>`). Seen on vop-service, 2026-07-16.
-- **`strategy.type: Recreate` + Server-Side Apply = HTTP 403.** Use `RollingUpdate` with
-  `maxSurge: 0 / maxUnavailable: 1` for identical zero-concurrency behaviour.
-- **Use explicit registry prefixes for container images** (`docker.io/library/<image>` for official
-  images) so the cluster's pull-through/rewrite policies apply.
-- **`trivy image` defaults to `linux/amd64` for remote scans, regardless of host arch.** Once a build
-  moves to a native `linux/arm64` builder (sandbox nodes, arm64 hosted runners), a plain
-  `trivy image ... "${IMAGE}"` against the pushed (arm64-only) image fails with `no child with
-  platform linux/amd64 in index` — silently, if the caller only checks the exit code. Pass
-  `--platform` explicitly, matching the arch the image was actually built for. A skipped SBOM
-  attestation here means Kyverno's `verify-openbank-image-sbom-attestation` policy blocks every pod
-  admission for that image (admin-ui outage, 2026-07-09). Producers must call the shared
-  `openbank-infra/scripts/lib/cosign-attest.sh` (which passes `--platform` and hard-fails), never
-  hand-roll `trivy`+`cosign attest` again.
-- **Kyverno verifies at ADMISSION, not continuously — a running pod is NOT evidence its image is
-  attested.** An unattested image keeps running; it is denied only on the next reschedule (node
-  roll, eviction, scale-up) and then can never restart, one pod at a time. So "the fleet is
-  healthy" / "PolicyReport shows 0 fail" only describes pods that happen to exist right now, and
-  never justifies an Audit→Enforce flip. Run `.github/scripts/check-fleet-attestations.sh` (daily
-  via `fleet-attestation.yml`) — it checks every image *declared* in gitops, incl. initContainers
-  and sidecars, so a gap is caught while still latent. Green gate before any Enforce graduation
-  (`rules.yaml: provenance.fleet_attestation_gate`).
-- **A provenance failure must fail the build that caused it.** `continue-on-error` /
-  `|| echo "::warning::"` on a sign/attest step buys a green deploy that produces an
-  undeployable image — the damage lands days later on whoever is on call, not on the author.
-  Verify with `cosign verify-attestation` after attesting; never trust `attest` exit 0 alone —
-  but see the next bullet: an unqualified verify does not prove YOUR envelope is the good one.
-- **`cosign attest` is ADDITIVE, so a green `verify-attestation` is not necessarily about your
-  build.** Each attest APPENDS an envelope to the image's `.att` tag instead of replacing, and
-  `verify-attestation` exits 0 if **any** envelope verifies. cosign v2 has no strict/newest-envelope
-  flag (`--policy` is any-match too — it errors only when *zero* attestations match). So a trivy run
-  that emits a truncated SBOM and still exits 0 pushes a junk predicate, and the verify passes
-  against an *earlier* build's envelope: green build, image shipped with provenance that is
-  technically present and substantively worthless. Proven live — an image carrying both a
-  549-component SBOM and a 2-byte `{}` predicate verifies PASS. Two layers, both needed: check the
-  SBOM BEFORE attesting (parses as JSON, `bomFormat == "CycloneDX"`, non-zero `components` — a junk
-  envelope, once pushed, can never be un-pushed, only outlived by the next real build), and bind the
-  post-attest verify to the run by requiring the CycloneDX `serialNumber` trivy minted for THIS SBOM
-  to appear among the envelopes that verified. `openbank-infra/scripts/lib/cosign-attest.sh` does
-  both — source it, never hand-roll `attest` + `verify`.
+### GitOps / Kubernetes / OPA policy bundles
+Full pitfalls — node livelock, `optional: true` secret refs, Argo Rollout dead-`stable` deadlock,
+Kyverno admission-vs-runtime, `cosign attest` being additive — live in
+[`openbank-infra/CLAUDE.md`](openbank-infra/CLAUDE.md); they load when you touch that tree. Two
+fire from *outside* it, so they stay here:
+- **Editing `rules.yaml` or any `.rego` restamps EVERY service's OPA bundle + pod-roll annotation.**
+  25 of the 26 `gen-*opa-bundle*.sh` embed `rules.yaml` verbatim and hash it, so a one-line
+  governance edit produces ~44 changed files and the OPA gate regenerates all of them. Run
+  `find openbank-infra/gitops/components -name 'gen-*opa-bundle*.sh' | sort | xargs -n1 bash` and
+  commit the lot; never hand-edit a bundle or an annotation to dodge the diff. Such a PR has a short
+  shelf life — merge with `--auto` (not `--admin`), or a competing governance PR conflicts it.
+- **Never hand-roll `trivy` + `cosign attest`/`verify` in a workflow** — source
+  `openbank-infra/scripts/lib/cosign-attest.sh`. It passes `--platform` (remote scans default to
+  amd64 and silently miss an arm64-only image) and checks the SBOM *before* attesting; `cosign
+  attest` is additive, so a green `verify-attestation` can be about an earlier build's envelope.
 
-### OPA / Rego policies (ADR-0031/ADR-0034)
-- **Editing any shared policy source ripples the OPA bundle checksum of every service.** Each
-  `openbank-infra/gitops/components/**/gen-*opa-bundle*.sh` embeds `rest.rego`, `agents.rego`,
-  `agents.yaml` and (25 of the 26) `rules.yaml` verbatim into its ConfigMap and hashes them into
-  that service's `openbank.tech/policy-checksum` annotation. So a new charter entry for a
-  completely unrelated agent — or any `rules.yaml` edit — still changes *every* service's bundle
-  and annotation. `opa-policy.yml`'s "build + verify bundle" job discovers the generators with
-  `find` and regenerates **all** of them on every OPA-relevant PR, so your PR fails there unless it
-  re-runs and commits every generator's output, not just your own service's bundle. Regenerate with:
-  ```
-  find openbank-infra/gitops/components -name 'gen-*opa-bundle*.sh' | sort | xargs -n1 bash
-  ```
-  Expect this to roll the pods of every service whose checksum moved — that is the point (subPath
-  mounts do not hot-reload). Do not hand-edit a bundle or an annotation to dodge the diff.
-- **The generator list is discovered, not hard-coded — keep it that way.** Until #1184 the gate
-  named four generators while 25 hashed `rules.yaml`, so ~21 services' committed bundles drifted
-  from the policy source for months with CI green: the deployed OPA data (`data.rules.*`,
-  `data.agents.*`) silently lagged what `rules.yaml` declared. If you add a generator, add nothing
-  to CI — but do commit it mode `100755`: a non-executable generator no-ops a `./…` loop and looks
-  exactly like "in sync" (`gen-ledger-opa-bundle.sh` shipped `100644` and had never once run).
-- **An `AI_AGENT` principal's id carries an `agent:` prefix on the REST path, but not on the
-  MCP path.** `AuthorizeInterceptor.principalType()` classifies `AI_AGENT` from a JWT `sub`
-  prefixed `agent:`, and `principal.id` is that sub verbatim — but `openbank-agent-service`
-  sets `agent` to a bare charter id (`"ui-assistant"`) directly from its own config on the MCP
-  `/tools/call` path. A charter lookup that compares `principal.id`/`input.agent` straight
-  against `agents.yaml` ids must strip the prefix first (`trim_prefix(input.agent, "agent:")`,
-  a no-op when absent) or it silently never matches for every real REST call.
-- **`rest.rego` must delegate AI-agent REST calls to `agents.allow`, never `agents.charter_allowed`
-  directly.** Only `allow` also applies `hard_denied` / `charter_denied` / `skill_ok` — calling
-  `charter_allowed` alone lets a fleet-wide hard-denied tool tier or a charter's own `tools.deny`
-  glob silently reach a REST action anyway.
 
 ### CI / bot commit signing
 - **What signs a bot commit is the *endpoint*, not the token — and `main-protection` enforces
@@ -256,27 +168,20 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   then verify via the API (`gh api .../pulls/<N>/commits --jq '.[].commit.verification'`) — not
   `gh pr view`.
 
-### Dependency graph & PR-time CVE gating (ADR-0030; `rules.yaml: dependencies.pr_time_cve_gate`)
-- **`dependency-review` only ever diffs *submitted* dependency graphs — so `dependency-submission`
-  MUST keep its `pull_request` trigger, or the Gradle half of the gate silently passes.** GitHub
-  parses npm/pip/docker/actions manifests natively but **not Gradle**; the PR-head graph exists only
-  because `dependency-submission.yml` also runs on `pull_request` (#1421). Nothing else covers it:
-  Trivy's Java support is JAR / `pom.xml` / `gradle.lockfile` / `*.sbt.lock` only and this repo has
-  **zero** lockfiles, and CodeQL is neither a dependency scanner nor a required check. Delete that
-  trigger as "redundant CI" and `block_on_cve_severity` becomes decoration — green, checking nothing.
-- **`retry-on-snapshot-warnings` retries even when no submission is coming.** GitHub answers
-  `No snapshots were found for the head SHA` whether or not a graph is on its way, so armed
-  unconditionally it burns its whole window on every PR that touches no manifest (measured: **>11
-  min**). Arm it only on dependency-touching PRs. Size the window from the **end-to-end** wait, not
-  the resolve: the fleet resolve takes ~734 s but the snapshot only becomes queryable ~24 min in
-  (GitHub indexes the graph *after* the submission API returns), so gradle/actions' documented 600 s
-  cannot work here.
+### Dependency graph & PR-time CVE gating
+Rationale + what does *not* cover it: `rules.yaml: dependencies.pr_time_cve_gate` (authoritative).
+- **`dependency-submission.yml` MUST keep its `pull_request` trigger.** `dependency-review` only
+  diffs *submitted* graphs and GitHub does not parse Gradle natively, so deleting that trigger as
+  "redundant CI" leaves `block_on_cve_severity` green while checking nothing (#1421).
+- **`retry-on-snapshot-warnings` retries even when no submission is coming** (GitHub always answers
+  `No snapshots were found for the head SHA`) — armed unconditionally it burnt >11 min on PRs
+  touching no manifest. Arm it only on dependency-touching PRs, and size the window from the
+  measured ~24 min end-to-end, not the 734 s resolve (the documented 600 s cannot work here).
 - **A red push-triggered workflow on `main` is addressed to nobody.** `dependency-submission` died
-  of `Java heap space` for three days; every run went red and no one looked, while Dependabot alerts
-  and the PR-time gate both quietly read the stale graph — neither goes red when it is stale. Any
-  workflow whose *output* something else silently depends on needs an escalation path (raise/refresh
-  a tracking issue, as `fleet-attestation.yml` and now `dependency-submission.yml` do). Its
-  `GRADLE_OPTS` heap is a ratchet with nothing measuring it — expect to raise it again.
+  of `Java heap space` for three days, red every run, while Dependabot and the gate quietly read the
+  stale graph — neither goes red when it is stale. Anything whose *output* others depend on needs an
+  escalation path (raise/refresh an issue, as `fleet-attestation.yml` and this one now do). Its heap
+  is a ratchet with nothing measuring it — expect to raise it again.
 
 ### Reviewing a diff
 - **Use 3-dot diff for pre-merge review:** `git diff origin/main...origin/<branch>` is the actual
