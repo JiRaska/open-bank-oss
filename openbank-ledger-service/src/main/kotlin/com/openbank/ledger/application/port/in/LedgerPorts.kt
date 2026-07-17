@@ -10,6 +10,7 @@ import com.openbank.ledger.domain.model.JournalSide
 import com.openbank.ledger.domain.model.SubLedgerBalance
 import com.openbank.ledger.domain.model.TrialBalance
 import com.openbank.libs.api.pagination.CursorPage
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
@@ -22,6 +23,17 @@ data class PostJournalCommand(
     val description: String?,
     val lines: List<JournalLineRequest>,
     val postedBy: UUID,
+    /**
+     * Extra outbox rows to enqueue in the SAME transaction as this posting's own `JournalPosted`
+     * + `AccountBookedChanged` rows (#1201 proposed fix 3) — for a caller whose own domain event
+     * must inherit the journal post's atomicity guarantee instead of being published separately
+     * after the fact, where a crash in the gap between the two would silently lose it. A function
+     * of the posted [JournalEntry], not a fixed list: the entry's real `id` (assigned inside
+     * [com.openbank.ledger.application.usecase.LedgerService.postJournal], never caller-supplied)
+     * is very often exactly what the caller's own event needs as its `aggregateId`, and it isn't
+     * known until the entry is built. See `FxRevaluationService.revalue` for the reference use.
+     */
+    val additionalOutboxMessages: (JournalEntry) -> List<OutboxMessage> = { emptyList() },
 )
 
 data class JournalLineRequest(

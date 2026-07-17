@@ -120,7 +120,8 @@ class LedgerService(
             "Unvalidated GL account referenced in journal entry"
         }
 
-        val messages = listOf(journalPostedMessage(entry)) + bookedChangedMessages(entry)
+        val messages =
+            listOf(journalPostedMessage(entry)) + bookedChangedMessages(entry) + command.additionalOutboxMessages(entry)
         val saved = try {
             journalRepository.save(entry, command.idempotencyKey, messages)
         } catch (e: PersistenceException) {

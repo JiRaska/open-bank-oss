@@ -91,9 +91,3 @@ interface JournalRepository {
      */
     suspend fun controlAccountTieOut(controlAccountId: UUID, asOf: LocalDate): List<ControlAccountTieOut>
 }
-
-/** Outbound port for publishing ledger domain events to the broker. */
-interface LedgerEventPublisher {
-
-    suspend fun publish(topic: String, key: String, event: Any)
-}

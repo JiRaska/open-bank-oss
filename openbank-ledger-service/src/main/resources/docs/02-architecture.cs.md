@@ -69,14 +69,14 @@ com.openbank.ledger/
 ├── application/               ◄── orchestrace use-casů
 │   ├── port/in/               LedgerPorts (LedgerUseCase), FxRevaluationPorts
 │   ├── port/out/              GlAccountRepository, JournalRepository,
-│   │                          LedgerOutboxPort, LedgerEventPublisher, CnbRateProvider
+│   │                          LedgerOutboxPort, CnbRateProvider
 │   └── usecase/               LedgerService, FxRevaluationService
 │
 └── infrastructure/            ◄── adaptéry
     ├── rest/                  LedgerResource, FxRevaluationResource, ExceptionMappers
     ├── persistence/           Panache*Repository, JournalEntities, LedgerOutboxEntity
     ├── outbox/                LedgerOutboxDispatcher (plánovaný drain)
-    ├── messaging/             KafkaLedgerOutboxEventPublisher, LoggingLedgerEventPublisher
+    ├── messaging/             KafkaLedgerOutboxEventPublisher
     ├── client/                FxServiceClient, FxServiceCnbRateAdapter
     ├── partition/             JournalPartitionMaintainer, HibernatePartitionExecutor
     └── schedule/              FxRevaluationScheduler
@@ -93,7 +93,6 @@ com.openbank.ledger/
 | `JournalRepository` (out) | `PanacheJournalRepository` | perzistence/čtení zápisů + řádků |
 | `GlAccountRepository` (out) | `PanacheGlAccountRepository` | vyhledávání v účtové osnově dle kódu/id |
 | `LedgerOutboxPort` (out) | `LedgerOutboxRepositoryImpl` | zařazení + nárokování outbox řádků |
-| `LedgerEventPublisher` (out) | `KafkaLedgerOutboxEventPublisher` / `Logging…` | publikace doménových událostí |
 | `CnbRateProvider` (out) | `FxServiceCnbRateAdapter` (→ `FxServiceClient`) | zákonný kurz ČNB |
 
 ## Outbox tok
