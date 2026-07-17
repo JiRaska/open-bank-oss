@@ -2,15 +2,18 @@
 
 Date: 2026-06-27
 Status: Accepted
-Delivery-Status: Planned
+Decision-Status: Accepted
+Delivery-Status: Partial
 
-**Delivery note (updated 2026-06-30):**
-Engineering practice is production-quality (hexagonal arch, CI gates, threat models, release-please,
-signed commits). Pre-cutover work done: CI artifact tracking cleaned (A1), PII filter applied (A3),
-SECURITY.md + GOVERNANCE.md + ARCHITECTURE.md + CONTRIBUTING.md + onboarding docs live. Blocking
-cutover work not yet started: git filter-repo history rewrite (A2, ~190 MB CI artifacts), GitHub
-Dependabot/CodeQL/secret-scanning enablement (B), OSS discoverability metadata + Discussions (C),
-OpenSSF Scorecard wiring (D1-D4). Move to Planned until cutover window is scheduled.
+**Delivery note (updated 2026-07-17):** the go-public cutover executed; a governance-enforcement tail remains.
+The repo is public (topics, homepage, Discussions), history is clean of the ~190 MB CI artifacts (A1/A2), and
+GitHub-native security is fully on (secret scanning + push protection + Dependabot + CodeQL, B). Also shipped:
+community-health docs, discoverability (C), post-build image scan (D1), coverage ratchet (D2), OpenSSF Scorecard
+workflow + README badge (D3), Dependabot auto-merge (D4), README slim + `docs/ARCHITECTURE.md` (G), and an honest
+single-maintainer `GOVERNANCE.md` (F). Remaining: **E1** — 2 of 4 advisory rules (db-migration, pitest) are still
+advisory behind their ADR-0144 deadlines; **E2** — a parseable-ADR-status CI check (this ADR is itself being
+migrated to the two-axis `Decision-Status`/`Delivery-Status` header as part of that). Partial, not Planned (the
+cutover happened) and not Shipped (E1/E2 open).
 Author(s): @JiRaska
 
 ## Context

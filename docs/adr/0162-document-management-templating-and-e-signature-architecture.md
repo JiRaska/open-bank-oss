@@ -1,9 +1,28 @@
 # ADR-0162 — Document management, templating & e-signature architecture
 
 Date: 2026-07-13
-Decision-Status: Proposed
-Delivery-Status: Planned
+Decision-Status: Accepted
+Delivery-Status: Partial
 Author(s): jiri.raska
+
+**Delivery note (updated 2026-07-17):** D1–D5 + D7 shipped; D6 partial; D4 phase-2 deferred by this ADR.
+- **D1 (`openbank-document-service` bounded context)** — ✅ Shipped: released 0.8.4, gitops + threat model;
+  product-catalog `Product.documentTemplateCode`.
+- **D2 (versioned templating)** — ✅ Shipped: `HandlebarsTemplateRenderer` + one-published-per-code partial
+  unique index (`V5`), atomic `publishReplacing`.
+- **D3 (HTML→PDF)** — ✅ Shipped: `openbank-document-renderer` WeasyPrint sidecar (default leg). Gotenberg/Typst
+  opt-in adapters are ADR-framed future, not built.
+- **D4 (signature ceremony + seal)** — ✅ Shipped (phase-1): `SignatureCeremonyService`, PAdES-B via
+  `PdfBoxPadesSealAdapter` (PDFBox + BouncyCastle), two-tier signing via OpenBao PKI. Phase-2 (QES/QSeal, EU DSS
+  PAdES-LTA, HSM) deliberately deferred — no DSS dep, `QUALIFIED` unused. Deviation: orchestrated via
+  transactional outbox, not Temporal as the D4 prose sketched.
+- **D5 (WORM store + metadata index)** — ✅ Shipped: via ADR-0161 `ObjectStorePort`; `governance.yaml`
+  restricted / 10-year retention / single-tenant.
+- **D6 (admin template management)** — ⬜ Partial: `/document-templates` route + RBAC shipped; the graphical
+  WYSIWYG editor (GrapesJS/TipTap) is a textarea (deferred in-code) and the ADR-0155 four-eyes maker-checker
+  for PUBLISH of a money-path template is absent.
+- **D7 (onboarding wiring)** — ✅ Shipped: `AccountCreatedConsumer` + `OnboardingDocumentService`, idempotent
+  (`V6__onboarding_idempotency`).
 
 ## Context
 

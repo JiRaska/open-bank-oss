@@ -1,9 +1,20 @@
 # ADR-0161 — Object-storage standard for application binary artifacts
 
 Date: 2026-07-13
-Decision-Status: Proposed
-Delivery-Status: Planned
+Decision-Status: Accepted
+Delivery-Status: Partial
 Author(s): jiri.raska
+
+**Delivery note (updated 2026-07-17):** D1 + D2 shipped, D3 pending.
+- **D1 (`ObjectStorePort` in domain libs)** — ✅ Shipped: `openbank-libs-domain/.../storage/ObjectStorePort.kt`
+  (framework-free `put`/`get`/`exists`/`presignGet`, service-namespaced keys).
+- **D2 (S3 + Postgres adapters behind one config key)** — ✅ Shipped: `S3ObjectStore` + `PostgresBlobStore`
+  in `openbank-libs-runtime` (AWS SDK v2 in the version catalog); the Postgres backend is consumed by
+  `openbank-document-service`'s `V4__add_object_store_blobs.sql`. Caveat: the S3 adapter applies SSE-AES256
+  and defers SSE-KMS + Object-Lock WORM to the D3 bucket.
+- **D3 (reusable Terraform documents bucket, WORM by default)** — ⬜ Pending: no `openbank-documents-<env>`
+  bucket or reusable module exists; document-service gitops notes the real S3 adapter is "deliberately NOT
+  wired here". Until D3 ships, the SSE-KMS / WORM-at-rest guarantee D2 defers to it is unrealized.
 
 ## Context
 
