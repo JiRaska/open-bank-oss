@@ -1,8 +1,8 @@
 # ADR-0176 — Operator-initiated customer messaging
 
 Date: 2026-07-16
-Decision-Status: Proposed
-Delivery-Status: Planned
+Decision-Status: Accepted
+Delivery-Status: Partial
 Author(s): jiri.raska
 
 **Correction note (2026-07-16, issue #1331).** The first version of this ADR shipped with a false
@@ -13,6 +13,25 @@ fact. Force 3, D6 and D1 are rewritten below; the false rejection of an alternat
 compliance citations are downgraded to unverified. **What is corrected is recorded, not
 overwritten** — the errors are as instructive as the decisions, and an ADR that quietly rewrites its
 own reasoning teaches nothing.
+
+**Delivery note (updated 2026-07-17):** D1/D4/D5/D7 shipped; D2 partial; D3/D6 pending.
+- **D1 (closed template variable schema)** — ✅ Shipped: `NotificationTemplate` closed schema, exhaustive
+  `renderTemplate` (no `else`), undeclared-key rejection.
+- **D2 (operator compose + approval)** — ⬜ Partial: the backend is real — `OperatorMessageService`/
+  `OperatorMessageResource` (`POST /api/v1/notifications/messages`), `OperatorMessageTemplate` catalogue, no
+  free-text body. But the admin-ui compose UI (`opsMessageApi`) targets a non-existent `/opsmessages` contract
+  (wrong paths, template `OPERATOR_ACCOUNT_NOTICE`, extra `purpose` field) and 404s through the pass-through
+  BFF — an operator cannot yet compose from the console. Tracked as a bug separately.
+- **D3 (push wake-signal)** — ⬜ Pending: `sendPush` still ships full rendered content; operator PUSH is
+  refused (EMAIL-only), blocked on #1182. Deferred to `openbank-app`.
+- **D4 (`opsmessage.*` authz namespace)** — ✅ Shipped: `opsmessage.compose` / `opsmessage.approval.decide`;
+  `rest.rego` excludes service-accounts and the edge; pinned in `rest_test.rego`.
+- **D5 (four-eyes on compose)** — ✅ Shipped: `rules.yaml four_eyes.actions=[opsmessage.compose]`,
+  `RedisApprovalStore`, `ApprovalResource` with self-approval guard.
+- **D6 (purpose / lawful-basis binding + marketing hard-deny)** — ⬜ Pending: no purpose field; marketing is
+  only implicitly excluded (no template), with no API hard-deny. Blocked on the #1331 consent-authority decision.
+- **D7 (per-customer message history)** — ✅ Shipped: admin-ui `MessagesTab`, metadata-only,
+  `notifications:view` gate.
 
 ## Context
 

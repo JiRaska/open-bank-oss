@@ -132,7 +132,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0121](0121-service-self-reported-sbom-and-supply-chain-attestation.md) | Service self-reported SBOM and supply-chain attestation | Accepted | Partial | — |
 | [0122](0122-split-openbank-libs-into-domain-and-runtime.md) | Split openbank-libs into domain and runtime modules | Accepted | Partial | — |
 | [0123](0123-relicense-to-apache-2.0.md) | Relicense the platform from MPL-2.0 to Apache-2.0 | Accepted | Shipped | — |
-| [0124](0124-oss-readiness-and-public-launch-hardening.md) | OSS-readiness and public-launch hardening | Accepted | Planned | — |
+| [0124](0124-oss-readiness-and-public-launch-hardening.md) | OSS-readiness and public-launch hardening | Accepted | Partial | — |
 | [0125](0125-same-account-currency-exchange.md) | Same-account currency exchange (the app's currency swap) | Superseded by ADR-0110 | Superseded | — |
 | [0126](0126-unified-consent-lifecycle.md) | Unified Consent Lifecycle and GDPR Linkage | Accepted | Partial | — |
 | [0132](0132-customer-edge-per-party-rate-limiting.md) | Per-party request rate limiting at the customer edge | Accepted | Shipped | — |
@@ -163,22 +163,22 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0158](0158-account-opening-validates-against-product-catalog.md) | Account opening validates against product-catalog | Accepted | Complete | — |
 | [0159](0159-cnpg-ha-money-path.md) | High-availability CNPG for money-path databases | Accepted | Shipped | — |
 | [0160](0160-end-to-end-integration-liveness-and-drift-detection-standard.md) | End-to-end integration liveness and drift-detection standard | Accepted | Partial | — |
-| [0161](0161-object-storage-standard-for-application-documents.md) | Object-storage standard for application binary artifacts | Proposed | Planned | — |
-| [0162](0162-document-management-templating-and-e-signature-architecture.md) | Document management, templating & e-signature architecture | Proposed | Planned | — |
+| [0161](0161-object-storage-standard-for-application-documents.md) | Object-storage standard for application binary artifacts | Accepted | Partial | — |
+| [0162](0162-document-management-templating-and-e-signature-architecture.md) | Document management, templating & e-signature architecture | Accepted | Partial | — |
 | [0163](0163-control-liveness-sentinel-ai-agent.md) | Control-liveness-sentinel AI agent | Accepted | Partial | — |
 | [0164](0164-governance-auditor-ai-agent.md) | Governance-auditor AI agent | Accepted | Partial | — |
 | [0165](0165-release-steward-ai-agent.md) | Release-steward AI agent | Accepted | Partial | — |
 | [0166](0166-docs-truth-agent-ai-agent.md) | docs-truth-agent AI agent | Accepted | Partial | — |
 | [0167](0167-authz-policy-auditor-ai-agent.md) | authz-policy-auditor AI agent | Accepted | Partial | — |
 | [0168](0168-flaky-test-hunter-ai-agent.md) | flaky-test-hunter AI agent | Accepted | Partial | — |
-| [0169](0169-customer-document-access-and-sca-bound-signing.md) | Customer document access & SCA-bound signing over customer-edge | Proposed | Planned | — |
+| [0169](0169-customer-document-access-and-sca-bound-signing.md) | Customer document access & SCA-bound signing over customer-edge | Accepted | Shipped | — |
 | [0170](0170-onboarding-e-signature-flow-in-the-customer-app.md) | Onboarding e-signature flow in the customer app | Proposed | Planned | — |
 | [0171](0171-verification-of-payee-for-outbound-credit-transfers.md) | Verification of Payee for outbound credit transfers | Accepted | Partial | — |
 | [0172](0172-cryptographic-key-management-and-lifecycle.md) | Cryptographic key management and lifecycle | Accepted | Partial | — |
 | [0173](0173-capacity-management-and-headroom.md) | Capacity management and headroom | Accepted | Partial | — |
 | [0174](0174-ict-third-party-dependencies-and-exit-strategy.md) | ICT third-party dependencies and exit strategy | Accepted | Partial | — |
 | [0175](0175-data-residency-and-sovereignty.md) | Data residency and sovereignty | Accepted | Partial | — |
-| [0176](0176-operator-initiated-customer-messaging.md) | Operator-initiated customer messaging | Proposed | Planned | — |
+| [0176](0176-operator-initiated-customer-messaging.md) | Operator-initiated customer messaging | Accepted | Partial | — |
 
 ---
 

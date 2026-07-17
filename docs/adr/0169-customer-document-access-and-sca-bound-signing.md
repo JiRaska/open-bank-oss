@@ -1,9 +1,22 @@
 # ADR-0169 — Customer document access & SCA-bound signing over customer-edge
 
 Date: 2026-07-15
-Decision-Status: Proposed
-Delivery-Status: Planned
+Decision-Status: Accepted
+Delivery-Status: Shipped
 Author(s): jiri.raska
+
+**Delivery note (updated 2026-07-17):** all four decisions shipped.
+- **D1 (customer-edge document/signature routes)** — ✅ Shipped: `CustomerDocumentResource` (ROLE_CUSTOMER,
+  token-forced partyRef, IDOR-scoped). One convenience route from the D1 table — `GET /documents` (list) — is
+  not implemented; the onboarding sign flow works without it.
+- **D2 (document-bound SCA / dynamic linking)** — ✅ Shipped: sca `V6__document_signing_binding`,
+  `ScaPurpose.DOCUMENT_SIGNING`, mismatch → 409; `SignatureCeremonyService` passes the real `document.sha256`
+  + `ceremonyId` end-to-end (not a stub).
+- **D3 (language-correct idempotent onboarding agreement)** — ✅ Shipped: `OnboardingDocumentService`
+  `ensureOnboardingAgreement` (4-branch spec), document-service `V6__onboarding_idempotency`.
+- **D4 (sign-what-you-saw: the sealed PDF is the served one)** — ✅ Shipped (backend obligation):
+  content-addressed `GET /documents/{id}/content` + D2's hash binding. The app-side "don't re-render" rule is
+  ADR-0170 (separate repo), out of this ADR's scope.
 
 ## Context
 
