@@ -15,6 +15,7 @@ import com.openbank.document.application.port.out.SignerVerificationPort
 import com.openbank.document.domain.event.SignatureCeremonyCompleted
 import com.openbank.document.domain.model.CeremonyStatus
 import com.openbank.document.domain.model.Document
+import com.openbank.document.domain.model.DocumentStatus
 import com.openbank.document.domain.model.SignatureCeremony
 import com.openbank.document.domain.model.Signer
 import com.openbank.document.domain.model.SignerStatus
@@ -48,7 +49,14 @@ class SignatureCeremonyService(
 ) : SignatureCeremonyUseCase {
 
     override suspend fun openCeremony(cmd: OpenCeremonyCommand): SignatureCeremony {
-        documentRepo.findById(cmd.documentId) ?: error("Document not found: ${cmd.documentId}")
+        val document = documentRepo.findById(cmd.documentId) ?: error("Document not found: ${cmd.documentId}")
+        // A document enters signing the moment its ceremony opens — GENERATED -> PENDING_SIGNATURE.
+        // Guarded (not unconditional): openCeremony can also run against a document a prior open
+        // attempt already advanced (DuplicateCeremonyException retry, ADR-0162 D7 self-heal), and
+        // Document.markPendingSignature() requires GENERATED.
+        if (document.status == DocumentStatus.GENERATED) {
+            documentRepo.save(document.markPendingSignature())
+        }
         val signers = cmd.signerPartyRefs.mapIndexed { index, ref ->
             Signer(partyRef = ref, order = index + 1, status = SignerStatus.PENDING, signedAt = null)
         }
@@ -132,6 +140,23 @@ class SignatureCeremonyService(
         val pdf = objectStore.get(document.storageKey)
         val sealed = sealPort.sealPades(pdf, ceremony)
         objectStore.put(document.storageKey, sealed, document.contentType)
+        // The terminal status transition itself — previously missing entirely, so a document
+        // never actually reached SIGNED no matter how many times its ceremony completed.
+        // OnboardingDocumentService.ensureOnboardingAgreement's "already signed, return it
+        // untouched" short-circuit filters on THIS field, so its absence meant every login
+        // re-ran the full onboarding sign ceremony against the still-GENERATED/PENDING_SIGNATURE
+        // document instead of recognising it as done (found live: the app's sign screen kept
+        // reappearing on every returning-user login, not just once during onboarding).
+        //
+        // Self-heals a document whose ceremony was opened before this fix and is therefore still
+        // GENERATED (openCeremony's new markPendingSignature() never ran for it) by passing
+        // through PENDING_SIGNATURE first — markSigned() itself still requires exactly that state.
+        val pending = if (document.status == DocumentStatus.GENERATED) {
+            document.markPendingSignature()
+        } else {
+            document
+        }
+        documentRepo.save(pending.markSigned())
     }
 
     companion object {

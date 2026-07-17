@@ -6,6 +6,7 @@ package com.openbank.document.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import com.openbank.document.application.port.`in`.OpenCeremonyCommand
 import com.openbank.document.application.port.out.CeremonyRepositoryPort
 import com.openbank.document.application.port.out.ClientSignatureIssuerPort
 import com.openbank.document.application.port.out.DocumentRepositoryPort
@@ -78,6 +79,7 @@ class SignatureCeremonyServiceTest {
         coEvery { sealPort.sealPades(clientSigned, any()) } returns sealed
         coEvery { objectStore.put(document.storageKey, sealed, document.contentType) } returns Unit
         coEvery { ceremonyRepo.saveWithOutbox(any(), any()) } answers { firstArg() }
+        coEvery { documentRepo.save(any()) } answers { firstArg() }
 
         val result = service.recordDecision(ceremony.id, "party-1", SignerStatus.SIGNED, "evidence-1")
 
@@ -86,6 +88,62 @@ class SignatureCeremonyServiceTest {
             clientSignaturePort.signAsClient(pdf, "party-1")
             sealPort.sealPades(clientSigned, any())
         }
+        // The bug this pins: a completed ceremony used to seal the PDF bytes but never persist
+        // the document's own status past PENDING_SIGNATURE, so
+        // OnboardingDocumentService.ensureOnboardingAgreement's "already signed" check could
+        // never match and every subsequent login re-ran the full sign ceremony.
+        coVerify { documentRepo.save(match { it.status == DocumentStatus.SIGNED }) }
+    }
+
+    @Test
+    fun `sealing self-heals a document whose ceremony was opened before the pending-signature fix`(): Unit =
+        runBlocking {
+            // Simulates a ceremony that reached DRAFT under the pre-fix openCeremony(), which
+            // never advanced the document past GENERATED.
+            val ceremony = ceremony(listOf(signer("party-1")))
+            val document = document().copy(status = DocumentStatus.GENERATED)
+            val pdf = "pdf-bytes".toByteArray()
+            coEvery { ceremonyRepo.findById(ceremony.id) } returns ceremony
+            coEvery { documentRepo.findById(ceremony.documentId) } returns document
+            coEvery {
+                signerVerificationPort.verify("party-1", "evidence-1", document.sha256, ceremony.id.toString())
+            } returns true
+            coEvery { objectStore.get(document.storageKey) } returns pdf
+            coEvery { clientSignaturePort.signAsClient(any(), "party-1") } returns pdf
+            coEvery { objectStore.put(any(), any(), any()) } returns Unit
+            coEvery { sealPort.sealPades(any(), any()) } returns pdf
+            coEvery { ceremonyRepo.saveWithOutbox(any(), any()) } answers { firstArg() }
+            coEvery { documentRepo.save(any()) } answers { firstArg() }
+
+            service.recordDecision(ceremony.id, "party-1", SignerStatus.SIGNED, "evidence-1")
+
+            coVerify { documentRepo.save(match { it.status == DocumentStatus.SIGNED }) }
+        }
+
+    @Test
+    fun `opening a ceremony advances a GENERATED document to PENDING_SIGNATURE`(): Unit = runBlocking {
+        val document = document().copy(status = DocumentStatus.GENERATED)
+        coEvery { documentRepo.findById(document.id) } returns document
+        coEvery { documentRepo.save(any()) } answers { firstArg() }
+        coEvery { ceremonyRepo.save(any()) } answers { firstArg() }
+
+        service.openCeremony(OpenCeremonyCommand(document.id, listOf("party-1"), SignatureLevel.ADVANCED))
+
+        coVerify { documentRepo.save(match { it.status == DocumentStatus.PENDING_SIGNATURE }) }
+    }
+
+    @Test
+    fun `opening a ceremony against an already-PENDING_SIGNATURE document does not re-save it`(): Unit = runBlocking {
+        // A retry after DuplicateCeremonyException (ADR-0162 D7 self-heal) can call this again
+        // for a document a prior attempt already advanced -- markPendingSignature() requires
+        // GENERATED, so a blind re-call would throw.
+        val document = document().copy(status = DocumentStatus.PENDING_SIGNATURE)
+        coEvery { documentRepo.findById(document.id) } returns document
+        coEvery { ceremonyRepo.save(any()) } answers { firstArg() }
+
+        service.openCeremony(OpenCeremonyCommand(document.id, listOf("party-1"), SignatureLevel.ADVANCED))
+
+        coVerify(exactly = 0) { documentRepo.save(any()) }
     }
 
     @Test
