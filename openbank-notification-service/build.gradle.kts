@@ -23,6 +23,7 @@ dependencies {
     implementation(libs.quarkus.opentelemetry)
     implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.mailer)
+    implementation(libs.quarkus.redis.client) // four-eyes ApprovalStore (ADR-0155, ADR-0176 D5)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)

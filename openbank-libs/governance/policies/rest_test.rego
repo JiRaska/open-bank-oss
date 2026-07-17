@@ -52,11 +52,14 @@ rules_real := {
 		"clearing": ["clearingBatch"],
 		"sca": ["device", "scaChallenge"],
 	},
-	"four_eyes": {"verbs": [
-		"transfer", "post", "reverse", "freeze", "release", "flip",
-		"transitionStatus", "recall", "settle", "disburse", "send", "credit", "debit",
-		"collateralRegister",
-	]},
+	"four_eyes": {
+		"verbs": [
+			"transfer", "post", "reverse", "freeze", "release", "flip",
+			"transitionStatus", "recall", "settle", "disburse", "send", "credit", "debit",
+			"collateralRegister",
+		],
+		"actions": ["opsmessage.compose"],
+	},
 	"feature_flags": {
 		"prohibited_flag_combinations": [
 			"sca-enforcement-disabled",
@@ -765,4 +768,117 @@ test_deny_human_operator_sanctions_create_via_m2m_rule if {
 		"action": "sanctions.create",
 		"resource": "",
 	}
+}
+
+# ---------------------------------------------------------------------------------------
+# opsmessage.compose (ADR-0176 D4/D5): operator-initiated customer messaging. Its own action
+# namespace, deliberately not notification.*, and its own four-eyes trigger, independent of
+# money_path_scopes.
+# ---------------------------------------------------------------------------------------
+test_allow_operator_compose_message if {
+	decision := rest.allow with input as {
+		"principal": {"id": "operator-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "opsmessage.compose",
+		"resource": "",
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	decision.reason == "operator-compose-message"
+}
+
+test_allow_admin_compose_message if {
+	rest.allow with input as {
+		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"action": "opsmessage.compose",
+		"resource": "",
+	}
+		with data.openbank.bundle as bundle
+}
+
+# The finding that made D4's namespace split necessary rather than merely tidy:
+# service-account-openbank-edge carries ROLE_OPERATOR in the realm and is classified HUMAN
+# (Keycloak client_credentials tokens never produce principal.type == SERVICE), so a rule
+# gated on HUMAN + ROLE_OPERATOR alone would re-admit it. This is the regression test for
+# that specific identity, not just the class of service-account ids.
+test_deny_edge_service_account_compose_message if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "opsmessage.compose",
+		"resource": "",
+	}
+}
+
+# Any service-account caller is excluded, not only the edge identity — the rule gates on the
+# id prefix, not a specific client.
+test_deny_any_service_account_compose_message if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-kyc", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "opsmessage.compose",
+		"resource": "",
+	}
+}
+
+# A role that is neither operator nor admin does not gain this action.
+test_deny_viewer_compose_message if {
+	not rest.allow with input as {
+		"principal": {"id": "viewer-1", "type": "HUMAN", "roles": ["ROLE_VIEWER"]},
+		"action": "opsmessage.compose",
+		"resource": "",
+	}
+}
+
+# edge-service-notification's plain notification.*/device.* prefix match does NOT extend to
+# opsmessage.* — this is the namespace split (ADR-0176 D4) actually holding, not just asserted
+# in a comment.
+test_deny_edge_service_notification_does_not_cover_opsmessage if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": []},
+		"action": "opsmessage.compose",
+		"resource": "",
+	}
+}
+
+# The checker-side decide action gets the identical shape.
+test_allow_operator_decide_message_approval if {
+	decision := rest.allow with input as {
+		"principal": {"id": "operator-2", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "opsmessage.approval.decide",
+		"resource": "approval-1",
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	decision.reason == "operator-decide-message-approval"
+}
+
+test_deny_edge_service_account_decide_message_approval if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "opsmessage.approval.decide",
+		"resource": "approval-1",
+	}
+}
+
+# four_eyes_required fires for opsmessage.compose via the NEW data.rules.four_eyes.actions
+# list, not via money_path_scopes — notification-service is not and will never be in
+# money_path_services, so this proves the exact-action clause is what is actually firing.
+test_four_eyes_required_for_opsmessage_compose if {
+	rest.four_eyes_required with input as {"action": "opsmessage.compose"}
+		with data.rules as rules_real
+}
+
+# Confirms the exact-action clause is scoped, not a wildcard: an arbitrary action outside
+# both four_eyes.verbs and four_eyes.actions is not flagged.
+test_four_eyes_not_required_for_unrelated_action if {
+	not rest.four_eyes_required with input as {"action": "notification.list"}
+		with data.rules as rules_real
+}
+
+# The exact-action clause never fires against a bundle with no rules.yaml override (the
+# undefined-collection case the rest.rego comment documents) — proves this is a genuinely
+# additive change: a service whose bundle predates four_eyes.actions sees no behaviour change.
+test_four_eyes_not_required_when_actions_key_absent if {
+	not rest.four_eyes_required with input as {"action": "opsmessage.compose"}
+		with data.rules as {"four_eyes": {"verbs": []}}
 }
