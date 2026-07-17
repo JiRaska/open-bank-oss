@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.11.0...consent-service-v0.11.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **consent:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1518](https://github.com/JiRaska/open-bank-oss/issues/1518)) ([b81644a](https://github.com/JiRaska/open-bank-oss/commit/b81644a2a1955df2dd04d02b80089e897c7cfdb4))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.10.7...consent-service-v0.11.0) (2026-07-14)
 
 
