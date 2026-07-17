@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.5](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.8.4...document-service-v0.8.5) (2026-07-17)
+
+
+### Bug Fixes
+
+* **document:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1519](https://github.com/JiRaska/open-bank-oss/issues/1519)) ([7afdeb4](https://github.com/JiRaska/open-bank-oss/commit/7afdeb4f7ad05f1ce0dba48380a823f7b4bc74cd))
+
 ## [0.8.4](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.8.3...document-service-v0.8.4) (2026-07-17)
 
 
