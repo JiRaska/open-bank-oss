@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.13.0...notification-service-v0.13.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **notification:** reject opsmessage.compose requests missing required template variables ([#1424](https://github.com/JiRaska/open-bank-oss/issues/1424)) ([e99ad93](https://github.com/JiRaska/open-bank-oss/commit/e99ad931ff4d69a43ff4e090aa81ccc4df0e0181)), closes [#1381](https://github.com/JiRaska/open-bank-oss/issues/1381)
+* **notification:** split NotificationConsumer.sendEmail's mail-failure handling from SENT-recording ([#1433](https://github.com/JiRaska/open-bank-oss/issues/1433)) ([9ed42eb](https://github.com/JiRaska/open-bank-oss/commit/9ed42ebe11db31783f6cc9c4dba1e9705488b808)), closes [#1392](https://github.com/JiRaska/open-bank-oss/issues/1392)
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.12.9...notification-service-v0.13.0) (2026-07-17)
 
 
