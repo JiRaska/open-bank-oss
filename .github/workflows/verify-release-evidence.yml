@@ -61,7 +61,20 @@ jobs:
           bin="$(command -v cosign || true)"
           if ! { [ -n "$bin" ] && cosign version 2>/dev/null | grep -Eq 'GitVersion:[[:space:]]*v2\.'; }; then
             bin="${RUNNER_TEMP}/cosign2"
-            curl -fsSL -o "$bin" "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-${os}-${arch}"
+            # sha256 pins from the release's cosign_checksums.txt — bump together with
+            # COSIGN_VERSION (same block as release-please.yml).
+            case "${os}-${arch}" in
+              linux-amd64)  COSIGN_SHA256="caaad125acef1cb81d58dcdc454a1e429d09a750d1e9e2b3ed1aed8964454708" ;;
+              linux-arm64)  COSIGN_SHA256="bd0f9763bca54de88699c3656ade2f39c9a1c7a2916ff35601caf23a79be0629" ;;
+              darwin-amd64) COSIGN_SHA256="98a3bfd691f42c6a5b721880116f89210d8fdff61cc0224cd3ef2f8e55a466fb" ;;
+              darwin-arm64) COSIGN_SHA256="edfc761b27ced77f0f9ca288ff4fac7caa898e1e9db38f4dfdf72160cdf8e638" ;;
+              *) echo "::error::no pinned cosign checksum for ${os}-${arch}"; exit 1 ;;
+            esac
+            curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 \
+              -o "$bin" "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-${os}-${arch}"
+            SHATOOL="sha256sum"; command -v sha256sum >/dev/null 2>&1 || SHATOOL="shasum -a 256"
+            echo "${COSIGN_SHA256}  ${bin}" | ${SHATOOL} -c - \
+              || { echo "::error::cosign ${COSIGN_VERSION} download failed checksum verification"; exit 1; }
             chmod +x "$bin"
           fi
           cd ev

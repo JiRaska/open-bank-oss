@@ -13,8 +13,11 @@ permissions:
 
 # Cancel superseded runs on the same ref so Dependabot/PR pushes don't stack up
 # expensive CodeQL/Trivy/SBOM runs and drain the Free-tier minute budget.
+# event_name is part of the key: schedule and push:[main] both resolve to
+# refs/heads/main, so without it a routine Monday-morning push CANCELS the
+# weekly scheduled audit — the audit posture silently never runs that week.
 concurrency:
-  group: security-${{ github.ref }}
+  group: security-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
