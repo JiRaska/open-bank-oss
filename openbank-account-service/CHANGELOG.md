@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.4](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.15.3...account-service-v0.15.4) (2026-07-17)
+
+
+### Bug Fixes
+
+* **account-service:** stop acking-and-dropping party events that only failed transiently ([#1533](https://github.com/JiRaska/open-bank-oss/issues/1533)) ([10733be](https://github.com/JiRaska/open-bank-oss/commit/10733be22d701ba424829b8f6c0c4981d10c283f)), closes [#1497](https://github.com/JiRaska/open-bank-oss/issues/1497)
+
 ## [0.15.3](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.15.2...account-service-v0.15.3) (2026-07-17)
 
 
