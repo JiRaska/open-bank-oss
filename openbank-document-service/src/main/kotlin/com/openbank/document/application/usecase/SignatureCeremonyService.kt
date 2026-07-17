@@ -79,6 +79,18 @@ class SignatureCeremonyService(
     ): SignatureCeremony {
         val ceremony = ceremonyRepo.findById(ceremonyId) ?: error("Ceremony not found: $ceremonyId")
         val now = Instant.now(clock)
+        // At-least-once safety. The caller retries a decision whose HTTP response was lost, and
+        // SignatureCeremony.recordDecision rejects any decision on a ceremony that already reached
+        // a terminal status — so without this, one dropped response leaves the client tapping
+        // "sign" against a ceremony that IS already signed, failing forever with no way forward.
+        // Replaying a decision this signer already recorded converges on the recorded outcome
+        // instead: returning here re-signs nothing and re-seals nothing, which is the point — the
+        // signature act itself is not idempotent (single-use SCA evidence, a fresh one-time client
+        // certificate per act), so a replay must be absorbed, never re-executed.
+        val recorded = ceremony.signers.find { it.partyRef == partyRef }
+        if (recorded != null && recorded.status == decision) {
+            return ceremony
+        }
         // Validate the decision in the domain FIRST — signer order, not-already-decided, ceremony
         // status — before any object-store mutation. A rejected decision (wrong signer order, a
         // replayed duplicate, an already-terminal ceremony) must never leave a phantom client
