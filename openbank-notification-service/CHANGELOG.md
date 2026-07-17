@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.12.9...notification-service-v0.13.0) (2026-07-17)
+
+
+### Features
+
+* **notification:** operator-initiated customer messaging, four-eyes gated ([#1368](https://github.com/JiRaska/open-bank-oss/issues/1368)) ([6e6be0e](https://github.com/JiRaska/open-bank-oss/commit/6e6be0e7e0a834f501f34c46202ed8acff644ef2))
+
 ## [0.12.9](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.12.8...notification-service-v0.12.9) (2026-07-17)
 
 
