@@ -32,6 +32,21 @@ import java.util.UUID
  * deliberate, separate operational decision, not shipped with this endpoint), a maker's call is
  * paused by `AuthorizeInterceptor` with HTTP 202 and a `PendingApproval` id; the operator retries
  * with `X-Approval-Id` once a different operator decides it via `ApprovalResource`.
+ *
+ * `resource = "#request"` matters more here than on a typical gated action. Every other
+ * four-eyes-gated action in the fleet (e.g. `lending.disburse`) binds `resource` to an
+ * ALREADY-EXISTING entity id, so a `PendingApproval` can only ever satisfy a retry against that
+ * same entity. `opsmessage.compose` is create-with-rich-body — there is no pre-existing entity to
+ * bind to — so without a resource binding, `AuthorizeInterceptor.satisfies()` would compare only
+ * (action, resourceId=null, maker), making every pending approval for one maker interchangeable:
+ * a checker approving message A would silently also authorize a later retry carrying a
+ * completely different message B, never reviewed by anyone (code-review finding, PR #1368).
+ * `#request` resolves via reflection (`extractResource`) to `request.toString()` — `data class
+ * ComposeMessageRequest`'s generated `toString()` is a deterministic, content-derived
+ * fingerprint of partyId+template+recipient+variables. Two calls with the same content produce
+ * the same resourceId (the retry the maker is meant to make); any change to the content produces
+ * a different one (a NEW pending approval, requiring a fresh checker decision) — server-computed,
+ * so the maker cannot forge a match by claiming an id, only by resending byte-identical content.
  */
 @Path("/api/v1/notifications/messages")
 @Produces(MediaType.APPLICATION_JSON)
@@ -44,7 +59,7 @@ class OperatorMessageResource {
 
     @POST
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
-    @Authorize(action = "opsmessage.compose")
+    @Authorize(action = "opsmessage.compose", resource = "#request")
     @Operation(summary = "Send a customer a message from a reviewed, closed catalogue of templates")
     suspend fun compose(request: ComposeMessageRequest): Response {
         val notificationId = try {

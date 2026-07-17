@@ -11,9 +11,11 @@ import com.openbank.notification.infrastructure.persistence.repository.Notificat
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.mailer.Mail
 import io.quarkus.mailer.reactive.ReactiveMailer
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -39,6 +41,8 @@ class OperatorMessageRejected(message: String) : RuntimeException(message)
  */
 @ApplicationScoped
 class OperatorMessageService {
+
+    private val log = Logger.getLogger(OperatorMessageService::class.java)
 
     @Inject
     lateinit var notificationRepo: NotificationRepository
@@ -76,7 +80,23 @@ class OperatorMessageService {
         }
         Panache.withTransaction { notificationRepo.persist(entity) }.awaitSuspending()
 
+        // Two `.onFailure()` handlers, deliberately at two different points in the chain — not
+        // one after both stages (code-review finding, PR #1368). A single trailing handler
+        // cannot tell "the mail never went out" from "the mail went out, but recording SENT
+        // failed" — Mutiny's Uni#chain composes onto ONE failure channel, so it would catch
+        // both, and the original code did: a transient Postgres error AFTER a successful send
+        // silently overwrote the row with status=FAILED, while the customer had actually
+        // received the message. That is a worse outcome than leaving the row PENDING.
         mailer.send(Mail.withHtml(request.recipient, subject, body))
+            .onFailure().invoke { e ->
+                log.warnf(e, "opsmessage.compose: mail send failed notificationId=%s", notificationId)
+            }
+            .onFailure().recoverWithUni { _ ->
+                Panache.withTransaction {
+                    notificationRepo.find("notificationId", notificationId).firstResult()
+                        .map { e -> e?.also { it.status = "FAILED" } }
+                }.replaceWithVoid()
+            }
             .chain { _ ->
                 Panache.withTransaction {
                     notificationRepo.find("notificationId", notificationId).firstResult()
@@ -86,14 +106,23 @@ class OperatorMessageService {
                                 it.sentAt = Instant.now(clock)
                             }
                         }
-                }
+                }.replaceWithVoid()
             }
-            .onFailure().recoverWithUni { _ ->
-                Panache.withTransaction {
-                    notificationRepo.find("notificationId", notificationId).firstResult()
-                        .map { e -> e?.also { it.status = "FAILED" } }
-                }
+            // Only reachable if the mail genuinely went out (the FAILED path above already
+            // recovered any send failure into a completed Uni). Never marks the row FAILED —
+            // that would be a lie about a message that was actually delivered — logs loudly
+            // instead, and swallows so the endpoint still returns 201: the customer already has
+            // the message, this is a bookkeeping problem for an operator to notice via the log,
+            // not a reason to fail the request.
+            .onFailure().invoke { e ->
+                log.warnf(
+                    e,
+                    "opsmessage.compose: mail sent but recording SENT status failed notificationId=%s " +
+                        "— row left as-is, NOT marked FAILED (the email was actually delivered)",
+                    notificationId,
+                )
             }
+            .onFailure().recoverWithUni { _ -> Uni.createFrom().voidItem() }
             .awaitSuspending()
 
         return notificationId

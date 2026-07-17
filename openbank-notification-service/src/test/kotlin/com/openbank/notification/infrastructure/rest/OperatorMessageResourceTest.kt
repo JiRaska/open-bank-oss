@@ -64,4 +64,48 @@ class OperatorMessageResourceTest {
         assertThat(response.status).isEqualTo(400)
         assertThat((response.entity as Map<*, *>)["code"]).isEqualTo("BAD_REQUEST")
     }
+
+    /**
+     * `compose()`'s `@Authorize(resource = "#request")` (PR #1368 code-review fix) leans entirely
+     * on `ComposeMessageRequest`'s generated `toString()` being a deterministic, content-derived
+     * fingerprint: `AuthorizeInterceptor.extractResource` just calls `.toString()` on the
+     * parameter, and `satisfies()` string-compares it on retry. If two DIFFERENT requests ever
+     * produced the SAME string, a checker's approval of one would silently also unlock the other
+     * — the exact bug this fix closes. This test proves the property the fix actually depends on,
+     * not just that the annotation string is present (NotificationSecurityTest covers that).
+     */
+    @Test
+    fun `ComposeMessageRequest toString() is a content-sensitive fingerprint`() {
+        val partyId = UUID.randomUUID()
+        val base = ComposeMessageRequest(
+            partyId = partyId,
+            template = OperatorMessageTemplate.SUPPORT_FOLLOWUP,
+            recipient = "customer@example.com",
+            variables = mapOf("ticketReference" to "TCK-1"),
+        )
+
+        // Identical content -> identical fingerprint: this is what makes the maker's real retry
+        // (same request, replayed with X-Approval-Id) satisfy AuthorizeInterceptor at all.
+        val repeat = base.copy()
+        assertThat(repeat.toString()).isEqualTo(base.toString())
+
+        // Any single field changing -> a different fingerprint: this is what stops a DIFFERENT
+        // request from consuming an approval that was only ever reviewed against `base`.
+        assertThat(base.copy(recipient = "someone-else@example.com").toString())
+            .isNotEqualTo(base.toString())
+        assertThat(
+            base.copy(
+                template = OperatorMessageTemplate.GENERIC_NOTICE,
+                variables = mapOf(
+                    "subject" to "x",
+                    "note" to "y",
+                ),
+            ).toString(),
+        )
+            .isNotEqualTo(base.toString())
+        assertThat(base.copy(variables = mapOf("ticketReference" to "TCK-2")).toString())
+            .isNotEqualTo(base.toString())
+        assertThat(base.copy(partyId = UUID.randomUUID()).toString())
+            .isNotEqualTo(base.toString())
+    }
 }

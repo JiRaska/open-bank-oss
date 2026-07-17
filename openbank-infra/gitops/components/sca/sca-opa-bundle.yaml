@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sca-service
     app.kubernetes.io/part-of: sca
   annotations:
-    openbank.tech/policy-checksum: "594b284c8d00fe52"
+    openbank.tech/policy-checksum: "f6b084a95bd2d150"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -149,6 +149,38 @@ data:
     	role in input.principal.roles
     	some verb in {"list", "read"}
     	endswith(input.action, sprintf(".%v", [verb]))
+    }
+
+    # ADR-0176 D4: operator-initiated customer messaging is its own action namespace
+    # (opsmessage.*), deliberately NOT notification.* — the edge-service-notification rule below
+    # grants every notification.* action to customer-edge's M2M identity via a plain prefix match,
+    # and opsmessage.compose must never be reachable that way. A namespace split alone is not
+    # sufficient, though: service-account-openbank-edge is classified HUMAN (Keycloak
+    # client_credentials tokens never produce principal.type == SERVICE — see
+    # authz_policy.principal_type_service_unreachable in rules.yaml) and carries ROLE_OPERATOR in
+    # the realm (openbank-infra/gitops/components/keycloak/realm-template.json), so a rule gated on
+    # HUMAN + ROLE_OPERATOR alone would silently re-admit that exact M2M identity. The explicit
+    # `service-account-` exclusion below is what actually keeps it out — same idiom as
+    # m2m-sanctions-screening further down, used there for the opposite purpose (identifying M2M,
+    # not excluding it).
+    allowed_reasons contains "operator-compose-message" if {
+    	input.principal.type == "HUMAN"
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    	role in input.principal.roles
+    	not startswith(input.principal.id, "service-account-")
+    	input.action == "opsmessage.compose"
+    }
+
+    # Checker side of the same four-eyes flow (ADR-0155 mechanism, ADR-0176 D5 trigger). Deciding
+    # an approval is exactly as sensitive as issuing the request it gates, so it gets the identical
+    # HUMAN + operator-role + non-service-account shape, not the broader operator-write-any this
+    # service otherwise has no equivalent of.
+    allowed_reasons contains "operator-decide-message-approval" if {
+    	input.principal.type == "HUMAN"
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    	role in input.principal.roles
+    	not startswith(input.principal.id, "service-account-")
+    	input.action == "opsmessage.approval.decide"
     }
 
     # Authenticated customers may perform any `customer.*` action (initiate payments, enroll
@@ -291,6 +323,17 @@ data:
     four_eyes_required if {
     	input.action == "featureflag.flip"
     	input.attributes.flag in data.rules.feature_flags.money_path_flags
+    }
+
+    # Exact-action four-eyes, independent of money-path scope (ADR-0176 D5). Generalises the
+    # featureflag.flip clause above into a reusable list (data.rules.four_eyes.actions) rather than
+    # a one-off inline check — for an action whose service will never appear in
+    # money_path_services (opsmessage.compose today), the verb-based clause above can never match,
+    # since it requires deriving a scope FROM money_path_services first. Undefined, not an error,
+    # for any bundle whose rules.yaml predates this key — Rego membership over an undefined
+    # collection simply does not fire.
+    four_eyes_required if {
+    	input.action in data.rules.four_eyes.actions
     }
 
     # ---------------------------------------------------------------------------------------
@@ -1856,6 +1899,28 @@ data:
         # caller found but the rego already reserves the grant), the risky path needs its own distinct
         # action (e.g. a dedicated operator-only "enrollOnBehalf" endpoint) before it can be four-eyes
         # gated safely — do not reuse the shared customer/M2M-facing action.
+      #
+      # actions: exact action names, gated independently of money_path_scopes (ADR-0176 D5).
+      # `verbs` above only ever fires for an action whose SCOPE derives from money_path_services —
+      # notification-service is not, and never will be, on that list (D5's own reasoning), so no verb
+      # addition could reach opsmessage.compose. This generalises the featureflag.flip precedent two
+      # blocks down (an exact action name, independent of money-path scope, already shipped with
+      # ADR-0067) into a reusable list instead of a one-off inline clause. Read disjunctively with
+      # `verbs` in rest.rego's four_eyes_required — a service can be gated by either mechanism, never
+      # both computing the same answer twice.
+      #
+      # The GUARDRAIL above applies here too, unchanged: opsmessage.compose is its own action
+      # namespace specifically so this list-membership can never accidentally cover an M2M-reachable
+      # action — rest.rego's edge-service-notification rule grants notification.* to customer-edge's
+      # M2M identity via a prefix match, and opsmessage.* was kept out of that family for exactly this
+      # reason (ADR-0176 D4).
+      actions:
+        - opsmessage.compose                # ADR-0176 D5: operator-initiated customer messaging.
+                                             # Confirmed no M2M caller — the only allow rule for this
+                                             # action requires HUMAN + (ROLE_OPERATOR or ROLE_ADMIN) and
+                                             # explicitly excludes any service-account-* principal id
+                                             # (rest.rego operator-compose-message), the same exclusion
+                                             # m2m-sanctions-screening uses for the opposite carve-out.
 
     # ---------------------------------------------------------------------------------------
     # Feature-flag flip governance (ADR-0067 follow-up, issue #419). The OPA PEP (rest.rego)

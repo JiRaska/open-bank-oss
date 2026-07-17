@@ -64,6 +64,28 @@ class NotificationSecurityTest {
             .containsExactlyInAnyOrder("ROLE_OPERATOR", "ROLE_ADMIN")
     }
 
+    /**
+     * Code-review finding (PR #1368): `compose()` originally shipped `@Authorize` with no
+     * `resource` binding, so `AuthorizeInterceptor.satisfies()` compared only (action,
+     * resourceId=null, maker) on retry — a checker's approval of one message would silently
+     * also unlock a retry carrying completely different content, never reviewed by anyone.
+     * `resource = "#request"` fixes this by binding the approval to `request.toString()` (the
+     * data class's generated, content-derived fingerprint). This pins the annotation carries
+     * that binding; `ComposeMessageRequest toString() is a content-sensitive fingerprint` below
+     * proves the fingerprint itself actually varies with content, which is what the fix depends on.
+     */
+    @Test
+    fun `opsmessage compose binds its four-eyes approval to the request content, not to nothing`() {
+        val compose = methodNamed(OperatorMessageResource::class.java, "compose")
+        assertThat(compose.getAnnotation(Authorize::class.java)?.resource)
+            .describedAs(
+                "compose() must bind a resource — see PR #1368: without it, a checker's " +
+                    "approval of one message content silently authorizes ANY later retry from the " +
+                    "same maker, regardless of content",
+            )
+            .isEqualTo("#request")
+    }
+
     @Test
     fun `neither opsmessage endpoint is @PermitAll`() {
         val methods = listOf(
