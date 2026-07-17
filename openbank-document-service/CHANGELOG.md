@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.4](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.8.3...document-service-v0.8.4) (2026-07-17)
+
+
+### Bug Fixes
+
+* **document-service:** heal documents signed before the SIGNED transition existed ([#1416](https://github.com/JiRaska/open-bank-oss/issues/1416)) ([84182a4](https://github.com/JiRaska/open-bank-oss/commit/84182a408cf7d9b304bfc4a2ef5f3fc5b5d2ad67))
+
 ## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.8.2...document-service-v0.8.3) (2026-07-17)
 
 
