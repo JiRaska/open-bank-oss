@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.3](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.6.2...billing-service-v0.6.3) (2026-07-17)
+
+
+### Bug Fixes
+
+* **billing:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1462](https://github.com/JiRaska/open-bank-oss/issues/1462)) ([f92d245](https://github.com/JiRaska/open-bank-oss/commit/f92d2458f9835a2147c467bf4229a0be57ade351))
+
 ## [0.6.2](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.6.1...billing-service-v0.6.2) (2026-07-14)
 
 
