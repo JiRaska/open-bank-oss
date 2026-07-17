@@ -1,0 +1,68 @@
+# ArgoCD application-health alert rules.
+#
+# WHY THIS EXISTS: ArgoCD is the deploy backbone, and until #1453 nothing scraped it —
+# Prometheus held 4128 metric names and not one started with `argocd`, because the chart
+# defaults controller.metrics.enabled to false. So an app could sit Degraded indefinitely
+# with no signal anywhere.
+#
+# It did. On 2026-07-16 two apps had been Degraded for ~2 days and both were correct:
+#   - document-service — its OpenBao signing keystore is unseeded, so every PAdES seal it
+#     applies is a DEV-ONLY throwaway cert, worthless as evidence (#1284)
+#   - notifications    — a KEDA scaler broken for its entire 44-day life (#1400)
+# Both were found by an unrelated investigation. Neither paged, because nothing could.
+#
+# Note the shape of that failure: `sync_status="Synced"` AND `health_status="Degraded"`
+# at the same time — gitops is faithfully applying manifests while the thing those
+# manifests describe is broken. Sync status alone never reveals it, and sync status is
+# what people look at.
+#
+# Metric verified against argo-cd chart 9.5.21 / ArgoCD v3.4.3, by querying this
+# cluster's Prometheus after #1453's apply — not by reading a name:
+#   argocd_app_info — labels: name, health_status (Healthy|Progressing|Degraded|
+#     Unknown|Suspended|Missing), sync_status, dest_namespace, project, autosync_enabled.
+#   Live at the time of writing: Healthy 72, Progressing 10, Degraded 1, Unknown 1 —
+#   the single Degraded being document-service, i.e. this alert fires on a real,
+#   already-known-open fault the moment it lands.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-argocd-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: argocd
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: openbank.argocd.app-health
+      interval: 1m
+      rules:
+        # 1h, not 5m: a Degraded blip during a rollout is normal and self-clears — a
+        # canary mid-analysis, a pod restarting. What went unseen for two days is the
+        # PERSISTENT kind, so the threshold is set where it distinguishes the two.
+        - alert: ArgoCDAppDegraded
+          expr: |
+            argocd_app_info{health_status="Degraded"} > 0
+          for: 1h
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "ArgoCD app {{ $labels.name }} Degraded for over an hour"
+            description: "{{ $labels.name }} (namespace {{ $labels.dest_namespace }}) has been Degraded for >1h with sync_status={{ $labels.sync_status }}. A Synced+Degraded app means gitops applied the manifests and the workload they describe is still broken — check the app's resource tree, not its sync state. Two apps sat like this for 2 days before anything scraped ArgoCD (#1284, #1400)."
+            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0002-karpenter-node-drain.md"
+
+        # Unknown is not Degraded and is worth its own rule: it usually means the
+        # controller cannot assess the app at all (missing CRD, unreachable dest cluster,
+        # a broken health check) rather than that the workload is unhealthy. It is the
+        # state most likely to be mistaken for "fine" on a dashboard.
+        - alert: ArgoCDAppHealthUnknown
+          expr: |
+            argocd_app_info{health_status="Unknown"} > 0
+          for: 2h
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "ArgoCD cannot determine the health of {{ $labels.name }}"
+            description: "{{ $labels.name }} (namespace {{ $labels.dest_namespace }}) has reported health_status=Unknown for >2h. The controller is not failing the app — it cannot assess it. Check for a missing CRD or a resource whose health ArgoCD has no check for."
+            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0002-karpenter-node-drain.md"
