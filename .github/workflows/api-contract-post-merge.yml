@@ -1,0 +1,149 @@
+# -----------------------------------------------------------------------------
+# API-contract post-merge guard (ADR-0048 D5, issue #1465).
+#
+# THE GAP THIS CLOSES: ci.yml's api-contract gate classifies each PR against the
+# CURRENT merge-base, which already fixed the creation-time base.sha bug (#534).
+# But a residual remains, and ci.yml's own comment names it: a PR whose last CI
+# run predates a competing spec merge, and which then merges with no later run,
+# is unseen by ANY run-time base. Both PRs claim the same info.version; the second
+# lands new endpoints under an unchanged version (#481 × #524 on the ledger spec).
+#
+# The two documented preventions are both unavailable or unaffordable here:
+#   * a merge queue — requires an ORG-owned repo; this one is personal, so the
+#     ruleset rejects the rule outright (422, see #1465).
+#   * required-up-to-date branches — measured on this repo: main takes a merge
+#     every ~93 s (median), so a service PR would need ~8 CI re-runs and ~70 min
+#     to land. That taxes all ~100 merges/day to close a race that needs TWO PRs
+#     on the SAME spec in one CI window — and only 1 of the last 60 PRs touches an
+#     openapi.yaml at all.
+#
+# So: DETECT instead of prevent. Re-run the same classification on main, against
+# what main actually was, and shout if a spec landed mis-versioned. Costs nothing
+# on the ~59/60 PRs that touch no spec (path filter), adds zero PR latency, and
+# turns a silent contract break into an addressed issue.
+#
+# This does NOT block the bad merge — it has already happened. That is the trade:
+# immediate detection over a fleet-wide delay. Fix forward by bumping
+# info.version (the API axis is independent of version.txt — ADR-0048).
+# -----------------------------------------------------------------------------
+name: API contract post-merge guard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/openapi.yaml"
+
+permissions:
+  contents: read
+
+concurrency:
+  # Per-SHA: every main commit gets its own lane. Keying by ref would let a later
+  # push cancel this one, and a cancelled guard silently never classifies the
+  # commit it was created for — the exact silence this workflow exists to remove.
+  group: api-contract-post-merge-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  classify:
+    name: Classify the merged spec change
+    runs-on: ubuntu-latest # public repo => hosted runners free+unlimited (FinOps: hosted-first)
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # The guard diffs against what main was before this push. Shallow clones
+          # cannot reach it, and main is squash-merged so it is normally one commit
+          # back — but a push can carry more, so resolve it from the event, not HEAD~1.
+          fetch-depth: 0
+
+      - name: Resolve the pre-push base
+        id: base
+        env:
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          # All-zeroes on a branch's first push; impossible on main, but a wrong base
+          # would misclassify rather than fail, so guard it rather than assume.
+          if [ -z "${PUSH_BEFORE_SHA}" ] || [ "${PUSH_BEFORE_SHA}" = "0000000000000000000000000000000000000000" ]; then
+            echo "::warning::github.event.before is unusable (${PUSH_BEFORE_SHA:-empty}) — nothing to classify against."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! git cat-file -e "${PUSH_BEFORE_SHA}^{commit}" 2>/dev/null; then
+            echo "::warning::base ${PUSH_BEFORE_SHA} not present in the clone — nothing to classify against."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "base=${PUSH_BEFORE_SHA}" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "Classifying ${PUSH_BEFORE_SHA}..${GITHUB_SHA}"
+
+      - name: "api-contract classification (ADR-0048 D5, enforced)"
+        if: steps.base.outputs.skip == 'false'
+        # Same pinned + checksummed oasdiff as ci.yml's PR-time gate, and the same
+        # script with the same flags — only the base differs. A second implementation
+        # would be a second thing to keep true.
+        env:
+          OASDIFF_VERSION: "1.22.0"
+          OASDIFF_SHA256: "8b972accaf49f984cf40702af8b29360126ac9436594ccf6ac1ae662209a5fe6"
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 --retry-delay 3 -o /tmp/oasdiff.tar.gz \
+            "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz"
+          echo "${OASDIFF_SHA256}  /tmp/oasdiff.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/oasdiff.tar.gz -C /tmp oasdiff
+          sudo install -m 0755 /tmp/oasdiff /usr/local/bin/oasdiff
+          python3 .github/scripts/check-api-contract.py --base "${{ steps.base.outputs.base }}" --enforce
+
+  raise-issue:
+    name: Raise issue on a mis-versioned spec
+    needs: classify
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5  # API calls only
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or refresh the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          MERGED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          TITLE="A spec merged to main with a mis-classified info.version"
+          # Body via a plain redirect + --body-file, NOT BODY=$(cat <<EOF ...): a heredoc
+          # nested in $( ) mis-parses an apostrophe as an opening quote on bash 3.2, so
+          # that form cannot be dry-run locally. See dependency-submission.yml's alarm.
+          cat > "${RUNNER_TEMP:-/tmp}/issue-body.md" <<EOF
+          The post-merge api-contract classification FAILED for \`${MERGED_SHA}\`: an
+          \`openapi.yaml\` landed on main whose \`info.version\` does not match the change it
+          actually makes.
+
+          **This is the residual race ci.yml's diff-base comment names** (#481 × #524): two
+          spec PRs each classified green against their own base, the second merged without a
+          re-run, and it landed new endpoints under a version the first already took. The
+          PR-time gate cannot see it — that needs a merge queue (unavailable: org-only, #1465)
+          or required-up-to-date branches (rejected: ~8 CI re-runs and ~70 min per service PR
+          at this repo's ~93 s median merge gap, to close a race that needs two PRs on one
+          spec while only 1 in 60 PRs touches a spec at all).
+
+          Run: ${RUN_URL} — the log names the spec and the versions.
+
+          **Fix forward.** Bump \`info.version\` to the next free version on a new PR; the API
+          axis is independent of \`version.txt\` (ADR-0048), and whoever lands second takes the
+          next version. Do not rewrite main. Re-check the version against the CURRENT main
+          before pushing — that is the same trap that produced this issue.
+
+          This issue is refreshed on each further occurrence; close it once a spec merge is
+          green again.
+          EOF
+          existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file "${RUNNER_TEMP:-/tmp}/issue-body.md"
+          else
+            gh issue create --title "$TITLE" --body-file "${RUNNER_TEMP:-/tmp}/issue-body.md" \
+              --label governance --label "severity:high"
+          fi
