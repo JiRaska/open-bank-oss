@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.8.0...dispute-service-v0.8.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **dispute:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1493](https://github.com/JiRaska/open-bank-oss/issues/1493)) ([a889641](https://github.com/JiRaska/open-bank-oss/commit/a889641cc5b3bf430b4001bcfecbbe14bfaa3a41))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.7.6...dispute-service-v0.8.0) (2026-07-09)
 
 
