@@ -15,10 +15,6 @@ lineage:
       relationType: api
       description: reads release-please-config.json/.release-please-manifest.json/application.yaml
         via a repo checkout, and open-PR openapi.yaml diffs via the GitHub API
-  downstream:
-    - serviceName: admin-ui
-      relationType: api
-      description: exposes release/version-invariant findings and HITL approval queue
 schemaLineage:
   ownedSchemas: [releasesteward_schema]
   dependentSchemas: []
