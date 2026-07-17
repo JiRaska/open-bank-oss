@@ -16,6 +16,17 @@ import org.eclipse.microprofile.faulttolerance.CircuitBreaker
 import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
 
+/**
+ * Drains the account transactional outbox (ADR-0050 / ADR-0049 D3).
+ *
+ * **N4 — cross-pod row claim (#1201).** `concurrentExecution = SKIP` only prevents in-JVM
+ * overlap; it does not stop two pods from both running this scheduled method. `replicas: 1` is
+ * steady-state only — an Argo Rollouts canary window runs the old and new pod simultaneously for
+ * the whole rollout duration, and both dispatch on their own tick. `AccountOutboxRepositoryImpl`
+ * therefore implements [OutboxRepository.claimProcessable] as an atomic `FOR UPDATE SKIP LOCKED`
+ * claim, not the unclaimed-peek default, so two concurrently running pods can never both select
+ * and publish the same row.
+ */
 @ApplicationScoped
 class AccountOutboxDispatcher(
     private val repo: AccountOutboxRepository,
