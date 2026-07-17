@@ -19,10 +19,18 @@ metadata:
   labels:
     app.kubernetes.io/name: notification-service
     app.kubernetes.io/part-of: notifications
-    openbank.io/finops-tier: T2
+    # No openbank.io/finops-tier: the T2 declaration was removed with the KEDA
+    # ScaledObject it named (ADR-0057 T2 == "KEDA ScaledObject on Kafka consumer-group
+    # lag"). T2 stopped being true the moment the warm floor went to 1 for the
+    # customer-edge synchronous read; the scaler that made it nominally true had never
+    # worked. T1 (KEDA HTTP add-on, as product-catalog/interest/card-issuance/sdd use)
+    # is the plausible home once this service has a native image — until then it is
+    # unclassified, like the other 37 pending the ADR-0054 classifier.
 spec:
-  # No `replicas:` — KEDA's ScaledObject is the sole owner of the replica count
-  # (setting it here would fight the HPA on every reconcile).
+  # Replicas are owned here again, explicitly: KEDA's ScaledObject used to own them and
+  # is gone. Leaving the field absent would work only by Kubernetes' default-to-1, which
+  # is an accident rather than a declaration.
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: notification-service
