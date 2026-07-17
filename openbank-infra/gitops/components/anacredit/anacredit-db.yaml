@@ -5,10 +5,9 @@
 # secret (username/password for the `openbank` owner) and an anacredit-db-rw Service the Deployment
 # uses. Must reconcile BEFORE the anacredit-service image that carries the datasource config
 # deploys, else Flyway-at-start fails on a missing DB (same pattern as product-catalog-db.yaml).
-# NOTE: no S3 WAL/backup here yet — that needs an EKS Pod Identity role (#863 pattern, same gap as
-# product-catalog-db), tracked as a follow-up. Unlike product-catalog, credit exposures are NOT
+# S3 WAL archiving + daily base backups are configured below (#1444). Credit exposures are NOT
 # reconstructible from in-code seed data — a data-loss event here loses real regulatory-reporting
-# state, so backups should be prioritised ahead of product-catalog's when that follow-up lands.
+# state, which is why this one is not left on the "restore from seed" footing product-catalog is.
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -28,7 +27,33 @@ spec:
   postgresql:
     parameters:
       wal_keep_size: "64MB"
+      # Bound WAL so a checkpoint spike or bulk load cannot fill the 2Gi volume (#1432).
+      max_wal_size: "512MB"
+  # WAL archiving + daily base backups to S3 (ADR-0035, #863 pattern). Credentials via EKS
+  # Pod Identity on the anacredit-db ServiceAccount (aws/.../db-backups.tf) — barman reads the
+  # SDK chain, no secret. Sandbox S3 lifecycle expires after 35d; prod needs compliance retention.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/anacredit-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
   bootstrap:
     initdb:
       database: openbank_anacredit
       owner: openbank
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: anacredit-db-daily
+  namespace: anacredit
+spec:
+  schedule: "0 3 3 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: anacredit-db

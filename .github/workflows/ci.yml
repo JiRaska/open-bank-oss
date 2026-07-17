@@ -627,6 +627,18 @@ jobs:
         run: python3 openbank-infra/scripts/check-db-migration.py --base "${PR_DIFF_BASE}"
 
       # rules.yaml event_change / ADR-0006: schema-compat gate. The fleet's event
+      # A CNPG cluster gets its S3 backup credentials from an EKS Pod Identity association in
+      # db-backups.tf, granted per (namespace, serviceAccount). That list is maintained by hand
+      # and nothing linked it to the gitops manifests, so a new database could declare
+      # `barmanObjectStore` + `inheritFromIAMRole: true`, report Ready and Healthy, and silently
+      # never back up — there is no failure until someone needs a restore. Three clusters were
+      # in exactly that state (issue #1444); sdd-db had been failing every WAL archive for three
+      # days. NOT diff-scoped: it runs against whole repo state, because the gap is a MISSING
+      # pair, and a PR that adds only the gitops half would not touch the .tf side at all.
+      # ADVISORY for now — add --enforce to flip.
+      - name: "db-backup association gate — every backed-up CNPG cluster has pod identity (advisory)"
+        run: python3 openbank-infra/scripts/check-db-backup-associations.py
+
       # contract is the set of Kotlin data classes extending DomainEvent (JSON on
       # Kafka via the outbox; no .avsc files exist yet — the script covers those
       # too for the ADR-0006 Apicurio target state). DIFF-SCOPED: compares each
