@@ -14,9 +14,6 @@ lineage:
     - serviceName: transaction-service
       relationType: api
       description: creates
-    - serviceName: aml-service
-      relationType: api
-      description: screens
 schemaLineage:
   ownedSchemas:
     - swift_schema

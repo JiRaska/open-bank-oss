@@ -18,9 +18,6 @@ lineage:
       relationType: topic
       description: consumes payment events for settlement
   downstream:
-    - serviceName: transaction-service
-      relationType: api
-      description: creates settlement transactions
     - serviceName: audit-service
       relationType: topic
       description: emits settlement audit events

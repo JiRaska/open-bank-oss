@@ -30,9 +30,6 @@ lineage:
     - serviceName: balance-service
       relationType: api
       description: init
-    - serviceName: party-service
-      relationType: api
-      description: owner
     - serviceName: audit-service
       relationType: topic
       description: events

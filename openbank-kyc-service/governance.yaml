@@ -12,14 +12,8 @@ evidenceExported: true
 lineage:
   downstream:
     - serviceName: party-service
-      relationType: api
+      relationType: topic
       description: updates
-    - serviceName: aml-service
-      relationType: topic
-      description: triggers
-    - serviceName: notification-service
-      relationType: topic
-      description: events
 schemaLineage:
   ownedSchemas:
     - kyc_schema

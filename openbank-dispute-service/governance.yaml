@@ -10,10 +10,6 @@ dataClassification: confidential
 retentionPolicy: 7 years
 evidenceExported: true
 lineage:
-  downstream:
-    - serviceName: card-issuance-service
-      relationType: api
-      description: blocks
 schemaLineage:
   ownedSchemas:
     - disputes_schema

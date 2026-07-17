@@ -14,10 +14,6 @@ lineage:
     - serviceName: dispute-service
       relationType: api
       description: blocks
-  downstream:
-    - serviceName: account-service
-      relationType: api
-      description: issues
 schemaLineage:
   ownedSchemas:
     - cards_schema
