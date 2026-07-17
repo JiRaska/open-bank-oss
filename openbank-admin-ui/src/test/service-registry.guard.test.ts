@@ -88,17 +88,34 @@ function walkYaml(dir: string): string[] {
  * Regex-based (the repo's guard-test convention) — these manifests are plain,
  * single-doc-per-kind YAML, so a parser buys nothing here.
  */
+/**
+ * Finds the `name:` value inside the `metadata:` block starting at [metadataLineIdx].
+ * Line-by-line, not regex: an indented, whitespace-only line (e.g. "\t\t") let a
+ * `[ \t]+` / `.*` pair split it many ways, and CodeQL flagged the resulting exponential
+ * backtrack (js/redos) even after pinning the char class to `[ \t]`. Scanning lines
+ * directly has no backtracking to begin with.
+ */
+function nameFromMetadataBlock(lines: string[], metadataLineIdx: number): string | undefined {
+  for (let i = metadataLineIdx + 1; i < lines.length; i++) {
+    const line = lines[i]
+    if (!/^[ \t]/.test(line)) break // dedented past the metadata block
+    const m = /^[ \t]+name:[ \t]*([a-z0-9][a-z0-9-]*)[ \t]*$/.exec(line)
+    if (m) return m[1]
+  }
+  return undefined
+}
+
 function gitopsWorkloadNames(): Set<string> {
   const names = new Set<string>()
   for (const file of walkYaml(GITOPS)) {
     const src = readFileSync(file, 'utf-8')
     for (const doc of src.split(/^---$/m)) {
       if (!/^kind:\s*(Deployment|Service|Rollout)\s*$/m.test(doc)) continue
-      // `[ \t]` rather than `\s`: `\s` matches \n, so `(?:\s+.*\n)*?` could split a run of
-      // " \n" lines many ways and backtrack exponentially (CodeQL js/redos). Indentation is
-      // spaces/tabs only, so pinning it makes each iteration consume exactly one line.
-      const m = doc.match(/^metadata:[ \t]*\n(?:[ \t]+.*\n)*?[ \t]+name:[ \t]*([a-z0-9][a-z0-9-]*)[ \t]*$/m)
-      if (m) names.add(m[1])
+      const lines = doc.split('\n')
+      const metadataLineIdx = lines.findIndex(l => /^metadata:[ \t]*$/.test(l))
+      if (metadataLineIdx === -1) continue
+      const name = nameFromMetadataBlock(lines, metadataLineIdx)
+      if (name) names.add(name)
     }
   }
   return names
