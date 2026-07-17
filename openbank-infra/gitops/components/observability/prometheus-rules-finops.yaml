@@ -63,12 +63,20 @@ spec:
     - name: openbank.finops.karpenter-churn
       interval: 5m
       rules:
-        # D3: Node churn rate. Karpenter exports karpenter_nodes_total with
-        # lifecycle phase labels. High disruption/termination rate outside the
-        # maintenance window indicates misconfigured consolidation.
+        # D3: Node churn rate. High termination rate outside the maintenance window
+        # indicates misconfigured consolidation.
+        #
+        # These two rules were dead from the day they were written: they queried
+        # `karpenter_nodes_total{lifecycle="terminating"}`, and Karpenter 1.x exports
+        # neither that metric nor that label. `karpenter_nodes_total` exists only as a
+        # PREFIX of unrelated capacity gauges (`karpenter_nodes_total_pod_requests`,
+        # `..._daemon_limits`) — which is what made a grep for it look like a match.
+        # Nothing scraped Karpenter either (#1445), so the rules never evaluated and the
+        # wrong name never surfaced. Both now fixed; queries below were run against this
+        # cluster's Prometheus and return data.
         - alert: FinOpsKarpenterNodeChurnHigh
           expr: |
-            increase(karpenter_nodes_total{lifecycle="terminating"}[1h]) > 3
+            increase(karpenter_nodes_terminated_total[1h]) > 3
           for: 10m
           labels:
             severity: warning
@@ -84,7 +92,7 @@ spec:
         - alert: FinOpsKarpenterChurnOutsideMaintenance
           expr: |
             (hour() >= 7 and hour() < 20) and
-            increase(karpenter_nodes_total{lifecycle="terminating"}[30m]) > 2
+            increase(karpenter_nodes_terminated_total[30m]) > 2
           for: 5m
           labels:
             severity: critical
@@ -94,6 +102,30 @@ spec:
           annotations:
             summary: "Node churn during business hours — {{ $value }} nodes"
             description: "Karpenter terminated {{ $value }} nodes during business hours (07:00–20:00 UTC). This causes unnecessary EBS detach races and cross-AZ traffic spikes. Prometheus server UTC assumed."
+            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0002-karpenter-node-drain.md"
+
+        # A NodePool at its `limits` cap is invisible until it bites: Karpenter simply
+        # refuses to provision ("all available instance types exceed limits for nodepool"),
+        # pods sit Pending, and a Rollout eventually aborts on its progress deadline. That
+        # is how #1272 was found — and how #809 was found before it, at the previous cap.
+        # Twice discovered by a failure rather than a signal; this is the signal.
+        #
+        # The cap is a deliberate cost guardrail (without it Karpenter once provisioned
+        # 14x c6g.12xlarge, ~$235/day), so this must not read as "raise it" — it reads as
+        # "the pool has no room left; decide whether demand or the cap is wrong."
+        - alert: FinOpsKarpenterNodePoolNearCap
+          expr: |
+            100 * karpenter_nodepools_usage{resource_type="cpu"}
+              / on(nodepool) karpenter_nodepools_limit{resource_type="cpu"} >= 90
+          for: 15m
+          labels:
+            severity: warning
+            detector: D3
+            team: platform
+            route: finops-agent
+          annotations:
+            summary: "NodePool {{ $labels.nodepool }} at {{ $value | printf \"%.0f\" }}% of its CPU cap"
+            description: "Karpenter cannot add nodes to {{ $labels.nodepool }} once usage reaches the cap: pods stay Pending and Rollouts abort on progressDeadlineSeconds (#1272, #809). Decide whether declared requests grew honestly (raise the cap) or overstate demand (right-size them) — do not reflex-raise; the cap is the runaway-cost guardrail."
             runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0002-karpenter-node-drain.md"
 
     - name: openbank.finops.ebs-health
