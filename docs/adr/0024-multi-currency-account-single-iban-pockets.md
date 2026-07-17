@@ -5,9 +5,9 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): Jiří Raška
 
-**Delivery note (updated 2026-06-30):**
+**Delivery note (updated 2026-07-17):**
 - **Model decision** — ✅ Complete: one IBAN + N currency pockets per account, pocket-level balance/overdraft; architecture settled and documented.
-- **Implementation** — ⬜ Pending: account/CurrencyPocket schema + routing logic, per-pocket statement dates, deposit-insurance aggregation, AnaCredit exposure tie-out not yet coded; sequenced in multicurrency-implementation-plan.
+- **Implementation** — 🟡 Partial: the CurrencyPocket schema (`V7__account_pockets.sql`, `AccountPocketEntity`, `CurrencyPocketRepositoryImpl`), pocket routing / missing-pocket policy (`PocketRouter` + `AccountService.resolvePocket`, unit-tested), and pocket lifecycle (add/close/list via `AccountResource` `/pockets`) are **shipped** and now underpin ADR-0107/0109/0110. Still ⬜ Pending: **per-pocket statement dates, deposit-insurance aggregation, AnaCredit exposure tie-out** — not yet coded; sequenced in multicurrency-implementation-plan.
 
 ## Context
 

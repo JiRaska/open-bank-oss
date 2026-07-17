@@ -6,8 +6,9 @@ Delivery-Status: Partial
 Author(s): OpenBank platform
 
 **Delivery note (updated 2026-06-30):**
-- **Governance primitives** — ✅ Ready: read-model projection, four-eyes maker-checker stage functions, `AuditEvent` trail, COMPLIANCE-role `PiiMask`, and OPA advisory/enforce ladders designed and tested in domain layer.
-- **Admin-UI and SCA step-up** — ⬜ Pending: cockpit UI (party/KYC/SCA stage funnel, drill-down timeline), operator step-up SCA, and admin surface not yet shipped.
+- **Governance primitives** — ✅ Ready (domain layer): read-model projection + canonical funnel-stage function, `com.openbank.libs.foureyes` maker-checker primitive (wired into kyc approve/reject), and audited/reasoned kyc decisions. ⚠️ Designed-not-wired on the onboarding read API: role-based `PiiMask` (PII still returned plaintext) and OPA `@Authorize` enforce (endpoints are `@RolesAllowed`).
+- **Admin-UI cockpit (read)** — ✅ Shipped: `/onboarding` "Onboarding Cockpit" — per-stage funnel KPI tiles, stage-filtered records board, per-applicant drill-down drawer (nav-registered, BFF-wired to onboarding-service).
+- **Action surface, step-up & read-API authz** — ⬜ Pending: the four-eyes approval-queue tab, operator action buttons + mandatory-reason modal, drill-down audit timeline, operator step-up SCA, and — on the onboarding read API — OPA `@Authorize` enforce and role-based `PiiMask`.
 
 ## Context
 

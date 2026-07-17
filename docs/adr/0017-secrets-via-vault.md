@@ -5,12 +5,24 @@ Status: Accepted
 Delivery-Status: Partial
 Author(s): jiri.raska
 
-**Delivery note (updated 2026-07-01):**
-- **`BootstrapVerifier` in `openbank-libs`** — ✅ Shipped: fails-fast at startup if any property literally equals a local-dev placeholder outside the `%dev` profile; prevents prod regression.
-- **Dev `docker-compose.yml` Vault container + `vault-seed.sh`** — ✅ Shipped: `make up` seeds KV paths; new contributors get a working dev stack with no unseal ceremony.
-- **Per-service `application.yaml` migration** (28 services) — Partial: account, transaction, ledger, and sepa-payment migrated first; remaining services migrate opportunistically when touched.
+**Delivery note (updated 2026-07-17):** ⚠️ **The delivered mechanism is not the one this ADR
+decided.** The platform ships **OpenBao (an MPL-2.0 Vault fork) + External Secrets Operator (ESO) +
+env-var indirection** (see ADR-0007, runbook `docs/runbooks/0005-vault-to-openbao-migration.md`) — the
+Quarkus Vault extension + `BootstrapVerifier` this ADR prescribes were never wired. `quarkus-vault` is
+declared in `libs.versions.toml` but referenced by zero `build.gradle.kts`. ESO is the option this
+ADR's own "Alternatives considered" rejected, so **Decision-Status warrants re-evaluation (likely
+Superseded by ADR-0007 once an ADR records it)** — flagged, not changed here.
+- **`BootstrapVerifier` in `openbank-libs`** — ⬜ **Not shipped**: no `BootstrapVerifier` class exists
+  in code; the fail-fast placeholder guard was never implemented. (Service docs asserting it exists are
+  stale.)
+- **Dev secrets backend** — ✅ Shipped, but it is **OpenBao**, not "Vault": `docker-compose.yml` svc
+  `openbao`, seeded by `docker/openbao/init/init.sh` (KV v2 at `openbank/`). There is no `vault-seed.sh`.
+- **Per-service secret sourcing** — 🟡 Partial: account/transaction/ledger/sepa-payment source secrets
+  via **env vars populated by ESO/OpenBao**, not the Quarkus Vault extension. Even these are not fully
+  clean — account-service still carries a literal `openbank_secret` / `openbank_cache_secret`.
 - **CI vault-seed step** for integration tests — ⬜ Pending.
-- **Prod AppRole provisioning runbook** in `docs/strategy/` — ⬜ Pending.
+- **Prod AppRole provisioning runbook** in `docs/strategy/` — ⬜ Pending (moot: prod uses ESO with
+  Vault Kubernetes auth, not AppRole).
 
 ## Context
 

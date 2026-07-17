@@ -7,7 +7,7 @@ Author(s): Jiří Raška
 
 **Delivery note (updated 2026-06-30):**
 - **Five in-code controls (F1/F2/F3/F6/F7)** — ✅ Shipped: integrity hash (F1), Merkle-root tamper-evidence (F2), maker-checker (F3), crypto-erasure (F6), schema governance (F7) are build-time gated and tested.
-- **External adapter controls (F4/F5/F8/F9)** — ⬜ Pending: WORM S3 Object Lock adapter, KMS-backed erasure `@Alternative`, and Apicurio registry integration not yet implemented; assurance levels remain 🟡 YELLOW for those findings.
+- **External adapter controls** — 🟡 Partial (the 2026-06-30 "not yet implemented" line was false and mis-numbered these as F4/F5/F8/F9): the three named adapters are implemented, tested and build-gated — `VaultCryptoErasure` (F6) and `ApicurioSchemaCatalogSource` (F7) are **deployed** in dev compose; `S3WormArchive` (F2) is code-complete + unit-tested (SigV4 / Object-Lock COMPLIANCE) but **not yet deployed** (awaits a provisioned S3 Object-Lock bucket), assurance 🟡. The genuine remaining gap is **OLTP source-side reconciliation (F4/F5)**: `HttpReconciliationSource` exists (ADR-0026) but is not deployed, so the drift check runs warehouse-only. **F8/F9** are config-only GREEN (no external adapter — never "pending").
 
 ## Context
 

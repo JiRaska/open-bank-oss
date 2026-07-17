@@ -7,7 +7,7 @@ Author(s): OpenBank platform
 
 **Delivery note (updated 2026-06-30):**
 - **Architecture** — ✅ Settled: eIDAS 2.0 / EUDI Wallet positioning confirmed; `pid-service` + Splink probabilistic linkage + Temporal orchestration + four-eyes decision primitives designed.
-- **Implementation** — ⬜ Pending: OpenID4VP/OpenID4VCI endpoints, EUDI PID credential acceptance, document-analysis LLM integration (Track C), and Temporal flow orchestration not yet coded; identity-hub onboarding phased.
+- **Implementation** — 🟡 Partial: OpenID4VP relying-party verify+resolve, OpenID4VCI PID issuance (offer/token/credential/revoke + Token Status List), mdoc, and the in-process Fellegi–Sunter tier-2′ matcher are **shipped and tested** (`pid-service`, migrations `V8`/`V9`; landed 2026-06-26). ⬜ Pending: (Q)EAA attestation catalogue (only a PID VC issues today), QEAA/HSM/QTSP signing, the Splink `identity-match-service` sidecar (matcher is in-process for now), OPA purpose-binding + minimum-LoA inputs, graded LoA ingestion (`levelOfAssurance` is a hardcoded `"HIGH"`), document-analysis LLM (Track C), and the Temporal onboarding-orchestration cutover.
 
 ## Context
 
