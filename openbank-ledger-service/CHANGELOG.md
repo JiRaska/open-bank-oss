@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.15.0...ledger-service-v1.15.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **ledger:** give TieOutScheduler catch-up so a deploy-window miss self-heals ([#1398](https://github.com/JiRaska/open-bank-oss/issues/1398)) ([a5e50bd](https://github.com/JiRaska/open-bank-oss/commit/a5e50bdf44035ba1e463a2bc4e252503167cca68))
+
 ## [1.15.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.14.0...ledger-service-v1.15.0) (2026-07-17)
 
 
