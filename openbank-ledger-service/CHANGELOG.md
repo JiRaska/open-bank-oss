@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.14.0...ledger-service-v1.15.0) (2026-07-17)
+
+
+### Features
+
+* **interest:** post the ADR-0033 split so capitalization actually credits the customer ([#1316](https://github.com/JiRaska/open-bank-oss/issues/1316)) ([b2ae411](https://github.com/JiRaska/open-bank-oss/commit/b2ae4117f6995b63f16e53a3004fdabee4ed223d))
+
 ## [1.14.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.13.0...ledger-service-v1.14.0) (2026-07-16)
 
 
