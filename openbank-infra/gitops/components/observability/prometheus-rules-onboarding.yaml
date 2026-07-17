@@ -1,0 +1,79 @@
+# Onboarding / event-bus alert rules.
+#
+# WHY THIS EXISTS: new-customer onboarding was completely broken in sandbox for ~3 weeks
+# (last account opened 2026-06-24) and NOTHING alerted. A chain of silent faults —
+# party-service locked out of its own Kafka topics, sanctions-db out of disk,
+# product-catalog scaled to zero on the onboarding path, and PartyEventConsumer
+# acking-and-dropping the events it couldn't project — each broke the pipeline without
+# turning anything red. It was found only by driving a real registration end to end.
+# These rules make the two silent signals loud: events landing in the party-events DLQ,
+# and parties being created without accounts following.
+#
+# Picked up automatically (ruleSelectorNilUsesHelmValues=false; observability app recurses
+# this directory). Metric names verified live: openbank_parties_created_total /
+# openbank_accounts_created_total come from libs DomainMetrics (Micrometer -> _total);
+# kafka_* come from the Strimzi Kafka Exporter (topicRegex ".*", so every topic including
+# the DLQ is scraped). CNPG disk / instance-down is already covered by openbank-db-alerts
+# (PostgresInstanceDown / PostgresVolumeLow) — not duplicated here.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-onboarding-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.onboarding.pipeline
+      rules:
+        - alert: PartyEventDeadLettered
+          # A party event that survived PartyEventConsumer's bounded retry and was routed to the
+          # DLQ (failure-strategy: dead-letter-queue). The DLQ has no consumer by design, so any
+          # record on it is an unprocessed event — most likely a PARTY_CREATED whose customer got
+          # no account. This is the exact silent data-loss that ran for 3 weeks, now made loud.
+          # increase() over 1h: fires while records are still arriving and clears an hour after
+          # they stop (the topic offset is monotonic, so a plain `> 0` would latch forever).
+          expr: |
+            increase(kafka_topic_partition_current_offset{topic="dead-letter-topic-party-events-in"}[1h]) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Party events are being dead-lettered (account-service)"
+            description: "account-service dead-lettered at least one party event in the last hour — a well-formed event it could not project even after retries. Almost always a downstream dependency is down (sanctions-service, product-catalog, the accounts DB). Inspect `dead-letter-topic-party-events-in`; every record there is a customer action (likely a PARTY_CREATED → no account opened) awaiting replay once the dependency recovers."
+        - alert: OnboardingAccountsNotFollowingParties
+          # The disparity that names this incident: parties ARE being created but accounts are NOT
+          # following. Silent when nothing is happening — no parties created means the left side is
+          # empty and this never fires, so it is safe in a sandbox with sporadic onboarding.
+          #
+          # Party side: openbank_parties_created_total — create-specific (the account.created
+          # pipeline is driven by PARTY_CREATED only, so party.events' topic offset can't be used;
+          # it also counts PARTY_UPDATED/KYC churn and would fire on pure-update bursts).
+          # Account side: the account.created TOPIC OFFSET, not openbank_accounts_created_total.
+          # That counter is registered lazily and resets per account-service pod, so it can read
+          # zero for an hour after a deploy even though accounts opened on the prior pod — a false
+          # positive. The Kafka Exporter's topic offset is external, monotonic and survives service
+          # restarts, so `increase(...) == 0` means genuinely no account was opened.
+          expr: |
+            (sum(increase(openbank_parties_created_total[1h])) > 0)
+            unless
+            (sum(increase(kafka_topic_partition_current_offset{topic="openbank.accounts.account.created"}[1h])) > 0)
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Parties are being created but no accounts are opening"
+            description: "openbank_parties_created_total rose over the last hour while openbank_accounts_created_total did not — new customers are registering but the PARTY_CREATED → account.created pipeline is not producing accounts. This is the onboarding outage signature (party-service → Kafka → account-service). Check the party-events consumer lag, the DLQ (PartyEventDeadLettered), and account-service's dependencies (sanctions-service, product-catalog)."
+        - alert: KafkaConsumerGroupLagStuck
+          # General event-bus safety net — the config comment on the Kafka Exporter calls
+          # consumer-group lag "the single most useful event-bus health signal" and until now NO
+          # alert used it. A consumer group whose lag stays high is stuck (wedged handler, a
+          # dependency it needs is down, or it lost topic access). Threshold + 15m dwell keep it
+          # quiet under normal catch-up bursts in a low-volume sandbox.
+          expr: kafka_consumergroup_lag > 500
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kafka consumer group {{ $labels.consumergroup }} is falling behind"
+            description: "Consumer group {{ $labels.consumergroup }} has lag >500 on topic {{ $labels.topic }} sustained for 15m — it is not keeping up. A wedged handler, a down dependency, or a missing topic ACL (the class that took party-service offline) all look like this. Check the consuming service's logs and its KafkaUser ACLs."
