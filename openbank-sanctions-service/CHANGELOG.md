@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.7.1...sanctions-service-v0.7.2) (2026-07-17)
+
+
+### Bug Fixes
+
+* **sanctions:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1542](https://github.com/JiRaska/open-bank-oss/issues/1542)) ([3a74c43](https://github.com/JiRaska/open-bank-oss/commit/3a74c4374f7c659836150f760329bf08cae49442))
+
 ## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.7.0...sanctions-service-v0.7.1) (2026-07-17)
 
 
