@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.4](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.8.3...sepa-payment-v0.8.4) (2026-07-17)
+
+
+### Bug Fixes
+
+* **sepa-payment:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1471](https://github.com/JiRaska/open-bank-oss/issues/1471)) ([566ac07](https://github.com/JiRaska/open-bank-oss/commit/566ac07dd7f359fbaccec37c3e82e805a3100de1))
+
 ## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.8.2...sepa-payment-v0.8.3) (2026-07-14)
 
 
