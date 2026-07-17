@@ -175,6 +175,54 @@ class NotificationConsumerIT {
         assertThat(bodyFor(partyId)).doesNotContain(code)
     }
 
+    /**
+     * The #1325 hole, end to end: a secret-shaped variable on an ordinary, non-SECRET template.
+     *
+     * Before the closed schema this rendered through the `else` branch as `code: 483920` and was
+     * persisted in cleartext — `TemplateSensitivity` could not help, because it classifies
+     * templates and the template here is legitimately not secret. Now the request never reaches
+     * `dispatch`, so no row exists at all.
+     */
+    @Test
+    fun `undeclared variable is rejected before anything is stored (issue 1325)`() {
+        val partyId = UUID.randomUUID()
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.EMAIL,
+                template = NotificationTemplate.ACCOUNT_FROZEN,
+                recipient = "frozen@example.com",
+                variables = mapOf(
+                    "accountNumber" to "CZ6508000000192000145399",
+                    "reason" to "AML review",
+                    "code" to "483920",
+                ),
+            ),
+        )
+
+        // Rejected, not stored-then-redacted: the row was never written.
+        assertThat(countFor(partyId)).isEqualTo(0L)
+    }
+
+    /** The same template without the smuggled key goes through untouched. */
+    @Test
+    fun `declared variables on the same template are accepted and stored`() {
+        val partyId = UUID.randomUUID()
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.EMAIL,
+                template = NotificationTemplate.ACCOUNT_FROZEN,
+                recipient = "frozen-ok@example.com",
+                variables = mapOf("accountNumber" to "CZ6508000000192000145399", "reason" to "AML review"),
+            ),
+        )
+
+        assertThat(countFor(partyId)).isEqualTo(1L)
+        assertThat(bodyFor(partyId)).contains("AML review")
+        assertThat(bodyFor(partyId)).doesNotContain("483920")
+    }
+
     /** An ordinary template is untouched — redaction is an allow-list, not a blanket. */
     @Test
     fun `non-secret template still stores its rendered body`() {
