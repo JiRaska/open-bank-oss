@@ -21,6 +21,42 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      # Whether to wait for a Gradle snapshot depends on whether one is coming: the retry
+      # below must be armed ONLY when dependency-submission.yml is also running for this PR,
+      # i.e. when the same paths it filters on changed. Measured the hard way — with the
+      # retry armed unconditionally this job sat >11 min on a PR that touched no manifest
+      # at all, because GitHub reports a snapshot warning for the head SHA regardless (the
+      # Gradle graph is inherited from main, never submitted for this SHA). That would have
+      # taxed the ~93% of PRs this feature has nothing to say about.
+      #
+      # Same merge-base resolution as ci.yml's shared diff-base step, and for the same
+      # reason: pull_request.base.sha is frozen at PR creation and misclassifies once a
+      # competing PR merges first.
+      - name: Detect dependency-manifest changes
+        id: deps
+        env:
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          base="${EVENT_BASE_SHA}"
+          git fetch --depth=2 origin "${GITHUB_SHA}" 2>/dev/null || true
+          if git rev-parse -q --verify 'HEAD^2' >/dev/null 2>&1; then
+            base="$(git rev-parse 'HEAD^1')"
+          else
+            git fetch --depth=1 origin "${base}" 2>/dev/null || true
+          fi
+          # Keep this list in sync with dependency-submission.yml's path filters.
+          # Here-string, not a pipe: `set -o pipefail` + `grep -q` exiting early SIGPIPEs
+          # the producer and fails the step (a known footgun in this repo's workflows).
+          files="$(git diff --name-only "${base}" "${GITHUB_SHA}")"
+          if grep -qE '(^|/)build\.gradle\.kts$|^openbank-libs/gradle/libs\.versions\.toml$|^settings\.gradle\.kts$|^gradle/wrapper/' <<< "${files}"; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Dependency manifests changed — will wait for the Gradle snapshot from dependency-submission.yml."
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No dependency manifest touched — no Gradle submission runs for this PR, so nothing to wait for."
+          fi
+
       - name: Dependency Review
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
@@ -32,15 +68,13 @@ jobs:
           # every PR was invisible here and vulnerable deps landed unreviewed, to surface
           # later as Dependabot alerts on main.
           #
-          # On a dependency-touching PR that submission job runs concurrently with this
-          # one, so the head-SHA snapshot may not exist yet when this starts: retry until
-          # it does. gradle/actions documents 600 s, but the fleet's resolve was MEASURED
-          # at ~670 s, so 600 would time out before the snapshot ever landed — 1200 leaves
-          # room for the resolve plus queue time.
-          #
-          # On a PR that touches no dependency manifest, no submission runs and there is no
-          # snapshot warning to retry on, so this returns at its usual few seconds.
-          retry-on-snapshot-warnings: true
+          # Armed only on dependency-touching PRs (see the detect step above): there the
+          # submission job runs concurrently with this one, so the head-SHA snapshot may
+          # not exist yet when this starts and we must wait for it. gradle/actions
+          # documents a 600 s timeout, but this fleet's resolve was MEASURED at ~670 s —
+          # 600 would give up before the snapshot could ever land. 1200 covers the resolve
+          # plus queue time, and the job's own timeout-minutes is set above it.
+          retry-on-snapshot-warnings: ${{ steps.deps.outputs.changed == 'true' }}
           retry-on-snapshot-warnings-timeout: 1200
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
           # No allow-ghsas / allow-dependencies-licenses entries: both suppressions
