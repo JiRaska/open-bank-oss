@@ -14,10 +14,13 @@ permissions:
 jobs:
   dependency-review:
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
-    # 25 > the retry window below, which must in turn outlast dependency-submission.yml
-    # (measured ~11 min for the full-fleet resolve) or this job would give up before the
-    # graph it is waiting for exists.
-    timeout-minutes: 25
+    # Sized from an end-to-end measurement on a real dependency-touching PR, not from the
+    # submission's runtime alone: the resolve itself took 734 s, but the snapshot only
+    # became queryable ~24 min after this job started (GitHub indexes the submitted graph
+    # after the API call returns). At timeout-minutes: 25 that run cleared by 48 s — one
+    # slow queue away from a spurious red on an honest PR. 35 leaves real headroom.
+    # Only dependency-touching PRs wait at all; the rest finish in ~7 s (retry disarmed).
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -69,13 +72,15 @@ jobs:
           # later as Dependabot alerts on main.
           #
           # Armed only on dependency-touching PRs (see the detect step above): there the
-          # submission job runs concurrently with this one, so the head-SHA snapshot may
-          # not exist yet when this starts and we must wait for it. gradle/actions
-          # documents a 600 s timeout, but this fleet's resolve was MEASURED at ~670 s —
-          # 600 would give up before the snapshot could ever land. 1200 covers the resolve
-          # plus queue time, and the job's own timeout-minutes is set above it.
+          # submission job runs concurrently with this one, so the head-SHA snapshot does
+          # not exist yet when this starts ("No snapshots were found for the head SHA")
+          # and we must wait for it.
+          #
+          # gradle/actions documents 600 s. Measured end-to-end on a real dependency PR,
+          # the snapshot only became queryable ~24 min in (734 s resolve + GitHub's own
+          # indexing lag afterwards), so 600 — and even 1200 — undershoot reality. 1800.
           retry-on-snapshot-warnings: ${{ steps.deps.outputs.changed == 'true' }}
-          retry-on-snapshot-warnings-timeout: 1200
+          retry-on-snapshot-warnings-timeout: 1800
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
           # No allow-ghsas / allow-dependencies-licenses entries: both suppressions
           # here existed solely for schemathesis 3.39.16's transitive pins, and the
