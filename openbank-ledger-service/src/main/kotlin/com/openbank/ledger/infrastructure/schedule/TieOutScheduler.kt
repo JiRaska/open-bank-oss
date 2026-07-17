@@ -17,6 +17,7 @@ import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.runBlocking
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
@@ -36,6 +37,17 @@ import java.time.ZoneId
  * [TieOutFreshnessWatchdog] can escalate a MISSING run (the #855 failure mode: a control
  * that silently stops running is invisible in metrics that only fire on breaks).
  * The scheduler never crashes — failures are caught, logged and recorded as ERROR.
+ *
+ * **Catch-up (issue #1378).** A single JVM instance owns this `@Scheduled` trigger with no
+ * cross-pod coordination (ADR-0039 Phase B pre-dates that work); a deploy — canary rollout or
+ * plain restart — that straddles the exact 06:00 fire time skips the tick with nothing to
+ * retry it. That happened for real on 2026-07-17: PR #1316's rollout landed on the trigger
+ * minute and the day was never checked (confirmed clean only by a manual query against
+ * [LedgerUseCase.getControlAccountTieOut] after the fact). So every run first asks
+ * [TieOutRunRepository.findLatest] for the last `as_of` it has a row for and walks forward from
+ * there to yesterday, oldest day first — the same healing shape as `CloseCalendar`'s
+ * oldest-first catch-up in statement-service, for the same reason: capping to the *newest* N
+ * days would strand the oldest gap forever, since the cursor here only ever moves forward too.
  */
 @ApplicationScoped
 class TieOutScheduler(
@@ -43,6 +55,8 @@ class TieOutScheduler(
     private val glAccountRepository: GlAccountRepository,
     private val runRepository: TieOutRunRepository,
     private val clock: Clock,
+    @ConfigProperty(name = "openbank.ledger.tieout.max-catchup-days", defaultValue = "7")
+    private val maxCatchUpDays: Int,
     registry: MeterRegistry,
 ) {
     private val log: Logger = Logger.getLogger(TieOutScheduler::class.java)
@@ -58,7 +72,50 @@ class TieOutScheduler(
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     fun runTieOut(): Unit = runBlocking {
-        val asOf = LocalDate.now(zone).minusDays(1)
+        // clock.withZone(zone), NOT LocalDate.now(zone): the latter is `Clock.system(zone)` —
+        // it silently ignores the injected `clock` and reads the JVM's real wall clock. Harmless
+        // in production (the CDI clock is `Clock.systemUTC()`, so both give the same instant and
+        // therefore the same Prague date), but it makes this method untestable with a fixed clock
+        // — exactly the class of clock-injection violation flagged fleet-wide in the closing audit
+        // (docs/audits/2026-07-16-closing-audit.md, systemic root cause 1).
+        val through = LocalDate.now(clock.withZone(zone)).minusDays(1)
+        val dates = catchUpDates(through)
+        if (dates.isEmpty()) {
+            log.infof("Sub-ledger tie-out: already checked through %s — nothing to do", through)
+        }
+        dates.forEach { asOf -> runTieOutFor(asOf) }
+    }
+
+    /**
+     * The dates this run must (re-)check, oldest first: everything after the latest recorded
+     * `as_of` up to and including [through]. No prior run at all means this is the very first
+     * tick ever — there is no history to anchor a backlog from, so only [through] is checked,
+     * exactly the pre-catch-up behaviour.
+     *
+     * Bounded to [maxCatchUpDays] so a long-dormant scheduler can't enqueue an unbounded backlog
+     * in one run; the *oldest* days are kept (not the newest — see the class KDoc) so later runs
+     * keep making forward progress on the gap instead of re-checking the same recent window
+     * forever.
+     */
+    private suspend fun catchUpDates(through: LocalDate): List<LocalDate> {
+        val latestAsOf = runRepository.findLatest()?.asOf ?: return listOf(through)
+        val from = latestAsOf.plusDays(1)
+        if (from > through) return emptyList()
+        val gap = generateSequence(from) { it.plusDays(1) }.takeWhile { it <= through }.toList()
+        if (gap.size > maxCatchUpDays) {
+            log.warnf(
+                "Sub-ledger tie-out: %d-day gap since %s exceeds the %d-day catch-up cap — " +
+                    "healing oldest-first; %d day(s) will remain after this run",
+                gap.size,
+                latestAsOf,
+                maxCatchUpDays,
+                gap.size - maxCatchUpDays,
+            )
+        }
+        return gap.take(maxCatchUpDays)
+    }
+
+    private suspend fun runTieOutFor(asOf: LocalDate) {
         log.infof("Sub-ledger tie-out check for %s", asOf)
         // Aggregate per-account outcomes rather than mutating counters inside the loop lambda:
         // the accumulation is the same, but it reads as one expression and CodeQL can actually
