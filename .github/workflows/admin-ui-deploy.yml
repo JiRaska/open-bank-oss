@@ -64,9 +64,15 @@ permissions:
 
 concurrency:
   # One admin-ui deploy at a time — a second push while a deploy PR is open would
-  # produce conflicting image tags. Cancel the in-flight run; the newer commit wins.
+  # produce conflicting image tags. cancel-in-progress must stay FALSE: the
+  # build-push job pushes to ECR and only then signs + attests (build-push-admin-ui.sh
+  # → cosign_sign_and_attest), so cancelling mid-job can strand a pushed-but-unattested
+  # image that Kyverno's verify-images policy denies on the next reschedule — days
+  # later, far from the cause (same hazard auto-deploy.yml documents). Queueing is
+  # safe: GitHub keeps only the newest pending run per group, so the latest commit
+  # still wins — it just waits for the in-flight deploy to finish signing.
   group: admin-ui-deploy
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build-push:

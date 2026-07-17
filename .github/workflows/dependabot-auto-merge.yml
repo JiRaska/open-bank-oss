@@ -1,12 +1,22 @@
 # Dependabot auto-merge (OSS-readiness D4, ADR-0119 §D4).
 #
-# Policy: auto-merge patch and minor Dependabot PRs once CI is green.
-# Major updates stay open for human review — they can introduce breaking changes.
-#
-# Allowlist: gradle, npm, github-actions, docker ecosystems (all configured in
-# .github/dependabot.yml). Excluded from auto-merge:
-#   - Major version bumps (any ecosystem)
+# Policy: auto-merge PATCH Dependabot PRs (gradle, npm) once CI is green.
+# Everything else stays open for human review:
+#   - Minor + major bumps (any ecosystem) — minors regularly carry new transitive
+#     dependencies; the Gradle graph has no PR-time vuln gate (dependency-review
+#     doesn't parse Gradle and there is no gradle.lockfile for Trivy fs), so an
+#     auto-merged minor is an uninspected supply-chain entry point.
+#   - github-actions bumps (any size) — a version bump swaps the pinned commit SHA
+#     for NEW action code that then runs in CI with contents:write/id-token:write.
+#     A human must eyeball the diff of what will execute with those permissions.
+#   - docker bumps (any size) — base-image changes alter the runtime attack surface
+#     of every service built on them; same eyeball rule.
 #   - PRs that are not authored by dependabot[bot]
+#
+# Note: dependabot-verification-metadata.yml auto-recomputes gradle checksums from
+# whatever Maven Central serves at PR time, so verification-metadata.xml is NOT a
+# defense against a poisoned upstream release riding an auto-merge — human review
+# of minors is.
 #
 # Token: GITHUB_TOKEN with `contents: write` is enough for auto-merge on a repo
 # without environment protection (GitHub Free / public repos). The workflow
@@ -42,22 +52,30 @@ jobs:
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
-      # Auto-merge patch or minor updates. Major stays for human review.
-      - name: Enable auto-merge (patch / minor only)
+      # Auto-merge patch updates only, and never for github-actions / docker
+      # (see the policy header). Ecosystem ids are fetch-metadata's: github_actions
+      # uses an underscore.
+      - name: Enable auto-merge (patch only, gradle/npm)
         if: |
-          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
-          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' &&
+          steps.metadata.outputs.package-ecosystem != 'github_actions' &&
+          steps.metadata.outputs.package-ecosystem != 'docker'
         run: gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Skip — major update (requires human review)
-        if: steps.metadata.outputs.update-type == 'version-update:semver-major'
+      - name: Skip — requires human review
+        if: |
+          steps.metadata.outputs.update-type != 'version-update:semver-patch' ||
+          steps.metadata.outputs.package-ecosystem == 'github_actions' ||
+          steps.metadata.outputs.package-ecosystem == 'docker'
         # PR_TITLE via env, not `${{ }}` interpolated straight into the script: the title is
         # attacker-influenceable and direct interpolation is a script-injection vector
         # (Scorecard Dangerous-Workflow). Env-var passing is not subject to shell expansion.
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+          ECOSYSTEM: ${{ steps.metadata.outputs.package-ecosystem }}
         run: |
-          echo "::notice title=Major update::${PR_TITLE} is a major bump — skipping auto-merge, human review required."
+          echo "::notice title=Human review required::${PR_TITLE} (${ECOSYSTEM}, ${UPDATE_TYPE}) is outside the auto-merge policy (patch-only, gradle/npm) — skipping auto-merge."
