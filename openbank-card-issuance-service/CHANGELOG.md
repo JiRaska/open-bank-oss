@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.3](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.10.2...card-issuance-service-v0.10.3) (2026-07-17)
+
+
+### Bug Fixes
+
+* **card-issuance:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1516](https://github.com/JiRaska/open-bank-oss/issues/1516)) ([04f7b33](https://github.com/JiRaska/open-bank-oss/commit/04f7b33aca215c33b46a135736e21616908f6cb4))
+
 ## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.10.1...card-issuance-service-v0.10.2) (2026-07-09)
 
 
