@@ -4,6 +4,8 @@
 
 package com.openbank.libs.api.error
 
+import com.openbank.libs.approval.InvalidApprovalStateException
+import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
@@ -51,6 +53,32 @@ class NoSuchElementExceptionMapper : ExceptionMapper<NoSuchElementException> {
     override fun toResponse(exception: NoSuchElementException): Response = Response.status(404)
         .entity(apiError(404, ErrorCode.NOT_FOUND.code, exception.message ?: "Resource not found"))
         .build()
+}
+
+// ADR-0155: a checker can never decide their own PendingApproval — ApprovalStore.decide
+// enforces this itself (defense-in-depth), surfaced here as a plain 403. Formerly duplicated
+// verbatim across 10+ services (issue #1394) plus a divergent {"code","message"}-shaped copy in
+// notification-service; a per-service copy of this exact type would collide non-deterministically
+// with this one (issue #526's defect class), so this is now the ONLY registered mapper for it.
+@Provider
+class SelfApprovalNotAllowedMapper : ExceptionMapper<SelfApprovalNotAllowedException> {
+    override fun toResponse(exception: SelfApprovalNotAllowedException): Response =
+        Response.status(ErrorCode.FORBIDDEN.httpStatus)
+            .entity(
+                apiError(ErrorCode.FORBIDDEN.httpStatus, ErrorCode.FORBIDDEN.code, exception.message ?: "Forbidden"),
+            )
+            .build()
+}
+
+// decide()/markExecuted() reject re-deciding or re-consuming an approval that isn't in the
+// expected status (e.g. an EXECUTED approval flipped back to APPROVED and replayed). See
+// SelfApprovalNotAllowedMapper above for why this lives here instead of per-service.
+@Provider
+class InvalidApprovalStateMapper : ExceptionMapper<InvalidApprovalStateException> {
+    override fun toResponse(exception: InvalidApprovalStateException): Response =
+        Response.status(ErrorCode.CONFLICT.httpStatus)
+            .entity(apiError(ErrorCode.CONFLICT.httpStatus, ErrorCode.CONFLICT.code, exception.message ?: "Conflict"))
+            .build()
 }
 
 // ConstraintViolationExceptionMapper intentionally NOT in libs:
