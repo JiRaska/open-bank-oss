@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.8.0...fx-service-v0.8.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **fx:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1538](https://github.com/JiRaska/open-bank-oss/issues/1538)) ([a05fc47](https://github.com/JiRaska/open-bank-oss/commit/a05fc479359709534a95b24a3b00e9869e487709))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.7.7...fx-service-v0.8.0) (2026-07-14)
 
 
