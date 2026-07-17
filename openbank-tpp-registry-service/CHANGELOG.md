@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.7](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.6.6...tpp-registry-service-v0.6.7) (2026-07-17)
+
+
+### Bug Fixes
+
+* **tpp-registry:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1562](https://github.com/JiRaska/open-bank-oss/issues/1562)) ([fa41b67](https://github.com/JiRaska/open-bank-oss/commit/fa41b67c41f0a09ee8d1a31dbc6e38103b943208))
+
 ## [0.6.6](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.6.5...tpp-registry-service-v0.6.6) (2026-07-11)
 
 
