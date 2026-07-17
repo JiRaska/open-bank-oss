@@ -38,6 +38,17 @@ class OperatorMessageRejected(message: String) : RuntimeException(message)
  * worse, not better. IN_APP is refused because it is a stub that never leaves `PENDING` (no real
  * delivery exists yet). SMS was never implemented for any template. Real multi-channel delivery is
  * the remaining ADR-0176 D2/D3 work.
+ *
+ * **`partyId` is trusted, unvalidated, caller-supplied input (issue #1384, explicit decision, not
+ * an oversight).** Every other write into `notifications.party_id` originates from an
+ * authenticated internal domain event; this endpoint is the first to accept it directly from an
+ * operator. Validating it against `party-service` would need a new outbound REST client this
+ * service does not otherwise have, for a namespace (`opsmessage.*`) that is already four-eyes
+ * gated end to end — the checker reviewing a pending approval sees the same `partyId` the maker
+ * submitted. Documented here so the audit-trail implication is explicit rather than silent: an
+ * operator can send a real email while attaching it to an arbitrary or mistyped `partyId`, which
+ * would misattribute the notification row without failing the request. Revisit if/when this
+ * service gains a party-service client for another reason.
  */
 @ApplicationScoped
 class OperatorMessageService {
@@ -54,20 +65,7 @@ class OperatorMessageService {
     lateinit var clock: Clock
 
     suspend fun compose(request: OperatorMessageRequest): UUID {
-        // Symmetrical check (issue #1381): unknownVariables() only ever caught EXTRA keys, so a
-        // request missing a required key sailed through and render()'s old fallback-to-"" quietly
-        // substituted a blank — a real customer got a message with an empty body/subject, and the
-        // row was persisted and mailed as an ordinary SENT row with no error anywhere in the chain.
-        val unknown = request.template.unknownVariables(request.variables)
-        val missing = request.template.variables - request.variables.keys
-        if (unknown.isNotEmpty() || missing.isNotEmpty()) {
-            throw OperatorMessageRejected(
-                "template ${request.template.name} declares ${request.template.variables.sorted()} " +
-                    "but request carried ${request.variables.keys.sorted()}" +
-                    (if (unknown.isNotEmpty()) " (undeclared: ${unknown.sorted()})" else "") +
-                    (if (missing.isNotEmpty()) " (missing: ${missing.sorted()})" else ""),
-            )
-        }
+        validateRequest(request)
 
         val (subject, body) = render(request.template, request.variables)
         // notificationId is the entity's durable, indexed identifier (ADR-0106) — minted via
@@ -135,6 +133,33 @@ class OperatorMessageService {
         return notificationId
     }
 
+    // Format-validate before anything is persisted or sent (issue #1384): an empty string,
+    // malformed address, or a string containing CR/LF previously reached Mail.withHtml's `to`
+    // field unchecked — best case a late unhandled mailer exception, worst case a header-
+    // injection vector. Regex.matches() requires the ENTIRE string to match (no partial-region
+    // matching, unlike `find`), so a trailing "\r\n" cannot sneak past the `$` anchor.
+    //
+    // Symmetrical variable check (issue #1381): unknownVariables() only ever caught EXTRA keys,
+    // so a request missing a required key sailed through and render()'s old fallback-to-""
+    // quietly substituted a blank — a real customer got a message with an empty body/subject,
+    // and the row was persisted and mailed as an ordinary SENT row with no error in the chain.
+    private fun validateRequest(request: OperatorMessageRequest) {
+        if (request.recipient.isBlank() || !EMAIL_PATTERN.matches(request.recipient)) {
+            throw OperatorMessageRejected("recipient is not a well-formed email address")
+        }
+
+        val unknown = request.template.unknownVariables(request.variables)
+        val missing = request.template.variables - request.variables.keys
+        if (unknown.isNotEmpty() || missing.isNotEmpty()) {
+            throw OperatorMessageRejected(
+                "template ${request.template.name} declares ${request.template.variables.sorted()} " +
+                    "but request carried ${request.variables.keys.sorted()}" +
+                    (if (unknown.isNotEmpty()) " (undeclared: ${unknown.sorted()})" else "") +
+                    (if (missing.isNotEmpty()) " (missing: ${missing.sorted()})" else ""),
+            )
+        }
+    }
+
     /**
      * Exhaustive, no `else` — a new [OperatorMessageTemplate] constant fails to compile here.
      * `vars.getValue(key)` is safe: [compose] already rejected any request whose `variables`
@@ -152,6 +177,12 @@ class OperatorMessageService {
                     "(reference <b>${vars.getValue("ticketReference")}</b>). " +
                     "Please reply to this message if you have further questions.</p>"
         }
+
+    companion object {
+        // Deliberately simple (not RFC 5322-complete): reject blanks/malformed input and, by
+        // excluding whitespace from both local and domain parts, CR/LF header-injection payloads.
+        private val EMAIL_PATTERN = Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")
+    }
 }
 
 data class OperatorMessageRequest(

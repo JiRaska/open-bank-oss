@@ -134,4 +134,50 @@ class OperatorMessageServiceIT {
         assertThat(mailbox.getMailMessagesSentTo("missing-var@example.com")).isEmpty()
         assertThat(bodyFor(partyId)).isNull()
     }
+
+    /**
+     * Issue #1384: `recipient` had no format/blank validation before reaching
+     * `Mail.withHtml`. A malformed address must be rejected as 400 (via
+     * [OperatorMessageRejected]), not reach the mailer at all.
+     */
+    @Test
+    fun `a malformed recipient is rejected before anything is persisted or sent`() {
+        val partyId = UUID.randomUUID()
+        mailbox.clear()
+
+        assertThatThrownBy {
+            onVertxContext {
+                service.compose(
+                    OperatorMessageRequest(
+                        partyId = partyId,
+                        template = OperatorMessageTemplate.SUPPORT_FOLLOWUP,
+                        recipient = "not-an-email",
+                        variables = mapOf("ticketReference" to "TCK-1"),
+                    ),
+                )
+            }
+        }.isInstanceOf(OperatorMessageRejected::class.java)
+
+        assertThat(bodyFor(partyId)).isNull()
+    }
+
+    @Test
+    fun `a blank recipient is rejected before anything is persisted or sent`() {
+        val partyId = UUID.randomUUID()
+
+        assertThatThrownBy {
+            onVertxContext {
+                service.compose(
+                    OperatorMessageRequest(
+                        partyId = partyId,
+                        template = OperatorMessageTemplate.SUPPORT_FOLLOWUP,
+                        recipient = "  ",
+                        variables = mapOf("ticketReference" to "TCK-1"),
+                    ),
+                )
+            }
+        }.isInstanceOf(OperatorMessageRejected::class.java)
+
+        assertThat(bodyFor(partyId)).isNull()
+    }
 }
