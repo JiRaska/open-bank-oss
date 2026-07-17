@@ -15,6 +15,7 @@ import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -54,6 +55,37 @@ class StatementOutboxRepositoryImpl(private val clock: Clock) :
         )
     }.awaitSuspending()
 
+    /**
+     * Reference implementation for the [OutboxRepository.claimProcessable] atomic-claim
+     * override (#1201). One statement: the inner `SELECT ... FOR UPDATE SKIP LOCKED` locks and
+     * skips-past whatever a concurrently running claim has already locked, and the outer `UPDATE`
+     * flips exactly those rows to DISPATCHING and returns them — so two dispatcher instances
+     * racing this at the same instant can never both claim the same row. Also reclaims rows still
+     * DISPATCHING past [staleAfter] (a pod that claimed a row and then crashed or was evicted
+     * before `markSent`/`markFailed`), so a claim can never strand a row forever.
+     *
+     * Plain native SQL rather than a Panache/HQL lock hint: `FOR UPDATE SKIP LOCKED` has no
+     * `jakarta.persistence.LockModeType` equivalent, and the lock only has to be held for the
+     * lifetime of this one statement/transaction — it must not span the network publish call that
+     * follows.
+     */
+    override suspend fun claimProcessable(limit: Int, staleAfter: Duration): List<OutboxEntry> {
+        val now = Instant.now(clock)
+        val staleThreshold = now.minus(staleAfter)
+        return Panache.withTransaction {
+            Panache.getSession().chain { session ->
+                session.createNativeQuery(CLAIM_SQL, StatementOutboxEntity::class.java)
+                    .setParameter("pending", OutboxStatus.PENDING.name)
+                    .setParameter("failed", OutboxStatus.FAILED.name)
+                    .setParameter("dispatching", OutboxStatus.DISPATCHING.name)
+                    .setParameter("staleThreshold", staleThreshold)
+                    .setParameter("claimLimit", limit.coerceAtLeast(1))
+                    .setParameter("now", now)
+                    .resultList
+            }
+        }.map { entities -> entities.map { it.toEntry() } }.awaitSuspending()
+    }
+
     override suspend fun markSent(eventId: UUID, sentAt: Instant) {
         Panache.withTransaction {
             find("eventId", eventId).firstResult().invoke { e ->
@@ -79,5 +111,22 @@ class StatementOutboxRepositoryImpl(private val clock: Clock) :
                 }
             }.replaceWithVoid()
         }.awaitSuspending()
+    }
+
+    companion object {
+        @Suppress("MaxLineLength")
+        private const val CLAIM_SQL = """
+            UPDATE statement_outbox
+            SET status = :dispatching, claimed_at = :now, updated_at = :now
+            WHERE id IN (
+                SELECT id FROM statement_outbox
+                WHERE (status IN (:pending, :failed))
+                   OR (status = :dispatching AND claimed_at < :staleThreshold)
+                ORDER BY created_at ASC
+                LIMIT :claimLimit
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING *
+        """
     }
 }
