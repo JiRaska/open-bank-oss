@@ -69,8 +69,11 @@ class OperatorMessageService {
 
         val (subject, body) = render(request.template, request.variables)
         // notificationId is the entity's durable, indexed identifier (ADR-0106) — minted via
-        // Ids, a UUIDv7 generator, not a plain random UUID. Matches NotificationConsumer's
-        // existing rows, which predate this guard.
+        // Ids, a UUIDv7 generator, not a plain random UUID. Diverges from NotificationConsumer's
+        // existing rows (issue #1388): NotificationConsumer.dispatch still mints notificationId
+        // via bare UUID.randomUUID() (UUIDv4), so `notifications.notification_id` is currently a
+        // mix of UUIDv4 and UUIDv7 across the two write paths -- do not assume sort/version-bit
+        // consistency across them without checking NotificationConsumer first.
         val notificationId = Ids.newId()
         val entity = NotificationEntity().also {
             it.notificationId = notificationId
