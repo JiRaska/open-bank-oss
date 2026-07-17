@@ -202,10 +202,12 @@ jobs:
           rules:
             line-length: disable
             document-start: disable
-            # The fleet manifests use single-spaced flow style — `{ a: b }`,
-            # `[ x, y ]` — pervasively (ArgoCD Applications, component resources).
-            # Allow one inner space rather than fight it file-by-file (it kept
-            # re-reddening main as new services landed).
+            # Allow ONE space inside flow collections (`{ a: b }`, `[ x, y ]`) as well
+            # as zero. The fleet manifests use that style pervasively (ArgoCD
+            # Applications, component resources, the single-owner service manifests);
+            # both styles are equivalent YAML and harmless. Defaulting to 0-only kept
+            # re-breaking this required check every time a new service was onboarded
+            # (#648, #657, ...).
             braces:
               max-spaces-inside: 1
             brackets:
@@ -216,15 +218,6 @@ jobs:
               min-spaces-from-content: 1
             truthy:
               check-keys: false
-            # Allow ONE space inside flow collections (`{ a: b }`, `[ x, y ]`) as
-            # well as zero. The gitops single-owner service manifests are authored
-            # in compact flow style with inner spaces; both styles are equivalent
-            # YAML and harmless. Defaulting to 0-only kept re-breaking the required
-            # check every time a new service was onboarded (#648, #657, ...).
-            braces:
-              max-spaces-inside: 1
-            brackets:
-              max-spaces-inside: 1
             # Allow either sequence-indentation style (block sequences indented
             # under their key, or flush with it). The Kyverno mutation policies
             # (ecr-pull-through-rewrite.yaml) and several ArgoCD/gitops manifests

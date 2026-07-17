@@ -40,6 +40,7 @@ jobs:
   auto-merge:
     name: Auto-merge patch/minor Dependabot PRs
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # API calls only
     if: github.actor == 'dependabot[bot]'
     permissions:
       contents: write
