@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: transaction-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "a7c7c70937ecb614"
+    openbank.tech/policy-checksum: "df616492f7300ae0"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1580,9 +1580,25 @@ data:
         # rate. ALL still unallowlisted below (real triage tracked as a fleet-sweep issue, not resolved
         # by fiat). Flip to enforced once triage brings unallowlisted violations to zero = pass
         # --enforce to the script in ci.yml (one-line change), same as every other ADR-0144 gate here.
-        blocked_on: "34 unallowlisted lineage edges found on first scan (2026-07-13) need individual triage (stale/wrong governance.yaml edge vs. a real dependency this heuristic's exact-match can't see) — tracked as a fleet-sweep issue, not yet filed"
+        blocked_on: "issue #1021 triaged the original 34: 4 were a topic-normalization bug in the
+          checker itself (fixed), 19 are stale governance.yaml edges (corrected/removed), 6 below are
+          real dependencies the heuristic's exact-match can't see, and 4 are genuine gaps tracked as
+          their own issues, not fixed here. A follow-up scan found 7 more edges outside the original
+          34 (the *->admin-ui reversed-direction shape) — not yet triaged."
         ci_producer: ".github/scripts/check-governance-lineage.py"
-        allowlist: []
+        allowlist:
+          - edge: "openbank-copilot-service->balance-service:api"
+            reason: "Reached only through CustomerEdgeRestClient (configKey=customer-edge), a shared BFF client with no per-target configKey — GET /customer/v1/balances/{accountId}."
+          - edge: "openbank-copilot-service->fx-service:api"
+            reason: "Same shared CustomerEdgeRestClient (configKey=customer-edge) as balance-service above — GET /customer/v1/fx/rates."
+          - edge: "openbank-copilot-service->ledger-service:api"
+            reason: "Same shared CustomerEdgeRestClient (configKey=customer-edge) — GET /customer/v1/statements/{accountId}."
+          - edge: "openbank-copilot-service->transaction-service:api"
+            reason: "Same shared CustomerEdgeRestClient (configKey=customer-edge) — listTransactions()."
+          - edge: "openbank-interest-service->account-service:api"
+            reason: "Reaches the account indirectly through TransactionServiceClient (configKey=transaction-service), which books the withholding-tax remittance cash leg — never a direct account-service call."
+          - edge: "openbank-transaction-service->account-service:api"
+            reason: "Validation is implemented via BalanceCoverClient (configKey=balance-service) placing/releasing holds, a sibling of account-service — never a direct account-service call."
       service_code_change:
         detect: ["<service>/src/main/**"]
         require:
