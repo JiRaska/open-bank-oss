@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.6](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.8.5...document-service-v0.8.6) (2026-07-17)
+
+
+### Bug Fixes
+
+* **document-service:** fill the RAMCOVA_SMLOUVA template with real party/account/product data ([#1595](https://github.com/JiRaska/open-bank-oss/issues/1595)) ([e154349](https://github.com/JiRaska/open-bank-oss/commit/e154349afd01b53ee0ad5040faa4435af171771b)), closes [#1497](https://github.com/JiRaska/open-bank-oss/issues/1497)
+
 ## [0.8.5](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.8.4...document-service-v0.8.5) (2026-07-17)
 
 
