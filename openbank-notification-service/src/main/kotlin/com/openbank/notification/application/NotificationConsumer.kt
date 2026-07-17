@@ -231,12 +231,30 @@ class NotificationConsumer {
         }
     }
 
+    // Two `.onFailure()` handlers, deliberately at two different points in the chain — not one
+    // after both stages (issue #1392, mirroring the identical fix applied to
+    // OperatorMessageService.compose() in PR #1368's own code review, which this method
+    // predates and was the uncorrected model for). A single trailing handler cannot tell "the
+    // mail never went out" from "the mail went out, but recording SENT failed" — Mutiny's
+    // Uni#chain composes onto ONE failure channel, so it would catch both: a transient Postgres
+    // error AFTER a successful send would silently mark the row FAILED for a message the
+    // customer actually received, and the "stub mode" log message conflated the two failure
+    // cases into one line.
     private fun sendEmail(
         req: NotificationRequest,
         subject: String,
         body: String,
         entity: NotificationEntity,
     ): Uni<Void> = mailer.send(Mail.withHtml(req.recipient, subject, body))
+        .onFailure().invoke { e ->
+            log.warnf(e, "Email send failed: to=%s template=%s", req.recipient, req.template)
+        }
+        .onFailure().recoverWithUni { _ ->
+            Panache.withTransaction {
+                notificationRepo.find("notificationId", entity.notificationId).firstResult()
+                    .map { ent -> ent?.also { it.status = "FAILED" } }
+            }.replaceWithVoid()
+        }
         .chain { _ ->
             Panache.withTransaction {
                 notificationRepo.find("notificationId", entity.notificationId).firstResult()
@@ -246,17 +264,24 @@ class NotificationConsumer {
                             it.sentAt = Instant.now(clock)
                         }
                     }
-            }
+            }.replaceWithVoid()
         }
         .onItem().invoke { _ -> log.infof("Email sent: to=%s template=%s", req.recipient, req.template) }
-        .onFailure().recoverWithUni { e ->
-            log.warnf("Email failed (stub mode): %s", e.message)
-            Panache.withTransaction {
-                notificationRepo.find("notificationId", entity.notificationId).firstResult()
-                    .map { ent -> ent?.also { it.status = "FAILED" } }
-            }
+        // Only reachable if the mail genuinely went out (the FAILED path above already recovered
+        // any send failure into a completed Uni). Never marks the row FAILED — that would be a
+        // lie about a message that was actually delivered — logs loudly instead, and swallows so
+        // dispatch still completes normally: the customer already has the message, this is a
+        // bookkeeping problem for an operator to notice via the log, not a reason to fail dispatch.
+        .onFailure().invoke { e ->
+            log.warnf(
+                e,
+                "Email sent but recording SENT status failed: to=%s template=%s — row left as-is, " +
+                    "NOT marked FAILED (the email was actually delivered)",
+                req.recipient,
+                req.template,
+            )
         }
-        .replaceWithVoid()
+        .onFailure().recoverWithUni { _ -> Uni.createFrom().voidItem() }
 
     /**
      * Deliver a PUSH notification by fanning out to every ACTIVE device token registered for
