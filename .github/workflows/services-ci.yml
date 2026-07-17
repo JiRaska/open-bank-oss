@@ -131,7 +131,7 @@ jobs:
             echo "Changed files:"; echo "$FILES" | sed 's/^/  /'
 
             # Code-global inputs every module compiles/tests against -> rebuild all.
-            # (openbank-libs, version catalog, root build, gradle.properties,
+            # (openbank-libs*, version catalog, root build, gradle.properties,
             # build-logic.) A change here can alter any service's compile or test
             # inputs, so the whole fleet must rebuild.
             # NB: feed grep via a here-string, NOT `echo "$FILES" | grep -q`.
@@ -145,8 +145,26 @@ jobs:
             # Governance catalogs (openbank-libs/governance/) are data for CI
             # checks + admin-ui, not a compile/test input of any module — an
             # ADR/control-catalog edit must not cost a 28-module fleet run.
+            #
+            # `openbank-libs/` alone is stale since ADR-0122 split the module in two
+            # (#33/#34): openbank-libs-domain and openbank-libs-runtime are compiled
+            # into EVERY service exactly like openbank-libs was, and
+            # openbank-libs-testing supplies the shared Pact/authz/outbox conformance
+            # kits every service's test source set depends on (testImplementation) —
+            # i.e. it can change *how* a provider's Pact verification test runs
+            # without touching that provider's own src/ or any pacts/*.json, and
+            # without a `pacts/` diff to catch it downstream (issue #1208 triage,
+            # gap #2). A literal `^openbank-libs/` prefix does not match any of the
+            # three split module names, so before this fix a change to any of them
+            # fell through to the per-module fan-out below and rebuilt only that
+            # module itself — a silent under-build of every other service's compile
+            # and Pact-provider-test inputs. auto-deploy.yml's analogous SHARED_CHANGED
+            # check already lists openbank-libs-domain/openbank-libs-runtime
+            # explicitly (#376); this brings services-ci.yml's PR-path trigger in
+            # line with it, plus openbank-libs-testing (auto-deploy correctly omits
+            # it — it's test-only, never shipped in a runtime image).
             FILES_CODE=$(grep -vE '^openbank-libs/governance/' <<< "$FILES" || true)
-            if grep -qE '^(openbank-libs/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_CODE"; then
+            if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_CODE"; then
               echo "Decision: code-global change -> build all modules."
               CHANGED="$ALL"
             else
