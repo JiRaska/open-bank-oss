@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.2](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.14.1...transaction-service-v1.14.2) (2026-07-17)
+
+
+### Bug Fixes
+
+* **transaction:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1495](https://github.com/JiRaska/open-bank-oss/issues/1495)) ([156d39a](https://github.com/JiRaska/open-bank-oss/commit/156d39a52b6c52668ccf961028d7ad048189b4dc))
+
 ## [1.14.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.14.0...transaction-service-v1.14.1) (2026-07-16)
 
 
