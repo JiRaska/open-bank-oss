@@ -25,7 +25,13 @@ import org.eclipse.microprofile.faulttolerance.Timeout
  * Tolerance to fire (interceptors only fire on the concrete `@ApplicationScoped` bean, not on
  * the abstract base — see ADR-0013).
  *
- * **N4 — single writer.** `concurrentExecution = SKIP` prevents in-JVM overlap.
+ * **N4 — cross-pod row claim (#1201).** `concurrentExecution = SKIP` only prevents in-JVM
+ * overlap; it does not stop two pods from both running this scheduled method. `replicas: 1` is
+ * steady-state only — an Argo Rollouts canary window runs the old and new pod simultaneously for
+ * the whole rollout duration, and both dispatch on their own tick. `AmlOutboxRepositoryImpl`
+ * therefore implements [OutboxRepository.claimProcessable] as an atomic `FOR UPDATE SKIP LOCKED`
+ * claim, not the unclaimed-peek default, so two concurrently running pods can never both select
+ * and publish the same row.
  */
 @ApplicationScoped
 class AmlOutboxDispatcher(
