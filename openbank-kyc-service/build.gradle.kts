@@ -47,6 +47,11 @@ dependencies {
     // Provider-side verification of kyc-case events onboarding-service consumes (ADR-0063,
     // issue #468). Git-pact (@PactFolder) — no broker needed.
     testImplementation(libs.pact.provider)
+    // #1201: isolated PostgreSQL per test JVM via Testcontainers (kyc-service had no IT infra
+    // before this — matches every other outbox-bearing service's PostgresTestResource pattern).
+    testImplementation(libs.testcontainers)
+    testImplementation(libs.testcontainers.junit)
+    testImplementation(libs.testcontainers.postgresql)
 }
 
 // Pact: write the generated consumer contract to pacts/ and forward broker config, matching
