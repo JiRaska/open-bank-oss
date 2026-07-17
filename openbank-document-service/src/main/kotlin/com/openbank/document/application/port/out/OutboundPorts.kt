@@ -171,4 +171,40 @@ interface ClientSignatureIssuerPort {
  */
 interface ProductCatalogPort {
     suspend fun findDocumentTemplateCode(productId: UUID): String?
+
+    /**
+     * The product's display name + code, for the RAMCOVA_SMLOUVA template's `{{product.name}}`/
+     * `{{product.code}}` clause (Article 2). Same fail-open stance as [findDocumentTemplateCode] —
+     * that clause is itself `{{#if}}`-guarded in the template, so a lookup failure degrades to
+     * omitting the clause, never to blocking the signature.
+     */
+    suspend fun findProduct(productId: UUID): ProductInfo?
 }
+
+data class ProductInfo(val name: String?, val code: String)
+
+/**
+ * Read-only lookup into `openbank-party-service`, scoped to what RAMCOVA_SMLOUVA's `{{party.*}}`
+ * clause needs (the customer's own name + on-file address, ADR-0169 D5). Fails open, matching
+ * [ProductCatalogPort]: `party.name` is the one placeholder the template does NOT `{{#if}}`-guard,
+ * so a lookup failure still renders a legible (if impersonal) contract rather than blocking the
+ * signature over an enrichment dependency — but see [OnboardingDocumentService] for the fallback
+ * used when this returns `null`.
+ */
+interface PartyLookupPort {
+    suspend fun findById(partyId: UUID): PartyInfo?
+}
+
+data class PartyInfo(val legalName: String, val formattedAddress: String?)
+
+/**
+ * Read-only lookup into `openbank-account-service`, scoped to the CURRENT account RAMCOVA_SMLOUVA's
+ * `{{account.iban}}`/`{{product.*}}` clause needs. By the time the framework agreement is signed
+ * the account already exists (ADR-0162 D7 — `account.created` fires before the sign step), so this
+ * is real on-file data. Fails open like [ProductCatalogPort] — the clause is `{{#if}}`-guarded.
+ */
+interface AccountLookupPort {
+    suspend fun findCurrentAccount(partyId: UUID): AccountInfo?
+}
+
+data class AccountInfo(val iban: String, val productId: UUID)

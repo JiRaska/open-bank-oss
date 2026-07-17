@@ -91,6 +91,15 @@ spec:
             # every account.created event. Same in-cluster address billing-service already uses.
             - name: PRODUCT_CATALOG_SERVICE_URL
               value: http://product-catalog.accounts.svc:8104
+            # party-service / account-service REST client base URLs (application.yaml:
+            # quarkus.rest-client.party-service-api / account-service-api) — fill the
+            # RAMCOVA_SMLOUVA template's {{party.*}}/{{account.*}}/{{product.*}} clauses at sign
+            # time (PartyAdapter/AccountAdapter, fail-open). Ports match the live Services
+            # (party-service.party.svc:8111, account-service.accounts.svc:8100).
+            - name: PARTY_SERVICE_URL
+              value: http://party-service.party.svc:8111
+            - name: ACCOUNT_SERVICE_URL
+              value: http://account-service.accounts.svc:8100
             # ADR-0162 D4 (continued): OpenBao pki-document-signing engine address for the client
             # electronic-signature adapter (OpenBaoClientSignatureAdapter). Declaring it here (rather
             # than relying only on the @ConfigProperty code default) is what makes gen-network-policies.py

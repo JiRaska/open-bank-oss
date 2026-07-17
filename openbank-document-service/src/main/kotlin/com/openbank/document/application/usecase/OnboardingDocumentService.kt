@@ -12,15 +12,19 @@ import com.openbank.document.application.port.`in`.OnboardingDocumentUseCase
 import com.openbank.document.application.port.`in`.OpenCeremonyCommand
 import com.openbank.document.application.port.`in`.RenderDocumentCommand
 import com.openbank.document.application.port.`in`.SignatureCeremonyUseCase
+import com.openbank.document.application.port.out.AccountLookupPort
 import com.openbank.document.application.port.out.DocumentRepositoryPort
 import com.openbank.document.application.port.out.DuplicateCeremonyException
 import com.openbank.document.application.port.out.DuplicateDocumentException
+import com.openbank.document.application.port.out.PartyLookupPort
 import com.openbank.document.application.port.out.ProductCatalogPort
 import com.openbank.document.domain.model.Document
 import com.openbank.document.domain.model.DocumentStatus
 import com.openbank.document.domain.model.SignatureLevel
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
+import java.time.Clock
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -43,13 +47,53 @@ import java.util.UUID
 @ApplicationScoped
 class OnboardingDocumentService(
     private val productCatalogPort: ProductCatalogPort,
+    private val partyLookupPort: PartyLookupPort,
+    private val accountLookupPort: AccountLookupPort,
     private val renderUseCase: DocumentRenderUseCase,
     private val documentQueryUseCase: DocumentQueryUseCase,
     private val ceremonyUseCase: SignatureCeremonyUseCase,
     private val documentRepository: DocumentRepositoryPort,
+    private val clock: Clock,
 ) : OnboardingDocumentUseCase {
 
     private val log = Logger.getLogger(OnboardingDocumentService::class.java)
+
+    /**
+     * Assembles the Handlebars data map both render call sites need — the fix for a document that
+     * used to render against `data = emptyMap()` and left a signed legal contract reading
+     * "(the "Customer")" with a blank address (RAMCOVA_SMLOUVA's `{{party.name}}` is the one
+     * placeholder the template does NOT `{{#if}}`-guard). Every lookup here is fail-open (see the
+     * port kdocs) — an unreachable dependency degrades to an omitted clause (the template already
+     * guards account/product/address with `{{#if}}`), never to blocking the signature. `party.name`
+     * is the one exception in practice: party-service is structurally guaranteed to have a
+     * non-blank legalName (a required domain field), so only a live outage — not "the customer has
+     * no name" — would leave it blank, same fail-open trade-off the rest of the fleet accepts for
+     * reference-data dependencies.
+     *
+     * [productIdOverride] lets the eager path (which already knows the exact product from
+     * `account.created`) skip re-deriving it from the looked-up account.
+     *
+     * [partyRef] is typed as a bare `String` everywhere upstream, not a `UUID` — an unparseable
+     * value (malformed data, a non-UUID synthetic reference) is treated the same as an unreachable
+     * lookup: skip enrichment, never throw. A legal-document render must not fail over a party-id
+     * shape issue any more than over a network blip.
+     */
+    private suspend fun buildAgreementData(
+        partyRef: String,
+        caseRef: String,
+        productIdOverride: UUID? = null,
+    ): Map<String, Any?> {
+        val partyId = runCatching { UUID.fromString(partyRef) }.getOrNull()
+        val party = partyId?.let { partyLookupPort.findById(it) }
+        val account = partyId?.let { accountLookupPort.findCurrentAccount(it) }
+        val product = (productIdOverride ?: account?.productId)?.let { productCatalogPort.findProduct(it) }
+        return mapOf(
+            "party" to mapOf("name" to (party?.legalName ?: ""), "address" to party?.formattedAddress),
+            "account" to mapOf("iban" to account?.iban),
+            "product" to mapOf("name" to product?.name, "code" to product?.code),
+            "document" to mapOf("date" to LocalDate.now(clock).toString(), "caseRef" to caseRef),
+        )
+    }
 
     override suspend fun issueOnboardingDocument(cmd: IssueOnboardingDocumentCommand) {
         val idempotencyKey = onboardingKey(cmd.accountId)
@@ -86,7 +130,11 @@ class OnboardingDocumentService(
                 RenderDocumentCommand(
                     templateCode = templateCode,
                     templateVersion = null,
-                    data = emptyMap(),
+                    data = buildAgreementData(
+                        partyRef = cmd.partyRef,
+                        caseRef = cmd.accountId.toString(),
+                        productIdOverride = cmd.productId,
+                    ),
                     contentType = "application/pdf",
                     partyRef = cmd.partyRef,
                     caseRef = cmd.accountId.toString(),
@@ -147,14 +195,15 @@ class OnboardingDocumentService(
         agreements.forEach { documentRepository.save(it.archive()) }
 
         // 4. Render fresh in the requested language + open the ceremony.
+        val caseRef = "$AGREEMENT_KEY_PREFIX$partyRef"
         val document = renderUseCase.render(
             RenderDocumentCommand(
                 templateCode = wantCode,
                 templateVersion = null,
-                data = emptyMap(),
+                data = buildAgreementData(partyRef = partyRef, caseRef = caseRef),
                 contentType = "application/pdf",
                 partyRef = partyRef,
-                caseRef = "$AGREEMENT_KEY_PREFIX$partyRef",
+                caseRef = caseRef,
                 productRef = null,
                 retainUntil = null,
             ),

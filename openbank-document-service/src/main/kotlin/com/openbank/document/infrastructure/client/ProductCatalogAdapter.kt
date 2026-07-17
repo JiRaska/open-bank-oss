@@ -5,6 +5,7 @@
 package com.openbank.document.infrastructure.client
 
 import com.openbank.document.application.port.out.ProductCatalogPort
+import com.openbank.document.application.port.out.ProductInfo
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -33,6 +34,14 @@ class ProductCatalogAdapter : ProductCatalogPort {
             .termsAndConditions.firstNotNullOfOrNull { it.documentTemplateCode }
     } catch (e: Exception) {
         log.warnf("product-catalog unavailable for %s; no onboarding document will be issued: %s", productId, e.message)
+        null
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    override suspend fun findProduct(productId: UUID): ProductInfo? = try {
+        client.getById(productId.toString()).awaitSuspending().let { ProductInfo(name = it.name, code = it.code) }
+    } catch (e: Exception) {
+        log.warnf("product-catalog unavailable for %s; contract will omit product details: %s", productId, e.message)
         null
     }
 }

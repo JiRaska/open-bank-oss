@@ -66,6 +66,18 @@ quarkus:
       url: ${PRODUCT_CATALOG_SERVICE_URL:http://localhost:8104}
       connect-timeout: 3000
       read-timeout: 5000
+    # Fill the RAMCOVA_SMLOUVA template's {{party.*}}/{{account.*}}/{{product.*}} clauses at
+    # sign time — was `data = emptyMap()` on every render, so a real signed contract read
+    # "(the "Customer")" with a blank address. Fail-open (PartyAdapter/AccountAdapter): an
+    # outage degrades the render, never blocks the signature.
+    party-service-api:
+      url: ${PARTY_SERVICE_URL:http://localhost:8111}
+      connect-timeout: 3000
+      read-timeout: 5000
+    account-service-api:
+      url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      connect-timeout: 3000
+      read-timeout: 5000
   redis:
     hosts: redis://localhost:6379
   smallrye-reactive-messaging:
