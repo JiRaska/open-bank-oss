@@ -61,3 +61,19 @@ spec:
         compression: gzip
       data:
         compression: gzip
+---
+# WAL without a base backup is unrestorable (issue #1487): vop-db declared barmanObjectStore
+# (above) but never had a ScheduledBackup, so continuous archiving ran for weeks with nothing to
+# restore it onto. #1444's sweep fixed the two cohorts it identified — no-store and no-IAM-
+# association — but this cluster already had a store, so it fell in neither and kept archiving
+# into a dead end. Matches the sibling pattern (e.g. accounts/postgres.yaml).
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: vop-db-daily
+  namespace: payments
+spec:
+  schedule: "0 41 2 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: vop-db
