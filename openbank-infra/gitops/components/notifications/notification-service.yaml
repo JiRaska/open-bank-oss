@@ -130,6 +130,44 @@ spec:
                   name: notification-webhook
                   key: SLACK_WEBHOOK_URL
                   optional: true
+            # PUSH delivery via APNs (ApnsPushSender). Adapter ON for the TestFlight
+            # pilot. sandbox=FALSE → api.push.apple.com: TestFlight and App Store builds
+            # use the Release config, which signs aps-environment=production (see
+            # openbank-app iosApp/project.yml), so their device tokens belong to the APNs
+            # PRODUCTION gateway. Only a local Xcode Debug build (aps-environment=
+            # development) would register on the sandbox host. The signing key (.p8), Key
+            # ID and Team ID come from Vault via apns-externalsecret.yaml; the secretKeyRefs
+            # are optional:true so a not-yet-seeded Vault leaves the pod healthy —
+            # ApnsPushSender is @ApplicationScoped and returns a per-send CONFIG failure,
+            # never a boot crash. bundle-id must equal the app's bundle identifier.
+            - name: APNS_ENABLED
+              value: "true"
+            - name: APNS_SANDBOX
+              value: "false"
+            # Must equal the app's bundle identifier (openbank-app project.yml:
+            # PRODUCT_BUNDLE_IDENTIFIER=tech.openbank.app) — it becomes the apns-topic
+            # header. NOT the ApnsPushSender default cz.openbank.app, which is wrong for
+            # this app and would be rejected BadTopic.
+            - name: APNS_BUNDLE_ID
+              value: tech.openbank.app
+            - name: APNS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: notification-service-apns
+                  key: APNS_KEY_ID
+                  optional: true
+            - name: APNS_TEAM_ID
+              valueFrom:
+                secretKeyRef:
+                  name: notification-service-apns
+                  key: APNS_TEAM_ID
+                  optional: true
+            - name: APNS_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: notification-service-apns
+                  key: APNS_PRIVATE_KEY
+                  optional: true
             # Dotted-key YAML config bug workaround (issue #686): load the
             # notification-events-in / party-events-in group.id and auto.offset.reset
             # override (notification-service-msg-override ConfigMap, mounted below) as
