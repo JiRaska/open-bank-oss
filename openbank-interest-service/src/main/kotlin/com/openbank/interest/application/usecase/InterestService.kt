@@ -175,14 +175,22 @@ class InterestService(
      * numerics are not commensurable (summing 100 CZK and 5 EUR into "105" is nonsense), and
      * [WithholdingTaxPolicy] assesses per currency (§E — only CZK is withheld in v1), so folding
      * them would also withhold against the wrong base. There is no safe guess, so refuse loudly and
-     * leave every accrual `ACCRUING`: an operator must split the product's accruals per currency.
+     * leave every accrual `ACCRUING`.
+     *
+     * NOTE (issue #1265): this refusal is permanent as shipped. Nothing binds a currency to a
+     * product ([InterestRateConfig] has no currency field, and [AccrualStatus.REVERSED] /
+     * [AccrualStatus.SUSPENDED] have zero writers anywhere), so there is currently no operator
+     * or API path that can split, reverse, or otherwise unwedge the pending set once this fires.
+     * Do not tell a caller to "split the accruals" or "investigate" as if that were actionable —
+     * see #1265 for the options (currency on the product config, currency in the accrual unique
+     * key, or a guarded reversal endpoint) and get a decision before promising a way out here.
      */
     private fun mixedCurrencyFailure(accountId: UUID, productId: String, currencies: List<String>) =
         IllegalStateException(
             "Refusing to capitalize a mixed-currency accrual set for account=$accountId product=$productId: " +
                 "pending accruals are denominated in ${currencies.sorted()}. Interest must be capitalized per " +
-                "(product, currency) — the accruals stay ACCRUING; investigate why one product accrued in " +
-                "several currencies.",
+                "(product, currency), but there is currently no operator or API path to split, reverse, or " +
+                "otherwise resolve this set — see issue #1265. Manual intervention is required.",
         )
 
     /**
