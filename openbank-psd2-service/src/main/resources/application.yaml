@@ -101,6 +101,15 @@ quarkus:
     # health/metrics on the main port in tests — RestAssured targets a single port
     management:
       enabled: false
+    # Unlike sibling services (account/card-issuance/document/aml), this service has no
+    # unconditional `flyway.migrate-at-start: true` in the main config above — the GitOps
+    # manifest injects QUARKUS_FLYWAY_MIGRATE_AT_START=true instead (psd2-service.yaml), so
+    # production migrates fine. But @QuarkusTest never sees that env var, so without this the
+    # Testcontainers Postgres from PostgresRedisTestResource never gets migrated and every IT
+    # touching psd2_outbox fails with "relation does not exist" (found while adding
+    # Psd2OutboxClaimIT, #1201).
+    flyway:
+      migrate-at-start: true
 
 opa:
   url: "${OPA_URL:http://localhost:8181}"
