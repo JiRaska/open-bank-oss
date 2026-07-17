@@ -84,6 +84,7 @@ jobs:
       github.actor != 'github-actions[bot]' &&
       !startsWith(github.head_ref, 'chore/admin-ui-deploy-')
     runs-on: ubuntu-latest
+    timeout-minutes: 15  # measured max 14s, but the Claude fallback is an agentic gh loop that can hang
     # secrets context isn't available in a step-level `if:` — expose it as a
     # job-level boolean env so the Claude fallback can gate on its presence.
     env:

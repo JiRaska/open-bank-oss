@@ -33,6 +33,7 @@ jobs:
   zap-baseline:
     name: ZAP baseline / ledger-service
     runs-on: ubuntu-latest
+    timeout-minutes: 20  # measured max 327s; boots a compose stack
     permissions:
       contents: read
       issues: none

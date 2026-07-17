@@ -24,6 +24,7 @@ jobs:
   pitest:
     name: pitest / ${{ matrix.service }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30  # measured max 414s (ledger); mutation runs are the likeliest to hang
     permissions:
       contents: read
     strategy:
