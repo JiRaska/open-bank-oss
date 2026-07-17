@@ -98,23 +98,12 @@ class OperatorMessageService {
             .onFailure().invoke { e ->
                 log.warnf(e, "opsmessage.compose: mail send failed notificationId=%s", notificationId)
             }
-            .onFailure().recoverWithUni { _ ->
-                Panache.withTransaction {
-                    notificationRepo.find("notificationId", notificationId).firstResult()
-                        .map { e -> e?.also { it.status = "FAILED" } }
-                }.replaceWithVoid()
-            }
-            .chain { _ ->
-                Panache.withTransaction {
-                    notificationRepo.find("notificationId", notificationId).firstResult()
-                        .map { e ->
-                            e?.also {
-                                it.status = "SENT"
-                                it.sentAt = Instant.now(clock)
-                            }
-                        }
-                }.replaceWithVoid()
-            }
+            .onFailure().recoverWithUni { _ -> notificationRepo.markTerminalStatus(notificationId, "FAILED") }
+            // Scoped bulk UPDATE, not find-then-map-then-persist (issue #1393): the prior code
+            // SELECTed the full row (pulling subject/body HTML back out) before UPDATEing it —
+            // an extra DB round-trip this repository's own markRead/markAllRead idiom already
+            // avoided elsewhere in this file.
+            .chain { _ -> notificationRepo.markTerminalStatus(notificationId, "SENT", Instant.now(clock)) }
             // Only reachable if the mail genuinely went out (the FAILED path above already
             // recovered any send failure into a completed Uni). Never marks the row FAILED —
             // that would be a lie about a message that was actually delivered — logs loudly

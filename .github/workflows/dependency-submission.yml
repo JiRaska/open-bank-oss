@@ -105,3 +105,81 @@ jobs:
       # --continue: one module failing to resolve shouldn't blank out the graph for the rest.
       - name: Resolve fleet dependency graph
         run: ./gradlew assemble testClasses --continue --no-daemon
+
+  # ── The alarm (issue #1449) ───────────────────────────────────────────────────
+  # Why this exists: from 2026-07-14 to 2026-07-17 EVERY run of the job above died
+  # with `Java heap space` and the fleet's dependency graph silently stopped updating
+  # for three days. Nothing was broken about the signal — each run went red — but a
+  # push-triggered workflow's red status on main is addressed to nobody, so no one
+  # looked. Dependabot alerts and (since #1421) the PR-time Gradle dependency gate both
+  # read that graph, and a stale graph makes the gate green without checking anything.
+  #
+  # The heap is a RATCHET with nothing measuring it: 4g was fine until the fleet grew
+  # past it, and 6g will go the same way. This job cannot prevent that — it makes the
+  # next occurrence arrive as an addressed issue instead of three quiet days.
+  #
+  # Not gated on `schedule` (unlike fleet-attestation's equivalent): the OOM ran red on
+  # main PUSHES, and the schedule is only weekly, so a schedule-only alarm would have
+  # waited up to 7 days to say anything. pull_request IS excluded — a PR-run failure is
+  # already visible on the PR, and filing a repo issue for it would be noise.
+  raise-issue:
+    name: Raise issue on submission failure
+    needs: submit
+    if: ${{ failure() && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5  # API calls only
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or refresh the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          TITLE="Dependency graph submission is failing — the Gradle vulnerability gate is running blind"
+          # Heredoc body is deliberately flush-left: `run: |` strips only the common YAML
+          # indent, so an indented body would carry leading spaces into the issue markdown.
+          # Body via a plain redirect + --body-file, NOT `BODY=$(cat <<EOF ...)`. A heredoc
+          # nested inside $( ) mis-parses an apostrophe as an opening quote on bash 3.2
+          # (still the default /bin/bash on macOS), so this step could not be dry-run
+          # locally in that form. CI runs bash 5 where it would have parsed, but a step
+          # that only its own CI can syntax-check is a step nobody tests before pushing.
+          # fleet-attestation.yml's equivalent survives that shape only because its body
+          # happens to contain no apostrophe.
+          cat > "${RUNNER_TEMP:-/tmp}/issue-body.md" <<EOF
+          \`dependency-submission.yml\` FAILED (trigger: \`${EVENT}\`), so the fleet's Gradle
+          dependency graph did not update.
+
+          **This is latent, not cosmetic.** Two things read that graph and neither goes red
+          when it is stale:
+
+          - **Dependabot security alerts** stop reflecting reality — no new alerts for the
+            Kotlin/Java fleet, which reads exactly like "no vulnerabilities".
+          - **The PR-time Gradle dependency gate** (\`dependency-review\`, #1419) diffs the PR
+            against this graph. A stale base makes the gate **pass without checking anything**.
+
+          Run: ${RUN_URL}
+
+          **Check the heap first.** The 2026-07-14..07-17 outage was \`Java heap space\` in
+          \`Resolve fleet dependency graph\`: \`-Xmx4g\` stopped fitting as the fleet grew, every
+          run died for three days, and nobody noticed because a red push-triggered workflow on
+          main is addressed to nobody. It is now \`-Xmx6g\`; that is a ratchet, not a fix. If the
+          log says \`Java heap space\`, raise \`GRADLE_OPTS\` in this workflow and match the
+          headroom \`security.yml\`'s CodeQL java-kotlin leg already proves on the same runner.
+
+          Note \`dependency-graph-continue-on-failure: true\` (setup-gradle's default): graph
+          submission is NOT gated on the resolve succeeding, so a partial graph may have been
+          submitted rather than none. Do not assume the previous good graph is still intact.
+
+          This issue is refreshed on each further failure; close it once a run is green.
+          EOF
+          existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file "${RUNNER_TEMP:-/tmp}/issue-body.md"
+          else
+            gh issue create --title "$TITLE" --body-file "${RUNNER_TEMP:-/tmp}/issue-body.md" \
+              --label tech-debt --label "severity:high"
+          fi

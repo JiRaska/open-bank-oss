@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: copilot-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "b243fb546b0e2293"
+    openbank.tech/policy-checksum: "49c7d06e5eb41c83"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2201,6 +2201,28 @@ data:
           adr: ADR-0136
       block_on_cve_severity: [CRITICAL, HIGH]
       catalog: openbank-libs/gradle/libs.versions.toml  # version catalog is the single dependency source
+      # HOW block_on_cve_severity is actually enforced at PR time -- and why it is load-bearing
+      # that dependency-submission runs on pull_request (#1419/#1421). Until it did, the rule
+      # above was declared but unenforced for Gradle, the fleet's primary language.
+      pr_time_cve_gate:
+        gate: .github/workflows/dependency-review.yml   # fail-on-severity: high
+        invariant: >
+          dependency-review only ever diffs SUBMITTED dependency graphs. GitHub natively parses
+          npm/pip/docker/actions manifests but NOT Gradle, so the graph for a PR head exists only
+          because dependency-submission.yml also runs on pull_request. Remove that trigger and the
+          gate keeps reporting green while checking nothing about Gradle -- a silent hole, not a
+          visible failure.
+        requires:
+          - ".github/workflows/dependency-submission.yml runs on pull_request with the same path filter"
+          - "dependency-review arms retry-on-snapshot-warnings ONLY on dependency-touching PRs"
+          - "dependency-submission failures raise a tracking issue (a stale graph makes the gate vacuous)"
+        not_covered_by:
+          trivy_fs: "Trivy's Java coverage is JAR / pom.xml / gradle.lockfile / *.sbt.lock only; this repo has zero lockfiles, so Trivy fs sees no Gradle dependency"
+          codeql: "not a dependency scanner, and not a required check"
+        fork_prs: >
+          Fork PRs get a read-only token, so the submission cannot run and they receive dependency
+          review for the natively-parsed ecosystems only, not Gradle. Deliberate: closing it needs a
+          workflow_run job holding contents:write over a fork-authored artifact.
       artifact_integrity:
         # Gradle dependency verification (gradle/verification-metadata.xml): SHA-256 pins for
         # every resolved artifact — a repository-level tamper or dependency-confusion swap of an
