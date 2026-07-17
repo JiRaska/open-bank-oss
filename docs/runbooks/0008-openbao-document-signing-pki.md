@@ -83,6 +83,18 @@ The `document-service-signing-keystore` ExternalSecret picks this up on its next
 (1h) or immediately via `kubectl annotate externalsecret document-service-signing-keystore -n
 documents force-sync=$(date +%s) --overwrite`.
 
+**Then restart document-service — the projected Secret alone is not enough:**
+
+```sh
+kubectl rollout restart deploy/document-service -n documents
+```
+
+`PdfBoxPadesSealAdapter` resolves the seal identity **once**, in its `init {}`, into a `val`. A
+keystore file appearing under a running pod changes nothing: the process keeps the ephemeral dev
+identity it picked at startup and goes on applying seals that are worthless as evidence — while
+`bao kv get` and `kubectl get secret` both look correct. Since #1299 the adapter is `@Startup`, so
+that decision (and its warning) happen at boot, which is why the boot is what must be repeated.
+
 ## Verify
 
 ```sh
