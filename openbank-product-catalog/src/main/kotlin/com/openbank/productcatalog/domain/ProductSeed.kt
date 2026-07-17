@@ -791,13 +791,12 @@ object ProductSeed {
                     url = "https://openbank.example/tac/savings-czk/v1.1",
                     effectiveFrom = LocalDate.of(2024, 12, 1),
                     language = "cs",
-                    // ADR-0162 D1: bind the account contract by CODE (current PUBLISHED version
-                    // resolved at render time), mirroring CURRENT_PERSONAL. Without this,
-                    // OnboardingDocumentService.issueOnboardingDocument finds no template for the
-                    // onboarding product and issues no account-contract document — the eager
-                    // account.created path no-ops. This is the retail CZK onboarding product
-                    // (id ...c3), so the omission meant every onboarding skipped it.
-                    documentTemplateCode = "UCET_SMLOUVA_CS",
+                    // No documentTemplateCode by design (ADR-0170 D5): at onboarding the customer
+                    // signs ONLY the framework agreement (RAMCOVA_SMLOUVA), which incorporates the
+                    // account-contract terms by reference — a separate account-contract signing
+                    // ceremony is an explicitly-deferred phase-2 refinement. Binding a template here
+                    // (as #1524 mistakenly did) makes the eager issueOnboardingDocument path open a
+                    // UCET_SMLOUVA ceremony that nothing ever signs — a dangling PENDING artifact.
                 ),
             ),
             versionHistory = listOf(
@@ -1106,13 +1105,12 @@ object ProductSeed {
                     effectiveFrom = LocalDate.of(2025, 1, 1),
                     language = "cs",
                     summary = "Korunový běžný účet — obchodní podmínky v1.0",
-                    // ADR-0162 D1: bind the account contract by CODE (current PUBLISHED version
-                    // resolved at render time), mirroring CURRENT_PERSONAL. Without this,
-                    // OnboardingDocumentService.issueOnboardingDocument finds no template for the
-                    // onboarding product and issues no account-contract document. This is THE
-                    // retail CZK onboarding current account (id ...c2), so the omission meant the
-                    // eager account.created path no-op'd for every new customer.
-                    documentTemplateCode = "UCET_SMLOUVA_CS",
+                    // No documentTemplateCode by design (ADR-0170 D5): at onboarding the customer
+                    // signs ONLY the framework agreement (RAMCOVA_SMLOUVA), which incorporates the
+                    // account-contract terms by reference — a separate account-contract signing
+                    // ceremony is an explicitly-deferred phase-2 refinement. Binding a template here
+                    // (as #1524 mistakenly did) makes the eager issueOnboardingDocument path open a
+                    // UCET_SMLOUVA ceremony that nothing ever signs — a dangling PENDING artifact.
                 ),
             ),
             versionHistory = listOf(
