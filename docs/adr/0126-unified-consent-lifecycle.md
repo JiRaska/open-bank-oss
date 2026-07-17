@@ -10,6 +10,15 @@
 | Supersedes       | —                              |
 | Superseded by    | —                              |
 
+**Delivery note (updated 2026-07-17):** the header `Partial` is accurate, but two decision points below
+were mismarked "Shipped". D1, D4, D5 shipped — D5 in particular is real: consent-service runs live at
+`AUTHZ_ENFORCE=true` (`openbank-infra/gitops/components/consent/consent-service.yaml`). **D2 and D3 are
+Partial:** D2's `/validate` response omits the promised `scope`/`grantedAccounts`/`frequencyPerDay`
+(returns only `{valid, reason, code}`); D3's revoke/reject publishes via a direct Kafka emitter, **not**
+the transactional outbox this ADR's D3 text promises — a dual-write with no atomic guarantee on a
+money-path revoke. (Aside: ADR-0034's "consent still advisory, pending #266" line is itself stale —
+OPA enforcement is live here.)
+
 ## Context
 
 OpenBank handles three overlapping consent regimes that previously lacked a unified ADR:
@@ -61,13 +70,17 @@ The `Consent` aggregate root enforces these caps in its `init` block.
 
 `POST /api/v1/consents` creates a `PENDING_SCA` record. The TPP (or bank agent) then drives SCA via `openbank-sca-service`; `POST /api/v1/consents/{id}/activate` completes the binding after SCA succeeds. SCA session ID is stored on the consent for non-repudiation.
 
-### D2 — Consent validation by resource servers (Shipped)
+### D2 — Consent validation by resource servers (Partial)
 
 `POST /api/v1/consents/{id}/validate` is the machine-to-machine gate called by `account-service`, `balance-service`, `transaction-service` etc. before returning data. Response: `{valid: true/false}` with `scope`, `grantedAccounts`, `frequencyPerDay`. No PII in the response.
 
-### D3 — Revocation propagation (Shipped)
+> **Delivery reality (2026-07-17):** the endpoint and its checks (grantee match, `isActive`, `hasScope`, `coversAccount`) are live, but the response DTO is `ConsentValidationResponse(valid, reason, code)` — it does **not** yet carry `scope`/`grantedAccounts`/`frequencyPerDay`, so a resource server cannot cache "for the configured `frequencyPerDay` window" as the Consequences section assumes. Partial until the DTO is completed.
+
+### D3 — Revocation propagation (Partial)
 
 `DELETE /api/v1/consents/{id}` (customer-initiated) or `POST /api/v1/consents/{id}/reject` (SCA failure) publishes `ConsentRevoked` / `ConsentRejected` via the transactional outbox to the `consent.events` Kafka topic. Idempotency key prevents duplicate processing.
+
+> **Delivery reality (2026-07-17):** events ARE published, but by `KafkaConsentEventPublisher` — a direct `@Channel` `MutinyEmitter.send`, **not** the transactional outbox described above (the outbox path is wired only into D4's expiration sweep). Revoke/reject is therefore a dual-write: a crash between the DB commit and the Kafka send drops the `ConsentRevoked`/`ConsentRejected` event with no retry, on a money-path service. Partial until revoke/reject moves onto the outbox.
 
 ### D4 — Scheduled expiration sweep (✅ Shipped)
 
