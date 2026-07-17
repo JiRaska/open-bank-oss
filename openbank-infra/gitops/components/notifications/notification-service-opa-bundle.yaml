@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: notification-service
     app.kubernetes.io/part-of: notifications
   annotations:
-    openbank.tech/policy-checksum: "f13c9dc267e9e541"
+    openbank.tech/policy-checksum: "bbc43ae42b204820"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -663,6 +663,31 @@ data:
         # spec-touching PR (bump info.version to match what the diff did), which the error
         # message spells out.
         ci_producer: ".github/scripts/check-api-contract.py"
+      db_backup_association:
+        detect: ["openbank-infra/gitops/**/*.yaml (kind: Cluster, postgresql.cnpg.io)"]
+        require:
+          - "a CNPG cluster declaring barmanObjectStore -> the managed bucket has a matching
+             aws_eks_pod_identity_association in db-backups.tf"
+        gate: db-backup-associations
+        enforced: advisory
+        target_enforce_date: "2026-08-15"   # ADR-0144
+        ci_producer: "openbank-infra/scripts/check-db-backup-associations.py"
+        # Backup credentials arrive via EKS Pod Identity, granted per (namespace, serviceAccount) by
+        # a HAND-MAINTAINED map in db-backups.tf. Nothing linked that map to the gitops manifests, so
+        # a new database could declare a backup, copy `inheritFromIAMRole: true` from a sibling,
+        # report Ready + Healthy — and silently never back up. There is no failure until someone
+        # needs a restore. Three clusters were in that state (#1444); sdd-db failed every WAL archive
+        # for three days.
+        #
+        # NOT diff-scoped, unlike db_change/api_contract: the defect is a MISSING pair across two
+        # trees, so a PR adding only the gitops half never touches the .tf side and a diff-scoped
+        # gate would see nothing. It runs against whole repo state instead.
+        #
+        # Deliberately NOT solved by a discovered for_each in Terraform — both routes are blocked:
+        # data.kubernetes_resources returns `objects` as a dynamic type (unknown at plan, so it
+        # cannot key a for_each; a tofu plan of that design read "0 to add, 35 to destroy"), and
+        # yamldecode cannot parse the 30-of-42 multi-doc manifests. Same lesson as the OPA generator
+        # gate (#1184): the list must be checked mechanically, not remembered.
       db_change:
         detect: ["src/main/resources/db/migration/*.sql", "Flyway/Liquibase changeset"]
         require:

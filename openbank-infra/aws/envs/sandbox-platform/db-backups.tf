@@ -41,8 +41,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "db_backups" {
 
 data "aws_iam_policy_document" "db_backups_policy" {
   statement {
-    sid    = "DenyInsecureTransport"
-    effect = "Deny"
+    sid     = "DenyInsecureTransport"
+    effect  = "Deny"
     actions = ["s3:*"]
     resources = [
       aws_s3_bucket.db_backups.arn,
@@ -134,44 +134,52 @@ resource "aws_eks_pod_identity_association" "db_backups_statements" {
 locals {
   db_backup_clusters = {
     # Original fleet (compliance + money-path first)
-    ledger    = { namespace = "ledger",    sa = "ledger-db" }
+    ledger = { namespace = "ledger", sa = "ledger-db" }
     # Restore-drill slot: permanent SA for point-in-time restore tests (runbook-0003).
     # Named "ledger-db-drill" so it never conflicts with the live cluster SA.
     ledger-drill = { namespace = "ledger", sa = "ledger-db-drill" }
-    balances  = { namespace = "balances",  sa = "balances-db" }
-    accounts  = { namespace = "accounts",  sa = "accounts-db" }
-    kyc       = { namespace = "kyc",       sa = "kyc-db" }
-    consent   = { namespace = "consent",   sa = "consent-db" }
-    sca       = { namespace = "sca",       sa = "sca-db" }
-    audit     = { namespace = "audit",     sa = "audit-db" }
-    sanctions = { namespace = "sanctions", sa = "sanctions-db" }
+    balances     = { namespace = "balances", sa = "balances-db" }
+    accounts     = { namespace = "accounts", sa = "accounts-db" }
+    kyc          = { namespace = "kyc", sa = "kyc-db" }
+    consent      = { namespace = "consent", sa = "consent-db" }
+    sca          = { namespace = "sca", sa = "sca-db" }
+    audit        = { namespace = "audit", sa = "audit-db" }
+    sanctions    = { namespace = "sanctions", sa = "sanctions-db" }
     # Extended fleet — all remaining clusters with barmanObjectStore to openbank-sandbox-db-backups
-    aml              = { namespace = "aml",              sa = "aml-db" }
-    dispute          = { namespace = "dispute",          sa = "dispute-db" }
-    fraud            = { namespace = "fraud",            sa = "fraud-db" }
-    fx               = { namespace = "fx",               sa = "fx-db" }
-    keycloak         = { namespace = "iam",              sa = "keycloak-db" }
-    interest         = { namespace = "interest",         sa = "interest-db" }
-    lending          = { namespace = "lending",          sa = "lending-db" }
-    apicurio         = { namespace = "messaging",        sa = "apicurio-db" }
-    notifications    = { namespace = "notifications",    sa = "notifications-db" }
-    onboarding       = { namespace = "onboarding",       sa = "onboarding-db" }
-    pact-broker      = { namespace = "pact-broker",      sa = "pact-broker-db" }
-    party            = { namespace = "party",            sa = "party-db" }
-    card-issuance    = { namespace = "payments",         sa = "card-issuance-db" }
-    settlement       = { namespace = "payments",         sa = "settlement-service-db" }
-    swift-service    = { namespace = "payments",         sa = "swift-service-db" }
-    transaction      = { namespace = "payments",         sa = "transaction-db" }
-    sepa-payment     = { namespace = "payments",         sa = "sepa-payment-db" }
-    domestic-payment = { namespace = "payments",         sa = "domestic-payment-db" }
-    sepa-instant     = { namespace = "payments",         sa = "sepa-instant-db" }
-    clearing         = { namespace = "payments",         sa = "clearing-db" }
-    standing-order   = { namespace = "payments",         sa = "standing-order-db" }
-    pid              = { namespace = "pid",              sa = "pid-db" }
-    agent            = { namespace = "platform",         sa = "agent-db" }
-    psd2             = { namespace = "psd2",             sa = "psd2-db" }
+    aml              = { namespace = "aml", sa = "aml-db" }
+    dispute          = { namespace = "dispute", sa = "dispute-db" }
+    fraud            = { namespace = "fraud", sa = "fraud-db" }
+    fx               = { namespace = "fx", sa = "fx-db" }
+    keycloak         = { namespace = "iam", sa = "keycloak-db" }
+    interest         = { namespace = "interest", sa = "interest-db" }
+    lending          = { namespace = "lending", sa = "lending-db" }
+    apicurio         = { namespace = "messaging", sa = "apicurio-db" }
+    notifications    = { namespace = "notifications", sa = "notifications-db" }
+    onboarding       = { namespace = "onboarding", sa = "onboarding-db" }
+    pact-broker      = { namespace = "pact-broker", sa = "pact-broker-db" }
+    party            = { namespace = "party", sa = "party-db" }
+    card-issuance    = { namespace = "payments", sa = "card-issuance-db" }
+    settlement       = { namespace = "payments", sa = "settlement-service-db" }
+    swift-service    = { namespace = "payments", sa = "swift-service-db" }
+    transaction      = { namespace = "payments", sa = "transaction-db" }
+    sepa-payment     = { namespace = "payments", sa = "sepa-payment-db" }
+    domestic-payment = { namespace = "payments", sa = "domestic-payment-db" }
+    sepa-instant     = { namespace = "payments", sa = "sepa-instant-db" }
+    clearing         = { namespace = "payments", sa = "clearing-db" }
+    standing-order   = { namespace = "payments", sa = "standing-order-db" }
+    pid              = { namespace = "pid", sa = "pid-db" }
+    agent            = { namespace = "platform", sa = "agent-db" }
+    psd2             = { namespace = "psd2", sa = "psd2-db" }
     security-scanner = { namespace = "security-scanner", sa = "security-scanner-db" }
-    temporal         = { namespace = "temporal",         sa = "temporal-db" }
+    temporal         = { namespace = "temporal", sa = "temporal-db" }
+    # Added by #1444. These three declared barmanObjectStore -> this bucket but were never
+    # added here, so every WAL archive failed with "Unable to locate credentials" and they had
+    # no backups at all — sdd-db for three days, alerting the whole time. The comment above
+    # claiming "all remaining clusters" was simply untrue; check-db-backup-associations.py now
+    # asserts it instead of trusting it.
+    sdd          = { namespace = "sdd", sa = "sdd-db" }
+    tpp-registry = { namespace = "tpp-registry", sa = "tpp-registry-db" }
+    vop          = { namespace = "payments", sa = "vop-db" }
   }
 }
 
