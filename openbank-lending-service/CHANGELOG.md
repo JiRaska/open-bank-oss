@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.11.1...lending-service-v0.11.2) (2026-07-17)
+
+
+### Bug Fixes
+
+* **lending:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1469](https://github.com/JiRaska/open-bank-oss/issues/1469)) ([6b02825](https://github.com/JiRaska/open-bank-oss/commit/6b02825cbccd5d11f0788c3574e1f51ba4a4141e))
+
 ## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.11.0...lending-service-v0.11.1) (2026-07-16)
 
 
