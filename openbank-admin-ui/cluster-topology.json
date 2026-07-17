@@ -1,11 +1,11 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-07-17T16:07:25.106Z",
+  "generatedAt": "2026-07-17T16:28:00.277Z",
   "counts": {
     "namespaces": 64,
     "networkPolicies": 89,
-    "externalSecrets": 122,
+    "externalSecrets": 123,
     "clusterPolicies": 4
   },
   "groups": [
@@ -522,10 +522,10 @@
       "icon": "key",
       "status": "live",
       "analogy": "Trezor s časovým zámkem — hesla nikdy neleží v kódu.",
-      "summary": "OpenBao drží tajemství; 122 ExternalSecret je sype do k8s. Žádný secret v gitu.",
+      "summary": "OpenBao drží tajemství; 123 ExternalSecret je sype do k8s. Žádný secret v gitu.",
       "controls": [
         "OpenBao",
-        "External Secrets (122)",
+        "External Secrets (123)",
         "KMS unseal"
       ],
       "adr": [
@@ -630,7 +630,7 @@
     {
       "item": "Tajemství",
       "plan": "OpenBao + ESO, nic v gitu",
-      "reality": "122 ExternalSecret",
+      "reality": "123 ExternalSecret",
       "status": "live"
     },
     {
