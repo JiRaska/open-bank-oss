@@ -477,6 +477,27 @@ resource "helm_release" "keda" {
       name  = "resources.operator.limits.memory"
       value = "512Mi"
     },
+    # Operator Prometheus metrics. Off by default in chart 2.19.0 — and not merely
+    # unexposed: the operator is launched with `--enable-prometheus-metrics=false`, so
+    # keda_scaler_errors and friends are not produced at all. Consequence: a ScaledObject
+    # can sit Ready=False forever with no signal. notification-service's did, for its
+    # entire 44-day life, and was found only because an unrelated investigation happened
+    # to read `kubectl get scaledobject` (#1400).
+    #
+    # Do NOT be misled by `keda-operator-metrics-apiserver:8080` already existing — that
+    # is the HPA external-metrics API and serves only keda_internal_metricsservice_*
+    # gRPC counters. The scaler metrics live on the keda-operator Service, which today
+    # exposes only metricsservice:9666; this value adds metrics:8080 to it.
+    {
+      name  = "prometheus.operator.enabled"
+      value = "true"
+    },
+    # The chart's own ServiceMonitor (selector app.kubernetes.io/name=keda-operator,
+    # namespaceSelector keda) — no hand-written one needed, same as argo-cd in #1453.
+    {
+      name  = "prometheus.operator.serviceMonitor.enabled"
+      value = "true"
+    },
   ]
 }
 
