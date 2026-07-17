@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.10.1...product-catalog-v0.10.2) (2026-07-17)
+
+
+### Bug Fixes
+
+* **product-catalog:** bind the account-contract template to the CZK onboarding products ([#1524](https://github.com/JiRaska/open-bank-oss/issues/1524)) ([701ada6](https://github.com/JiRaska/open-bank-oss/commit/701ada6137d82de3e8fa021eeb6c685452b1e9af)), closes [#1497](https://github.com/JiRaska/open-bank-oss/issues/1497)
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.10.0...product-catalog-v0.10.1) (2026-07-16)
 
 
