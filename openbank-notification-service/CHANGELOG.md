@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.13.2...notification-service-v0.13.3) (2026-07-17)
+
+
+### Bug Fixes
+
+* **notification:** validate opsmessage.compose recipient format before sending ([#1426](https://github.com/JiRaska/open-bank-oss/issues/1426)) ([38d343a](https://github.com/JiRaska/open-bank-oss/commit/38d343a0ec74a6a0cef19c351fb78bb5f5858e19)), closes [#1384](https://github.com/JiRaska/open-bank-oss/issues/1384)
+
 ## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.13.1...notification-service-v0.13.2) (2026-07-17)
 
 
