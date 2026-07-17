@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.3](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.2...kyc-service-v0.10.3) (2026-07-17)
+
+
+### Bug Fixes
+
+* **kyc:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1494](https://github.com/JiRaska/open-bank-oss/issues/1494)) ([cd9fafb](https://github.com/JiRaska/open-bank-oss/commit/cd9fafb2249aa9473ee9c78fcc0b86f4241a93d4))
+
 ## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.1...kyc-service-v0.10.2) (2026-07-16)
 
 
