@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Notification Service API
-  version: 1.5.0
+  version: 1.6.0
   description: Notification delivery management — query sent/pending notifications, manage push device tokens.
   license:
     name: Apache-2.0
@@ -15,6 +15,8 @@ tags:
   - name: Notifications
   - name: Devices
   - name: Ops — Dispatch Control
+  - name: Operator Messages
+  - name: Notification Approvals
 
 paths:
   /api/v1/devices:
@@ -191,6 +193,82 @@ paths:
       responses:
         '200':
           description: Count of notifications flipped to read
+
+  /api/v1/notifications/messages:
+    post:
+      tags: [Operator Messages]
+      summary: Send a customer a message from a reviewed, closed catalogue of templates
+      description: |
+        `opsmessage.compose` (ADR-0176 D2). ROLE_OPERATOR/ROLE_ADMIN only. EMAIL only. Gated by
+        `four_eyes.actions` in rules.yaml: when `AUTHZ_FOUR_EYES_ENFORCE=true`, a maker's call is
+        paused with `202` and a pending-approval id; the maker retries with `X-Approval-Id` once a
+        different operator decides it via `PATCH /api/v1/notifications/approvals/{id}`.
+        `AUTHZ_FOUR_EYES_ENFORCE` defaults `false`, so a `201` is the common response today.
+      operationId: composeOperatorMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComposeMessageRequest'
+      responses:
+        '201':
+          description: Message persisted and sent (or, once four-eyes enforcement is on, approved and sent)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComposeMessageResponse'
+        '202':
+          description: Four-eyes enforcement is on — paused pending a different operator's approval
+        '400':
+          description: Unknown/missing template variables, or a malformed recipient
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/notifications/approvals/{id}:
+    patch:
+      tags: [Notification Approvals]
+      summary: Approve or reject a pending four-eyes approval for an operator message
+      description: |
+        `opsmessage.approval.decide` (ADR-0176 D5). ROLE_OPERATOR/ROLE_ADMIN only; the checker
+        must be a different operator than the maker who called `POST /api/v1/notifications/messages`.
+      operationId: decideOperatorMessageApproval
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The pending-approval id returned by the paused compose call
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecideApprovalRequest'
+      responses:
+        '200':
+          description: Decided approval
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          description: The checker is the same operator who made the original request (self-approval)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: No pending approval with that id
+        '409':
+          description: The approval is not in a decidable state (already decided or executed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
   /api/v1/ops/dispatch:
     get:
@@ -545,3 +623,64 @@ components:
         state:
           type: string
           enum: [PROPOSED, APPROVED, REJECTED, WITHDRAWN, EXECUTED]
+
+    OperatorMessageTemplate:
+      type: string
+      description: |
+        The closed set of messages an operator may send (ADR-0176 D2). Deliberately not
+        NotificationTemplate — see OperatorMessageTemplate's own KDoc for why: some
+        NotificationTemplate constants feed the ADR-0059 oversight webhook, and reusing that
+        enum here would let an operator raise a false lifecycle alert.
+      enum: [GENERIC_NOTICE, SUPPORT_FOLLOWUP]
+
+    ComposeMessageRequest:
+      type: object
+      required: [partyId, template, recipient]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        template:
+          $ref: '#/components/schemas/OperatorMessageTemplate'
+        recipient:
+          type: string
+          description: Email address. Must be well-formed; rejected with 400 otherwise.
+        variables:
+          type: object
+          additionalProperties:
+            type: string
+          description: |
+            Must exactly match the chosen template's declared variable set — GENERIC_NOTICE
+            needs {subject, note}, SUPPORT_FOLLOWUP needs {ticketReference}. Extra or missing
+            keys are both rejected with 400.
+
+    ComposeMessageResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The new notification's id.
+
+    DecideApprovalRequest:
+      type: object
+      required: [approve]
+      properties:
+        approve:
+          type: boolean
+
+    ApprovalResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        action:
+          type: string
+        resourceId:
+          type: string
+          nullable: true
+        status:
+          type: string
+        decidedBy:
+          type: string
+          nullable: true
