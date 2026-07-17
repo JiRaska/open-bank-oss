@@ -6,6 +6,7 @@ package com.openbank.sdd.infrastructure.persistence.repository
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.persistence.outbox.OutboxRepository
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import com.openbank.sdd.application.port.out.SddOutbox
 import com.openbank.sdd.application.port.out.SddOutboxRepository
@@ -15,6 +16,8 @@ import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -26,7 +29,7 @@ import java.util.UUID
  * session so they share a single CDI bean and a consistent transaction boundary.
  */
 @ApplicationScoped
-class SddOutboxRepositoryImpl :
+class SddOutboxRepositoryImpl(private val clock: Clock) :
     SddOutboxRepository,
     SddOutbox,
     PanacheRepository<SddOutboxEntity> {
@@ -83,6 +86,37 @@ class SddOutboxRepositoryImpl :
         }.awaitSuspending()
     }
 
+    /**
+     * Reference implementation for the [OutboxRepository.claimProcessable] atomic-claim
+     * override (#1201). One statement: the inner `SELECT ... FOR UPDATE SKIP LOCKED` locks and
+     * skips-past whatever a concurrently running claim has already locked, and the outer
+     * `UPDATE` flips exactly those rows to DISPATCHING and returns them — so two dispatcher
+     * instances racing this at the same instant can never both claim the same row. Also reclaims
+     * rows still DISPATCHING past [staleAfter] (a pod that claimed a row and then crashed or was
+     * evicted before `markSent`/`markFailed`), so a claim can never strand a row forever.
+     *
+     * Plain native SQL rather than a Panache/HQL lock hint: `FOR UPDATE SKIP LOCKED` has no
+     * `jakarta.persistence.LockModeType` equivalent, and the lock only has to be held for the
+     * lifetime of this one statement/transaction — it does not need to (and must not) span the
+     * network publish call that follows.
+     */
+    override suspend fun claimProcessable(limit: Int, staleAfter: Duration): List<OutboxEntry> {
+        val now = Instant.now(clock)
+        val staleThreshold = now.minus(staleAfter)
+        return Panache.withTransaction {
+            Panache.getSession().chain { session ->
+                session.createNativeQuery(CLAIM_SQL, SddOutboxEntity::class.java)
+                    .setParameter("pending", OutboxStatus.PENDING.name)
+                    .setParameter("failed", OutboxStatus.FAILED.name)
+                    .setParameter("dispatching", OutboxStatus.DISPATCHING.name)
+                    .setParameter("staleThreshold", staleThreshold)
+                    .setParameter("claimLimit", limit.coerceAtLeast(1))
+                    .setParameter("now", now)
+                    .resultList
+            }
+        }.map { entities -> entities.map { it.toEntry() } }.awaitSuspending()
+    }
+
     private fun OutboxMessage.toEntity() = SddOutboxEntity().also {
         it.eventId = eventId
         it.aggregateId = aggregateId
@@ -92,5 +126,22 @@ class SddOutboxRepositoryImpl :
         it.attemptCount = 0
         it.createdAt = createdAt
         it.updatedAt = createdAt
+    }
+
+    companion object {
+        @Suppress("MaxLineLength")
+        private const val CLAIM_SQL = """
+            UPDATE sdd_outbox
+            SET status = :dispatching, claimed_at = :now, updated_at = :now
+            WHERE id IN (
+                SELECT id FROM sdd_outbox
+                WHERE (status IN (:pending, :failed))
+                   OR (status = :dispatching AND claimed_at < :staleThreshold)
+                ORDER BY created_at ASC
+                LIMIT :claimLimit
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING *
+        """
     }
 }

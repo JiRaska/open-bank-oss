@@ -78,4 +78,7 @@ class SddMandateEntity : PanacheEntityBase {
 /** Transactional outbox for `sdd.*` events — column definitions inherited from [PanacheOutboxEntity]. */
 @Entity
 @Table(name = "sdd_outbox")
-class SddOutboxEntity : PanacheOutboxEntity()
+class SddOutboxEntity : PanacheOutboxEntity() {
+    @Column(name = "claimed_at")
+    var claimedAt: Instant? = null
+}
