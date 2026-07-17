@@ -5,10 +5,13 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Bell, RefreshCw, Mail, AlertTriangle, CheckCircle2, Info } from 'lucide-react'
+import { Bell, RefreshCw, Mail, AlertTriangle, CheckCircle2, Info, Clock, Check, X } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { useAuth } from '@/lib/auth/useAuth'
+import { hasPermission } from '@/lib/auth/roles'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { opsMessageApi, type OperatorMessage } from '@/lib/api'
 
 const NOTIFICATION_SERVICE = '/api/svc/notification-service'
 
@@ -27,6 +30,8 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function NotificationsPage() {
   const { t, language } = useLanguage()
+  const { roles } = useAuth()
+  const canApprove = hasPermission(roles, 'opsmessage:approve')
   const [items, setItems]     = useState<Notification[]>([])
   const [loading, setLoading] = useState(true)
   // Typed unavailable reason → renders the calm <DataUnavailable> panel instead
@@ -94,6 +99,8 @@ export default function NotificationsPage() {
         ))}
       </div>
 
+      {canApprove && <PendingOperatorMessages />}
+
       {unavailable && (
         <div className="card" style={{ padding: 0, marginBottom: '16px' }}>
           <DataUnavailable
@@ -155,6 +162,122 @@ export default function NotificationsPage() {
           </tbody>
         </table>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Operator-initiated customer messages awaiting a second approver (ADR-0176 D5). Backed by
+ * OperatorMessageResource.listPending — reuses the opsmessage.approve grant, since
+ * ApprovalStore itself has no query to list pending approvals (see that endpoint's KDoc).
+ *
+ * A DIFFERENT operator than the one who composed the message must decide it —
+ * SelfApprovalNotAllowedException refuses it server-side if the same operator tries. This
+ * component doesn't try to hide the "compose" button from the maker (there's no reliable
+ * client-side way to know in advance who composed which row before deciding), it just
+ * surfaces the server's rejection as a plain error if it happens.
+ */
+function PendingOperatorMessages() {
+  const { t } = useLanguage()
+  const [rows, setRows] = useState<OperatorMessage[]>([])
+  const [loading, setLoading] = useState(true)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [rowError, setRowError] = useState<Record<string, string>>({})
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const { items } = await opsMessageApi.listPending()
+      setRows(items)
+    } catch {
+      setRows([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const decide = async (row: OperatorMessage, approve: boolean) => {
+    setBusyId(row.id)
+    setRowError(prev => { const next = { ...prev }; delete next[row.id]; return next })
+    try {
+      if (approve) await opsMessageApi.approve(row.id)
+      else await opsMessageApi.reject(row.id)
+      await load()
+    } catch {
+      // Most often SelfApprovalNotAllowedException (the maker tried to decide their own
+      // message) — never surface the raw backend message for a user-initiated write.
+      setRowError(prev => ({
+        ...prev,
+        [row.id]: t(
+          'Rozhodnutí se nezdařilo. Jiný operátor už možná rozhodl, nebo jste zprávu sami vytvořili.',
+          'The decision failed. Another operator may have already decided it, or you composed this message yourself.',
+        ),
+      }))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  if (!loading && rows.length === 0) return null
+
+  return (
+    <div className="card" style={{ overflow: 'hidden', marginBottom: '16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
+        <Clock size={15} style={{ color: 'var(--yellow)' }} />
+        <span style={{ fontWeight: 600, fontSize: '13px' }}>
+          {t('Zprávy čekající na schválení', 'Messages awaiting approval')}
+        </span>
+        {!loading && <span className="tag" style={{ marginLeft: 'auto' }}>{rows.length}</span>}
+      </div>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>{t('Šablona', 'Template')}</th>
+            <th>{t('Reference', 'Reference')}</th>
+            <th>{t('Účel', 'Purpose')}</th>
+            <th>{t('Akce', 'Actions')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {loading && Array.from({ length: 2 }).map((_, i) => (
+            <tr key={i}>{Array.from({ length: 4 }).map((_, j) => (
+              <td key={j}><div className="skeleton" style={{ height: '14px', width: '80px' }} /></td>
+            ))}</tr>
+          ))}
+          {!loading && rows.map(row => (
+            <tr key={row.id}>
+              <td><span className="tag">{row.template}</span></td>
+              <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{row.referenceId}</td>
+              <td><span className="tag">{row.purpose}</span></td>
+              <td>
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ color: 'var(--green)' }}
+                    onClick={() => decide(row, true)}
+                    disabled={busyId === row.id}
+                  >
+                    <Check size={13} /> {t('Schválit', 'Approve')}
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ color: 'var(--red)' }}
+                    onClick={() => decide(row, false)}
+                    disabled={busyId === row.id}
+                  >
+                    <X size={13} /> {t('Zamítnout', 'Reject')}
+                  </button>
+                  {rowError[row.id] && (
+                    <span style={{ fontSize: '11px', color: 'var(--red)' }}>{rowError[row.id]}</span>
+                  )}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
