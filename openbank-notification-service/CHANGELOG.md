@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.9](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.12.8...notification-service-v0.12.9) (2026-07-17)
+
+
+### Security
+
+* **notification:** close the variable schema; render every template ([#1350](https://github.com/JiRaska/open-bank-oss/issues/1350)) ([721e26c](https://github.com/JiRaska/open-bank-oss/commit/721e26c84d46d92656f021ddfbdcb50d2e00edb4)), closes [#1325](https://github.com/JiRaska/open-bank-oss/issues/1325)
+
 ## [0.12.8](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.12.7...notification-service-v0.12.8) (2026-07-16)
 
 
