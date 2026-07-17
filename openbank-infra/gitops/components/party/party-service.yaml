@@ -76,10 +76,44 @@ spec:
             # localhost, the producer can never connect, party events stay undispatched
             # in the outbox, and the onboarding-service funnel stays empty. Points at the
             # Strimzi bootstrap, same as onboarding-service.
+            # Kafka → Strimzi tls:9093 (mTLS, ADR-0137 #2665 Tier 1). party-service was the
+            # last plaintext:9092 client in the fleet, and 9092 authenticates as ANONYMOUS.
+            # That was survivable only while its topics had no ACLs: Strimzi's simple
+            # authorizer allows an unlisted principal ONLY on a topic no ACL names, so the
+            # moment the party-service KafkaUser was created (its ACLs bind these very
+            # topics to CN=party-service), ANONYMOUS lost access to them — and party-service
+            # locked itself out of its own topics.
+            #
+            # Failure mode was total and silent from the outside: party.events could not be
+            # produced and kyc/aml events could not be consumed, so a new customer's
+            # party.created never left the outbox, no account was ever opened, no onboarding
+            # document or signature ceremony was ever created, and KYC sat at NOT_STARTED
+            # forever. Onboarding simply did not complete. Found by running a real
+            # registration through the live sandbox, not by a failing check.
             - name: KAFKA_BOOTSTRAP_SERVERS
-              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
             - name: QUARKUS_SMALLRYE_REACTIVE_MESSAGING_KAFKA_BOOTSTRAP_SERVERS
-              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka/keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: party-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka/truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
           startupProbe:
             tcpSocket:
               port: management
@@ -106,6 +140,12 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka/keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka/truststore
+              readOnly: true
           resources:
             requests:
               cpu: 200m
@@ -168,6 +208,14 @@ spec:
         - name: feature-flags
           configMap:
             name: party-feature-flags
+        # Already projected into this namespace 17 days ago by the ADR-0137 rollout — only
+        # the Deployment above was never switched over to actually use them.
+        - name: kafka-keystore
+          secret:
+            secretName: party-service-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
   strategy:
     canary:
       stableService: party-service

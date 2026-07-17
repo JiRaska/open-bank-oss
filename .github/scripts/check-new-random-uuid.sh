@@ -42,7 +42,12 @@ violations="$(
       '*/src/main/*.kt' ':(exclude)*/domain/identifiers/Ids.kt' 2>/dev/null \
     | awk '
         /^\+\+\+ /        { f=$2; sub(/^b\//,"",f); next }
-        /^\+/ && /UUID\.randomUUID\(\)/ { print f ":  " substr($0,2) }
+        /^\+/ && /UUID\.randomUUID\(\)/ {
+          line=substr($0,2)
+          trimmed=line
+          sub(/^[ \t]+/, "", trimmed)
+          if (trimmed !~ /^\/\//) print f ":  " line
+        }
       ' || true
 )"
 
