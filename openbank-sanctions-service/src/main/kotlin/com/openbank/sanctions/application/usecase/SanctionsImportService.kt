@@ -244,11 +244,15 @@ class SanctionsImportService(private val entryRepo: SanctionsEntryRepository, pr
             return 0
         }
 
-        // Deactivate stale entries before streaming new data in
-        entryRepo.deactivateByListType(listType)
-
         var total = 0
         val batch = mutableListOf<SanctionsEntry>()
+        // Present-set for the end-of-stream reconciliation sweep below — NOT a deactivate-first
+        // pass. Deactivating stale entries used to run BEFORE this loop, unconditionally, for
+        // every row in the list; that made a failed refresh (network drop mid-stream) leave the
+        // whole list wiped with only the partial replacement reactivated, and doubled the WAL
+        // cost of every successful refresh by rewriting the still-present majority twice
+        // (deactivate, then reactivate on upsert). See #1432.
+        val seenExternalIds = mutableSetOf<String>()
 
         fun col(cols: List<String>, idx: Int) = if (idx >= 0) cols.getOrElse(idx) { "" }.trim() else ""
 
@@ -267,6 +271,7 @@ class SanctionsImportService(private val entryRepo: SanctionsEntryRepository, pr
                 val programRaw = col(cols, idxProgramIds)
 
                 if (name.isBlank()) continue
+                id.takeIf { it.isNotBlank() }?.let { seenExternalIds += it }
 
                 val aliases = aliasesRaw.split(";")
                     .map { it.trim() }
@@ -312,7 +317,17 @@ class SanctionsImportService(private val entryRepo: SanctionsEntryRepository, pr
         }
 
         if (batch.isNotEmpty()) total += entryRepo.upsertAll(batch)
-        Log.infof("Imported %d OpenSanctions entries for %s", total, listType)
+
+        // Only reached if the loop above completed without throwing — a mid-stream failure
+        // (network drop, malformed line) propagates out of this function instead, and the
+        // existing list is left untouched rather than partially wiped.
+        val deactivated = entryRepo.deactivateMissing(listType, seenExternalIds)
+        Log.infof(
+            "Imported %d OpenSanctions entries for %s (%d no longer present, deactivated)",
+            total,
+            listType,
+            deactivated,
+        )
         return total
     }
 

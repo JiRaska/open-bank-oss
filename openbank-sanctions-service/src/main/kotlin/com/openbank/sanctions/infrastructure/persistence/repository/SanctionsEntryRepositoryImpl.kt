@@ -11,6 +11,8 @@ import com.openbank.sanctions.domain.model.*
 import io.quarkus.logging.Log
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.mutiny.pgclient.PgPool
+import io.vertx.mutiny.sqlclient.Row
+import io.vertx.mutiny.sqlclient.RowSet
 import io.vertx.mutiny.sqlclient.Tuple
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
@@ -79,6 +81,16 @@ class SanctionsEntryRepositoryImpl(private val pool: PgPool, private val clock: 
                 search_text  = EXCLUDED.search_text,
                 active       = true,
                 updated_at   = NOW()
+            WHERE
+                sanctions_entries.active        IS NOT TRUE
+                OR sanctions_entries.entity_type   IS DISTINCT FROM EXCLUDED.entity_type
+                OR sanctions_entries.primary_name  IS DISTINCT FROM EXCLUDED.primary_name
+                OR sanctions_entries.aliases_json  IS DISTINCT FROM EXCLUDED.aliases_json
+                OR sanctions_entries.date_of_birth IS DISTINCT FROM EXCLUDED.date_of_birth
+                OR sanctions_entries.nationalities IS DISTINCT FROM EXCLUDED.nationalities
+                OR sanctions_entries.programs      IS DISTINCT FROM EXCLUDED.programs
+                OR sanctions_entries.search_text   IS DISTINCT FROM EXCLUDED.search_text
+            RETURNING 1
         """.trimIndent()
 
         // CoreTuple.wrap(List) handles arbitrary number of params; then wrap in mutiny Tuple
@@ -100,22 +112,43 @@ class SanctionsEntryRepositoryImpl(private val pool: PgPool, private val clock: 
             )
         }
 
-        // Batch in chunks of 500 to avoid oversized messages
+        // Batch in chunks of 500 to avoid oversized messages. Count via RETURNING, not chunk.size:
+        // before the WHERE-guard above existed, every conflicting row always got written, so
+        // "rows submitted" and "rows written" happened to be the same number and this bug was
+        // invisible. Now that an unchanged row is correctly skipped, chunk.size would silently
+        // over-report — "Imported 776,000 entries" every single refresh even when almost nothing
+        // changed, which is exactly the kind of number nobody would think to question.
         var total = 0
         for (chunk in tuples.chunked(500)) {
-            pool.preparedQuery(sql).executeBatch(chunk).awaitSuspending()
-            total += chunk.size
+            var rowSet: RowSet<Row>? = pool.preparedQuery(sql).executeBatch(chunk).awaitSuspending()
+            while (rowSet != null) {
+                total += rowSet.size()
+                rowSet = rowSet.next()
+            }
         }
         return total
     }
 
-    override suspend fun deactivateByListType(listType: SanctionsListType): Int {
+    override suspend fun deactivateMissing(listType: SanctionsListType, presentExternalIds: Set<String>): Int {
+        // Array-parameter anti-join, not a temp table: vertx-pg-client binds a Kotlin
+        // Array<String> as a native Postgres text[] parameter, so this is one round trip
+        // regardless of set size (~776k for PEP_GLOBAL) and needs no session-scoped state to
+        // clean up. `NOT (external_id = ANY($2))` — not `NOT IN` — because `NOT IN` returns
+        // NULL (not TRUE) the moment the array contains any NULL, silently matching zero rows;
+        // `= ANY` has no such trap, and an empty presentExternalIds array still deactivates
+        // everything as intended (a genuinely empty upstream feed).
         val result = pool
             .preparedQuery(
-                "UPDATE sanctions_entries SET active = false, updated_at = NOW()" +
-                    " WHERE list_type = $1 AND active = true",
+                """
+                UPDATE sanctions_entries
+                SET active = false, updated_at = NOW()
+                WHERE list_type = $1
+                  AND active = true
+                  AND external_id IS NOT NULL
+                  AND NOT (external_id = ANY($2))
+                """.trimIndent(),
             )
-            .execute(Tuple.of(listType.name))
+            .execute(Tuple.of(listType.name, presentExternalIds.toTypedArray()))
             .awaitSuspending()
         return result.rowCount()
     }
