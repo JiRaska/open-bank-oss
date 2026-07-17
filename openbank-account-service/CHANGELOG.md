@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.3](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.15.2...account-service-v0.15.3) (2026-07-17)
+
+
+### Bug Fixes
+
+* **account:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1470](https://github.com/JiRaska/open-bank-oss/issues/1470)) ([42e80c8](https://github.com/JiRaska/open-bank-oss/commit/42e80c8559aa255014cb2f13df52b3857d940414))
+
 ## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.15.1...account-service-v0.15.2) (2026-07-16)
 
 
