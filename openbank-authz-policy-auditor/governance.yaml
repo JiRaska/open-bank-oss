@@ -16,10 +16,6 @@ lineage:
       description: reads openbank-infra/opa/policies/*.rego, openbank-libs/governance/policies/*.rego,
         openbank-libs-runtime AuthorizeInterceptor.kt, and openbank-libs/governance/agents.yaml via a
         repo checkout
-  downstream:
-    - serviceName: admin-ui
-      relationType: api
-      description: exposes OPA/Rego and agents.yaml static-policy-drift findings and HITL approval queue
 schemaLineage:
   ownedSchemas:
     - authzaudit_schema

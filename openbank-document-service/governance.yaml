@@ -20,13 +20,6 @@ lineage:
     - serviceName: account-service
       relationType: topic
       description: consumes account.created for onboarding document issuance (ADR-0162 D7)
-  downstream:
-    - serviceName: lending-service
-      relationType: api
-      description: consumes rendered loan agreements
-    - serviceName: account-service
-      relationType: api
-      description: consumes rendered account statements/agreements
 schemaLineage:
   ownedSchemas:
     - documents_schema

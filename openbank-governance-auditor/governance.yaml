@@ -14,10 +14,6 @@ lineage:
     - serviceName: github
       relationType: api
       description: reads merged-PR metadata (reviews, merge-commit verification, labels, body) via the GitHub API
-  downstream:
-    - serviceName: admin-ui
-      relationType: api
-      description: exposes governance-audit findings and HITL approval queue
 schemaLineage:
   ownedSchemas:
     - govaudit_schema
