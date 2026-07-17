@@ -7,6 +7,7 @@ package com.openbank.notification.infrastructure.persistence.repository
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Instant
@@ -68,4 +69,20 @@ class NotificationRepository : PanacheRepository<NotificationEntity> {
     suspend fun markAllRead(partyId: UUID): Int = Panache.withTransaction {
         update("readAt = ?1 where partyId = ?2 and readAt is null", Instant.now(), partyId)
     }.awaitSuspending()
+
+    /**
+     * Scoped bulk UPDATE, not find-then-map-then-persist (issue #1393): the terminal status
+     * transition inside [OperatorMessageService.compose]'s Mutiny chain used to SELECT the full
+     * row (pulling subject/body HTML back out) before UPDATEing it, an extra DB round-trip this
+     * file's own [markRead]/[markAllRead] idiom already avoided. `Uni<Void>`, not `suspend`,
+     * because the caller composes it directly inside a `mailer.send(...)` reactive chain rather
+     * than a coroutine. `sentAt == null` (the FAILED transition) leaves that column untouched.
+     */
+    fun markTerminalStatus(id: UUID, status: String, sentAt: Instant? = null): Uni<Void> = Panache.withTransaction {
+        if (sentAt != null) {
+            update("status = ?1, sentAt = ?2 where notificationId = ?3", status, sentAt, id)
+        } else {
+            update("status = ?1 where notificationId = ?2", status, id)
+        }
+    }.replaceWithVoid()
 }
