@@ -734,6 +734,38 @@ jobs:
           deployable_json="$(printf '%s\n' "${deployable_list[@]:-}" | jq -R . | jq -sc 'map(select(length > 0))')"
           echo "deployable=${deployable_json}" >> "$GITHUB_OUTPUT"
           echo "Deployable this run: ${deployable_json}"
+          # ── #1420: name the services left behind (changed − deployable), loudly ──────────
+          # The gate keeps the deployable SUBSET moving and only fails its own status "for
+          # visibility"; the complement is silently starved. Four money-path services sat 5+
+          # days behind main before anyone diffed image tags by hand (issue #1420). The gate
+          # already knows the complement — emit it so a green-looking run cannot hide a stuck
+          # money-path deploy. This changes NO deploy behaviour: rc/deployable/exit are
+          # untouched; it only adds a summary + annotations, escalating to ::error:: when a
+          # money-path service is the one left behind.
+          BLOCKED_JSON="$(jq -cn --argjson all "$SERVICES" --argjson ok "$deployable_json" '$all - $ok' 2>/dev/null || echo '[]')"
+          echo "blocked=${BLOCKED_JSON}" >> "$GITHUB_OUTPUT"
+          BLOCKED_N="$(echo "$BLOCKED_JSON" | jq 'length')"
+          if [ "$BLOCKED_N" -gt 0 ]; then
+            # money-path service names come from the governance source of truth, so this can't
+            # rot as the fleet's money-path set changes.
+            MP="$(awk '/^money_path_services:/{f=1;next} f&&/^  - /{print $2} f&&/^[a-zA-Z]/{exit}' openbank-libs/governance/rules.yaml)"
+            {
+              echo "### can-i-deploy: ${BLOCKED_N} changed service(s) left behind"
+              echo "Rebuilt this run but blocked by the contract gate — they stay on their current (older) image while \`main\` advances:"
+            } >> "$GITHUB_STEP_SUMMARY"
+            mp_blocked=0
+            for svc in $(echo "$BLOCKED_JSON" | jq -r '.[]'); do
+              if echo "$MP" | grep -qx "$svc"; then
+                echo "::error::[${svc}] MONEY-PATH service blocked by can-i-deploy — not deploying; it stays behind main (issue #1420)"
+                echo "- \`${svc}\` — **money-path**, blocked" >> "$GITHUB_STEP_SUMMARY"
+                mp_blocked=1
+              else
+                echo "::warning::[${svc}] blocked by can-i-deploy — not deploying (issue #1420)"
+                echo "- \`${svc}\` — blocked" >> "$GITHUB_STEP_SUMMARY"
+              fi
+            done
+            [ "$mp_blocked" = "1" ] && echo "::error::can-i-deploy left one or more MONEY-PATH services behind this run — see the job summary (issue #1420)"
+          fi
           # Enforce: non-zero rc still fails this job's own status for visibility (ADR-0092) —
           # it no longer blocks gitops-pr/record-deployment for the deployable subset above.
           exit $rc
