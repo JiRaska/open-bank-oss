@@ -4,13 +4,19 @@ on:
   push:
     branches: [main]
   pull_request:
+  # `Validate manifests` is a required check, so it must also report in the merge queue's
+  # `merge_group` context or the queue stalls forever waiting for a status that can never
+  # arrive. Note the diff-scoped gates below are extended to merge_group individually —
+  # adding only the trigger would report green while checking nothing.
+  merge_group:
 
 permissions:
   contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a queue check — a cancelled run reports no status and the entry hangs.
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -36,11 +42,22 @@ jobs:
         with:
           fetch-depth: 0
       - id: check
+        env:
+          # Empty except on merge_group; the PR/push paths never read it.
+          MQ_BASE_SHA: ${{ github.event.merge_group.base_sha || '' }}
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "push" ]; then
             # Post-merge main build always includes admin-ui.
             echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif [ -n "${MQ_BASE_SHA}" ]; then
+            # merge_group: base_sha is the tree this entry was built on. `github.base_ref` is
+            # EMPTY here, so the PR path below would fetch "":refs/remotes/origin/" and then
+            # diff "origin/...HEAD" — a hard error that would wedge the queue.
+            git fetch --depth=1 origin "${MQ_BASE_SHA}" 2>/dev/null || true
+            N=$(git diff --name-only "${MQ_BASE_SHA}" HEAD -- openbank-admin-ui/ | wc -l | tr -d ' ')
+            echo "changed=$( [ "$N" -gt 0 ] && echo 'true' || echo 'false' )" >> "$GITHUB_OUTPUT"
+            echo "Admin UI files changed (merge_group base ${MQ_BASE_SHA}): $N"
           else
             BASE="origin/${{ github.base_ref }}"
             # Force the remote-tracking ref to the true tip (persistent self-hosted
@@ -385,19 +402,33 @@ jobs:
       # merge and that merges with no later run is still unseen by ANY run-time
       # base choice — that needs required-up-to-date branches or a merge queue.
       - name: "resolve PR diff base (current merge-base, not creation-time base.sha)"
-        if: github.event_name == 'pull_request'
+        # merge_group too: every diff-scoped gate below reads PR_DIFF_BASE, so if this step
+        # skipped in the queue they would all skip with it and `Validate manifests` would go
+        # green having checked nothing — the queue would be theatre.
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MQ_BASE_SHA: ${{ github.event.merge_group.base_sha || '' }}
         run: |
           set -euo pipefail
-          base="${EVENT_BASE_SHA}"
-          git fetch --depth=2 origin "${GITHUB_SHA}" 2>/dev/null || true
-          if git rev-parse -q --verify 'HEAD^2' >/dev/null 2>&1; then
-            base="$(git rev-parse 'HEAD^1')"
-          else
+          if [ -n "${MQ_BASE_SHA}" ]; then
+            # In the queue there is nothing to derive: base_sha IS the tree this entry was
+            # built on (main + the entries ahead of it). That is also the base this gate
+            # always wanted — the whole #481 x #524 race was the PR-time base going stale
+            # when a competing PR merged first, which by construction cannot happen here.
+            base="${MQ_BASE_SHA}"
             git fetch --depth=1 origin "${base}" 2>/dev/null || true
+            echo "merge_group diff base: ${base}"
+          else
+            base="${EVENT_BASE_SHA}"
+            git fetch --depth=2 origin "${GITHUB_SHA}" 2>/dev/null || true
+            if git rev-parse -q --verify 'HEAD^2' >/dev/null 2>&1; then
+              base="$(git rev-parse 'HEAD^1')"
+            else
+              git fetch --depth=1 origin "${base}" 2>/dev/null || true
+            fi
+            echo "PR diff base: ${base} (event base.sha: ${EVENT_BASE_SHA})"
           fi
-          echo "PR diff base: ${base} (event base.sha: ${EVENT_BASE_SHA})"
           echo "PR_DIFF_BASE=${base}" >> "$GITHUB_ENV"
 
       # ADR-0030 D2, diff-aware half (issue #265): when a PR moves a money-path
@@ -409,7 +440,8 @@ jobs:
       # ADR-0144) — findings are ::warning annotations; add --enforce to flip.
       # PR-only: the gate diffs against the resolved PR diff base (see above).
       - name: "threat-model updated on trust-boundary change (ADR-0030 D2, advisory)"
-        if: github.event_name == 'pull_request'
+        # merge_group too — it diffs against PR_DIFF_BASE, which the queue sets.
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         run: python3 openbank-infra/scripts/check-threat-model-diff.py --base "${PR_DIFF_BASE}"
 
       # CLAUDE.md rule 3 / ADR-0029: a module is a released component iff it has
@@ -430,6 +462,9 @@ jobs:
       # (finrep-service 0.4.0). Harmless but noisy; classifies from the PR title since the squash
       # commit doesn't exist yet at PR-CI time. PR-only: no PR title to classify on a push to main.
       - name: "release-scope-mismatch gate (rules.yaml release_scope_mismatch, advisory)"
+        # Stays pull_request-only ON PURPOSE: it classifies from the PR title/body, which a
+        # merge_group payload does not carry. Nothing is lost — it already ran on the PR, and
+        # queueing cannot change a commit type or scope.
         if: github.event_name == 'pull_request'
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
@@ -602,7 +637,8 @@ jobs:
       # creation-time event base.sha — the #524 × #481 ledger merge race);
       # pushes to main have already been classified.
       - name: "api-contract gate — OpenAPI diff classification (ADR-0048 D5, enforced)"
-        if: github.event_name == 'pull_request'
+        # merge_group too: the race a merge queue exists to close (#481 x #524): two spec PRs both claiming one info.version.
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
           OASDIFF_VERSION: "1.22.0"
           OASDIFF_SHA256: "8b972accaf49f984cf40702af8b29360126ac9436594ccf6ac1ae662209a5fe6"
@@ -623,7 +659,8 @@ jobs:
       # startup with `checksum mismatch`). PR-only and diff-scoped against the
       # resolved PR diff base, same as api-contract above.
       - name: "db-migration gate — rollback note + forward-only (rules.yaml db_change, advisory)"
-        if: github.event_name == 'pull_request'
+        # merge_group too — it diffs against PR_DIFF_BASE, which the queue sets.
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         run: python3 openbank-infra/scripts/check-db-migration.py --base "${PR_DIFF_BASE}"
 
       # rules.yaml event_change / ADR-0006: schema-compat gate. The fleet's event
@@ -649,7 +686,8 @@ jobs:
       # ADVISORY until the rules.yaml schema-compat gate graduates
       # (target 2026-09-15, ADR-0144) — flip = --enforce. stdlib-only.
       - name: "schema-compat gate — event backward-compatibility (event_change, advisory)"
-        if: github.event_name == 'pull_request'
+        # merge_group too — it diffs against PR_DIFF_BASE, which the queue sets.
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         run: python3 .github/scripts/check-event-schema-compat.py --base "${PR_DIFF_BASE}"
 
       # DomainEvent.occurredAt constructor guard (PR #2662 / #2709).
