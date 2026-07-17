@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.15.1...ledger-service-v1.15.2) (2026-07-17)
+
+
+### Bug Fixes
+
+* **ledger:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1415](https://github.com/JiRaska/open-bank-oss/issues/1415)) ([ac5ef06](https://github.com/JiRaska/open-bank-oss/commit/ac5ef0629f0f5edde2461cfd607a89dc9b296bbd))
+
 ## [1.15.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.15.0...ledger-service-v1.15.1) (2026-07-17)
 
 
