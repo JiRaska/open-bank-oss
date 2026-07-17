@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.7.1...swift-service-v0.7.2) (2026-07-17)
+
+
+### Bug Fixes
+
+* **swift:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1557](https://github.com/JiRaska/open-bank-oss/issues/1557)) ([a3bc10e](https://github.com/JiRaska/open-bank-oss/commit/a3bc10e8323ac627a94d3895b7ea272104965a26))
+
 ## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.7.0...swift-service-v0.7.1) (2026-07-12)
 
 
