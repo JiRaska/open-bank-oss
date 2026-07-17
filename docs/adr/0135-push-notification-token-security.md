@@ -10,6 +10,19 @@ Author(s): Jiri Raska
 - **Security model** — ✅ Complete: token binding to SCA session, 90-day TTL refresh, explicit logout `DELETE` endpoint (PR #2527), payload minimisation (title/template only, no PII), and per-platform registration limit designed.
 - **Token migration** — ⬜ Pending: APNs/FCM feedback loop integration (token revocation callbacks) and migration of existing plain-text tokens to encrypted columns + `registeredAt`/`refreshedAt`/`status` schema not yet done.
 
+**Delivery-Status update (2026-07-17):** the "Token migration" bullet above conflates a
+shipped item with genuinely-pending ones — split for accuracy (issue #1521):
+- **Lifecycle schema** — ✅ Shipped: `status` has existed on `device_tokens` since
+  `V6__create_device_tokens.sql`, and `registered_at`/`refreshed_at` were added by
+  `V7__device_token_lifecycle_columns.sql` and are read/written by `DeviceTokenEntity`,
+  `DeviceTokenRepository`, and `DeviceResource` in `openbank-notification-service`.
+- **Token encryption at rest** — ⬜ still Pending: `device_tokens.token` remains a plain
+  `TEXT` column (no encryption in `DeviceTokenEntity`/the persistence layer).
+- **APNs/FCM feedback-loop revocation callbacks** — ⬜ still Pending: no inbound
+  provider-revocation handler exists; `DeviceTokenRepository`'s "revocation" is
+  outbound-only (explicit logout / admin deactivation), not a feedback-loop callback.
+  Header stays `Delivery-Status: Partial` — this only corrects which sub-items are open.
+
 ## Context
 
 OpenBank's mobile app (iOS + Android, ADR-0064) sends push notifications for payment confirmations,
