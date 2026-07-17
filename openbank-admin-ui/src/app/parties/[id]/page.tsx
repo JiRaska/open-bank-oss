@@ -14,7 +14,7 @@ import { hasPermission } from '@/lib/auth/roles'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { opsMessageApi } from '@/lib/api'
+import { opsMessageApi, OPERATOR_MESSAGE_TEMPLATE_VARS, type OperatorMessageTemplate, type ComposeMessageRequest } from '@/lib/api'
 
 const PAGE_SIZE = 25
 
@@ -232,7 +232,7 @@ function PartyDetailPage() {
         </div>
       )}
 
-      {tab === 'messages' && <MessagesTab partyId={party.id} roles={roles} />}
+      {tab === 'messages' && <MessagesTab partyId={party.id} partyEmail={party.email} roles={roles} />}
     </div>
   )
 }
@@ -248,7 +248,7 @@ function PartyDetailPage() {
  * `notifications:view` permission gating this tab is UX only — it decides what we render,
  * not what an operator can fetch. Showing bodies here needs the policy fix first.
  */
-function MessagesTab({ partyId, roles }: { partyId: string; roles: string[] }) {
+function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEmail: string; roles: string[] }) {
   // A helper component outside the page needs its own language context (all admin-ui pages
   // are 'use client') — never reference the page's `t` out of scope (CLAUDE.md rule #4).
   const { t, language } = useLanguage()
@@ -262,11 +262,16 @@ function MessagesTab({ partyId, roles }: { partyId: string; roles: string[] }) {
   const canCompose = hasPermission(roles, 'opsmessage:compose')
   const [sending, setSending] = useState(false)
   const [composeError, setComposeError] = useState<string | null>(null)
-  // Set once the maker's first submit call returns 202 — nothing here polls automatically
-  // (ADR-0176 introduces the fleet's first 202/X-Approval-Id UI flow; a real approval
-  // notification channel is a separate, larger piece of work). The maker clicks "Retry send"
-  // themselves once a colleague has approved it.
-  const [pendingSubmit, setPendingSubmit] = useState<{ id: string; approvalId?: string } | null>(null)
+  const [template, setTemplate] = useState<OperatorMessageTemplate>('GENERIC_NOTICE')
+  const [recipient, setRecipient] = useState(partyEmail)
+  const [vars, setVars] = useState<Record<string, string>>({})
+  // Set once compose returns 202 — nothing here polls automatically (ADR-0176 introduces the
+  // fleet's first 202/X-Approval-Id UI flow; a real approval notification channel is a separate,
+  // larger piece of work). We hold the EXACT request that was paused: the retry must resend the
+  // byte-identical body (the interceptor binds the approval to the request's content), and the
+  // maker relays `approvalId` to a colleague, who decides it on the Notifications page. The maker
+  // then clicks "Retry send".
+  const [pendingSubmit, setPendingSubmit] = useState<{ request: ComposeMessageRequest; approvalId: string } | null>(null)
   const [retrying, setRetrying] = useState(false)
 
   const load = useCallback(async (nextPage: number) => {
@@ -302,33 +307,37 @@ function MessagesTab({ partyId, roles }: { partyId: string; roles: string[] }) {
   // The endpoint is offset-paged (page/size/total), not cursor-paged like party search.
   const hasNextPage = (page + 1) * PAGE_SIZE < total
 
-  const REFERENCE_ID_PATTERN = /^[A-Za-z0-9-]{1,40}$/
+  // Mirror the backend recipient guard (OperatorMessageService.EMAIL_PATTERN): reject blanks and
+  // CR/LF header-injection before the BFF call, so a malformed address never leaves the browser.
+  const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  const templateVars = OPERATOR_MESSAGE_TEMPLATE_VARS[template]
 
-  // ADR-0176 D2: OPERATOR_ACCOUNT_NOTICE is the only composable template today, so the operator
-  // supplies just a reference code — never free text. Two calls, mirroring
-  // OperatorMessageResource's own KDoc: draft persists the content, submit is the four-eyes
-  // -gated one and pauses (202) until a different operator approves it.
+  // ADR-0176 D2: a single four-eyes-gated compose call (POST /notifications/messages). The
+  // operator picks a closed-catalogue template, a recipient, and the template's exact variables;
+  // no free-text template. When four-eyes enforcement is on the call pauses (202) until a
+  // different operator decides it on the Notifications page.
   async function sendMessage() {
-    const referenceId = window.prompt(
-      t('Referenční kód (např. TICKET-123):', 'Reference (e.g. TICKET-123):'),
-    )
-    if (referenceId === null) return
-    if (!REFERENCE_ID_PATTERN.test(referenceId)) {
-      setComposeError(t(
-        'Referenční kód musí obsahovat 1–40 alfanumerických znaků nebo pomlček.',
-        'Reference must be 1-40 alphanumeric characters or hyphens.',
-      ))
+    const trimmedRecipient = recipient.trim()
+    if (!EMAIL_PATTERN.test(trimmedRecipient)) {
+      setComposeError(t('Zadejte platnou e-mailovou adresu příjemce.', 'Enter a valid recipient email address.'))
       return
     }
+    // The request must carry EXACTLY the template's declared keys — extra or missing are both 400.
+    const variables: Record<string, string> = {}
+    for (const key of templateVars) variables[key] = (vars[key] ?? '').trim()
+    if (templateVars.some(key => !variables[key])) {
+      setComposeError(t('Vyplňte prosím všechna pole šablony.', 'Please fill in every template field.'))
+      return
+    }
+    const request: ComposeMessageRequest = { partyId, template, recipient: trimmedRecipient, variables }
     setSending(true); setComposeError(null)
     try {
-      const drafted = await opsMessageApi.draft({ partyId, template: 'OPERATOR_ACCOUNT_NOTICE', referenceId, purpose: 'SERVICE' })
-      const result = await opsMessageApi.submit(drafted.id)
+      const result = await opsMessageApi.compose(request)
       if (result.status === 'PENDING_APPROVAL') {
-        setPendingSubmit({ id: drafted.id, approvalId: result.approvalId })
+        setPendingSubmit({ request, approvalId: result.approvalId })
       } else {
-        // Only reached if four-eyes enforcement is off in this environment — still a real
-        // send, so refresh the history to show it.
+        // four-eyes enforcement off in this environment — a real send, so refresh the history.
+        setVars({})
         load(0)
       }
     } catch {
@@ -344,17 +353,28 @@ function MessagesTab({ partyId, roles }: { partyId: string; roles: string[] }) {
     if (!pendingSubmit) return
     setRetrying(true)
     try {
-      const result = await opsMessageApi.submit(pendingSubmit.id, pendingSubmit.approvalId)
+      // Byte-identical replay of the paused request, now carrying the approval id.
+      const result = await opsMessageApi.compose(pendingSubmit.request, pendingSubmit.approvalId)
       if (result.status !== 'PENDING_APPROVAL') {
         setPendingSubmit(null)
+        setVars({})
         load(0)
       }
       // Still PENDING_APPROVAL: nobody has decided it yet — leave the banner up.
     } catch {
       // A 409 (already resolved) or 403 (rejected/self-approval) most often means someone
-      // already decided it — leave the banner up rather than guessing; the Pending approvals
-      // queue on the Notifications page has the authoritative status.
+      // already decided it — leave the banner up rather than guessing; the approvals panel
+      // on the Notifications page has the authoritative status.
     } finally { setRetrying(false) }
+  }
+
+  function varLabel(key: string): string {
+    switch (key) {
+      case 'subject': return t('Předmět', 'Subject')
+      case 'note': return t('Text zprávy', 'Message body')
+      case 'ticketReference': return t('Číslo tiketu', 'Ticket reference')
+      default: return key
+    }
   }
 
   return (
@@ -362,21 +382,74 @@ function MessagesTab({ partyId, roles }: { partyId: string; roles: string[] }) {
       {canCompose && (
         <div className="card" style={{ padding: '14px 20px', marginBottom: '16px' }}>
           {pendingSubmit ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <Clock size={15} style={{ color: 'var(--yellow)' }} />
-              <span style={{ fontSize: '13px' }}>
-                {t('Zpráva čeká na schválení druhým operátorem.', 'Message is awaiting a second operator’s approval.')}
-              </span>
-              <button className="btn btn-secondary" style={{ marginLeft: 'auto' }} onClick={retrySubmit} disabled={retrying}>
-                <RefreshCw size={13} /> {retrying ? t('Zkouším…', 'Retrying…') : t('Zkusit znovu odeslat', 'Retry send')}
-              </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Clock size={15} style={{ color: 'var(--yellow)' }} />
+                <span style={{ fontSize: '13px' }}>
+                  {t('Zpráva čeká na schválení druhým operátorem.', 'Message is awaiting a second operator’s approval.')}
+                </span>
+                <button className="btn btn-secondary" style={{ marginLeft: 'auto' }} onClick={retrySubmit} disabled={retrying}>
+                  <RefreshCw size={13} /> {retrying ? t('Zkouším…', 'Retrying…') : t('Zkusit znovu odeslat', 'Retry send')}
+                </button>
+              </div>
+              {/* No backend endpoint lists pending approvals (ApprovalStore has no query), so the
+                  checker cannot discover this from a queue — the maker relays the id out of band. */}
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                {t('Předejte toto ID schválení druhému operátorovi:', 'Give this approval id to a second operator:')}{' '}
+                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{pendingSubmit.approvalId}</span>
+              </div>
             </div>
           ) : (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <button className="btn btn-secondary" onClick={sendMessage} disabled={sending}>
-                <Send size={13} /> {sending ? t('Odesílám…', 'Sending…') : t('Poslat zprávu', 'Send message')}
-              </button>
-              {composeError && <span style={{ fontSize: '12px', color: 'var(--red)' }}>{composeError}</span>}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                  {t('Šablona', 'Template')}
+                  <select
+                    className="input"
+                    value={template}
+                    onChange={e => { setTemplate(e.target.value as OperatorMessageTemplate); setVars({}); setComposeError(null) }}
+                  >
+                    <option value="GENERIC_NOTICE">{t('Obecné oznámení', 'Generic notice')}</option>
+                    <option value="SUPPORT_FOLLOWUP">{t('Reakce na požadavek podpory', 'Support follow-up')}</option>
+                  </select>
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)', flex: 1, minWidth: '220px' }}>
+                  {t('Příjemce (e-mail)', 'Recipient (email)')}
+                  <input
+                    className="input"
+                    type="email"
+                    value={recipient}
+                    onChange={e => setRecipient(e.target.value)}
+                    placeholder={t('jmeno@priklad.cz', 'name@example.com')}
+                  />
+                </label>
+              </div>
+              {templateVars.map(key => (
+                <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                  {varLabel(key)}
+                  {key === 'note' ? (
+                    <textarea
+                      className="input"
+                      rows={3}
+                      value={vars[key] ?? ''}
+                      onChange={e => setVars(prev => ({ ...prev, [key]: e.target.value }))}
+                    />
+                  ) : (
+                    <input
+                      className="input"
+                      type="text"
+                      value={vars[key] ?? ''}
+                      onChange={e => setVars(prev => ({ ...prev, [key]: e.target.value }))}
+                    />
+                  )}
+                </label>
+              ))}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <button className="btn btn-secondary" onClick={sendMessage} disabled={sending}>
+                  <Send size={13} /> {sending ? t('Odesílám…', 'Sending…') : t('Poslat zprávu', 'Send message')}
+                </button>
+                {composeError && <span style={{ fontSize: '12px', color: 'var(--red)' }}>{composeError}</span>}
+              </div>
             </div>
           )}
         </div>
