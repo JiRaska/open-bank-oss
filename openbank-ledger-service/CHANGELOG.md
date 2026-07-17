@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.3](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.15.2...ledger-service-v1.15.3) (2026-07-17)
+
+
+### Bug Fixes
+
+* **ledger:** Postgres advisory-lock cross-pod exclusion for once-per-cluster schedulers ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1440](https://github.com/JiRaska/open-bank-oss/issues/1440)) ([8de116e](https://github.com/JiRaska/open-bank-oss/commit/8de116e84c8db538042160063dd50782c3ea79f7))
+
 ## [1.15.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.15.1...ledger-service-v1.15.2) (2026-07-17)
 
 
