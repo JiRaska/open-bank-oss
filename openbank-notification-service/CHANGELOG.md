@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.5](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.13.4...notification-service-v0.13.5) (2026-07-17)
+
+
+### Bug Fixes
+
+* **notification:** keep the PUSH status update on the Vert.x context after the async APNs send ([#1559](https://github.com/JiRaska/open-bank-oss/issues/1559)) ([2da8588](https://github.com/JiRaska/open-bank-oss/commit/2da858803500a1f630a3e989d9d1945e1180cdee)), closes [#1548](https://github.com/JiRaska/open-bank-oss/issues/1548)
+
 ## [0.13.4](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.13.3...notification-service-v0.13.4) (2026-07-17)
 
 
