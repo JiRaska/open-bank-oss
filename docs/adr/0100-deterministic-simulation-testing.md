@@ -212,4 +212,4 @@ case).
 - Antithesis deterministic hypervisor: https://antithesis.com/
 - ADR-0029 (governance as code, test ratchet)
 - ADR-0101 (Temporal durable execution — companion ADR)
-- Test coverage programme (issue #1122 et seq.)
+- Test coverage programme (issue JiRaska/open-bank#1122 et seq.)

@@ -7,7 +7,7 @@ Author(s): @JiRaska
 
 Relates to: ADR-0039 (ledger golden source, balance projection), ADR-0078 (per-customer
 statement close), ADR-0035 (statement periods), ADR-0026 (EoD reconciliation),
-ADR-0037 (AnaCredit render-only reporting). Closes the gap tracked in issue #471.
+ADR-0037 (AnaCredit render-only reporting). Closes the gap tracked in issue JiRaska/open-bank#471.
 Prerequisite for: ADR-0097 (supervisory / prudential returns — FINREP/COREP).
 
 ## Context

@@ -141,7 +141,7 @@ relaxing sanctions/AML screening, raising an SCA limit, bypassing four-eyes — 
 OPA prohibitions; disabling sanctions screening is *prohibited outright*, not merely
 gated). Conversely, engineer-owned feature rollout never enters the `PolicyStore`.
 For the grey zone: money-path flag flips on the ADR-0067 side still require four-eyes
-(`libs/foureyes`, tracked in issue #419) — but if a "flag" would change a
+(`libs/foureyes`, tracked in issue JiRaska/open-bank#419) — but if a "flag" would change a
 risk/compliance-owned parameter or its threshold, it is a Tier-B parameter here, not a flag.
 
 ## Alternatives considered

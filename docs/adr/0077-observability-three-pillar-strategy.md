@@ -11,7 +11,7 @@
 > - **Tier C domain metrics** (business counters/gauges): fleet sweep shipped in 26 PRs (#789–#815)
 >   + #788 via `DomainMetrics` per-service pattern (ADR-0079). The 7 money-path services (ledger,
 >   balance, transaction, sepa-payment, domestic-payment, sepa-instant, fx) await the 2-approval
->   gate per ADR-0030 — tracked in issue #787.
+>   gate per ADR-0030 — tracked in issue JiRaska/open-bank#787.
 > - **Pillar 2 traces**: OTel SDK enabled fleet-wide (QUARKUS_OTEL_SDK_DISABLED removed); native-image
 >   auto-instrumentation pilot on product-catalog (ADR-0083, PR #1021).
 > - **Alertmanager** wired (GoAlert/ntfy last-mile): ADR-0088 D1.
@@ -28,7 +28,7 @@
 >   services with a custom format (`account`, `psd2`, `sca`, `agent`) keep their own value.
 >   Dev-profile override (plain text) also centralised in the same file.
 > - **Remaining:** Phase 4 alerting (Alertmanager already wired per ADR-0088 D1); money-path
->   domain metrics (issue #787, 2-approval gate).
+>   domain metrics (issue JiRaska/open-bank#787, 2-approval gate).
 
 ---
 

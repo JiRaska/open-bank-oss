@@ -217,5 +217,5 @@ and tracked as its own future ADR. This ADR's job is to stop the gap from being 
 - ADR-0039 — ledger as golden source; control-account ⇄ sub-ledger reconciliation (the integrity gate).
 - ADR-0046 — ČNB FX fixing ingestion + daily revaluation posting.
 - ADR-0030 (threat models); ADR-0029 (governance-as-code).
-- Actionable tail: statement-close hardening (D3) — issue #470; entity-level statutory close (D5) —
-  issue #471 (future ADR when prioritised).
+- Actionable tail: statement-close hardening (D3) — issue JiRaska/open-bank#470; entity-level statutory close (D5) —
+  issue JiRaska/open-bank#471 (future ADR when prioritised).

@@ -5,14 +5,14 @@ Status: Accepted (2026-06-14 — decision implemented: `openbank-libs/.../flags`
 ships the OpenFeature-aligned surface (`FeatureClient`, `FlagdProvider`,
 `@FeatureFlag` + interceptor, `FlagDefinition`/`FlagExposure`) merged to `main`.
 Remaining tail is tracked as a follow-up issue, not a blocker: four-eyes
-enforcement on money-path flag flips — issue #419.)
+enforcement on money-path flag flips — issue JiRaska/open-bank#419.)
 Delivery-Status: Shipped
 
 **Delivery note (updated 2026-06-30):**
 Core feature-flag infrastructure shipped: `FeatureClient`, `FlagdProvider`, `@FeatureFlag`
 interceptor, `FlagDefinition`/`FlagExposure` in `openbank-libs/flags`; flagd OFREP sidecar
 integration; fast-path Kafka kill-switch (`feature-control` topic); flag definitions as code
-in Git + ConfigMap. Four-eyes enforcement on money-path flag flips (issue #419) is a
+in Git + ConfigMap. Four-eyes enforcement on money-path flag flips (issue JiRaska/open-bank#419) is a
 tracked follow-up governed by ADR-0034 MakerChecker — not a blocker for non-money-path use.
 Author(s): Jiří Raška
 
@@ -85,7 +85,7 @@ same asymmetry ADR-0047 uses for break-glass.
 **5. Governance classification.** Every flag declares a `classification`:
 `COSMETIC` | `FEATURE` | `MONEY_PATH`. This ADR's skeleton carries the
 classification and `fourEyes` metadata (`FlagDefinition`); the runtime
-**enforcement** is a tracked follow-up (issue #419). When wired, a `MONEY_PATH`
+**enforcement** is a tracked follow-up (issue JiRaska/open-bank#419). When wired, a `MONEY_PATH`
 flip **will be** gated through the four-eyes primitive (`libs/foureyes` +
 `governance.Proposal`, ADR-0023/0034) and **will** emit an `AuditEvent`
 (`operation = "featureflag.flip"`); OPA (`libs/authz`) **will** decide *who* may
@@ -136,7 +136,7 @@ feature flag**. It belongs to ADR-0047 governance (four-eyes, effective-dating,
 OPA prohibitions — disabling sanctions screening is prohibited outright). A flag
 whose flip would do a compliance officer's job is misclassified by definition; CI
 must reject it. Within this ADR's own scope, **money-path flag flips require
-four-eyes** (`libs/foureyes`, enforcement tracked in issue #419).
+four-eyes** (`libs/foureyes`, enforcement tracked in issue JiRaska/open-bank#419).
 
 ## Alternatives considered
 
