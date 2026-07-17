@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.8](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.8.7...pid-service-v0.8.8) (2026-07-17)
+
+
+### Bug Fixes
+
+* **pid:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1541](https://github.com/JiRaska/open-bank-oss/issues/1541)) ([cd6ff1b](https://github.com/JiRaska/open-bank-oss/commit/cd6ff1bd255cec544ae3b252c317a056d554d9cc))
+
 ## [0.8.7](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.8.6...pid-service-v0.8.7) (2026-07-07)
 
 
