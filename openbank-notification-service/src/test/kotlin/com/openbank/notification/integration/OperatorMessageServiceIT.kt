@@ -107,4 +107,31 @@ class OperatorMessageServiceIT {
         assertThat(mailbox.getMailMessagesSentTo("rejected@example.com")).isEmpty()
         assertThat(bodyFor(partyId)).isNull()
     }
+
+    /**
+     * Issue #1381: `unknownVariables()` only ever caught EXTRA keys. A request missing a
+     * required key used to sail through and render() silently substituted an empty string —
+     * a real customer got a blank-body email, persisted and mailed as an ordinary SENT row.
+     */
+    @Test
+    fun `a request missing a required variable is rejected before anything is persisted or sent`() {
+        val partyId = UUID.randomUUID()
+        mailbox.clear()
+
+        assertThatThrownBy {
+            onVertxContext {
+                service.compose(
+                    OperatorMessageRequest(
+                        partyId = partyId,
+                        template = OperatorMessageTemplate.SUPPORT_FOLLOWUP,
+                        recipient = "missing-var@example.com",
+                        variables = emptyMap(),
+                    ),
+                )
+            }
+        }.isInstanceOf(OperatorMessageRejected::class.java)
+
+        assertThat(mailbox.getMailMessagesSentTo("missing-var@example.com")).isEmpty()
+        assertThat(bodyFor(partyId)).isNull()
+    }
 }
