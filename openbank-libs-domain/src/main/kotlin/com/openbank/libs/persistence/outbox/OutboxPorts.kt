@@ -4,12 +4,35 @@
 
 package com.openbank.libs.persistence.outbox
 
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
 interface OutboxRepository {
     /** PENDING + FAILED rows, oldest first. DEAD (N5) and SENT rows are excluded. */
     suspend fun listProcessable(limit: Int): List<OutboxEntry>
+
+    /**
+     * Atomically claim up to [limit] processable rows for **this** dispatcher instance,
+     * transitioning them to [OutboxStatus.DISPATCHING] so a concurrently running instance
+     * cannot select the same rows (#1201). This matters whenever more than one pod can run the
+     * dispatch loop at once — including under a steady-state `replicas: 1` deployment, since an
+     * Argo Rollouts canary window runs the old and new pod simultaneously for the duration of the
+     * rollout, and **both** run every `@Scheduled` bean regardless of traffic-weight split.
+     *
+     * Also reclaims rows still [OutboxStatus.DISPATCHING] after [staleAfter] — the claiming pod
+     * crashed or was evicted between claiming the row and calling `markSent`/`markFailed` — so a
+     * claim can never strand a row forever.
+     *
+     * The default delegates to [listProcessable]: an **unclaimed peek**, safe only when the
+     * caller can guarantee a single dispatcher instance is ever running (no concurrent-claim
+     * protection). Override with an atomic `UPDATE ... WHERE id IN (SELECT ... FOR UPDATE SKIP
+     * LOCKED)` claim wherever that guarantee doesn't hold — see
+     * `LedgerOutboxRepositoryImpl.claimProcessable` for the reference implementation. Rolling
+     * this out to the rest of the outbox-bearing fleet is tracked as follow-up scope on #1201.
+     */
+    suspend fun claimProcessable(limit: Int, staleAfter: Duration = Duration.ofMinutes(2)): List<OutboxEntry> =
+        listProcessable(limit)
 
     /**
      * Count of processable (PENDING + FAILED) rows — the outbox **backlog**, the single most

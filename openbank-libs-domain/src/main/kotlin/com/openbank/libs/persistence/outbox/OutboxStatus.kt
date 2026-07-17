@@ -11,13 +11,19 @@ import java.util.UUID
  * Lifecycle of an outbox row (ADR-0050).
  *
  * - [PENDING] — written in the same transaction as the state change, not yet relayed.
+ * - [DISPATCHING] — claimed by one dispatcher instance ([OutboxRepository.claimProcessable],
+ *   #1201) and in flight to the broker. Not a durable end state: a repository that implements
+ *   claim semantics reclaims rows stuck here past its stale-claim window (the claiming pod
+ *   crashed or was evicted between claim and `markSent`/`markFailed`) instead of leaving them
+ *   stranded. Repositories still on the [OutboxRepository.claimProcessable] default never
+ *   produce this status.
  * - [SENT] — successfully relayed to the broker.
  * - [FAILED] — a relay attempt failed; the row stays eligible for re-dispatch.
  * - [DEAD] — terminal. The row exhausted [OutboxFailurePolicy.DEFAULT_MAX_ATTEMPTS]
  *   publish attempts and is parked so a poison row can neither be retried forever nor
  *   starve the batch (ADR-0050 N5). Excluded from `listProcessable`.
  */
-enum class OutboxStatus { PENDING, SENT, FAILED, DEAD }
+enum class OutboxStatus { PENDING, DISPATCHING, SENT, FAILED, DEAD }
 
 data class OutboxMessage(
     val eventId: UUID = UUID.randomUUID(),

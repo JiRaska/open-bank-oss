@@ -24,10 +24,13 @@ import org.eclipse.microprofile.faulttolerance.Timeout
  * Resilience annotations live here on the concrete CDI bean — CDI interceptors only fire when
  * the call enters through the proxy that wraps this bean (ADR-0013).
  *
- * **N4 — single writer.** `concurrentExecution = SKIP` prevents in-JVM overlap, and the ledger
- * deployment is pinned to `replicas: 1`; together they guarantee exactly one dispatcher claims a
- * row. A `FOR UPDATE SKIP LOCKED` claim is the tracked refinement for any future multi-writer
- * topology.
+ * **N4 — cross-pod row claim (#1201).** `concurrentExecution = SKIP` only prevents in-JVM
+ * overlap; it does not stop two pods from both running this scheduled method. `replicas: 1` is
+ * steady-state only — an Argo Rollouts canary window runs the old and new pod simultaneously for
+ * the whole rollout duration, and both dispatch on their own tick. `LedgerOutboxRepositoryImpl`
+ * therefore implements [OutboxRepository.claimProcessable] as an atomic `FOR UPDATE SKIP LOCKED`
+ * claim, not the unclaimed-peek default, so two concurrently running pods can never both select
+ * and publish the same row.
  */
 @ApplicationScoped
 class LedgerOutboxDispatcher(
