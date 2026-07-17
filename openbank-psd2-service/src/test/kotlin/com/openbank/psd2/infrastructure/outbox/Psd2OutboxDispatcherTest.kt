@@ -46,12 +46,12 @@ class Psd2OutboxDispatcherTest {
 
         dispatcher.dispatch()
 
-        coVerify(exactly = 0) { repo.listProcessable(any()) }
+        coVerify(exactly = 0) { repo.claimProcessable(any(), any()) }
     }
 
     @Test
     fun `dispatch drains the outbox when dispatch-enabled is true`(): Unit = runBlocking {
-        coEvery { repo.listProcessable(any()) } returns listOf(sampleEntry())
+        coEvery { repo.claimProcessable(any(), any()) } returns listOf(sampleEntry())
         coEvery { publisher.publish(any()) } returns Unit
         coEvery { repo.markSent(any(), any()) } returns Unit
 
@@ -59,7 +59,7 @@ class Psd2OutboxDispatcherTest {
 
         dispatcher.dispatch()
 
-        coVerify(exactly = 1) { repo.listProcessable(any()) }
+        coVerify(exactly = 1) { repo.claimProcessable(any(), any()) }
         coVerify(exactly = 1) { publisher.publish(any()) }
         coVerify(exactly = 1) { repo.markSent(any(), any()) }
     }
@@ -67,7 +67,7 @@ class Psd2OutboxDispatcherTest {
     @Test
     fun `dispatch marks an entry failed when the publisher throws`(): Unit = runBlocking {
         val entry = sampleEntry()
-        coEvery { repo.listProcessable(any()) } returns listOf(entry)
+        coEvery { repo.claimProcessable(any(), any()) } returns listOf(entry)
         coEvery { publisher.publish(entry) } throws RuntimeException("kafka unavailable")
         coEvery { repo.markFailed(any(), any(), any()) } returns Unit
 
