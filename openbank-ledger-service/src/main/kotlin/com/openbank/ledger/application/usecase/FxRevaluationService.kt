@@ -4,6 +4,7 @@
 
 package com.openbank.ledger.application.usecase
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.ledger.application.port.`in`.FxRevaluationResult
 import com.openbank.ledger.application.port.`in`.FxRevaluationUseCase
 import com.openbank.ledger.application.port.`in`.GetTrialBalanceQuery
@@ -13,14 +14,18 @@ import com.openbank.ledger.application.port.`in`.PostJournalCommand
 import com.openbank.ledger.application.port.`in`.RevalueFxCommand
 import com.openbank.ledger.application.port.out.CnbRateProvider
 import com.openbank.ledger.application.port.out.GlAccountRepository
-import com.openbank.ledger.application.port.out.LedgerEventPublisher
 import com.openbank.ledger.domain.event.FxRevaluedEvent
 import com.openbank.ledger.domain.model.FxRevaluationInput
 import com.openbank.ledger.domain.model.FxRevaluationPosting
+import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalLine
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
 import java.math.BigDecimal
+import java.time.Clock
+import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -30,15 +35,18 @@ import java.util.UUID
  * (199x-CV), fetches the statutory ČNB fixing from `openbank-fx-service`, and posts a pure-CZK
  * revaluation entry (built by [FxRevaluationPosting]) through [LedgerUseCase.postJournal] with the
  * idempotency key `fx-reval-{date}` — exactly one entry per business day; a same-day re-run is a
- * no-op. The `JournalPosted` event flows through the transactional outbox (ADR-0003); an additional
- * `openbank.ledger.fx.revalued` domain notification is emitted after the post.
+ * no-op. [FxRevaluedEvent] is enqueued via `PostJournalCommand.additionalOutboxMessages`, so it
+ * commits in the SAME transaction as the `JournalPosted`/`AccountBookedChanged` rows the post
+ * itself writes (#1201 proposed fix 3) — not a separate post-commit publish that a crash between
+ * the two could lose.
  */
 @ApplicationScoped
 class FxRevaluationService(
     private val ledger: LedgerUseCase,
     private val glAccounts: GlAccountRepository,
     private val cnbRates: CnbRateProvider,
-    private val events: LedgerEventPublisher,
+    private val objectMapper: ObjectMapper,
+    private val clock: Clock,
 ) : FxRevaluationUseCase {
 
     private val log: Logger = Logger.getLogger(FxRevaluationService::class.java)
@@ -93,14 +101,29 @@ class FxRevaluationService(
                 description = "Daily FX revaluation at ČNB fixing ${command.date}",
                 lines = lines.map { it.toRequest() },
                 postedBy = SYSTEM_USER,
+                additionalOutboxMessages = { posted -> listOf(fxRevaluedMessage(posted, command.date, movements)) },
             ),
         )
 
-        events.publish(REVALUED_TOPIC, entry.id.toString(), FxRevaluedEvent(entry.id, command.date, movements))
         log.infof("FX revaluation %s posted as %s: %s", command.date, entry.id, movements)
 
         return FxRevaluationResult(command.date, posted = true, journalId = entry.id, movements = movements)
     }
+
+    private fun fxRevaluedMessage(entry: JournalEntry, date: LocalDate, movements: Map<String, BigDecimal>) =
+        OutboxMessage(
+            aggregateId = entry.id,
+            eventType = FX_REVALUED,
+            payload = objectMapper.writeValueAsString(
+                FxRevaluedEvent(
+                    aggregateId = entry.id,
+                    date = date,
+                    movements = movements,
+                    occurredAt = Instant.now(clock),
+                ),
+            ),
+            createdAt = Instant.now(clock),
+        )
 
     private fun JournalLine.toRequest() = JournalLineRequest(
         glAccountId = glAccountId,
@@ -116,7 +139,7 @@ class FxRevaluationService(
 
     private companion object {
         const val EXCHANGE_DIFF_CODE = "5900"
-        const val REVALUED_TOPIC = "openbank.ledger.fx.revalued"
+        const val FX_REVALUED = "FxRevalued"
         val SYSTEM_USER: UUID = UUID.fromString("00000000-0000-0000-0000-000000005900")
 
         // ADR-0046 scope: EUR/USD/GBP against the CZK functional currency.

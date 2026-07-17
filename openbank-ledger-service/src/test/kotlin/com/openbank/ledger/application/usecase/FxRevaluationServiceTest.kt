@@ -4,13 +4,15 @@
 
 package com.openbank.ledger.application.usecase
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.SerializationFeature
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.openbank.ledger.application.port.`in`.GetTrialBalanceQuery
 import com.openbank.ledger.application.port.`in`.LedgerUseCase
 import com.openbank.ledger.application.port.`in`.PostJournalCommand
 import com.openbank.ledger.application.port.`in`.RevalueFxCommand
 import com.openbank.ledger.application.port.out.CnbRateProvider
 import com.openbank.ledger.application.port.out.GlAccountRepository
-import com.openbank.ledger.application.port.out.LedgerEventPublisher
 import com.openbank.ledger.domain.model.GlAccount
 import com.openbank.ledger.domain.model.GlAccountType
 import com.openbank.ledger.domain.model.JournalEntry
@@ -29,8 +31,10 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.UUID
 
 class FxRevaluationServiceTest {
@@ -39,9 +43,16 @@ class FxRevaluationServiceTest {
     private val ledger = mockk<LedgerUseCase>()
     private val glAccounts = mockk<GlAccountRepository>()
     private val cnbRates = mockk<CnbRateProvider>()
-    private val events = mockk<LedgerEventPublisher>(relaxed = true)
 
-    private val service = FxRevaluationService(ledger, glAccounts, cnbRates, events)
+    // Mirrors Quarkus's managed ObjectMapper (JavaTimeModule + dates-as-ISO-strings), matching
+    // LedgerServiceTest's own jsonMapper convention — without it, serializing occurredAt (Instant)
+    // throws (Instant has no default Jackson handler).
+    private val objectMapper = ObjectMapper()
+        .registerModule(JavaTimeModule())
+        .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+    private val clock = Clock.fixed(Instant.parse("2026-05-30T15:00:00Z"), ZoneOffset.UTC)
+
+    private val service = FxRevaluationService(ledger, glAccounts, cnbRates, objectMapper, clock)
 
     private val eurCvId = UUID.randomUUID()
     private val pnlId = UUID.randomUUID()
@@ -116,7 +127,8 @@ class FxRevaluationServiceTest {
         coEvery { glAccounts.findByCode("1995") } returns gl(eurCvId, "1995")
         coEvery { glAccounts.findByCode("5900") } returns gl(pnlId, "5900")
         val cmd = slot<PostJournalCommand>()
-        coEvery { ledger.postJournal(capture(cmd)) } returns stubEntry()
+        val entry = stubEntry()
+        coEvery { ledger.postJournal(capture(cmd)) } returns entry
 
         val result = service.revalue(RevalueFxCommand(date))
 
@@ -127,7 +139,25 @@ class FxRevaluationServiceTest {
         assertThat(cmd.captured.idempotencyKey).isEqualTo("fx-reval-2026-05-30")
         assertThat(cmd.captured.lines).hasSize(2)
         assertThat(cmd.captured.lines.all { it.baseCurrencyCode == "CZK" }).isTrue()
-        coVerify(exactly = 1) { events.publish("openbank.ledger.fx.revalued", any(), any()) }
+
+        // FxRevalued rides the SAME outbox transaction as the journal post (#1201 proposed fix
+        // 3), not a separate post-commit publish a crash could lose — proven here by asserting on
+        // the outbox message the command carries, not a call to some now-deleted publisher.
+        val outboxMessages = cmd.captured.additionalOutboxMessages(entry)
+        assertThat(outboxMessages).hasSize(1)
+        val message = outboxMessages.single()
+        assertThat(message.aggregateId).isEqualTo(entry.id)
+        assertThat(message.eventType).isEqualTo("FxRevalued")
+        val node = objectMapper.readTree(message.payload)
+        assertThat(node["aggregateId"].asText()).isEqualTo(entry.id.toString())
+        assertThat(node["date"].asText()).isEqualTo(date.toString())
+        // decimalValue(), not asText(): Jackson's default BigDecimal serialization uses
+        // scientific notation for a value this large (pre-existing, unrelated to this change —
+        // AccountBookedChangedEvent's payload has the same characteristic, no ObjectMapperCustomizer
+        // overrides it), so the JSON node's text form is "2.5145E7", not "25145000.00" — the same
+        // numeric value, different string representation. A caller reading this back with a real
+        // JSON parser (as any consumer must) gets the same BigDecimal either way.
+        assertThat(node["movements"]["EUR"].decimalValue()).isEqualByComparingTo(BigDecimal("25145000.00"))
     }
 
     @Test

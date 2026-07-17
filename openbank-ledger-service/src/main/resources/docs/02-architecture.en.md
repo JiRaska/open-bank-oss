@@ -69,14 +69,14 @@ com.openbank.ledger/
 ├── application/               ◄── use-case orchestration
 │   ├── port/in/               LedgerPorts (LedgerUseCase), FxRevaluationPorts
 │   ├── port/out/              GlAccountRepository, JournalRepository,
-│   │                          LedgerOutboxPort, LedgerEventPublisher, CnbRateProvider
+│   │                          LedgerOutboxPort, CnbRateProvider
 │   └── usecase/               LedgerService, FxRevaluationService
 │
 └── infrastructure/            ◄── adapters
     ├── rest/                  LedgerResource, FxRevaluationResource, ExceptionMappers
     ├── persistence/           Panache*Repository, JournalEntities, LedgerOutboxEntity
     ├── outbox/                LedgerOutboxDispatcher (scheduled drain)
-    ├── messaging/             KafkaLedgerOutboxEventPublisher, LoggingLedgerEventPublisher
+    ├── messaging/             KafkaLedgerOutboxEventPublisher
     ├── client/                FxServiceClient, FxServiceCnbRateAdapter
     ├── partition/             JournalPartitionMaintainer, HibernatePartitionExecutor
     └── schedule/              FxRevaluationScheduler
@@ -93,7 +93,6 @@ com.openbank.ledger/
 | `JournalRepository` (out) | `PanacheJournalRepository` | persist/read journal entries + lines |
 | `GlAccountRepository` (out) | `PanacheGlAccountRepository` | chart-of-accounts lookups by code/id |
 | `LedgerOutboxPort` (out) | `LedgerOutboxRepositoryImpl` | enqueue + claim outbox rows |
-| `LedgerEventPublisher` (out) | `KafkaLedgerOutboxEventPublisher` / `Logging…` | publish domain events |
 | `CnbRateProvider` (out) | `FxServiceCnbRateAdapter` (→ `FxServiceClient`) | statutory ČNB FX fixing |
 
 ## Outbox flow
