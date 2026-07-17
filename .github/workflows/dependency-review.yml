@@ -14,15 +14,73 @@ permissions:
 jobs:
   dependency-review:
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
-    timeout-minutes: 10
+    # Sized from an end-to-end measurement on a real dependency-touching PR, not from the
+    # submission's runtime alone: the resolve itself took 734 s, but the snapshot only
+    # became queryable ~24 min after this job started (GitHub indexes the submitted graph
+    # after the API call returns). At timeout-minutes: 25 that run cleared by 48 s — one
+    # slow queue away from a spurious red on an honest PR. 35 leaves real headroom.
+    # Only dependency-touching PRs wait at all; the rest finish in ~7 s (retry disarmed).
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Whether to wait for a Gradle snapshot depends on whether one is coming: the retry
+      # below must be armed ONLY when dependency-submission.yml is also running for this PR,
+      # i.e. when the same paths it filters on changed. Measured the hard way — with the
+      # retry armed unconditionally this job sat >11 min on a PR that touched no manifest
+      # at all, because GitHub reports a snapshot warning for the head SHA regardless (the
+      # Gradle graph is inherited from main, never submitted for this SHA). That would have
+      # taxed the ~93% of PRs this feature has nothing to say about.
+      #
+      # Same merge-base resolution as ci.yml's shared diff-base step, and for the same
+      # reason: pull_request.base.sha is frozen at PR creation and misclassifies once a
+      # competing PR merges first.
+      - name: Detect dependency-manifest changes
+        id: deps
+        env:
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          base="${EVENT_BASE_SHA}"
+          git fetch --depth=2 origin "${GITHUB_SHA}" 2>/dev/null || true
+          if git rev-parse -q --verify 'HEAD^2' >/dev/null 2>&1; then
+            base="$(git rev-parse 'HEAD^1')"
+          else
+            git fetch --depth=1 origin "${base}" 2>/dev/null || true
+          fi
+          # Keep this list in sync with dependency-submission.yml's path filters.
+          # Here-string, not a pipe: `set -o pipefail` + `grep -q` exiting early SIGPIPEs
+          # the producer and fails the step (a known footgun in this repo's workflows).
+          files="$(git diff --name-only "${base}" "${GITHUB_SHA}")"
+          if grep -qE '(^|/)build\.gradle\.kts$|^openbank-libs/gradle/libs\.versions\.toml$|^settings\.gradle\.kts$|^gradle/wrapper/' <<< "${files}"; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Dependency manifests changed — will wait for the Gradle snapshot from dependency-submission.yml."
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No dependency manifest touched — no Gradle submission runs for this PR, so nothing to wait for."
+          fi
 
       - name: Dependency Review
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
           comment-summary-in-pr: always
+          # This action only ever diffs SUBMITTED dependency graphs. Gradle — the fleet's
+          # primary language — is not natively parsed by GitHub, so until
+          # dependency-submission.yml also ran on pull_request (#1419) the Gradle half of
+          # every PR was invisible here and vulnerable deps landed unreviewed, to surface
+          # later as Dependabot alerts on main.
+          #
+          # Armed only on dependency-touching PRs (see the detect step above): there the
+          # submission job runs concurrently with this one, so the head-SHA snapshot does
+          # not exist yet when this starts ("No snapshots were found for the head SHA")
+          # and we must wait for it.
+          #
+          # gradle/actions documents 600 s. Measured end-to-end on a real dependency PR,
+          # the snapshot only became queryable ~24 min in (734 s resolve + GitHub's own
+          # indexing lag afterwards), so 600 — and even 1200 — undershoot reality. 1800.
+          retry-on-snapshot-warnings: ${{ steps.deps.outputs.changed == 'true' }}
+          retry-on-snapshot-warnings-timeout: 1800
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
           # No allow-ghsas / allow-dependencies-licenses entries: both suppressions
           # here existed solely for schemathesis 3.39.16's transitive pins, and the

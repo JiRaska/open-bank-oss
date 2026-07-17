@@ -27,6 +27,20 @@ on:
       - "openbank-libs/gradle/libs.versions.toml"
       - "settings.gradle.kts"
       - "gradle/wrapper/**"
+  # PRs too, so dependency-review.yml has a head-SHA graph to diff against main's
+  # (issue #1419): without a per-PR submission the Gradle graph is main-only, and
+  # dependency-review — which only ever compares submitted graphs — silently had
+  # nothing to say about the fleet's primary language. This is the integration
+  # documented by gradle/actions (docs/dependency-submission.md). Same path filter
+  # as the push trigger: only a PR that can change resolution pays the ~11 min, which
+  # is 3 of the last 40 PRs.
+  pull_request:
+    branches: [main]
+    paths:
+      - "**/build.gradle.kts"
+      - "openbank-libs/gradle/libs.versions.toml"
+      - "settings.gradle.kts"
+      - "gradle/wrapper/**"
   schedule:
     # Weekly belt-and-braces resubmission — dependency resolution can drift even without a
     # manifest change (a transitive version moving inside a declared range).
@@ -44,6 +58,16 @@ jobs:
   submit:
     name: Submit fleet dependency graph
     runs-on: ubuntu-latest # public repo => hosted runners free+unlimited (FinOps: hosted-first)
+    # Skip on fork PRs: GitHub hands them a read-only token no matter what the block
+    # below asks for, so the submission API call would fail — a guaranteed red check
+    # on every external contribution. Consequence: a fork PR gets dependency review
+    # for the natively-parsed ecosystems (npm/pip/actions/docker) but NOT for Gradle.
+    # Accepted deliberately: closing it needs the generate-and-upload + workflow_run
+    # download-and-submit split, and a `workflow_run` job holding `contents: write`
+    # while consuming a fork-authored artifact is the first such pattern in this repo —
+    # not worth introducing for a repo whose changes all land from same-repo branches.
+    # Revisit if external contributions become routine (tracked in #1419).
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     timeout-minutes: 30
     permissions:
       contents: write # required by the dependency-submission API
