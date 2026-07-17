@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.3.2...devops-agent-v0.4.0) (2026-07-17)
+
+
+### Features
+
+* **vop:** add Verification of Payee backend; give control-plane agents episodic memory ([#1195](https://github.com/JiRaska/open-bank-oss/issues/1195)) ([91460fc](https://github.com/JiRaska/open-bank-oss/commit/91460fcc62bb72f4a99953e51e90374597dda9c3))
+
 ## [0.3.2](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.3.1...devops-agent-v0.3.2) (2026-07-07)
 
 
