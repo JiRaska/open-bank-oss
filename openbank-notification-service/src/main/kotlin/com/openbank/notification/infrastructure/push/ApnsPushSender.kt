@@ -47,8 +47,11 @@ class ApnsPushSender {
     @ConfigProperty(name = "openbank.notification.push.apns.team-id")
     var teamId: Optional<String> = Optional.empty()
 
-    @ConfigProperty(name = "openbank.notification.push.apns.bundle-id", defaultValue = "cz.openbank.app")
-    var bundleId: String = "cz.openbank.app"
+    // Default must match the app's PRODUCT_BUNDLE_IDENTIFIER (openbank-app iosApp/project.yml),
+    // since it becomes the apns-topic header — a mismatch is rejected BadTopic. Overridable per
+    // env; the default exists so an unconfigured deploy fails the right way, not silently wrong.
+    @ConfigProperty(name = "openbank.notification.push.apns.bundle-id", defaultValue = "tech.openbank.app")
+    var bundleId: String = "tech.openbank.app"
 
     // .p8 PEM contents (PKCS#8 EC private key), raw or Base64-encoded. Via env/Vault.
     @ConfigProperty(name = "openbank.notification.push.apns.private-key")

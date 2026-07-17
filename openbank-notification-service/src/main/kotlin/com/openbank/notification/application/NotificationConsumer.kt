@@ -24,6 +24,7 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.mailer.Mail
 import io.quarkus.mailer.reactive.ReactiveMailer
 import io.smallrye.mutiny.Uni
+import io.vertx.core.Vertx
 import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -33,6 +34,7 @@ import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.Executor
 
 @ApplicationScoped
 class NotificationConsumer {
@@ -300,6 +302,12 @@ class NotificationConsumer {
         entity: NotificationEntity,
     ): Uni<Void> {
         val pushText = htmlToPlain(body)
+        // Capture the Vert.x (duplicated) context now, while we are demonstrably on it — the
+        // opening findActiveByParty transaction below only works because we are. The push adapter's
+        // send completes on the JDK HttpClient's own thread pool, off the event loop
+        // (ApnsPushSender), so without hopping back, the trailing status/invalidate transaction
+        // runs with "No current Vertx context found" and is silently swallowed (issue #1548).
+        val vertxContext = Vertx.currentContext()
         return Panache.withTransaction { deviceTokenRepo.findActiveByParty(req.partyId) }
             .chain { tokens ->
                 if (tokens.isEmpty()) {
@@ -315,6 +323,9 @@ class NotificationConsumer {
                     ).map { result -> deviceId to result }
                 }
                 Uni.join().all(sends).andCollectFailures()
+                    // The sends completed off the Vert.x event loop; hop back onto the captured
+                    // context so the Panache.withTransaction below has a context (issue #1548).
+                    .emitOn(Executor { command -> vertxContext?.runOnContext { command.run() } ?: command.run() })
                     .chain { results ->
                         val delivered = results.count { it.second.success }
                         val invalidIds = results.filter { it.second.invalidToken }.map { it.first }

@@ -4,10 +4,15 @@
 package com.openbank.notification.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.notification.application.port.out.PushMessage
+import com.openbank.notification.application.port.out.PushSender
 import com.openbank.notification.domain.model.NotificationChannel
 import com.openbank.notification.domain.model.NotificationRequest
 import com.openbank.notification.domain.model.NotificationTemplate
+import com.openbank.notification.domain.model.PushResult
 import com.openbank.notification.domain.model.TemplateSensitivity
+import com.openbank.notification.infrastructure.persistence.entity.DeviceTokenEntity
+import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
 import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.mailer.MockMailbox
@@ -15,16 +20,22 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
+import io.smallrye.mutiny.Uni
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import io.smallrye.reactive.messaging.memory.InMemorySource
+import jakarta.annotation.Priority
+import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.inject.Alternative
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.reactive.messaging.Message
 import org.eclipse.microprofile.reactive.messaging.spi.Connector
 import org.junit.jupiter.api.Test
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionStage
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.function.Supplier
 
@@ -239,5 +250,95 @@ class NotificationConsumerIT {
 
         assertThat(bodyFor(partyId)).contains("Alice")
         assertThat(bodyFor(partyId)).isNotEqualTo(TemplateSensitivity.REDACTED_BODY)
+    }
+
+    // ── PUSH channel end-to-end (issue #1548 hardening) ──
+
+    @Inject
+    lateinit var deviceTokenRepo: DeviceTokenRepository
+
+    private fun seedActiveDevice(partyId: UUID, token: String) {
+        VertxContextSupport.subscribeAndAwait {
+            Panache.withTransaction {
+                val now = Instant.now()
+                val entity = DeviceTokenEntity().also {
+                    it.deviceId = UUID.randomUUID()
+                    it.partyId = partyId
+                    it.appInstance = "it-instance-$token"
+                    it.platform = "APNS"
+                    it.token = token
+                    it.status = "ACTIVE"
+                    it.registeredAt = now
+                    it.createdAt = now
+                    it.updatedAt = now
+                }
+                deviceTokenRepo.persist(entity)
+            }
+        }
+    }
+
+    private fun deviceStatusFor(token: String): String? = VertxContextSupport.subscribeAndAwait {
+        Panache.withSession { deviceTokenRepo.find("token", token).firstResult() }
+    }?.status
+
+    /**
+     * End-to-end PUSH coverage (there was none before #1548): one device the adapter accepts, one
+     * it rejects as invalid. Asserts the fan-out result is persisted — row flips to SENT (≥1
+     * delivered) and the rejected token is retired. [OffContextPushSender] completes its send on a
+     * worker thread to mirror ApnsPushSender's JDK HttpClient.
+     *
+     * NOTE: this exercises the post-send transaction but does NOT deterministically reproduce the
+     * production "No current Vertx context found" failure — Quarkus' Mutiny context propagation
+     * restores the context inside this Testcontainers harness, so the pre-fix code also passes here.
+     * The fix (capture the Vert.x context, hop back onto it after the off-loop send) is verified
+     * against the real APNs path in the sandbox: with the adapter enabled the row now commits SENT.
+     */
+    @Test
+    fun `PUSH delivery persists SENT and retires provider-rejected tokens`() {
+        val partyId = UUID.randomUUID()
+        seedActiveDevice(partyId, OffContextPushSender.GOOD_TOKEN)
+        seedActiveDevice(partyId, OffContextPushSender.BAD_TOKEN)
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.PUSH,
+                template = NotificationTemplate.WELCOME,
+                recipient = "push-recipient@example.com",
+                variables = mapOf("name" to "Push"),
+            ),
+        )
+
+        // At least one device accepted → row committed SENT (pre-fix: stuck PENDING).
+        assertThat(statusFor(partyId)).isEqualTo("SENT")
+        // The provider-rejected token was retired in the same transaction (pre-fix: stayed ACTIVE).
+        assertThat(deviceStatusFor(OffContextPushSender.BAD_TOKEN)).isEqualTo("INVALID")
+        assertThat(deviceStatusFor(OffContextPushSender.GOOD_TOKEN)).isEqualTo("ACTIVE")
+    }
+}
+
+/**
+ * Test push adapter that completes its send on a worker thread — off the Vert.x event loop —
+ * mirroring ApnsPushSender's JDK HttpClient completion. `@Alternative` at `@Priority(1)` replaces
+ * the real PushSenderRouter for this test module; the non-PUSH tests never invoke it. The good
+ * token is accepted, any other token is rejected as invalid.
+ */
+@Alternative
+@Priority(1)
+@ApplicationScoped
+class OffContextPushSender : PushSender {
+    override fun send(message: PushMessage): Uni<PushResult> {
+        val result = if (message.token == GOOD_TOKEN) {
+            PushResult.ok("apns-id-it")
+        } else {
+            PushResult.failed("BadDeviceToken", "invalid token", invalidToken = true)
+        }
+        return Uni.createFrom().completionStage(CompletableFuture.supplyAsync({ result }, EXECUTOR))
+    }
+
+    companion object {
+        const val GOOD_TOKEN = "apns-good-token-it"
+        const val BAD_TOKEN = "apns-bad-token-it"
+        private val EXECUTOR = Executors.newSingleThreadExecutor()
     }
 }
