@@ -224,7 +224,7 @@ openbank:
         enabled: ${APNS_ENABLED:false}
         key-id: ${APNS_KEY_ID:}
         team-id: ${APNS_TEAM_ID:}
-        bundle-id: ${APNS_BUNDLE_ID:cz.openbank.app}
+        bundle-id: ${APNS_BUNDLE_ID:tech.openbank.app}
         # .p8 PKCS#8 EC private key (raw PEM or Base64).
         private-key: ${APNS_PRIVATE_KEY:}
         # true → APNs sandbox host (debug builds); false → production.
