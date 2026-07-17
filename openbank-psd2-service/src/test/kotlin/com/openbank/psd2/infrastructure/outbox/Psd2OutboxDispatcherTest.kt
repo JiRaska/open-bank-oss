@@ -21,6 +21,12 @@ import java.util.UUID
  * scheduled tick is a no-op gate around [com.openbank.libs.persistence.outbox.AbstractOutboxDispatcher]'s
  * shared drain loop, and that a processable entry is published and marked sent through that loop
  * (which internally calls the protected `publishWithResilience` override).
+ *
+ * Stubs/verifies `claimProcessable` (#1201's atomic claim), not `listProcessable`: the shared
+ * `OutboxDispatch.dispatchOnce` calls the former, and a `mockk()` never falls through to the
+ * interface's default `claimProcessable = listProcessable(limit)` body — it intercepts every
+ * call at the proxy level, so an un-stubbed `claimProcessable` throws (swallowed by
+ * `dispatchOnce`'s `runCatching`), silently skipping the whole batch.
  */
 class Psd2OutboxDispatcherTest {
 

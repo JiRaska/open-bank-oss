@@ -16,6 +16,12 @@ import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
 
+/**
+ * Stubs/verifies `claimProcessable` (#1201's atomic claim), not `listProcessable`: a relaxed
+ * `mockk()` never falls through to the interface's default `claimProcessable = listProcessable`
+ * body, so an un-stubbed `claimProcessable` silently returns an empty list instead. See
+ * `BillingOutboxDispatcherTest` for the full explanation.
+ */
 class FxOutboxDispatcherTest {
 
     private val outboxRepository = mockk<FxOutboxRepository>(relaxed = true)
@@ -39,7 +45,7 @@ class FxOutboxDispatcherTest {
     fun `dispatch publishes each processable row and marks it sent`(): Unit = runBlocking {
         val a = entry(payload = "evt-a")
         val b = entry(payload = "evt-b")
-        coEvery { outboxRepository.listProcessable(any()) } returns listOf(a, b)
+        coEvery { outboxRepository.claimProcessable(any(), any()) } returns listOf(a, b)
 
         dispatcher.dispatch()
 
@@ -53,7 +59,7 @@ class FxOutboxDispatcherTest {
     @Test
     fun `a publish failure marks that row failed with the error and does not mark it sent`(): Unit = runBlocking {
         val failing = entry(payload = "boom")
-        coEvery { outboxRepository.listProcessable(any()) } returns listOf(failing)
+        coEvery { outboxRepository.claimProcessable(any(), any()) } returns listOf(failing)
         coEvery { eventPublisher.publish(failing) } throws RuntimeException("kafka down")
 
         dispatcher.dispatch()
@@ -64,7 +70,7 @@ class FxOutboxDispatcherTest {
 
     @Test
     fun `a repository read failure is swallowed so the scheduler never crashes`(): Unit = runBlocking {
-        coEvery { outboxRepository.listProcessable(any()) } throws IllegalStateException("db unavailable")
+        coEvery { outboxRepository.claimProcessable(any(), any()) } throws IllegalStateException("db unavailable")
 
         dispatcher.dispatch()
 
@@ -77,7 +83,7 @@ class FxOutboxDispatcherTest {
 
         disabledDispatcher.dispatch()
 
-        coVerify(exactly = 0) { outboxRepository.listProcessable(any()) }
+        coVerify(exactly = 0) { outboxRepository.claimProcessable(any(), any()) }
         coVerify(exactly = 0) { eventPublisher.publish(any()) }
     }
 }

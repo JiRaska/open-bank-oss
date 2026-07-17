@@ -20,6 +20,12 @@ import java.util.UUID
  * The scheduled dispatch tick is gated on `openbank.outbox.dispatch-enabled` (default **false** —
  * the classic silent-outbox footgun) and, when enabled, must mark each row SENT on success and
  * FAILED on a publish error so the row is retried rather than lost.
+ *
+ * Stubs/verifies `claimProcessable` (#1201's atomic claim), not `listProcessable`: a `mockk()`
+ * never falls through to the interface's default `claimProcessable = listProcessable(limit)`
+ * body — it intercepts every call at the proxy level — so an un-stubbed `claimProcessable` throws
+ * (swallowed by `dispatchOnce`'s `runCatching`), silently skipping the whole batch. See
+ * `BillingOutboxDispatcherTest` for the full explanation.
  */
 class LendingOutboxDispatcherTest {
 
