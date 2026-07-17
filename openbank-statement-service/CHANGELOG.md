@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.8](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.5.7...statement-service-v0.5.8) (2026-07-17)
+
+
+### Bug Fixes
+
+* **statement:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1556](https://github.com/JiRaska/open-bank-oss/issues/1556)) ([9c4c1d6](https://github.com/JiRaska/open-bank-oss/commit/9c4c1d6f20d992fe14630c94c0399663c0479e07))
+
 ## [0.5.7](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.5.6...statement-service-v0.5.7) (2026-07-16)
 
 
