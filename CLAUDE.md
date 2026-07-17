@@ -167,6 +167,15 @@ fire from *outside* it, so they stay here:
   `GIT_SEQUENCE_EDITOR=true git rebase -i --exec 'git commit --amend --no-edit -S' origin/main`,
   then verify via the API (`gh api .../pulls/<N>/commits --jq '.[].commit.verification'`) — not
   `gh pr view`.
+- **The `merge_group:` triggers in the required-check workflows are DEAD CODE — there is no merge
+  queue and there cannot be one.** GitHub merge queue requires an **organization-owned** repo; this
+  one is owned by a personal account, so adding a `merge_queue` rule to the ruleset returns
+  `422 Invalid rule 'merge_queue'` (issue #1465 has the isolation proof). The support was built
+  before that was checked; it is kept because it is correct and inert (the trigger simply never
+  fires) and would be needed the day the repo moves under an org — but do not read it as a working
+  gate, and do not "fix" a queue that isn't there. Consequence: the frozen-`base.sha` race
+  (#481 × #524) stays open, and `strict_required_status_checks_policy` (require branches up to
+  date) is the only remaining lever that works on a personal account.
 
 ### Dependency graph & PR-time CVE gating
 Rationale + what does *not* cover it: `rules.yaml: dependencies.pr_time_cve_gate` (authoritative).
