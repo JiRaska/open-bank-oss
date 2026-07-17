@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.1](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.11.0...balance-service-v1.11.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **balance:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1496](https://github.com/JiRaska/open-bank-oss/issues/1496)) ([84a8831](https://github.com/JiRaska/open-bank-oss/commit/84a8831668e30716f797b76c1f9a2dfd91f0aaec))
+
 ## [1.11.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.10.1...balance-service-v1.11.0) (2026-07-14)
 
 
