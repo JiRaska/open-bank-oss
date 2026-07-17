@@ -14,7 +14,12 @@ import { hasPermission } from '@/lib/auth/roles'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { opsMessageApi } from '@/lib/api'
+import {
+  opsMessageApi,
+  OPERATOR_MESSAGE_TEMPLATE_VARIABLES,
+  type OperatorMessageTemplate,
+  type ComposeMessageRequest,
+} from '@/lib/api'
 
 const PAGE_SIZE = 25
 
@@ -262,11 +267,14 @@ function MessagesTab({ partyId, roles }: { partyId: string; roles: string[] }) {
   const canCompose = hasPermission(roles, 'opsmessage:compose')
   const [sending, setSending] = useState(false)
   const [composeError, setComposeError] = useState<string | null>(null)
-  // Set once the maker's first submit call returns 202 — nothing here polls automatically
+  // Set once the maker's first compose call returns 202 — nothing here polls automatically
   // (ADR-0176 introduces the fleet's first 202/X-Approval-Id UI flow; a real approval
   // notification channel is a separate, larger piece of work). The maker clicks "Retry send"
-  // themselves once a colleague has approved it.
-  const [pendingSubmit, setPendingSubmit] = useState<{ id: string; approvalId?: string } | null>(null)
+  // themselves once a colleague has approved it. The retry resends `request` VERBATIM — the
+  // backend binds the pending approval to the request body's own content fingerprint
+  // (OperatorMessageResource KDoc), so anything other than a byte-identical resend would create
+  // a new, never-approved pending approval instead of satisfying the existing one.
+  const [pendingCompose, setPendingCompose] = useState<{ request: ComposeMessageRequest; approvalId: string } | null>(null)
   const [retrying, setRetrying] = useState(false)
 
   const load = useCallback(async (nextPage: number) => {
@@ -302,30 +310,50 @@ function MessagesTab({ partyId, roles }: { partyId: string; roles: string[] }) {
   // The endpoint is offset-paged (page/size/total), not cursor-paged like party search.
   const hasNextPage = (page + 1) * PAGE_SIZE < total
 
-  const REFERENCE_ID_PATTERN = /^[A-Za-z0-9-]{1,40}$/
+  // Deliberately simple, client-side pre-check only — the backend (OperatorMessageService)
+  // validates authoritatively and is the one that actually matters for rejecting a malformed
+  // address.
+  const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-  // ADR-0176 D2: OPERATOR_ACCOUNT_NOTICE is the only composable template today, so the operator
-  // supplies just a reference code — never free text. Two calls, mirroring
-  // OperatorMessageResource's own KDoc: draft persists the content, submit is the four-eyes
-  // -gated one and pauses (202) until a different operator approves it.
+  // ADR-0176 D2: a closed, reviewed template catalogue — the operator never supplies free text,
+  // only the declared variables for whichever template they pick. Sequential window.prompt()
+  // calls mirror this codebase's existing single-field pattern (accounts/[id]'s doAction) rather
+  // than introducing new form UI, chained since this action needs more than one field.
   async function sendMessage() {
-    const referenceId = window.prompt(
-      t('Referenční kód (např. TICKET-123):', 'Reference (e.g. TICKET-123):'),
-    )
-    if (referenceId === null) return
-    if (!REFERENCE_ID_PATTERN.test(referenceId)) {
-      setComposeError(t(
-        'Referenční kód musí obsahovat 1–40 alfanumerických znaků nebo pomlček.',
-        'Reference must be 1-40 alphanumeric characters or hyphens.',
-      ))
+    const recipient = window.prompt(t('E-mail příjemce:', 'Recipient email:'))
+    if (recipient === null) return
+    if (!EMAIL_PATTERN.test(recipient)) {
+      setComposeError(t('Zadejte platnou e-mailovou adresu.', 'Enter a valid email address.'))
       return
     }
+
+    const templateChoice = window.prompt(
+      t(
+        'Šablona — napište GENERIC_NOTICE (obecné oznámení) nebo SUPPORT_FOLLOWUP (návaznost na tiket):',
+        'Template — type GENERIC_NOTICE (general notice) or SUPPORT_FOLLOWUP (support ticket follow-up):',
+      ),
+      'SUPPORT_FOLLOWUP',
+    )
+    if (templateChoice === null) return
+    const template = templateChoice.trim().toUpperCase() as OperatorMessageTemplate
+    if (!(template in OPERATOR_MESSAGE_TEMPLATE_VARIABLES)) {
+      setComposeError(t('Neznámá šablona.', 'Unknown template.'))
+      return
+    }
+
+    const variables: Record<string, string> = {}
+    for (const key of OPERATOR_MESSAGE_TEMPLATE_VARIABLES[template]) {
+      const value = window.prompt(`${key}:`)
+      if (value === null) return
+      variables[key] = value
+    }
+
+    const request: ComposeMessageRequest = { partyId, template, recipient, variables }
     setSending(true); setComposeError(null)
     try {
-      const drafted = await opsMessageApi.draft({ partyId, template: 'OPERATOR_ACCOUNT_NOTICE', referenceId, purpose: 'SERVICE' })
-      const result = await opsMessageApi.submit(drafted.id)
-      if (result.status === 'PENDING_APPROVAL') {
-        setPendingSubmit({ id: drafted.id, approvalId: result.approvalId })
+      const result = await opsMessageApi.compose(request)
+      if (result.status === 'PENDING_APPROVAL' && result.approvalId) {
+        setPendingCompose({ request, approvalId: result.approvalId })
       } else {
         // Only reached if four-eyes enforcement is off in this environment — still a real
         // send, so refresh the history to show it.
@@ -341,19 +369,18 @@ function MessagesTab({ partyId, roles }: { partyId: string; roles: string[] }) {
   }
 
   async function retrySubmit() {
-    if (!pendingSubmit) return
+    if (!pendingCompose) return
     setRetrying(true)
     try {
-      const result = await opsMessageApi.submit(pendingSubmit.id, pendingSubmit.approvalId)
+      const result = await opsMessageApi.compose(pendingCompose.request, pendingCompose.approvalId)
       if (result.status !== 'PENDING_APPROVAL') {
-        setPendingSubmit(null)
+        setPendingCompose(null)
         load(0)
       }
       // Still PENDING_APPROVAL: nobody has decided it yet — leave the banner up.
     } catch {
-      // A 409 (already resolved) or 403 (rejected/self-approval) most often means someone
-      // already decided it — leave the banner up rather than guessing; the Pending approvals
-      // queue on the Notifications page has the authoritative status.
+      // A 409/403 (already resolved, or self-approval refused) most often means someone
+      // already decided it — leave the banner up rather than guessing.
     } finally { setRetrying(false) }
   }
 
@@ -361,7 +388,7 @@ function MessagesTab({ partyId, roles }: { partyId: string; roles: string[] }) {
     <>
       {canCompose && (
         <div className="card" style={{ padding: '14px 20px', marginBottom: '16px' }}>
-          {pendingSubmit ? (
+          {pendingCompose ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <Clock size={15} style={{ color: 'var(--yellow)' }} />
               <span style={{ fontSize: '13px' }}>

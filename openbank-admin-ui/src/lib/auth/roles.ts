@@ -71,12 +71,12 @@ export const PERMISSIONS = {
   // call the endpoint directly. This decides what we *render*, not what they can *fetch*.
   // Real metadata/body separation needs a policy change — issue #1326.
   "notifications:view":       [ROLES.ADMIN, ROLES.OPERATOR],
-  // Operator-initiated customer messaging (ADR-0176 D4/D5). Matches the backend's actual rego
-  // grants exactly (opsmessage-compose / opsmessage-approve in rest.rego) — any
-  // ROLE_OPERATOR/ROLE_ADMIN may compose or decide, with self-approval refused server-side by
-  // SelfApprovalNotAllowedException, not by a narrower UI-side role split. Unlike
-  // notifications:view above, this one DOES mirror a real backend check (opsmessage.compose is
-  // also four-eyes gated, which no UI permission could substitute for either way).
+  // Operator-initiated customer messaging (ADR-0176 D4/D5, #1368). Matches the backend's actual
+  // rego actions exactly — opsmessage.compose (POST .../messages) and opsmessage.approval.decide
+  // (PATCH .../approvals/{id}) both grant any ROLE_OPERATOR/ROLE_ADMIN, with self-approval
+  // refused server-side (ApprovalStore.decide), not by a narrower UI-side role split. Unlike
+  // notifications:view above, this DOES mirror a real backend check (compose is also four-eyes
+  // gated, which no UI permission could substitute for either way).
   "opsmessage:compose":       [ROLES.ADMIN, ROLES.OPERATOR],
   "opsmessage:approve":       [ROLES.ADMIN, ROLES.OPERATOR],
   // System
