@@ -66,7 +66,18 @@ class StatementPeriodEntity : PanacheEntityBase {
     lateinit var closedAt: Instant
 }
 
-/** Transactional outbox for `account.statement.period.closed` (ADR-0049 D3). */
+/**
+ * Transactional outbox for `account.statement.period.closed` (ADR-0049 D3).
+ *
+ * `claimed_at` is statement-only — added straight on this entity, not the shared
+ * [PanacheOutboxEntity] (mapped by every outbox-bearing service — a shared-entity migration
+ * would need every service migrated in lockstep). Stamped by
+ * `StatementOutboxRepositoryImpl.claimProcessable`'s atomic claim query on DISPATCHING; read
+ * back by the same query to decide if a DISPATCHING row is stale enough to reclaim.
+ */
 @Entity
 @Table(name = "statement_outbox")
-class StatementOutboxEntity : PanacheOutboxEntity()
+class StatementOutboxEntity : PanacheOutboxEntity() {
+    @Column(name = "claimed_at")
+    var claimedAt: Instant? = null
+}
