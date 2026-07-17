@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.9.1...party-service-v0.9.2) (2026-07-17)
+
+
+### Bug Fixes
+
+* **party:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1540](https://github.com/JiRaska/open-bank-oss/issues/1540)) ([08a6537](https://github.com/JiRaska/open-bank-oss/commit/08a65375f6cd5a4bb06769d749be42f1a7931eb7))
+
 ## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.9.0...party-service-v0.9.1) (2026-07-16)
 
 
