@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.13.1...notification-service-v0.13.2) (2026-07-17)
+
+
+### Performance
+
+* **notification:** scoped bulk UPDATE for opsmessage.compose's terminal status transition ([#1436](https://github.com/JiRaska/open-bank-oss/issues/1436)) ([2fdcee6](https://github.com/JiRaska/open-bank-oss/commit/2fdcee63797751d013b7230621b18f1ebd656b1e)), closes [#1393](https://github.com/JiRaska/open-bank-oss/issues/1393)
+
 ## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.13.0...notification-service-v0.13.1) (2026-07-17)
 
 
