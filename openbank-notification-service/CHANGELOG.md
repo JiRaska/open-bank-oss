@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.4](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.13.3...notification-service-v0.13.4) (2026-07-17)
+
+
+### Bug Fixes
+
+* **notification:** correct stale comment on OperatorMessageService's notificationId ([#1430](https://github.com/JiRaska/open-bank-oss/issues/1430)) ([fe46205](https://github.com/JiRaska/open-bank-oss/commit/fe46205b64e5196190604e4037a2cb53a8e1d2aa))
+
 ## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.13.2...notification-service-v0.13.3) (2026-07-17)
 
 
