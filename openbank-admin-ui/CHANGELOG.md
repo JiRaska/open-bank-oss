@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.50.0...admin-ui-v0.50.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** reconcile operator-messaging UI with shipped notification-service contract ([#1535](https://github.com/JiRaska/open-bank-oss/issues/1535)) ([584bad9](https://github.com/JiRaska/open-bank-oss/commit/584bad9e2c6dda6b002d9d7ef089a35fe2d13aad)), closes [#1521](https://github.com/JiRaska/open-bank-oss/issues/1521)
+
 ## [0.50.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.49.0...admin-ui-v0.50.0) (2026-07-16)
 
 
