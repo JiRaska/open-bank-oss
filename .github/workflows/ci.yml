@@ -401,6 +401,11 @@ jobs:
       # merge ref). Residual gap: a PR whose last CI run predates the competing
       # merge and that merges with no later run is still unseen by ANY run-time
       # base choice — that needs required-up-to-date branches or a merge queue.
+      # A merge queue is NOT available: it requires an organization-owned repo and this
+      # one is personal, so the ruleset rejects the rule outright (#1465). The
+      # merge_group branch below is therefore inert — kept correct for the day the repo
+      # moves under an org, but it closes nothing today. The gap above stays open unless
+      # strict_required_status_checks_policy (require branches up to date) is turned on.
       - name: "resolve PR diff base (current merge-base, not creation-time base.sha)"
         # merge_group too: every diff-scoped gate below reads PR_DIFF_BASE, so if this step
         # skipped in the queue they would all skip with it and `Validate manifests` would go
