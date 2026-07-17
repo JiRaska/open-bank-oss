@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.13.0...standing-order-service-v0.13.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **standing-order:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1555](https://github.com/JiRaska/open-bank-oss/issues/1555)) ([5813a0f](https://github.com/JiRaska/open-bank-oss/commit/5813a0ffcb971b4709e7750f579e0d72ab949fb7))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.12.0...standing-order-service-v0.13.0) (2026-07-13)
 
 
