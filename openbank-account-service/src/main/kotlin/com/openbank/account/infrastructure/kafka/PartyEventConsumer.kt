@@ -14,11 +14,21 @@ import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
 import com.openbank.libs.domain.money.CurrencyCode
 import jakarta.enterprise.context.ApplicationScoped
+import kotlinx.coroutines.delay
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
 import java.math.BigDecimal
 import java.util.UUID
+
+/** The subset of the party-event envelope this consumer projects. */
+private data class PartyEvent(
+    val type: String,
+    val partyId: UUID,
+    val partyType: String,
+    val legalName: String,
+    val status: String,
+)
 
 /**
  * Onboarding account lifecycle driven by party domain events (ADR-0073).
@@ -33,9 +43,18 @@ import java.util.UUID
  * - party SUSPENDED → freeze any active account (defence in depth).
  *
  * Idempotent: one onboarding account per party AND type; re-delivered events are no-ops.
- * Poison-pill safe: any parse/projection failure is logged and acked so a single bad event
- * cannot wedge the consumer group (the party service remains the source of truth and can be
- * replayed).
+ *
+ * Failure handling distinguishes two cases that an earlier catch-all conflated — a conflation
+ * that turned a transient outage into permanent, silent data loss (a whole cohort of customers
+ * had their PARTY_CREATED acked-and-dropped and never got an account, 2026-06-24..2026-07-17):
+ *  - **Poison pill** — unparseable, or missing the partyId. It can never succeed, so it is logged
+ *    and acked (returning): retrying or dead-lettering it would only wedge or fill the DLQ.
+ *  - **Transient projection failure** — a well-formed event we simply could not project yet
+ *    because a dependency was momentarily down (a scaled-to-zero cold start, a DB blip). A short
+ *    bounded retry absorbs the blip; if it still fails the exception ESCAPES, and SmallRye routes
+ *    the record to the dead-letter topic (`failure-strategy: dead-letter-queue`, application.yaml)
+ *    — parked for replay, never destroyed, and the consumer keeps moving. The party service
+ *    remains the source of truth and the DLQ record is recoverable.
  */
 @ApplicationScoped
 // Constructor width comes from @ConfigProperty injection (the bonus feature alone is a
@@ -77,31 +96,95 @@ class PartyEventConsumer(
 
     @Incoming("party-events-in")
     suspend fun consume(payload: String) {
-        try {
-            val node = objectMapper.readTree(payload)
-            // Wire contract = the DEPLOYED producer (party-service KafkaPartyEventPublisher):
-            // a FLAT envelope on topic openbank.party.events —
-            //   {"eventType":"PARTY_CREATED","partyId":...,"partyType":"INDIVIDUAL",
-            //    "status":"PENDING_KYC","legalName":...,"email":...,"occurredAt":...}
-            // (NOT the pid-service nested {aggregateId,payload} form — pid publishes to a
-            //  different topic `party.events` and is not deployed. See ADR-0072 migration.)
-            val type = node.path("eventType").asText()
-            val partyId = runCatching { UUID.fromString(node.path("partyId").asText()) }.getOrNull() ?: return
-            when (type) {
-                "PARTY_CREATED" ->
-                    openPendingAccount(
-                        partyId = partyId,
-                        partyType = node.path("partyType").asText(""),
-                        legalName = node.path("legalName").asText("").trim(),
+        val event = parseEnvelope(payload)
+        if (event == null) {
+            // Poison pill: unparseable, or no usable partyId. It can never succeed — acking it (by
+            // returning) is correct. Do NOT let it reach the retry/DLQ path: retrying is pointless
+            // and dead-lettering it just fills the DLQ with events nothing can ever process.
+            log.warnf("Dropping unprocessable party event (poison pill): %.300s", payload)
+            return
+        }
+        // A well-formed event; a projection failure here is transient (dependency momentarily
+        // down), so it must NOT be swallowed. A short bounded retry absorbs a blip (e.g. a
+        // scaled-to-zero dependency's cold start); if it still fails the exception escapes and
+        // SmallRye dead-letters the record for replay (failure-strategy in application.yaml).
+        withBoundedRetry(event) { dispatch(event) }
+    }
+
+    /**
+     * Wire contract = the DEPLOYED producer (party-service KafkaPartyEventPublisher): a FLAT
+     * envelope on topic openbank.party.events —
+     *   {"eventType":"PARTY_CREATED","partyId":...,"partyType":"INDIVIDUAL",
+     *    "status":"PENDING_KYC","legalName":...,"email":...,"occurredAt":...}
+     * (NOT the pid-service nested {aggregateId,payload} form — pid publishes to a different topic
+     *  `party.events` and is not deployed. See ADR-0072 migration.)
+     *
+     * Returns null only for a genuine poison pill — malformed JSON, or a missing/non-UUID partyId.
+     * An unknown eventType is NOT poison: it parses fine and [dispatch] simply no-ops on it.
+     */
+    private fun parseEnvelope(payload: String): PartyEvent? {
+        val node = runCatching { objectMapper.readTree(payload) }.getOrNull() ?: return null
+        val partyId = runCatching { UUID.fromString(node.path("partyId").asText()) }.getOrNull() ?: return null
+        return PartyEvent(
+            type = node.path("eventType").asText(""),
+            partyId = partyId,
+            partyType = node.path("partyType").asText(""),
+            legalName = node.path("legalName").asText("").trim(),
+            status = node.path("status").asText(""),
+        )
+    }
+
+    private suspend fun dispatch(event: PartyEvent) {
+        when (event.type) {
+            "PARTY_CREATED" -> openPendingAccount(event.partyId, event.partyType, event.legalName)
+            // party-service flips status to ACTIVE (two-key KYC+AML gate) and re-publishes the
+            // party via PARTY_UPDATED / KYC_STATUS_CHANGED, both carrying the new `status`.
+            "PARTY_UPDATED", "KYC_STATUS_CHANGED" -> reconcileToPartyStatus(event.partyId, event.status)
+            "PARTY_ERASED" -> handleErased(event.partyId)
+            else -> Unit // a type we don't project — nothing to do, ack.
+        }
+    }
+
+    /**
+     * Retries [block] a bounded number of times with linear backoff, then rethrows so the message
+     * is nacked to the DLQ. Deliberately retries on ANY exception: from here every failure is a
+     * transient projection failure (poison pills were filtered out before this is called), and the
+     * projections are idempotent (keyed on partyId + account type), so a retry re-runs safely.
+     * The per-attempt log carries the exception type + message, which the service's JSON log format
+     * (`%s`, no `%e`) would otherwise drop — so a failure is diagnosable without the stack trace.
+     */
+    private suspend fun withBoundedRetry(event: PartyEvent, block: suspend () -> Unit) {
+        var attempt = 1
+        while (true) {
+            try {
+                block()
+                return
+            } catch (e: Exception) {
+                if (attempt >= MAX_PROJECTION_ATTEMPTS) {
+                    log.errorf(
+                        e,
+                        "party event %s/%s failed after %d attempts (%s: %s) — dead-lettering",
+                        event.type,
+                        event.partyId,
+                        attempt,
+                        e.javaClass.simpleName,
+                        e.message,
                     )
-                // party-service flips status to ACTIVE (two-key KYC+AML gate) and re-publishes the
-                // party via PARTY_UPDATED / KYC_STATUS_CHANGED, both carrying the new `status`.
-                "PARTY_UPDATED", "KYC_STATUS_CHANGED" ->
-                    reconcileToPartyStatus(partyId, node.path("status").asText(""))
-                "PARTY_ERASED" -> handleErased(partyId)
+                    throw e
+                }
+                log.warnf(
+                    "party event %s/%s projection attempt %d/%d failed (%s: %s) — retrying in %dms",
+                    event.type,
+                    event.partyId,
+                    attempt,
+                    MAX_PROJECTION_ATTEMPTS,
+                    e.javaClass.simpleName,
+                    e.message,
+                    RETRY_BACKOFF_MS * attempt,
+                )
+                delay(RETRY_BACKOFF_MS * attempt)
+                attempt++
             }
-        } catch (e: Exception) {
-            log.errorf(e, "Failed to handle party event: %.300s", payload)
         }
     }
 
@@ -160,15 +243,13 @@ class PartyEventConsumer(
     }
 
     // GDPR Art. 17 right to erasure: null out the stored legalName for every account of the
-    // erased party. Best-effort / poison-pill safe: a DB failure is logged and the message is
-    // acked so a transient error does not wedge the consumer group.
+    // erased party. A transient DB failure here deliberately propagates (to retry then DLQ, via
+    // consume's withBoundedRetry): a swallowed failure would leave the erasure silently
+    // incomplete, a compliance breach. anonymizeByPartyId is idempotent (nulling an already-null
+    // name is a no-op), so a retry or a replay re-runs safely.
     private suspend fun handleErased(partyId: UUID) {
-        try {
-            val count = accountRepository.anonymizeByPartyId(partyId)
-            log.infof("GDPR Art. 17: anonymised legalName for erased party %s (%d account(s))", partyId, count)
-        } catch (e: Exception) {
-            log.errorf(e, "Failed to anonymise account legalName for erased party %s", partyId)
-        }
+        val count = accountRepository.anonymizeByPartyId(partyId)
+        log.infof("GDPR Art. 17: anonymised legalName for erased party %s (%d account(s))", partyId, count)
     }
 
     // Fire the one-time welcome bonus as the account goes live. Best-effort: a failure here must not
@@ -189,5 +270,13 @@ class PartyEventConsumer(
         } catch (e: Exception) {
             log.warnf(e, "Welcome-bonus notification failed for party %s (bonus already granted)", partyId)
         }
+    }
+
+    private companion object {
+        // Small and bounded: enough to ride out a dependency cold start / brief blip (a few
+        // seconds total), not so many that a genuinely-down dependency delays dead-lettering for
+        // long. Linear backoff: RETRY_BACKOFF_MS, then 2x, then 3x (~3s total across 3 attempts).
+        const val MAX_PROJECTION_ATTEMPTS = 4
+        const val RETRY_BACKOFF_MS = 500L
     }
 }

@@ -161,3 +161,26 @@ spec:
   config:
     retention.ms: 604800000
     cleanup.policy: delete
+---
+# Dead-letter topic for account-service's party-events-in channel (SmallRye
+# failure-strategy: dead-letter-queue). A party event whose projection survives the
+# consumer's bounded retry is parked here for inspection/replay instead of being dropped.
+# Name is SmallRye's default (dead-letter-topic-<channel>) — set implicitly, not via a
+# dotted `dead-letter-queue.topic` YAML key (that key is silently mis-quoted by SmallRye
+# Config). Longer retention than the source topic: a DLQ record is a real incident that may
+# outlive a 7-day window before someone replays it. No consumer by design — it is a
+# quarantine, invisible to the event-consumer-liveness gate (that gate reads `outgoing:`
+# channels, and this producer is the connector's implicit DLQ, not a declared channel).
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: dead-letter-topic-party-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete

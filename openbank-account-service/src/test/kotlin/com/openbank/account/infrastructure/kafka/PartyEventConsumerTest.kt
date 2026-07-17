@@ -19,6 +19,7 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.util.UUID
@@ -189,14 +190,61 @@ class PartyEventConsumerTest {
     }
 
     @Test
-    fun `PARTY_ERASED anonymisation failure is swallowed and does not wedge the consumer`(): Unit = runBlocking {
+    fun `PARTY_ERASED anonymisation failure propagates after retries so the record is dead-lettered`(): Unit =
+        runBlocking {
+            val partyId = UUID.randomUUID()
+            coEvery { accountRepository.anonymizeByPartyId(partyId) } throws RuntimeException("DB down")
+
+            // A transient DB failure must NOT be swallowed — swallowing left the GDPR erasure
+            // silently incomplete AND (on the account-open path) dropped the customer's account.
+            // It now propagates so SmallRye dead-letters the record for replay.
+            assertThatThrownBy {
+                runBlocking { consumer(bonusEnabled = false).consume(erasedEvent(partyId)) }
+            }.isInstanceOf(RuntimeException::class.java)
+
+            // Retried up to the bound before giving up (idempotent projection, safe to re-run).
+            coVerify(exactly = 4) { accountRepository.anonymizeByPartyId(partyId) }
+        }
+
+    // ── Poison pill vs transient failure ──────────────────────────────────────────────────────
+
+    @Test
+    fun `a malformed event is dropped as a poison pill without touching the projection`(): Unit = runBlocking {
+        // Must NOT throw (that would nack an unprocessable event to the DLQ forever) and must not
+        // attempt any projection.
+        consumer(bonusEnabled = false).consume("}{ not json")
+        consumer(bonusEnabled = false).consume("""{"eventType":"PARTY_CREATED","partyId":"not-a-uuid"}""")
+
+        coVerify(exactly = 0) { accountRepository.findByPartyId(any(), any(), any()) }
+        coVerify(exactly = 0) { accountUseCase.openAccount(any()) }
+    }
+
+    @Test
+    fun `a transient projection failure on PARTY_CREATED retries then propagates for dead-lettering`(): Unit =
+        runBlocking {
+            val partyId = UUID.randomUUID()
+            coEvery { accountRepository.findByPartyId(partyId, any(), any()) } throws
+                RuntimeException("sanctions screening unavailable")
+
+            // A well-formed event we could not project yet must NOT be acked-and-dropped — it
+            // propagates after a bounded retry so the record is dead-lettered, never lost.
+            assertThatThrownBy {
+                runBlocking { consumer(bonusEnabled = false).consume(createdEvent(partyId)) }
+            }.isInstanceOf(RuntimeException::class.java)
+
+            coVerify(exactly = 4) { accountRepository.findByPartyId(partyId, any(), any()) }
+        }
+
+    @Test
+    fun `an unknown event type is a no-op ack, not a poison pill`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
-        coEvery { accountRepository.anonymizeByPartyId(partyId) } throws RuntimeException("DB down")
+        val unknown = """{"eventType":"PARTY_MERGED","partyId":"$partyId","occurredAt":"2026-06-28T10:00:00Z"}"""
 
-        // Must not throw — poison-pill safe.
-        consumer(bonusEnabled = false).consume(erasedEvent(partyId))
+        // Parses fine, dispatch has no branch for it → nothing happens, no throw.
+        consumer(bonusEnabled = false).consume(unknown)
 
-        coVerify(exactly = 1) { accountRepository.anonymizeByPartyId(partyId) }
+        coVerify(exactly = 0) { accountUseCase.openAccount(any()) }
+        coVerify(exactly = 0) { accountRepository.anonymizeByPartyId(any()) }
     }
 
     private fun erasedEvent(partyId: UUID) =
