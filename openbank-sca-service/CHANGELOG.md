@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.9.0...sca-service-v0.9.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **sca:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1554](https://github.com/JiRaska/open-bank-oss/issues/1554)) ([f9e33ea](https://github.com/JiRaska/open-bank-oss/commit/f9e33ea7b81c5d931750695b6d97014b0c91cdb0))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.8.10...sca-service-v0.9.0) (2026-07-16)
 
 
