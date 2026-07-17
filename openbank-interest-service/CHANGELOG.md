@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.10.0...interest-service-v0.10.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **interest:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1468](https://github.com/JiRaska/open-bank-oss/issues/1468)) ([2b75d68](https://github.com/JiRaska/open-bank-oss/commit/2b75d68f2c72a38d6679836d4b0b4f2aac67de75))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.9.1...interest-service-v0.10.0) (2026-07-17)
 
 
