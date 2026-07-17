@@ -10,6 +10,8 @@ import com.openbank.sanctions.domain.model.SanctionsEntry
 import com.openbank.sanctions.domain.model.SanctionsListType
 import com.sun.net.httpserver.HttpServer
 import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.coVerifyOrder
 import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.runBlocking
@@ -170,9 +172,9 @@ class SanctionsImportServiceTest {
             "os-2,Organization,Acme Sanctioned Co,,,,,,,,,\"EU-SANCTIONS\",,,,\n"
         val url = serveOnce(csv, "text/csv")
 
-        coEvery { entryRepo.deactivateByListType(SanctionsListType.PEP_GLOBAL) } returns 0
         val entriesSlot = slot<List<SanctionsEntry>>()
         coEvery { entryRepo.upsertAll(capture(entriesSlot)) } returns 2
+        coEvery { entryRepo.deactivateMissing(SanctionsListType.PEP_GLOBAL, setOf("os-1", "os-2")) } returns 0
 
         val count = service.importList(SanctionsListType.PEP_GLOBAL, url)
 
@@ -209,7 +211,9 @@ class SanctionsImportServiceTest {
             "os-3,Person,,,,,,,,,,,,,,\n"
         val url = serveOnce(csv, "text/csv")
 
-        coEvery { entryRepo.deactivateByListType(SanctionsListType.UN_CONSOLIDATED) } returns 0
+        // Both rows are skipped (blank line, blank name) — the reconciliation sweep at the end
+        // still runs (the stream completed without error), just with an empty present set.
+        coEvery { entryRepo.deactivateMissing(SanctionsListType.UN_CONSOLIDATED, emptySet()) } returns 0
 
         val count = service.importList(SanctionsListType.UN_CONSOLIDATED, url)
 
@@ -224,9 +228,9 @@ class SanctionsImportServiceTest {
             "os-5,Aircraft,N12345,,,,,,,,,,,,,\n"
         val url = serveOnce(csv, "text/csv")
 
-        coEvery { entryRepo.deactivateByListType(SanctionsListType.HM_TREASURY) } returns 0
         val entriesSlot = slot<List<SanctionsEntry>>()
         coEvery { entryRepo.upsertAll(capture(entriesSlot)) } returns 2
+        coEvery { entryRepo.deactivateMissing(SanctionsListType.HM_TREASURY, setOf("os-4", "os-5")) } returns 0
 
         service.importList(SanctionsListType.HM_TREASURY, url)
 
@@ -242,12 +246,54 @@ class SanctionsImportServiceTest {
             "os-6,Person,\"Doe, John \"\"The Rock\"\"\",,,,,,,,,,,,,\n"
         val url = serveOnce(csv, "text/csv")
 
-        coEvery { entryRepo.deactivateByListType(SanctionsListType.PEP_GLOBAL) } returns 0
         val entriesSlot = slot<List<SanctionsEntry>>()
         coEvery { entryRepo.upsertAll(capture(entriesSlot)) } returns 1
+        coEvery { entryRepo.deactivateMissing(SanctionsListType.PEP_GLOBAL, setOf("os-6")) } returns 0
 
         service.importList(SanctionsListType.PEP_GLOBAL, url)
 
         assertThat(entriesSlot.captured.single().primaryName).isEqualTo("""Doe, John "The Rock"""")
+    }
+
+    // ──── deactivateMissing — the mark-and-sweep reconciliation contract ─────
+
+    @Test
+    fun `a mid-stream failure never calls deactivateMissing, leaving existing entries untouched`(): Unit = runBlocking {
+        val csv = "id,schema,name,aliases,birth_date,countries,addresses,identifiers,sanctions," +
+            "phones,emails,program_ids,dataset,first_seen,last_seen,last_change\n" +
+            "os-1,Person,First Entry,,,,,,,,,,,,,\n" +
+            "os-2,Person,Second Entry,,,,,,,,,,,,,\n"
+        val url = serveOnce(csv, "text/csv")
+
+        // The batch flush throws partway through the stream (simulates a DB hiccup between
+        // reading rows) — this must propagate out of importOpenSanctionsCsv, get swallowed by
+        // importList's catch-all, and never reach deactivateMissing.
+        coEvery { entryRepo.upsertAll(any()) } throws RuntimeException("connection reset")
+
+        val count = service.importList(SanctionsListType.PEP_GLOBAL, url)
+
+        assertThat(count).isZero()
+        coVerify(exactly = 0) { entryRepo.deactivateMissing(any(), any()) }
+    }
+
+    @Test
+    fun `deactivateMissing runs once, after every batch has been upserted, not before`(): Unit = runBlocking {
+        // Force two batches by dropping the batch size threshold via a large-enough row count
+        // is impractical here (IMPORT_BATCH_SIZE = 500); instead assert call ORDER directly:
+        // upsertAll must be recorded before deactivateMissing for the same run.
+        val csv = "id,schema,name,aliases,birth_date,countries,addresses,identifiers,sanctions," +
+            "phones,emails,program_ids,dataset,first_seen,last_seen,last_change\n" +
+            "os-1,Person,First Entry,,,,,,,,,,,,,\n"
+        val url = serveOnce(csv, "text/csv")
+
+        coEvery { entryRepo.upsertAll(any()) } returns 1
+        coEvery { entryRepo.deactivateMissing(SanctionsListType.PEP_GLOBAL, setOf("os-1")) } returns 0
+
+        service.importList(SanctionsListType.PEP_GLOBAL, url)
+
+        coVerifyOrder {
+            entryRepo.upsertAll(any())
+            entryRepo.deactivateMissing(SanctionsListType.PEP_GLOBAL, setOf("os-1"))
+        }
     }
 }
