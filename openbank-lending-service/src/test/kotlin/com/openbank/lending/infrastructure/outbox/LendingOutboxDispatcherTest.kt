@@ -45,7 +45,7 @@ class LendingOutboxDispatcherTest {
 
         dispatcher.dispatch()
 
-        coVerify(exactly = 0) { repo.listProcessable(any()) }
+        coVerify(exactly = 0) { repo.claimProcessable(any(), any()) }
         coVerify(exactly = 0) { publisher.publish(any()) }
     }
 
@@ -53,7 +53,7 @@ class LendingOutboxDispatcherTest {
     fun `an enabled dispatch publishes each processable row and marks it sent`(): Unit = runBlocking {
         val first = entry()
         val second = entry()
-        coEvery { repo.listProcessable(any()) } returns listOf(first, second)
+        coEvery { repo.claimProcessable(any(), any()) } returns listOf(first, second)
         coJustRun { publisher.publish(any()) }
         coJustRun { repo.markSent(any(), any()) }
 
@@ -69,7 +69,7 @@ class LendingOutboxDispatcherTest {
     @Test
     fun `a failed publish marks the row failed for retry instead of dropping it`(): Unit = runBlocking {
         val poisoned = entry()
-        coEvery { repo.listProcessable(any()) } returns listOf(poisoned)
+        coEvery { repo.claimProcessable(any(), any()) } returns listOf(poisoned)
         coEvery { publisher.publish(poisoned) } throws IllegalStateException("broker unavailable")
         coJustRun { repo.markFailed(any(), any(), any()) }
 
