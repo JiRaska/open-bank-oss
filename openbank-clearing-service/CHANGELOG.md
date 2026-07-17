@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.1...clearing-service-v0.7.2) (2026-07-17)
+
+
+### Bug Fixes
+
+* **clearing:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1517](https://github.com/JiRaska/open-bank-oss/issues/1517)) ([8040527](https://github.com/JiRaska/open-bank-oss/commit/8040527db9dc7634ef8160242917c272c096f8e2))
+
 ## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.0...clearing-service-v0.7.1) (2026-07-14)
 
 
