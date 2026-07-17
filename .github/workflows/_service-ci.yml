@@ -431,9 +431,36 @@ jobs:
       # Coverage upload (Codecov is free for public repos; tokenless via the OIDC
       # id-token this job already has). Advisory only — never gates the build.
       # koverVerify stays the enforcement mechanism (ratchet-only, rules.yaml).
+      #
+      # The -D flags below MUST mirror "Build + test" verbatim (issue #1009). koverXmlReport
+      # depends on koverGenerateArtifact -> test, so this is a SECOND, independent `./gradlew`
+      # invocation reaching the same `test` task. build.gradle.kts's `tasks.withType<Test> {
+      # System.getProperty(key)?.let { systemProperty(key, it) } }` makes those Pact -D values
+      # part of `test`'s tracked inputs — omitting them here makes the input set differ from the
+      # build step's, which is a guaranteed cache miss: Gradle re-executes `test` from scratch,
+      # this time with pactbroker.url/pact.verifier.publishResults unset, so the pact-jvm
+      # verifier logs "Skipping publishing of verification results ... not 'true'" and the
+      # @PactBroker provider test's @EnabledIfSystemProperty(pactbroker.url) gate skips it
+      # outright. Confirmed live in run 29489275110 job 87613534930 (2026-07-16): the `test` task
+      # ran a second, full time (fresh Testcontainer boot included) right after this step started,
+      # with none of the Pact system properties present. Passing identical values here lets
+      # Gradle recognize `test` as UP-TO-DATE/FROM-CACHE instead of re-running it uncredentialed.
       - name: Generate Kover XML report
         continue-on-error: true
-        run: ./gradlew :${{ inputs.service }}:koverXmlReport --build-cache --console=plain
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          PUBLISH_RESULTS: ${{ github.ref == 'refs/heads/main' }}
+        run: |
+          ./gradlew :${{ inputs.service }}:koverXmlReport --build-cache --console=plain \
+            -Dpactbroker.url="${PACT_BROKER_URL:-}" \
+            -Dpactbroker.auth.username="${PACT_BROKER_USERNAME:-}" \
+            -Dpactbroker.auth.password="${PACT_BROKER_PASSWORD:-}" \
+            -Dpactbroker.enablePending=true \
+            -Dpactbroker.providerBranch="${BRANCH}" \
+            -Dpact.verifier.publishResults="${PUBLISH_RESULTS}" \
+            -Dpact.provider.version="${GITHUB_SHA}" \
+            -Dpact.provider.branch="${BRANCH}" \
+            -Dpact.provider.tag="${BRANCH}"
 
       - name: Upload coverage to Codecov
         continue-on-error: true
