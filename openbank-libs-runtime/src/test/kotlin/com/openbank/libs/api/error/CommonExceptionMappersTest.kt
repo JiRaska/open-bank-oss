@@ -4,6 +4,9 @@
 
 package com.openbank.libs.api.error
 
+import com.openbank.libs.approval.ApprovalStatus
+import com.openbank.libs.approval.InvalidApprovalStateException
+import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import jakarta.ws.rs.WebApplicationException
 import org.assertj.core.api.Assertions.assertThat
 import org.jboss.logging.MDC
@@ -102,5 +105,30 @@ class CommonExceptionMappersTest {
     fun `traceId falls back to a fresh id when no correlation id is in MDC`() {
         val body = NoSuchElementExceptionMapper().toResponse(NoSuchElementException("x")).entity as ApiError
         assertThat(body.traceId).isNotBlank()
+    }
+
+    // ADR-0155 four-eyes mappers (issue #1394): formerly duplicated verbatim across 10+
+    // services plus a divergent {"code","message"}-shaped copy in notification-service.
+    @Test
+    fun `SelfApprovalNotAllowedException maps to 403 FORBIDDEN with the exception message`() {
+        val response = SelfApprovalNotAllowedMapper().toResponse(SelfApprovalNotAllowedException("maker-1"))
+        val body = response.entity as ApiError
+
+        assertThat(response.status).isEqualTo(403)
+        assertThat(body.status).isEqualTo(403)
+        assertThat(body.code).isEqualTo(ErrorCode.FORBIDDEN.code)
+        assertThat(body.message).contains("maker-1")
+    }
+
+    @Test
+    fun `InvalidApprovalStateException maps to 409 CONFLICT with the exception message`() {
+        val exception = InvalidApprovalStateException("appr-1", ApprovalStatus.PENDING, ApprovalStatus.EXECUTED)
+        val response = InvalidApprovalStateMapper().toResponse(exception)
+        val body = response.entity as ApiError
+
+        assertThat(response.status).isEqualTo(409)
+        assertThat(body.status).isEqualTo(409)
+        assertThat(body.code).isEqualTo(ErrorCode.CONFLICT.code)
+        assertThat(body.message).contains("appr-1")
     }
 }

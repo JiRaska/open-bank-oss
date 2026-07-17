@@ -4,10 +4,6 @@
 
 package com.openbank.transaction.infrastructure.rest
 
-import com.openbank.libs.api.error.ApiError
-import com.openbank.libs.approval.InvalidApprovalStateException
-import com.openbank.libs.approval.SelfApprovalNotAllowedException
-import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.transaction.application.usecase.TransactionNotFoundException
 import com.openbank.transaction.application.usecase.TransactionUpdateConflictException
 import jakarta.ws.rs.core.MediaType
@@ -49,39 +45,6 @@ class TransactionUpdateConflictExceptionMapper : ExceptionMapper<TransactionUpda
             .build()
 }
 
-// ADR-0155: a checker can never decide their own PendingApproval — ApprovalStore.decide
-// enforces this itself (defense-in-depth), surfaced here as a plain 403.
-@Provider
-class SelfApprovalNotAllowedMapper : ExceptionMapper<SelfApprovalNotAllowedException> {
-    override fun toResponse(exception: SelfApprovalNotAllowedException): Response =
-        Response.status(Response.Status.FORBIDDEN)
-            .entity(
-                ApiError(
-                    // ADR-0106: a per-response correlation id, not a durable/indexed identifier — Ids.randomId().
-                    traceId = Ids.randomId().toString(),
-                    status = 403,
-                    code = "FORBIDDEN",
-                    message = exception.message ?: "Forbidden",
-                ),
-            )
-            .build()
-}
-
-// Code review finding: decide()/markExecuted() now reject re-deciding or re-consuming an
-// approval that isn't in the expected status (was previously unguarded, allowing an EXECUTED
-// approval to be flipped back to APPROVED and replayed). Surfaced as a 409, matching the
-// existing TransactionUpdateConflictExceptionMapper convention for state-machine violations.
-@Provider
-class InvalidApprovalStateMapper : ExceptionMapper<InvalidApprovalStateException> {
-    override fun toResponse(exception: InvalidApprovalStateException): Response =
-        Response.status(Response.Status.CONFLICT)
-            .entity(
-                ApiError(
-                    traceId = Ids.randomId().toString(),
-                    status = 409,
-                    code = "CONFLICT",
-                    message = exception.message ?: "Conflict",
-                ),
-            )
-            .build()
-}
+// SelfApprovalNotAllowedMapper / InvalidApprovalStateMapper (403/409) moved to
+// openbank-libs-runtime's CommonExceptionMappers (issue #1394) — a service-local copy of the
+// same exact type would collide non-deterministically with the shared one (issue #526).

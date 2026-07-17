@@ -3,6 +3,10 @@
 # exception type openbank-libs-runtime already maps
 # (com/openbank/libs/api/error/CommonExceptionMappers.kt): IllegalArgumentException,
 # IllegalStateException, NoSuchElementException, Exception, WebApplicationException.
+# Also covers two libs-domain four-eyes types moved into the same file (issue #1394):
+# SelfApprovalNotAllowedException, InvalidApprovalStateException — these were previously
+# duplicated per-service (10+ byte-identical copies plus a divergent shape in
+# notification-service) specifically because no shared mapper existed yet.
 #
 # JAX-RS provider selection between two ExceptionMapper<T>s registered for the identical
 # type T is not deterministically ordered — a second local mapper for a libs-owned type
@@ -32,7 +36,7 @@ checked=0
 # mention of the string — explanatory comments about this exact defect class (including
 # this script's own error message, and the fix's inline documentation) legitimately
 # reference these type names in prose and must not self-trigger.
-pattern=': *ExceptionMapper<(IllegalArgumentException|IllegalStateException|NoSuchElementException|Exception|WebApplicationException)>'
+pattern=': *ExceptionMapper<(IllegalArgumentException|IllegalStateException|NoSuchElementException|Exception|WebApplicationException|SelfApprovalNotAllowedException|InvalidApprovalStateException)>'
 
 while IFS= read -r f; do
   checked=$((checked + 1))
