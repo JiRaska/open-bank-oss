@@ -8,12 +8,16 @@ import com.openbank.document.application.port.`in`.DocumentQueryUseCase
 import com.openbank.document.application.port.`in`.DocumentRenderUseCase
 import com.openbank.document.application.port.`in`.IssueOnboardingDocumentCommand
 import com.openbank.document.application.port.`in`.OpenCeremonyCommand
-import com.openbank.document.application.port.`in`.RenderDocumentCommand
 import com.openbank.document.application.port.`in`.SignatureCeremonyUseCase
+import com.openbank.document.application.port.out.AccountInfo
+import com.openbank.document.application.port.out.AccountLookupPort
 import com.openbank.document.application.port.out.DocumentRepositoryPort
 import com.openbank.document.application.port.out.DuplicateCeremonyException
 import com.openbank.document.application.port.out.DuplicateDocumentException
+import com.openbank.document.application.port.out.PartyInfo
+import com.openbank.document.application.port.out.PartyLookupPort
 import com.openbank.document.application.port.out.ProductCatalogPort
+import com.openbank.document.application.port.out.ProductInfo
 import com.openbank.document.domain.model.Document
 import com.openbank.document.domain.model.DocumentStatus
 import com.openbank.document.domain.model.SignatureCeremony
@@ -25,7 +29,9 @@ import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Clock
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 
 /**
@@ -37,20 +43,30 @@ import java.util.UUID
 class OnboardingDocumentServiceTest {
 
     private val productCatalogPort: ProductCatalogPort = mockk()
+    private val partyLookupPort: PartyLookupPort = mockk()
+    private val accountLookupPort: AccountLookupPort = mockk()
     private val renderUseCase: DocumentRenderUseCase = mockk()
     private val documentQueryUseCase: DocumentQueryUseCase = mockk()
     private val ceremonyUseCase: SignatureCeremonyUseCase = mockk()
     private val documentRepository: DocumentRepositoryPort = mockk()
+    private val clock: Clock = Clock.fixed(Instant.parse("2026-07-17T10:00:00Z"), ZoneOffset.UTC)
     private val service = OnboardingDocumentService(
         productCatalogPort,
+        partyLookupPort,
+        accountLookupPort,
         renderUseCase,
         documentQueryUseCase,
         ceremonyUseCase,
         documentRepository,
+        clock,
     )
 
     private val accountId: UUID = UUID.randomUUID()
     private val productId: UUID = UUID.randomUUID()
+
+    // A non-UUID partyRef here is deliberate — it doubles as coverage for the "unparseable
+    // partyRef" fail-open path (buildAgreementData never throws, just skips enrichment lookups)
+    // instead of needing a separate test to exercise it.
     private val partyRef = "party-1"
     private val idempotencyKey = "onboarding:$accountId"
 
@@ -58,6 +74,10 @@ class OnboardingDocumentServiceTest {
     fun `renders the product's bound template with no pinned version and opens a ceremony`(): Unit = runBlocking {
         coEvery { documentQueryUseCase.findByIdempotencyKey(idempotencyKey) } returns null
         coEvery { productCatalogPort.findDocumentTemplateCode(productId) } returns "RAMCOVA_SMLOUVA_CS"
+        // buildAgreementData still resolves the product from productIdOverride even though
+        // partyRef ("party-1") isn't a parseable UUID — party/account lookups are skipped, but
+        // the product lookup doesn't depend on partyId.
+        coEvery { productCatalogPort.findProduct(productId) } returns null
         val document = document()
         coEvery { renderUseCase.render(any()) } returns document
         coEvery { ceremonyUseCase.findByDocumentId(document.id) } returns null
@@ -65,19 +85,20 @@ class OnboardingDocumentServiceTest {
 
         service.issueOnboardingDocument(IssueOnboardingDocumentCommand(accountId, partyRef, productId))
 
+        // Non-data fields asserted exactly; `data`'s content is covered by the dedicated
+        // enrichment tests below, since it now depends on party/account/product lookups.
         coVerify(exactly = 1) {
             renderUseCase.render(
-                RenderDocumentCommand(
-                    templateCode = "RAMCOVA_SMLOUVA_CS",
-                    templateVersion = null,
-                    data = emptyMap(),
-                    contentType = "application/pdf",
-                    partyRef = partyRef,
-                    caseRef = accountId.toString(),
-                    productRef = productId.toString(),
-                    retainUntil = null,
-                    idempotencyKey = idempotencyKey,
-                ),
+                match {
+                    it.templateCode == "RAMCOVA_SMLOUVA_CS" &&
+                        it.templateVersion == null &&
+                        it.contentType == "application/pdf" &&
+                        it.partyRef == partyRef &&
+                        it.caseRef == accountId.toString() &&
+                        it.productRef == productId.toString() &&
+                        it.retainUntil == null &&
+                        it.idempotencyKey == idempotencyKey
+                },
             )
         }
         coVerify(exactly = 1) {
@@ -136,6 +157,7 @@ class OnboardingDocumentServiceTest {
         // First lookup misses; render loses the unique-key race; the retry lookup finds the winner.
         coEvery { documentQueryUseCase.findByIdempotencyKey(idempotencyKey) } returns null andThen winner
         coEvery { productCatalogPort.findDocumentTemplateCode(productId) } returns "RAMCOVA_SMLOUVA_CS"
+        coEvery { productCatalogPort.findProduct(productId) } returns null
         coEvery { renderUseCase.render(any()) } throws DuplicateDocumentException("lost the race")
         coEvery { ceremonyUseCase.findByDocumentId(winner.id) } returns null
         coEvery { ceremonyUseCase.openCeremony(any()) } returns mockk()
@@ -152,6 +174,7 @@ class OnboardingDocumentServiceTest {
         val document = document()
         coEvery { documentQueryUseCase.findByIdempotencyKey(idempotencyKey) } returns null
         coEvery { productCatalogPort.findDocumentTemplateCode(productId) } returns "RAMCOVA_SMLOUVA_CS"
+        coEvery { productCatalogPort.findProduct(productId) } returns null
         coEvery { renderUseCase.render(any()) } returns document
         coEvery { ceremonyUseCase.findByDocumentId(document.id) } returns null
         coEvery { ceremonyUseCase.openCeremony(any()) } throws DuplicateCeremonyException("lost the race")
@@ -241,6 +264,83 @@ class OnboardingDocumentServiceTest {
 
         coVerify(exactly = 1) { renderUseCase.render(match { it.templateCode == "RAMCOVA_SMLOUVA_CS" }) }
     }
+
+    // ── Template data enrichment — the fix: `data` used to always be emptyMap(), so a real
+    // signed RAMCOVA_SMLOUVA read "(the "Customer")" with a blank address (ADR-0169 D5) ────────
+
+    @Test
+    fun `ensure fills party, account, product and document data into the rendered template`(): Unit = runBlocking {
+        val realPartyRef = UUID.randomUUID()
+        coEvery { documentQueryUseCase.listByParty(realPartyRef.toString()) } returns emptyList()
+        coEvery { partyLookupPort.findById(realPartyRef) } returns
+            PartyInfo(legalName = "Adéla Bartošová", formattedAddress = "Václavské náměstí 1, 110 00 Praha 1")
+        val accountProductId = UUID.randomUUID()
+        coEvery { accountLookupPort.findCurrentAccount(realPartyRef) } returns
+            AccountInfo(iban = "CZ6508000000192000145399", productId = accountProductId)
+        coEvery { productCatalogPort.findProduct(accountProductId) } returns
+            ProductInfo(name = "CZK Current Account", code = "CURRENT_CZK")
+        val rendered = document(code = "RAMCOVA_SMLOUVA_CS")
+        coEvery { renderUseCase.render(any()) } returns rendered
+        coEvery { ceremonyUseCase.findByDocumentId(rendered.id) } returns null
+        coEvery { ceremonyUseCase.openCeremony(any()) } returns ceremony(UUID.randomUUID())
+
+        service.ensureOnboardingAgreement(realPartyRef.toString(), "cs")
+
+        coVerify(exactly = 1) {
+            renderUseCase.render(
+                match {
+                    @Suppress("UNCHECKED_CAST")
+                    val party = it.data["party"] as Map<String, Any?>
+
+                    @Suppress("UNCHECKED_CAST")
+                    val account = it.data["account"] as Map<String, Any?>
+
+                    @Suppress("UNCHECKED_CAST")
+                    val product = it.data["product"] as Map<String, Any?>
+
+                    @Suppress("UNCHECKED_CAST")
+                    val doc = it.data["document"] as Map<String, Any?>
+                    party["name"] == "Adéla Bartošová" &&
+                        party["address"] == "Václavské náměstí 1, 110 00 Praha 1" &&
+                        account["iban"] == "CZ6508000000192000145399" &&
+                        product["name"] == "CZK Current Account" &&
+                        product["code"] == "CURRENT_CZK" &&
+                        doc["date"] == "2026-07-17" &&
+                        doc["caseRef"] == "onboarding-agreement:$realPartyRef"
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `ensure degrades to an unnamed party rather than failing when party-service is unreachable`(): Unit =
+        runBlocking {
+            val realPartyRef = UUID.randomUUID()
+            coEvery { documentQueryUseCase.listByParty(realPartyRef.toString()) } returns emptyList()
+            // PartyLookupPort/AccountLookupPort are themselves fail-open (never throw — see their
+            // adapters), so "unreachable" surfaces here as null, not an exception.
+            coEvery { partyLookupPort.findById(realPartyRef) } returns null
+            coEvery { accountLookupPort.findCurrentAccount(realPartyRef) } returns null
+            val rendered = document(code = "RAMCOVA_SMLOUVA_CS")
+            coEvery { renderUseCase.render(any()) } returns rendered
+            coEvery { ceremonyUseCase.findByDocumentId(rendered.id) } returns null
+            coEvery { ceremonyUseCase.openCeremony(any()) } returns ceremony(UUID.randomUUID())
+
+            // Must not throw — an enrichment-dependency outage degrades the render, never blocks it.
+            service.ensureOnboardingAgreement(realPartyRef.toString(), "cs")
+
+            coVerify(exactly = 1) {
+                renderUseCase.render(
+                    match {
+                        @Suppress("UNCHECKED_CAST")
+                        val party = it.data["party"] as Map<String, Any?>
+                        party["name"] == "" && party["address"] == null
+                    },
+                )
+            }
+            // No account -> no product to look up.
+            coVerify(exactly = 0) { productCatalogPort.findProduct(any()) }
+        }
 
     private fun ceremony(id: UUID): SignatureCeremony = mockk { every { this@mockk.id } returns id }
 

@@ -17,9 +17,9 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 
 /**
  * RestClient binding to `openbank-product-catalog`'s product read endpoint — narrow, mirroring
- * `openbank-account-service`'s own `ProductCatalogClient`. The only field this service actually
- * needs is `termsAndConditions[].documentTemplateCode` (ADR-0162 D1), the product's onboarding
- * document reference.
+ * `openbank-account-service`'s own `ProductCatalogClient`. Needs `termsAndConditions[]
+ * .documentTemplateCode` (ADR-0162 D1), the product's onboarding document reference, and `name`
+ * (fills the RAMCOVA_SMLOUVA template's `{{product.name}}` clause once an account exists).
  */
 @RegisterRestClient(configKey = "product-catalog-api")
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
@@ -34,6 +34,7 @@ interface ProductCatalogClient {
 data class ProductClientResponse(
     val id: String,
     val code: String,
+    val name: String? = null,
     val termsAndConditions: List<TermsAndConditionsClientResponse> = emptyList(),
 )
 
