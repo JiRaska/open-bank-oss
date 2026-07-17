@@ -22,6 +22,11 @@ repositories {
 }
 
 dependencies {
+    // DO NOT MERGE — throwaway proof that the PR-time Gradle dependency gate (#1419)
+    // actually fails a vulnerable dependency. commons-text 1.9 is Text4Shell
+    // (CVE-2022-42889 / GHSA-599f-7c49-w659, critical). This branch is closed, never merged.
+    implementation("org.apache.commons:commons-text:1.9")
+
     api(libs.kotlin.stdlib)
     api(libs.kotlin.reflect)
     api(libs.kotlinx.coroutines.core)
