@@ -37,6 +37,33 @@ interface InterestAccrualRepository {
      * product's accruals into this capitalization would credit them against the wrong product.
      */
     fun findPendingCapitalization(accountId: UUID, productId: String, toDate: LocalDate): Uni<List<InterestAccrual>>
+
+    /**
+     * The accruals of one `(account, product)` already **claimed** by an in-flight capitalization
+     * (`CAPITALIZING`), regardless of date.
+     *
+     * Deliberately NOT bounded by a period: the caller must be able to see a claim made for a
+     * *different* `periodTo` and refuse rather than silently re-capitalize the same accruals under a
+     * second ledger idempotency key — see `InterestService.capitalize`. Each row carries the period
+     * it was claimed for in [InterestAccrual.claimedPeriodTo].
+     */
+    fun findClaimedForCapitalization(accountId: UUID, productId: String): Uni<List<InterestAccrual>>
+
+    /**
+     * Claims [accrualIds] for the capitalization of [periodTo]: flips them `ACCRUING → CAPITALIZING`
+     * and stamps `claimed_period_to`, in ONE status-guarded transaction of its own.
+     *
+     * This is what pins the amount the ledger is about to be told to the amount that will be
+     * recorded. Without it, the ledger post and the capitalization row each re-derive the accrual
+     * set independently, and a backfilled accrual landing between them makes interest-service claim
+     * a credit the GL never booked — silently, because the ledger's idempotent replay returns the
+     * FIRST journal without comparing amounts.
+     *
+     * Fails (and rolls back) unless every id flipped: a partial match means a concurrent run claimed
+     * or capitalized some of them.
+     */
+    fun claimForCapitalization(accrualIds: List<UUID>, periodTo: LocalDate): Uni<Unit>
+
     fun sumAccrued(accountId: UUID, from: LocalDate, to: LocalDate): Uni<BigDecimal>
 }
 
@@ -47,14 +74,15 @@ interface InterestCapitalizationRepository {
 
     /**
      * Persists the capitalization, its paired withholding-tax liability and the outbox event, and
-     * flips the source accruals `ACCRUING → CAPITALIZED`, all in ONE database transaction (same
+     * flips the source accruals `CAPITALIZING → CAPITALIZED`, all in ONE database transaction (same
      * atomic shape as statement-service's `saveWithOutbox`). A crash or failure anywhere rolls the
      * whole write set back, so a retry re-runs from a clean slate instead of re-crediting
      * already-capitalized accruals (duplicate interest + duplicate withholding).
      *
-     * The accrual flip is status-guarded (`AND status = 'ACCRUING'`): if any of [accrualIds] was
-     * capitalized by a concurrent run, the row count mismatches and the transaction fails — no
-     * partial rows survive.
+     * The accrual flip is status-guarded (`AND status = 'CAPITALIZING'`): the rows must still be the
+     * ones this attempt claimed via [InterestAccrualRepository.claimForCapitalization]. If a
+     * concurrent run capitalized or reversed any of them, the row count mismatches and the
+     * transaction fails — no partial rows survive.
      */
     fun saveWithOutbox(
         cap: InterestCapitalization,

@@ -43,6 +43,7 @@ class InterestAccrualEntity : PanacheEntityBase() {
     @Column(name = "accrued_amount", precision = 20, scale = 6) var accruedAmount: BigDecimal = BigDecimal.ZERO
     @Column(name = "currency", length = 3) var currency: String = "EUR"
     @Column(name = "status") @Enumerated(EnumType.STRING) var status: AccrualStatus = AccrualStatus.ACCRUING
+    @Column(name = "claimed_period_to") var claimedPeriodTo: LocalDate? = null
     @Column(name = "capitalized_at") var capitalizedAt: OffsetDateTime? = null
     @Column(name = "created_at") var createdAt: OffsetDateTime = OffsetDateTime.MIN
 }

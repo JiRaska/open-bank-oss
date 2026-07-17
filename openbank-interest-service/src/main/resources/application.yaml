@@ -47,9 +47,9 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     tls:
       verification: none
-  # Outbound service-to-service token (#999): the transaction-service rest-client mints an
-  # openbank-services M2M token via this oidc-client. Disabled under %test (units call the
-  # consumer directly; the boot IT never books a remittance payment).
+  # Outbound service-to-service token (#999): the transaction-service and ledger-service
+  # rest-clients mint an openbank-services M2M token via this oidc-client. Disabled under %test
+  # (units call the consumer directly; the boot IT never books a remittance payment).
   oidc-client:
     auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
     client-id: openbank-services
@@ -60,6 +60,14 @@ quarkus:
   rest-client:
     transaction-service:
       url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
+      scope: jakarta.inject.Singleton
+    # ADR-0033 §D: the capitalization credit leg (DEBIT interest expense / CREDIT the customer's
+    # deposit-control pocket / CREDIT withholding-tax payable). The default resolves only on
+    # localhost — a deployment MUST set LEDGER_SERVICE_URL or every capitalization fails at the
+    # ledger post and leaves its accruals ACCRUING (loud, not silent: nothing is credited and
+    # nothing is withheld, so the period simply retries).
+    ledger-service:
+      url: ${LEDGER_SERVICE_URL:http://localhost:8101}
       scope: jakarta.inject.Singleton
   redis:
     hosts: redis://localhost:6379
@@ -129,6 +137,23 @@ authz:
     # dispatchScheduledBatch() explicitly and never races the assertions.
     scheduler:
       enabled: false
+# ADR-0033 §D — the GL accounts the capitalization split posts against (InterestLedgerConfig).
+# Defaults are the stable `a0000000-…` rows seeded by the ledger's
+# V17__interest_capitalization_accounts.sql; operators repoint them at the real chart per
+# environment. Interest expense is per currency because the ledger rejects a line whose currency
+# differs from its GL account's (the V14 cash-clearing bug); withholding-tax payable is CZK-only
+# because ADR-0033 §E withholds only CZK interest.
+interest:
+  ledger:
+    system-actor-id: ${INTEREST_LEDGER_SYSTEM_ACTOR_ID:00000000-0000-0000-0000-0000000000cc}
+    gl:
+      # NOT V1's '4000 Interest Expense': that row was seeded with gen_random_uuid(), so no fixed
+      # UUID can reference it (issue #468's defect, cf. V15/'4003 Fee Income'), and it is CZK-only.
+      interest-expense-czk: ${INTEREST_GL_INTEREST_EXPENSE_CZK:a0000000-0000-0000-0000-000000004010}
+      interest-expense-eur: ${INTEREST_GL_INTEREST_EXPENSE_EUR:a0000000-0000-0000-0000-000000004011}
+      interest-expense-usd: ${INTEREST_GL_INTEREST_EXPENSE_USD:a0000000-0000-0000-0000-000000004012}
+      interest-expense-gbp: ${INTEREST_GL_INTEREST_EXPENSE_GBP:a0000000-0000-0000-0000-000000004013}
+      withholding-tax-payable: ${INTEREST_GL_WITHHOLDING_TAX_PAYABLE:a0000000-0000-0000-0000-000000002200}
 openbank:
   interest:
     accrual-cron: "0 0 1 * * ?"

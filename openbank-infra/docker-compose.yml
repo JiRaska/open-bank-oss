@@ -1012,6 +1012,10 @@ services:
       QUARKUS_REDIS_HOSTS: redis://:${VALKEY_PASSWORD}@valkey:6379
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       MP_MESSAGING_CONNECTOR_SMALLRYE_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # ADR-0033 §D: capitalization posts its credit leg to the ledger. The application.yaml
+      # default is localhost, which resolves to the container itself here.
+      LEDGER_SERVICE_URL: http://ledger-service:8101
+      TRANSACTION_SERVICE_URL: http://transaction-service:8102
     ports:
       - "8125:8125"
     depends_on:

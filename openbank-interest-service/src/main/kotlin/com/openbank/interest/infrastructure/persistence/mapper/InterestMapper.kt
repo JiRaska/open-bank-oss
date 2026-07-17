@@ -13,67 +13,109 @@ import jakarta.enterprise.context.ApplicationScoped
 @ApplicationScoped
 class InterestMapper {
     fun toEntity(c: InterestRateConfig) = InterestRateConfigEntity().also {
-        it.id = c.id; it.productId = c.productId; it.rateType = c.rateType
-        it.annualRate = c.annualRate; it.minBalance = c.minBalance; it.maxBalance = c.maxBalance
-        it.dayCount = c.dayCount; it.effectiveFrom = c.effectiveFrom; it.effectiveTo = c.effectiveTo
-        it.active = c.active; it.createdAt = c.createdAt; it.updatedAt = c.updatedAt
+        it.id = c.id
+        it.productId = c.productId
+        it.rateType = c.rateType
+        it.annualRate = c.annualRate
+        it.minBalance = c.minBalance
+        it.maxBalance = c.maxBalance
+        it.dayCount = c.dayCount
+        it.effectiveFrom = c.effectiveFrom
+        it.effectiveTo = c.effectiveTo
+        it.active = c.active
+        it.createdAt = c.createdAt
+        it.updatedAt = c.updatedAt
     }
     fun toDomain(e: InterestRateConfigEntity) = InterestRateConfig(
         id = e.id, productId = e.productId, rateType = e.rateType,
         annualRate = e.annualRate, minBalance = e.minBalance, maxBalance = e.maxBalance,
         dayCount = e.dayCount, effectiveFrom = e.effectiveFrom, effectiveTo = e.effectiveTo,
-        active = e.active, createdAt = e.createdAt, updatedAt = e.updatedAt
+        active = e.active, createdAt = e.createdAt, updatedAt = e.updatedAt,
     )
     fun toEntity(a: InterestAccrual) = InterestAccrualEntity().also {
-        it.id = a.id; it.accountId = a.accountId; it.productId = a.productId
-        it.configId = a.configId; it.accrualDate = a.accrualDate; it.balance = a.balance
-        it.dailyRate = a.dailyRate; it.accruedAmount = a.accruedAmount; it.currency = a.currency
-        it.status = a.status; it.capitalizedAt = a.capitalizedAt; it.createdAt = a.createdAt
+        it.id = a.id
+        it.accountId = a.accountId
+        it.productId = a.productId
+        it.configId = a.configId
+        it.accrualDate = a.accrualDate
+        it.balance = a.balance
+        it.dailyRate = a.dailyRate
+        it.accruedAmount = a.accruedAmount
+        it.currency = a.currency
+        it.status = a.status
+        it.claimedPeriodTo = a.claimedPeriodTo
+        it.capitalizedAt = a.capitalizedAt
+        it.createdAt = a.createdAt
     }
     fun toDomain(e: InterestAccrualEntity) = InterestAccrual(
         id = e.id, accountId = e.accountId, productId = e.productId,
         configId = e.configId, accrualDate = e.accrualDate, balance = e.balance,
         dailyRate = e.dailyRate, accruedAmount = e.accruedAmount, currency = e.currency,
-        status = e.status, capitalizedAt = e.capitalizedAt, createdAt = e.createdAt
+        status = e.status, claimedPeriodTo = e.claimedPeriodTo,
+        capitalizedAt = e.capitalizedAt, createdAt = e.createdAt,
     )
     fun toEntity(c: InterestCapitalization) = InterestCapitalizationEntity().also {
-        it.id = c.id; it.accountId = c.accountId; it.productId = c.productId
-        it.periodFrom = c.periodFrom; it.periodTo = c.periodTo; it.totalAccrued = c.totalAccrued
-        it.capitalizedAmount = c.capitalizedAmount; it.grossAmount = c.grossAmount
-        it.taxAmount = c.taxAmount; it.netAmount = c.netAmount; it.currency = c.currency
-        it.ledgerEntryId = c.ledgerEntryId; it.createdAt = c.createdAt
+        it.id = c.id
+        it.accountId = c.accountId
+        it.productId = c.productId
+        it.periodFrom = c.periodFrom
+        it.periodTo = c.periodTo
+        it.totalAccrued = c.totalAccrued
+        it.capitalizedAmount = c.capitalizedAmount
+        it.grossAmount = c.grossAmount
+        it.taxAmount = c.taxAmount
+        it.netAmount = c.netAmount
+        it.currency = c.currency
+        it.ledgerEntryId = c.ledgerEntryId
+        it.createdAt = c.createdAt
     }
     fun toDomain(e: InterestCapitalizationEntity) = InterestCapitalization(
         id = e.id, accountId = e.accountId, productId = e.productId,
         periodFrom = e.periodFrom, periodTo = e.periodTo, totalAccrued = e.totalAccrued,
         capitalizedAmount = e.capitalizedAmount, grossAmount = e.grossAmount,
         taxAmount = e.taxAmount, netAmount = e.netAmount, currency = e.currency,
-        ledgerEntryId = e.ledgerEntryId, createdAt = e.createdAt
+        ledgerEntryId = e.ledgerEntryId, createdAt = e.createdAt,
     )
     fun toEntity(w: WithholdingTax) = WithholdingTaxEntity().also {
-        it.id = w.id; it.capitalizationId = w.capitalizationId; it.accountId = w.accountId
-        it.partyRef = w.partyRef; it.periodFrom = w.periodFrom; it.periodTo = w.periodTo
-        it.taxableBase = w.taxableBase; it.rate = w.rate; it.taxAmount = w.taxAmount
-        it.currency = w.currency; it.treatment = w.treatment; it.exemptCode = w.exemptCode
-        it.status = w.status; it.remittanceId = w.remittanceId; it.createdAt = w.createdAt
+        it.id = w.id
+        it.capitalizationId = w.capitalizationId
+        it.accountId = w.accountId
+        it.partyRef = w.partyRef
+        it.periodFrom = w.periodFrom
+        it.periodTo = w.periodTo
+        it.taxableBase = w.taxableBase
+        it.rate = w.rate
+        it.taxAmount = w.taxAmount
+        it.currency = w.currency
+        it.treatment = w.treatment
+        it.exemptCode = w.exemptCode
+        it.status = w.status
+        it.remittanceId = w.remittanceId
+        it.createdAt = w.createdAt
     }
     fun toDomain(e: WithholdingTaxEntity) = WithholdingTax(
         id = e.id, capitalizationId = e.capitalizationId, accountId = e.accountId,
         partyRef = e.partyRef, periodFrom = e.periodFrom, periodTo = e.periodTo,
         taxableBase = e.taxableBase, rate = e.rate, taxAmount = e.taxAmount,
         currency = e.currency, treatment = e.treatment, exemptCode = e.exemptCode,
-        status = e.status, remittanceId = e.remittanceId, createdAt = e.createdAt
+        status = e.status, remittanceId = e.remittanceId, createdAt = e.createdAt,
     )
     fun toEntity(r: WithholdingRemittance) = WithholdingRemittanceEntity().also {
-        it.id = r.id; it.periodYear = r.periodYear; it.periodMonth = r.periodMonth
-        it.authority = r.authority; it.currency = r.currency; it.totalTaxAmount = r.totalTaxAmount
-        it.itemCount = r.itemCount; it.dueDate = r.dueDate; it.status = r.status
+        it.id = r.id
+        it.periodYear = r.periodYear
+        it.periodMonth = r.periodMonth
+        it.authority = r.authority
+        it.currency = r.currency
+        it.totalTaxAmount = r.totalTaxAmount
+        it.itemCount = r.itemCount
+        it.dueDate = r.dueDate
+        it.status = r.status
         it.createdAt = r.createdAt
     }
     fun toDomain(e: WithholdingRemittanceEntity) = WithholdingRemittance(
         id = e.id, periodYear = e.periodYear, periodMonth = e.periodMonth,
         authority = e.authority, currency = e.currency, totalTaxAmount = e.totalTaxAmount,
         itemCount = e.itemCount, dueDate = e.dueDate, status = e.status,
-        withholdingIds = emptyList(), createdAt = e.createdAt
+        withholdingIds = emptyList(), createdAt = e.createdAt,
     )
 }
