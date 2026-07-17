@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.8.2...document-service-v0.8.3) (2026-07-17)
+
+
+### Bug Fixes
+
+* **document-service:** persist the SIGNED transition after sealing ([#1380](https://github.com/JiRaska/open-bank-oss/issues/1380)) ([344924f](https://github.com/JiRaska/open-bank-oss/commit/344924f2a7393cde8117af8b20a5945737c0e047))
+
 ## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.8.1...document-service-v0.8.2) (2026-07-16)
 
 
