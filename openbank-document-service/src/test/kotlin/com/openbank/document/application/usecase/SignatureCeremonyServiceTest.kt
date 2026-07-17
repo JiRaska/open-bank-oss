@@ -217,6 +217,28 @@ class SignatureCeremonyServiceTest {
         coVerify(exactly = 0) { signerVerificationPort.verify(any(), any(), any(), any()) }
     }
 
+    @Test
+    fun `replaying a decision this signer already recorded absorbs it instead of failing`(): Unit = runBlocking {
+        // The deadlock this guards, seen live: the caller retries a decision whose HTTP response
+        // was lost, the ceremony behind it is already COMPLETED, and the domain rejects every
+        // decision on a terminal ceremony -- so the retry failed forever and the client sat on the
+        // signing screen unable to sign a contract they had ALREADY signed. Absorbing the replay
+        // must not re-execute the signature act: the SCA evidence is single-use and each signing
+        // act mints a fresh one-time certificate, so re-running it is not a no-op.
+        val signed = Signer(partyRef = "party-1", order = 1, status = SignerStatus.SIGNED, signedAt = FIXED_NOW)
+        val completed = ceremony(listOf(signed)).copy(status = CeremonyStatus.COMPLETED)
+        coEvery { ceremonyRepo.findById(completed.id) } returns completed
+
+        val result = service.recordDecision(completed.id, "party-1", SignerStatus.SIGNED, "evidence-1")
+
+        assertThat(result.status).isEqualTo(CeremonyStatus.COMPLETED)
+        coVerify(exactly = 0) { signerVerificationPort.verify(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { clientSignaturePort.signAsClient(any(), any()) }
+        coVerify(exactly = 0) { sealPort.sealPades(any(), any()) }
+        coVerify(exactly = 0) { ceremonyRepo.save(any()) }
+        coVerify(exactly = 0) { ceremonyRepo.saveWithOutbox(any(), any()) }
+    }
+
     private fun signer(partyRef: String, order: Int = 1) =
         Signer(partyRef = partyRef, order = order, status = SignerStatus.PENDING, signedAt = null)
 
