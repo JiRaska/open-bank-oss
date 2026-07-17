@@ -271,6 +271,17 @@ class AuthorizeInterceptor {
             // so a fleet where authz.four-eyes.enforce is false everywhere (the current default,
             // and never overridden in gitops) looked exactly like a fleet with no flagged actions.
             meters?.authzFourEyes(annotation.action, "required_not_enforced")
+            // debug, not warn (issue #1391): this is normal/expected state fleet-wide today, not a
+            // misconfiguration — flipping authz.four-eyes.enforce is a deliberate, separate
+            // operational decision. But the metric above wasn't paired with any log line, so this
+            // advisory state was invisible to anyone tailing logs rather than querying metrics —
+            // asymmetric with the ApprovalStore-missing branch below, which does log loudly for
+            // exactly this class of "silently not enforcing" gap.
+            log.debugf(
+                "four-eyes: action=%s is flagged four_eyes_required but authz.four-eyes.enforce=false " +
+                    "— proceeding without the second-approver gate (advisory)",
+                annotation.action,
+            )
             return ctx.proceed()
         }
         if (!approvalStore.isResolvable) {
