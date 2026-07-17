@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.10.0...domestic-payment-v0.10.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **domestic-payment:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1520](https://github.com/JiRaska/open-bank-oss/issues/1520)) ([6f550b6](https://github.com/JiRaska/open-bank-oss/commit/6f550b69ad2741187099814a924c8a2576064f9a))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.9.0...domestic-payment-v0.10.0) (2026-07-09)
 
 
