@@ -23,7 +23,8 @@ CARD_ISSUANCE_REST_EXT=$(cat << 'REGO'
 #   card.list      — listAll, listByAccount (#accountId), listByParty (#partyId)
 #   card.read      — getCard (#id)
 #   card.activate  — activate (#id)
-#   card.block     — block (#id) — also ROLE_COMPLIANCE at the Jakarta layer
+#   card.block     — block (#id) — ROLE_OPERATOR/ROLE_ADMIN/ROLE_COMPLIANCE (@RolesAllowed is a
+#                    disjunction: ROLE_COMPLIANCE widens the caller set, it does not narrow it)
 #   card.suspend   — suspend (#id) — customer-edge calls this on a customer's OWN card
 #                    (self-service freeze, /customer/v1/cards/{id}/freeze)
 #   card.resume    — resume (#id) — same, customer self-service unfreeze
@@ -43,17 +44,24 @@ package openbank.rest
 
 import rego.v1
 
-# Operators/admins may create, activate, suspend, or resume a card. Card.block is deliberately
-# excluded here — it additionally requires ROLE_COMPLIANCE at the Jakarta layer, gated below.
+# Operators/admins may create, activate, block, suspend, or resume a card — mirroring
+# CardResource's @RolesAllowed on each method. block() is included: its
+# @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE") is a disjunction (any one role
+# admits the caller), so ROLE_COMPLIANCE is an ADDITIONAL grantee, not an extra requirement.
+# Omitting card.block here made the policy strictly narrower than the resource it guards: every
+# card.block by ROLE_OPERATOR/ROLE_ADMIN would 403 the moment AUTHZ_ENFORCE flips to true,
+# disabling the fraud response for a lost/stolen card for the only admin identity in the realm
+# (admin@openbank.local holds OPERATOR/ADMIN/VIEWER, not COMPLIANCE).
 allowed_reasons contains "operator-card-write" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	input.action in {"card.create", "card.activate", "card.suspend", "card.resume"}
+	input.action in {"card.create", "card.activate", "card.block", "card.suspend", "card.resume"}
 }
 
-# Blocking a card (fraud/compliance hold) is also grantable to ROLE_COMPLIANCE, matching
-# CardResource's @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE") on block().
+# Blocking a card (fraud/compliance hold) is also grantable to ROLE_COMPLIANCE alone — a
+# compliance officer who holds neither ROLE_OPERATOR nor ROLE_ADMIN can still block, matching the
+# third role in CardResource's @RolesAllowed on block().
 allowed_reasons contains "compliance-card-block" if {
 	input.principal.type == "HUMAN"
 	"ROLE_COMPLIANCE" in input.principal.roles
