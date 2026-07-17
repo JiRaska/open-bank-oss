@@ -12,6 +12,7 @@ import com.openbank.ledger.domain.model.GlAccount
 import com.openbank.ledger.domain.model.TieOutRunRecord
 import com.openbank.ledger.domain.model.TieOutRunStatus
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.persistence.lock.ClusterLock
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.scheduler.Scheduled
@@ -48,6 +49,15 @@ import java.time.ZoneId
  * there to yesterday, oldest day first — the same healing shape as `CloseCalendar`'s
  * oldest-first catch-up in statement-service, for the same reason: capping to the *newest* N
  * days would strand the oldest gap forever, since the cursor here only ever moves forward too.
+ *
+ * **Cross-pod exclusion (#1201).** `concurrentExecution = SKIP` only stops in-JVM overlap; an
+ * Argo Rollouts canary window runs the old and new pod simultaneously for the whole rollout, and
+ * both fire this trigger on their own tick. Without coordination, two pods would both walk the
+ * same catch-up gap and both double-increment `openbank.subledger.tieout.break` plus write two
+ * run records for the same `as_of`. [ClusterLock.tryRunExclusively] wraps the whole run in a
+ * transaction-scoped advisory lock so only one pod's tick actually executes; the losing pod's
+ * tick is a no-op — not a missed day, since the winning pod still covers the full catch-up gap
+ * above.
  */
 @ApplicationScoped
 class TieOutScheduler(
@@ -57,6 +67,7 @@ class TieOutScheduler(
     private val clock: Clock,
     @ConfigProperty(name = "openbank.ledger.tieout.max-catchup-days", defaultValue = "7")
     private val maxCatchUpDays: Int,
+    private val clusterLock: ClusterLock,
     registry: MeterRegistry,
 ) {
     private val log: Logger = Logger.getLogger(TieOutScheduler::class.java)
@@ -72,18 +83,24 @@ class TieOutScheduler(
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     fun runTieOut(): Unit = runBlocking {
-        // clock.withZone(zone), NOT LocalDate.now(zone): the latter is `Clock.system(zone)` —
-        // it silently ignores the injected `clock` and reads the JVM's real wall clock. Harmless
-        // in production (the CDI clock is `Clock.systemUTC()`, so both give the same instant and
-        // therefore the same Prague date), but it makes this method untestable with a fixed clock
-        // — exactly the class of clock-injection violation flagged fleet-wide in the closing audit
-        // (docs/audits/2026-07-16-closing-audit.md, systemic root cause 1).
-        val through = LocalDate.now(clock.withZone(zone)).minusDays(1)
-        val dates = catchUpDates(through)
-        if (dates.isEmpty()) {
-            log.infof("Sub-ledger tie-out: already checked through %s — nothing to do", through)
+        val ran = clusterLock.tryRunExclusively(JOB_NAME) {
+            // clock.withZone(zone), NOT LocalDate.now(zone): the latter is `Clock.system(zone)` —
+            // it silently ignores the injected `clock` and reads the JVM's real wall clock.
+            // Harmless in production (the CDI clock is `Clock.systemUTC()`, so both give the same
+            // instant and therefore the same Prague date), but it makes this method untestable
+            // with a fixed clock — exactly the class of clock-injection violation flagged
+            // fleet-wide in the closing audit (docs/audits/2026-07-16-closing-audit.md, systemic
+            // root cause 1).
+            val through = LocalDate.now(clock.withZone(zone)).minusDays(1)
+            val dates = catchUpDates(through)
+            if (dates.isEmpty()) {
+                log.infof("Sub-ledger tie-out: already checked through %s — nothing to do", through)
+            }
+            dates.forEach { asOf -> runTieOutFor(asOf) }
         }
-        dates.forEach { asOf -> runTieOutFor(asOf) }
+        if (ran == null) {
+            log.infof("Sub-ledger tie-out: another pod already holds this tick's lock — skipping")
+        }
     }
 
     /**
@@ -201,5 +218,9 @@ class TieOutScheduler(
             // The freshness watchdog will surface the missing row within its SLA.
             log.errorf(ex, "Tie-out run record persist failed (status=%s asOf=%s): %s", status, asOf, ex.message)
         }
+    }
+
+    private companion object {
+        const val JOB_NAME = "ledger.tieout"
     }
 }

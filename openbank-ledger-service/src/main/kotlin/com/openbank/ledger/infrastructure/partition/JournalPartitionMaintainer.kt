@@ -4,6 +4,7 @@
 
 package com.openbank.ledger.infrastructure.partition
 
+import com.openbank.libs.persistence.lock.ClusterLock
 import com.openbank.libs.persistence.partition.PartitionMaintenance
 import com.openbank.libs.persistence.partition.PartitionPolicy
 import io.quarkus.scheduler.Scheduled
@@ -24,6 +25,10 @@ import java.time.LocalDate
  *  - Roll-forward CREATE is idempotent and always runs, so the partition horizon never lapses.
  *  - Retention is DETACH-only and dry-run by default; physical DROP requires explicit config.
  *  - Every action is recorded in the immutable `partition_lifecycle_audit` table.
+ *  - Cross-pod exclusion (#1201): an Argo Rollouts canary window runs two pods, and both fire
+ *    `@Scheduled` beans on their own tick — without coordination, two pods could race the same
+ *    partition CREATE/DETACH/DROP DDL. [ClusterLock.tryRunExclusively] wraps the run in a
+ *    transaction-scoped advisory lock so only one pod's tick executes.
  */
 @ApplicationScoped
 class JournalPartitionMaintainer(
@@ -41,41 +46,52 @@ class JournalPartitionMaintainer(
 
     @ConfigProperty(name = "openbank.ledger.partition.dry-run", defaultValue = "true")
     private val dryRun: Boolean,
+
+    private val clusterLock: ClusterLock,
 ) {
     @Scheduled(every = "24h", delayed = "30s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     suspend fun maintain() {
-        try {
-            val policy = PartitionPolicy(
-                parentTable = PARENT_TABLE,
-                prefix = PARENT_TABLE,
-                futureYears = futureYears,
-                retentionYears = retentionYears,
-                dropEnabled = dropEnabled,
-                dryRun = dryRun,
-            )
-            val report = PartitionMaintenance.maintain(LocalDate.now(clock), policy, executor)
-            if (report.executed.isNotEmpty() || report.skippedDryRun.isNotEmpty() || report.defaultPartitionRows > 0) {
-                log.infof(
-                    "journal_entries partition maintenance: executed=%d, dryRunSkipped=%d, defaultRows=%d",
-                    report.executed.size,
-                    report.skippedDryRun.size,
-                    report.defaultPartitionRows,
+        val ran = clusterLock.tryRunExclusively(JOB_NAME) {
+            try {
+                val policy = PartitionPolicy(
+                    parentTable = PARENT_TABLE,
+                    prefix = PARENT_TABLE,
+                    futureYears = futureYears,
+                    retentionYears = retentionYears,
+                    dropEnabled = dropEnabled,
+                    dryRun = dryRun,
                 )
+                val report = PartitionMaintenance.maintain(LocalDate.now(clock), policy, executor)
+                if (report.executed.isNotEmpty() ||
+                    report.skippedDryRun.isNotEmpty() ||
+                    report.defaultPartitionRows > 0
+                ) {
+                    log.infof(
+                        "journal_entries partition maintenance: executed=%d, dryRunSkipped=%d, defaultRows=%d",
+                        report.executed.size,
+                        report.skippedDryRun.size,
+                        report.defaultPartitionRows,
+                    )
+                }
+                if (report.defaultPartitionRows > 0) {
+                    log.warnf(
+                        "journal_entries_default holds %d row(s) — inserts are being misrouted; check the partition horizon",
+                        report.defaultPartitionRows,
+                    )
+                }
+            } catch (ex: Exception) {
+                // The scheduler must never crash; a failed pass is retried on the next tick.
+                log.error("journal_entries partition maintenance failed", ex)
             }
-            if (report.defaultPartitionRows > 0) {
-                log.warnf(
-                    "journal_entries_default holds %d row(s) — inserts are being misrouted; check the partition horizon",
-                    report.defaultPartitionRows,
-                )
-            }
-        } catch (ex: Exception) {
-            // The scheduler must never crash; a failed pass is retried on the next tick.
-            log.error("journal_entries partition maintenance failed", ex)
+        }
+        if (ran == null) {
+            log.infof("journal_entries partition maintenance: another pod already holds this tick's lock — skipping")
         }
     }
 
     companion object {
         private const val PARENT_TABLE = "journal_entries"
+        private const val JOB_NAME = "ledger.partition-maintenance"
         private val log: Logger = Logger.getLogger(JournalPartitionMaintainer::class.java)
     }
 }
