@@ -10,10 +10,6 @@ dataClassification: restricted
 retentionPolicy: 10 years
 evidenceExported: true
 lineage:
-  downstream:
-    - serviceName: aml-service
-      relationType: topic
-      description: updates
 schemaLineage:
   ownedSchemas:
     - sanctions_schema

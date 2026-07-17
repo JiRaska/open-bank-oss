@@ -10,10 +10,6 @@ dataClassification: confidential
 retentionPolicy: 5 years
 evidenceExported: false
 lineage:
-  downstream:
-    - serviceName: transaction-service
-      relationType: api
-      description: rates
 schemaLineage:
   ownedSchemas:
     - fx_schema

@@ -18,9 +18,6 @@ lineage:
       relationType: api
       description: updates
   downstream:
-    - serviceName: pid-service
-      relationType: api
-      description: documents
     - serviceName: audit-service
       relationType: topic
       description: events

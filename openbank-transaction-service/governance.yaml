@@ -48,9 +48,6 @@ lineage:
     - serviceName: audit-service
       relationType: topic
       description: events
-    - serviceName: notification-service
-      relationType: topic
-      description: events
 schemaLineage:
   ownedSchemas:
     - transactions_schema

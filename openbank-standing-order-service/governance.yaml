@@ -11,7 +11,7 @@ retentionPolicy: 5 years
 evidenceExported: true
 lineage:
   downstream:
-    - serviceName: transaction-service
+    - serviceName: sepa-payment
       relationType: api
       description: creates
 schemaLineage:

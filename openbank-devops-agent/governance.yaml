@@ -17,10 +17,6 @@ lineage:
     - serviceName: temporal
       relationType: api
       description: durable analysis workflow execution
-  downstream:
-    - serviceName: admin-ui
-      relationType: api
-      description: exposes DevOps findings and HITL approval queue
 schemaLineage:
   ownedSchemas:
     - devops_schema

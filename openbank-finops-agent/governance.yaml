@@ -17,10 +17,6 @@ lineage:
     - serviceName: alertmanager
       relationType: api
       description: receives finops anomaly alerts
-  downstream:
-    - serviceName: admin-ui
-      relationType: api
-      description: exposes anomaly list and HITL approval queue
 schemaLineage:
   ownedSchemas: []
   dependentSchemas: []

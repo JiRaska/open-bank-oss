@@ -10,10 +10,6 @@ dataClassification: confidential
 retentionPolicy: 7 years
 evidenceExported: true
 lineage:
-  downstream:
-    - serviceName: transaction-service
-      relationType: api
-      description: settles
 schemaLineage:
   ownedSchemas:
     - clearing_schema

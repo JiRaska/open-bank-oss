@@ -136,10 +136,15 @@ def main() -> int:
                 normalized_keys = rest_client_keys | {normalize_service_name(k) for k in rest_client_keys}
                 backed = bool(normalized_targets & normalized_keys)
             else:  # topic
+                # `target` (governance.yaml's serviceName) is written bare ("audit-service"), but
+                # build_topic_maps() keys its producer/consumer dicts by the full directory name
+                # ("openbank-audit-service") — comparing bare-against-full can never match (#1021).
+                # The `api` branch above already normalizes both sides; this branch didn't.
+                target_full = target if target.startswith("openbank-") else f"openbank-{target}"
                 produces = {t for t, producers in all_producers.items() if service in producers}
                 consumes = {t for t, consumers in all_consumers.items() if service in consumers}
-                target_produces = {t for t, producers in all_producers.items() if target in producers}
-                target_consumes = {t for t, consumers in all_consumers.items() if target in consumers}
+                target_produces = {t for t, producers in all_producers.items() if target_full in producers}
+                target_consumes = {t for t, consumers in all_consumers.items() if target_full in consumers}
                 backed = bool((produces & target_consumes) or (target_produces & consumes))
 
             if backed:
