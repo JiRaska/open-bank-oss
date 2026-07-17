@@ -338,6 +338,30 @@ resource "helm_release" "argocd" {
       name  = "controller.resources.limits.memory"
       value = "3584Mi"
     },
+    # Application-controller metrics. Both default to false in argo-cd 9.5.21, which is
+    # why Prometheus holds 4128 metric names and NOT ONE starts with `argocd`: nothing was
+    # ever scraped, so no rule could be written and none was. The cost was concrete — two
+    # apps sat Degraded for ~2 days (document-service's unseeded signing keystore, and a
+    # KEDA scaler broken for 44 days, #1284) and were found by an unrelated investigation
+    # rather than by a page. `argocd_app_info{health_status="Degraded"}` comes from this
+    # controller; enabling it is what makes that alertable at all.
+    #
+    # Only the controller: `argocd_app_info` lives here. server/repoServer/applicationSet
+    # metrics are separate values and answer different questions (API latency, sync perf) —
+    # not this gap, so not in this change.
+    {
+      name  = "controller.metrics.enabled"
+      value = "true"
+    },
+    # The chart's own ServiceMonitor — no hand-written one needed (contrast
+    # servicemonitor-karpenter.yaml, where the chart is terraform-managed but the Service
+    # already existed, so gitops could take it without an apply). The cluster Prometheus
+    # has empty serviceMonitorSelector AND serviceMonitorNamespaceSelector ({}), verified,
+    # so it discovers this with no additionalLabels.
+    {
+      name  = "controller.metrics.serviceMonitor.enabled"
+      value = "true"
+    },
   ]
 }
 
