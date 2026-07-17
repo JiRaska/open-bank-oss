@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.7.0...sanctions-service-v0.7.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **sanctions:** stop rewriting every row twice on every PEP_GLOBAL refresh (issue [#1432](https://github.com/JiRaska/open-bank-oss/issues/1432)) ([#1505](https://github.com/JiRaska/open-bank-oss/issues/1505)) ([03884b7](https://github.com/JiRaska/open-bank-oss/commit/03884b751d98ff12e635d7f4883171c5de32f6da))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.6.5...sanctions-service-v0.7.0) (2026-07-14)
 
 
