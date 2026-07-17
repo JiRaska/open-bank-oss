@@ -33,6 +33,7 @@ secret rotation (ADR-0099).
 | **DNSSEC** | `aws_kms_key.dnssec` (Route53 KSK) | AWS KMS, OpenTofu | **Disabled** (`enable_key_rotation = false`) |
 | **Transport CA** | Strimzi cluster CA + clients CA, ~33 KafkaUser certs | Strimzi operator, `messaging` ns | Strimzi defaults — **not configured, not documented** |
 | **Document signing** | `pki-document-signing` root (RSA-2048, 10y) → per-ceremony leaf (300s, `no_store`) | OpenBao PKI, in-cluster | Root: **none**. Leaf: ephemeral |
+| **Institutional seal** | the bank's own long-lived PAdES-sealing PKCS12 — `openbank/document-service-signing-seal` (`KEYSTORE_P12_BASE64` + `KEYSTORE_PASSWORD`). Distinct from the row above: that mints the *client's* one-time cert, this is the *bank's* identity on every sealed document | OpenBao KV, seeded out-of-band by an operator (runbook 0008) | **None** — and **not yet seeded**: `PdfBoxPadesSealAdapter` falls back to a DEV-ONLY ephemeral cert (#1284) |
 | **Agent identity** | `pki-agent` CA (ADR-0031 D3b) | OpenBao PKI | Not documented |
 | **Credential issuance** | EUDI issuer EC P-256 private JWK — signs every PID/(Q)EAA | OpenBao KV | **None** |
 | **PII index** | RČ pepper (HMAC-SHA256, `BlindIndex`) | OpenBao KV | Manual + re-index (`index_key_version`) |
