@@ -28,8 +28,13 @@ import org.eclipse.microprofile.faulttolerance.Timeout
  * `@Timeout` **must** appear on the concrete bean's methods, not on abstract base-class methods.
  * CDI interceptors only fire through the proxy that wraps the concrete `@ApplicationScoped` bean.
  *
- * **N4 — single writer.** `concurrentExecution = SKIP` prevents in-JVM overlap; the SDD Deployment
- * is pinned to `replicas: 1`. Together they guarantee at most one dispatcher claims a row.
+ * **N4 — cross-pod row claim (#1201).** `concurrentExecution = SKIP` only prevents in-JVM
+ * overlap; it does not stop two pods from both running this scheduled method. `replicas: 1` is
+ * steady-state only — an Argo Rollouts canary window runs the old and new pod simultaneously for
+ * the whole rollout duration, and both dispatch on their own tick. `SddOutboxRepositoryImpl`
+ * therefore implements [OutboxRepository.claimProcessable] as an atomic `FOR UPDATE SKIP LOCKED`
+ * claim, not the unclaimed-peek default, so two concurrently running pods can never both select
+ * and publish the same row.
  * Entries are processed sequentially by [AbstractOutboxDispatcher], preserving per-aggregate order.
  */
 @ApplicationScoped
