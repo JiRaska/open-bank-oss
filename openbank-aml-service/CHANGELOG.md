@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.5](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.7.4...aml-service-v0.7.5) (2026-07-17)
+
+
+### Bug Fixes
+
+* **aml:** atomic FOR UPDATE SKIP LOCKED outbox claim ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1472](https://github.com/JiRaska/open-bank-oss/issues/1472)) ([afa8925](https://github.com/JiRaska/open-bank-oss/commit/afa89257572ede250b23db9fbd910f57deadab8a))
+
 ## [0.7.4](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.7.3...aml-service-v0.7.4) (2026-07-11)
 
 
