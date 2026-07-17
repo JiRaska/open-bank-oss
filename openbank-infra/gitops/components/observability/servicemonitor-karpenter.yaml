@@ -1,0 +1,38 @@
+# Scrape Karpenter's Prometheus metrics. Nothing did, and the cost was not theoretical:
+# `prometheus-rules-finops.yaml` has carried two Karpenter alerts since it was written —
+# FinOpsKarpenterNodeChurnHigh (warning) and FinOpsKarpenterChurnOutsideMaintenance
+# (**critical**) — both keyed on `karpenter_nodes_total`. That series has never existed in
+# Prometheus, so neither rule could ever evaluate, let alone fire. They read as coverage and
+# delivered none. The metric is real (Karpenter serves 388 `karpenter_nodes_total` samples on
+# its own /metrics right now); it simply had no scraper.
+#
+# Karpenter is a terraform helm_release (`main.tf`), and its chart can emit this itself via
+# `serviceMonitor.enabled` — but the `karpenter` Service already exposes `http-metrics`:8080, so a
+# ServiceMonitor here picks it up with no terraform apply. Same shape and rationale as
+# servicemonitor-kyverno.yaml: lives in `observability`, selects cross-namespace, and the cluster
+# Prometheus has empty SM selectors so it is discovered automatically.
+#
+# This also unblocks the NodePool-cap alert #1272 asks for: `karpenter_nodepools_limit` and
+# `karpenter_nodepools_usage` (note: nodepool**s**, plural — the 1.x names) are exposed and are
+# what would have caught `default` pinned at 48/48 CPU before it aborted a rollout, instead of
+# after.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: karpenter
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: karpenter
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - kube-system
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: karpenter
+  endpoints:
+    - port: http-metrics
+      interval: 30s
+      path: /metrics
+      honorLabels: true
