@@ -26,13 +26,60 @@ spec:
     - name: openbank.db.postgres
       rules:
         - alert: PostgresInstanceDown
-          expr: cnpg_collector_up == 0
-          for: 2m
+          # Uses `up` (the SCRAPE result), NOT cnpg_collector_up (a metric the
+          # instance exports about itself). That distinction is the whole alert:
+          # a Postgres instance that is down stops exporting cnpg_* ENTIRELY, so
+          # the series VANISHES rather than going to 0, and `cnpg_collector_up == 0`
+          # — the previous expression here — can never match a down instance. It
+          # was asking a dead exporter to report its own death.
+          #
+          # Proven live on sanctions-db-1 (2026-07-17, issue #1432), over a 12h
+          # window while the instance was crashlooping:
+          #   cnpg_collector_up{pod="sanctions-db-1"}  127 samples, ZERO of them 0
+          #   up{pod="sanctions-db-1"}                 145 samples, 18 of them 0
+          # and fleet-wide at the same moment:
+          #   count(up{container="postgres"})  = 66   <- scrape targets
+          #   count(cnpg_collector_up)         = 65   <- the missing one IS the dead one
+          #
+          # Consequence: sanctions-service (money-path AML screening) sat at zero
+          # endpoints for hours and this alert never fired — not because it was
+          # missing, but because it was structurally incapable of firing.
+          #
+          # `up` survives because Prometheus itself writes it per target: a target
+          # that fails to scrape is recorded as 0, not dropped. Scoped by
+          # container="postgres" so it covers only CNPG instance pods.
+          expr: up{container="postgres"} == 0
+          for: 5m
           labels:
             severity: critical
           annotations:
-            summary: "Postgres {{ $labels.namespace }}/{{ $labels.pod }} exporter down"
-            description: "CNPG collector cannot reach Postgres on {{ $labels.pod }} for >2m — the instance is likely down or unreachable."
+            summary: "Postgres {{ $labels.namespace }}/{{ $labels.pod }} is down"
+            description: "Prometheus cannot scrape Postgres on {{ $labels.pod }} for >5m — the instance is down, crashlooping, or unreachable. Check `kubectl get cluster -n {{ $labels.namespace }}`: a CNPG cluster parked in phase `Not enough disk space` will NOT self-heal or fail over, by design — it waits for the PVC to be enlarged."
+        - alert: PostgresVolumeLow
+          # Preventive: catch a filling volume BEFORE it kills the instance, because
+          # once the pod is gone this series disappears too (kubelet only reports
+          # volume stats for a RUNNING pod) — so a low-disk threshold can never fire
+          # on the pod that already died. It has to fire while the patient is alive.
+          #
+          # Why this matters here: CNPG parks a cluster in phase `Not enough disk
+          # space` and deliberately does not fail over (promoting a replica with an
+          # identically sized PVC would hit the same wall). The parked state has no
+          # exit that does not involve a human — so a human has to be told.
+          #
+          # Threshold calibration (2026-07-17, 69 PVCs fleet-wide): every DB volume
+          # sits at 67%+ free except sanctions-db-2 at 28.8%. 30% is comfortably
+          # below the healthy population and fires only on a genuine outlier.
+          expr: |
+            100 * (
+              kubelet_volume_stats_available_bytes{persistentvolumeclaim=~".+-db-[0-9]+"}
+              / kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~".+-db-[0-9]+"}
+            ) < 30
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres volume {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} is {{ $value | printf \"%.1f\" }}% free"
+            description: "PVC {{ $labels.persistentvolumeclaim }} has under 30% free for >15m. A CNPG cluster that actually runs out parks in phase `Not enough disk space` and stops until a human enlarges the PVC — this alert exists to arrive before that. Check peak WAL generation, not just current size: a bulk job can write more WAL in one run than the volume holds (issue #1432)."
         - alert: PostgresConnectionsSaturated
           # Open backends approaching max_connections — the classic 'too many
           # clients already' precursor. Ratio joins the pool count to the
