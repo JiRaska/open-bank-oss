@@ -2,12 +2,30 @@
 
 Date: 2026-06-29
 Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only; phase 1a shipped, phases 1b/2/3 deferred -->
+Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only; phases 1a/1b shipped, phase 2 shipped under ADR-0143, phase 3 pending -->
 Author(s): Jiri Raska
 
-**Delivery note (updated 2026-06-30):**
-- **Phase 1a (parser/evaluator)** — ✅ Shipped: structured whitelisted predicate model (`WaiveConditionParser`/`WaiverEvaluator`) in `product-catalog` domain layer with tests.
-- **Phase 1b and Phase 2** — ⬜ Pending: promoting to `openbank-libs` (Phase 1b) and billing-service fee posting with four-eyes ledger verb (Phase 2) are phased; money-path posting deploy-gated.
+**Delivery note (updated 2026-07-17):**
+- **Phase 1a (parser/evaluator)** — ✅ Shipped: structured whitelisted predicate model
+  (`WaiveConditionParser`/`WaiverEvaluator`) with tests.
+- **Phase 1b (promote to `openbank-libs`; surface the rule on `/api/v1/fees`)** — ✅ Shipped: the
+  predicate model and evaluator are in `openbank-libs-domain`
+  (`com.openbank.libs.product.WaiveCondition` / `WaiverEvaluator`; ADR-0122 later moved
+  `openbank-libs` into the domain/runtime split). `product-catalog`'s `FeeRuleEvaluator` is now a
+  fee-typed adapter over the shared evaluator rather than a second copy, and `FeeScheduleItem`
+  carries `waiverEvaluable` + `waiverRule`, so `/api/v1/fees` exposes both the parsed rule and
+  whether it is machine-evaluable.
+- **Phase 2 (runtime fee posting)** — ✅ Shipped, under its own **ADR-0143** (runtime product fee
+  posting via a dedicated billing service): `openbank-billing-service` assesses fees per cycle and
+  books them through the ledger + outbox, four-eyes gated on `billing.post`, with the
+  `billing-fee-conservation` DST invariant and a threat model
+  (`docs/threat-models/openbank-billing-service.md`). ADR-0143 carries that work's delivery status —
+  real-environment e2e verification and the four-eyes enforcement flip are tracked there, not here.
+- **Phase 3 (interest + eligibility)** — ⬜ Pending, and the only phase of this ADR still open.
+  `Product.bonusRateCondition` remains free text (seeded `"No withdrawals in calendar month"`). It
+  does **not** fit the phase-1 grammar `<attribute-phrase> <op> <number> [currency]` — it is a
+  temporal/event predicate, not a comparison — so phase 3 has to extend the vocabulary, not merely
+  reuse the evaluator as this ADR's "Deferred" section assumed.
 
 ## Context
 
@@ -149,6 +167,9 @@ above are covered by the grammar and proven to parse in tests.
 
 - ADR-0002 — hexagonal architecture per service (domain has zero framework imports)
 - ADR-0013 / ADR-0014 / ADR-0049 — openbank-libs shared primitives (phase 1b target)
+- ADR-0122 — openbank-libs domain/runtime split (where the phase 1b evaluator lives today)
+- ADR-0143 — runtime product fee posting via a dedicated billing service (phase 2 was
+  delivered under that ADR; its delivery status is tracked there)
 - ADR-0033 / ADR-0038 — withholding tax: precedent for policy currently hard-coded
   in a service rather than driven by configuration
 - ADR-0048 — API contract version axis (relevant to the phase 1b `/api/v1/fees` change)
