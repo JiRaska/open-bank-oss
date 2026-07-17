@@ -43,7 +43,7 @@ A dedicated **management interface** is enabled on port **8085** (`quarkus.manag
 | `FCM_SERVICE_ACCOUNT_JSON` | (unset) | FCM service-account JSON (Vault) |
 | `FCM_PROJECT_ID` | (unset) | optional, falls back to JSON |
 | `APNS_ENABLED` | `false` | enable APNs push adapter |
-| `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_BUNDLE_ID` | / / `cz.openbank.app` | APNs identifiers |
+| `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_BUNDLE_ID` | / / `tech.openbank.app` | APNs identifiers |
 | `APNS_PRIVATE_KEY` | (unset) | .p8 PKCS#8 EC key (Vault) |
 | `APNS_SANDBOX` | `false` | true → APNs sandbox host |
 | `BUILD_TIME` / `GIT_COMMIT` | `unknown` | build metadata in `/api/v1/info` |
