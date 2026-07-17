@@ -36,9 +36,15 @@ spec:
         matchLabels:
           cnpg.io/cluster: sanctions-db
   imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  # 2Gi (the fleet's default) was exhausted at 1.4Gi used / 561Mi available (71%): CNPG's
+  # low-disk-space guard stopped the primary outright (issue #1486, sanctions-service down
+  # for hours). gp3 supports online expansion, so CNPG grows the PVC group in place — no
+  # data migration. 10Gi is ~7x the observed usage: sanctions/PEP screening lists are
+  # append-heavy and grow with every feed update, not a fixed-size dataset like most of the
+  # fleet's other 2Gi single-owner DBs, so headroom matters more here than a uniform default.
   storage:
     storageClass: gp3
-    size: 2Gi
+    size: 10Gi
   resources:
     requests:
       cpu: 100m
