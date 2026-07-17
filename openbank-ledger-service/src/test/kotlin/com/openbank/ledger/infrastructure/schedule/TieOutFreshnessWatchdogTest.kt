@@ -7,6 +7,7 @@ package com.openbank.ledger.infrastructure.schedule
 import com.openbank.ledger.application.port.out.TieOutRunRepository
 import com.openbank.ledger.domain.model.TieOutRunRecord
 import com.openbank.ledger.domain.model.TieOutRunStatus
+import com.openbank.libs.testing.lock.NoOpClusterLock
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
@@ -28,7 +29,7 @@ class TieOutFreshnessWatchdogTest {
     private val now = Instant.parse("2026-07-16T10:00:00Z")
     private val clock = Clock.fixed(now, ZoneOffset.UTC)
     private val runs = mockk<TieOutRunRepository>()
-    private val watchdog = TieOutFreshnessWatchdog(runs, clock)
+    private val watchdog = TieOutFreshnessWatchdog(runs, clock, NoOpClusterLock())
 
     private fun run(age: Duration, status: TieOutRunStatus) = TieOutRunRecord(
         id = UUID.randomUUID(),

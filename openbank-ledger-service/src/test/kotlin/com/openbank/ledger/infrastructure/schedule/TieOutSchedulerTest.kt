@@ -13,6 +13,7 @@ import com.openbank.ledger.domain.model.GlAccountType
 import com.openbank.ledger.domain.model.TieOutRunRecord
 import com.openbank.ledger.domain.model.TieOutRunStatus
 import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.testing.lock.NoOpClusterLock
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -35,7 +36,15 @@ class TieOutSchedulerTest {
     private val registry = SimpleMeterRegistry()
     private val clock = Clock.fixed(Instant.parse("2026-07-16T04:00:00Z"), ZoneOffset.UTC)
 
-    private val scheduler = TieOutScheduler(ledger, glAccounts, runs, clock, maxCatchUpDays = 7, registry)
+    private val scheduler = TieOutScheduler(
+        ledger,
+        glAccounts,
+        runs,
+        clock,
+        maxCatchUpDays = 7,
+        NoOpClusterLock(),
+        registry,
+    )
 
     private fun runRecord(asOf: LocalDate) = TieOutRunRecord(
         id = UUID.randomUUID(),
@@ -190,7 +199,7 @@ class TieOutSchedulerTest {
         // A 5-day gap (11th..15th) capped to 2: takeLast would strand the 11th/12th forever,
         // since the cursor only ever moves forward from the latest saved as_of (the #1201-class
         // bug CloseCalendar had). take() keeps 11th, 12th and leaves 13th-15th for the next run.
-        val capped = TieOutScheduler(ledger, glAccounts, runs, clock, maxCatchUpDays = 2, registry)
+        val capped = TieOutScheduler(ledger, glAccounts, runs, clock, maxCatchUpDays = 2, NoOpClusterLock(), registry)
         val account = control("2100")
         coEvery { glAccounts.findByCode(any()) } returns null
         coEvery { glAccounts.findByCode("2100") } returns account
