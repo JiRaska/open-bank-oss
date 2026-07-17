@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.9.1...interest-service-v0.10.0) (2026-07-17)
+
+
+### Features
+
+* **interest:** post the ADR-0033 split so capitalization actually credits the customer ([#1316](https://github.com/JiRaska/open-bank-oss/issues/1316)) ([b2ae411](https://github.com/JiRaska/open-bank-oss/commit/b2ae4117f6995b63f16e53a3004fdabee4ed223d))
+
 ## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.9.0...interest-service-v0.9.1) (2026-07-16)
 
 
