@@ -54,11 +54,18 @@ class OperatorMessageService {
     lateinit var clock: Clock
 
     suspend fun compose(request: OperatorMessageRequest): UUID {
+        // Symmetrical check (issue #1381): unknownVariables() only ever caught EXTRA keys, so a
+        // request missing a required key sailed through and render()'s old fallback-to-"" quietly
+        // substituted a blank — a real customer got a message with an empty body/subject, and the
+        // row was persisted and mailed as an ordinary SENT row with no error anywhere in the chain.
         val unknown = request.template.unknownVariables(request.variables)
-        if (unknown.isNotEmpty()) {
+        val missing = request.template.variables - request.variables.keys
+        if (unknown.isNotEmpty() || missing.isNotEmpty()) {
             throw OperatorMessageRejected(
                 "template ${request.template.name} declares ${request.template.variables.sorted()} " +
-                    "but request carried undeclared ${unknown.sorted()}",
+                    "but request carried ${request.variables.keys.sorted()}" +
+                    (if (unknown.isNotEmpty()) " (undeclared: ${unknown.sorted()})" else "") +
+                    (if (missing.isNotEmpty()) " (missing: ${missing.sorted()})" else ""),
             )
         }
 
@@ -128,21 +135,24 @@ class OperatorMessageService {
         return notificationId
     }
 
-    /** Exhaustive, no `else` — a new [OperatorMessageTemplate] constant fails to compile here. */
+    /**
+     * Exhaustive, no `else` — a new [OperatorMessageTemplate] constant fails to compile here.
+     * `vars.getValue(key)` is safe: [compose] already rejected any request whose `variables`
+     * don't exactly match `template.variables` (extra AND missing), so every declared key is
+     * guaranteed present by the time render() runs — no fallback-to-"" indirection needed.
+     */
     private fun render(template: OperatorMessageTemplate, vars: Map<String, String>): Pair<String, String> =
         when (template) {
             OperatorMessageTemplate.GENERIC_NOTICE ->
-                (vars.v("subject").ifBlank { "A message from OpenBank" }) to
-                    "<p>${vars.v("note")}</p>"
+                (vars.getValue("subject").ifBlank { "A message from OpenBank" }) to
+                    "<p>${vars.getValue("note")}</p>"
             OperatorMessageTemplate.SUPPORT_FOLLOWUP ->
                 "Following up on your support request" to
                     "<p>We are following up on your support request " +
-                    "(reference <b>${vars.v("ticketReference")}</b>). " +
+                    "(reference <b>${vars.getValue("ticketReference")}</b>). " +
                     "Please reply to this message if you have further questions.</p>"
         }
 }
-
-private fun Map<String, String>.v(key: String): String = this[key] ?: ""
 
 data class OperatorMessageRequest(
     val partyId: UUID,
