@@ -50,7 +50,14 @@ jobs:
     env:
       # Same OOM guard as fleet-lint.yml / security.yml CodeQL job: a full-fleet dependency
       # resolution (~30 modules + the quarkus-bom) needs more than Gradle's 3 GiB default heap.
-      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8"
+      # 4g stopped being enough as the fleet grew: every run since 2026-07-14 failed with
+      # "Java heap space" (`assemble testClasses` OOMs before the graph is written), so the
+      # dependency graph GitHub uses for Dependabot alerts/SBOM has been silently stale since
+      # then — no graph file to submit, but the job still exits without visibly failing that
+      # step (issue #909's residual-alert investigation traced back here). security.yml's
+      # CodeQL java-kotlin leg resolves the same whole-fleet graph on the same ubuntu-latest
+      # runner at -Xmx6g without OOMing — match that proven headroom here.
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8"
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
     steps:
