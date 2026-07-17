@@ -16,6 +16,13 @@ import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
 
+/**
+ * Stubs/verifies `claimProcessable` (#1201's atomic claim), not `listProcessable`: the shared
+ * `OutboxDispatch.dispatchOnce` calls the former, and a plain `mockk()` never falls through to
+ * the interface's default `claimProcessable = listProcessable(limit)` body — it intercepts every
+ * call at the proxy level, so an un-stubbed `claimProcessable` on a relaxed mock silently returns
+ * an empty list instead. See `BillingOutboxDispatcherTest` for the full explanation.
+ */
 class ConsentOutboxDispatcherTest {
 
     private val outboxRepository = mockk<ConsentOutboxRepository>(relaxed = true)
@@ -28,7 +35,7 @@ class ConsentOutboxDispatcherTest {
     fun `dispatch publishes and marks each processable row sent`(): Unit = runBlocking {
         val entry1 = entry("payload-1")
         val entry2 = entry("payload-2")
-        coEvery { outboxRepository.listProcessable(any()) } returns listOf(entry1, entry2)
+        coEvery { outboxRepository.claimProcessable(any(), any()) } returns listOf(entry1, entry2)
 
         dispatcher().dispatch()
 
@@ -43,14 +50,14 @@ class ConsentOutboxDispatcherTest {
     fun `dispatch does nothing when disabled`(): Unit = runBlocking {
         dispatcher(enabled = false).dispatch()
 
-        coVerify(exactly = 0) { outboxRepository.listProcessable(any()) }
+        coVerify(exactly = 0) { outboxRepository.claimProcessable(any(), any()) }
         coVerify(exactly = 0) { eventPublisher.publish(any()) }
     }
 
     @Test
     fun `dispatch marks a row failed when publish throws`(): Unit = runBlocking {
         val entry = entry("payload-x")
-        coEvery { outboxRepository.listProcessable(any()) } returns listOf(entry)
+        coEvery { outboxRepository.claimProcessable(any(), any()) } returns listOf(entry)
         coEvery { eventPublisher.publish(entry) } throws RuntimeException("kafka down")
 
         dispatcher().dispatch()
@@ -61,7 +68,7 @@ class ConsentOutboxDispatcherTest {
 
     @Test
     fun `dispatch swallows a repository failure so the scheduler never crashes`(): Unit = runBlocking {
-        coEvery { outboxRepository.listProcessable(any()) } throws RuntimeException("db unavailable")
+        coEvery { outboxRepository.claimProcessable(any(), any()) } throws RuntimeException("db unavailable")
 
         // Must not propagate.
         dispatcher().dispatch()

@@ -20,6 +20,12 @@ import java.util.UUID
  * The scheduled dispatch tick is gated on `openbank.outbox.dispatch-enabled` (default **false** —
  * the classic silent-outbox footgun) and, when enabled, must mark each row SENT on success and
  * FAILED on a publish error so the row is retried rather than lost.
+ *
+ * Stubs/verifies `claimProcessable` (#1201's atomic claim), not `listProcessable`: a `mockk()`
+ * never falls through to the interface's default `claimProcessable = listProcessable(limit)`
+ * body — it intercepts every call at the proxy level — so an un-stubbed `claimProcessable` throws
+ * (swallowed by `dispatchOnce`'s `runCatching`), silently skipping the whole batch. See
+ * `BillingOutboxDispatcherTest` for the full explanation.
  */
 class LendingOutboxDispatcherTest {
 
@@ -45,7 +51,7 @@ class LendingOutboxDispatcherTest {
 
         dispatcher.dispatch()
 
-        coVerify(exactly = 0) { repo.listProcessable(any()) }
+        coVerify(exactly = 0) { repo.claimProcessable(any(), any()) }
         coVerify(exactly = 0) { publisher.publish(any()) }
     }
 
@@ -53,7 +59,7 @@ class LendingOutboxDispatcherTest {
     fun `an enabled dispatch publishes each processable row and marks it sent`(): Unit = runBlocking {
         val first = entry()
         val second = entry()
-        coEvery { repo.listProcessable(any()) } returns listOf(first, second)
+        coEvery { repo.claimProcessable(any(), any()) } returns listOf(first, second)
         coJustRun { publisher.publish(any()) }
         coJustRun { repo.markSent(any(), any()) }
 
@@ -69,7 +75,7 @@ class LendingOutboxDispatcherTest {
     @Test
     fun `a failed publish marks the row failed for retry instead of dropping it`(): Unit = runBlocking {
         val poisoned = entry()
-        coEvery { repo.listProcessable(any()) } returns listOf(poisoned)
+        coEvery { repo.claimProcessable(any(), any()) } returns listOf(poisoned)
         coEvery { publisher.publish(poisoned) } throws IllegalStateException("broker unavailable")
         coJustRun { repo.markFailed(any(), any(), any()) }
 

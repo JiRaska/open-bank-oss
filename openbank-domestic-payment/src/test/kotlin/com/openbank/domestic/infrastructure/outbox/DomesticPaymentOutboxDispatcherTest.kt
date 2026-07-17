@@ -17,6 +17,14 @@ import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
 
+/**
+ * Stubs/verifies `claimProcessable` (#1201's atomic claim), not `listProcessable`: the shared
+ * `OutboxDispatch.dispatchOnce` calls the former, and a `mockk()` never falls through to the
+ * interface's default `claimProcessable = listProcessable(limit)` body — it intercepts every
+ * call at the proxy level, so an un-stubbed `claimProcessable` throws (swallowed by
+ * `dispatchOnce`'s `runCatching`), silently skipping the batch. See
+ * `BillingOutboxDispatcherTest` for the full explanation.
+ */
 class DomesticPaymentOutboxDispatcherTest {
 
     private val outboxRepository: DomesticPaymentOutboxRepository = mockk()
@@ -42,7 +50,7 @@ class DomesticPaymentOutboxDispatcherTest {
     fun `happy drain publishes each row and marks it sent`(): Unit = runBlocking {
         val first = entry()
         val second = entry()
-        coEvery { outboxRepository.listProcessable(any()) } returns listOf(first, second)
+        coEvery { outboxRepository.claimProcessable(any(), any()) } returns listOf(first, second)
         coJustRun { eventPublisher.publish(any()) }
         coJustRun { outboxRepository.markSent(any(), any()) }
 
@@ -58,7 +66,7 @@ class DomesticPaymentOutboxDispatcherTest {
     fun `publish failure marks the row failed and continues the batch`(): Unit = runBlocking {
         val failing = entry()
         val healthy = entry()
-        coEvery { outboxRepository.listProcessable(any()) } returns listOf(failing, healthy)
+        coEvery { outboxRepository.claimProcessable(any(), any()) } returns listOf(failing, healthy)
         coEvery { eventPublisher.publish(failing) } throws RuntimeException("kafka down")
         coJustRun { eventPublisher.publish(healthy) }
         coJustRun { outboxRepository.markSent(any(), any()) }
@@ -73,7 +81,7 @@ class DomesticPaymentOutboxDispatcherTest {
 
     @Test
     fun `a repository listing fault is swallowed so the scheduler never crashes`(): Unit = runBlocking {
-        coEvery { outboxRepository.listProcessable(any()) } throws RuntimeException("db unreachable")
+        coEvery { outboxRepository.claimProcessable(any(), any()) } throws RuntimeException("db unreachable")
 
         dispatcher().dispatch()
 
@@ -84,10 +92,10 @@ class DomesticPaymentOutboxDispatcherTest {
     @Test
     fun `dispatch is skipped when dispatchEnabled is false`(): Unit = runBlocking {
         val disabled = DomesticPaymentOutboxDispatcher(outboxRepository, eventPublisher, dispatchEnabled = false)
-        coEvery { outboxRepository.listProcessable(any()) } returns emptyList()
+        coEvery { outboxRepository.claimProcessable(any(), any()) } returns emptyList()
 
         disabled.dispatch()
 
-        coVerify(exactly = 0) { outboxRepository.listProcessable(any()) }
+        coVerify(exactly = 0) { outboxRepository.claimProcessable(any(), any()) }
     }
 }

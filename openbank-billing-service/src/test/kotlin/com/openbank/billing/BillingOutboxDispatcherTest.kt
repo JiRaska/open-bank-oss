@@ -23,6 +23,16 @@ import java.util.UUID
  * the classic silent-outbox footgun) and, when enabled, must mark each row SENT on success and
  * FAILED on a publish error so the row is retried rather than lost. Mirrors
  * `openbank-lending-service`'s `LendingOutboxDispatcherTest`.
+ *
+ * Stubs/verifies `claimProcessable`, not `listProcessable`: `OutboxDispatch.dispatchOnce` (which
+ * the shared `AbstractOutboxDispatcher.dispatchScheduledBatch` delegates to) claims rows via
+ * `OutboxRepository.claimProcessable` (#1201, atomic claim so two dispatcher instances during an
+ * Argo Rollouts canary window can't both grab the same row). `claimProcessable`'s default body
+ * calls `listProcessable`, but that default only resolves for a REAL class implementing the
+ * interface — a `mockk()` intercepts every call at the proxy level regardless of default method
+ * bodies, so an un-stubbed `claimProcessable` throws (swallowed by `dispatchOnce`'s
+ * `runCatching`), silently skipping the whole batch. Stubbing `listProcessable` alone verified
+ * nothing.
  */
 class BillingOutboxDispatcherTest {
 
@@ -48,7 +58,7 @@ class BillingOutboxDispatcherTest {
 
         dispatcher.dispatch()
 
-        coVerify(exactly = 0) { repo.listProcessable(any()) }
+        coVerify(exactly = 0) { repo.claimProcessable(any(), any()) }
         coVerify(exactly = 0) { publisher.publish(any()) }
     }
 
@@ -56,7 +66,7 @@ class BillingOutboxDispatcherTest {
     fun `an enabled dispatch publishes each processable row and marks it sent`(): Unit = runBlocking {
         val first = entry()
         val second = entry()
-        coEvery { repo.listProcessable(any()) } returns listOf(first, second)
+        coEvery { repo.claimProcessable(any(), any()) } returns listOf(first, second)
         coJustRun { publisher.publish(any()) }
         coJustRun { repo.markSent(any(), any()) }
 
@@ -72,7 +82,7 @@ class BillingOutboxDispatcherTest {
     @Test
     fun `a failed publish marks the row failed for retry instead of dropping it`(): Unit = runBlocking {
         val poisoned = entry()
-        coEvery { repo.listProcessable(any()) } returns listOf(poisoned)
+        coEvery { repo.claimProcessable(any(), any()) } returns listOf(poisoned)
         coEvery { publisher.publish(poisoned) } throws IllegalStateException("ledger unavailable")
         coJustRun { repo.markFailed(any(), any(), any()) }
 
@@ -86,7 +96,7 @@ class BillingOutboxDispatcherTest {
     fun `dispatchScheduledBatch drives the same dispatch loop without the resilience annotations`(): Unit =
         runBlocking {
             val entryRow = entry()
-            coEvery { repo.listProcessable(any()) } returns listOf(entryRow)
+            coEvery { repo.claimProcessable(any(), any()) } returns listOf(entryRow)
             coJustRun { publisher.publish(any()) }
             coJustRun { repo.markSent(any(), any()) }
 

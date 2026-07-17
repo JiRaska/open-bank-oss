@@ -18,6 +18,13 @@ import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
 
+/**
+ * Stubs/verifies `claimProcessable` (#1201's atomic claim), not `listProcessable`: a `mockk()`
+ * never falls through to the interface's default `claimProcessable = listProcessable(limit)`
+ * body — it intercepts every call at the proxy level — so an un-stubbed `claimProcessable` throws
+ * (swallowed by `dispatchOnce`'s `runCatching`), silently skipping the whole batch. See
+ * `BillingOutboxDispatcherTest` for the full explanation.
+ */
 class SepaPaymentOutboxDispatcherTest {
 
     private lateinit var outboxRepository: SepaPaymentOutboxRepository
@@ -48,7 +55,7 @@ class SepaPaymentOutboxDispatcherTest {
     fun `happy drain publishes each entry and marks every row sent`(): Unit = runBlocking {
         val first = entry(payload = "{\"e\":\"a\"}")
         val second = entry(payload = "{\"e\":\"b\"}")
-        coEvery { outboxRepository.listProcessable(any()) } returns listOf(first, second)
+        coEvery { outboxRepository.claimProcessable(any(), any()) } returns listOf(first, second)
         coJustRun { eventPublisher.publish(any()) }
         coJustRun { outboxRepository.markSent(any(), any()) }
 
@@ -65,7 +72,7 @@ class SepaPaymentOutboxDispatcherTest {
     fun `publish failure marks the row failed with the error message and continues`(): Unit = runBlocking {
         val failing = entry(payload = "{\"e\":\"boom\"}")
         val ok = entry(payload = "{\"e\":\"ok\"}")
-        coEvery { outboxRepository.listProcessable(any()) } returns listOf(failing, ok)
+        coEvery { outboxRepository.claimProcessable(any(), any()) } returns listOf(failing, ok)
         coEvery { eventPublisher.publish(failing) } throws RuntimeException("broker down")
         coJustRun { eventPublisher.publish(ok) }
         coJustRun { outboxRepository.markSent(any(), any()) }
@@ -81,7 +88,7 @@ class SepaPaymentOutboxDispatcherTest {
 
     @Test
     fun `repository listing failure is swallowed so the scheduler never crashes`(): Unit = runBlocking {
-        coEvery { outboxRepository.listProcessable(any()) } throws RuntimeException("db unreachable")
+        coEvery { outboxRepository.claimProcessable(any(), any()) } throws RuntimeException("db unreachable")
 
         dispatcher.dispatch()
 
@@ -96,7 +103,7 @@ class SepaPaymentOutboxDispatcherTest {
 
         disabledDispatcher.dispatch()
 
-        coVerify(exactly = 0) { outboxRepository.listProcessable(any()) }
+        coVerify(exactly = 0) { outboxRepository.claimProcessable(any(), any()) }
         coVerify(exactly = 0) { eventPublisher.publish(any()) }
     }
 }
