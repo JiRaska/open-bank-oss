@@ -1,34 +1,42 @@
-# HTTPScaledObject — ADR-0083 T1 (HTTP → 0) pilot for product-catalog.
+# HTTPScaledObject — ADR-0083 T1 (HTTP → 0) for product-catalog, held at min: 1.
 #
-# product-catalog is the nominated T1 pilot: it is a stateless, non-money-path,
-# read-only HTTP service with near-zero CPU utilisation at rest (~0.004 cores
-# per the ADR-0057 tier classifier). It has no synchronous inbound callers from
-# other services at runtime — the only callers are the admin-UI and the fees
-# vertical (ADR-0051), both of which can tolerate a first-request cold-start
-# latency rather than a 5xx.
+# THE T1 PREMISE WAS WRONG, AND IT TOOK ONBOARDING DOWN. This file used to open with:
 #
-# How it works:
-#   1. This object registers product-catalog with the KEDA HTTP add-on.
-#   2. Inbound traffic must be routed through the interceptor Service
-#      (keda-add-ons-http-interceptor.keda.svc:8080) — see the Ingress annotation
-#      in product-catalog.yaml. The interceptor holds the first request while
-#      KEDA scales the Deployment 0 → 1; subsequent requests are forwarded
-#      directly once a pod is Ready.
-#   3. After `scaledownPeriod` seconds of inactivity the interceptor signals
-#      KEDA to scale back to zero, and Karpenter consolidates the idle node.
+#   "It has no synchronous inbound callers from other services at runtime — the only
+#    callers are the admin-UI and the fees vertical (ADR-0051), both of which can
+#    tolerate a first-request cold-start latency rather than a 5xx."
 #
-# minReplicas: 0 — the T1 goal; safe because:
-#   - product-catalog is NOT on the money path (rules.yaml money_path_services).
-#   - The interceptor parks the first request (no 5xx on cold start).
-#   - Native image cold-start is targeted at ≤ 300 ms p95 (ADR-0083 SLO gate);
-#     until that SLO is measured and confirmed, minReplicas can be raised to 1
-#     as a conservative fallback without any manifest change to this file.
+# Both halves are false. product-catalog has TWO synchronous in-cluster callers on the
+# onboarding path, and neither goes through the interceptor — they dial the ClusterIP
+# directly, which is the only thing that can wake a scaled-to-zero pod:
+#
+#   - account-service  → AccountService.openAccount, validating the product (issue #668)
+#   - document-service → OnboardingDocumentService.issueOnboardingDocument, resolving the
+#                        product's documentTemplateCode (ADR-0162 D7)
+#
+# So the pod never woke, and every call got `Connection refused` instead of a cold start.
+# The two callers then failed in different directions, which is why this stayed invisible:
+#
+#   - account-service fails OPEN (reference data, not money path) — accounts still opened,
+#     product validation silently skipped. A WARN, no more.
+#   - document-service treats an unresolvable template code as "this product has no
+#     document" and returns — logging it at INFO. So no onboarding document was created,
+#     no signature ceremony existed, and the customer had nothing to sign. Registration
+#     still returned 201.
+#
+# Held at min: 1 until BOTH are true:
+#   1. every in-cluster caller reaches product-catalog through the interceptor (or the
+#      callers stop being synchronous), and
+#   2. the ADR-0083 §5 cold-start SLO is actually MEASURED — it never was. T1 was
+#      declared complete on the strength of the premise above rather than on data.
+#
+# Keeping the HTTPScaledObject (rather than deleting it) preserves the scale-UP path and
+# the ADR-0083 wiring, so re-testing T1 later is a one-line change back to min: 0 once
+# the callers are fixed. maxReplicas/scaledownPeriod/targetPendingRequests are unchanged
+# and only matter above 1 replica.
 #
 # maxReplicas: 3 — generous cap for a read-only seed store; revise once live
 #   traffic data is available.
-#
-# scaledownPeriod: 300 s (5 min) — gives a short-lived admin-UI browsing session
-#   time to complete before the pod is torn down. Tune after ADR-0083 §5 measurement.
 #
 # targetPendingRequests: 100 — the interceptor scales 1 replica per 100 in-flight
 #   requests. At product-catalog's expected fan-out this means a single warm pod
@@ -41,7 +49,7 @@ metadata:
   labels:
     app.kubernetes.io/name: product-catalog
     app.kubernetes.io/part-of: accounts
-    openbank.io/finops-tier: T1
+    openbank.io/finops-tier: T0     # held at min:1 — see header; T1 reverted in rules.yaml
     openbank.io/adr: "0083"
 spec:
   hosts:
@@ -57,7 +65,9 @@ spec:
     apiVersion: apps/v1
     port: 8104
   replicas:
-    min: 0
+    # 0 → 1: see the header. Onboarding calls this service synchronously and does not go
+    # through the interceptor, so at 0 it is not a cold start — it is a connection refused.
+    min: 1
     max: 3
   scaledownPeriod: 300
   targetPendingRequests: 100

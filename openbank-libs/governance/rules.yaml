@@ -1212,7 +1212,19 @@ finops_tiers:
     # tuned probes ≤5s p95 (met on a small sample, ~4.4s avg/5.0s worst-of-3; probe
     # tuning alone cut ~28% off the untuned 3.5-8.8s, the residual ~4s floor is
     # Kubernetes control-plane + admission-webhook overhead, not the image).
-    openbank-product-catalog: T1
+    openbank-product-catalog: T0
+    # Reverted T1 -> T0 on 2026-07-17: the T1 measurement was real but measured the wrong
+    # path. Every number below was taken THROUGH the KEDA HTTP interceptor, which parks the
+    # first request while the pod scales 0->1. But product-catalog's actual onboarding-path
+    # callers — account-service (openAccount product validation, #668) and document-service
+    # (OnboardingDocumentService template-code resolution, ADR-0162 D7) — dial the ClusterIP
+    # directly, NOT the interceptor. At min:0 they got `Connection refused`, not a slow first
+    # click. document-service reads that as "product has no document template" and issues no
+    # onboarding document, so no signature ceremony is ever created: onboarding silently could
+    # not complete (registration still 201). Zero accounts completed onboarding 2026-06-24..
+    # 2026-07-17. The HTTPScaledObject is held at min:1; re-declare T1 only once every
+    # in-cluster caller goes through the interceptor AND the SLO is re-measured on that path.
+    # Original T1 rationale kept below for the record.
     # Declared 2026-07-07 (#253): the live sandbox Deployment (accounts namespace)
     # already runs the native image + tuned probes (startupProbe/readinessProbe
     # periodSeconds:1, failureThreshold:10). A 10-sample end-to-end scale-from-zero
