@@ -27,6 +27,19 @@ on:
       - "openbank-libs/gradle/libs.versions.toml"
       - "settings.gradle.kts"
       - "gradle/wrapper/**"
+  # PR-head submission (issue #1419): dependency-review.yml only ever diffs a SUBMITTED
+  # graph, and GitHub does not natively parse Gradle manifests (unlike npm/pip/docker) —
+  # without this trigger, dependency-review is blind to Kotlin/Java deps on every PR and
+  # only catches a vulnerable Gradle dependency post-merge, via Dependabot. Same path
+  # filter as the push trigger: only ~3 of the last 40 PRs touch a dependency manifest, so
+  # the ~11 min full-fleet resolve stays off ~93% of PRs.
+  pull_request:
+    branches: [main]
+    paths:
+      - "**/build.gradle.kts"
+      - "openbank-libs/gradle/libs.versions.toml"
+      - "settings.gradle.kts"
+      - "gradle/wrapper/**"
   schedule:
     # Weekly belt-and-braces resubmission — dependency resolution can drift even without a
     # manifest change (a transitive version moving inside a declared range).

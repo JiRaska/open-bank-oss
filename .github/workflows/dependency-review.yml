@@ -14,7 +14,11 @@ permissions:
 jobs:
   dependency-review:
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
-    timeout-minutes: 10
+    # dependency-submission.yml's Gradle graph for this PR head runs concurrently (issue
+    # #1419) and takes ~670s for the full-fleet resolve. retry-on-snapshot-warnings-timeout
+    # below polls for up to 1200s waiting for that snapshot to land — this job's own
+    # timeout must stay comfortably above that or it self-cancels before the retry gives up.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -24,6 +28,13 @@ jobs:
           fail-on-severity: high
           comment-summary-in-pr: always
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
+          # Gradle has no native GitHub dependency-graph parser (unlike npm/pip/docker) —
+          # dependency-submission.yml explicitly submits it for this PR head, but that
+          # submission is a separate, concurrently-running workflow. Retry until the
+          # snapshot lands instead of diffing against a graph that doesn't have it yet
+          # (issue #1419). 1200s: measured full-fleet resolve is ~670s; give headroom.
+          retry-on-snapshot-warnings: true
+          retry-on-snapshot-warnings-timeout: 1200
           # starlette (pulled in transitively via schemathesis==3.39.16's own
           # starlette<1,>=0.13 pin — .github/workflows/requirements/schemathesis.txt)
           # is stuck below the versions that fix these two advisories (patched at
