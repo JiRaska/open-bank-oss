@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.4](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.15.3...ledger-service-v1.15.4) (2026-07-17)
+
+
+### Bug Fixes
+
+* **ledger:** outbox FxRevaluedEvent instead of a separate post-commit publish ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1451](https://github.com/JiRaska/open-bank-oss/issues/1451)) ([86176ed](https://github.com/JiRaska/open-bank-oss/commit/86176edd5c85ccf82386bef4194d32d2c715796b))
+
 ## [1.15.3](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.15.2...ledger-service-v1.15.3) (2026-07-17)
 
 
