@@ -15,6 +15,7 @@ class InterestMapper {
     fun toEntity(c: InterestRateConfig) = InterestRateConfigEntity().also {
         it.id = c.id
         it.productId = c.productId
+        it.accountId = c.accountId
         it.rateType = c.rateType
         it.annualRate = c.annualRate
         it.minBalance = c.minBalance
@@ -27,7 +28,7 @@ class InterestMapper {
         it.updatedAt = c.updatedAt
     }
     fun toDomain(e: InterestRateConfigEntity) = InterestRateConfig(
-        id = e.id, productId = e.productId, rateType = e.rateType,
+        id = e.id, productId = e.productId, accountId = e.accountId, rateType = e.rateType,
         annualRate = e.annualRate, minBalance = e.minBalance, maxBalance = e.maxBalance,
         dayCount = e.dayCount, effectiveFrom = e.effectiveFrom, effectiveTo = e.effectiveTo,
         active = e.active, createdAt = e.createdAt, updatedAt = e.updatedAt,

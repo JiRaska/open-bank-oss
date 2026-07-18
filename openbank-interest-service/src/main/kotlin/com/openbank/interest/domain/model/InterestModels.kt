@@ -27,6 +27,10 @@ enum class DayCount { ACT_365, ACT_360, ACT_ACT, THIRTY_360 }
 data class InterestRateConfig(
     val id: UUID = UUID.randomUUID(),
     val productId: String,
+    /** When set, this rate is an override for that single account, taking precedence over the
+     *  product-level default (accountId == null). Lets a specific customer be granted interest on an
+     *  otherwise non-interest-bearing account (e.g. a CURRENT account, which defaults to 0). */
+    val accountId: UUID? = null,
     val rateType: InterestRateType = InterestRateType.FIXED,
     val annualRate: BigDecimal,
     val minBalance: BigDecimal = BigDecimal.ZERO,

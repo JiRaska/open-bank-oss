@@ -252,7 +252,7 @@ class CustomerEdgeResource(
             return forbidden("Account does not belong to caller")
         }
         val productId = extractTextField(objectMapper, accountJson, "productId")
-        val annualRate = productId?.let { fetchActiveAnnualRate(it, customer.partyId) }
+        val annualRate = productId?.let { fetchEffectiveAnnualRate(accountId, it, customer.partyId) }
         val out = objectMapper.createObjectNode()
         if (annualRate == null) {
             // No active rate config for this product — not interest-bearing (or interest-service is
@@ -286,17 +286,21 @@ class CustomerEdgeResource(
         return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
     }
 
-    /** The active annual rate (decimal fraction) for [productId], or null if the product has no
-     *  active interest config or interest-service is unavailable (fail-soft — the caller reports
-     *  ineligible rather than failing the whole request). */
-    private fun fetchActiveAnnualRate(productId: String, partyId: UUID): java.math.BigDecimal? {
-        val resp = upstream.get("$interestServiceUrl/api/v1/interest/rates?productId=$productId", partyId.toString())
+    /** The annual rate (decimal fraction) EFFECTIVE for this account — an account-specific override
+     *  if one is set, else the product default — or null when the account earns no interest (a plain
+     *  CURRENT account, whose product default is deactivated) or interest-service is unavailable
+     *  (fail-soft: the caller reports ineligible rather than failing the whole request). 204 = no
+     *  effective rate. */
+    private fun fetchEffectiveAnnualRate(accountId: UUID, productId: String, partyId: UUID): java.math.BigDecimal? {
+        val resp = upstream.get(
+            "$interestServiceUrl/api/v1/interest/accounts/$accountId/effective-rate?productId=$productId",
+            partyId.toString(),
+        )
         if (resp.status != 200) return null
-        val arr =
-            runCatching { objectMapper.readTree(resp.entity?.toString() ?: return null) }.getOrNull() ?: return null
-        if (!arr.isArray) return null
-        val active = arr.firstOrNull { it.get("active")?.asBoolean(false) == true } ?: return null
-        return active.get("annualRate")?.decimalValue()
+        val node = runCatching {
+            objectMapper.readTree(resp.entity?.toString() ?: return null)
+        }.getOrNull() ?: return null
+        return node.get("annualRate")?.decimalValue()
     }
 
     // --- Currency pockets (ADR-0109) ---

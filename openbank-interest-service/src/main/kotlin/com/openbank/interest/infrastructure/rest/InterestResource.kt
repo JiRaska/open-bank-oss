@@ -140,6 +140,20 @@ class InterestResource(
         rateConfigUseCase.listConfigs(productId)
 
     @GET
+    @Path("/accounts/{accountId}/effective-rate")
+    @Operation(summary = "The interest rate effective for an account (override, else product default)")
+    @Authorize(action = "interest.read", resource = "#accountId")
+    fun effectiveRate(
+        @PathParam("accountId") accountId: UUID,
+        @QueryParam("productId") productId: String,
+        @QueryParam("date") @DefaultValue("") date: String,
+    ): Uni<Response> {
+        val on = if (date.isNotEmpty()) LocalDate.parse(date) else LocalDate.now(clock)
+        return rateConfigUseCase.effectiveRate(accountId, productId, on)
+            .map { it?.let { c -> Response.ok(c).build() } ?: Response.noContent().build() }
+    }
+
+    @GET
     @Path("/rates/{id}")
     @Operation(summary = "Get interest rate configuration by ID")
     @Authorize(action = "interest.read", resource = "#id")

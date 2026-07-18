@@ -68,7 +68,7 @@ class InterestService(
     )
 
     override fun accrue(request: AccrualRequest): Uni<InterestAccrual> =
-        configRepo.findActiveForProduct(request.productId, request.accrualDate).flatMap { config ->
+        configRepo.findEffectiveRate(request.accountId, request.productId, request.accrualDate).flatMap { config ->
             if (config == null) {
                 Uni.createFrom().failure(
                     IllegalStateException("No active rate config for product ${request.productId}"),
@@ -465,6 +465,10 @@ class InterestService(
     override fun getConfig(id: UUID): Uni<InterestRateConfig?> = configRepo.findById(id)
     override fun listConfigs(productId: String?): Uni<List<InterestRateConfig>> =
         if (productId != null) configRepo.findByProductId(productId) else configRepo.findAll()
+
+    override fun effectiveRate(accountId: UUID, productId: String, date: LocalDate): Uni<InterestRateConfig?> =
+        configRepo.findEffectiveRate(accountId, productId, date)
+
     override fun deactivateConfig(id: UUID): Uni<InterestRateConfig> = configRepo.findById(id).flatMap { config ->
         if (config == null) {
             Uni.createFrom().failure(IllegalArgumentException("Config not found"))
