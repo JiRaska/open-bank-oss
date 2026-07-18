@@ -61,10 +61,14 @@ spec:
         resources:
           requests:
             cpu: 100m
-            memory: 256Mi
+            # Steady-state RSS sits at ~448Mi (LLM client + toolset context), so the old
+            # 256Mi request under-declared it by ~2x and the 512Mi limit left no headroom:
+            # OOMKilled (exit 137) on 2026-07-17. Right-size the request to observed usage
+            # and give the limit real slack.
+            memory: 512Mi
           limits:
             cpu: 500m
-            memory: 512Mi
+            memory: 1Gi
         nodeSelector:
           workload: observability
         tolerations:
