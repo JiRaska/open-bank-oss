@@ -154,7 +154,7 @@ jobs:
         with:
           node-version: "20"
 
-      - uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
+      - uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a # v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -165,10 +165,10 @@ jobs:
       # Running it unconditionally for JS/TS caused intermittent
       # "unsuccessful execution, exit code: 0" SARIF upload failures when
       # autobuild's heuristic misdetected/mis-ran the admin-ui build.
-      - uses: github/codeql-action/autobuild@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
+      - uses: github/codeql-action/autobuild@7188fc363630916deb702c7fdcf4e481b751f97a # v4
         if: matrix.build-mode == 'autobuild'
 
-      - uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
+      - uses: github/codeql-action/analyze@7188fc363630916deb702c7fdcf4e481b751f97a # v4
         with:
           category: "/language:${{ matrix.language }}"
 
@@ -220,14 +220,14 @@ jobs:
       # this repo went public failed here). Distinct categories per file fixes it.
       - name: Upload Trivy fs SARIF
         if: always() && github.event.repository.private == false
-        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
+        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
 
       - name: Upload Trivy config SARIF
         if: always() && github.event.repository.private == false
-        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
+        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4
         with:
           sarif_file: trivy-config.sarif
           category: trivy-config
