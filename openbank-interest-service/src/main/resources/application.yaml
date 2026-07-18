@@ -69,6 +69,12 @@ quarkus:
     ledger-service:
       url: ${LEDGER_SERVICE_URL:http://localhost:8101}
       scope: jakarta.inject.Singleton
+    # Fleet-directory read for the daily accrual run: discovers ACTIVE accounts
+    # (GET /accounts/active, ADR-0143) and their booked balance (GET /accounts/{id}/balance).
+    # Same openbank-services M2M principal as the ledger/transaction clients above.
+    account-service:
+      url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      scope: jakarta.inject.Singleton
   redis:
     hosts: redis://localhost:6379
   shutdown:
@@ -158,6 +164,10 @@ openbank:
   interest:
     accrual-cron: "0 0 1 * * ?"
     capitalization-cron: "0 0 2 1 * ?"
+    # Account types the daily accrual run posts interest for (comma-separated, matched against
+    # account-service's accountType). Onboarding opens a SAVINGS account per retail customer; the
+    # CURRENT payment account is non-interest-bearing.
+    accruable-account-types: "SAVINGS"
     day-count-convention: ACT_365
     withholding:
       # #999: the bank's own operating/settlement account debited for the §38d odvod to the

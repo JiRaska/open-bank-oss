@@ -4,6 +4,10 @@
 
 package com.openbank.interest.application.usecase
 
+import com.openbank.interest.application.port.out.AccountDirectoryPort
+import com.openbank.interest.application.port.out.AccountPage
+import com.openbank.interest.application.port.out.AccountSnapshot
+import com.openbank.interest.application.port.out.BalanceSnapshot
 import com.openbank.interest.application.port.out.CapitalizationPosting
 import com.openbank.interest.application.port.out.InterestAccrualRepository
 import com.openbank.interest.application.port.out.InterestCapitalizationRepository
@@ -48,13 +52,16 @@ class InterestServiceTest {
     private val capitalizationRepo = mockk<InterestCapitalizationRepository>()
     private val taxProfilePort = mockk<TaxProfilePort>()
     private val ledgerPostingPort = mockk<LedgerPostingPort>()
+    private val accountDirectoryPort = mockk<AccountDirectoryPort>()
     private val service = InterestService(
         configRepo,
         accrualRepo,
         capitalizationRepo,
         taxProfilePort,
         ledgerPostingPort,
+        accountDirectoryPort,
         "ACT_365",
+        "SAVINGS",
         clock,
     )
 
@@ -148,6 +155,85 @@ class InterestServiceTest {
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessage("No active rate config for product SAVINGS")
         verify(exactly = 0) { accrualRepo.save(any()) }
+    }
+
+    @Test
+    fun `accrueAll walks all pages, accrues only accruable types, and returns the written count`() {
+        val date = LocalDate.of(2026, 1, 20)
+        val savingsA = UUID.fromString("aaaa0000-0000-0000-0000-000000000001")
+        val currentB = UUID.fromString("bbbb0000-0000-0000-0000-000000000002")
+        val savingsC = UUID.fromString("cccc0000-0000-0000-0000-000000000003")
+        val config = sampleConfig(annualRate = BigDecimal("0.365"))
+
+        // Two pages; a CURRENT account sits between the two SAVINGS ones and must be filtered out
+        // BEFORE its balance is ever read.
+        every { accountDirectoryPort.listActiveAccounts(null, any()) } returns Uni.createFrom().item(
+            AccountPage(
+                items = listOf(
+                    AccountSnapshot(savingsA, "SAVINGS_PRODUCT", "SAVINGS", "CZK"),
+                    AccountSnapshot(currentB, "CURRENT_PRODUCT", "CURRENT", "CZK"),
+                ),
+                nextCursor = "cursor-1",
+            ),
+        )
+        every { accountDirectoryPort.listActiveAccounts("cursor-1", any()) } returns Uni.createFrom().item(
+            AccountPage(
+                items = listOf(AccountSnapshot(savingsC, "SAVINGS_PRODUCT", "savings", "CZK")),
+                nextCursor = null,
+            ),
+        )
+        every { accountDirectoryPort.bookedBalance(savingsA) } returns
+            Uni.createFrom().item(BalanceSnapshot(BigDecimal("1000.00"), "CZK"))
+        every { accountDirectoryPort.bookedBalance(savingsC) } returns
+            Uni.createFrom().item(BalanceSnapshot(BigDecimal("2000.00"), "CZK"))
+        every { configRepo.findActiveForProduct(any(), date) } returns Uni.createFrom().item(config)
+        every { accrualRepo.save(any()) } answers { Uni.createFrom().item(firstArg<InterestAccrual>()) }
+
+        val count = service.accrueAll(date).await().indefinitely()
+
+        assertThat(count).isEqualTo(2)
+        verify(exactly = 1) { accountDirectoryPort.bookedBalance(savingsA) }
+        verify(exactly = 1) { accountDirectoryPort.bookedBalance(savingsC) }
+        // The CURRENT account is filtered by type — its balance is never even fetched.
+        verify(exactly = 0) { accountDirectoryPort.bookedBalance(currentB) }
+    }
+
+    @Test
+    fun `accrueAll skips zero balance and survives a per-account accrual failure without aborting`() {
+        val date = LocalDate.of(2026, 1, 20)
+        val zero = UUID.fromString("00000000-0000-0000-0000-0000000000a1")
+        val dup = UUID.fromString("00000000-0000-0000-0000-0000000000a2")
+        val ok = UUID.fromString("00000000-0000-0000-0000-0000000000a3")
+        val config = sampleConfig(annualRate = BigDecimal("0.365"))
+
+        every { accountDirectoryPort.listActiveAccounts(null, any()) } returns Uni.createFrom().item(
+            AccountPage(
+                items = listOf(
+                    AccountSnapshot(zero, "SAVINGS_PRODUCT", "SAVINGS", "CZK"),
+                    AccountSnapshot(dup, "SAVINGS_PRODUCT", "SAVINGS", "CZK"),
+                    AccountSnapshot(ok, "SAVINGS_PRODUCT", "SAVINGS", "CZK"),
+                ),
+                nextCursor = null,
+            ),
+        )
+        every { accountDirectoryPort.bookedBalance(zero) } returns
+            Uni.createFrom().item(BalanceSnapshot(BigDecimal.ZERO, "CZK"))
+        every { accountDirectoryPort.bookedBalance(dup) } returns
+            Uni.createFrom().item(BalanceSnapshot(BigDecimal("500.00"), "CZK"))
+        every { accountDirectoryPort.bookedBalance(ok) } returns
+            Uni.createFrom().item(BalanceSnapshot(BigDecimal("1000.00"), "CZK"))
+        every { configRepo.findActiveForProduct(any(), date) } returns Uni.createFrom().item(config)
+        // The duplicate account simulates the UNIQUE(account, date, product) violation on re-run.
+        every { accrualRepo.save(match { it.accountId == dup }) } returns
+            Uni.createFrom().failure(IllegalStateException("duplicate key value violates unique constraint"))
+        every { accrualRepo.save(match { it.accountId == ok }) } answers
+            { Uni.createFrom().item(firstArg<InterestAccrual>()) }
+
+        val count = service.accrueAll(date).await().indefinitely()
+
+        assertThat(count).isEqualTo(1)
+        // Zero-balance account is skipped before any accrual save is attempted.
+        verify(exactly = 0) { accrualRepo.save(match { it.accountId == zero }) }
     }
 
     @Test
