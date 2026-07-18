@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.7](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.13.6...notification-service-v0.13.7) (2026-07-18)
+
+
+### Security
+
+* **notification:** escape HTML variables in rendered notification bodies ([#1634](https://github.com/JiRaska/open-bank-oss/issues/1634)) ([5934967](https://github.com/JiRaska/open-bank-oss/commit/5934967b1d3deb82695632c7f259e63cfcb60288)), closes [#1382](https://github.com/JiRaska/open-bank-oss/issues/1382) [#1386](https://github.com/JiRaska/open-bank-oss/issues/1386)
+
 ## [0.13.6](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.13.5...notification-service-v0.13.6) (2026-07-17)
 
 
