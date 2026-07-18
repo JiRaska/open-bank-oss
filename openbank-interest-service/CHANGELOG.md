@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.10.1...interest-service-v0.11.0) (2026-07-18)
+
+
+### Features
+
+* **interest:** wire the daily accrual engine (accrueAll was a stub) + seed savings rate ([#1614](https://github.com/JiRaska/open-bank-oss/issues/1614)) ([06e361d](https://github.com/JiRaska/open-bank-oss/commit/06e361d981c9b780cd1c1a50bda3b8ed65f4f42e))
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.10.0...interest-service-v0.10.1) (2026-07-17)
 
 
